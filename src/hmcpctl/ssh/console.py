@@ -56,7 +56,7 @@ import logging
 import math
 import os
 import shlex
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, Literal, Self, TypeVar
@@ -1126,7 +1126,7 @@ class ConsoleSession:
         )
 
     @contextlib.asynccontextmanager
-    async def hand_over(self) -> AsyncIterator[ConsoleHandover]:
+    async def hand_over(self) -> AsyncGenerator[ConsoleHandover]:
         """Mode (a): move the channel to an in-process holder; the vterm stays held.
 
         No ``rmvterm`` or ``mkvterm`` runs on entry or exit. :meth:`read` waits
@@ -1145,7 +1145,7 @@ class ConsoleSession:
     @contextlib.asynccontextmanager
     async def _handed_over(
         self, handover: _Handover, name: str
-    ) -> AsyncIterator[_Handover]:
+    ) -> AsyncGenerator[_Handover]:
         self._require_collecting(name)
         self._give_channel(handover)
         try:
@@ -1438,7 +1438,7 @@ class WritableConsoleSession(ConsoleSession):
         )
 
     @contextlib.asynccontextmanager
-    async def raw_mode(self) -> AsyncIterator[ConsoleRawChannel]:
+    async def raw_mode(self) -> AsyncGenerator[ConsoleRawChannel]:
         """Exclusive raw mode for a preempting holder: ADR 0173 mode (a) plus writes.
 
         The vterm stays held and no ``rmvterm`` or ``mkvterm`` runs. The

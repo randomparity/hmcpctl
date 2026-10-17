@@ -1097,8 +1097,8 @@ def test_rejects_unsupported_core_metadata_version(
         ),
         (
             "Requires-Dist",
-            b"Requires-Dist: asyncssh<3,>=2.24.0",
             b"Requires-Dist: asyncssh<3,>=2.24.1",
+            b"Requires-Dist: asyncssh<3,>=2.24.2",
             "runtime dependencies differ",
         ),
         (
@@ -1360,8 +1360,8 @@ def test_rejects_sdist_dependency_mismatch(
         for index, (member, data) in enumerate(entries):
             if member.name.endswith("/PKG-INFO"):
                 changed = data.replace(
-                    b"Requires-Dist: asyncssh<3,>=2.24.0",
                     b"Requires-Dist: asyncssh<3,>=2.24.1",
+                    b"Requires-Dist: asyncssh<3,>=2.24.2",
                 )
                 member.size = len(changed)
                 entries[index] = (member, changed)
@@ -1428,7 +1428,7 @@ def test_rejects_malformed_project_configuration_actionably(
         )
     else:
         content = content.replace(
-            '"asyncssh>=2.24.0,<3"', '"not a valid requirement !!!"'
+            '"asyncssh>=2.24.1,<3"', '"not a valid requirement !!!"'
         )
     pyproject.write_text(content)
 

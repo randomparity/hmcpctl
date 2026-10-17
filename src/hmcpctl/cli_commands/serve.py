@@ -52,10 +52,7 @@ def _audit_level(value: str | None) -> int | None:
             f"unknown --audit-level {terminal_field(repr(value), err=True)}; use one of "
             + terminal_field(", ".join(_AUDIT_LEVELS), err=True)
         )
-    resolved = logging.getLevelName(name)
-    if not isinstance(resolved, int):
-        raise RuntimeError(f"logging did not resolve known level {name!r}")  # noqa: TRY004 - the isinstance tests the stdlib's return value, not a caller's argument, so RuntimeError states an internal invariant
-    return resolved
+    return logging.getLevelNamesMapping()[name]
 
 
 def serve(

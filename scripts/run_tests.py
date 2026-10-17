@@ -11,7 +11,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from typing import BinaryIO
 
@@ -103,7 +103,7 @@ def _subreaper(value: int | None = None) -> int:
 
 
 @contextlib.contextmanager
-def _parallel_mode() -> Iterator[bool]:
+def _parallel_mode() -> Generator[bool]:
     previous = None
     try:
         try:

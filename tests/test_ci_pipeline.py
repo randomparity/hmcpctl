@@ -14,10 +14,10 @@ import pytest
 ROOT = Path(__file__).parents[1]
 TOOL_PINS = {
     "detect-secrets==1.5.0",
-    "prek==0.5.0",
-    "ruff==0.16.5",
-    "ty==0.0.75",
-    "zizmor==1.29.0",
+    "prek==0.5.5",
+    "ruff==0.16.10",
+    "ty==0.0.85",
+    "zizmor==1.30.1",
 }
 TY_INCLUDE = ["src/hmcpctl", "scripts"]
 RUFF_EXTEND_SELECT = {

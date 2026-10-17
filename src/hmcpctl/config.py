@@ -828,6 +828,7 @@ def _load_profile_from_document(
 def _inventory_field(path: Path, name: str, entry: dict[str, Any], field: str) -> Any:
     """Return *entry*'s *field* as ``HMCConfig`` would coerce it, else raise ConfigError."""
     info = HMCConfig.model_fields[field]
+    assert info.annotation is not None, f"HMCConfig field {field!r} has no annotation"
     value = entry.get(field, info.default)
     try:
         return TypeAdapter(info.annotation).validate_python(value)

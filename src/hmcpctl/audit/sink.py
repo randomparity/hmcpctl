@@ -14,7 +14,7 @@ import queue
 import re
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -388,7 +388,7 @@ class _CLIAuditFormatter(logging.Formatter):
 
 
 @contextmanager
-def cli_audit_sink() -> Iterator[None]:
+def cli_audit_sink() -> Generator[None]:
     """Scope CLI fallback presentation; configured handlers remain authoritative."""
     logger = logging.getLogger(AUDIT_LOGGER_NAME)
     if (

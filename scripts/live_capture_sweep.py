@@ -28,7 +28,7 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Generator, Sequence
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -68,7 +68,7 @@ def command_allowed(command: object) -> bool:
 
 
 @contextlib.contextmanager
-def read_only_guard() -> Iterator[None]:
+def read_only_guard() -> Generator[None]:
     """Refuse mutating calls at the transport seams for the life of the block.
 
     Enter it before ``capture()``: the harness then wraps the guard and records each

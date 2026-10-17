@@ -59,7 +59,7 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from datetime import UTC, datetime
@@ -1815,7 +1815,7 @@ def _emit_observations(
 
 
 @asynccontextmanager
-async def served_client() -> AsyncIterator[Client]:
+async def served_client() -> AsyncGenerator[Client]:
     """A client connected to the application exactly as a live run composes it.
 
     The one owner of that composition: every live-test entry point that reads the

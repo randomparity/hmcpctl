@@ -2201,11 +2201,10 @@ async def test_raw_mode_refuses_while_another_pause_is_active():
         FakeConnection([FakeProcess(BANNER)]),
     )
     with connect, run_command, probe_seconds, _audited():
-        async with _writable() as session:
-            async with session.hand_over():
-                with pytest.raises(RuntimeError):
-                    async with session.raw_mode():
-                        pass
+        async with _writable() as session, session.hand_over():
+            with pytest.raises(RuntimeError):
+                async with session.raw_mode():
+                    pass
 
 
 @pytest.mark.asyncio

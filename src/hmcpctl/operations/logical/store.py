@@ -13,7 +13,7 @@ import stat
 import sys
 import threading
 import time
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Generator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -250,7 +250,7 @@ def _open(*, create: bool) -> sqlite3.Connection | None:
 
 
 @contextmanager
-def _translated() -> Iterator[None]:
+def _translated() -> Generator[None]:
     try:
         yield
     except sqlite3.IntegrityError:
@@ -270,7 +270,7 @@ def _translated() -> Iterator[None]:
 
 
 @contextmanager
-def session() -> Iterator[sqlite3.Connection]:
+def session() -> Generator[sqlite3.Connection]:
     """Open (creating if needed) the store for one unit of work."""
     with _translated():
         conn = _open(create=True)
@@ -285,7 +285,7 @@ def session() -> Iterator[sqlite3.Connection]:
 
 
 @contextmanager
-def read_session() -> Iterator[sqlite3.Connection | None]:
+def read_session() -> Generator[sqlite3.Connection | None]:
     """Open the store for reading; yield None when none has been created."""
     with _translated():
         conn = _open(create=False)
@@ -297,7 +297,7 @@ def read_session() -> Iterator[sqlite3.Connection | None]:
 
 
 @contextmanager
-def write_transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+def write_transaction(conn: sqlite3.Connection) -> Generator[sqlite3.Connection]:
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn

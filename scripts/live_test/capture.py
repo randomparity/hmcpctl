@@ -28,7 +28,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
@@ -252,7 +252,7 @@ class Capture:
 
 
 @contextlib.contextmanager
-def capture(path: Path, *, raw: bool = False) -> Iterator[Capture]:
+def capture(path: Path, *, raw: bool = False) -> Generator[Capture]:
     """Record every HMC REST call and SSH command made inside the block to *path*.
 
     *raw* keeps answers unredacted (see the module docstring) and refuses a
