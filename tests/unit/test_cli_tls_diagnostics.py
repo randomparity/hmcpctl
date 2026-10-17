@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import warnings
+from datetime import datetime
 
 import pytest
 from typer.testing import CliRunner
@@ -25,6 +26,13 @@ from hmcpctl.errors import HMCError
 
 @pytest.fixture
 def cli_boundary(monkeypatch):
+    class AuditClock:
+        @staticmethod
+        def now(tz):
+            return datetime(2026, 1, 1, 0, 0, 1, 10000, tzinfo=tz)
+
+    # Keep "1.0" in the timestamp so warning assertions cannot match it.
+    monkeypatch.setattr(records, "datetime", AuditClock)
     monkeypatch.delenv("HMC_VERIFY_SSL")
     monkeypatch.setattr(core, "_reported_tls_warning_keys", set())
     warnings.simplefilter("always")
@@ -66,7 +74,9 @@ def test_cli_tls_warnings_before_real_error(cli_boundary, monkeypatch, verify):
     assert ".py:" not in result.stderr
     assert "await self.logon()" not in result.stderr
     assert ("credentials can be intercepted" in result.stderr) is (verify is not True)
-    assert ("1.0" in result.stderr) is (verify is None)
+    assert ("TLS verification defaults to off until 1.0." in result.stderr) is (
+        verify is None
+    )
     audit = [
         json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")
     ]
@@ -252,7 +262,10 @@ app(["--host", "hmc.test", "--user", "u", "--password", "p", "systems", "list"])
     assert result.returncode == 1 and result.stdout == b""
     assert "controlled authentication failure" in stderr
     assert ".py:" not in stderr
-    assert "credentials can be intercepted" in stderr and "1.0" in stderr
+    assert (
+        "credentials can be intercepted" in stderr
+        and "TLS verification defaults to off until 1.0." in stderr
+    )
     assert ("Audit tls-verification-disabled:" in stderr) is tty
     assert ('"event": "tls-verification-disabled"' in stderr) is not tty
 
@@ -315,6 +328,6 @@ def test_migration_default_filter_survives_sequential_cli_calls(
     warnings.simplefilter("default", core.HMCVerifySSLDefaultWarning)
     first = CliRunner().invoke(cli.app, ["systems", "list"])
     second = CliRunner().invoke(cli.app, ["systems", "list"])
-    assert "1.0" in first.stderr
-    assert "1.0" not in second.stderr
+    assert "TLS verification defaults to off until 1.0." in first.stderr
+    assert "TLS verification defaults to off until 1.0." not in second.stderr
     assert second.exit_code == 1
