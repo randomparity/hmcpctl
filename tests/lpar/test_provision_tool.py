@@ -604,8 +604,8 @@ def test_provision_lpar_full_workflow(monkeypatch, mock_hmc):
     assert result.lpar_uuid == LPAR_UUID
     assert result.dry_run is False
     # The explicit uniqueness precondition and the create workflow's own
-    # race-safe resolution each verify the name.
-    assert name_lookup.call_count == 2
+    # race-safe resolution each verify the name; power-on verifies UUID containment.
+    assert name_lookup.call_count == 3
     steps = {s.step: s for s in result.steps}
     assert steps["create"].status == "ok"
     assert steps["network"].status == "ok"
@@ -1087,6 +1087,7 @@ def _provision_via_406(
             httpx.Response(200, text=OTHER_LPAR_FEED),
             httpx.Response(200, text=OTHER_LPAR_FEED),
             readback or httpx.Response(200, text=CREATED_LPAR_FEED),
+            httpx.Response(200, text=CREATED_LPAR_FEED),
         ]
     )
     mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").mock(

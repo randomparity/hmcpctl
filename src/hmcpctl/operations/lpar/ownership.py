@@ -18,6 +18,7 @@ from hmcpctl.discovery_limits import (
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.systems.fleet import FleetListing, read_fleet
 from hmcpctl.resource_identity import (
+    _hosts_partition,
     is_uuid,
     lpar_name_from_uuid,
     optional_system_selector,
@@ -61,21 +62,6 @@ def _discovery_candidate(system: object) -> tuple[str, str] | None:
     if not isinstance(system_name, str) or not system_name:
         return None
     return system_uuid, system_name
-
-
-def _hosts_partition(partitions: list[dict[str, Any]], lpar_uuid: str) -> bool:
-    """Whether *partitions* contains *lpar_uuid*, compared case-insensitively.
-
-    ``resolve_lpar_uuid`` returns a caller-supplied UUID verbatim and ``is_uuid``
-    admits upper-case hex, while the HMC renders UUIDs lower-case. These are the
-    only places in the package where a *user-supplied* UUID is equality-compared
-    against HMC output, so the normalisation belongs here rather than in the
-    shared resolver, whose value also reaches URL path segments.
-    """
-    wanted = lpar_uuid.casefold()
-    return any(
-        str(entry.get("UUID") or "").casefold() == wanted for entry in partitions
-    )
 
 
 @dataclass
@@ -211,44 +197,6 @@ async def _discover_owning_system(
     )
 
 
-async def _verify_partition_on_system(
-    hmc: HMCClient, system_uuid: str, lpar_uuid: str, lpar_selector: str
-) -> None:
-    """Reject a partition UUID that does not live on the selected system.
-
-    ADR 0094. ``resolve_lpar_uuid`` passes a canonical UUID straight through, so
-    a caller can pair any partition UUID with any managed-system selector —
-    and ADR 0039 actively recommends UUIDs in policy allowlists, so that pairing
-    is the recommended input shape. Without this check the guard would read
-    ``lssyscfg -m <the selected system> --filter lpar_names=<the partition's
-    name>``: on a cross-system name collision that reads a *different*
-    partition's token, and can approve mutating a foreign-owned one. The
-    omitted-selector path gets the same containment from
-    :func:`_discover_owning_system`'s UUID match.
-
-    Only a UUID needs the read, so *lpar_selector* must be the string the caller
-    passed, not a resolved value: a partition *name* was resolved through
-    ``find_partition_by_name`` against this very feed, which establishes its
-    containment already, and re-reading the largest payload in the guarded chain
-    would answer a settled question.
-    """
-    if not is_uuid(lpar_selector):
-        return
-    try:
-        partitions = await hmc.list_logical_partitions(system_uuid)
-    except HMCError as exc:
-        raise ValueError(
-            f"Cannot confirm LPAR {lpar_selector!r} belongs to managed system "
-            f"{system_uuid}: {exc}"
-        ) from exc
-    if not _hosts_partition(partitions, lpar_uuid):
-        raise ValueError(
-            f"LPAR {lpar_selector!r} does not belong to managed system "
-            f"{system_uuid}; name the managed system that hosts it, or omit "
-            "the selector to have it discovered"
-        )
-
-
 async def resolve_and_authorize_lpar_mutation(
     hmc: HMCClient,
     system_name_or_uuid: str | None,
@@ -262,7 +210,7 @@ async def resolve_and_authorize_lpar_mutation(
     operations whose managed-system selector is optional. Either way the
     partition is established to live on the system whose token the guard reads:
     by discovery when the selector is omitted, by
-    :func:`_verify_partition_on_system` when it is supplied (ADR 0092).
+    :func:`resolve_lpar_uuid` when it is supplied (ADR 0226).
 
     An approved override reads no token, so it skips the fleet walk the guard
     alone requires — otherwise an oversized fleet, a slow one, or an unreachable
@@ -292,9 +240,6 @@ async def resolve_and_authorize_lpar_mutation(
         system_uuid = await resolve_system_uuid(hmc, selector)
         lpar_uuid = await resolve_lpar_uuid(
             hmc, lpar_name_or_uuid, system_name_or_uuid=system_uuid
-        )
-        await _verify_partition_on_system(
-            hmc, system_uuid, lpar_uuid, lpar_name_or_uuid
         )
         system_name, lpar_name = await resolve_lpar_ownership_names(
             hmc, system_uuid, selector, lpar_uuid
@@ -600,7 +545,6 @@ async def _resolve_contained_lpar_names(
     lpar_uuid = await resolve_lpar_uuid(
         hmc, lpar_name_or_uuid, system_name_or_uuid=system_uuid
     )
-    await _verify_partition_on_system(hmc, system_uuid, lpar_uuid, lpar_name_or_uuid)
     return await resolve_lpar_ownership_names(
         hmc, system_uuid, system_name_or_uuid, lpar_uuid
     )

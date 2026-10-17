@@ -19,7 +19,7 @@ from typing import Any
 import asyncssh
 import httpx
 import pytest
-from conftest import live_response, make_config
+from conftest import captured_lpar_entry, live_response, make_config
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
 import live_capture_sweep as sweep
@@ -640,6 +640,18 @@ def _raw_commands(
     return sent
 
 
+@pytest.fixture
+def contained_partitions(mock_hmc):
+    for kind, uuid in [("LogicalPartition", LPAR_UUID), ("VirtualIOServer", VIOS_UUID)]:
+        entry = captured_lpar_entry(uuid, "target").replace("LogicalPartition", kind)
+        mock_hmc.get(f"/rest/api/uom/ManagedSystem/{DISCONNECTED_UUID}/{kind}").mock(
+            return_value=httpx.Response(
+                200, text=f'<feed xmlns="http://www.w3.org/2005/Atom">{entry}</feed>'
+            )
+        )
+
+
+@pytest.mark.usefixtures("contained_partitions")
 @pytest.mark.parametrize(
     ("step", "context", "route"),
     [
@@ -663,8 +675,25 @@ def _raw_commands(
             sweep.Context(system=DISCONNECTED_NAME, vios=VIOS_UUID),
             rf"/VirtualIOServer/{VIOS_UUID}",
         ),
+        (
+            "lpar",
+            sweep.Context(system=DISCONNECTED_NAME, lpar=LPAR_UUID),
+            rf"/ManagedSystem/{DISCONNECTED_UUID}/LogicalPartition",
+        ),
+        (
+            "vios",
+            sweep.Context(system=DISCONNECTED_NAME, vios=VIOS_UUID),
+            rf"/ManagedSystem/{DISCONNECTED_UUID}/VirtualIOServer",
+        ),
     ],
-    ids=["lpar-lookup", "lpar-read", "vios-lookup", "vios-read"],
+    ids=[
+        "lpar-lookup",
+        "lpar-read",
+        "vios-lookup",
+        "vios-read",
+        "lpar-membership",
+        "vios-membership",
+    ],
 )
 def test_a_timed_out_partition_lookup_is_recorded_and_the_raw_phase_runs(
     mock_hmc: Any,
@@ -674,7 +703,9 @@ def test_a_timed_out_partition_lookup_is_recorded_and_the_raw_phase_runs(
     context: sweep.Context,
     route: str,
 ) -> None:
-    mock_hmc.get(url__regex=route).mock(side_effect=httpx.ReadTimeout("read timed out"))
+    mock_hmc.get(f"/rest/api/uom{route}").mock(
+        side_effect=httpx.ReadTimeout("read timed out")
+    )
 
     names, records = _resolve_partitions(mock_hmc, tmp_path, context)
 
@@ -718,6 +749,7 @@ def test_a_partition_name_that_is_not_found_still_fails(
     ],
     ids=["lpar", "vios"],
 )
+@pytest.mark.usefixtures("contained_partitions")
 def test_a_partition_uuid_that_is_not_found_still_fails(
     mock_hmc: Any, tmp_path: Path, context: sweep.Context
 ) -> None:

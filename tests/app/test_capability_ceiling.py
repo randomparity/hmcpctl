@@ -10,6 +10,7 @@ import asyncio
 
 import pytest
 from fastmcp import Client, FastMCP
+from rendered_output import collapse_whitespace
 
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.authorization.access_policy import (
@@ -1101,7 +1102,7 @@ def test_serve_reports_an_unloadable_policy_and_starts_nothing(tmp_path, monkeyp
     # `fail` renders through a rich Console that wraps a non-tty line at 80 columns,
     # and the line carries tmp_path, so the wrap can land inside the phrase (#1536).
     assert result.exit_code == 1
-    assert "TOML parse error" in " ".join(result.output.split())
+    assert "TOML parse error" in collapse_whitespace(result.output)
 
 
 def test_inspection_reports_which_tools_a_targets_table_cannot_bound():

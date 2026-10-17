@@ -311,8 +311,9 @@ async def test_st40_runs_only_in_its_own_arm(arm):
     state, hmc = arm
     state.group = "round2"
 
-    await _run(state, 0, 40)
+    await _run(state, 40)
 
+    assert hmc.calls == []
     assert _mutations(hmc) == []
     assert any(r["note"] == "runs only in the storage arm" for r in state.results)
 

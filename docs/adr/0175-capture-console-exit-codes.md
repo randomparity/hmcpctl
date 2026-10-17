@@ -4,6 +4,7 @@
 
 Accepted (2026-09-23). Applies ADR 0072 and ADR 0170's capture outcome (`stop_reason`,
 `released`) to the CLI command #959 adds. PR #777's review deferred this contract to #959.
+Extended by ADR 0235 (2026-10-16) for SIGINT and partial output.
 
 ## Context
 
@@ -20,11 +21,17 @@ The command's stdout is the raw console stream, so stdout cannot carry the outco
 | `0` | Capture stopped on `duration`, `max_bytes`, `idle` or `remote-close`; `released` is true. |
 | `1` | Runtime failure: selector lookup, SSH or HMC failure, `ConsoleHeldError` contention, a capture whose `stop_reason` is `error`, or bytes that could not be written. |
 | `2` | Usage error, found before any file or connection opens: a bound outside its limits, an existing `--output` file, or a terminal stdout without `--output`. |
-| `3` | `released` is false. Outranks `1`. |
+| `3` | Release is false or unproven. Outranks `1` and `130`. |
+| `130` | Ctrl-C (SIGINT) interrupted capture and release was proven. |
 
 Bytes a returned capture holds are written before a non-zero exit. When the capture returns,
 one stderr line reports stop reason, byte count, `released` and any error; otherwise stderr
-carries the `Error:` line. An interrupt is outside this table.
+carries the `Error:` line. Ctrl-C stops early and waits for release cleanup. Its
+flushed partial `--output` file is retained, including an empty file or the bytes
+flushed before a write error. A write error is still reported; release proof
+selects 130 versus 3. Interrupting before a capture outcome exists returns 3
+without asserting release. Ordinary noninterrupt file-failure behavior is unchanged.
+SIGTERM and SIGHUP remain outside this table.
 
 ## Consequences
 

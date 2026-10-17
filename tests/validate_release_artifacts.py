@@ -31,7 +31,7 @@ PACKAGE_NAME = "hmcpctl"
 # exported model, alias, and signature as Any, so it is a shipped-artifact
 # invariant rather than a source-tree convenience.
 TYPE_MARKER = "py.typed"
-PACKAGE_RESOURCES = (TYPE_MARKER, "_operation_maturity.json")
+PACKAGE_RESOURCES = (TYPE_MARKER, "_operation_maturity.json", "_progress_codes.json")
 PACKAGE_SENTINELS = ("__init__.py", "server.py", *PACKAGE_RESOURCES)
 CORE_METADATA_VERSION = "2.5"
 MAX_ARCHIVE_BYTES = 256 * 1024 * 1024

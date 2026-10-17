@@ -167,8 +167,8 @@ def test_console_info_returns_management_console(monkeypatch, mock_hmc):
 
 
 @pytest.mark.parametrize("body", [NULL_PROPERTY_500_BODY, NULL_PROPERTY_500_XML_BODY])
-def test_console_info_translates_known_firmware_500(monkeypatch, mock_hmc, body):
-    """A null-property 500 becomes the actionable firmware error.
+def test_console_info_translates_known_null_property_500(monkeypatch, mock_hmc, body):
+    """A null-property 500 becomes the actionable schema-pin error.
 
     Asserting the produced message is what makes this test bite: the
     untranslated transport error carries the same status code and the same
@@ -185,7 +185,9 @@ def test_console_info_translates_known_firmware_500(monkeypatch, mock_hmc, body)
     message = str(exc_info.value)
     assert "Management-console inventory is unavailable" in message
     assert "could not serialize a null property" in message
-    assert "update the HMC firmware and retry" in message
+    assert "X-HMC-Schema-Version pin (HMC_SCHEMA_VERSION)" in message
+    assert "unset HMC_SCHEMA_VERSION" in message
+    assert "firmware" not in message
     assert exc_info.value.status_code == 500
     assert exc_info.value.body == body
     assert isinstance(exc_info.value.__cause__, HMCError)

@@ -1,8 +1,17 @@
 # Bare-CEC LPAR recipe
 
-> **Verified** on HMC V10R3 M1060 with an 8375-42A (POWER9) managed system during the v0.1.0
-> live window (#879). Each expected output below is what that run returned. Another HMC level or
-> machine model may answer differently.
+> **MCP operations verified** on HMC V10R3 M1060 with an 8375-42A (POWER9) managed system
+> during the v0.1.0 live window (#879). That window did not run these CLI wrappers.
+> Expected outcomes below describe the corresponding operations; CLI presentation is
+> documented separately and is not a historical CLI verification claim.
+
+The bare-CEC arm now additionally runs the CLI `lpars state`, `lpars refcodes`, and
+`jobs show` reads against its fixture and activation job. Their assertions produce
+separate CLI result-row observations (ADR 0221). The release-window dry-run and final
+private summary list CLI coverage or an explicit gap for each claimed operation.
+Other CLI wrappers in this recipe remain outside this bounded CLI verification;
+a future release must state those gaps unless it supplies additional live evidence.
+Offline tests of the new steps do not establish hardware verification.
 
 This recipe brings up one Linux LPAR that uses no VIOS, shared storage, or virtual network. It
 creates the partition, gives it a dedicated physical PCIe slot, activates it to the SMS menu,

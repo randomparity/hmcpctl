@@ -52,12 +52,16 @@ def hmc_read_lpar_refcodes(
     count: int = 1,
     profile: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Read the most recent reference codes (SRCs) for one partition.
+    """Read recent partition reference codes with offline POWER9 definitions.
 
     Boot progress without a virtual terminal: ``lsrefcode -r lpar`` needs no
     console, so an activation can be followed read-only. Rows come back
     most-recent first, each carrying ``lpar_name``, ``time_stamp`` and
-    ``refcode``. Whether an SRC is still reported once the partition reaches
+    ``refcode``, plus ``definition`` and ``definition_source``. The added fields
+    are null for unknown codes. Definitions are offline POWER9 informational
+    summaries with public IBM page/code provenance; they do not establish boot
+    success, readiness or failure. The raw code and diagnostic suffix are preserved.
+    Whether an SRC is still reported once the partition reaches
     ``Running`` is reported by the caller epic (#871) and has not been
     confirmed against hardware here; #879 owns that observation.
 

@@ -35,7 +35,7 @@ from ...ssh.profiles import (
     get_proc_compat_modes,
     set_lpar_proc_compat,
 )
-from ..output import VerbatimTable, console, print_json, usage_error
+from ..output import VerbatimTable, console, print_json, terminal_field, usage_error
 from ..runtime import run_cli_coroutine, ssh_config, with_client
 
 
@@ -83,8 +83,10 @@ def lpars_memopt_score(
         print_json(score)
     else:
         console.print(
-            f"{score['lpar_name']} (id {score['lpar_id']}): "
-            f"curr_lpar_score={score['curr_lpar_score']}",
+            (
+                f"{terminal_field(score['lpar_name'])} (id {terminal_field(score['lpar_id'])}"
+                f"): curr_lpar_score={terminal_field(score['curr_lpar_score'])}"
+            ),
             markup=False,
         )
 
@@ -100,11 +102,15 @@ def lpars_get_minimum_affinity_policy(
         print_json(asdict(policy))
         return
     if policy.capability == "capability-unavailable":
-        console.print(f"unavailable: {policy.unavailable_reason}", markup=False)
+        console.print(
+            f"unavailable: {terminal_field(policy.unavailable_reason)}", markup=False
+        )
         return
     console.print(
-        f"minimum affinity score: {policy.min_affinity_score} "
-        f"({policy.min_affinity_score_action})",
+        (
+            f"minimum affinity score: {terminal_field(policy.min_affinity_score)} ("
+            f"{terminal_field(policy.min_affinity_score_action)})"
+        ),
         markup=False,
     )
 
@@ -145,7 +151,7 @@ def lpars_system_memopt_score(
     if as_json:
         print_json(score)
         return
-    console.print(f"current: {score['curr_sys_score']}", markup=False)
+    console.print(f"current: {terminal_field(score['curr_sys_score'])}", markup=False)
 
 
 def _run_memopt_plan(
@@ -196,7 +202,8 @@ def _run_resource_group_memopt(
     if result.capability == "capability-unavailable":
         console.print(
             Text.assemble(
-                ("Capability unavailable:", "yellow"), f" {result.unavailable_reason}"
+                ("Capability unavailable:", "yellow"),
+                f" {terminal_field(result.unavailable_reason)}",
             )
         )
         return
@@ -210,7 +217,7 @@ def _run_resource_group_memopt(
         )
         if result.mode == "calculated":
             line += f"; predicted: {item['predicted_score']}; prediction guaranteed: no"
-        console.print(line, markup=False)
+        console.print(terminal_field(line), markup=False)
 
 
 def lpars_resource_group_memopt_scores(
@@ -271,10 +278,11 @@ def lpars_plan_memopt_scores(
         return
     for score in scores:
         console.print(
-            f"{score['lpar_name']} (id {score['lpar_id']}): "
-            f"current: {score['curr_lpar_score']}; "
-            f"predicted: {score['predicted_lpar_score']}; "
-            "prediction guaranteed: no",
+            (
+                f"{terminal_field(score['lpar_name'])} (id {terminal_field(score['lpar_id'])}"
+                f"): current: {terminal_field(score['curr_lpar_score'])}; predicted: "
+                f"{terminal_field(score['predicted_lpar_score'])}; prediction guaranteed: no"
+            ),
             markup=False,
         )
 
@@ -300,9 +308,10 @@ def lpars_plan_system_memopt_score(
         print_json(score)
         return
     console.print(
-        f"current: {score['curr_sys_score']}; "
-        f"predicted: {score['predicted_sys_score']}; "
-        "prediction guaranteed: no",
+        (
+            f"current: {terminal_field(score['curr_sys_score'])}; predicted: "
+            f"{terminal_field(score['predicted_sys_score'])}; prediction guaranteed: no"
+        ),
         markup=False,
     )
 
@@ -316,7 +325,9 @@ def lpars_get_description(
         lambda: get_lpar_description(ssh_config(), system_name, lpar_name)
     )
 
-    console.print(result.strip() or "(no description set)", markup=False)
+    console.print(
+        terminal_field(result.strip() or "(no description set)"), markup=False
+    )
 
 
 def lpars_set_description(
@@ -338,7 +349,7 @@ def lpars_set_description(
 ) -> None:
     """Set the description field of an LPAR (HMC CLI via SSH)."""
     if not yes and not typer.confirm(
-        f"Set description on '{lpar_name}' (system {system_name})?"
+        f"Set description on '{terminal_field(lpar_name)}' (system {terminal_field(system_name)})?"
     ):
         raise typer.Abort()
 
@@ -352,9 +363,13 @@ def lpars_set_description(
         )
     )
 
-    console.print(f"Description updated for '{lpar_name}'", style="green", markup=False)
+    console.print(
+        f"Description updated for '{terminal_field(lpar_name)}'",
+        style="green",
+        markup=False,
+    )
     if result.strip():
-        console.print(result.strip(), markup=False)
+        console.print(terminal_field(result.strip()), markup=False)
 
 
 def lpars_get_msp(
@@ -382,7 +397,8 @@ def lpars_set_msp(
 ) -> None:
     """Set the MSP (Migratable Service Partition) flag of a VIOS (HMC CLI via SSH)."""
     if not yes and not typer.confirm(
-        f"Set MSP={'1' if enabled else '0'} on '{lpar_name}' (system {system_name})?"
+        f"Set MSP={terminal_field('1' if enabled else '0')} on '"
+        f"{terminal_field(lpar_name)}' (system {terminal_field(system_name)})?"
     ):
         raise typer.Abort()
     result = with_client(
@@ -395,9 +411,11 @@ def lpars_set_msp(
         )
     )
 
-    console.print(f"MSP updated for '{lpar_name}'", style="green", markup=False)
+    console.print(
+        f"MSP updated for '{terminal_field(lpar_name)}'", style="green", markup=False
+    )
     if result.strip():
-        console.print(result.strip(), markup=False)
+        console.print(terminal_field(result.strip()), markup=False)
 
 
 def lpars_get_proc_compat_modes(
@@ -406,7 +424,9 @@ def lpars_get_proc_compat_modes(
     """Get processor compatibility modes supported by a managed system (HMC CLI via SSH)."""
     modes = run_cli_coroutine(lambda: get_proc_compat_modes(ssh_config(), system_name))
 
-    console.print(",".join(modes) or "(no modes returned)", markup=False)
+    console.print(
+        terminal_field(",".join(modes) or "(no modes returned)"), markup=False
+    )
 
 
 def lpars_get_proc_compat(
@@ -453,8 +473,9 @@ def lpars_set_proc_compat(
     """Set the processor compatibility mode on an LPAR profile (HMC CLI via SSH)."""
     target = f"profile '{profile_name}'" if profile_name else "the default profile"
     if not yes and not typer.confirm(
-        f"Set processor compatibility mode to '{mode}' on {target} of LPAR "
-        f"'{lpar_name}' (system {system_name})?"
+        f"Set processor compatibility mode to '{terminal_field(mode)}' on "
+        f"{terminal_field(target)} of LPAR '{terminal_field(lpar_name)}' (system "
+        f"{terminal_field(system_name)})?"
     ):
         raise typer.Abort()
     profile = run_cli_coroutine(
@@ -464,7 +485,10 @@ def lpars_set_proc_compat(
     )
 
     console.print(
-        f"Processor compatibility mode updated on profile '{profile}' of '{lpar_name}'",
+        (
+            f"Processor compatibility mode updated on profile '{terminal_field(profile)}"
+            f"' of '{terminal_field(lpar_name)}'"
+        ),
         style="green",
         markup=False,
     )

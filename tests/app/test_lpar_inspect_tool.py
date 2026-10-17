@@ -234,3 +234,25 @@ def test_profile_drift_is_unavailable():
     result = _call(_app(_ALL), _HMC(), {**_ARGUMENTS, "include": ["profile_drift"]})
     assert result["profile_drift"]["status"] == "unavailable"
     assert result["profile_drift"]["tool"] is None
+
+
+def test_mcp_inspection_serializes_definitions_without_changing_state(monkeypatch):
+    from hmcpctl.ssh import refcodes
+
+    async def transport(*_args):
+        return (
+            "lpar_name,time_stamp,refcode\nweb1,t,CA00E105 LP=00002\nweb1,t,B2001230\n"
+        )
+
+    monkeypatch.setattr(refcodes, "run_hmc_command", transport)
+    monkeypatch.setattr(
+        inspect_module, "list_lpar_refcodes", refcodes.list_lpar_refcodes
+    )
+    result = _call(_app(_ALL), _HMC(), _ARGUMENTS)
+    rows = result["refcodes"]["codes"]
+    assert rows[0]["refcode"] == "CA00E105 LP=00002"
+    assert "operating system" in rows[0]["definition"].lower()
+    assert rows[0]["definition_source"]["notation"] == "CA00E105"
+    assert rows[1]["definition"] is None
+    assert rows[1]["definition_source"] is None
+    assert result["state"] == "error"

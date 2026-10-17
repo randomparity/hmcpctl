@@ -51,8 +51,8 @@ approved exclusion, and either it or an unknown blocks a complete-coverage claim
 IDs in `operations.json`. Format 3 ([ADR 0132](../adr/0132-confirmed-live-limitation-gaps.md))
 added optional confirmations to missing scope; format 4
 ([ADR 0186](../adr/0186-observation-schema-version-stamp.md)) adds a required `schema_version`
-to every observation. The evidence, currency, and promotion
-model from [ADR 0127](../adr/0127-derived-live-verification-staleness.md) is unchanged.
+to every observation. [ADR 0212](../adr/0212-release-scoped-live-verification.md) now
+governs release-scoped currency and promotion; ADR 0127's observation shape and closure fingerprint remain.
 Implementation — `absent`, `partial`, or `implemented`, with explicit implemented
 and missing scope — is recorded independently from evidence.
 
@@ -86,8 +86,9 @@ there. The catalog grammar keeps the maintenance level optional so rows recorded
 `schema_version` is the run's `HMC_SCHEMA_VERSION` as its header printed it — a
 `V<n>_<n>[_<n>...]` token or `(not set)` — and observations stored before format 4 read
 `unrecorded`, because nothing recorded the value for them; it attributes the observation and does not
-affect currency or promotion. An operation carries at most one live observation;
-re-validating replaces it, and the superseded record stays in `git log`.
+affect currency or promotion. An operation carries one live observation per producing
+observation id, and the newest by `(observed_at, id)` decides its state; re-validating
+replaces that id's row, and the superseded record stays in `git log`.
 
 ### Confirmed limitation gaps
 
@@ -130,53 +131,85 @@ Stale confirmations remain valid historical records; future timestamps are inval
 Coarse environment labels can retain a repaired limitation for up to 90 days; remove
 its confirmation when earlier revalidation is needed. Missing environment labels disable reuse.
 
-### Derived staleness
+### Release snapshot and candidate currency
 
-Currency is **derived when the catalog is read**, never stored, and never a validation
-error. An observation goes stale when either trigger fires:
+`release-verification.json` freezes `verification`, `reason` and `observed_at` for the
+last release, initially v0.1.0. The packaged `src/hmcpctl/_operation_maturity.json`
+combines those fields with current catalog-derived operation IDs, `implementation`
+and `runtime_eligibility`. `just capability-metadata` regenerates that projection;
+`just tool-docs` renders its frozen verification without a wall-clock dependency.
+Ordinary inventory checks compare verification to the snapshot, not development closures.
+Installed CLI/MCP discovery retains this historical state without runtime age decay.
 
-- its operation's **import closure changed** — the SHA-256 over the handler module and
-  every `src/hmcpctl/` module it transitively imports no longer matches; the closure is
-  computed from the source, so nothing is omitted by hand;
-- it is **older than 90 days** — the ceiling that sees changes on the HMC itself, which
-  this repository cannot observe.
-
-Each operation then reports one of five states:
+Candidate currency is derived separately from catalog observations. An observation is
+stale when its operation's fingerprint differs from the current import closure, or it
+exceeds the 90-day ceiling at gate time. The closure covers the handler and transitively
+imported Python modules under `src/hmcpctl/`, not the CLI wrappers. Each operation reports:
 
 | State | Condition |
 |---|---|
 | `unrecorded` | no maturity record |
 | `unevidenced` | a record, but no live observation |
 | `stale` | the closure changed, or the observation exceeded the age ceiling |
-| `failed` | a `failed` observation that is not stale |
-| `current` | a `passed` observation that is not stale — the only promoting state |
+| `failed` | a failed observation that is not stale |
+| `current` | a passed observation that is not stale; the only promoting state |
+
+Ordinary development needs no live rerun or rerun issue when closures change. An
+operator-authorized ad-hoc window may contribute catalog observations; it does not
+change packaged verification between releases. Release eligibility still depends on
+matching candidate closures and sufficiently recent evidence.
 
 ### Reporting
 
-`just verification-report` prints one line per operation carrying the implementation
-state beside the derived state — `verification: sriov.set_mode partial current`, so a
-partly implemented operation cannot read as fully verified — and a summary line. It
-exits 0 and emits workflow warnings on a pull request or push; the weekly scheduled run
-passes `--fail-on-stale` and fails when anything is stale. That weekly run is the only
-forcing function: a stale observation nobody re-runs stays visibly stale, and nothing
-promotes it back.
+`just verification-report` prints candidate implementation and derived verification
+states plus global counts. It is a diagnostic, not the installed historical state.
+The former CI verification-report job, including weekly fail-on-stale, is removed.
+
+Committed `releases/vX.Y.Z.json` files identify each claimed operation, arm and scenario.
+The historical `v0.1.0.json` records 15 MCP claims and makes no CLI claim. Inventory
+validation checks claim triples; the release gate checks selected operations:
+
+```sh
+uv run --no-sync python scripts/check_capability_inventory.py \
+  --require-current docs/capabilities/releases/vX.Y.Z.json --release
+```
+
+Substitute the actual release claims filename. `--require-current` implies a selected
+report, checks candidate closure and age, and fails on any selected non-current state.
+It is mutually exclusive with global `--fail-on-stale`, which requires
+`--verification-report`. Unclaimed non-current operations do not block the selected gate.
+`--release` additionally requires the snapshot to match candidate closures/catalog,
+without age decay; the two checks serve distinct purposes. See
+[releasing](../development.md#evidence-gate) for the tag-time sequence.
 
 ### Recording an observation
 
-The live runner writes observations and confirmed gaps to a gitignored file beside its results document,
-and never into the catalog: a human copies them in, and the pull request that commits
-one is where the record is reviewed. The runner writes nothing unless the tree is clean
-under `src/` and `scripts/`, both environment settings are present in `.env`
-(`LIVE_TEST_ENV_HMC_RELEASE` and `LIVE_TEST_ENV_HARDWARE_FAMILY` — both or neither,
-the release in its canonical `V<n>R<n>M<n>` form such as `V10R3M1060`, so one HMC is
-never recorded under two tokens),
-`HMC_SCHEMA_VERSION` is unset or a `V<n>_<n>[_<n>...]` token (a run with both environment
-settings present warns at startup otherwise), and `git check-ignore` claims the destination.
+The runner writes ignored results and `<stem>-observations.json` sidecars, not the
+catalog. Observations require clean `src/` and `scripts/`, both environment labels in
+`.env` (`LIVE_TEST_ENV_HMC_RELEASE`, canonical `V<n>R<n>M<n>` such as `V10R3M1060`, and
+`LIVE_TEST_ENV_HARDWARE_FAMILY`), a valid or unset `HMC_SCHEMA_VERSION`, and an ignored
+output destination. Assertions and cleanup attribution determine eligible evidence.
+Raw results can contain private infrastructure identifiers and must not be published.
 
-The validator proves shape, not truth. It applies every bound the runner applies —
-because the catalog is hand-copied and hand-editable, so a check on the way out is not a
-check on the way in — but it cannot know whether an observation describes a run that
-happened. Trust rests on the record being small, closed-shape, and reviewed.
+For a release, use [the authorized window command](../live-testing.md#2-run-the-authorized-window).
+After its last successful arm, clean recovery and matching independent baselines,
+it invokes `scripts/promote_live_observations.py` with the claims, complete result set,
+new `promotion/` branch and explicit completion/recovery attestations. The promoter
+validates result/sidecar provenance at the candidate and eligible observations offline,
+then writes `maturity.json`, `release-verification.json`, the packaged projection and
+regenerated `docs/tools/`. Its commit allowlist excludes raw output. It neither pushes
+nor tags; review the local promotion branch in a PR before merging. A failed promotion
+may leave that branch for inspection, never automatic rollback or a retry grant.
+
+Promotion retains MCP evidence only. Bare-CEC's asserted CLI observations stay on raw
+result rows, and the window's private summary reports CLI coverage or an explicit gap
+for each claim. Three read-only wrapper checks do not verify every CLI wrapper or
+retroactively change v0.1.0's MCP-only scope.
+
+The validator proves shape and provenance consistency, not that hardware was exercised.
+Review must tie the generated filtered matrices to the actual candidate, completed window
+and clean recovery. An ad-hoc catalog update does not authorize writing a release snapshot;
+only the reviewed release-evidence flow changes the frozen verification fields.
 
 Scenario coverage remains hand-written until #706.
 `uv run --no-sync python scripts/scenario_gap_report.py` reports, offline, the operations

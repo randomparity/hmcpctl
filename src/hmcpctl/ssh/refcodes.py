@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import shlex
+from typing import Any
 
 from ..config import HMCConfig
+from ..progress_codes import lookup_progress_code
 from .commands import build_filter, parse_hmc_result_rows
 from .install import validate_hmc_name
 from .transport import HMCCLIError, run_hmc_command
@@ -18,8 +20,12 @@ async def list_lpar_refcodes(
     system_name: str,
     lpar_name: str,
     count: int = 1,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Read the *count* most recent reference codes for one partition.
+
+    Rows preserve the HMC's three raw fields and add nullable ``definition``
+    and ``definition_source`` metadata from the offline POWER9 catalog. These
+    are informational summaries, not boot or readiness decisions.
 
     Rows come back most-recent first.  *count* is bounded because the whole
     result is returned to the caller in one message; ``count=1`` reproduces
@@ -72,4 +78,14 @@ async def list_lpar_refcodes(
                 f"lsrefcode reported partition {row['lpar_name']!r}; "
                 f"expected {lpar_name!r}"
             )
-    return rows
+    enriched = []
+    for row in rows:
+        definition = lookup_progress_code(row["refcode"])
+        enriched.append(
+            {
+                **row,
+                "definition": definition.definition if definition else None,
+                "definition_source": definition.source() if definition else None,
+            }
+        )
+    return enriched

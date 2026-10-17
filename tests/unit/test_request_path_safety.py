@@ -546,6 +546,10 @@ def test_platform_update_rejects_a_non_uuid_system_before_transport():
         "/rest/api/uom/jobs/j%2D1",
         # The captured submission's SELF link path (#1161).
         "/rest/api/uom/jobs/1787837921266",
+        # Template deployment job paths (#110).
+        "/rest/api/templates/jobs/j-1",
+        "/rest/api/templates/jobs/j%2D1",
+        "/rest/api/templates/jobs/1787837835560",
     ],
 )
 def test_a_job_link_is_accepted(path):

@@ -25,7 +25,7 @@ from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_loc
 from ...config import ISO_URL_ALLOWLIST_HELP
 from ...documents.storage import StorageKind
 from ...errors import HMCError
-from ...resource_identity import resolve_lpar_uuid, resolve_vios_uuid
+from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +235,44 @@ async def list_volume_groups(
     return [_volume_group(entry) for entry in await hmc.list_volume_groups(vios_uuid)]
 
 
+async def resolve_volume_group_uuid(hmc: HMCClient, vios_uuid: str, value: str) -> str:
+    """Resolve one complete VG identity from the selected VIOS's inventory."""
+    uuid_selector = is_uuid(value)
+    candidates = []
+    matches = []
+    incomplete = False
+    for entry in await hmc.list_volume_groups(vios_uuid):
+        resource = entry.get("Resource", entry)
+        name = resource.get("GroupName") if isinstance(resource, Mapping) else None
+        uuid = entry.get("UUID")
+        if not isinstance(uuid, str):
+            uuid = ""
+        valid_uuid = is_uuid(uuid)
+        candidates.append(f"{name!r} ({uuid!r})")
+        if uuid_selector:
+            incomplete |= not valid_uuid
+            matched = valid_uuid and uuid.casefold() == value.casefold()
+        else:
+            incomplete |= not isinstance(name, str) or not name
+            matched = name == value
+        if matched:
+            incomplete |= not valid_uuid
+            matches.append(uuid)
+    if incomplete or len(matches) != 1:
+        if incomplete:
+            reason = "incomplete identity"
+        elif matches:
+            reason = "ambiguous"
+        else:
+            reason = "not found"
+        raise ValueError(
+            f"VolumeGroup {value!r} on VIOS {vios_uuid!r}: {reason}. "
+            f"Candidates: {', '.join(candidates) or 'none'}. "
+            f"Inspect with storage list-vgs {vios_uuid}."
+        )
+    return matches[0]
+
+
 async def create_volume_group(
     hmc: HMCClient,
     vios_name_or_uuid: str,
@@ -275,10 +313,12 @@ async def create_virtual_disk(
             be resolved.
         HMCError: If the HMC rejects the creation request or it cannot be completed.
     """
+    vios_uuid = await resolve_vios_uuid(
+        hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+    )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     return await hmc.create_virtual_disk(
-        await resolve_vios_uuid(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
+        vios_uuid,
         vg_uuid,
         name,
         capacity_mib,
@@ -331,6 +371,7 @@ async def delete_virtual_disk(
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     mappings = await hmc.list_storage_mappings(vios_uuid)
     disk_link = f"/rest/api/uom/VirtualIOServer/{vios_uuid}/VolumeGroup/{vg_uuid}/VirtualDisk/{disk_name}"
 
@@ -399,10 +440,12 @@ async def create_media_repository(
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
     """Create a media repository in a VIOS volume group."""
+    vios_uuid = await resolve_vios_uuid(
+        hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+    )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     return await hmc.create_media_repository(
-        await resolve_vios_uuid(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
+        vios_uuid,
         vg_uuid,
         size_mib,
     )
@@ -418,10 +461,12 @@ async def create_optical_media(
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
     """Create blank optical media in a VIOS media repository."""
+    vios_uuid = await resolve_vios_uuid(
+        hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+    )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     return await hmc.create_optical_media(
-        await resolve_vios_uuid(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
+        vios_uuid,
         vg_uuid,
         name,
         size_mib,
@@ -525,6 +570,7 @@ async def delete_media_repository(
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     media = await hmc.list_optical_media(vios_uuid, vg_uuid)
     if media:
         names = ", ".join(m.get("MediaName", "unknown") for m in media)
@@ -555,6 +601,7 @@ async def delete_optical_media(
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
 
     # Exhaustively check optical mappings for references to this media
     optical_mappings = await hmc.list_optical_mappings(vios_uuid)
@@ -590,10 +637,12 @@ async def get_media_repository(
     Returns the repository with capacity (RepositorySize, in GiB) and optionally
     embedded VirtualOpticalMedia entries if present.
     """
+    vios_uuid = await resolve_vios_uuid(
+        hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+    )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     return await hmc.get_media_repository(
-        await resolve_vios_uuid(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
+        vios_uuid,
         vg_uuid,
     )
 
@@ -814,6 +863,7 @@ async def list_optical_media(
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     return [
         _optical_media(entry)
         for entry in await hmc.list_optical_media(vios_uuid, vg_uuid)
@@ -965,6 +1015,7 @@ async def upload_iso(
             "HMC documents, and the HMC may accept more."
         )
 
+    vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
     if await hmc.get_media_repository(vios_uuid, vg_uuid) is None:
         raise ValueError(
             f"Volume group {vg_uuid} on VIOS {vios_uuid} holds no media repository. "

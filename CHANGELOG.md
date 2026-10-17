@@ -16,6 +16,23 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Offline POWER9 progress-code lookup and 2,202 independently written definitions,
+  with public IBM page/code provenance. CLI, MCP and partition inspection reference-code
+  rows carry definitions and explicit unknowns while preserving raw codes (#1690).
+
+- Bare-CEC live testing exercises the installed CLI state, reference-code and job-show
+  paths with separate asserted CLI observations. Release-window reports state CLI
+  coverage or gaps for each claim; v0.1.0 remains MCP-only evidence (#1477).
+
+- Run an explicitly authorized release window with `scripts/run_release_window.py`,
+  composing named arms, recovery, strict baselines, private evidence and local promotion;
+  dry-run derives the claimed arms without hardware access (#1513).
+
+- Promote completed live-window sidecars with `scripts/promote_live_observations.py`,
+  producing a new local branch with validated catalog, release snapshot, packaged
+  projection and generated tool documentation; raw results stay uncommitted. Validated,
+  unclaimed observations without existing catalog records are reported and omitted (#1512).
+
 - `scripts/check_capability_inventory.py --require-current FILE` gates a release
   on its validated claimed operations, naming non-current evidence and applying
   candidate closure and 90-day age checks without blocking on unclaimed states (#1478).
@@ -28,6 +45,19 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   mappings and volume-group volumes (#1479).
 
 ### Changed
+
+- The HTTP 500 "Nested path contains null property" errors from a managed-system read by UUID
+  and from the management-console read now name an `X-HMC-Schema-Version` pin as the likely
+  cause and tell the operator to unset `HMC_SCHEMA_VERSION`, instead of advising a firmware
+  update (#1648).
+
+- Release and live-testing runbooks now use the authorized release-window command,
+  claimed-set gate and tag-time snapshot validation, with explicit recovery and
+  promotion review. Ordinary development needs no live rerun (#1514).
+
+- Round2 live testing preserves the configured partition and disk while provisioning
+  temporary owned fixtures. Recovery independently compares a fresh system/VIOS baseline
+  and original partition properties; missing legacy witnesses fail closed (#1513).
 
 - The `app` extra now pins `fastmcp-slim[server]==4.0.10`, up from 4.0.3; `mcp` and `mcp-types`
   stay at 2.2.0 (#1539).

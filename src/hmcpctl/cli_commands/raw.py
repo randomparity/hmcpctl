@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from .output import fail
+from .output import fail, print_raw, terminal_field
 from .runtime import with_client
 
 
@@ -18,10 +18,7 @@ def raw_get(
     """Raw GET against the HMC; prints the XML response body."""
 
     body, _headers = with_client(lambda hmc: hmc.raw_get(path))
-    # typer.echo, not Rich: the body is printed as received, with no markup parsing,
-    # wrapping or tab expansion; color=True stops click stripping ANSI codes from a
-    # pipe (#1029).
-    typer.echo(body, color=True)
+    print_raw(body)
 
 
 def raw_post(
@@ -43,12 +40,11 @@ def raw_post(
         except (OSError, UnicodeError) as exc:
             fail(OSError(f"cannot read body file {body_path}: {exc}"))
 
-    if not yes and not typer.confirm(f"POST {path} to the HMC?"):
+    if not yes and not typer.confirm(f"POST {terminal_field(path)} to the HMC?"):
         raise typer.Abort()
 
-    typer.echo(
-        with_client(lambda hmc: hmc.raw_post(path, body, content_type=content_type)),
-        color=True,
+    print_raw(
+        with_client(lambda hmc: hmc.raw_post(path, body, content_type=content_type))
     )
 
 

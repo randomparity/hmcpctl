@@ -46,7 +46,7 @@ from hmcpctl.ssh.profiles import (
 )
 from hmcpctl.ssh.transport import HMCCLIError
 
-from . import pcie
+from . import cli, pcie
 from .metrics import _as_outcome
 from .observation import CLEANUP, Assertion, CallFailure, ExpectedOutcome
 
@@ -500,10 +500,13 @@ async def _activate_to_sms(
         )
     else:
         await _inspect_job(client, state, job_id)
+    if reached in _FIRMWARE_STATES:
+        await cli.observe_state(state, fixture.lpar_uuid, reached)
     return reached in _FIRMWARE_STATES
 
 
 async def _inspect_job(client: Client, state: RunState, job_id: str) -> None:
+    await cli.observe_job(state, job_id)
     st, data = await state.call(client, "hmc_get_job", job_id=job_id)
     state.record_verified(
         _ROW,
@@ -567,6 +570,8 @@ async def _observe(
         cleanup="not-required",
         data=data,
     )
+
+    await cli.observe_refcodes(state, arm.system_name, fixture.lpar_name)
 
     # The idle cap equals the duration: a partition parked at SMS has already
     # drawn its menu and prints nothing more, which the default 10 s would read

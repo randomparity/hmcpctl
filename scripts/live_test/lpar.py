@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, get_args
 from fastmcp import Client
 
 from hmcpctl.operations.lpar.core import ProcessorCompatibilityMode
-from hmcpctl.ssh.commands import build_filter
+from hmcpctl.ssh.commands import build_filter, parse_hmc_result_rows
 from hmcpctl.ssh.lpar import validate_lpar_description
+from hmcpctl.ssh.transport import HMCCLIError
 
 from .inventory import read_sync_state
 from .observation import (
@@ -27,6 +28,27 @@ if TYPE_CHECKING:
 
 async def exercise_lpar_lifecycle(client: Client, state: RunState) -> None:
     print("\n=== ST8: LPAR Lifecycle ===")
+    status, data = await state.call(
+        client,
+        "hmc_run_command",
+        cmd=f"lssyscfg -r lpar -m {shlex.quote(state.config.system_name)} -F name --header",
+    )
+    try:
+        names = (
+            parse_hmc_result_rows(data, ("name",), "scratch admission")
+            if status == "PASS" and isinstance(data, str)
+            else None
+        )
+    except HMCCLIError:
+        names = None
+    if names is None or any(row["name"] == state.config.scratch_name for row in names):
+        state.record(
+            8,
+            "scratch admission",
+            "FAIL",
+            "scratch name is present or inventory unreadable",
+        )
+        return
     await _discover_system_uuid(client, state)
     await _create_and_confirm_scratch_lpar(client, state)
     await _modify_and_summarize_scratch_lpar(client, state)

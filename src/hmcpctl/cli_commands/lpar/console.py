@@ -19,7 +19,7 @@ from hmcpctl.ssh.console import (
     ConsoleHoldLostError,
 )
 
-from ..output import err_console, fail, usage_error
+from ..output import err_console, fail, terminal_field, usage_error
 from ..runtime import with_client
 
 #: ADR 0175: ``released`` false means the vterm may still be held; it outranks 1.
@@ -78,18 +78,27 @@ def _report(capture: ConsoleCapture) -> None:
             "; the HMC reported that another client ended this hold, so no rmvterm "
             "was issued: leave that client's session alone"
         )
+    elif not capture.released and capture.stop_reason == "interrupted":
+        line += (
+            "; check console ownership before another capture; "
+            "do not end another client's session"
+        )
     elif not capture.released:
         line += (
             "; the console may still be held: run 'rmvterm -m "
             f"{shlex.quote(capture.system)} -p {shlex.quote(capture.lpar)}' "
             "on the HMC before another capture"
         )
-    err_console.print(line, markup=False, highlight=False, soft_wrap=True)
+    err_console.print(
+        terminal_field(line, err=True), markup=False, highlight=False, soft_wrap=True
+    )
 
 
 def _exit_code(capture: ConsoleCapture, *, write_failed: bool) -> int:
     if not capture.released:
         return RELEASE_UNPROVEN
+    if capture.stop_reason == "interrupted":
+        return 130
     return 1 if write_failed or capture.stop_reason == "error" else 0
 
 
@@ -98,7 +107,10 @@ def lpars_capture_console(
         ..., metavar="LPAR", help="LPAR name or UUID"
     ),
     system_name_or_uuid: str = typer.Option(
-        ..., "--system", "-s", help="Managed system name or UUID hosting the LPAR"
+        ...,
+        "--system",
+        "-s",
+        help="Managed system name or UUID; required to select the LPAR console host",
     ),
     duration_seconds: float = typer.Option(
         30.0, "--duration", help="Maximum capture duration in seconds (at most 3600)"
@@ -117,17 +129,36 @@ def lpars_capture_console(
 
     Writes the raw console bytes to stdout, or to --output, and never sends input to
     the partition. One stderr line reports the stop reason, byte count and whether
-    the console release was proven.
+    the console release was proven. Press Ctrl-C (SIGINT) to stop early, then
+    wait for release cleanup. The flushed partial --output file is retained.
 
     Exit codes (ADR 0175): 0 the capture finished and the console was released;
     1 lookup, SSH or HMC failure, the console held by another session, a capture
     stopped by an error, or bytes that could not be written; 2 a usage error,
     including an out-of-range bound, an existing --output file, or a terminal
     stdout without --output; 3 the release was not proven, so the console may
-    still be held.
+    still be held; 130 interrupted by Ctrl-C with release proven. Exit 3 takes
+    precedence over 130 and write errors. SIGTERM and SIGHUP are not covered.
     """
     _check_bounds(duration_seconds, max_bytes, idle_timeout_seconds)
     sink = _open_sink(output)
+    write_error: list[OSError] = []
+
+    def _stream_chunk(chunk: bytes) -> None:
+        """Write *chunk* to the sink as it arrives.
+
+        Write errors are recorded and suppressed so the capture completes and
+        the vterm is properly released before the caller handles the failure
+        (issue #1674).  Once a write has failed, later chunks are skipped.
+        """
+        if write_error:
+            return
+        try:
+            sink.write(chunk)
+            sink.flush()
+        except OSError as exc:
+            write_error.append(exc)
+
     try:
         capture = with_client(
             lambda hmc: capture_lpar_console_by_selector(
@@ -137,23 +168,56 @@ def lpars_capture_console(
                 duration_seconds=duration_seconds,
                 max_bytes=max_bytes,
                 idle_timeout_seconds=idle_timeout_seconds,
+                on_chunk=_stream_chunk,
+                stop_on_cancel=True,
             )
         )
+    except KeyboardInterrupt:
+        if write_error:
+            err_console.print(
+                f"Error: could not write console bytes: {terminal_field(write_error[0], err=True)}",
+                markup=False,
+            )
+        if output is not None:
+            try:
+                sink.close()
+            except OSError as exc:
+                err_console.print(
+                    f"Error: could not close partial console file: {terminal_field(exc, err=True)}",
+                    markup=False,
+                )
+        err_console.print(
+            "Capture interrupted; partial output retained; release was not proven. "
+            "Check console ownership before another capture.",
+            markup=False,
+        )
+        raise typer.Exit(RELEASE_UNPROVEN) from None
     except BaseException:
         _discard(sink, output)
         raise
     _report(capture)
-    try:
-        sink.write(capture.data)
-        sink.flush()
-        if output is not None:
+    if write_error:
+        if capture.stop_reason != "interrupted":
+            _discard(sink, output)
+        elif output is not None:
+            with contextlib.suppress(OSError):
+                sink.close()
+        err_console.print(
+            f"Error: could not write console bytes: {terminal_field(write_error[0], err=True)}",
+            markup=False,
+        )
+        raise typer.Exit(_exit_code(capture, write_failed=True)) from write_error[0]
+    if output is not None:
+        try:
             sink.close()
-    except BaseException as exc:
-        _discard(sink, output)
-        if not isinstance(exc, OSError):
-            raise
-        err_console.print(f"Error: could not write console bytes: {exc}", markup=False)
-        raise typer.Exit(_exit_code(capture, write_failed=True)) from exc
+        except OSError as exc:
+            if capture.stop_reason != "interrupted":
+                _discard(sink, output)
+            err_console.print(
+                f"Error: could not write console bytes: {terminal_field(exc, err=True)}",
+                markup=False,
+            )
+            raise typer.Exit(_exit_code(capture, write_failed=True)) from exc
     code = _exit_code(capture, write_failed=False)
     if code:
         raise typer.Exit(code)

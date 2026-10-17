@@ -7,7 +7,7 @@ import json
 import typer
 from rich.text import Text
 
-from .output import _resource, console, err_console, print_json
+from .output import _resource, console, err_console, print_json, terminal_field
 from .runtime import with_client
 
 
@@ -23,7 +23,9 @@ def console_info(as_json: bool = typer.Option(False, "--json")) -> None:
         print_json(info)
         return
     res = _resource(info)
-    console.print(Text.assemble(("HMC", "bold"), f" {info.get('link') or ''}"))
+    console.print(
+        Text.assemble(("HMC", "bold"), f" {terminal_field(info.get('link') or '')}")
+    )
     for key in (
         "VersionInfo",
         "ManagementConsoleName",
@@ -31,7 +33,10 @@ def console_info(as_json: bool = typer.Option(False, "--json")) -> None:
         "NetworkInterfaces",
     ):
         if key in res:
-            console.print(f"  {key}: {json.dumps(res[key], default=str)}", markup=False)
+            console.print(
+                f"  {terminal_field(key)}: {terminal_field(json.dumps(res[key], default=str))}",
+                markup=False,
+            )
 
 
 def register_commands(group: typer.Typer) -> None:

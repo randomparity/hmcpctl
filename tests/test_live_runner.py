@@ -1259,6 +1259,7 @@ async def test_provision_dry_run_requires_vios_and_uses_configured_vlan() -> Non
 async def test_lpar_lifecycle_captures_jobs_and_clears_scratch_identity() -> None:
     state = _ScriptedSriovState(
         [
+            ("hmc_run_command", "PASS", "name\n"),
             ("hmc_get_system", "PASS", {"UUID": "system-uuid"}),
             ("hmc_create_lpar", "PASS", {"lpar": {"UUID": "scratch-uuid"}}),
             ("hmc_get_lpar", "PASS", {"UUID": "scratch-uuid"}),
@@ -1276,7 +1277,7 @@ async def test_lpar_lifecycle_captures_jobs_and_clears_scratch_identity() -> Non
     assert state.artifacts.system_uuid == "system-uuid"
     assert state.artifacts.scratch_uuid is None
     assert state.artifacts.job_uuid_sample == "boot-job"
-    assert state.calls[1][1]["resources"] == {
+    assert state.calls[2][1]["resources"] == {
         "desired_memory": state.config.scratch_create_desired_memory_mib,
         "max_memory": state.config.scratch_create_max_memory_mib,
         "desired_vcpus": state.config.scratch_create_desired_vcpus,
@@ -1399,7 +1400,15 @@ async def test_live_provision_is_judged_by_the_steps_of_a_served_result(
     state = _ScriptedSriovState([("hmc_provision_lpar", "PASS", provisioned)])
 
     await provisioning._provision_from_baseline(
-        object(), state, vios_uuid="vios-A-uuid", vg_uuid="vg-A-uuid", pvid=3100
+        object(),
+        state,
+        {
+            "name": "fixture",
+            "disk": "hp14deadbeef",
+            "token": "round2-deadbeef",
+            "vios_uuid": "vios-A-uuid",
+            "vg_uuid": "vg-A-uuid",
+        },
     )
 
     (row,) = state.results
@@ -4761,7 +4770,7 @@ async def test_baseline_capture_runs_cohesive_phases_in_order(monkeypatch):
         inventory, "_print_baseline_summary", lambda _state: events.append("summary")
     )
 
-    await inventory.capture_lpar_baseline(object(), object())
+    await inventory.capture_lpar_baseline(object(), runner.RunState())
 
     assert events == ["properties", "adapters", "vios", "cli", "sync", "summary"]
 
@@ -6209,39 +6218,35 @@ async def test_st1_fallback_served_feed_reads_fail_rather_than_promote(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_st1_declared_limitation_is_a_gap_not_an_observation(monkeypatch):
-    state, observed = await _run_st1(
-        monkeypatch,
-        {
-            "hmc_list_systems": ("FAIL", _failure(_ST1_NULL_PROPERTY_500)),
-            "hmc_capacity_report": ("FAIL", _failure(_ST1_NULL_PROPERTY_500)),
-            "hmc_find_placement": ("FAIL", _failure(_ST1_NULL_PROPERTY_500)),
-        },
-    )
-
-    assert {"system.list", "capacity.report", "placement.find"}.isdisjoint(observed)
-    assert {
-        (gap["operation"], gap["missing_scope"]["variant"]) for gap in state.gaps
-    } == {
-        ("system.list", "firmware-inventory-serialization"),
-        ("capacity.report", "firmware-inventory-serialization"),
-        ("placement.find", "firmware-inventory-serialization"),
+async def test_st1_null_property_500_on_a_system_read_fails_closed(monkeypatch):
+    """No reachable system 500s on these reads (#1531), so one that does is a FAIL."""
+    reads = {
+        "hmc_list_systems": "system.list",
+        "hmc_capacity_report": "capacity.report",
+        "hmc_find_placement": "placement.find",
     }
+    dispatched = {}
+    responses = {tool: ("PASS", data) for tool, data in _st1_responses().items()}
+    responses |= {tool: ("FAIL", _failure(_ST1_NULL_PROPERTY_500)) for tool in reads}
+
+    async def scripted_call(_state, _client, tool, *, expected=(), **kwargs):
+        dispatched.setdefault(tool, list(expected))
+        if (
+            tool == "hmc_list_resources"
+            and kwargs["resource_type"] == "LogicalPartition"
+        ):
+            return "PASS", [{"UUID": _ST1_LPAR_UUID}]
+        return responses.get(tool, ("PASS", {}))
+
+    monkeypatch.setattr(runner.RunState, "call", scripted_call)
+    state = runner.RunState()
+    await connectivity.inventory_connectivity(None, state)
+
+    observed = {row["operation"]: row["observation"] for row in state.observations}
+    assert {observed[op]["result"] for op in reads.values()} == {"failed"}
+    assert all(dispatched[tool] == [] for tool in reads)
     rows = {row["tool"]: row["status"] for row in state.results}
-    assert rows["hmc_list_systems"] == "SKIP"
-
-
-@pytest.mark.asyncio
-async def test_st1_invalid_dispatch_is_never_the_declared_limitation(monkeypatch):
-    invalid = observation.CallFailure(
-        "InvalidDispatch", _ST1_NULL_PROPERTY_500, "", None, False
-    )
-
-    state, observed = await _run_st1(
-        monkeypatch, {"hmc_list_systems": ("FAIL", invalid)}
-    )
-
-    assert observed["system.list"]["result"] == "failed"
+    assert {rows[tool] for tool in reads} == {"FAIL"}
     assert not state.gaps
 
 
@@ -6388,29 +6393,8 @@ async def test_mutating_workflows_stop_when_inventory_context_is_missing(
 
 
 @pytest.mark.asyncio
-async def test_storage_provisioning_runs_the_complete_successful_orchestration(
-    monkeypatch,
-):
-    calls = []
-
-    async def scripted_call(_state, _client, tool, **kwargs):
-        calls.append((tool, kwargs))
-        if tool == "hmc_run_command":
-            return "PASS", _st14_volumes(state)
-        if tool == "hmc_get_lpar":
-            return "PASS", {"uuid": "recreated-lp3"}
-        if tool == "hmc_provision_lpar":
-            return "PASS", {"steps": [{"step": "create", "status": "ok"}]}
-        if tool == "hmc_list_virtual_networks":
-            return "PASS", _listed_networks(state.config.provision_vlan_id)
-        return "PASS", {}
-
-    monkeypatch.setattr(runner.RunState, "call", scripted_call)
-    state = runner.RunState()
-    state.artifacts.vios_uuid = "vios-uuid"
-    state.artifacts.vios_partition_id = 7
-    state.artifacts.vg_uuid = "vg-uuid"
-    state.artifacts.vdisk_vg_name = state.config.vdisk_volume_group_name
+async def test_storage_provisioning_preserves_baseline_resource_sizes():
+    state = _ScriptedSriovState([("hmc_provision_lpar", "PASS", {"steps": []})])
     state.artifacts.lp3_baseline = {
         "lpars": {
             "Resource": {
@@ -6420,56 +6404,28 @@ async def test_storage_provisioning_runs_the_complete_successful_orchestration(
                 "DesiredVirtualProcessors": "2",
                 "MaximumVirtualProcessors": "4",
             }
-        },
+        }
     }
-
-    await runner.exercise_storage_provisioning(None, state)
-
-    assert [tool for tool, _ in calls] == [
-        "hmc_list_virtual_networks",
-        "hmc_get_lpar",
-        "hmc_power_off_lpar",
-        "hmc_delete_lpar",
-        "hmc_list_lpars",
-        "hmc_list_volume_groups",
-        "hmc_run_command",
-        "hmc_create_virtual_disk",
-        "hmc_list_volume_groups",
-        "hmc_provision_lpar",
-        "hmc_get_lpar",
-        "hmc_lpar_summary",
-    ]
-    assert calls[0][1] == {"system_name_or_uuid": state.config.system_name}
-    assert calls[6][1]["cmd"] == (
-        f"viosvrcmd -m {state.config.system_name} --id 7"
-        f" -c 'lsvg -lv {state.config.vdisk_volume_group_name}'"
-    )
-    assert calls[7][1]["capacity_mib"] == state.config.provision_disk_mib
-    provision = calls[9][1]
-    assert provision == {
-        "system_name_or_uuid": state.config.system_name,
-        "name": state.config.lp3_name,
-        "adapters": {"port_vlan_id": state.config.provision_vlan_id},
-        "storage": {
+    await provisioning._provision_from_baseline(
+        None,
+        state,
+        {
+            "name": "fixture",
+            "disk": "hp14deadbeef",
+            "token": "round2-deadbeef",
             "vios_uuid": "vios-uuid",
-            "storage_name": state.config.vdisk_name,
-            "kind": "VirtualDisk",
             "vg_uuid": "vg-uuid",
         },
-        "resources": {
-            "min_memory": 1024,
-            "desired_memory": 2048,
-            "max_memory": 4096,
-            "desired_vcpus": 2,
-            "max_vcpus": 4,
-        },
-        "partition_type": "AIX/Linux",
-        "power_on": True,
-        "dry_run": False,
+    )
+    assert state.calls[0][1]["resources"] == {
+        "min_memory": 1024,
+        "desired_memory": 2048,
+        "max_memory": 4096,
+        "desired_vcpus": 2,
+        "max_vcpus": 4,
     }
-    assert calls[10][1] == {"lpar_name_or_uuid": state.config.lp3_name}
-    assert calls[11][1] == {"lpar_name_or_uuid": state.config.lp3_name}
-    assert state.artifacts.lp3_uuid == "recreated-lp3"
+    assert state.calls[0][1]["name"] == "fixture"
+    assert state.artifacts.lp3_uuid is None
 
 
 def _listed_networks(*vlans: object) -> list[dict[str, object]]:
@@ -6543,6 +6499,8 @@ async def test_lpar_lifecycle_sequences_create_power_and_cleanup(monkeypatch):
 
     async def scripted_call(_state, _client, tool, **kwargs):
         calls.append((tool, kwargs))
+        if tool == "hmc_run_command":
+            return "PASS", "name\n"
         if tool == "hmc_create_lpar":
             return "PASS", {"UUID": "scratch-uuid"}
         if tool in {"hmc_power_on_lpar", "hmc_power_off_lpar"}:
@@ -6556,6 +6514,7 @@ async def test_lpar_lifecycle_sequences_create_power_and_cleanup(monkeypatch):
     await runner.exercise_lpar_lifecycle(None, state)
 
     assert [tool for tool, _ in calls] == [
+        "hmc_run_command",
         "hmc_create_lpar",
         "hmc_get_lpar",
         "hmc_modify_lpar",
@@ -6608,12 +6567,16 @@ async def test_st14_cleanup_uses_scoped_delete_and_independent_exact_inventory(
     state.artifacts.vios_uuid = "unused-stale-uuid"
     state.artifacts.vios_partition_id = 7
     calls = []
-    listed = (
-        [state.config.vdisk_name] if present else [state.config.vdisk_name + "-other"]
-    )
+    listed = ["hp14deadbeef"] if present else ["hp14deadbeef" + "-other"]
 
     async def call(_state, _client, tool, **kwargs):
         calls.append((tool, kwargs))
+        if tool == "hmc_get_lpar":
+            return "FAIL", observation.CallFailure(
+                "HMCCLIError", "HSCL8012 partition not found", "", None, False
+            )
+        if tool == "hmc_get_vios_storage_detail":
+            return "PASS", {"Resource": {"VirtualSCSIMappings": {}}}
         if tool == "hmc_run_command":
             return "PASS", _st14_volumes(state, *listed)
         if tool == "hmc_delete_virtual_disk":
@@ -6621,8 +6584,16 @@ async def test_st14_cleanup_uses_scoped_delete_and_independent_exact_inventory(
         return "PASS", {}
 
     monkeypatch.setattr(runner.RunState, "call", call)
-    assert await provisioning._recreate_test_disk(
-        None, state, "selected-vios-uuid", "configured-vg-uuid", 1024
+    await provisioning._cleanup_fixture(
+        None,
+        state,
+        {
+            "name": "fixture",
+            "disk": "hp14deadbeef",
+            "token": "round2-deadbeef",
+            "vios_uuid": "selected-vios-uuid",
+            "vg_uuid": "configured-vg-uuid",
+        },
     )
     deletes = [kw for tool, kw in calls if tool == "hmc_delete_virtual_disk"]
     assert deletes == (
@@ -6631,7 +6602,7 @@ async def test_st14_cleanup_uses_scoped_delete_and_independent_exact_inventory(
                 "vios_name_or_uuid": "selected-vios-uuid",
                 "system_name_or_uuid": "sys; reboot",
                 "vg_uuid": "configured-vg-uuid",
-                "disk_name": state.config.vdisk_name,
+                "disk_name": "hp14deadbeef",
             }
         ]
         if present
@@ -6645,13 +6616,13 @@ async def test_st14_cleanup_uses_scoped_delete_and_independent_exact_inventory(
     ] * (2 if present else 1)
     assert [
         kw["disk_name"] for tool, kw in calls if tool == "hmc_create_virtual_disk"
-    ] == [state.config.vdisk_name]
-    removal = next(
+    ] == []
+    removals = [
         row
         for row in state.results
-        if row["tool"] == "hmc_delete_virtual_disk (old test disk)"
-    )
-    assert removal["status"] == ("PASS" if present else "SKIP")
+        if row["tool"] == "hmc_delete_virtual_disk (fixture)"
+    ]
+    assert [row["status"] for row in removals] == (["PASS"] if present else [])
     assert not state.gaps
 
 
@@ -6675,21 +6646,35 @@ async def test_st14_cleanup_delete_failures_are_fail_and_stop(monkeypatch, failu
 
     async def call(_state, _client, tool, **kwargs):
         calls.append(tool)
+        if tool == "hmc_get_lpar":
+            return "FAIL", observation.CallFailure(
+                "HMCCLIError", "HSCL8012 partition not found", "", None, False
+            )
+        if tool == "hmc_get_vios_storage_detail":
+            return "PASS", {"Resource": {"VirtualSCSIMappings": {}}}
         if tool == "hmc_run_command":
-            return "PASS", _st14_volumes(state, state.config.vdisk_name)
+            return "PASS", _st14_volumes(state, "hp14deadbeef")
         if tool == "hmc_delete_virtual_disk":
             return "FAIL", observation.classify_failure(RuntimeError(failure))
         return "PASS", {}
 
     monkeypatch.setattr(runner.RunState, "call", call)
-    assert not await provisioning._recreate_test_disk(
-        None, state, "vios-uuid", "vg-uuid", 1024
+    await provisioning._cleanup_fixture(
+        None,
+        state,
+        {
+            "name": "fixture",
+            "disk": "hp14deadbeef",
+            "token": "round2-deadbeef",
+            "vios_uuid": "vios-uuid",
+            "vg_uuid": "vg-uuid",
+        },
     )
     assert "hmc_create_virtual_disk" not in calls
     removal = next(
         row
         for row in state.results
-        if row["tool"] == "hmc_delete_virtual_disk (old test disk)"
+        if row["tool"] == "hmc_delete_virtual_disk (fixture)"
     )
     assert removal["status"] == "FAIL"
     assert not state.gaps
@@ -6718,10 +6703,16 @@ async def test_st14_cleanup_refuses_unproven_absence(monkeypatch, fault):
     async def call(_state, _client, tool, **kwargs):
         nonlocal reads
         calls.append(tool)
+        if tool == "hmc_get_lpar":
+            return "FAIL", observation.CallFailure(
+                "HMCCLIError", "HSCL8012 partition not found", "", None, False
+            )
+        if tool == "hmc_get_vios_storage_detail":
+            return "PASS", {"Resource": {"VirtualSCSIMappings": {}}}
         if tool != "hmc_run_command":
             return "PASS", {}
         reads += 1
-        data = _st14_volumes(state, state.config.vdisk_name)
+        data = _st14_volumes(state, "hp14deadbeef")
         if fault == "read-error" or (fault == "post-read-error" and reads == 2):
             return "FAIL", observation.classify_failure(
                 RuntimeError("managed system not found")
@@ -6739,8 +6730,16 @@ async def test_st14_cleanup_refuses_unproven_absence(monkeypatch, fault):
         return "PASS", data
 
     monkeypatch.setattr(runner.RunState, "call", call)
-    assert not await provisioning._recreate_test_disk(
-        None, state, "vios-uuid", "vg-uuid", 1024
+    await provisioning._cleanup_fixture(
+        None,
+        state,
+        {
+            "name": "fixture",
+            "disk": "hp14deadbeef",
+            "token": "round2-deadbeef",
+            "vios_uuid": "vios-uuid",
+            "vg_uuid": "vg-uuid",
+        },
     )
     assert "hmc_create_virtual_disk" not in calls
     assert any(row["status"] == "FAIL" for row in state.results)

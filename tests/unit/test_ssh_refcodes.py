@@ -68,7 +68,7 @@ def test_command_shape_is_exact(monkeypatch):
     rows = _run(list_lpar_refcodes(_config(), "sys-R1", "sys-R1-pcie-p1165bad", 3))
 
     assert _sent(transport) == capture["command"]
-    assert rows == [
+    assert [{field: row[field] for field in REFCODE_FIELDS} for row in rows] == [
         {
             "lpar_name": "sys-R1-pcie-p1165bad",
             "time_stamp": "09/30/2026 20:41:31",
@@ -265,3 +265,32 @@ def test_the_tool_forwards_resolved_names_and_the_count(monkeypatch):
         "lsrefcode -r lpar -m resolved-sys --filter lpar_names=resolved-lpar"
         " -n 7 -F lpar_name,time_stamp,refcode --header"
     )
+
+
+def test_definitions_preserve_raw_suffixes_and_explicit_unknowns(monkeypatch):
+    _transport(
+        monkeypatch,
+        "lpar_name,time_stamp,refcode\n"
+        "web01,now,ca00e105 LP=00002\nweb01,earlier,B2001230 LP=00002\n",
+    )
+    rows = _run(list_lpar_refcodes(_config(), "sys1", "web01", 2))
+    assert rows[0]["refcode"] == "ca00e105 LP=00002"
+    assert "operating system" in rows[0]["definition"].lower()
+    assert rows[0]["definition_source"]["notation"] == "CA00E105"
+    assert rows[1]["refcode"] == "B2001230 LP=00002"
+    assert rows[1]["definition"] is None
+    assert rows[1]["definition_source"] is None
+
+
+def test_mcp_exposes_enrichment_from_the_real_reader(monkeypatch):
+    from hmcpctl.server_tools.lpar import lifecycle_boot
+
+    _transport(monkeypatch, "lpar_name,time_stamp,refcode\nweb01,now,CA00E105\n")
+    monkeypatch.setattr(
+        lifecycle_boot,
+        "ssh_with_client",
+        lambda fn, **_kwargs: _run(fn(_config(), "sys1", "web01")),
+    )
+    rows = lifecycle_boot.hmc_read_lpar_refcodes("sys1", "web01")
+    assert rows[0]["definition"]
+    assert rows[0]["definition_source"]["pdf_pages"] == [100]

@@ -7,7 +7,7 @@ from dataclasses import asdict
 import typer
 
 from ..operations import jobs as operations_jobs
-from .output import console, err_console, print_json
+from .output import console, err_console, print_json, terminal_field
 from .runtime import with_client
 
 
@@ -24,7 +24,11 @@ def jobs_show(
     )
 
     if not outcome.found:
-        err_console.print(f"Job {job_id} not found", style="yellow", markup=False)
+        err_console.print(
+            f"Job {terminal_field(job_id, err=True)} not found",
+            style="yellow",
+            markup=False,
+        )
         raise typer.Exit(code=1)
     print_json(asdict(outcome))
 
@@ -56,10 +60,18 @@ def jobs_wait(
     )
 
     if not outcome.found:
-        err_console.print(f"Job {job_id} not found", style="yellow", markup=False)
+        err_console.print(
+            f"Job {terminal_field(job_id, err=True)} not found",
+            style="yellow",
+            markup=False,
+        )
         raise typer.Exit(code=1)
     status = outcome.status or "unknown"
-    console.print(f"Job {job_id} status: {status}", style="green", markup=False)
+    console.print(
+        f"Job {terminal_field(job_id)} status: {terminal_field(status)}",
+        style="green",
+        markup=False,
+    )
     print_json(asdict(outcome))
 
 

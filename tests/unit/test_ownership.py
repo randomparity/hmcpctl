@@ -187,13 +187,11 @@ def test_resolve_and_authorize_lpar_names_forwards_resolution_and_override(
     hmc = AsyncMock()
     resolve_system = AsyncMock(return_value="system-uuid")
     resolve_lpar = AsyncMock(return_value="lpar-uuid")
-    verify_membership = AsyncMock()
     resolve_names = AsyncMock(return_value=("system-name", "lpar-name"))
     authorize = AsyncMock()
     with (
         patch.object(lpar_ownership, "resolve_system_uuid", resolve_system),
         patch.object(lpar_ownership, "resolve_lpar_uuid", resolve_lpar),
-        patch.object(lpar_ownership, "_verify_partition_on_system", verify_membership),
         patch.object(lpar_ownership, "resolve_lpar_ownership_names", resolve_names),
         patch.object(lpar_ownership, "authorize_lpar_mutation", authorize),
     ):
@@ -211,9 +209,6 @@ def test_resolve_and_authorize_lpar_names_forwards_resolution_and_override(
     resolve_lpar.assert_awaited_once_with(
         hmc, "lpar-selector", system_name_or_uuid="system-uuid"
     )
-    verify_membership.assert_awaited_once_with(
-        hmc, "system-uuid", "lpar-uuid", "lpar-selector"
-    )
     resolve_names.assert_awaited_once_with(
         hmc, "system-uuid", "system-selector", "lpar-uuid"
     )
@@ -225,20 +220,19 @@ def test_resolve_and_authorize_lpar_names_forwards_resolution_and_override(
     )
 
 
-def test_required_system_rejects_partition_uuid_from_another_system():
+@pytest.mark.parametrize("ownership_override", [False, True])
+def test_required_system_rejects_partition_uuid_from_another_system(ownership_override):
     hmc = AsyncMock()
     # The foreign system has a same-named partition: name resolution alone
     # must not make the asserted system appear to contain the UUID.
     hmc.list_logical_partitions.return_value = [
         {"UUID": "different-lpar-uuid", "Resource": {"PartitionName": "aix1"}}
     ]
-    resolve_system = AsyncMock(return_value="selected-system-uuid")
-    resolve_lpar = AsyncMock(return_value="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    resolve_system = AsyncMock(return_value="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     resolve_names = AsyncMock()
     authorize = AsyncMock()
     with (
         patch.object(lpar_ownership, "resolve_system_uuid", resolve_system),
-        patch.object(lpar_ownership, "resolve_lpar_uuid", resolve_lpar),
         patch.object(lpar_ownership, "resolve_lpar_ownership_names", resolve_names),
         patch.object(lpar_ownership, "authorize_lpar_mutation", authorize),
         pytest.raises(ValueError, match="does not belong to managed system"),
@@ -248,10 +242,13 @@ def test_required_system_rejects_partition_uuid_from_another_system():
                 hmc,
                 "selected-system",
                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                ownership_override=ownership_override,
             )
         )
 
-    hmc.list_logical_partitions.assert_awaited_once_with("selected-system-uuid")
+    hmc.list_logical_partitions.assert_awaited_once_with(
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    )
     resolve_names.assert_not_awaited()
     authorize.assert_not_awaited()
 
@@ -282,17 +279,22 @@ def test_resolve_lpar_ownership_names_rejects_whitespace_only_partition_name():
         )
 
 
-def test_optional_system_rejects_partition_uuid_from_another_system():
+@pytest.mark.parametrize("ownership_override", [False, True])
+def test_optional_system_rejects_partition_uuid_from_another_system(ownership_override):
     hmc = AsyncMock()
+    hmc.list_system_summaries.return_value = [
+        {
+            "UUID": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "SystemName": "selected-system",
+        }
+    ]
     hmc.list_logical_partitions.return_value = [
         {"UUID": "different-lpar-uuid", "Resource": {"PartitionName": "aix1"}}
     ]
-    resolve_system = AsyncMock(return_value="selected-system-uuid")
-    resolve_lpar = AsyncMock(return_value="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    resolve_system = AsyncMock(return_value="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     authorize = AsyncMock()
     with (
         patch.object(lpar_ownership, "resolve_system_uuid", resolve_system),
-        patch.object(lpar_ownership, "resolve_lpar_uuid", resolve_lpar),
         patch.object(lpar_ownership, "authorize_lpar_mutation", authorize),
         pytest.raises(ValueError, match="does not belong to managed system"),
     ):
@@ -301,11 +303,13 @@ def test_optional_system_rejects_partition_uuid_from_another_system():
                 hmc,
                 "selected-system",
                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                ownership_override=False,
+                ownership_override=ownership_override,
             )
         )
 
-    hmc.list_logical_partitions.assert_awaited_once_with("selected-system-uuid")
+    hmc.list_logical_partitions.assert_awaited_once_with(
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    )
     authorize.assert_not_awaited()
 
 

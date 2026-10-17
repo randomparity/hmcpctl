@@ -591,6 +591,7 @@ def test_every_kept_backup_reads_as_off_baseline_in_recovery(
         users=False,
         lpar_config=None,
         lpar_power=None,
+        round2=None,
     ):
         return await recovery.check_vios_backup(read_only, inputs)
 

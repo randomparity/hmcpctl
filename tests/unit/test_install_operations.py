@@ -47,6 +47,7 @@ def _hmc(**resolutions) -> AsyncMock:
     hmc.list_system_summaries.return_value = [
         {"UUID": SYSTEM_UUID, "SystemName": "sys1"}
     ]
+    hmc.list_vios.return_value = [{"UUID": LPAR_UUID}]
     hmc.find_vios_by_name.return_value = {"UUID": LPAR_UUID}
     hmc.get_vios.return_value = {
         "Resource": {

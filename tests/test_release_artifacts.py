@@ -1097,8 +1097,8 @@ def test_rejects_unsupported_core_metadata_version(
         ),
         (
             "Requires-Dist",
-            b"Requires-Dist: asyncssh<3,>=2.24.0",
             b"Requires-Dist: asyncssh<3,>=2.24.1",
+            b"Requires-Dist: asyncssh<3,>=2.24.2",
             "runtime dependencies differ",
         ),
         (
@@ -1360,8 +1360,8 @@ def test_rejects_sdist_dependency_mismatch(
         for index, (member, data) in enumerate(entries):
             if member.name.endswith("/PKG-INFO"):
                 changed = data.replace(
-                    b"Requires-Dist: asyncssh<3,>=2.24.0",
                     b"Requires-Dist: asyncssh<3,>=2.24.1",
+                    b"Requires-Dist: asyncssh<3,>=2.24.2",
                 )
                 member.size = len(changed)
                 entries[index] = (member, changed)
@@ -1428,7 +1428,7 @@ def test_rejects_malformed_project_configuration_actionably(
         )
     else:
         content = content.replace(
-            '"asyncssh>=2.24.0,<3"', '"not a valid requirement !!!"'
+            '"asyncssh>=2.24.1,<3"', '"not a valid requirement !!!"'
         )
     pyproject.write_text(content)
 
@@ -1506,3 +1506,55 @@ def test_release_artifacts_recompute_candidate_verification(
     assert main([str(artifacts), str(project)]) == 0
     assert main([str(artifacts), str(project), "--release"]) == 1
     assert "release verification snapshot differs" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extension", ["*.whl", "*.tar.gz"])
+def test_installed_artifact_has_offline_progress_code_lookup(
+    built_project: tuple[Path, Path], tmp_path: Path, extension: str
+) -> None:
+    import sys
+
+    artifacts, _ = built_project
+    artifact = next(artifacts.glob(extension))
+    installed = tmp_path / "installed"
+    result = _run(
+        "uv",
+        "pip",
+        "install",
+        "--offline",
+        "--no-deps",
+        "--no-build-isolation",
+        "--python",
+        sys.executable,
+        "--target",
+        str(installed),
+        str(artifact),
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    proof = (
+        "import sys; sys.path.insert(0, sys.argv[1]); "
+        "from pathlib import Path; from hmcpctl import progress_codes as p; "
+        "assert Path(p.__file__).is_relative_to(sys.argv[1]); "
+        "r=p.lookup_progress_code('ca00e105 LP=00002'); "
+        "assert r.notation == 'CA00E105' and r.pdf_pages == (100,); "
+        "assert 'operating system' in r.definition.lower(); "
+        "assert p.lookup_progress_code('B2001230') is None"
+    )
+    result = _run(sys.executable, "-I", "-c", proof, str(installed), cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+
+
+def test_rejects_checkout_without_progress_catalog(
+    tmp_path: Path, built_project: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    artifacts, project = _artifact_copy(tmp_path, built_project)
+    stripped = tmp_path / "stripped"
+    shutil.copytree(project, stripped, ignore=shutil.ignore_patterns("dist"))
+    (stripped / "src/hmcpctl/_progress_codes.json").unlink()
+    _assert_invalid(
+        artifacts,
+        stripped,
+        capsys,
+        "missing package sentinel: hmcpctl/_progress_codes.json",
+    )

@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import pytest
-from conftest import live_fixture, live_response, make_config
+from conftest import captured_lpar_entry, live_fixture, live_response, make_config
 from defusedxml import ElementTree as ET
 
 from hmcpctl.client.core import HMCClient
@@ -106,6 +106,18 @@ def _hmc_env(monkeypatch):
     monkeypatch.setenv("HMC_HOST", "hmc.test")
     monkeypatch.setenv("HMC_USER", "hscroot")
     monkeypatch.setenv("HMC_PASSWORD", "abc123")
+
+
+@pytest.fixture
+def scoped_lpar(mock_hmc):
+    entry = captured_lpar_entry("00000000-0000-0000-0000-000000000002", "lpar1")
+    mock_hmc.get(
+        "/rest/api/uom/ManagedSystem/00000000-0000-0000-0000-000000000001/LogicalPartition"
+    ).mock(
+        return_value=httpx.Response(
+            200, text=f'<feed xmlns="http://www.w3.org/2005/Atom">{entry}</feed>'
+        )
+    )
 
 
 def _route_preferences_read(router):
@@ -618,6 +630,7 @@ def test_processed_metrics_doc_fetch_403_actionable(monkeypatch, mock_hmc):
         )
 
 
+@pytest.mark.usefixtures("scoped_lpar")
 def test_aggregated_metric_links(monkeypatch, mock_hmc):
     """hmc_aggregated_metric_links uses the AggregatedMetrics endpoint.
 
@@ -642,6 +655,7 @@ def test_aggregated_metric_links(monkeypatch, mock_hmc):
     assert result[0]["link"].endswith("_2.json")
 
 
+@pytest.mark.usefixtures("scoped_lpar")
 def test_aggregated_metrics_mode_fetch_fetches_latest(monkeypatch, mock_hmc):
     """hmc_aggregated_metrics with mode='fetch' downloads from the AggregatedMetrics URL.
 
@@ -804,6 +818,7 @@ def test_processed_metrics_403_actionable(monkeypatch, mock_hmc):
         )
 
 
+@pytest.mark.usefixtures("scoped_lpar")
 def test_aggregated_metrics_406_actionable(monkeypatch, mock_hmc):
     """hmc_aggregated_metrics on HTTP 406 names the refused media type."""
     _hmc_env(monkeypatch)
@@ -820,6 +835,7 @@ def test_aggregated_metrics_406_actionable(monkeypatch, mock_hmc):
         )
 
 
+@pytest.mark.usefixtures("scoped_lpar")
 def test_aggregated_metrics_403_actionable(monkeypatch, mock_hmc):
     """hmc_aggregated_metrics on HTTP 403 raises HMCError mentioning PCM authority."""
     _hmc_env(monkeypatch)

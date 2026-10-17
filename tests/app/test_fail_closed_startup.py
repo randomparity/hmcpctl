@@ -46,6 +46,7 @@ from pathlib import Path
 
 import pytest
 import typer
+from rendered_output import collapse_whitespace
 from typer.testing import CliRunner
 
 from hmcpctl import server as server_module
@@ -94,6 +95,11 @@ def _names(application) -> set[str]:
 def _unstyle(text: str) -> str:
     """Strip ANSI styling so an assertion reads the words, not the escape codes."""
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _plain(text: str) -> str:
+    """The rendered words alone, unstyled and rejoined across Rich's wraps (#1621)."""
+    return collapse_whitespace(_unstyle(text))
 
 
 def _console_script(*, proof: str) -> str:
@@ -389,7 +395,7 @@ def test_error_text_survives_square_brackets(capsys):
     with pytest.raises(typer.Exit):
         fail(ValueError('came from a [profiles." prod"] key in config.toml'))
 
-    assert '[profiles." prod"]' in _unstyle(capsys.readouterr().err)
+    assert '[profiles." prod"]' in _plain(capsys.readouterr().err)
 
 
 def test_error_text_survives_a_closing_tag_shape(capsys):
@@ -403,7 +409,7 @@ def test_error_text_survives_a_closing_tag_shape(capsys):
     with pytest.raises(typer.Exit):
         usage_error("connections entry '[/prod]' is empty or padded")
 
-    assert "'[/prod]'" in _unstyle(capsys.readouterr().err)
+    assert "'[/prod]'" in _plain(capsys.readouterr().err)
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +422,7 @@ def test_serve_without_a_policy_exits_2(steer_config):
     result = CliRunner().invoke(app, ["serve"])
 
     assert result.exit_code == 2
-    output = _unstyle(result.output)
+    output = _plain(result.output)
     assert "config init-access-policy" in output
     assert "--access-policy" in output
 
@@ -431,7 +437,7 @@ def test_serve_with_an_absent_policy_file_exits_1(steer_config):
     result = CliRunner().invoke(app, ["serve", "--access-policy", LEGACY_POLICY_NAME])
 
     assert result.exit_code == 1
-    assert "config init-access-policy" in _unstyle(result.output)
+    assert "config init-access-policy" in _plain(result.output)
 
 
 def test_an_unresolvable_config_home_refuses_without_a_traceback(monkeypatch):
@@ -452,11 +458,21 @@ def test_an_unresolvable_config_home_refuses_without_a_traceback(monkeypatch):
     result = CliRunner().invoke(app, ["serve"])
 
     assert result.exit_code == 2
-    assert "config init-access-policy" in _unstyle(result.output)
+    assert "config init-access-policy" in _plain(result.output)
+
+
+# Narrower than "cannot be read", so Rich must break that phrase wherever the path ends;
+# 40 columns wraps it only for some temporary-path lengths (#1621). It must also stay at
+# least len("access-policy"): any narrower and Rich folds that word mid-word, which turns
+# the "no access-policy file at" negative back into one that cannot fail.
+_PHRASE_SPLITTING_COLUMNS = len("cannot be read") - 1
 
 
 @pytest.mark.skipif(os.name != "posix", reason="symlink semantics are POSIX here")
-def test_a_dangling_symlink_is_not_reported_as_an_absent_file(steer_config):
+@pytest.mark.parametrize("columns", [None, _PHRASE_SPLITTING_COLUMNS])
+def test_a_dangling_symlink_is_not_reported_as_an_absent_file(
+    steer_config, monkeypatch, columns
+):
     """R5b: `exists()` follows the link; `O_EXCL` does not.
 
     Symlinking the platform-native path at a mounted or packaged policy is the natural
@@ -467,13 +483,15 @@ def test_a_dangling_symlink_is_not_reported_as_an_absent_file(steer_config):
     Reporting it as present hands the case to the load path, whose error names the
     resolved target and the errno.
     """
+    if columns is not None:
+        monkeypatch.setenv("COLUMNS", str(columns))
     link = steer_config / "access-policy.toml"
     link.symlink_to(steer_config / "nowhere" / "access-policy.toml")
 
     result = CliRunner().invoke(app, ["serve", "--access-policy", LEGACY_POLICY_NAME])
 
     assert result.exit_code == 1
-    output = _unstyle(result.output)
+    output = _plain(result.output)
     assert "no access-policy file at" not in output
     assert "cannot be read" in output
 
@@ -501,7 +519,7 @@ def test_serve_without_a_policy_exits_2_as_a_subprocess():
     )
 
     assert completed.returncode == 2
-    assert "config init-access-policy" in _unstyle(completed.stderr)
+    assert "config init-access-policy" in _plain(completed.stderr)
 
 
 @pytest.mark.skipif(
@@ -564,7 +582,7 @@ def test_the_documented_migration_works_end_to_end(tmp_path):
     )
     assert again.returncode == 1
     assert target.read_bytes() == written
-    assert "--output" in _unstyle(again.stdout + again.stderr)
+    assert "--output" in _plain(again.stdout + again.stderr)
 
     # And the file it wrote is one a server actually starts on. `initialize` plus
     # `tools/list` over raw newline-delimited JSON-RPC, deliberately not a client

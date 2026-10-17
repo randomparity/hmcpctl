@@ -7,6 +7,7 @@ import copy
 import json
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import Any, get_type_hints
 from unittest.mock import AsyncMock, Mock, patch
 from xml.etree.ElementTree import Element, SubElement, fromstring, tostring
@@ -515,7 +516,9 @@ async def test_decommission_dry_run_inventories_without_mutating(
 
     result = await decommission_lpar(hmc, "system-a", "aix-prod", dry_run=True)
 
-    assert result == DecommissionResult(
+    legacy = dict(result.blast_radius)
+    assert legacy.pop("mapping_evidence")
+    assert replace(result, blast_radius=legacy) == DecommissionResult(
         resource_deleted=False,
         workflow_completed=True,
         lpar_uuid=LPAR_UUID,
@@ -1423,6 +1426,7 @@ async def test_partial_mapping_detach_reports_success_then_stops(monkeypatch):
     assert result.steps[1].result == {
         "mappings": ({"vios_uuid": VIOS_UUID, "mapping_id": "vhost0/vtscsi0"},),
         "error": "second refused",
+        "failed_mapping": {"vios_uuid": VIOS_UUID, "mapping_id": "vhost0/vtscsi1"},
     }
     assert hmc.delete_storage_mapping.await_count == 2
     hmc.delete_adapter.assert_not_awaited()
@@ -1937,3 +1941,165 @@ async def test_adapter_feed_preserves_native_metadata_and_person_fields(monkeypa
     result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
     assert result.workflow_completed and result.resource_deleted
     assert hmc.delete_adapter.await_count == 6
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize(
+    "case", ["client", "mapping-id", "unavailable", "partial", "casefold"]
+)
+async def test_mapping_evidence_and_rendering(monkeypatch, capsys, dry_run, case):
+    from hmcpctl.cli_commands.lpar.decommission import _render_decommission_result
+    from hmcpctl.cli_commands.output import InventoryFormat
+
+    hmc = _client()
+    _patch_common(monkeypatch, [])
+    detail = _complete_storage_detail()
+    mappings = detail["Resource"]["VirtualSCSIMappings"]["VirtualSCSIMapping"]
+    mappings[0].pop("UUID")
+    target = LPAR_UUID
+    if case == "client":
+        mappings[0].pop("AssociatedLogicalPartition")
+    elif case == "mapping-id":
+        mappings[0].pop("TargetDevice")
+    elif case == "unavailable":
+        detail = None
+    elif case == "partial":
+        for index in (1, 2):
+            mapping = copy.deepcopy(mappings[0])
+            mapping["TargetDevice"]["VirtualSCSITargetDevice"]["TargetName"] = (
+                f"vtscsi{index}"
+            )
+            mappings.append(mapping)
+        hmc.delete_storage_mapping.side_effect = [None, HMCError("second refused")]
+    else:
+        target = "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+        hmc.list_logical_partitions.return_value = [_lpar(target)]
+        hmc.get_logical_partition.return_value = _lpar(target)
+        mappings[0]["AssociatedLogicalPartition"]["href"] = (
+            f"/rest/api/uom/LogicalPartition/{target.upper()}"
+        )
+    hmc.get_vios_storage_detail.return_value = detail
+    result = await decommission_lpar(hmc, "system-a", target, dry_run=dry_run)
+    evidence = result.blast_radius["mapping_evidence"]
+    assert evidence and all(item["vios_uuid"] == VIOS_UUID for item in evidence)
+    assert all(item["backing_device"] != "hdisk99" for item in evidence)
+    scsi = [item for item in evidence if item["type"] == "VirtualSCSIMapping"]
+    assert all(row["uuid"] == "unknown" for row in scsi)
+    if case in ("client", "mapping-id"):
+        assert scsi[0]["disposition"] == "unproven"
+        assert scsi[0]["missing_identity"] != "none"
+        assert scsi[0]["backing_device"] == "hdisk10"
+        assert scsi[0]["server_adapter"] == "vhost0"
+        if case == "mapping-id":
+            assert "ServerAdapter.AdapterName" not in scsi[0]["missing_identity"]
+        hmc.delete_storage_mapping.assert_not_awaited()
+    elif case == "unavailable":
+        assert evidence[0]["disposition"] == "unproven"
+        assert evidence[0]["vios_name"] == "vios1"
+        hmc.delete_storage_mapping.assert_not_awaited()
+    elif case == "partial":
+        expected = (
+            ["planned detach"] * 3 if dry_run else ["detached", "failed", "retained"]
+        )
+        assert [row["disposition"] for row in scsi] == expected
+    else:
+        assert scsi[0]["disposition"] == ("planned detach" if dry_run else "detached")
+        assert not any(
+            row["type"] == "VirtualSCSIMapping"
+            for row in result.blast_radius["storage_mappings"]
+        )
+    hmc.delete_virtual_disk.assert_not_awaited()
+    _render_decommission_result(result, "aix-prod", InventoryFormat.tsv, "system-a")
+    rendered = capsys.readouterr()
+    assert rendered.out.startswith("Section\tItem\tField\tValue\n")
+    assert VIOS_UUID in rendered.out and "--lpar" not in rendered.out
+    assert "{'" not in rendered.out and "…" not in rendered.out
+    assert "backing_storage" in rendered.out and "retained" in rendered.out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_unresolved_duplicate_remains_unproven(monkeypatch, dry_run):
+    hmc = _client()
+    _patch_common(monkeypatch, [])
+    detail = _complete_storage_detail()
+    mappings = detail["Resource"]["VirtualSCSIMappings"]["VirtualSCSIMapping"]
+    unknown = copy.deepcopy(mappings[0])
+    unknown.pop("AssociatedLogicalPartition")
+    mappings.append(unknown)
+    hmc.get_vios_storage_detail.return_value = detail
+    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=dry_run)
+    evidence = result.blast_radius["mapping_evidence"]
+    unresolved = [row for row in evidence if row["relationship"] == "unknown"]
+    assert len(unresolved) == 1
+    assert unresolved[0]["disposition"] == "unproven"
+    hmc.delete_storage_mapping.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind,field",
+    [
+        ("PhysicalVolume", "VolumeName"),
+        ("VirtualDisk", "DiskName"),
+        ("LogicalUnit", "UnitName"),
+        ("VirtualOpticalMedia", "MediaName"),
+    ],
+)
+async def test_evidence_preserves_wrapped_backing_text(monkeypatch, kind, field):
+    hmc = _client()
+    _patch_common(monkeypatch, [])
+    resource = element_to_dict(
+        fromstring(f"""<VirtualIOServer>
+      <VirtualSCSIMappings><VirtualSCSIMapping>
+        <AssociatedLogicalPartition href="/rest/api/uom/LogicalPartition/{LPAR_UUID}"/>
+        <ServerAdapter><AdapterName ksv="V1_0">vhost0</AdapterName></ServerAdapter>
+        <TargetDevice><VirtualSCSITargetDevice><TargetName ksv="V1_0">vtscsi0</TargetName></VirtualSCSITargetDevice></TargetDevice>
+        <Storage><{kind}><{field} ksv="V1_0">known-backing</{field}></{kind}></Storage>
+      </VirtualSCSIMapping></VirtualSCSIMappings></VirtualIOServer>""")
+    )
+    hmc.get_vios_storage_detail.return_value = {"Resource": resource}
+    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=True)
+    row = result.blast_radius["mapping_evidence"][0]
+    assert row["backing_device"] == "known-backing"
+    assert row["mapping_id"] == "vhost0/vtscsi0"
+    assert "backing_device" not in result.blast_radius["storage_mappings"][0]
+
+
+@pytest.mark.asyncio
+async def test_empty_metadata_collection_has_no_mapping_evidence(monkeypatch):
+    hmc = _client()
+    _patch_common(monkeypatch, [])
+    resource = element_to_dict(
+        fromstring("""<VirtualIOServer>
+      <VirtualSCSIMappings group="ViosSCSIMapping"><Metadata><Atom/></Metadata></VirtualSCSIMappings>
+      <VirtualFibreChannelMappings group="ViosFCMapping"><Metadata><Atom/></Metadata></VirtualFibreChannelMappings>
+      </VirtualIOServer>""")
+    )
+    hmc.get_vios_storage_detail.return_value = {"Resource": resource}
+    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=True)
+    assert result.blast_radius["mapping_evidence"] == ()
+
+
+@pytest.mark.asyncio
+async def test_evidence_preserves_wrapped_vios_and_fc_identity(monkeypatch):
+    hmc = _client()
+    _patch_common(monkeypatch, [])
+    resource = element_to_dict(
+        fromstring(f"""<VirtualIOServer>
+      <PartitionName ksv="V1_0">known-vios</PartitionName>
+      <VirtualSCSIMappings/>
+      <VirtualFibreChannelMappings><VirtualFibreChannelMapping>
+      <UUID ksv="V1_0">aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</UUID>
+      <AssociatedLogicalPartition href="/rest/api/uom/LogicalPartition/{LPAR_UUID}"/>
+      <Port><WWPNPair ksv="V1_0">known-port-pair</WWPNPair></Port>
+      </VirtualFibreChannelMapping></VirtualFibreChannelMappings></VirtualIOServer>""")
+    )
+    hmc.list_vios.return_value = [{"UUID": VIOS_UUID, "Resource": resource}]
+    hmc.get_vios_storage_detail.return_value = {"Resource": resource}
+    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=True)
+    row = result.blast_radius["mapping_evidence"][0]
+    assert row["vios_name"] == "known-vios"
+    assert row["uuid"] == row["mapping_id"] == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    assert row["backing_device"] == "known-port-pair"

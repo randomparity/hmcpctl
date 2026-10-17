@@ -56,7 +56,7 @@ import logging
 import math
 import os
 import shlex
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, Literal, Self, TypeVar
@@ -75,7 +75,9 @@ logger = logging.getLogger(__name__)
 #: The terminal outcomes of a bounded capture. ``contention`` is not a stop
 #: reason: it raises :class:`ConsoleHeldError` instead, per issue #385's
 #: requirement that "another session holds the vterm" be a distinct error.
-StopReason = Literal["duration", "max_bytes", "idle", "remote-close", "error"]
+StopReason = Literal[
+    "duration", "max_bytes", "idle", "remote-close", "error", "interrupted"
+]
 
 _State = Literal[
     "new",
@@ -381,12 +383,19 @@ async def _collect_output(
     duration_seconds: float,
     max_bytes: int,
     idle_timeout_seconds: float,
+    on_chunk: Callable[[bytes], None] | None = None,
+    stop_on_cancel: bool = False,
 ) -> tuple[bytes, StopReason, str | None]:
     """Read the stream until one of the three client-side bounds fires (P8).
 
     Read errors (transport drops included) end the collection with
     ``stop_reason="error"`` and whatever bytes arrived; the release path
     still runs, since P3 showed the HMC never reclaims the vterm itself.
+
+    When *on_chunk* is provided it is called with each raw chunk as it
+    arrives, before the chunk is appended to the internal buffer.  This
+    lets the CLI write bytes to its sink in real time rather than waiting
+    for the capture to finish (issue #1674).
     """
     loop = asyncio.get_running_loop()
     buf = bytearray()
@@ -408,6 +417,8 @@ async def _collect_output(
         except TimeoutError:
             continue  # loop top decides whether duration or idle fired
         except asyncio.CancelledError:
+            if stop_on_cancel:
+                return bytes(buf), "interrupted", None
             raise
         except Exception as exc:  # noqa: BLE001 - a mid-capture read failure ends the capture as an error result, not a raise
             logger.error("console stream read failed mid-capture: %s", exc)
@@ -416,6 +427,8 @@ async def _collect_output(
             raise TypeError("bounded capture never reconnects")
         if not chunk:
             return bytes(buf), "remote-close", None
+        if on_chunk is not None:
+            on_chunk(chunk)
         buf += chunk
         idle_deadline = loop.time() + idle_timeout_seconds
 
@@ -1113,7 +1126,7 @@ class ConsoleSession:
         )
 
     @contextlib.asynccontextmanager
-    async def hand_over(self) -> AsyncIterator[ConsoleHandover]:
+    async def hand_over(self) -> AsyncGenerator[ConsoleHandover]:
         """Mode (a): move the channel to an in-process holder; the vterm stays held.
 
         No ``rmvterm`` or ``mkvterm`` runs on entry or exit. :meth:`read` waits
@@ -1132,7 +1145,7 @@ class ConsoleSession:
     @contextlib.asynccontextmanager
     async def _handed_over(
         self, handover: _Handover, name: str
-    ) -> AsyncIterator[_Handover]:
+    ) -> AsyncGenerator[_Handover]:
         self._require_collecting(name)
         self._give_channel(handover)
         try:
@@ -1425,7 +1438,7 @@ class WritableConsoleSession(ConsoleSession):
         )
 
     @contextlib.asynccontextmanager
-    async def raw_mode(self) -> AsyncIterator[ConsoleRawChannel]:
+    async def raw_mode(self) -> AsyncGenerator[ConsoleRawChannel]:
         """Exclusive raw mode for a preempting holder: ADR 0173 mode (a) plus writes.
 
         The vterm stays held and no ``rmvterm`` or ``mkvterm`` runs. The
@@ -1484,6 +1497,8 @@ async def capture_lpar_console(
     duration_seconds: float,
     max_bytes: int,
     idle_timeout_seconds: float,
+    on_chunk: Callable[[bytes], None] | None = None,
+    stop_on_cancel: bool = False,
 ) -> ConsoleCapture:
     """Capture up to the given bounds from *lpar_name*'s console.
 
@@ -1515,25 +1530,45 @@ async def capture_lpar_console(
             incomplete ANSI escape sequence.
         idle_timeout_seconds: Client-side cap on silence (time since the last
             received byte); the HMC never times an idle stream out itself.
+        on_chunk: Optional callback called with each raw chunk as it arrives,
+            before it is appended to the internal buffer.  The CLI uses this
+            to write bytes to its output sink in real time (issue #1674).
+        stop_on_cancel: Return an interrupted outcome after cleanup instead of
+            propagating cancellation; the CLI opts in for its SIGINT contract.
     """
     _validate_bounds(duration_seconds, max_bytes, idle_timeout_seconds)
-    async with ConsoleSession(hmc, system_name, lpar_name) as session:
-        data, stop_reason, error = await _collect_output(
-            session, duration_seconds, max_bytes, idle_timeout_seconds
-        )
+    data = b""
+    session = ConsoleSession(hmc, system_name, lpar_name)
+    try:
+        async with session:
+            data, stop_reason, error = await _collect_output(
+                session,
+                duration_seconds,
+                max_bytes,
+                idle_timeout_seconds,
+                on_chunk,
+                stop_on_cancel,
+            )
+    except asyncio.CancelledError:
+        if not stop_on_cancel:
+            raise
+        stop_reason, error = "interrupted", None
     if session._state == "lost" and stop_reason != "error":
         # A bound fired on the loss report, or the release scan found it unread.
-        stop_reason = "error"
+        if stop_reason != "interrupted":
+            stop_reason = "error"
         error = _error_detail(
             ConsoleHoldLostError("another client's rmvterm ended the capture's hold")
         )
-    if HELD_SENTINEL in data:
+    if HELD_SENTINEL in data and stop_reason != "interrupted":
         raise ConsoleHeldError(
             f"The console of {lpar_name!r} on {system_name!r} printed the HMC "
             f"contention sentence {HELD_SENTINEL.decode()!r} after acquisition; "
             f"a release of the capture's own hold ran "
             f"(released={session.released is True})."
         )
+    if HELD_SENTINEL in data and stop_reason == "interrupted" and error is None:
+        error = "ConsoleHeldError: contention sentence appeared after acquisition"
     return ConsoleCapture(
         system=system_name,
         lpar=lpar_name,

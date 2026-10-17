@@ -145,6 +145,37 @@ def isolate_operation_state(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def wide_consoles(monkeypatch):
+    """Render every Rich console at one wide width, whatever the terminal is (#1586).
+
+    A narrow terminal wraps or truncates the text CLI and server tests match on, so
+    ``COLUMNS`` is pinned for the test and for any subprocess it starts. It is wide
+    enough that a message carrying a long temporary path stays on one line. Typer builds
+    its help, error and traceback consoles per call, so they read it then; it prefers
+    ``TERMINAL_WIDTH``, frozen into ``MAX_WIDTH`` at import, so that is cleared too.
+
+    Rich freezes a console's width at construction when ``COLUMNS`` is set, which
+    ``setenv`` cannot reach. The consoles built before the test are the CLI's two in
+    ``output`` -- which every command module imports by name, so the objects are the
+    ones to change -- and fastmcp's logging handlers. Clearing ``_width`` (what Rich's
+    ``width`` setter assigns) makes each read ``COLUMNS`` again. Patching the
+    attribute, not the property, lets monkeypatch restore the stored value rather
+    than the computed width the property would read back.
+    """
+    from rich.logging import RichHandler
+    from typer import rich_utils
+
+    from hmcpctl.cli_commands import output
+
+    monkeypatch.setenv("COLUMNS", "1000")
+    monkeypatch.delenv("TERMINAL_WIDTH", raising=False)
+    monkeypatch.setattr(rich_utils, "MAX_WIDTH", None)
+    handlers = [h for h in _PRISTINE_FASTMCP[0] if isinstance(h, RichHandler)]
+    for console in (output.console, output.err_console, *(h.console for h in handlers)):
+        monkeypatch.setattr(console, "_width", None)
+
+
+@pytest.fixture(autouse=True)
 def reset_audit_memento_override_dedup():
     """Give every test a fresh ``config`` override-warning flag (#546).
 

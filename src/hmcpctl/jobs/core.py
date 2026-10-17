@@ -33,13 +33,14 @@ SUCCESSFUL_JOB_STATUSES = frozenset({"COMPLETED", "COMPLETED_OK"})
 FAILED_JOB_STATUSES = TERMINAL_JOB_STATUSES - SUCCESSFUL_JOB_STATUSES
 
 # The SELF link a V10R3 HMC puts on every *read* of a job:
-# `/rest/api/uom/jobs/{JobID}/{uuid}`, whose trailing UUID changes on every read
-# and which the HMC itself refuses as a request URL (HTTP 400 REST000B, live
-# capture at 2281afd2, issue #1160). The submission's own SELF link is the
-# one-segment `/rest/api/uom/jobs/{JobID}` this reduces to. Only a UUID-shaped
-# trailing segment matches; anything else is left for the job-path guard.
+# `/rest/api/uom/jobs/{JobID}/{uuid}` or `/rest/api/templates/jobs/{JobID}/{uuid}`,
+# whose trailing UUID changes on every read and which the HMC itself refuses as a
+# request URL (HTTP 400 REST000B, live capture at 2281afd2, issue #1160). The
+# submission's own SELF link is the one-segment `/rest/api/{uom,templates}/jobs/{JobID}`
+# this reduces to. Only a UUID-shaped trailing segment matches; anything else is left
+# for the job-path guard.
 _READ_SELF_LINK = re.compile(
-    r"(/rest/api/uom/jobs/[^/?#]+)/[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
+    r"(/rest/api/(?:uom|templates)/jobs/[^/?#]+)/[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
 )
 
 

@@ -161,7 +161,10 @@ async def get_lpar(
 ) -> dict[str, Any] | None:
     """Get one LPAR by UUID or by an optionally system-scoped exact name."""
     if is_uuid(lpar_name_or_uuid):
-        return await hmc.get_logical_partition(lpar_name_or_uuid)
+        lpar_uuid = await resolve_lpar_uuid(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        )
+        return await hmc.get_logical_partition(lpar_uuid)
     selector = optional_system_selector(system_name_or_uuid)
     system_uuid = (
         await resolve_system_uuid(hmc, selector) if selector is not None else None

@@ -76,8 +76,8 @@ def hmc_delete_vios(
     irreversible. Confirm the target with hmc_list_vios before calling. Returns a
     confirmation string (immediate delete — no job to poll).
 
-    system_name_or_uuid disambiguates duplicate VIOS names; it is ignored when
-    vios_name_or_uuid is already a UUID.
+    system_name_or_uuid constrains both VIOS names and UUIDs to the selected
+    managed system. A UUID outside that system is rejected.
 
     Raises:
         HMCError: If the VIOS state is not 'not activated' (HTTP 409).

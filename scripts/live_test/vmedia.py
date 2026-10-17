@@ -347,7 +347,7 @@ def _drop_restored_ownership(
             "MANUAL RECOVERY REQUIRED: a restored document recorded the repository "
             f"as this arm's; it is no longer treated as owned. If an earlier run "
             f"created it, delete it by hand (hmcpctl storage delete-media-repo "
-            f"{shlex.quote(str(artifacts.vios_uuid))} <group: {groups}> --system "
+            f"{shlex.quote(str(artifacts.vios_uuid))} --vg <group: {groups}> --system "
             f"{shlex.quote(state.config.system_name)})",
         )
     artifacts.vmedia_repo_created = False
@@ -754,7 +754,7 @@ async def vmedia_upload_iso(client: Client, state: RunState) -> None:
             None,
             f"MANUAL RECOVERY REQUIRED: {name} may be in the repository "
             f"(hmcpctl storage delete-media {shlex.quote(str(state.artifacts.vios_uuid))} "
-            f"{shlex.quote(str(state.artifacts.vmedia_vg_uuid))} {shlex.quote(name)} "
+            f"--vg {shlex.quote(str(state.artifacts.vmedia_vg_uuid))} --name {shlex.quote(name)} "
             f"--system {shlex.quote(config.system_name)})",
         )
     state.record_verified(
@@ -1103,15 +1103,19 @@ class _RoundTrip:
                 self.manual(
                     f"cannot confirm whether {self.name} was created",
                     f"hmcpctl storage list-optical-media {shlex.quote(self.vios)} "
-                    f"{shlex.quote(self.vg)}",
+                    f"--vg {shlex.quote(self.vg)}",
                 )
             else:
                 self.artifacts.vmedia_blank_name = None
             return None
         return created
 
-    async def mount_and_unmount(self, baseline: _Baseline) -> tuple[bool, bool]:
-        """Mount, try the guarded delete, unmount; returns (mounted, delete refused)."""
+    async def mount_and_unmount(self, baseline: _Baseline) -> tuple[bool, bool | None]:
+        """Mount, try the guarded delete, unmount; returns (mounted, delete refused).
+
+        The refusal is None when the guard refused but the listing after it
+        could not be read: unverified, not a guard that let the delete through.
+        """
         config = self.config
         st_m, data_m = self.note(
             "hmc_mount_optical_media",
@@ -1162,7 +1166,18 @@ class _RoundTrip:
             [_DELETE_REFUSED_WHILE_MOUNTED],
         )
         _, _, still = await self.media("after the guarded delete")
-        refused = st_d == "FAIL" and still is not None and self.name in still
+        refused: bool | None = False
+        if isinstance(data_d, CallFailure) and _DELETE_REFUSED_WHILE_MOUNTED.matches(
+            data_d
+        ):
+            refused = None if still is None else self.name in still
+        if refused is None:
+            self.state.skip(
+                19,
+                "hmc_delete_optical_media (refusal unverified)",
+                f"the media listing after the guarded delete could not be read, so "
+                f"{self.name} staying in the repository is unconfirmed",
+            )
 
         st_u, data_u = self.note(
             "hmc_unmount_optical_media",
@@ -1221,7 +1236,7 @@ class _RoundTrip:
     def unmount_command(self) -> str:
         return (
             f"hmcpctl storage unmount-optical-media {shlex.quote(self.vios)} "
-            f"{shlex.quote(self.config.lp3_name)} {self.name} --system "
+            f"--lpar {shlex.quote(self.config.lp3_name)} --name {shlex.quote(self.name)} --system "
             f"{shlex.quote(self.config.system_name)}"
         )
 
@@ -1243,7 +1258,7 @@ class _RoundTrip:
         baseline: _Baseline,
         created: tuple[bool, ...],
         mounted: bool,
-        refused: bool,
+        refused: bool | None,
     ) -> None:
         st_d, data_d = self.note(
             "hmc_delete_optical_media",
@@ -1269,8 +1284,13 @@ class _RoundTrip:
             operation="media.delete",
             scenario=ROUND_TRIP_SCENARIO,
             assertions=[
-                # Only a mounted medium can show the guard refusing.
-                *([Assertion("refused-while-mounted", refused)] if mounted else []),
+                # Only a mounted medium can show the guard refusing, and only a
+                # readable listing can confirm the refusal kept it.
+                *(
+                    [Assertion("refused-while-mounted", refused)]
+                    if mounted and refused is not None
+                    else []
+                ),
                 Assertion("delete-accepted", st_d == "PASS"),
                 Assertion("media-absent", absent),
                 Assertion("media-equal-baseline", equal),
@@ -1283,7 +1303,7 @@ class _RoundTrip:
             self.manual(
                 f"{self.name} is still in the repository",
                 f"hmcpctl storage delete-media {shlex.quote(self.vios)} "
-                f"{shlex.quote(self.vg)} {self.name}",
+                f"--vg {shlex.quote(self.vg)} --name {shlex.quote(self.name)}",
             )
 
 

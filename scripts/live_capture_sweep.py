@@ -28,10 +28,10 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Generator, Sequence
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
 from urllib.parse import quote, urlsplit
 
 import asyncssh
@@ -45,6 +45,9 @@ LOGON_PATH = "/rest/api/web/Logon"
 _SHELL_META = re.compile(r"[;|&<>`$\n\r\\]")
 UOM = "application/vnd.ibm.powervm.uom+xml"
 WEB = "application/vnd.ibm.powervm.web+xml"
+
+
+_Command = TypeVar("_Command", bound=Callable[..., Awaitable[Any]])
 
 
 class ReadOnlyViolation(RuntimeError):
@@ -65,7 +68,7 @@ def command_allowed(command: object) -> bool:
 
 
 @contextlib.contextmanager
-def read_only_guard() -> Iterator[None]:
+def read_only_guard() -> Generator[None]:
     """Refuse mutating calls at the transport seams for the life of the block.
 
     Enter it before ``capture()``: the harness then wraps the guard and records each
@@ -75,14 +78,12 @@ def read_only_guard() -> Iterator[None]:
     run = asyncssh.SSHClientConnection.run
     create_process = asyncssh.SSHClientConnection.create_process
 
-    async def guarded_request(
-        client: Any, method: str, path: str, **kwargs: Any
-    ) -> Any:
+    async def guarded_request(self: Any, method: str, path: str, **kwargs: Any) -> Any:
         if not rest_allowed(method, path):
             raise ReadOnlyViolation(f"refused {method} {path}: the sweep only reads")
-        return await request(client, method, path, **kwargs)
+        return await request(self, method, path, **kwargs)
 
-    def guard_command(original: Callable[..., Awaitable[Any]]) -> Callable[..., Any]:
+    def guard_command(original: _Command) -> _Command:
         async def guarded(conn: Any, *args: Any, **kwargs: Any) -> Any:
             command = args[0] if args else kwargs.get("command")
             if not command_allowed(command):
@@ -91,7 +92,7 @@ def read_only_guard() -> Iterator[None]:
                 )
             return await original(conn, *args, **kwargs)
 
-        return guarded
+        return cast(_Command, guarded)
 
     HMCClient._request = guarded_request  # type: ignore[method-assign]
     asyncssh.SSHClientConnection.run = guard_command(run)  # type: ignore[method-assign]

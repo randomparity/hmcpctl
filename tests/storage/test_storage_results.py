@@ -33,7 +33,10 @@ def _observed_mappings() -> list[dict]:
 class _StorageClient:
     async def list_volume_groups(self, _vios_uuid: str):
         return [
-            {"UUID": "vg-1", "Resource": {"GroupName": "rootvg", "FreeSpace": "10"}}
+            {
+                "UUID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "Resource": {"GroupName": "rootvg", "FreeSpace": "10"},
+            }
         ]
 
     async def list_optical_media(self, _vios_uuid: str, _vg_uuid: str):
@@ -48,11 +51,13 @@ async def test_storage_inventory_translates_hmc_resources() -> None:
     client = cast(HMCClient, _StorageClient())
 
     volume_groups = await list_volume_groups(client, VIOS_UUID)
-    optical_media = await list_optical_media(client, VIOS_UUID, "vg-1")
+    optical_media = await list_optical_media(
+        client, VIOS_UUID, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
     mappings = await list_storage_mappings(client, VIOS_UUID)
 
     assert asdict(volume_groups[0]) == {
-        "uuid": "vg-1",
+        "uuid": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "name": "rootvg",
         "capacity_gib": None,
         "free_space_gib": 10,
@@ -74,7 +79,7 @@ async def test_storage_inventory_translates_hmc_resources() -> None:
 async def test_volume_group_rejects_missing_required_name() -> None:
     class MissingName:
         async def list_volume_groups(self, _vios_uuid: str):
-            return [{"UUID": "vg-1", "Resource": {}}]
+            return [{"UUID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "Resource": {}}]
 
     with pytest.raises(HMCError, match="GroupName"):
         await list_volume_groups(cast(HMCClient, MissingName()), VIOS_UUID)
@@ -83,7 +88,12 @@ async def test_volume_group_rejects_missing_required_name() -> None:
 def _vg_client(resource: dict[str, object]) -> HMCClient:
     class _Client:
         async def list_volume_groups(self, _vios_uuid: str):
-            return [{"UUID": "vg-1", "Resource": {"GroupName": "rootvg", **resource}}]
+            return [
+                {
+                    "UUID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "Resource": {"GroupName": "rootvg", **resource},
+                }
+            ]
 
     return cast(HMCClient, _Client())
 
@@ -197,11 +207,13 @@ async def test_optical_media_reports_the_gib_size_field_in_mib(
 ) -> None:
     """The live medium carries Size in GiB (#963); size_mib is that value times 1024."""
 
-    class _Client:
+    class _Client(_StorageClient):
         async def list_optical_media(self, _vios_uuid: str, _vg_uuid: str):
             return [{"MediaName": "install.iso", "Size": size_gib}]
 
-    media = await list_optical_media(cast(HMCClient, _Client()), VIOS_UUID, "vg-1")
+    media = await list_optical_media(
+        cast(HMCClient, _Client()), VIOS_UUID, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
 
     assert media[0].size_mib == size_mib
     assert type(media[0].size_mib) is type(size_mib)

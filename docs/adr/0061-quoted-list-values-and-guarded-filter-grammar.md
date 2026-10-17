@@ -72,12 +72,15 @@ narrows; the refusal keeps a future multi-value site from reaching an unguarded 
 
 **The recurrence guard widens with the grammar.** `tests/unit/test_i_record_grammar.py`
 selects `chsyscfg`/`mksyscfg` `-i`, `chhwres` `-a`, and any literal carrying `--filter`, and
-requires each payload to come from the owning builder — with the one documented value-form
-exemption named, not silently allowed. All three selections key on flag-carrying segments
+requires each payload to come from the owning builder. As decided here, the guard also named
+the one value-form exemption rather than silently allowing it; #1245 removed that exemption
+along with its site (see the amendment above). All three selections key on flag-carrying segments
 rather than on a literal opening with the command name: ADR 0045's opening rule let the
 appended-fragment idiom (`cmd += f" -a {…}"`) evade the scan, and this branch's own filter
 sites use that shape. The flag must be a whitespace-preceded token, so bare diagnostic labels
-are not selected; prose that trips the scan fails closed like any unguarded site. Element-wise assembly (`" ".join(["chhwres", "-a", payload])`) remains outside any literal selection — the same bound ADR 0045 records for its opening rule, inherited unchanged here.
+are not selected; prose that trips the scan fails closed like any unguarded site. Element-wise
+assembly (`" ".join(["chhwres", "-a", payload])`) remains outside any literal selection — the
+same bound ADR 0045 records for its opening rule, inherited unchanged here.
 
 ## Consequences
 

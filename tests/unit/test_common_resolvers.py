@@ -69,13 +69,13 @@ async def test_partition_resolver_forwards_resolved_system_scope(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resolver", [resolve_lpar_uuid, resolve_vios_uuid])
-async def test_partition_resolver_uuid_pass_through_ignores_system_scope(resolver):
+@pytest.mark.parametrize("scope", [None, "", "   "])
+async def test_partition_resolver_uuid_pass_through_without_scope(resolver, scope):
     hmc = AsyncMock()
     resource_uuid = "11111111-1111-1111-1111-111111111111"
 
     assert (
-        await resolver(hmc, resource_uuid, system_name_or_uuid="system-name")
-        == resource_uuid
+        await resolver(hmc, resource_uuid, system_name_or_uuid=scope) == resource_uuid
     )
 
     hmc.list_system_summaries.assert_not_awaited()
@@ -142,3 +142,47 @@ async def test_system_name_resolver_resolves_uuid_and_passes_name_through():
     hmc.list_system_summaries.assert_not_awaited()
     assert await resolve_system_name(hmc, SYSTEM_UUID) == "sys-a"
     hmc.list_system_summaries.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("resolver", "feed"),
+    [(resolve_lpar_uuid, "list_logical_partitions"), (resolve_vios_uuid, "list_vios")],
+)
+@pytest.mark.parametrize("member", [True, False])
+async def test_scoped_uuid_requires_selected_system_membership(resolver, feed, member):
+    hmc = AsyncMock()
+    uuid = "abcdefab-1111-4111-8111-111111111111"
+    hmc.list_system_summaries.return_value = [
+        {"UUID": SYSTEM_UUID, "SystemName": "sys-a"}
+    ]
+    getattr(hmc, feed).return_value = (
+        [{"UUID": uuid}] if member else [{"UUID": "other"}]
+    )
+    if member:
+        assert (
+            await resolver(hmc, uuid.upper(), system_name_or_uuid="sys-a")
+            == uuid.upper()
+        )
+    else:
+        with pytest.raises(ValueError, match="does not belong to managed system"):
+            await resolver(hmc, uuid, system_name_or_uuid="sys-a")
+    getattr(hmc, feed).assert_awaited_once_with(SYSTEM_UUID)
+    hmc.find_partition_by_name.assert_not_awaited()
+    hmc.find_vios_by_name.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("resolver", "feed"),
+    [(resolve_lpar_uuid, "list_logical_partitions"), (resolve_vios_uuid, "list_vios")],
+)
+async def test_scoped_uuid_preserves_feed_error(resolver, feed):
+    from hmcpctl.errors import HMCError
+
+    hmc = AsyncMock()
+    error = HMCError("feed unavailable", status_code=404)
+    getattr(hmc, feed).side_effect = error
+    with pytest.raises(HMCError) as caught:
+        await resolver(hmc, SYSTEM_UUID, system_name_or_uuid=SYSTEM_UUID)
+    assert caught.value is error

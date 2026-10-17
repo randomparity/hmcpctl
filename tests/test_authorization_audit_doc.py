@@ -1066,7 +1066,7 @@ def test_a_drifted_sample_tls_source_is_caught() -> None:
         rf'"source"\s*:\s*"{re.escape(real)}"',
         '"source": "retired-source"',
         document,
-        1,
+        count=1,
     )
     assert replaced == 1
     expected = {"retired-source"}
@@ -1108,7 +1108,7 @@ def test_an_attribution_source_is_not_read_as_a_tls_source() -> None:
         rf'"source"\s*:\s*"{re.escape(victim)}"',
         '"source": "retired-source"',
         document,
-        1,
+        count=1,
     )
     assert replaced == 1
     assert _sampled_tls_sources(reworded) == _sampled_tls_sources(document)

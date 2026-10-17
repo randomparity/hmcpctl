@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any
 
 import typer
 
@@ -18,75 +16,36 @@ from ...operations.partition_state import PartitionState
 from ...resource_identity import ResourceNotFoundError
 from ...ssh.refcodes import MAX_REFCODE_COUNT, list_lpar_refcodes
 from ..output import (
-    VerbatimTable,
+    InventoryFormat,
     console,
-    first_field,
-    output,
+    inventory_field,
     partition_not_found,
-    print_json,
+    print_inventory,
     report_unreadable,
+    resolve_inventory_format,
+    terminal_field,
 )
 from ..runtime import run_cli_coroutine, ssh_config, with_client
 
 
 def lpars_summary(
     name_or_uuid: str = typer.Argument(..., help="Partition name or UUID"),
-    as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format (default: table on TTY, tsv when redirected)",
+    ),
     system: str | None = typer.Option(
         None, "--system", "-s", help="Managed system name or UUID"
     ),
 ) -> None:
     """One-call summary: state, RMC, memory/CPU, OS details, adapter count, description."""
-
+    selected = resolve_inventory_format(as_json, format)
     summary = asdict(
         with_client(lambda hmc: fetch_lpar_summary(hmc, system, name_or_uuid))
     )
-
-    if as_json:
-        print_json(summary)
-        return
-    _render_lpar_summary(summary, name_or_uuid)
-
-
-def _render_lpar_summary(summary: Mapping[str, Any], name_or_uuid: str) -> None:
-    """Render a fetched LPAR summary as a terminal table."""
-    table = VerbatimTable(title=f"LPAR Summary: {summary.get('name') or name_or_uuid}")
-    table.add_column("Property", style="cyan")
-    table.add_column("Value", style="green")
-    for property_name, value in _summary_rows(summary):
-        table.add_row(property_name, value)
-    console.print(table)
-
-
-def _summary_rows(summary: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """Return the stable display rows for an LPAR summary."""
-    return [
-        ("UUID", summary.get("uuid") or "-"),
-        ("Name", summary.get("name") or "-"),
-        ("State", summary.get("state") or "-"),
-        ("RMC State", summary.get("rmc_state") or "-"),
-        ("Type", summary.get("partition_type") or "-"),
-        ("Partition ID", _value_or_missing(summary, "partition_id")),
-        ("Current Memory (MiB)", _value_or_missing(summary, "current_memory_mib")),
-        ("Desired Memory (MiB)", _value_or_missing(summary, "desired_memory_mib")),
-        ("Current Proc Units", _value_or_missing(summary, "current_proc_units")),
-        ("Desired Proc Units", _value_or_missing(summary, "desired_proc_units")),
-        ("Desired vCPUs", _value_or_missing(summary, "desired_vcpus")),
-        ("Dedicated Procs", _value_or_missing(summary, "dedicated_procs")),
-        ("OS Version", summary.get("os_version") or "-"),
-        ("OS Type", summary.get("os_type") or "-"),
-        (
-            "Client Network Adapters",
-            str(summary.get("client_network_adapter_count", 0)),
-        ),
-        ("Description", summary.get("description") or "-"),
-    ]
-
-
-def _value_or_missing(summary: Mapping[str, Any], key: str) -> str:
-    """Render an optional summary field without treating zero as missing."""
-    value = summary.get(key)
-    return "-" if value is None else str(value)
+    print_inventory(summary, selected, title="LPAR Summary")
 
 
 def lpars_list(
@@ -96,60 +55,86 @@ def lpars_list(
     state: PartitionState | None = typer.Option(
         None, "--state", help="Filter by PartitionState"
     ),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format (default: table on TTY, tsv when redirected)",
+    ),
 ) -> None:
     """List logical partitions."""
-
+    selected = resolve_inventory_format(as_json, format)
     listing = with_client(lambda hmc: list_lpars(hmc, system, state))
     report_unreadable(listing)
-
-    table = None
-    if not as_json:
-        table = VerbatimTable(title="Logical Partitions")
-        for col in ("Name", "ID", "UUID", "State", "Type", "OS", "RMC"):
-            table.add_column(col)
-        for lpar in listing.entries:
-            table.add_row(
-                first_field(lpar, "PartitionName"),
-                first_field(lpar, "PartitionID"),
-                lpar.get("UUID") or "-",
-                first_field(lpar, "PartitionState"),
-                first_field(lpar, "PartitionType"),
-                first_field(lpar, "OperatingSystemVersion", default="-"),
-                first_field(lpar, "ResourceMonitoringControlState", "RMCState"),
+    rows = []
+    for entry in listing.entries:
+        parent = entry.get("ManagedSystem") or {}
+        rows.append(
+            (
+                parent.get("SystemName"),
+                parent.get("UUID"),
+                inventory_field(entry, "PartitionName"),
+                inventory_field(entry, "PartitionID"),
+                entry.get("UUID"),
+                inventory_field(entry, "PartitionState"),
+                inventory_field(entry, "PartitionType"),
+                inventory_field(entry, "OperatingSystemVersion"),
+                inventory_field(entry, "ResourceMonitoringControlState", "RMCState"),
             )
-    output(asdict(listing), as_json, table, "No logical partitions found")
+        )
+    print_inventory(
+        asdict(listing),
+        selected,
+        ("System", "System UUID", "Name", "ID", "UUID", "State", "Type", "OS", "RMC"),
+        rows,
+        title="Logical Partitions",
+        empty_msg="No logical partitions found",
+    )
 
 
 def lpars_show(
     name_or_uuid: str = typer.Argument(..., help="Partition name or UUID"),
-    as_json: bool = typer.Option(True, "--json/--no-json"),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format (default: table on TTY, tsv when redirected)",
+    ),
+    system: str | None = typer.Option(
+        None, "--system", "-s", help="Restrict to this managed system name or UUID"
+    ),
 ) -> None:
     """Show one LPAR, looked up by name (exact) or by UUID."""
-
-    lpar = with_client(lambda hmc: get_lpar(hmc, name_or_uuid))
-
+    selected = resolve_inventory_format(as_json, format)
+    lpar = with_client(
+        lambda hmc: get_lpar(hmc, name_or_uuid, system_name_or_uuid=system)
+    )
     if lpar is None:
         partition_not_found(name_or_uuid)
-    print_json(lpar)
+    print_inventory(lpar, selected, title="Logical Partition")
 
 
 def lpars_state(
     name_or_uuid: str = typer.Argument(..., help="Partition name or UUID"),
+    system: str | None = typer.Option(
+        None, "--system", "-s", help="Restrict to this managed system name or UUID"
+    ),
 ) -> None:
     """Print just the current state of an LPAR."""
 
     async def state_or_none(hmc):
         try:
-            return await get_lpar_state(hmc, name_or_uuid)
-        except ResourceNotFoundError:
-            return None
+            return await get_lpar_state(hmc, name_or_uuid, system_name_or_uuid=system)
+        except ResourceNotFoundError as exc:
+            if exc.resource_kind == "LPAR":
+                return None
+            raise
 
     state = with_client(state_or_none)
 
     if state is None:
         partition_not_found(name_or_uuid)
-    console.print(state, markup=False)
+    console.print(terminal_field(state), markup=False)
 
 
 def lpars_refcodes(
@@ -158,15 +143,35 @@ def lpars_refcodes(
     count: int = typer.Option(
         1, "--count", help=f"Reference codes to return, 1 to {MAX_REFCODE_COUNT}"
     ),
-    as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format (default: table on TTY, tsv when redirected)",
+    ),
 ) -> None:
     """Read recent reference codes (SRCs) for one partition (HMC CLI via SSH)."""
-
+    selected = resolve_inventory_format(as_json, format)
     rows = run_cli_coroutine(
         lambda: list_lpar_refcodes(ssh_config(), system_name, lpar_name, count)
     )
-
-    output(rows, as_json, None, "No reference codes found")
+    cells = [
+        (row["lpar_name"], row["time_stamp"], row["refcode"], row["definition"])
+        for row in rows
+    ]
+    if selected == InventoryFormat.table:
+        cells = [
+            (name, stamp, code, definition or "Unknown definition")
+            for name, stamp, code, definition in cells
+        ]
+    print_inventory(
+        rows,
+        selected,
+        ("Partition", "Timestamp", "Code", "Definition"),
+        cells,
+        title="Reference codes",
+        empty_msg="No reference codes found",
+    )
 
 
 def register_commands(group: typer.Typer) -> None:

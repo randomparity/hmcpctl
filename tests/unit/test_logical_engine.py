@@ -563,7 +563,10 @@ def test_ledger_add_is_idempotent_across_replays(monkeypatch):
         assert conn.execute("SELECT count(*) FROM ledger").fetchone()[0] == 1
 
 
-def test_effect_limit():
+def test_effect_limit(monkeypatch):
+    # Exercise the bound without hundreds of journal writes racing the submit wait.
+    monkeypatch.setattr(store, "MAX_EFFECTS", 2)
+
     async def body(ctx):
         for n in range(store.MAX_EFFECTS + 1):
             await ctx.effect(f"e{n}", "test.k", "t", Writer())

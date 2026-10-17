@@ -238,7 +238,7 @@ def _assigned_element(name: str) -> str:
     return "Status" if name.lower().endswith("job_status") else name
 
 
-def _assignments(node: ast.AST) -> Iterator[tuple[str, ast.AST]]:
+def _assignments(node: ast.AST) -> Iterator[tuple[str, ast.expr]]:
     """(name, value) for `x = v`, `obj.x = v` and `f(x=v)`."""
     if isinstance(node, ast.Assign):
         for target in node.targets:

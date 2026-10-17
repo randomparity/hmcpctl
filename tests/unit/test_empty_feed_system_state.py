@@ -33,7 +33,6 @@ from hmcpctl.operations.lpar.core import get_lpar, list_lpars
 from hmcpctl.operations.lpar.decommission import decommission_lpar
 from hmcpctl.operations.lpar.ownership import (
     _discover_owning_system,
-    _verify_partition_on_system,
     list_lpar_ownership,
 )
 from hmcpctl.operations.systems.fleet import FleetListing
@@ -460,18 +459,20 @@ async def test_utilization_survey_records_feed_gaps_for_a_non_operating_system(
 
 
 @pytest.mark.asyncio
-async def test_partition_membership_check_names_the_system_state(mock_hmc) -> None:
+@pytest.mark.parametrize("resolver", [resolve_lpar_uuid, resolve_vios_uuid])
+async def test_partition_membership_check_names_the_system_state(
+    mock_hmc, resolver
+) -> None:
     _mock_no_connection_system(mock_hmc)
 
     async with HMCClient(make_config()) as hmc:
-        with pytest.raises(ValueError) as caught:
-            await _verify_partition_on_system(hmc, SYSTEM_UUID, LPAR_UUID, LPAR_UUID)
+        with pytest.raises(HMCError) as caught:
+            await resolver(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
 
     message = str(caught.value)
     assert repr(SYSTEM_NAME) in message
     assert "State 'no connection'" in message
     assert "omit the selector" not in message
-    assert isinstance(caught.value.__cause__, HMCError)
 
 
 @pytest.mark.asyncio

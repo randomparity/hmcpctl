@@ -10,12 +10,14 @@ from ...jobs import validate_wait_timing
 from ...operations.partition_state import PartitionState
 from ...operations.vios.core import list_vios, power_vios
 from ..output import (
-    VerbatimTable,
+    InventoryFormat,
     console,
-    first_field,
-    output,
+    inventory_field,
+    print_inventory,
     print_json,
     report_unreadable,
+    resolve_inventory_format,
+    terminal_field,
 )
 from ..runtime import with_client
 
@@ -27,27 +29,39 @@ def vios_list(
     state: PartitionState | None = typer.Option(
         None, "--state", help="Filter by PartitionState"
     ),
-    as_json: bool = typer.Option(False, "--json"),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format (default: table on TTY, tsv when redirected)",
+    ),
 ) -> None:
     """List Virtual I/O Servers."""
-
+    selected = resolve_inventory_format(as_json, format)
     listing = with_client(lambda hmc: list_vios(hmc, system, state))
     report_unreadable(listing)
-
-    table = None
-    if not as_json:
-        table = VerbatimTable(title="Virtual I/O Servers")
-        for col in ("Name", "ID", "UUID", "State", "Version"):
-            table.add_column(col)
-        for v in listing.entries:
-            table.add_row(
-                first_field(v, "PartitionName"),
-                first_field(v, "PartitionID"),
-                v.get("UUID") or "-",
-                first_field(v, "PartitionState"),
-                first_field(v, "IOSLevel", "VIOSVersion", default="-"),
+    rows = []
+    for entry in listing.entries:
+        parent = entry.get("ManagedSystem") or {}
+        rows.append(
+            (
+                parent.get("SystemName"),
+                parent.get("UUID"),
+                inventory_field(entry, "PartitionName"),
+                inventory_field(entry, "PartitionID"),
+                entry.get("UUID"),
+                inventory_field(entry, "PartitionState"),
+                inventory_field(entry, "IOSLevel", "VIOSVersion"),
             )
-    output(asdict(listing), as_json, table, "No VIOS found")
+        )
+    print_inventory(
+        asdict(listing),
+        selected,
+        ("System", "System UUID", "Name", "ID", "UUID", "State", "Version"),
+        rows,
+        title="Virtual I/O Servers",
+        empty_msg="No VIOS found",
+    )
 
 
 def vios_power_on(
@@ -66,7 +80,9 @@ def vios_power_on(
 ) -> None:
     """Power on a VIOS (submits a PowerOn job)."""
     validate_wait_timing(wait, timeout, interval)
-    if not yes and not typer.confirm(f"Really PowerOn VIOS {name_or_uuid}?"):
+    if not yes and not typer.confirm(
+        f"Really PowerOn VIOS {terminal_field(name_or_uuid)}?"
+    ):
         raise typer.Abort()
 
     job = with_client(
@@ -81,7 +97,11 @@ def vios_power_on(
         )
     )
 
-    console.print(f"Submitted PowerOn for {name_or_uuid}", style="green", markup=False)
+    console.print(
+        f"Submitted PowerOn for {terminal_field(name_or_uuid)}",
+        style="green",
+        markup=False,
+    )
     print_json(job)
 
 
@@ -103,7 +123,9 @@ def vios_power_off(
     """Power off a VIOS (submits a PowerOff job)."""
     validate_wait_timing(wait, timeout, interval)
     op = "Immediate PowerOff" if immediate else "PowerOff"
-    if not yes and not typer.confirm(f"Really {op} VIOS {name_or_uuid}?"):
+    if not yes and not typer.confirm(
+        f"Really {terminal_field(op)} VIOS {terminal_field(name_or_uuid)}?"
+    ):
         raise typer.Abort()
 
     job = with_client(
@@ -119,7 +141,11 @@ def vios_power_off(
         )
     )
 
-    console.print(f"Submitted {op} for {name_or_uuid}", style="green", markup=False)
+    console.print(
+        f"Submitted {terminal_field(op)} for {terminal_field(name_or_uuid)}",
+        style="green",
+        markup=False,
+    )
     print_json(job)
 
 

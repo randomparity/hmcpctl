@@ -59,12 +59,12 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import check_capability_inventory
 from fastmcp import Client
@@ -808,6 +808,7 @@ class RunState:
     iso_http_server: IsoHttpServer = field(default_factory=IsoHttpServer)
     # The `--group` this run was dispatched with; a system-wide step gates on it.
     group: str | None = None
+    hmc_config: HMCConfig | None = None
 
     async def call(
         self,
@@ -965,8 +966,11 @@ class RunState:
         assertions: Sequence[Assertion],
         cleanup: str,
         data: Any,
+        surface: str = "mcp",
     ) -> None:
         """Record one scenario's asserted postconditions — the only promoting path."""
+        if surface not in {"mcp", "cli"}:
+            raise ValueError("verification surface must be mcp or cli")
         if not assertions:
             raise ValueError(
                 "a verified observation must assert at least one condition"
@@ -989,23 +993,28 @@ class RunState:
             note,
             result="passed" if passed else "failed",
         )
-        self.observations.append(
-            {
-                "operation": operation,
-                # ``tested_commit``, ``closure_fingerprint``, ``hmc_release``,
-                # ``hardware_family`` and ``schema_version`` are filled at emission;
-                # ``channel`` is not derivable there, so it is written here.
-                "observation": {
-                    "id": _observation_id(subtask, tool),
-                    "channel": "live",
-                    "result": "passed" if passed else "failed",
-                    "scenario": scenario,
-                    "observed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "cleanup": cleanup,
-                    "assertions": [item.id for item in assertions if item.holds],
-                },
-            }
-        )
+        recorded = {
+            "operation": operation,
+            # ``tested_commit``, ``closure_fingerprint``, ``hmc_release``,
+            # ``hardware_family`` and ``schema_version`` are filled at emission;
+            # ``channel`` is not derivable there, so it is written here.
+            "observation": {
+                "id": _observation_id(
+                    subtask,
+                    tool.lower().replace(" ", "-") if surface == "cli" else tool,
+                ),
+                "channel": "live",
+                "result": "passed" if passed else "failed",
+                "scenario": scenario,
+                "observed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "cleanup": cleanup,
+                "assertions": [item.id for item in assertions if item.holds],
+            },
+        }
+        if surface == "cli":
+            self.results[-1]["cli_observation"] = recorded
+        else:
+            self.observations.append(recorded)
 
 
 # ---------------------------------------------------------------------------
@@ -1119,6 +1128,7 @@ def _validate_declared_function(
                     f"unrecorded declared result overwritten in {function.name}"
                 )
             continue
+        assert isinstance(node.func, ast.Attribute)
         if node.func.attr == "record_with_expected":
             if len(node.args) != 5:
                 raise ValueError(
@@ -1208,16 +1218,18 @@ def _load_known_gaps(
     known: set[tuple[str, str]] = set()
     if environment is not None:
         for record in records:
-            for scope in record["implementation"]["missing_scope"]:
+            implementation = cast(dict[str, Any], record["implementation"])
+            operation = cast(str, record["operation"])
+            for scope in implementation["missing_scope"]:
                 if "confirmation" not in scope:
                     continue
                 fingerprint = check_capability_inventory.closure_fingerprint(
-                    repo_root, handlers[record["operation"]].rsplit(".", 1)[0]
+                    repo_root, handlers[operation].rsplit(".", 1)[0]
                 )
                 if check_capability_inventory.gap_is_current(
                     scope["confirmation"], environment, fingerprint
                 ):
-                    known.add((record["operation"], scope["variant"]))
+                    known.add((operation, scope["variant"]))
     return known
 
 
@@ -1536,6 +1548,9 @@ def _restore_artifacts_from_results(
         print(f"  ⚠️  Could not restore artifacts from {results_path}: {exc}")
         return False
 
+    # Recovery witnesses belong to one invocation, never to restored context.
+    candidate.lp3_baseline.pop("round2_snapshot", None)
+    candidate.lp3_baseline.pop("round2_fixture", None)
     state.artifacts = candidate
     print(
         f"  ℹ  Artifacts restored from {results_path} "
@@ -1800,7 +1815,7 @@ def _emit_observations(
 
 
 @asynccontextmanager
-async def served_client() -> AsyncIterator[Client]:
+async def served_client() -> AsyncGenerator[Client]:
     """A client connected to the application exactly as a live run composes it.
 
     The one owner of that composition: every live-test entry point that reads the
@@ -1855,6 +1870,7 @@ async def main(
         return 1
     state = RunState(config=config, known_gaps=known_gaps, group=group)
     hmc_config = hmc_config or HMCConfig()
+    state.hmc_config = hmc_config
     print(f"Starting live integration tests at {datetime.now(UTC).isoformat()}")
     schema_version = env_var_value("HMC_SCHEMA_VERSION") or "(not set)"
     print(f"HMC_SCHEMA_VERSION={schema_version}")

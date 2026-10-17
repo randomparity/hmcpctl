@@ -54,7 +54,12 @@ async def test_skips_and_names_a_system_that_is_not_operating():
     listing = await read_fleet(hmc, read, "LPARs")
 
     assert listing == FleetListing(
-        [{"UUID": "lpar-1"}],
+        [
+            {
+                "UUID": "lpar-1",
+                "ManagedSystem": {"UUID": E2_UUID, "SystemName": "sys-E2"},
+            }
+        ],
         [UnreadableSystem("sys-R1", R1_UUID, "No Connection", "Connecting")],
     )
     read.assert_awaited_once_with(E2_UUID)
@@ -68,7 +73,9 @@ async def test_state_comparison_ignores_case_and_padding():
     listing = await read_fleet(hmc, read, "LPARs")
 
     assert listing.unreadable_systems == []
-    assert listing.entries == [{"UUID": "lpar-1"}]
+    assert listing.entries == [
+        {"UUID": "lpar-1", "ManagedSystem": {"UUID": E2_UUID, "SystemName": "sys-E2"}}
+    ]
 
 
 @pytest.mark.asyncio
@@ -148,7 +155,12 @@ async def test_a_system_that_stops_operating_mid_read_is_named():
     listing = await read_fleet(hmc, read, "LPARs")
 
     assert listing == FleetListing(
-        [{"UUID": "lpar-2"}],
+        [
+            {
+                "UUID": "lpar-2",
+                "ManagedSystem": {"UUID": E2_UUID, "SystemName": "sys-E2"},
+            }
+        ],
         [UnreadableSystem("sys-R1", R1_UUID, "No Connection", "Connecting")],
     )
 
@@ -220,3 +232,25 @@ async def test_the_captured_no_connection_systems_are_named_and_not_read():
         ("sys-R8", "no connection", None),
     ]
     assert read.await_count == 9
+
+
+@pytest.mark.asyncio
+async def test_fleet_retains_parent_without_mutation_or_extra_reads():
+    shared = {"UUID": "same-child", "Resource": {"PartitionName": "same-name"}}
+    hmc = _hmc(
+        [
+            _system(R1_UUID, "sys-R1", "operating"),
+            _system(E2_UUID, "sys-E2", "operating"),
+        ]
+    )
+    read = _reader({R1_UUID: [shared], E2_UUID: [shared]})
+    listing = await read_fleet(hmc, read, "LPARs")
+    assert [entry["ManagedSystem"] for entry in listing.entries] == [
+        {"UUID": R1_UUID, "SystemName": "sys-R1"},
+        {"UUID": E2_UUID, "SystemName": "sys-E2"},
+    ]
+    assert "ManagedSystem" not in shared
+    assert all(entry["Resource"] == shared["Resource"] for entry in listing.entries)
+    assert read.await_count == 2
+    hmc.list_system_summaries.assert_awaited_once_with()
+    assert len(hmc.mock_calls) == 1

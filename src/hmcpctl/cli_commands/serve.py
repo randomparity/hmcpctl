@@ -7,7 +7,7 @@ from typing import Final
 
 import typer
 
-from .output import fail, usage_error
+from .output import fail, terminal_field, usage_error
 from .runtime import current_options
 
 _AUDIT_LEVELS: Final = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -24,12 +24,14 @@ def _policy_file() -> tuple[str, bool] | None:
         return None
 
 
-def _no_policy_selected(detail: str) -> str:
+def _policy_guidance() -> str:
     """Build the migration guidance shared by policy startup refusals."""
     resolved = _policy_file()
-    where = f" ({resolved[0]})" if resolved is not None else ""
+    where = (
+        f" ({terminal_field(resolved[0], err=True)})" if resolved is not None else ""
+    )
     return (
-        f"{detail}\n\n"
+        "\n\n"
         "hmcpctl will not serve without an access policy. To keep what an unpolicied "
         "server exposed, generate one and review it:\n"
         "    hmcpctl config init-access-policy\n"
@@ -47,12 +49,10 @@ def _audit_level(value: str | None) -> int | None:
     name = value.upper()
     if name not in _AUDIT_LEVELS:
         raise typer.BadParameter(
-            f"unknown --audit-level {value!r}; use one of " + ", ".join(_AUDIT_LEVELS)
+            f"unknown --audit-level {terminal_field(repr(value), err=True)}; use one of "
+            + terminal_field(", ".join(_AUDIT_LEVELS), err=True)
         )
-    resolved = logging.getLevelName(name)
-    if not isinstance(resolved, int):
-        raise RuntimeError(f"logging did not resolve known level {name!r}")  # noqa: TRY004 - the isinstance tests the stdlib's return value, not a caller's argument, so RuntimeError states an internal invariant
-    return resolved
+    return logging.getLevelNamesMapping()[name]
 
 
 def serve(
@@ -101,20 +101,21 @@ def serve(
             f"--{name.replace('_', '-')}" for name in sorted(command_line_options)
         )
         raise typer.BadParameter(
-            f"serve does not accept HMC connection options ({options}); "
-            "configure the server with HMC_* environment variables or a configured HMC_PROFILE"
+            f"serve does not accept HMC connection options ("
+            f"{terminal_field(options, err=True)}"
+            f"); configure the server with HMC_* environment "
+            f"variables or a configured HMC_PROFILE"
         )
 
     level = _audit_level(audit_level)
     if access_policy is None:
-        usage_error(_no_policy_selected("serve requires --access-policy NAME"))
+        usage_error("serve requires --access-policy NAME", guidance=_policy_guidance())
 
     resolved = _policy_file()
     if resolved is not None and not resolved[1]:
         fail(
-            FileNotFoundError(
-                _no_policy_selected(f"no access-policy file at {resolved[0]}")
-            )
+            FileNotFoundError(f"no access-policy file at {resolved[0]}"),
+            guidance=_policy_guidance(),
         )
 
     try:
@@ -134,7 +135,8 @@ def serve(
             )
         except ValueError as exc:
             raise typer.BadParameter(
-                f"{exc} Re-run with --allow-remote if you understand the risk."
+                f"{terminal_field(exc, err=True)}"
+                f" Re-run with --allow-remote if you understand the risk."
             ) from exc
     else:
         server.main_stdio(

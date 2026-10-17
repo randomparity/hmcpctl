@@ -209,6 +209,57 @@ def test_deploy_partition_template_wait_true_polls_to_completion(monkeypatch, mo
     assert result["ownership_stamped"] is None
 
 
+def test_deploy_partition_template_wait_true_polls_template_job_link(
+    monkeypatch, mock_hmc
+):
+    """hmc_deploy_partition_template polls /rest/api/templates/jobs/ with atom+xml (#110)."""
+    _hmc_env(monkeypatch)
+    template_job_submit = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<entry xmlns="http://www.w3.org/2005/Atom">
+  <id>urn:uuid:submit-job-1</id>
+  <title>JobResponse</title>
+  <link rel="SELF" href="https://hmc.test/rest/api/templates/jobs/{JOB_ID}"/>
+  <content type="application/vnd.ibm.powervm.web+xml; type=JobResponse">
+    <JobResponse:JobResponse xmlns:JobResponse="http://www.ibm.com/xmlns/systems/power/firmware/web/mc/2012_10/">
+      <JobID>{JOB_ID}</JobID>
+      <Status>NOT_STARTED</Status>
+    </JobResponse:JobResponse>
+  </content>
+</entry>
+"""
+    template_job_completed = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<entry xmlns="http://www.w3.org/2005/Atom">
+  <id>urn:uuid:completed-job-1</id>
+  <title>JobResponse</title>
+  <link rel="SELF" href="https://hmc.test/rest/api/templates/jobs/{JOB_ID}"/>
+  <content type="application/vnd.ibm.powervm.web+xml; type=JobResponse">
+    <JobResponse:JobResponse xmlns:JobResponse="http://www.ibm.com/xmlns/systems/power/firmware/web/mc/2012_10/">
+      <JobID>{JOB_ID}</JobID>
+      <Status>COMPLETED_OK</Status>
+    </JobResponse:JobResponse>
+  </content>
+</entry>
+"""
+    mock_hmc.get(
+        f"/rest/api/uom/ManagedSystem/{TARGET_SYSTEM_UUID}/LogicalPartition"
+    ).mock(return_value=httpx.Response(200, text=_lpar_feed()))
+    mock_system_summaries(mock_hmc, (TARGET_SYSTEM_UUID, "sys-R1", "operating"))
+    submit_route = mock_hmc.put(
+        "/rest/api/templates/PartitionTemplate/draft-uuid/do/deploy"
+    ).mock(return_value=httpx.Response(202, text=template_job_submit))
+    poll_route = mock_hmc.get(f"/rest/api/templates/jobs/{JOB_ID}").mock(
+        return_value=httpx.Response(200, text=template_job_completed)
+    )
+    result = hmc_deploy_partition_template(
+        "draft-uuid", TARGET_SYSTEM_UUID, wait=True, timeout_seconds=60, poll_interval=1
+    )
+    assert submit_route.called
+    assert poll_route.called
+    assert poll_route.calls.last.request.headers.get("Accept") == "application/atom+xml"
+    assert set(result) == {"job", "ownership_stamped", "warnings"}
+    assert result["job"]["Resource"]["Status"] == "COMPLETED_OK"
+
+
 def _lpar_feed(*entries: tuple[str, str]) -> str:
     body = "".join(
         f"""

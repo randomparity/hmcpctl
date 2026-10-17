@@ -2209,7 +2209,29 @@
         ],
         "missing_scope": []
       },
-      "evidence": []
+      "evidence": [
+        {
+          "id": "st38-hmc-set-pcm-preferences",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st38-pcm-preference-round-trip",
+          "observed_at": "2026-10-14T14:30:31Z",
+          "cleanup": "passed",
+          "assertions": [
+            "long-term-monitor-held-by-aggregation",
+            "aggregation-toggled",
+            "short-term-monitor-toggled",
+            "compute-ltm-toggled",
+            "energy-monitor-held-by-aggregation",
+            "snapshot-restored"
+          ],
+          "tested_commit": "a136e565e641670f9ce587a88572620eaca091aa",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "09b4949ed0e01f264ac9a9c608b264eb5877ae15aaa02d40d1dbb04366fa7bce"
+        }
+      ]
     },
     {
       "operation": "metrics.processed_links",

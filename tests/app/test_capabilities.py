@@ -928,6 +928,9 @@ def test_power_on_lpar_non_waiting_assessment_does_not_measure(monkeypatch, mock
 
     _hmc_env(monkeypatch)
     _mock_power_on_guard(mock_hmc, "not activated")
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").mock(
+        return_value=httpx.Response(200, text=EXISTING_LPAR_FEED)
+    )
 
     result = hmc_power_on_lpar(
         LPAR_UUID,
@@ -951,6 +954,9 @@ def test_power_on_lpar_already_running_assessment_does_not_measure(
 
     _hmc_env(monkeypatch)
     _mock_power_on_guard(mock_hmc, "running")
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").mock(
+        return_value=httpx.Response(200, text=EXISTING_LPAR_FEED)
+    )
 
     result = hmc_power_on_lpar(
         LPAR_UUID,

@@ -33,6 +33,7 @@ from hmcpctl.operations.inventory.composite import fetch_system_summary
 from hmcpctl.operations.inventory.logical import read_inventory
 from hmcpctl.operations.inventory.utilization import (
     FIGURE_GROUPS,
+    _summary_mtms,
     fleet_systems,
     survey_hmc,
 )
@@ -42,6 +43,7 @@ from hmcpctl.operations.lpar.plan import _enumerate as plan_enumerate
 from hmcpctl.operations.systems.core import get_system, list_systems
 from hmcpctl.operations.systems.health import fetch_fleet_health
 from hmcpctl.operations.vios.core import _resolve_vios_backup_system_name
+from hmcpctl.xmlutil import mtms_parts, parse_feed
 
 QUICK_ALL = "rest-ms-quick-all-no-connection-v11r2"
 SUMMARIES = json.loads(live_fixture(QUICK_ALL)["body"])
@@ -243,6 +245,24 @@ async def test_an_unread_frame_another_hmc_reads_is_counted_once(mock_hmc):
 
     assert system.profiles == ("hmc-a", "hmc-b")
     assert system.reading.profile == "hmc-b"
+
+
+def test_quick_all_mtms_names_the_machine_its_full_entry_names():
+    """quick/All's ``MTMS`` and the full entry parse to one (type, model, serial) (#1534).
+
+    ADR 0184 counts a frame once by these three values whether it was read or only
+    listed. Both records come from one read-only 2026-10-14 V10R3 window. Tokenizing
+    hides the serial, so the evidence that the serials agree is the scripted comparison
+    of the raw capture that the fixtures README records.
+    """
+    entry = parse_feed(live_fixture("rest-ms-entry-mtms-pair")["body"])[0]
+    summaries = json.loads(live_fixture("rest-ms-quick-all-mtms-pair")["body"])
+    (summary,) = [s for s in summaries if s["UUID"].lower() == entry["UUID"].lower()]
+
+    full = mtms_parts(entry["Resource"])
+
+    assert full == ("8375", "42A", "<REDACTED-SERIAL>")
+    assert _summary_mtms(summary) == full
 
 
 @pytest.mark.asyncio

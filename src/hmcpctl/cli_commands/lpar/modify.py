@@ -10,7 +10,13 @@ import typer
 from ...documents.lpar import LparResources
 from ...operations.lpar.assignments import LparPcieAssignments
 from ...operations.lpar.dlpar import modify_lpar
-from ..output import console, partition_not_found, print_json, usage_error
+from ..output import (
+    console,
+    partition_not_found,
+    print_json,
+    terminal_field,
+    usage_error,
+)
 from ..runtime import with_client
 from .assignment_input import load_pcie_assignments
 
@@ -89,7 +95,9 @@ def lpars_modify(
         usage_error("--system is required when renaming an LPAR")
     if assignments != LparPcieAssignments() and system is None:
         usage_error("--system is required when assigning PCIe resources")
-    if not yes and not typer.confirm(f"Apply changes to '{name_or_uuid}'?"):
+    if not yes and not typer.confirm(
+        f"Apply changes to '{terminal_field(name_or_uuid)}'?"
+    ):
         raise typer.Abort()
 
     result = with_client(
@@ -110,7 +118,7 @@ def lpars_modify(
     if result.lpar is None:
         partition_not_found(name_or_uuid)
     uuid = result.lpar.get("UUID", name_or_uuid)
-    console.print(f"Modified LPAR {uuid}", style="green", markup=False)
+    console.print(f"Modified LPAR {terminal_field(uuid)}", style="green", markup=False)
     print_json(asdict(result))
 
 

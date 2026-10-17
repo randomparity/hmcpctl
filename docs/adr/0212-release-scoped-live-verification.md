@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-13).
+Accepted (2026-10-13). Amended 2026-10-15 by #1658 — see *Amendment* below.
 
 Supersedes the currency, catalog-promotion, and scheduled-report policy in
 [ADR 0127](0127-derived-live-verification-staleness.md), and the per-commit
@@ -88,6 +88,28 @@ and shipped source, while ordinary checks still detect catalog/projection drift.
 Implementation is staged through #1508–#1514; until then the existing code retains
 its behavior. This ADR authorizes no live run or tag.
 
+## Amendment (2026-10-15, #1658)
+
+Operation-keyed evidence holds one live row per producing observation, keyed by
+its catalog-wide unique observation id, not one row per operation; a
+re-produced id replaces its stored row even when its scenario changed. Promotion replaces a stored live row only when the window
+produced that observation again; every other stored row is kept until a
+reviewed commit retires it. The strict-subset refusal compares a passing
+observation with the stored row it replaces. A claimed operation still needs a
+passed observation from its declared arm and scenario in the window.
+
+Every reader takes an operation's state from its newest live row, ordered by
+`(observed_at, id)`: the release snapshot, `--require-current`,
+`verification-report` and the packaged projection derived from the snapshot.
+Promotion selects with the same key, so a timestamp tie between two producers
+resolves identically everywhere. When a retained row is newer than the claimed
+observation — another arm or scenario observed the operation later — readers
+report that row, failed or stale included, because it is the newest evidence;
+promotion refuses such a claim before creating its branch rather than leaving
+the release gate to fail on the promoted catalog.
+Two producers that record the same second are ordered by id, not by their
+position in the catalog.
+
 ## Considered & rejected
 
 - **Keep per-commit currency and weekly stale failures.** judgment: the operator
@@ -98,3 +120,6 @@ its behavior. This ADR authorizes no live run or tag.
   implementation cannot substantiate the candidate merely by being recent.
 - **Keep manual catalog promotion.** judgment: the operator chose a repeatable
   window with reviewed branch promotion, retaining review without hand-copying.
+- **Keep one live row per operation (#1658).** judgment: an operation with two
+  producers in one scenario, such as `lpar.modify`'s shared and dedicated
+  paths, lost one producer's evidence on every promotion.

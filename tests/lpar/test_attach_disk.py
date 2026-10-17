@@ -266,3 +266,30 @@ async def test_attach_disk_dry_run_reads_no_change_location() -> None:
 
     assert result.change_location is None
     client.get_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_disk_dry_run_refuses_duplicate_volume_group_identity():
+    client = _client()
+    client.list_volume_groups.return_value = [{"UUID": VG_UUID}, {"UUID": VG_UUID}]
+    with pytest.raises(ValueError, match="ambiguous"):
+        await attach_disk_to_lpar(
+            client, None, LPAR_UUID, _storage(), capacity_mib=1024, dry_run=True
+        )
+    client.create_virtual_disk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_disk_typed_storage_requires_volume_group_uuid():
+    client = _client()
+    with pytest.raises(ValueError, match="vg_uuid must be a canonical UUID"):
+        await attach_disk_to_lpar(
+            client,
+            None,
+            LPAR_UUID,
+            ProvisionStorage(VIOS_UUID, "disk01", vg_uuid="rootvg"),
+            capacity_mib=1024,
+            dry_run=True,
+        )
+    client.list_volume_groups.assert_not_awaited()
+    client.create_virtual_disk.assert_not_awaited()

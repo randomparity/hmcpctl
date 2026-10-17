@@ -16,6 +16,7 @@ from conftest import (
     JOB_ENTRY,
     JOB_ID,
     RUNNING_JOB_ENTRY,
+    captured_lpar_entry,
 )
 
 from hmcpctl.errors import HMCError
@@ -47,7 +48,23 @@ JOB_OUTCOME_KEYS = {
 
 
 @pytest.fixture(autouse=True)
-def _authorize_lpar_mutations(monkeypatch):
+def _authorize_lpar_mutations(monkeypatch, mock_hmc):
+    mock_hmc.get("/rest/api/uom/ManagedSystem/quick/All").mock(
+        return_value=httpx.Response(
+            200, json=[{"UUID": TARGET_SYSTEM_UUID, "SystemName": "source-system"}]
+        )
+    )
+    mock_hmc.get(
+        f"/rest/api/uom/ManagedSystem/{TARGET_SYSTEM_UUID}/LogicalPartition"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            text='<feed xmlns="http://www.w3.org/2005/Atom">'
+            + captured_lpar_entry(LPAR_UUID, "lpar1")
+            + "</feed>",
+        )
+    )
+
     async def authorize(hmc, system, lpar, **_kwargs):
         from hmcpctl.resource_identity import resolve_lpar_uuid
 
@@ -218,6 +235,10 @@ async def test_lpm_recovery_operations_return_stable_submission_outcome(
     operation, submit_method, args
 ):
     hmc = AsyncMock()
+    hmc.list_system_summaries.return_value = [
+        {"UUID": TARGET_SYSTEM_UUID, "SystemName": "source-system"}
+    ]
+    hmc.list_logical_partitions.return_value = [{"UUID": LPAR_UUID}]
     setattr(hmc, submit_method, AsyncMock(return_value={"UUID": "job-1"}))
 
     result = await operation(hmc, *args)
@@ -241,6 +262,10 @@ async def test_lpm_recovery_operations_wait_for_terminal_outcome(
     submitted = {"UUID": "job-1", "link": "/jobs/job-1"}
     completed = {"Resource": {"JobID": "job-1", "Status": "COMPLETED_OK"}}
     hmc = AsyncMock()
+    hmc.list_system_summaries.return_value = [
+        {"UUID": TARGET_SYSTEM_UUID, "SystemName": "source-system"}
+    ]
+    hmc.list_logical_partitions.return_value = [{"UUID": LPAR_UUID}]
     setattr(hmc, submit_method, AsyncMock(return_value=submitted))
     hmc.wait_for_job_entry.return_value = completed
 
@@ -276,6 +301,10 @@ async def test_lpm_recovery_operations_surface_terminal_failure(
         }
     }
     hmc = AsyncMock()
+    hmc.list_system_summaries.return_value = [
+        {"UUID": TARGET_SYSTEM_UUID, "SystemName": "source-system"}
+    ]
+    hmc.list_logical_partitions.return_value = [{"UUID": LPAR_UUID}]
     setattr(hmc, submit_method, AsyncMock(return_value=submitted))
     hmc.wait_for_job_entry.return_value = failed
 
@@ -298,6 +327,10 @@ async def test_lpm_recovery_operations_reject_invalid_active_timing_before_work(
     operation, submit_method, args
 ):
     hmc = AsyncMock()
+    hmc.list_system_summaries.return_value = [
+        {"UUID": TARGET_SYSTEM_UUID, "SystemName": "source-system"}
+    ]
+    hmc.list_logical_partitions.return_value = [{"UUID": LPAR_UUID}]
 
     with pytest.raises(ValueError, match="timeout_seconds"):
         await operation(hmc, *args, wait=True, timeout_seconds=-1)

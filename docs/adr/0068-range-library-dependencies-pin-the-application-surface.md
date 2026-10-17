@@ -44,6 +44,7 @@ dependencies = [
     "httpx>=0.28.1,<1",
     "pydantic>=2.13.4,<3",
     "pydantic-settings>=2.15.0,<3",
+    "truststore>=0.10.4,<1",
     "typing-extensions>=4.16.0,<5",
 ]
 ```
@@ -65,6 +66,10 @@ dependencies = [
 - `pydantic-settings <3`: it tracks pydantic's major line; behaviour changes
   within 2.x arrive through documented release notes on the stable
   `BaseSettings` surface hmc-mcp uses.
+- `truststore <1`: truststore publishes no formal semver contract, but its
+  `SSLContext` surface (a subclass of `ssl.SSLContext`) has been stable across
+  0.x and the project's own changelog reserves major boundaries for breaking
+  changes; the `<1` cap is the honest pre-1.0 boundary (#1602, ADR 0222).
 - `typing-extensions <5`: the project follows semantic versioning and reserves
   its next major for incompatible changes; hmc-mcp imports `TypedDict` directly
   for supported operation contracts.

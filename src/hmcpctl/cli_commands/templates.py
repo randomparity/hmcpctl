@@ -10,7 +10,15 @@ from ..operations.templates.core import (
     get_partition_template,
     list_partition_templates,
 )
-from .output import VerbatimTable, console, first_field, output, print_json, usage_error
+from .output import (
+    VerbatimTable,
+    console,
+    first_field,
+    output,
+    print_json,
+    terminal_field,
+    usage_error,
+)
 from .runtime import with_client
 
 
@@ -53,7 +61,7 @@ def templates_deploy(
     except ValueError as exc:
         usage_error(str(exc))
     if not yes and not typer.confirm(
-        f"Deploy draft template {draft_uuid} to system {system}?"
+        f"Deploy draft template {terminal_field(draft_uuid)} to system {terminal_field(system)}?"
     ):
         raise typer.Abort()
 
@@ -68,7 +76,11 @@ def templates_deploy(
         )
     )
 
-    console.print(f"Deploy job for template {draft_uuid}", style="green", markup=False)
+    console.print(
+        f"Deploy job for template {terminal_field(draft_uuid)}",
+        style="green",
+        markup=False,
+    )
     print_json(result)
 
 

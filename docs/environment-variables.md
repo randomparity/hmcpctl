@@ -18,7 +18,9 @@ Use `HMC_HOST`, `HMC_USER`, and `HMC_PASSWORD` for single-HMC setups without a p
 | `HMC_PROFILE` | string | _(none)_ | Named profile to load from `~/.config/hmcpctl/config.toml` (or platform equivalent); a value that is not a profile key is resolved through the top-level `nicknames` table. Selects the connection when no explicit `--host`/`HMC_HOST` is set |
 | `HMC_SSH_KEY_FILE` | path | _(none)_ | Path to an SSH private key file; when set, SSH commands use key-based auth instead of password auth |
 | `HMC_SSH_VERIFY_HOST_KEY` | bool | `true` | Verify SSH host keys against the process user's `~/.ssh/known_hosts`. Set `false` only for an explicit bypass; every connection warns. Profile key: `ssh_verify_host_key`. See [SSH trust setup](HMC_HINTS.md#ssh-host-key-trust) |
-| `HMC_VERIFY_SSL` | bool | `false` | Verify the HMC TLS certificate. HMCs ship self-signed certs; set to `true` only after installing the HMC CA locally |
+| `HMC_VERIFY_SSL` | bool | `false` | Verify the HMC TLS certificate. HMCs ship self-signed certs; set to `true` only after trusting the HMC's CA through `HMC_CA_BUNDLE`, `SSL_CERT_FILE` or `SSL_CERT_DIR`, or by enabling the system trust store; see [TLS trust](configuration.md#tls-trust). While the default remains false, constructing a client with verification off and no explicit `HMC_VERIFY_SSL` setting emits a one-time startup warning naming the forthcoming 1.0 default flip and the migration options; set `HMC_VERIFY_SSL=false` explicitly to silence it. |
+| `HMC_CA_BUNDLE` | path | _(none)_ | Path to a PEM file containing the CA certificate(s) to trust for the HMC TLS connection. When set and `HMC_VERIFY_SSL=true`, takes precedence over `SSL_CERT_FILE`, `SSL_CERT_DIR`, and `HMC_TRUST_SYSTEM_STORE`. Ignored when `HMC_VERIFY_SSL=false`. TOML key: `ca_bundle`. CLI flag: `--ca-bundle`. See [TLS trust](configuration.md#tls-trust) (ADR 0223) |
+| `HMC_TRUST_SYSTEM_STORE` | bool | `true` | When `true` and `HMC_VERIFY_SSL=true`, use the operating-system trust store (macOS Keychain, Windows Credential Store, Linux CA bundle) via `truststore` instead of only the `certifi` roots. An explicit `SSL_CERT_FILE` or `HMC_CA_BUNDLE` takes precedence. Set `false` to use only `SSL_CERT_FILE` / `SSL_CERT_DIR` and the bundled roots. Ignored when `HMC_VERIFY_SSL=false`. TOML key: `trust_system_store`. See [TLS trust](configuration.md#tls-trust) (ADR 0222) |
 | `HMC_TIMEOUT` | float | `180.0` | HTTP request timeout in seconds. A `ManagedSystem` feed read on a large HMC has taken longer than 60 s (#1202) |
 | `HMC_UPLOAD_TIMEOUT` | positive float | `600.0` | Seconds the ISO upload (`hmc_upload_iso` / `hmcpctl storage upload-iso`) waits for the HMC's response after it has streamed the last byte. The HMC answers only once it has taken the whole file, and the wait grows with the ISO's size. The wait is never shorter than `HMC_TIMEOUT`; the upload's connect and write waits stay at `HMC_TIMEOUT`. TOML profile key: `upload_timeout`. See ADR 0177 (amended by #1055) |
 | `HMC_MAX_RESPONSE_BYTES` | positive integer | `33554432` (32 MiB) | Maximum HMC REST response size in bytes, including successful and error replies. Exact-boundary responses are accepted; larger declared or streamed bodies are refused. Raise for unusually large inventories only when memory permits: this bounds response bytes, not total process memory. Zero is invalid and cannot disable the ceiling. TOML profile key: `max_response_bytes`. Error-body diagnostics keep their separate 4096-byte cap |
@@ -60,19 +62,21 @@ Use `HMC_HOST`, `HMC_USER`, and `HMC_PASSWORD` for single-HMC setups without a p
      words "where the setting came from"; that clause is the anchor, and this note must
      stay one `- **` bullet. -->
 - **TLS verification** (`HMC_VERIFY_SSL`): HMCs ship self-signed certificates,
-  so TLS verification is off by default. To verify the HMC certificate, install
-  its CA locally and set `HMC_VERIFY_SSL=true` — otherwise credentials are at
-  risk of man-in-the-middle interception.
+  so TLS verification is off by default. To verify the HMC certificate, set
+  `HMC_CA_BUNDLE` to a PEM file and `HMC_VERIFY_SSL=true` (highest precedence),
+  or set `HMC_TRUST_SYSTEM_STORE=true` (the default) and `HMC_VERIFY_SSL=true` to
+  consult the OS trust store, or trust the CA through `SSL_CERT_FILE` or
+  `SSL_CERT_DIR` ([TLS trust](configuration.md#tls-trust)) and set
+  `HMC_VERIFY_SSL=true` — otherwise credentials are at risk of
+  man-in-the-middle interception.
   The `false` default is deliberate and stays until 1.0: self-signed
-  certificates are the norm on HMCs, and this package has no certificate-trust
-  story yet (no trust-store configuration, no per-host pinning, no fingerprint
-  option), so flipping the default would break every existing operator's working
-  configuration on upgrade with no migration path. Because the insecure-by-default
-  state must still be observable, every client constructed with verification off
-  emits a `tls-verification-disabled` record to the audit stream, naming the HMC
-  host and where the setting came from (`explicit-argument`,
-  `environment:HMC_VERIFY_SSL`, or `field-default`), in addition to the
-  logon-time warning.
+  certificates are the norm on HMCs, and flipping the default would break every
+  existing operator's working configuration on upgrade with no migration path.
+  Because the insecure-by-default state must still be observable, every client
+  constructed with verification off emits a `tls-verification-disabled` record
+  to the audit stream, naming the HMC host and where the setting came from
+  (`explicit-argument`, `environment:HMC_VERIFY_SSL`, or `field-default`), in
+  addition to the logon-time warning.
 
 - **SSH key file** (`HMC_SSH_KEY_FILE`): used only by operations that run the HMC CLI
   over SSH (`hmc_run_command`, console capture, and the other SSH-backed tools and CLI
@@ -230,6 +234,20 @@ Use `HMC_HOST`, `HMC_USER`, and `HMC_PASSWORD` for single-HMC setups without a p
   operation.** It is opt-in; unset, no request carries
   `X-HMC-Schema-Version` at all. Set it only to pin schema negotiation
   explicitly — for example while debugging a read path.
+
+  Pinning `V1_0` can make a V10R3 HMC fail to serialize managed-system
+  inventory. On one V10R3 SP1060 HMC, the full `ManagedSystem` feed returned
+  HTTP 200 without the header and HTTP 500 with
+  `X-HMC-Schema-Version: V1_0`, in the same session. The 500 body read
+  `Nested path contains null property , currentProperty=Uuid
+  nestedPath=VirtualPersistentMemoryVolume/Uuid/Value/Value`. Unpinned, that
+  HMC answered at its native schema (`V1_17_0`). See #1646. Only that feed was
+  probed. `hmcpctl` lists systems through `ManagedSystem/quick/All` and reads
+  one system through `ManagedSystem/{uuid}`; whether either fails under the
+  pin, or whether other HMC releases behave the same way, is not established.
+  An earlier capture (2026-09-23) also recorded, with `V1_0` pinned, a 500 on
+  `ManagementConsole` and an empty `VolumeGroup` listing; those two
+  observations are unverified.
 
   When it is set, the header goes per call site, not per HTTP method. UOM
   requests carry it unless their own call site passes

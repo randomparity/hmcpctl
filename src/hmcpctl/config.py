@@ -170,6 +170,24 @@ class HMCConfig(BaseSettings):
     verify_ssl: bool = Field(
         default=False, description="Verify the HMC TLS certificate"
     )
+    ca_bundle: str | None = Field(
+        default=None,
+        description=(
+            "Path to a PEM file containing the CA certificate(s) to trust for the HMC "
+            "TLS connection (HMC_CA_BUNDLE). When set and verify_ssl is true, this path "
+            "is passed directly to the HTTP client and takes precedence over SSL_CERT_FILE, "
+            "SSL_CERT_DIR, and HMC_TRUST_SYSTEM_STORE. Ignored when verify_ssl is false."
+        ),
+    )
+    trust_system_store: bool = Field(
+        default=True,
+        description=(
+            "When true and verify_ssl is true, use the operating-system trust store "
+            "via truststore.SSLContext instead of only the certifi roots. Set false "
+            "to rely on SSL_CERT_FILE / SSL_CERT_DIR and the bundled roots only "
+            "(HMC_TRUST_SYSTEM_STORE). Ignored when verify_ssl is false."
+        ),
+    )
     timeout: float = Field(default=180.0, description="HTTP timeout in seconds")
     upload_timeout: float = Field(
         default=600.0,
@@ -810,6 +828,7 @@ def _load_profile_from_document(
 def _inventory_field(path: Path, name: str, entry: dict[str, Any], field: str) -> Any:
     """Return *entry*'s *field* as ``HMCConfig`` would coerce it, else raise ConfigError."""
     info = HMCConfig.model_fields[field]
+    assert info.annotation is not None, f"HMCConfig field {field!r} has no annotation"
     value = entry.get(field, info.default)
     try:
         return TypeAdapter(info.annotation).validate_python(value)

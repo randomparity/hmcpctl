@@ -207,10 +207,13 @@ runs the guard, so no denial is possible there and none is recorded.
 
 A denied caller can drive these at attempt rate, bounded in practice by the HMC round
 trip each denial costs. Under `hmcpctl serve` they land on the bounded sink, which
-drops and says so with a `records-dropped` count; on the CLI and Python API paths
-nothing installs a sink, so the line goes synchronously to stderr through
-`logging.lastResort` with no bound and no drop count — exactly as the
-`ownership-override` record already does there.
+drops and says so with a `records-dropped` count. The CLI's coroutine boundary
+uses a scoped synchronous fallback handler when logging is otherwise unconfigured;
+Python API callers retain `logging.lastResort`. Both routes have no queue bound
+or drop count. The CLI preserves JSON for these denial/ownership events. Only
+TLS-disabled events receive a compact terminal display, retaining their event
+identity, time, host and source; redirected stderr keeps the original JSON.
+Configured handlers and custom `logging.lastResort` handlers remain unchanged.
 
 The denial record names its `operation` and the override record does not. Closing
 that asymmetry would mean adding a field to the override record, which #467
@@ -506,13 +509,16 @@ attaches a handler writing to **stderr**. An embedder that composes an applicati
 propagate to the root logger's handlers; attach your own handler to `hmcpctl.audit` and
 set `propagate = False` on it, or keep stdout-bound handlers off the root logger. With
 neither a handler nor propagation, a `WARNING`
-record still reaches `logging.lastResort` on stderr, which is what a CLI user sees. To route them elsewhere, attach your own
+record still reaches `logging.lastResort` on stderr. The CLI coroutine boundary
+uses a scoped synchronous fallback instead, with compact TLS-event presentation
+on actual terminal stderr and unchanged JSON on redirected stderr. To route them
+elsewhere, attach your own
 handler to `hmcpctl.audit` **before** calling `main_stdio` / `main_http` — the server
 defers to a handler that is already there and will not add a second.
 
 > The non-blocking guarantee is the **shipped sink's**, not the logger's. Your handler is
 > called on the dispatch path, synchronously, so if it can block then so can the call.
-> `logging.lastResort` — what a CLI process with no sink installed uses — is synchronous
+> `logging.lastResort` and the CLI fallback handler are synchronous
 > for the same reason.
 
 > To set the level from the command line, pass `--audit-level LEVEL` to `hmcpctl serve`:
@@ -565,7 +571,7 @@ signed, and retention and export are yours. A record is written *before* the den
 raised and *before* a permitted handler runs, so a permitted call is recorded as
 **authorized**, not as **succeeded**.
 
-**Records are droppable, and delivery is asynchronous.** Since
+**Server-sink records are droppable, and their delivery is asynchronous.** Since
 [ADR 0043](adr/0043-non-blocking-stderr-diagnostics.md) a record is handed to a bounded
 in-memory queue (1024 lines) drained by one background thread, so nothing on the dispatch
 path waits on the destination. A destination that is absent, broken, closed, or simply not

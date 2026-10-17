@@ -14,7 +14,7 @@ from ...operations.virtualization.adapters import (
     delete_adapter,
     list_adapters,
 )
-from ..output import console, output, print_json
+from ..output import console, output, print_json, terminal_field
 from ..runtime import with_client
 
 _ADAPTER_TYPES = " | ".join(sorted(ADAPTER_TYPES))
@@ -60,7 +60,9 @@ def adapters_add_network(
 ) -> None:
     """Add a Virtual Ethernet (network) adapter to an LPAR."""
 
-    if not yes and not typer.confirm(f"Add network adapter (VLAN {vlan}) to '{lpar}'?"):
+    if not yes and not typer.confirm(
+        f"Add network adapter (VLAN {terminal_field(vlan)}) to '{terminal_field(lpar)}'?"
+    ):
         raise typer.Abort()
 
     result = with_client(
@@ -95,7 +97,7 @@ def adapters_add_vscsi(
     """Add a Virtual SCSI client adapter, paired to a VIOS."""
 
     if not yes and not typer.confirm(
-        f"Add vSCSI adapter to '{lpar}' via VIOS {vios_id}?"
+        f"Add vSCSI adapter to '{terminal_field(lpar)}' via VIOS {terminal_field(vios_id)}?"
     ):
         raise typer.Abort()
 
@@ -129,7 +131,7 @@ def adapters_add_vfc(
     """Add a Virtual Fibre Channel (NPIV) client adapter, paired to a VIOS."""
 
     if not yes and not typer.confirm(
-        f"Add vFC adapter to '{lpar}' via VIOS {vios_id}?"
+        f"Add vFC adapter to '{terminal_field(lpar)}' via VIOS {terminal_field(vios_id)}?"
     ):
         raise typer.Abort()
 
@@ -162,7 +164,8 @@ def adapters_delete(
     """Remove a virtual adapter from an LPAR."""
 
     if not yes and not typer.confirm(
-        f"Delete {adapter_type} {adapter_uuid} from '{lpar}'?"
+        f"Delete {terminal_field(adapter_type)} {terminal_field(adapter_uuid)} from '"
+        f"{terminal_field(lpar)}'?"
     ):
         raise typer.Abort()
 
@@ -179,18 +182,25 @@ def adapters_delete(
 
     console.print(
         Text.assemble(
-            (f"Deleted {adapter_type} {adapter_uuid}", "green"), f" from {lpar}"
+            (
+                f"Deleted {terminal_field(adapter_type)} {terminal_field(adapter_uuid)}",
+                "green",
+            ),
+            f" from {terminal_field(lpar)}",
         )
     )
-    console.print(location.summary(), markup=False)
+    console.print(terminal_field(location.summary()), markup=False)
 
 
 def _adapter_mutation(result: AdapterResult, lpar: str, kind: str) -> None:
     console.print(
-        Text.assemble((f"Added {kind} adapter", "green"), f" to {result.lpar_uuid}")
+        Text.assemble(
+            (f"Added {terminal_field(kind)} adapter", "green"),
+            f" to {terminal_field(result.lpar_uuid)}",
+        )
     )
     print_json(result.resource)
-    console.print(result.change_location.summary(), markup=False)
+    console.print(terminal_field(result.change_location.summary()), markup=False)
 
 
 def register_commands(group: typer.Typer) -> None:

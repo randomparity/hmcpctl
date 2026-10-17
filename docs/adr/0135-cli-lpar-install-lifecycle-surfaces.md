@@ -2,6 +2,8 @@
 
 ## Status
 
+> **Confirmation spelling superseded by [0231](0231-storage-explicit-consent.md)** (2026-10-16).
+
 Accepted
 
 ## Context

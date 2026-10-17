@@ -39,9 +39,10 @@ Run it only against an HMC, managed system, and VIOS you own.
   `delete-media`, and `delete-media-repo` read the volume group, change it, and write it back,
   so a concurrent change to that group is lost. Serialize every writer on `MEDIA_VG` for the
   run, and compare `storage list-vgs` and `storage list-optical-media` before and after each.
-- **Confirmations.** Most mutating commands prompt unless you pass `--yes` (or `--confirm` for
-  `unmount-optical-media` and `detach-mapping`). The examples pass it so they copy cleanly. Remove
-  it when you run the recipe by hand. `--yes` is not a dry run. `storage upload-iso` never
+- **Confirmations.** Most mutating commands prompt on terminal stdin unless you pass `--yes`/`-y`.
+  Storage mutations with confirmation require this flag when stdin is not a terminal; piping
+  `y` does not grant consent. The examples pass it so they copy cleanly. Remove
+  it when you run the recipe interactively. `--yes` is not a dry run. `storage upload-iso` never
   prompts: it writes as soon as you run it, so check the listing first. The HMC CLI commands
   below never prompt either.
 - **Dry runs.** No global dry-run mode exists. Only commands that advertise `--dry-run` support
@@ -192,12 +193,16 @@ hmcpctl storage create-disk "$VIOS" --vg "$VG" --name "$DISK_NAME" --capacity-mi
   --system "$SYSTEM" --yes
 hmcpctl storage list-vgs "$VIOS" --system "$SYSTEM" --json
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
-hmcpctl storage map "$VIOS" --lpar "$LPAR" --disk "$DISK_NAME" --system "$SYSTEM" --yes
+hmcpctl storage map "$VIOS" --lpar "$LPAR" --name "$DISK_NAME" --system "$SYSTEM" --yes
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
 ```
 
-Expected: `add-network` and `storage map` each end with a `CurrentProfileSync is ...` line that
-says whether the new adapter lives only in the current configuration; step 5 depends on it.
+Expected: `add-network` ends with a `CurrentProfileSync is ...` line. `storage map`
+includes the same information in `change_location_summary` and structured `change_location`
+fields. These say whether the new adapter lives only in the current configuration; step 5
+depends on them. Storage mutations now show a concise operation/target/outcome result;
+`request_succeeded` leaves final state unverified, so retain the inventory checks below.
+See [storage output migration](../cli.md#storage-mutation-output-migration) for JSON and details.
 `adapters list` shows the new network adapter on `VLAN_ID`. `--capacity-mib` must be
 a positive multiple of 1024; the CLI converts it to the whole GiB the HMC takes. The second
 `list-vgs` shows the new disk in `VG`. `storage map` creates its own vSCSI client and server
@@ -213,24 +218,24 @@ VIOS's `rootvg`. Set `MEDIA_VG` to the group that holds the repository.
 
 ```bash
 MEDIA_VG=<volume-group-uuid-holding-the-media-repository>
-hmcpctl storage get-media-repo "$VIOS" "$MEDIA_VG" --system "$SYSTEM" --json
+hmcpctl storage get-media-repo "$VIOS" --vg "$MEDIA_VG" --system "$SYSTEM" --json
 ```
 
 If `get-media-repo` shows no repository, create one. `--size-mib` must be a multiple of 1024
 and reaches the HMC as whole GiB, so the command below creates a 20 GiB repository.
 
 ```bash
-hmcpctl storage create-media-repo "$VIOS" "$MEDIA_VG" --size-mib 20480 --system "$SYSTEM" --yes
+hmcpctl storage create-media-repo "$VIOS" --vg "$MEDIA_VG" --size-mib 20480 --system "$SYSTEM" --yes
 ```
 
 Put the ISO in the repository and mount it on the partition. `upload-iso` sends the ISO
 through the HMC web File API and reports `uploaded` once the repository lists it.
 
 ```bash
-hmcpctl storage upload-iso "$VIOS" "$MEDIA_VG" "$MEDIA_NAME" "$ISO_URL" --system "$SYSTEM" --json
-hmcpctl storage list-optical-media "$VIOS" "$MEDIA_VG" --system "$SYSTEM" --json
+hmcpctl storage upload-iso "$VIOS" --vg "$MEDIA_VG" --name "$MEDIA_NAME" "$ISO_URL" --system "$SYSTEM" --json
+hmcpctl storage list-optical-media "$VIOS" --vg "$MEDIA_VG" --system "$SYSTEM" --json
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
-hmcpctl storage mount-optical-media "$VIOS" "$LPAR" "$MEDIA_NAME" --system "$SYSTEM" --yes
+hmcpctl storage mount-optical-media "$VIOS" --lpar "$LPAR" --name "$MEDIA_NAME" --system "$SYSTEM" --yes
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
 ```
 
@@ -242,8 +247,8 @@ before retrying` (V10R3 M1060, #1085). One `power-on --partition-profile` follow
 
 Expected: `upload-iso` reports `uploaded` with the size and the `source_sha256` it computed from the download. It refuses a
 `MEDIA_NAME` that already exists in the repository. `list-optical-media` lists `MEDIA_NAME`; its
-`size_mib` may be `null`. `mount-optical-media` prints the new optical mapping and creates
-another vSCSI adapter pair for it. The last `list-mappings` shows the disk mapping from step 3
+`size_mib` may be `null`. `mount-optical-media` reports the media target, outcome and change
+location; it creates another vSCSI adapter pair for the new optical mapping. The last `list-mappings` shows the disk mapping from step 3
 and the new optical mapping, and nothing else changed.
 
 ## 5. Boot from the ISO and observe
@@ -356,8 +361,16 @@ after `--idle-timeout` seconds without output. It never sends input to the parti
 the raw bytes to `CONSOLE_LOG`, which must not exist yet, and prints one line to stderr, for
 example `stop reason: idle; bytes: 2048; released: true`. The bytes carry terminal escape
 sequences: read them with `less -R` or a log viewer. The capture holds the partition's single
-console session while it runs. Exit status 1 with a message that the console is held means
-another session has it open; the command leaves that session alone. Exit status 3 means
+console session while it runs. Press **Ctrl-C (SIGINT)** to stop early, then wait
+for cleanup to finish before opening an interactive console. The flushed partial
+`CONSOLE_LOG` is retained. Exit 130 proves release; exit 3 means release is unproven
+and takes precedence even on interrupt or write failure. Check console ownership
+before retrying an interrupted, unproven release; never end another client's session.
+Any write failure is reported, so the retained file may be incomplete. SIGTERM/SIGHUP
+are not covered.
+Exit status 1 with a message that the console is held means
+another session has it open; the command leaves that session alone. For an uninterrupted
+capture, exit status 3 means
 `released: false`: the console may still be held, so run the `rmvterm` command the line names
 on the HMC before another capture. If the line instead says another client ended the hold
 (`ConsoleHoldLostError`), leave that client's session alone. Repeat the capture, each time to a new file, to follow the
@@ -378,7 +391,7 @@ Do not continue until the state reads `not activated`. Then unmount the ISO:
 
 ```bash
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
-hmcpctl storage unmount-optical-media "$VIOS" "$LPAR" "$MEDIA_NAME" --system "$SYSTEM" --confirm
+hmcpctl storage unmount-optical-media "$VIOS" --lpar "$LPAR" --name "$MEDIA_NAME" --system "$SYSTEM" --yes
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
 ```
 
@@ -409,7 +422,7 @@ hmcpctl lpars get-description "$LPAR_NAME" "$SYSTEM_NAME"
 ```bash
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
 MAPPING_ID=<identity-of-the-DISK_NAME-mapping-from-list-mappings>
-hmcpctl storage detach-mapping "$VIOS" "$MAPPING_ID" --system "$SYSTEM" --confirm
+hmcpctl storage detach-mapping "$VIOS" "$MAPPING_ID" --system "$SYSTEM" --yes
 hmcpctl storage list-mappings "$VIOS" --lpar "$LPAR" --system "$SYSTEM" --json
 ```
 
@@ -417,14 +430,14 @@ Delete the virtual disk, then the ISO. `delete-disk` refuses a disk that is stil
 
 ```bash
 hmcpctl storage delete-disk "$VIOS" --vg "$VG" --name "$DISK_NAME" --system "$SYSTEM" --yes
-hmcpctl storage delete-media "$VIOS" "$MEDIA_VG" "$MEDIA_NAME" --system "$SYSTEM" --yes
+hmcpctl storage delete-media "$VIOS" --vg "$MEDIA_VG" --name "$MEDIA_NAME" --system "$SYSTEM" --yes
 ```
 
 Delete the media repository only if this run created it and it holds nothing else:
 
 ```bash
-hmcpctl storage list-optical-media "$VIOS" "$MEDIA_VG" --system "$SYSTEM" --json
-hmcpctl storage delete-media-repo "$VIOS" "$MEDIA_VG" --system "$SYSTEM" --yes
+hmcpctl storage list-optical-media "$VIOS" --vg "$MEDIA_VG" --system "$SYSTEM" --json
+hmcpctl storage delete-media-repo "$VIOS" --vg "$MEDIA_VG" --system "$SYSTEM" --yes
 ```
 
 Delete the partition last, after the same description check; stop if it no

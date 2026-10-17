@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from hmcpctl.client.client_resolution import summary_for
 
@@ -127,16 +127,42 @@ async def resolve_system_name(hmc: HMCClient, value: str) -> str:
     return name
 
 
+def _hosts_partition(partitions: list[dict[str, Any]], partition_uuid: str) -> bool:
+    """Compare caller UUIDs with HMC feed identities without changing URL casing."""
+    wanted = partition_uuid.casefold()
+    return any(
+        str(entry.get("UUID") or "").casefold() == wanted for entry in partitions
+    )
+
+
+async def _verify_partition_on_system(
+    hmc: HMCClient, system_uuid: str, partition_uuid: str, kind: Literal["LPAR", "VIOS"]
+) -> None:
+    """Establish UUID containment using only the selected managed-system feed."""
+    partitions = (
+        await hmc.list_logical_partitions(system_uuid)
+        if kind == "LPAR"
+        else await hmc.list_vios(system_uuid)
+    )
+    if not _hosts_partition(partitions, partition_uuid):
+        raise ValueError(
+            f"{kind} {partition_uuid!r} does not belong to managed system "
+            f"{system_uuid}; name the managed system that hosts it"
+        )
+
+
 async def resolve_lpar_uuid(
     hmc: HMCClient, value: str, *, system_name_or_uuid: str | None = None
 ) -> str:
-    """Resolve an LPAR name or pass through its UUID."""
-    if is_uuid(value):
-        return value
+    """Resolve a LPAR selector, constraining names and UUIDs to supplied scope."""
     selector = optional_system_selector(system_name_or_uuid)
     system_uuid = (
         await resolve_system_uuid(hmc, selector) if selector is not None else None
     )
+    if is_uuid(value):
+        if system_uuid is not None:
+            await _verify_partition_on_system(hmc, system_uuid, value, "LPAR")
+        return value
     entry = (
         await hmc.find_partition_by_name(value, system_uuid=system_uuid)
         if system_uuid is not None
@@ -155,13 +181,15 @@ async def resolve_lpar_uuid(
 async def resolve_vios_uuid(
     hmc: HMCClient, value: str, *, system_name_or_uuid: str | None = None
 ) -> str:
-    """Resolve a VIOS name or pass through its UUID."""
-    if is_uuid(value):
-        return value
+    """Resolve a VIOS selector, constraining names and UUIDs to supplied scope."""
     selector = optional_system_selector(system_name_or_uuid)
     system_uuid = (
         await resolve_system_uuid(hmc, selector) if selector is not None else None
     )
+    if is_uuid(value):
+        if system_uuid is not None:
+            await _verify_partition_on_system(hmc, system_uuid, value, "VIOS")
+        return value
     entry = (
         await hmc.find_vios_by_name(value, system_uuid=system_uuid)
         if system_uuid is not None

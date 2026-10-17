@@ -1,7 +1,12 @@
 """Tool-layer tests for media repository and optical media tools."""
 
+from unittest.mock import AsyncMock
+
 import httpx
+import pytest
 from conftest import volume_group_with_repository
+
+from hmcpctl.client.core import HMCClient
 
 VIOS_UUID = "00000000-0000-0000-0000-000000000003"
 VG_UUID = "22222222-2222-2222-2222-222222220001"
@@ -83,12 +88,12 @@ def test_get_media_repository_not_found(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
 
     route = mock_hmc.get(
-        f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/99999999-9999-9999-9999-999999999999"
+        f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/{VG_UUID}"
     ).mock(return_value=httpx.Response(404, text=""))
 
     from hmcpctl.server_tools.storage.resources import hmc_get_media_repository
 
-    result = hmc_get_media_repository(VIOS_UUID, "99999999-9999-9999-9999-999999999999")
+    result = hmc_get_media_repository(VIOS_UUID, VG_UUID)
 
     assert route.called
     assert result is None
@@ -110,3 +115,13 @@ def test_list_optical_media_empty(monkeypatch, mock_hmc):
 
     assert route.called
     assert media_list == []
+
+
+@pytest.fixture(autouse=True)
+def scoped_volume_group_inventory(monkeypatch):
+    """Supply membership at the HMC boundary for these media/guard tests."""
+    lookup = AsyncMock(
+        return_value=[{"UUID": VG_UUID, "Resource": {"GroupName": "rootvg"}}]
+    )
+    monkeypatch.setattr(HMCClient, "list_volume_groups", lookup)
+    return lookup

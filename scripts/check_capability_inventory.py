@@ -16,7 +16,8 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Any, TypeGuard, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INVENTORY = ROOT / "docs" / "capabilities"
@@ -454,8 +455,8 @@ def _validate_rows(
                 errors.append(
                     f"source unit {identity}: unknown accounting row {row_id!r}"
                 )
-            elif accounted[identity] != 1 or identity not in rows[str(row_id)].get(
-                "source_units", []
+            elif accounted[identity] != 1 or identity not in cast(
+                list[object], rows[str(row_id)].get("source_units", [])
             ):
                 errors.append(
                     f"source unit {identity}: accounting does not match row {row_id}"
@@ -498,7 +499,7 @@ def _validate_operations(
                 errors.append(
                     f"operation evidence {tool}: {field} does not match registry"
                 )
-        if tuple(record.get("surfaces", ())) != found.surfaces:
+        if tuple(cast(Sequence[object], record.get("surfaces", ()))) != found.surfaces:
             errors.append(f"operation evidence {tool}: surfaces do not match registry")
         row_ids = record.get("row_ids")
         if not isinstance(row_ids, list):
@@ -537,7 +538,7 @@ def _exact_keys(value: object, keys: set[str], label: str, errors: list[str]) ->
     return True
 
 
-def _nonempty(value: object) -> bool:
+def _nonempty(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and bool(value.strip())
 
 
@@ -609,8 +610,8 @@ def _validate_implementation(
     missing_ids = {
         _scope_identity(scope, label, errors, missing=True) for scope in missing
     }
-    implemented_ids.discard(None)
-    missing_ids.discard(None)
+    implemented_ids = {identity for identity in implemented_ids if identity is not None}
+    missing_ids = {identity for identity in missing_ids if identity is not None}
     if len(implemented_ids) != len(implemented) or len(missing_ids) != len(missing):
         errors.append(f"{label}: scope entries must be unique and valid")
     valid_lists = {
@@ -679,7 +680,7 @@ def _validate_observation(
 ) -> None:
     """Validate one format 4 observation against its single closed shape.
 
-    `maturity.json` is hand-copied from the runner's output and hand-editable, so
+    `maturity.json` can be promoted from runner output or hand-edited, so
     every bound the runner applies on the way out is applied again here: the
     validator is the only check a hand-authored record ever meets.
     """
@@ -996,9 +997,13 @@ def derive_states(
                 "unevidenced", implementation=implementation_state
             )
             continue
-        # An operation carries at most one live observation, because re-validation
-        # replaces it; ordering by time keeps a hand-edited catalog deterministic.
-        latest = max(observations, key=lambda item: str(item.get("observed_at")))
+        # An operation keeps one live row per producing observation (ADR 0212).
+        # The newest row decides its state, ordered by the key promotion selects
+        # with, so a timestamp tie between producers resolves the same way.
+        latest = max(
+            observations,
+            key=lambda item: (str(item.get("observed_at")), str(item.get("id"))),
+        )
         key = (repo_root, _handler_module(tool.handler))
         if key not in fingerprints:
             fingerprints[key] = closure_fingerprint(*key)
@@ -1218,6 +1223,64 @@ def _check_runtime_projection(path: Path, expected: str) -> list[str]:
     return []
 
 
+def _module_observation_sites(module: ModuleType | None) -> set[tuple[str, int, str]]:
+    if module is None:
+        raise InventoryError("cannot resolve observation source module")
+    tree = ast.parse(inspect.getsource(module))
+    constants = {
+        target.id: node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    sites: set[tuple[str, int, str]] = set()
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "record_verified"
+        ):
+            continue
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+        operation = keywords.get("operation")
+        if not isinstance(operation, ast.Constant) or not isinstance(
+            operation.value, str
+        ):
+            raise InventoryError("observation operation must be a literal")
+        values = []
+        for field in (node.args[0] if node.args else None, keywords.get("scenario")):
+            if isinstance(field, ast.Constant):
+                values.append(field.value)
+            elif isinstance(field, ast.Name):
+                values.append(constants.get(field.id))
+            else:
+                values.append(None)
+        row, scenario = values
+        if type(row) is not int or row < 0 or not _matches(SCENARIO_ID, scenario):
+            raise InventoryError(
+                "observation row and scenario must resolve from source constants"
+            )
+        sites.add((operation.value, row, cast(str, scenario)))
+    return sites
+
+
+def discover_observation_sites() -> dict[tuple[str, int], str]:
+    """Associate result-row identities with scenarios, independently of dispatch IDs."""
+    from live_test_runner import _SCENARIO_MODULES
+
+    sites: dict[tuple[str, int], str] = {}
+    for module in _SCENARIO_MODULES:
+        for operation, row, scenario in _module_observation_sites(module):
+            key = (operation, row)
+            if key in sites and sites[key] != scenario:
+                raise InventoryError(
+                    "observation result-row identity has ambiguous scenarios"
+                )
+            sites[key] = scenario
+    return sites
+
+
 def _release_routes() -> set[tuple[str, str, str]]:
     from live_test_runner import RELEASE_SCENARIO_SUBTASKS, SUBTASK_GROUPS, SUBTASKS
 
@@ -1225,42 +1288,9 @@ def _release_routes() -> set[tuple[str, str, str]]:
     seen: set[str] = set()
     for subtask in set(RELEASE_SCENARIO_SUBTASKS.values()):
         module = inspect.getmodule(SUBTASKS[subtask])
-        if module is None:
-            raise InventoryError(f"cannot resolve release scenario subtask {subtask}")
-        tree = ast.parse(inspect.getsource(module))
-        constants = {
-            target.id: node.value.value
-            for node in tree.body
-            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
-            for target in node.targets
-            if isinstance(target, ast.Name) and isinstance(node.value.value, str)
-        }
-        for node in ast.walk(tree):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "record_verified"
-            ):
+        for operation, _row, scenario in _module_observation_sites(module):
+            if RELEASE_SCENARIO_SUBTASKS.get(scenario) != subtask:
                 continue
-            keywords = {keyword.arg: keyword.value for keyword in node.keywords}
-            scenario_node = keywords.get("scenario")
-            scenario = None
-            if isinstance(scenario_node, ast.Constant):
-                scenario = scenario_node.value
-            elif isinstance(scenario_node, ast.Name):
-                scenario = constants.get(scenario_node.id)
-            if (
-                not isinstance(scenario, str)
-                or RELEASE_SCENARIO_SUBTASKS.get(scenario) != subtask
-            ):
-                continue
-            operation = keywords.get("operation")
-            if not isinstance(operation, ast.Constant) or not isinstance(
-                operation.value, str
-            ):
-                raise InventoryError(
-                    f"release scenario {scenario}: operation must be a literal"
-                )
             seen.add(scenario)
             for arm, tasks in SUBTASK_GROUPS.items():
                 # The dedicated arm precedes bare-CEC in all; its row 29 makes
@@ -1268,7 +1298,7 @@ def _release_routes() -> set[tuple[str, str, str]]:
                 if arm == "all" and scenario == "st35-bare-cec":
                     continue
                 if subtask in tasks:
-                    routes.add((operation.value, arm, scenario))
+                    routes.add((operation, arm, scenario))
     if seen != set(RELEASE_SCENARIO_SUBTASKS):
         raise InventoryError(
             "release scenario registration has no record_verified declaration"
@@ -1294,7 +1324,7 @@ def load_release_claims(
     routes = _release_routes()
     seen: set[str] = set()
     result: list[dict[str, str]] = []
-    for row in document["operations"]:
+    for row in cast(list[object], document["operations"]):
         if (
             not isinstance(row, dict)
             or set(row) != {"operation", "arm", "scenario"}
@@ -1508,9 +1538,9 @@ def validate_inventory(
     unknown, proposed, pending = _validate_rows(rows, units, errors)
     _validate_operations(operation_records, rows, registry, repo_root, errors)
     operation_ids = {
-        record.get("operation")
+        operation
         for record in operation_records
-        if isinstance(record.get("operation"), str)
+        if isinstance(operation := record.get("operation"), str)
     }
     _validate_maturity(maturity_records, operation_ids, errors)
     errors.extend(_release_claim_errors(root, operation_ids))
@@ -1534,22 +1564,18 @@ def verify_corpora(root: Path, sources: Mapping[str, Path]) -> list[str]:
         return [str(error)]
     local_errors: list[str] = []
     corpus_records = _objects(
-        document.get("corpora", [])
-        if isinstance(document.get("corpora"), list)
-        else [],
+        values if isinstance(values := document.get("corpora"), list) else [],
         "corpora",
         local_errors,
     )
     corpus_ids = {str(record.get("id")) for record in corpus_records}
     topics = _objects(
-        document.get("topics", []) if isinstance(document.get("topics"), list) else [],
+        values if isinstance(values := document.get("topics"), list) else [],
         "topics",
         local_errors,
     )
     units = _objects(
-        document.get("source_units", [])
-        if isinstance(document.get("source_units"), list)
-        else [],
+        values if isinstance(values := document.get("source_units"), list) else [],
         "source_units",
         local_errors,
     )

@@ -27,6 +27,7 @@ import pytest
 import typer
 from click import unstyle
 from conftest import live_fixture
+from rendered_output import collapse_whitespace
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -72,6 +73,17 @@ from hmcpctl.ssh import lpar as ssh_lpar
 from hmcpctl.ssh import profiles as ssh_profiles
 from hmcpctl.ssh import refcodes as ssh_refcodes
 from hmcpctl.xmlutil import parse_feed
+
+
+@pytest.fixture
+def storage_terminal_input(monkeypatch):
+    """Prompt tests represent terminal stdin; real pipes are tested separately."""
+    import typer.testing
+
+    monkeypatch.setattr(
+        typer.testing._NamedTextIOWrapper, "isatty", lambda self: self.name == "<stdin>"
+    )
+
 
 LPAR_NAME = "lpar1"
 
@@ -808,7 +820,7 @@ def test_connection_options_do_not_leak_between_invocations(monkeypatch):
                 VIOS_UUID,
                 "--lpar",
                 LPAR_UUID,
-                "--disk",
+                "--name",
                 "bootvol",
                 "--target",
                 "vtscsi0",
@@ -819,25 +831,26 @@ def test_connection_options_do_not_leak_between_invocations(monkeypatch):
                 (VIOS_UUID, "VirtualDisk", "bootvol", LPAR_UUID, "vtscsi0"),
                 {},
             ),
-            "Mapped 'bootvol'",
+            "operation\tmap",
         ),
         (
             [
                 "storage",
                 "create-media-repo",
                 VIOS_UUID,
+                "--vg",
                 VG_UUID,
                 "--size-mib",
                 "2048",
                 "--yes",
             ],
             ("create_media_repository", (VIOS_UUID, VG_UUID, 2048), {}),
-            "Created media repository",
+            "operation\tcreate-media-repo",
         ),
         (
-            ["storage", "delete-media-repo", VIOS_UUID, VG_UUID, "--yes"],
+            ["storage", "delete-media-repo", VIOS_UUID, "--vg", VG_UUID, "--yes"],
             ("delete_media_repository", (VIOS_UUID, VG_UUID), {}),
-            "Deleted media repository",
+            "operation\tdelete-media-repo",
         ),
     ],
 )
@@ -905,9 +918,10 @@ def test_network_cli_refuses_an_unknown_switch_id_before_the_create(fake_hmc):
             "adapter-1",
         ],
         ["network", "delete", SYSTEM_UUID, "--uuid", "network-1"],
-        ["storage", "delete-media-repo", VIOS_UUID, VG_UUID],
+        ["storage", "delete-media-repo", VIOS_UUID, "--vg", VG_UUID],
     ],
 )
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_destructive_cli_commands_abort_without_confirmation(fake_hmc, args):
     result = RUNNER.invoke(cli.app, args, input="n\n")
 
@@ -1011,10 +1025,9 @@ def test_lpars_summary_renders_numeric_zero(monkeypatch):
     result = RUNNER.invoke(cli.app, ["lpars", "summary", "zero-lpar"])
 
     assert result.exit_code == 0
-    assert "Current Memory (MiB)" in result.stdout
-    assert "│ 0" in result.stdout
-    assert "Current Proc Units" in result.stdout
-    assert "0.0" in result.stdout
+    rows = dict(line.split("\t") for line in result.stdout.splitlines()[1:])
+    assert rows["current_memory_mib"] == "0"
+    assert rows["current_proc_units"] == "0.0"
 
 
 def test_lpars_show_by_uuid(fake_hmc):
@@ -1731,6 +1744,7 @@ def test_lpars_decommission_help_lists_cli_contract(fake_hmc):
         "--timeout-seconds",
         "--poll-interval",
         "--json",
+        "--format",
         "--yes",
     }
 
@@ -1749,7 +1763,7 @@ def test_lpars_decommission_dry_run_skips_confirmation(fake_hmc):
     )
 
     assert result.exit_code == 0, result.output
-    assert "DRY RUN" in result.stdout
+    assert "DRY RUN" in result.stderr
     assert "power_off" in result.stdout
     assert "dry_run" in result.stdout
     assert "Aborted" not in result.stderr
@@ -1781,7 +1795,7 @@ def test_lpars_decommission_confirmed_prompt_names_target_and_executes(fake_hmc)
     assert (
         f"Decommission LPAR '{LPAR_NAME}' on system '{SYSTEM_UUID}'?" in result.output
     )
-    assert "decommissioned successfully" in result.stdout
+    assert "decommissioned successfully" in result.stderr
     assert "vSCSI mappings before client adapters" in result.output
     assert "retains backing storage" in result.output
     names = [name for name, _, _ in fake_hmc.calls]
@@ -1805,7 +1819,7 @@ def test_lpars_decommission_yes_executes_workflow(fake_hmc):
     )
 
     assert result.exit_code == 0, result.output
-    assert "decommissioned successfully" in result.stdout
+    assert "decommissioned successfully" in result.stderr
     names = [name for name, _, _ in fake_hmc.calls]
     assert "delete_logical_partition" in names
     assert "Aborted" not in result.stderr
@@ -1828,7 +1842,7 @@ def test_lpars_decommission_incomplete_human_result_exits_1_after_rendering(fake
     )
 
     assert result.exit_code == 1
-    assert "was not fully decommissioned" in result.stdout
+    assert "was not fully decommissioned" in result.stderr
     assert "delete_lpar" in result.stdout
     assert "error" in result.stdout
     assert all(
@@ -1973,6 +1987,7 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
                 },
             ],
             "storage_mappings": [],
+            "mapping_evidence": [],
             "unresolved_storage_mapping_count": 0,
             "unavailable_storage_source_count": 0,
         },
@@ -2049,7 +2064,7 @@ def test_adapters_reject_invalid_type_before_client_call(fake_hmc, command):
                 "1024",
                 "--dry-run",
             ],
-            None,
+            AttachDiskResult(False, LPAR_UUID, True, (), ()),
         ),
         (
             "lpar.inventory",
@@ -2131,7 +2146,7 @@ def test_storage_map_rejects_invalid_kind_before_client_call(fake_hmc):
             VIOS_UUID,
             "--lpar",
             LPAR_UUID,
-            "--disk",
+            "--name",
             "disk1",
             "--kind",
             "UnknownStorage",
@@ -2165,7 +2180,7 @@ def test_storage_create_vg(fake_hmc):
     )
 
     assert result.exit_code == 0
-    assert "Created Volume Group 'datavg'" in result.stdout
+    assert "target\tdatavg" in result.stdout
     name, args, _ = fake_hmc.calls[0]
     assert name == "create_volume_group"
     assert args[0] == VIOS_UUID
@@ -2211,8 +2226,9 @@ def test_storage_create_disk(fake_hmc):
     )
 
     assert result.exit_code == 0
-    assert "Created virtual disk 'bootvol' (1024 MiB)" in result.stdout
-    name, args, _ = fake_hmc.calls[0]
+    assert "capacity_mib\t1024" in result.stdout
+    assert fake_hmc.calls[0] == ("list_volume_groups", (VIOS_UUID,), {})
+    name, args, _ = fake_hmc.calls[1]
     assert name == "create_virtual_disk"
     assert args[1] == VG_UUID
     assert args[3] == 1024
@@ -2238,7 +2254,7 @@ def test_storage_attach_disk_runs_workflow(fake_hmc):
     )
 
     assert result.exit_code == 0, result.output
-    assert "Attached virtual disk 'bootvol'" in result.stdout
+    assert "target\tbootvol" in result.stdout
     mutations = [
         name
         for name, _, _ in fake_hmc.calls
@@ -2267,7 +2283,7 @@ def test_storage_attach_disk_dry_run_does_not_mutate(fake_hmc):
     )
 
     assert result.exit_code == 0, result.output
-    assert "DRY RUN" in result.stdout
+    assert "outcome\tdry_run" in result.stdout
     mutations = {"create_virtual_disk", "add_vscsi_adapter", "map_storage_to_lpar"}
     assert not any(name in mutations for name, _, _ in fake_hmc.calls)
 
@@ -2423,7 +2439,7 @@ def _storage_app() -> typer.Typer:
             [StorageMapping("vhost0/vtscsi0", None, None, None)],
         ),
         (
-            ["detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--confirm"],
+            ["detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--yes"],
             "detach_storage_mapping",
             UNSYNCED,
         ),
@@ -2431,7 +2447,9 @@ def _storage_app() -> typer.Typer:
             [
                 "upload-iso",
                 VIOS_UUID,
+                "--vg",
                 VG_UUID,
+                "--name",
                 "aix.iso",
                 "https://images.test/aix.iso",
             ],
@@ -2477,7 +2495,8 @@ def test_storage_list_vgs_renders_a_table(fake_hmc, monkeypatch):
     )
 
     result = RUNNER.invoke(
-        cli.app, ["storage", "list-vgs", VIOS_UUID, "--system", "system-a"]
+        cli.app,
+        ["storage", "list-vgs", VIOS_UUID, "--system", "system-a", "--format", "table"],
     )
 
     assert result.exit_code == 0
@@ -2512,10 +2531,11 @@ def test_storage_delete_disk_deletes_when_confirmed(fake_hmc, monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert "Deleted virtual disk 'bootvol'" in result.stdout
+    assert "target\tbootvol" in result.stdout
     assert seen == {"vios": VIOS_UUID, "vg": VG_UUID, "name": "bootvol"}
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_delete_disk_declined_confirmation_aborts(fake_hmc, monkeypatch):
     called = []
 
@@ -2537,6 +2557,7 @@ def test_storage_delete_disk_declined_confirmation_aborts(fake_hmc, monkeypatch)
     assert called == []
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_map_declined_confirmation_aborts(fake_hmc, monkeypatch):
     called = []
 
@@ -2547,7 +2568,7 @@ def test_storage_map_declined_confirmation_aborts(fake_hmc, monkeypatch):
 
     result = RUNNER.invoke(
         cli.app,
-        ["storage", "map", VIOS_UUID, "--lpar", LPAR_UUID, "--disk", "bootvol"],
+        ["storage", "map", VIOS_UUID, "--lpar", LPAR_UUID, "--name", "bootvol"],
         input="n\n",
     )
 
@@ -2556,6 +2577,7 @@ def test_storage_map_declined_confirmation_aborts(fake_hmc, monkeypatch):
     assert called == []
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_create_media_repo_declined_confirmation_aborts(fake_hmc, monkeypatch):
     called = []
 
@@ -2568,7 +2590,15 @@ def test_storage_create_media_repo_declined_confirmation_aborts(fake_hmc, monkey
 
     result = RUNNER.invoke(
         cli.app,
-        ["storage", "create-media-repo", VIOS_UUID, VG_UUID, "--size-mib", "2048"],
+        [
+            "storage",
+            "create-media-repo",
+            VIOS_UUID,
+            "--vg",
+            VG_UUID,
+            "--size-mib",
+            "2048",
+        ],
         input="n\n",
     )
 
@@ -2594,6 +2624,7 @@ def test_storage_create_media_creates_when_confirmed(fake_hmc, monkeypatch):
             "storage",
             "create-media",
             VIOS_UUID,
+            "--vg",
             VG_UUID,
             "--name",
             "aix.iso",
@@ -2604,7 +2635,7 @@ def test_storage_create_media_creates_when_confirmed(fake_hmc, monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert "Created media 'aix.iso'" in result.stdout
+    assert "target\taix.iso" in result.stdout
     assert seen == {
         "vios": VIOS_UUID,
         "vg": VG_UUID,
@@ -2613,6 +2644,7 @@ def test_storage_create_media_creates_when_confirmed(fake_hmc, monkeypatch):
     }
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_create_media_declined_confirmation_aborts(fake_hmc, monkeypatch):
     called = []
 
@@ -2629,6 +2661,7 @@ def test_storage_create_media_declined_confirmation_aborts(fake_hmc, monkeypatch
             "storage",
             "create-media",
             VIOS_UUID,
+            "--vg",
             VG_UUID,
             "--name",
             "aix.iso",
@@ -2655,14 +2688,24 @@ def test_storage_delete_media_deletes_when_confirmed(fake_hmc, monkeypatch):
 
     result = RUNNER.invoke(
         cli.app,
-        ["storage", "delete-media", VIOS_UUID, VG_UUID, "aix.iso", "--yes"],
+        [
+            "storage",
+            "delete-media",
+            VIOS_UUID,
+            "--vg",
+            VG_UUID,
+            "--name",
+            "aix.iso",
+            "--yes",
+        ],
     )
 
     assert result.exit_code == 0
-    assert "Deleted media 'aix.iso'" in result.stdout
+    assert "target\taix.iso" in result.stdout
     assert seen == {"vios": VIOS_UUID, "vg": VG_UUID, "media_name": "aix.iso"}
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_delete_media_declined_confirmation_aborts(fake_hmc, monkeypatch):
     called = []
 
@@ -2675,7 +2718,7 @@ def test_storage_delete_media_declined_confirmation_aborts(fake_hmc, monkeypatch
 
     result = RUNNER.invoke(
         cli.app,
-        ["storage", "delete-media", VIOS_UUID, VG_UUID, "aix.iso"],
+        ["storage", "delete-media", VIOS_UUID, "--vg", VG_UUID, "--name", "aix.iso"],
         input="n\n",
     )
 
@@ -2684,6 +2727,7 @@ def test_storage_delete_media_declined_confirmation_aborts(fake_hmc, monkeypatch
     assert called == []
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
     mount = AsyncMock(
         return_value=StorageMapResult(
@@ -2700,7 +2744,9 @@ def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
             "storage",
             "mount-optical-media",
             VIOS_UUID,
+            "--lpar",
             LPAR_UUID,
+            "--name",
             "install.iso",
             "--system",
             SYSTEM_UUID,
@@ -2721,10 +2767,10 @@ def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
         ownership_override=True,
         system_name_or_uuid=SYSTEM_UUID,
     )
-    assert "Mounted optical media 'install.iso'" in result.stdout
+    assert "target\tinstall.iso" in result.stdout
     assert SYSTEM_UUID in result.stdout
     assert "vtopt0" in result.stdout
-    assert '"mapping-1"' in result.stdout
+    assert '"mapping-1"' not in result.stdout
     assert "CurrentProfileSync is Disabled" in result.stdout
 
 
@@ -2740,12 +2786,14 @@ def test_storage_unmount_optical_media_forwards_selectors(fake_hmc, monkeypatch)
             "storage",
             "unmount-optical-media",
             VIOS_UUID,
+            "--lpar",
             LPAR_UUID,
+            "--name",
             "install.iso",
             "--system",
             SYSTEM_UUID,
             "--ownership-override",
-            "--confirm",
+            "--yes",
         ],
     )
 
@@ -2758,11 +2806,12 @@ def test_storage_unmount_optical_media_forwards_selectors(fake_hmc, monkeypatch)
         ownership_override=True,
         system_name_or_uuid=SYSTEM_UUID,
     )
-    assert "Unmounted optical media 'install.iso'" in result.stdout
-    assert "backing ISO remains" in result.stdout
+    assert "target\tinstall.iso" in result.stdout
+    assert "backing_storage\tretained" in result.stdout
     assert "CurrentProfileSync is Disabled" in result.stdout
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_mount_optical_media_decline_does_not_mutate(fake_hmc, monkeypatch):
     mount = AsyncMock()
     monkeypatch.setattr(
@@ -2771,7 +2820,15 @@ def test_storage_mount_optical_media_decline_does_not_mutate(fake_hmc, monkeypat
 
     result = RUNNER.invoke(
         cli.app,
-        ["storage", "mount-optical-media", VIOS_UUID, LPAR_UUID, "install.iso"],
+        [
+            "storage",
+            "mount-optical-media",
+            VIOS_UUID,
+            "--lpar",
+            LPAR_UUID,
+            "--name",
+            "install.iso",
+        ],
         input="n\n",
     )
 
@@ -2780,6 +2837,7 @@ def test_storage_mount_optical_media_decline_does_not_mutate(fake_hmc, monkeypat
     mount.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_unmount_optical_media_decline_does_not_mutate(fake_hmc, monkeypatch):
     unmount = AsyncMock()
     monkeypatch.setattr(
@@ -2788,7 +2846,15 @@ def test_storage_unmount_optical_media_decline_does_not_mutate(fake_hmc, monkeyp
 
     result = RUNNER.invoke(
         cli.app,
-        ["storage", "unmount-optical-media", VIOS_UUID, LPAR_UUID, "install.iso"],
+        [
+            "storage",
+            "unmount-optical-media",
+            VIOS_UUID,
+            "--lpar",
+            LPAR_UUID,
+            "--name",
+            "install.iso",
+        ],
         input="n\n",
     )
 
@@ -2811,7 +2877,7 @@ def test_storage_optical_media_command_help():
     help_text = click.unstyle(result.stdout)
     assert "--system" in help_text
     assert "--ownership-override" in help_text
-    assert "--confirm" in help_text
+    assert "--yes" in help_text
 
 
 def test_storage_get_media_repo_renders_name_and_size(fake_hmc, monkeypatch):
@@ -2823,7 +2889,9 @@ def test_storage_get_media_repo_renders_name_and_size(fake_hmc, monkeypatch):
         "hmcpctl.cli_commands.storage.resources.get_media_repository", fake_get
     )
 
-    result = RUNNER.invoke(cli.app, ["storage", "get-media-repo", VIOS_UUID, VG_UUID])
+    result = RUNNER.invoke(
+        cli.app, ["storage", "get-media-repo", VIOS_UUID, "--vg", VG_UUID]
+    )
 
     assert result.exit_code == 0
     assert "VMLibrary" in result.stdout
@@ -2840,10 +2908,14 @@ def test_storage_get_media_repo_labels_the_size_in_gib(fake_hmc, monkeypatch):
         "hmcpctl.cli_commands.storage.resources.get_media_repository", fake_get
     )
 
-    result = RUNNER.invoke(cli.app, ["storage", "get-media-repo", VIOS_UUID, VG_UUID])
+    result = RUNNER.invoke(
+        cli.app,
+        ["storage", "get-media-repo", VIOS_UUID, "--vg", VG_UUID, "--format", "table"],
+    )
 
     assert result.exit_code == 0
-    assert "Size: 64 GiB" in result.stdout
+    assert "RepositorySize in GiB" in result.stdout
+    assert '"RepositorySize":"64"' in result.stdout
 
 
 def test_storage_get_media_repo_reports_empty(fake_hmc, monkeypatch):
@@ -2854,10 +2926,12 @@ def test_storage_get_media_repo_reports_empty(fake_hmc, monkeypatch):
         "hmcpctl.cli_commands.storage.resources.get_media_repository", fake_get
     )
 
-    result = RUNNER.invoke(cli.app, ["storage", "get-media-repo", VIOS_UUID, VG_UUID])
+    result = RUNNER.invoke(
+        cli.app, ["storage", "get-media-repo", VIOS_UUID, "--vg", VG_UUID]
+    )
 
     assert result.exit_code == 0
-    assert "No media repository found" in result.stdout
+    assert "No media repository found" in result.stderr
 
 
 def test_storage_get_media_repo_json(fake_hmc, monkeypatch):
@@ -2869,7 +2943,7 @@ def test_storage_get_media_repo_json(fake_hmc, monkeypatch):
     )
 
     result = RUNNER.invoke(
-        cli.app, ["storage", "get-media-repo", VIOS_UUID, VG_UUID, "--json"]
+        cli.app, ["storage", "get-media-repo", VIOS_UUID, "--vg", VG_UUID, "--json"]
     )
 
     assert result.exit_code == 0
@@ -2886,7 +2960,7 @@ def test_storage_list_optical_media_renders_a_table(fake_hmc, monkeypatch):
     )
 
     result = RUNNER.invoke(
-        cli.app, ["storage", "list-optical-media", VIOS_UUID, VG_UUID]
+        cli.app, ["storage", "list-optical-media", VIOS_UUID, "--vg", VG_UUID]
     )
 
     assert result.exit_code == 0
@@ -2904,11 +2978,11 @@ def test_storage_list_optical_media_reports_empty(fake_hmc, monkeypatch):
     )
 
     result = RUNNER.invoke(
-        cli.app, ["storage", "list-optical-media", VIOS_UUID, VG_UUID]
+        cli.app, ["storage", "list-optical-media", VIOS_UUID, "--vg", VG_UUID]
     )
 
     assert result.exit_code == 0
-    assert "No optical media found" in result.stdout
+    assert "No optical media found" in result.stderr
 
 
 def test_storage_list_optical_media_json(fake_hmc, monkeypatch):
@@ -2920,7 +2994,7 @@ def test_storage_list_optical_media_json(fake_hmc, monkeypatch):
     )
 
     result = RUNNER.invoke(
-        cli.app, ["storage", "list-optical-media", VIOS_UUID, VG_UUID, "--json"]
+        cli.app, ["storage", "list-optical-media", VIOS_UUID, "--vg", VG_UUID, "--json"]
     )
 
     assert result.exit_code == 0
@@ -3009,11 +3083,11 @@ def test_storage_detach_mapping_deletes_when_confirmed(fake_hmc, monkeypatch):
     )
 
     result = RUNNER.invoke(
-        cli.app, ["storage", "detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--confirm"]
+        cli.app, ["storage", "detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--yes"]
     )
 
     assert result.exit_code == 0
-    assert "Deleted storage mapping vhost0/vtscsi0" in result.stdout
+    assert "target\tvhost0/vtscsi0" in result.stdout
     assert "CurrentProfileSync is Disabled" in result.stdout
     assert seen == {
         "system": None,
@@ -3047,7 +3121,7 @@ def test_storage_detach_mapping_reports_one_failure_and_exits_1(fake_hmc, monkey
     )
 
     result = RUNNER.invoke(
-        cli.app, ["storage", "detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--confirm"]
+        cli.app, ["storage", "detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--yes"]
     )
 
     assert result.exit_code == 1
@@ -3113,16 +3187,18 @@ def test_storage_upload_iso_reports_uploaded_media(fake_hmc, monkeypatch):
             "storage",
             "upload-iso",
             VIOS_UUID,
+            "--vg",
             VG_UUID,
+            "--name",
             "aix.iso",
             "https://images.test/aix.iso",
         ],
     )
 
     assert result.exit_code == 0
-    assert "Upload status: uploaded" in result.stdout
-    assert "Media entry: aix.iso" in result.stdout
-    assert "1,048,576 bytes" in result.stdout
+    assert "outcome\tuploaded" in result.stdout
+    assert "target\taix.iso" in result.stdout
+    assert "media_size_bytes\t1048576" in result.stdout
 
 
 def test_storage_upload_iso_json(fake_hmc, monkeypatch):
@@ -3142,7 +3218,9 @@ def test_storage_upload_iso_json(fake_hmc, monkeypatch):
             "storage",
             "upload-iso",
             VIOS_UUID,
+            "--vg",
             VG_UUID,
+            "--name",
             "aix.iso",
             "https://images.test/aix.iso",
             "--json",
@@ -3233,7 +3311,11 @@ def test_lpars_refcodes_via_ssh(monkeypatch):
         "lsrefcode -r lpar -m sys1 --filter lpar_names=web01"
         " -n 3 -F lpar_name,time_stamp,refcode --header"
     )
-    assert json.loads(result.stdout) == [
+    rows = json.loads(result.stdout)
+    assert all(row["definition"] for row in rows)
+    assert [
+        {k: row[k] for k in ("lpar_name", "time_stamp", "refcode")} for row in rows
+    ] == [
         {
             "lpar_name": "web01",
             "time_stamp": "2026-09-21 10:00:00",
@@ -5214,11 +5296,12 @@ def test_metrics_show_logical_partition_forwards_owning_system(fake_hmc):
 
     assert result.exit_code == 0
     assert fake_hmc.calls == [
+        ("list_logical_partitions", (SYSTEM_UUID,), {}),
         (
             "get_processed_metric_links",
             ("LogicalPartition", LPAR_UUID, "2024-01-01T00:00:00Z", None, None),
             {"system_uuid": SYSTEM_UUID},
-        )
+        ),
     ]
 
 
@@ -5418,7 +5501,7 @@ def test_storage_mount_optical_media_help_names_the_rest0269_precondition():
 
     assert result.exit_code == 0
     assert "REST0269" in result.stdout
-    assert "activate or apply a profile" in " ".join(result.stdout.split())
+    assert "activate or apply a profile" in collapse_whitespace(result.stdout)
 
 
 @pytest.mark.parametrize("command", ["create", "provision"])
@@ -5487,4 +5570,234 @@ def test_lpars_provision_refuses_a_dedicated_slot_before_client_call(
     assert result.exit_code == 2
     assert "hmc_assign_dedicated_pcie_slot" in unstyle(result.stderr)
     provision.assert_not_awaited()
+    assert fake_hmc.calls == []
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_lpars_refcode_definitions_and_unknowns(monkeypatch, as_json):
+    async def fake(_cfg, _cmd):
+        return (
+            "lpar_name,time_stamp,refcode\n"
+            "web01,now,CA00E105 LP=00002\nweb01,earlier,B2001230 LP=00002\n"
+        )
+
+    _patch_ssh_command(monkeypatch, fake)
+    args = ["lpars", "refcodes", "sys1", "web01", "--count", "2"]
+    result = RUNNER.invoke(
+        cli.app, args + (["--json"] if as_json else ["--format", "table"])
+    )
+    assert result.exit_code == 0, result.output
+    if as_json:
+        rows = json.loads(result.stdout)
+        assert "operating system" in rows[0]["definition"].lower()
+        assert rows[0]["refcode"] == "CA00E105 LP=00002"
+        assert rows[1]["definition"] is None
+        assert rows[1]["definition_source"] is None
+    else:
+        text = collapse_whitespace(result.stdout)
+        assert "operating system" in text.lower()
+        assert "Unknown definition" in text
+        assert "B2001230" in text
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_refcode_table_escapes_terminal_controls_but_json_preserves_them(
+    monkeypatch, as_json
+):
+    raw = "B2001230\x1b]52;c;YWJj\x1b\\\u202e"
+
+    async def fake(_cfg, _cmd):
+        return f"lpar_name,time_stamp,refcode\nweb01,now,{raw}\n"
+
+    _patch_ssh_command(monkeypatch, fake)
+    args = ["lpars", "refcodes", "sys1", "web01"]
+    result = RUNNER.invoke(
+        cli.app, args + (["--json"] if as_json else ["--format", "table"])
+    )
+    assert result.exit_code == 0, result.output
+    if as_json:
+        assert json.loads(result.stdout)[0]["refcode"] == raw
+    else:
+        assert "\x1b" not in result.stdout
+        assert "\u202e" not in result.stdout
+        assert "\\x1b" in result.stdout
+
+
+@pytest.mark.parametrize("command", ["show", "state"])
+@pytest.mark.parametrize("flag", ["--system", "-s"])
+@pytest.mark.parametrize("target", [LPAR_UUID, LPAR_NAME])
+def test_lpar_inspection_carries_system_scope(fake_hmc, command, flag, target):
+    result = RUNNER.invoke(cli.app, ["lpars", command, target, flag, SYSTEM_UUID])
+    assert result.exit_code == 0, result.output
+    if target == LPAR_UUID:
+        assert fake_hmc.calls[0] == ("list_logical_partitions", (SYSTEM_UUID,), {})
+    else:
+        assert fake_hmc.calls[0] == (
+            "find_partition_by_name",
+            (LPAR_NAME,),
+            {"system_uuid": SYSTEM_UUID},
+        )
+
+
+@pytest.mark.parametrize("command", ["show", "state"])
+def test_lpar_inspection_rejects_wrong_system_uuid(fake_hmc, monkeypatch, command):
+    monkeypatch.setattr(fake_hmc, "list_logical_partitions", AsyncMock(return_value=[]))
+    result = RUNNER.invoke(cli.app, ["lpars", command, LPAR_UUID, "-s", SYSTEM_UUID])
+    assert result.exit_code == 1, result.output
+    assert "does not belong to managed system" in result.output
+    assert fake_hmc.calls == []
+
+
+@pytest.mark.parametrize("command", ["delete", "decommission", "capture-console"])
+def test_required_lpar_scope_rejects_before_hmc_calls(fake_hmc, command, monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.setattr("typer.rich_utils.FORCE_TERMINAL", True)
+    result = RUNNER.invoke(cli.app, ["lpars", command, LPAR_UUID])
+    assert result.exit_code == 2, result.output
+    assert "--system" in unstyle(result.output)
+    assert fake_hmc.calls == []
+
+
+@pytest.mark.parametrize("command", ["show", "state"])
+@pytest.mark.parametrize(
+    "system", [SYSTEM_UUID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]
+)
+def test_lpar_inspection_disambiguates_duplicate_names(
+    fake_hmc, monkeypatch, command, system
+):
+    from types import MethodType
+
+    from hmcpctl.client.core import HMCClient
+
+    other_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    expected = LPAR_UUID if system == SYSTEM_UUID else other_uuid
+
+    async def partitions(selected):
+        return [
+            {
+                **fake_hmc.lpar,
+                "UUID": LPAR_UUID if selected == SYSTEM_UUID else other_uuid,
+            }
+        ]
+
+    monkeypatch.setattr(fake_hmc, "list_logical_partitions", partitions)
+    monkeypatch.setattr(
+        fake_hmc,
+        "find_partition_by_name",
+        MethodType(HMCClient.find_partition_by_name, fake_hmc),
+    )
+    args = ["lpars", command, LPAR_NAME, "-s", system]
+    if command == "show":
+        args.append("--json")
+    result = RUNNER.invoke(cli.app, args)
+    assert result.exit_code == 0, result.output
+    if command == "show":
+        assert json.loads(result.stdout)["UUID"] == expected
+    else:
+        assert fake_hmc.calls == [
+            ("get_quick_property", ("LogicalPartition", expected, "PartitionState"), {})
+        ]
+
+
+@pytest.mark.parametrize("command", ["show", "state"])
+def test_scoped_lpar_inspection_missing_name(fake_hmc, command):
+    result = RUNNER.invoke(cli.app, ["lpars", command, "ghost", "-s", SYSTEM_UUID])
+    assert result.exit_code == 1, result.output
+    assert fake_hmc.calls == [
+        ("find_partition_by_name", ("ghost",), {"system_uuid": SYSTEM_UUID})
+    ]
+
+
+def test_storage_wrong_system_uuid_refuses_before_deletion(fake_hmc, monkeypatch):
+    monkeypatch.setattr(fake_hmc, "list_vios", AsyncMock(return_value=[]))
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "storage",
+            "delete-disk",
+            VIOS_UUID,
+            "--vg",
+            VG_UUID,
+            "--name",
+            "disk1",
+            "--system",
+            SYSTEM_UUID,
+            "--yes",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "does not belong to managed system" in result.output
+    assert fake_hmc.calls == []
+
+
+@pytest.mark.parametrize("command", ["show", "state"])
+def test_scoped_lpar_inspection_missing_system(fake_hmc, command):
+    result = RUNNER.invoke(
+        cli.app, ["lpars", command, LPAR_UUID, "-s", "absent-system"]
+    )
+    assert result.exit_code == 1, result.output
+    assert "No managed system named" in result.output
+
+
+@pytest.mark.parametrize("vg", ["rootvg", VG_UUID])
+@pytest.mark.parametrize("vios", ["vios01", VIOS_UUID])
+def test_storage_named_attach_selectors(fake_hmc, vg, vios):
+    fake_hmc.vg["Resource"]["GroupName"] = "rootvg"
+    fake_hmc.find_vios_by_name = AsyncMock(return_value={"UUID": VIOS_UUID})
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "storage",
+            "attach-disk",
+            LPAR_UUID,
+            "--vios",
+            vios,
+            "--vg",
+            vg,
+            "--name",
+            "disk01",
+            "--capacity-mib",
+            "1024",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    if vios == "vios01":
+        fake_hmc.find_vios_by_name.assert_awaited_once_with("vios01")
+    else:
+        fake_hmc.find_vios_by_name.assert_not_awaited()
+    assert not any(name == "create_virtual_disk" for name, _, _ in fake_hmc.calls)
+
+
+def test_storage_map_uses_name_option(fake_hmc):
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "storage",
+            "map",
+            VIOS_UUID,
+            "--lpar",
+            LPAR_UUID,
+            "--name",
+            "disk01",
+            "--yes",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["get-media-repo", VIOS_UUID, VG_UUID],
+        ["delete-media", VIOS_UUID, VG_UUID, "install.iso", "--yes"],
+        ["mount-optical-media", VIOS_UUID, LPAR_UUID, "install.iso", "--yes"],
+        ["map", VIOS_UUID, "--lpar", LPAR_UUID, "--disk", "disk01", "--yes"],
+    ],
+)
+def test_storage_retired_positional_syntax_makes_no_requests(fake_hmc, arguments):
+    result = RUNNER.invoke(cli.app, ["storage", *arguments])
+    assert result.exit_code == 2
     assert fake_hmc.calls == []

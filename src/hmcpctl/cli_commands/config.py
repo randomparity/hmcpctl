@@ -16,7 +16,6 @@ files, separate lifecycles; a policy grant's ``connections`` entries are profile
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -33,7 +32,7 @@ from ..config import (
 )
 from . import runtime as cli_runtime
 from .legacy_policy import GENERATED_SOURCE, LEGACY_POLICY_NAME
-from .output import console, err_console, fail
+from .output import console, err_console, fail, print_json, terminal_field
 from .serve import _policy_file
 
 _STARTER_TOML = """\
@@ -91,7 +90,7 @@ def config_init() -> None:
     # Same treatment as `init-access-policy` below, and for the same two reasons: this
     # line is the command's machine-readable output, and the path comes from
     # Path.home()/XDG_CONFIG_HOME/APPDATA, any of which may legally contain brackets.
-    console.print(str(target), soft_wrap=True, markup=False)
+    console.print(terminal_field(target), soft_wrap=True, markup=False)
 
 
 def config_list() -> None:
@@ -101,7 +100,9 @@ def config_list() -> None:
     if config_path is None:
         # Compute what the path *would* be for the helpful message.
         would_be = config_dir() / "config.toml"
-        console.print(f"No config file found at {would_be}", markup=False)
+        console.print(
+            f"No config file found at {terminal_field(would_be)}", markup=False
+        )
         return
 
     # Parse once so profile names, the default marker, and nicknames all derive
@@ -118,13 +119,21 @@ def config_list() -> None:
 
     for entry in profiles:
         marker = "  (default)" if entry["is_default"] else ""
-        console.print(f"{entry['name']}{marker}", markup=False)
+        console.print(
+            f"{terminal_field(entry['name'])}{terminal_field(marker)}", markup=False
+        )
 
     # Surface nicknames (secret-free): each maps to a profile key, flagged if
     # its target does not exist.
     for entry in inventory["nicknames"]:
         status = "" if entry["target_exists"] else "  (no such profile)"
-        console.print(f"{entry['name']} -> {entry['target']}{status}", markup=False)
+        console.print(
+            (
+                f"{terminal_field(entry['name'])} -> {terminal_field(entry['target'])}"
+                f"{terminal_field(status)}"
+            ),
+            markup=False,
+        )
 
 
 def config_show(
@@ -160,11 +169,14 @@ def config_show(
     data: dict[str, Any] = inventory["selected"]
 
     if as_json:
-        console.print_json(json.dumps(data))
+        print_json(data)
     else:
         width = max(len(k) for k in data)
         for key, value in data.items():
-            console.print(f"{key:<{width}}  {value}", markup=False)
+            console.print(
+                f"{terminal_field(f'{key:<{width}}')}  {terminal_field(value)}",
+                markup=False,
+            )
 
 
 def _write_exclusive(target: Path, text: str) -> None:
@@ -259,7 +271,7 @@ def config_init_access_policy(
     except ConfigError as exc:
         fail(exc)
     except AccessPolicyError as exc:
-        fail(exc)
+        fail(exc, guidance=_PROFILE_KEY_GUIDANCE)
 
     try:
         _write_exclusive(target, text)
@@ -295,11 +307,13 @@ def config_init_access_policy(
     # rich Console hard-folds at 80 columns on a non-tty, so
     # `hmcpctl config init-access-policy > path.txt` would otherwise capture a path
     # broken across lines. Markup off for the same reason as above.
-    console.print(str(target), soft_wrap=True, markup=False)
+    console.print(terminal_field(target), soft_wrap=True, markup=False)
     if output is None:
         err_console.print(
-            "Review it, then start the server with: hmcpctl serve --access-policy "
-            f"{LEGACY_POLICY_NAME}",
+            (
+                f"Review it, then start the server with: hmcpctl serve --access-policy "
+                f"{terminal_field(LEGACY_POLICY_NAME, err=True)}"
+            ),
             markup=False,
         )
     else:
@@ -317,6 +331,11 @@ def config_init_access_policy(
 
 DIFF_IDENTICAL: Final = 0
 DIFF_DIFFERS: Final = 1
+_PROFILE_KEY_GUIDANCE = (
+    "\n\nThat entry came from a profile key in config.toml. "
+    "Remove the padding from the profile key."
+)
+
 DEPLOYED_UNREADABLE: Final = 3
 GENERATION_FAILED: Final = 4
 
@@ -332,13 +351,7 @@ def _render_validated_legacy_policy() -> str:
 
     connections = legacy_connections()
     text = render_legacy_policy(TOOL_SECURITY, connections)
-    try:
-        compile_rendered_policy(text, TOOL_SECURITY)
-    except AccessPolicyError as exc:
-        raise AccessPolicyError(
-            f"{exc}\n\nThat entry came from a profile key in config.toml. "
-            "Remove the padding from the profile key."
-        ) from exc
+    compile_rendered_policy(text, TOOL_SECURITY)
     return text
 
 
@@ -380,7 +393,7 @@ def config_diff_access_policy(
     except ConfigError as exc:
         fail(exc, code=GENERATION_FAILED)
     except AccessPolicyError as exc:
-        fail(exc, code=GENERATION_FAILED)
+        fail(exc, code=GENERATION_FAILED, guidance=_PROFILE_KEY_GUIDANCE)
 
     try:
         deployed_text = path.read_text(encoding="utf-8")
@@ -418,8 +431,10 @@ def config_diff_access_policy(
         # `soft_wrap=True`: like init-access-policy's success line, this carries the
         # operator's own path, and an 80-column fold on a non-tty would break it.
         err_console.print(
-            f"No differences: {path} matches what this build and the "
-            "current config.toml generate.",
+            (
+                f"No differences: {terminal_field(path, err=True)}"
+                f" matches what this build and the current config.toml generate."
+            ),
             soft_wrap=True,
             markup=False,
         )
@@ -429,7 +444,12 @@ def config_diff_access_policy(
     # Console; soft-wrapped because the diff IS the command's machine-readable
     # output and a hard fold at 80 columns would corrupt its lines.
     for line in diff:
-        console.print(line.rstrip("\n"), soft_wrap=True, highlight=False, markup=False)
+        console.print(
+            terminal_field(line.rstrip("\n")),
+            soft_wrap=True,
+            highlight=False,
+            markup=False,
+        )
     raise typer.Exit(code=DIFF_DIFFERS)
 
 

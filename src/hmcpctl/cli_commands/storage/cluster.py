@@ -11,7 +11,14 @@ from ...operations.storage.cluster import (
     validate_logical_unit_create,
     validate_logical_unit_wait,
 )
-from ..output import VerbatimTable, console, first_field, output, print_json
+from ..output import (
+    VerbatimTable,
+    console,
+    first_field,
+    output,
+    print_json,
+    terminal_field,
+)
 from ..runtime import with_client
 
 
@@ -81,7 +88,8 @@ def cluster_create_lu(
         lu_type, device_type, wait, timeout_seconds, poll_interval
     )
     if not yes and not typer.confirm(
-        f"Create {lu_size_gib} GiB {lu_type} LU '{name}' in cluster {cluster}?"
+        f"Create {terminal_field(lu_size_gib)} GiB {terminal_field(lu_type)} LU '"
+        f"{terminal_field(name)}' in cluster {terminal_field(cluster)}?"
     ):
         raise typer.Abort()
 
@@ -101,7 +109,9 @@ def cluster_create_lu(
     )
 
     console.print(
-        f"Submitted CreateLogicalUnit job for '{name}'", style="green", markup=False
+        f"Submitted CreateLogicalUnit job for '{terminal_field(name)}'",
+        style="green",
+        markup=False,
     )
     print_json(job)
 
@@ -121,7 +131,8 @@ def cluster_delete_lu(
     """Delete a Logical Unit from a Cluster/SSP (submits a job)."""
     validate_logical_unit_wait(wait, timeout_seconds, poll_interval)
     if not yes and not typer.confirm(
-        f"Delete LU {udid} from cluster {cluster}? This is irreversible."
+        f"Delete LU {terminal_field(udid)} from cluster {terminal_field(cluster)}"
+        f"? This is irreversible."
     ):
         raise typer.Abort()
 
@@ -137,7 +148,9 @@ def cluster_delete_lu(
     )
 
     console.print(
-        f"Submitted DeleteLogicalUnit job for {udid}", style="green", markup=False
+        f"Submitted DeleteLogicalUnit job for {terminal_field(udid)}",
+        style="green",
+        markup=False,
     )
     print_json(job)
 

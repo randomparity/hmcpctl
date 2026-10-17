@@ -13,7 +13,7 @@ from ...jobs import (
     validate_wait_timing,
 )
 from ...operations.lpar.core import delete_lpar, power_lpar
-from ..output import console, err_console, print_json
+from ..output import console, err_console, print_json, terminal_field
 from ..runtime import with_client
 
 
@@ -172,7 +172,9 @@ def _power_lpar(
                 op = f"{op} with restart"
             if operation != "shutdown":
                 op = f"{op} (operation={operation})"
-        if not typer.confirm(f"Really submit {op} for partition '{name_or_uuid}'?"):
+        if not typer.confirm(
+            f"Really submit {terminal_field(op)} for partition '{terminal_field(name_or_uuid)}'?"
+        ):
             err_console.print("Aborted.")
             raise typer.Abort()
 
@@ -199,19 +201,26 @@ def _power_lpar(
     )
     uuid, job = result.lpar_uuid, result.job
     if job and job.get("already_running"):
-        console.print(job["message"], style="yellow", markup=False)
+        console.print(terminal_field(job["message"]), style="yellow", markup=False)
         print_json(job)
         return
-    console.print(Text.assemble(("Job submitted", "green"), f" for {uuid}"))
+    console.print(
+        Text.assemble(("Job submitted", "green"), f" for {terminal_field(uuid)}")
+    )
     print_json(job)
     for warning in result.warnings:
-        console.print(f"Warning: {warning}", style="yellow", markup=False)
+        console.print(
+            f"Warning: {terminal_field(warning)}", style="yellow", markup=False
+        )
 
 
 def lpars_delete(
     name_or_uuid: str = typer.Argument(..., help="Partition name or UUID"),
     system: str = typer.Option(
-        ..., "--system", "-s", help="Managed system name or UUID"
+        ...,
+        "--system",
+        "-s",
+        help="Managed system name or UUID; required for scoped ownership and cleanup checks",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
     ownership_override: bool = typer.Option(
@@ -222,7 +231,7 @@ def lpars_delete(
 ) -> None:
     """Delete (destroy) an LPAR. It must be powered off first."""
     if not yes and not typer.confirm(
-        f"Permanently DELETE partition '{name_or_uuid}'? This cannot be undone."
+        f"Permanently DELETE partition '{terminal_field(name_or_uuid)}'? This cannot be undone."
     ):
         raise typer.Abort()
 
@@ -234,7 +243,7 @@ def lpars_delete(
             ownership_override=ownership_override,
         )
     )
-    console.print(f"Deleted LPAR {uuid}", style="green", markup=False)
+    console.print(f"Deleted LPAR {terminal_field(uuid)}", style="green", markup=False)
 
 
 def register_commands(group: typer.Typer) -> None:

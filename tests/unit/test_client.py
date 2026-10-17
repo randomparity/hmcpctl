@@ -8,6 +8,7 @@ import threading
 import traceback
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -27,7 +28,11 @@ from defusedxml import ElementTree as DET
 
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.client import core as client_core
-from hmcpctl.client.core import HMCClient, TLSVerificationDisabledWarning
+from hmcpctl.client.core import (
+    HMCClient,
+    HMCVerifySSLDefaultWarning,
+    TLSVerificationDisabledWarning,
+)
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError, HMCTransportError
 from hmcpctl.jobs import build_job_request
@@ -502,7 +507,11 @@ async def test_tls_warning_key_retains_the_construction_time_source(monkeypatch)
     monkeypatch.setattr(client_core, "_reported_tls_warning_keys", set())
     monkeypatch.setenv("HMC_VERIFY_SSL", "false")
     environment_client = HMCClient(
-        HMCConfig(host="hmc.test", user="hscroot", password="abc123")
+        HMCConfig(
+            host="hmc.test",
+            user="hscroot",
+            password="abc123",  # pragma: allowlist secret
+        )
     )
 
     monkeypatch.setenv("HMC_VERIFY_SSL", "true")
@@ -582,6 +591,44 @@ async def test_logon_silent_when_verify_ssl_enabled(mock_hmc):
         async with HMCClient(make_config(verify_ssl=True)):
             pass
     assert not [w for w in caught if "verification" in str(w.message)]
+
+
+def test_startup_warning_fires_when_verify_ssl_defaults_to_false(monkeypatch):
+    """Field-default verify_ssl=false emits the pre-1.0 startup warning."""
+    monkeypatch.delenv("HMC_VERIFY_SSL", raising=False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", HMCVerifySSLDefaultWarning)
+        HMCClient(
+            HMCConfig(
+                host="hmc.test",
+                user="hscroot",
+                password="abc123",  # pragma: allowlist secret
+            )
+        )
+    assert any(
+        warning.category is HMCVerifySSLDefaultWarning and "1.0" in str(warning.message)
+        for warning in caught
+    )
+
+
+def test_startup_warning_silent_when_verify_ssl_explicitly_false():
+    """Explicit verify_ssl=false does not emit the startup warning."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", HMCVerifySSLDefaultWarning)
+        HMCClient(make_config(verify_ssl=False))
+    assert not [
+        warning for warning in caught if warning.category is HMCVerifySSLDefaultWarning
+    ]
+
+
+def test_startup_warning_silent_when_verify_ssl_true():
+    """verify_ssl=true does not emit the startup warning."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", HMCVerifySSLDefaultWarning)
+        HMCClient(make_config(verify_ssl=True))
+    assert not [
+        warning for warning in caught if warning.category is HMCVerifySSLDefaultWarning
+    ]
 
 
 @pytest.mark.asyncio
@@ -687,12 +734,19 @@ def test_tls_audit_record_names_where_the_setting_came_from(
         # default to flow through unset.
         "host": "hmc.test",
         "user": "hscroot",
-        "password": "abc123",
+        "password": "abc123",  # pragma: allowlist secret
         "_env_file": None,
     }
     config_kwargs.update(kwargs)
     caught = _capture_audit()
-    HMCClient(HMCConfig(**config_kwargs))
+    # Field-default cases deliberately exercise ADR 0224's startup warning too.
+    expectation = (
+        pytest.warns(HMCVerifySSLDefaultWarning)
+        if expected_source == "field-default"
+        else nullcontext()
+    )
+    with expectation:
+        HMCClient(HMCConfig(**config_kwargs))
 
     assert len(caught) == 1
     assert caught[0]["source"] == expected_source
@@ -746,11 +800,23 @@ def test_tls_audit_record_ignores_the_environment_for_an_isolated_config(
     monkeypatch.setenv("HMC_VERIFY_SSL", "true")
     caught = _capture_audit()
 
-    HMCClient(
-        HMCConfig.from_mapping(
-            {"host": "hmc.test", "user": "hscroot", "password": "abc123", **kwargs}
-        )
+    # Field-default cases deliberately exercise ADR 0224's startup warning too.
+    expectation = (
+        pytest.warns(HMCVerifySSLDefaultWarning)
+        if expected_source == "field-default"
+        else nullcontext()
     )
+    with expectation:
+        HMCClient(
+            HMCConfig.from_mapping(
+                {
+                    "host": "hmc.test",
+                    "user": "hscroot",
+                    "password": "abc123",  # pragma: allowlist secret
+                    **kwargs,
+                }
+            )
+        )
 
     assert len(caught) == 1
     assert caught[0]["source"] == expected_source
@@ -1038,6 +1104,10 @@ async def test_get_managed_system_fallback_failure_raises_actionable_error(
         with pytest.raises(HMCError, match="could not be resolved") as exc_info:
             await hmc.get_managed_system(uuid)
     assert exc_info.value.status_code == 500
+    message = str(exc_info.value)
+    assert "X-HMC-Schema-Version pin (HMC_SCHEMA_VERSION)" in message
+    assert "unset HMC_SCHEMA_VERSION" in message
+    assert "firmware" not in message
     if expect_quick_all_cause:
         assert "quick/All failed" in str(exc_info.value.__cause__)
 
@@ -4350,3 +4420,211 @@ async def test_search_uom_validate_truncates_at_the_length_cap(mock_hmc, over):
     else:
         assert name in message
         assert "..." not in message
+
+
+# ---------------------------------------------------------------------------
+# ADR 0222: trust_system_store — OS certificate store opt-in
+# ---------------------------------------------------------------------------
+#
+# _new_http_client passes verify=<SSLContext|bool> to httpx.AsyncClient.
+# We stub out AsyncClient to capture that argument before httpx reads
+# SSL_CERT_FILE (which it does at __init__ time, not lazily).
+
+
+class _CapturingAsyncClient:
+    """Stub for httpx.AsyncClient that records the verify= kwarg."""
+
+    captured: list
+
+    def __init__(self, **kwargs):
+        type(self).captured.append(kwargs.get("verify"))
+        self.base_url = kwargs.get("base_url", httpx.URL("https://hmc.test:443"))
+
+    async def aclose(self):
+        pass
+
+
+def _patch_async_client(monkeypatch):
+    """Install a capturing stub and return the list it writes to."""
+    _CapturingAsyncClient.captured = []
+    monkeypatch.setattr("hmcpctl.client.core.httpx.AsyncClient", _CapturingAsyncClient)
+    return _CapturingAsyncClient.captured
+
+
+def test_trust_system_store_on_with_verify_ssl_uses_ssl_context(monkeypatch):
+    """verify_ssl=True + trust_system_store=True (default) passes an SSLContext."""
+    import ssl
+
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=True, trust_system_store=True))
+    assert len(captured) >= 1
+    assert isinstance(captured[0], ssl.SSLContext)
+    assert isinstance(captured[0], truststore.SSLContext)
+
+
+def test_trust_system_store_off_with_verify_ssl_does_not_use_ssl_context(monkeypatch):
+    """verify_ssl=True + trust_system_store=False passes True (certifi roots)."""
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=True, trust_system_store=False))
+    assert len(captured) >= 1
+    assert not isinstance(captured[0], truststore.SSLContext)
+
+
+def test_trust_system_store_ssl_cert_file_wins_over_system_store(monkeypatch):
+    """When SSL_CERT_FILE is set, trust_system_store is bypassed."""
+    import truststore
+
+    monkeypatch.setenv("SSL_CERT_FILE", "/some/bundle.pem")
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=True, trust_system_store=True))
+    assert len(captured) >= 1
+    assert not isinstance(captured[0], truststore.SSLContext)
+
+
+def test_trust_system_store_ssl_cert_dir_wins_over_system_store(monkeypatch):
+    """When SSL_CERT_DIR is set, trust_system_store is bypassed."""
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.setenv("SSL_CERT_DIR", "/some/ca-dir")
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=True, trust_system_store=True))
+    assert len(captured) >= 1
+    assert not isinstance(captured[0], truststore.SSLContext)
+
+
+def test_trust_system_store_ignored_when_verify_ssl_false(monkeypatch):
+    """trust_system_store has no effect when verify_ssl=False."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=False, trust_system_store=True))
+    # When verify_ssl=False, verify stays False (a bool), not an SSLContext.
+    assert len(captured) >= 1
+    assert captured[0] is False
+
+
+def test_tls_audit_record_still_names_verify_ssl_source_not_trust_system_store(
+    monkeypatch,
+):
+    """ADR 0222: trust_system_store changes the context, not the audit source."""
+    monkeypatch.delenv("HMC_VERIFY_SSL", raising=False)
+    monkeypatch.setenv("HMC_VERIFY_SSL", "false")
+    caught = _capture_audit()
+
+    HMCClient(
+        HMCConfig(
+            host="hmc.test",
+            user="hscroot",
+            password="abc123",  # pragma: allowlist secret
+        )
+    )
+
+    assert len(caught) == 1
+    assert caught[0]["source"] == "environment:HMC_VERIFY_SSL"
+
+
+# ---------------------------------------------------------------------------
+# ADR 0223: ca_bundle — first-class CA-path setting
+# ---------------------------------------------------------------------------
+#
+# _new_http_client passes verify=<path|SSLContext|bool> to httpx.AsyncClient.
+# We reuse _patch_async_client / _CapturingAsyncClient from ADR 0222's section.
+
+
+def test_ca_bundle_set_passes_path_as_verify(monkeypatch):
+    """ca_bundle set and verify_ssl=True passes the path string to AsyncClient."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=True, ca_bundle="/path/to/hmc-ca.pem"))
+    assert len(captured) >= 1
+    assert captured[0] == "/path/to/hmc-ca.pem"
+
+
+def test_ca_bundle_wins_over_ssl_cert_file(monkeypatch):
+    """When ca_bundle is set, SSL_CERT_FILE is ignored for verify=."""
+    monkeypatch.setenv("SSL_CERT_FILE", "/some/other/bundle.pem")
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=True, ca_bundle="/hmc-specific.pem"))
+    assert len(captured) >= 1
+    # Must be the ca_bundle path, not a bool or SSLContext
+    assert captured[0] == "/hmc-specific.pem"
+
+
+def test_ca_bundle_wins_over_trust_system_store(monkeypatch):
+    """When ca_bundle is set, trust_system_store is bypassed (no SSLContext)."""
+    import ssl
+
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(
+        make_config(
+            verify_ssl=True,
+            trust_system_store=True,
+            ca_bundle="/hmc-specific.pem",
+        )
+    )
+    assert len(captured) >= 1
+    # Must be the path string, not a truststore.SSLContext
+    assert not isinstance(captured[0], ssl.SSLContext)
+    assert not isinstance(captured[0], truststore.SSLContext)
+    assert captured[0] == "/hmc-specific.pem"
+
+
+def test_ca_bundle_ignored_when_verify_ssl_false(monkeypatch):
+    """ca_bundle has no effect when verify_ssl=False."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=False, ca_bundle="/hmc-specific.pem"))
+    assert len(captured) >= 1
+    # verify_ssl=False → verify=False regardless of ca_bundle
+    assert captured[0] is False
+
+
+def test_ca_bundle_none_falls_through_to_trust_system_store(monkeypatch):
+    """When ca_bundle is None, the ADR 0222 trust_system_store path is used."""
+    import ssl
+
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=True, trust_system_store=True, ca_bundle=None))
+    assert len(captured) >= 1
+    assert isinstance(captured[0], ssl.SSLContext)
+    assert isinstance(captured[0], truststore.SSLContext)
+
+
+def test_tls_audit_record_still_names_verify_ssl_source_not_ca_bundle(
+    monkeypatch,
+):
+    """ADR 0223: ca_bundle changes the trust source, not the audit verify_ssl source."""
+    monkeypatch.delenv("HMC_VERIFY_SSL", raising=False)
+    monkeypatch.setenv("HMC_VERIFY_SSL", "false")
+    caught = _capture_audit()
+
+    HMCClient(
+        HMCConfig(
+            host="hmc.test",
+            user="hscroot",
+            password="abc123",  # pragma: allowlist secret
+            ca_bundle="/hmc-specific.pem",
+        )
+    )
+
+    assert len(caught) == 1
+    assert caught[0]["source"] == "environment:HMC_VERIFY_SSL"

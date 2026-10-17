@@ -11,7 +11,7 @@ from ...documents.lpar import PARTITION_TYPES, LparResources, validate_partition
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
 from ...ssh.lpar import validate_caller_token
-from ..output import console, err_console, print_json, usage_error
+from ..output import console, err_console, print_json, terminal_field, usage_error
 from ..runtime import with_client
 from .assignment_input import load_pcie_assignments
 
@@ -89,7 +89,10 @@ def lpars_create(
         usage_error(f"--type: {exc}")
     if not yes:
         typer.confirm(
-            f"Create LPAR '{name}' ({partition_type}, {memory} MiB) on system {system}?",
+            (
+                f"Create LPAR '{terminal_field(name)}' ({terminal_field(partition_type)}, "
+                f"{terminal_field(memory)} MiB) on system {terminal_field(system)}?"
+            ),
             abort=True,
         )
     resources = LparResources(
@@ -123,10 +126,14 @@ def lpars_create(
         )
     )
 
-    console.print(f"Created LPAR '{name}'", style="green", markup=False)
+    console.print(f"Created LPAR '{terminal_field(name)}'", style="green", markup=False)
     print_json(result.lpar)
     for warning in result.warnings:
-        err_console.print(f"Warning: {warning}", style="yellow", markup=False)
+        err_console.print(
+            f"Warning: {terminal_field(warning, err=True)}",
+            style="yellow",
+            markup=False,
+        )
     if result.steps:
         print_json(asdict(result))
     if not result.workflow_completed:

@@ -15,6 +15,8 @@ the complete tree.
 
 from __future__ import annotations
 
+from types import ModuleType
+
 from .cli_commands import (
     config,
     jobs,
@@ -28,6 +30,7 @@ from .cli_commands import (
     console as console_commands,
 )
 from .cli_commands.app import (
+    CLICommand,
     adapters_app,
     cluster_app,
     config_app,
@@ -104,13 +107,13 @@ def _register_commands() -> None:
         (config, config_app),
         (console_commands, console_app),
         (jobs, jobs_app),
-        (lpar_config, lpars_app),
+        (lpar_inventory, lpars_app),
+        (lpar_lifecycle, lpars_app),
         (lpar_console, lpars_app),
         (lpar_create, lpars_app),
         (lpar_decommission, lpars_app),
-        (lpar_inventory, lpars_app),
-        (lpar_lifecycle, lpars_app),
         (lpar_migration, lpars_app),
+        (lpar_config, lpars_app),
         (lpar_modify, lpars_app),
         (lpar_profiles, lpars_app),
         (lpar_provision, lpars_app),
@@ -128,8 +131,44 @@ def _register_commands() -> None:
         (vios, vios_app),
         (vios_labels, vios_app),
     )
+    lpar_panels: dict[ModuleType, str] = {
+        lpar_inventory: "Inventory",
+        lpar_lifecycle: "Lifecycle",
+        lpar_create: "Lifecycle",
+        lpar_decommission: "Lifecycle",
+        lpar_provision: "Lifecycle",
+        lpar_console: "Console",
+        lpar_migration: "Migration",
+        lpar_config: "Configuration",
+        lpar_modify: "Configuration",
+        lpar_profiles: "Configuration",
+    }
     for module, group in registrations:
+        start = len(group.registered_commands)
         module.register_commands(group)
+        for command in group.registered_commands[start:]:
+            command.cls = CLICommand
+            if group is lpars_app:
+                command.rich_help_panel = lpar_panels[module]
+            elif group is storage_app:
+                name = command.name or ""
+                if name.startswith(("list-", "get-")):
+                    command.rich_help_panel = "Inventory"
+                elif name in ("map", "detach-mapping"):
+                    command.rich_help_panel = "Mappings"
+                elif "media" in name or name == "upload-iso":
+                    command.rich_help_panel = "Optical media"
+                else:
+                    command.rich_help_panel = "Disks"
+    for command in app.registered_commands:
+        command.cls = CLICommand
+    for group in app.registered_groups:
+        if group.typer_instance is not None:
+            group.typer_instance.info.epilog = (
+                "Place connection options before the group: "
+                f"hmcpctl --profile NAME {group.name} COMMAND. "
+                "Use hmcpctl --help for root connection options."
+            )
 
 
 _register_commands()

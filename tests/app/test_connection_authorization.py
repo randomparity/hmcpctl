@@ -16,6 +16,7 @@ import pytest
 from conftest import make_config
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
+from rendered_output import collapse_whitespace
 
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.authorization.access_policy import (
@@ -655,7 +656,7 @@ def _stderr(capsys) -> str:
     assert audit_sink._sink().drain(audit_sink._DRAIN_TIMEOUT), (
         "the sink must settle, not stall"
     )
-    return " ".join(capsys.readouterr().err.split())
+    return collapse_whitespace(capsys.readouterr().err)
 
 
 def _denied(application, profile: str) -> str:
@@ -802,7 +803,7 @@ def test_served_warnings_use_the_bounded_escaped_sink(capsys, monkeypatch):
     captured = _stderr(capsys)
     assert called == []
     assert "py.warnings: WARNING:" in captured
-    assert "unsafe\\x1bwarning" in captured
+    assert "unsafe\\u001bwarning" in captured
     assert "\x1b" not in captured
 
 

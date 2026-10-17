@@ -27,7 +27,7 @@ import pathlib
 import sys
 import tomllib
 from dataclasses import dataclass
-from typing import NotRequired, TypedDict
+from typing import NotRequired, TypedDict, cast
 
 import asyncssh
 
@@ -222,10 +222,10 @@ def report(results: list[ProbeResult]) -> None:
                 print(f"\n  {'─' * 60}")
                 print(f"  SYSTEM: {sys_name}")
                 print(f"  {'─' * 60}")
-                for qlabel, qq in q.items():
+                for qlabel, qq in cast(dict[str, QueryResult], q).items():
                     _print_query(f"  {qlabel}", qq)
             else:
-                _print_query(f"  {label}", q)
+                _print_query(f"  {label}", cast(QueryResult, q))
 
 
 def _print_query(label: str, q: QueryResult) -> None:

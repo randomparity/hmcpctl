@@ -2,6 +2,8 @@
 
 ## Status
 
+> **Control-character passthrough superseded by [0229](0229-cli-terminal-control-policy.md)** (2026-10-16); markup and styling decisions remain in force.
+
 Accepted on 2026-10-01 for issue #1029.
 
 ## Context

@@ -1,8 +1,7 @@
 {
  "firmware": "v11r2-p10-9043-mrx",
  "sources": [
-  "2026-10-01 read-only sweep: HMC V11R2 SP1120 managing a POWER10 9043-MRX (second HMC)",
-  "2026-10-01 read-only sweep: HMC V11R2 SP1120 managing a POWER10 9043-MRX (first HMC)"
+  "2026-10-01 read-only sweep: HMC V11R2 SP1120 managing a POWER10 9043-MRX (second HMC)"
  ],
  "rest": {
   "endpoints": [

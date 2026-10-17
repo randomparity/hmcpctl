@@ -14,7 +14,8 @@ import queue
 import re
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -359,6 +360,54 @@ def sink_handler() -> logging.Handler:
     their own message, and leaves it unset when the message is the record.
     """
     return _AuditHandler()
+
+
+class _CLIAuditFormatter(logging.Formatter):
+    """Compact terminal view without changing the emitted record or collector JSON."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        if sys.stderr is None or not sys.stderr.isatty():
+            return message
+        try:
+            event = json.loads(message)
+        except (ValueError, TypeError):
+            return message
+        if (
+            not isinstance(event, dict)
+            or set(event) != {"time", "event", "host", "source"}
+            or event["event"] != "tls-verification-disabled"
+            or not all(isinstance(value, str) for value in event.values())
+        ):
+            return message
+        fields = " ".join(
+            f"{key}={json.dumps(event[key], ensure_ascii=True)}"
+            for key in ("host", "source", "time")
+        )
+        return f"Audit tls-verification-disabled: {fields}"
+
+
+@contextmanager
+def cli_audit_sink() -> Generator[None]:
+    """Scope CLI fallback presentation; configured handlers remain authoritative."""
+    logger = logging.getLogger(AUDIT_LOGGER_NAME)
+    if (
+        logger.hasHandlers()
+        or logging.lastResort is None
+        or logging.lastResort is not getattr(logging, "_defaultLastResort", None)
+    ):
+        yield
+        return
+    # Keep lastResort's synchronous delivery: a display change must not add drops.
+    handler = type(logging.lastResort)()
+    handler.setLevel(logging.lastResort.level)
+    handler.setFormatter(_CLIAuditFormatter())
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
 
 
 def set_audit_level(level: int) -> None:

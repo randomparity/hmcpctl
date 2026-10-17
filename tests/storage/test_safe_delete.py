@@ -381,3 +381,13 @@ async def test_delete_virtual_disk_inline_match_honours_the_group_link(
         else:
             await delete_virtual_disk(hmc, VIOS_UUID, VG_UUID, "vd-1")
     assert hmc.delete_virtual_disk.await_count == (0 if refused else 1)
+
+
+@pytest.fixture(autouse=True)
+def scoped_volume_group_inventory(monkeypatch):
+    """Supply membership at the HMC boundary for these media/guard tests."""
+    lookup = AsyncMock(
+        return_value=[{"UUID": VG_UUID, "Resource": {"GroupName": "rootvg"}}]
+    )
+    monkeypatch.setattr(HMCClient, "list_volume_groups", lookup)
+    return lookup

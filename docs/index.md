@@ -24,6 +24,7 @@ an HMC, and use the CLI or an MCP client.
 - [Environment variables](environment-variables.md): all supported settings and operation guards.
 - [Operation details](operations.md): units, selectors, collection limits, and capability restrictions.
 - [Authorization audit](authorization-audit.md): events, reason codes, and log delivery.
+- [Progress-code definitions](progress-codes.md): offline POWER9 coverage, lookup and enriched outputs.
 - [HMC CLI cheatsheet](hmc-cli-cheatsheet.md): underlying IBM commands used over SSH.
 - [HMC hints](HMC_HINTS.md): SSH access, host-key trust, and command troubleshooting.
 - [HMC API patterns](api-patterns.md): verified V10R3/POWER9 REST and CLI behaviour, with the code paths that conform.

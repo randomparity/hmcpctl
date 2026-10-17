@@ -19,7 +19,14 @@ from ...operations.lpar.provision import (
     provision_lpar,
     validate_provision_assignments,
 )
-from ..output import VerbatimTable, console, print_json, usage_error
+from ..output import (
+    VerbatimTable,
+    console,
+    escape_controls,
+    print_json,
+    terminal_field,
+    usage_error,
+)
 from ..runtime import with_client
 from .assignment_input import load_pcie_assignments
 
@@ -93,7 +100,10 @@ def lpars_provision(
         )
     if not dry_run and not yes:
         typer.confirm(
-            f"Provision LPAR '{name}' on system '{system}' (VLAN {port_vlan_id}, VIOS {vios_uuid})?"
+            (
+                f"Provision LPAR '{terminal_field(name)}' on system '{terminal_field(system)}"
+                f"' (VLAN {terminal_field(port_vlan_id)}, VIOS {terminal_field(vios_uuid)})?"
+            )
             + (" [DRY RUN]" if dry_run else ""),
             abort=True,
         )
@@ -139,19 +149,23 @@ def _render_provision_result(
         )
     elif result.workflow_completed:
         console.print(
-            f"LPAR '{name}' provisioned successfully", style="green", markup=False
+            f"LPAR '{terminal_field(name)}' provisioned successfully",
+            style="green",
+            markup=False,
         )
     elif result.resource_created:
         identity = result.lpar_uuid or "UUID unavailable"
         console.print(
-            f"LPAR '{name}' was created ({identity}), "
-            "but provisioning is incomplete — check step results",
+            (
+                f"LPAR '{terminal_field(name)}' was created ({terminal_field(identity)}"
+                f"), but provisioning is incomplete — check step results"
+            ),
             style="yellow",
             markup=False,
         )
     else:
         console.print(
-            f"LPAR '{name}' was not created — check step results",
+            f"LPAR '{terminal_field(name)}' was not created — check step results",
             style="yellow",
             markup=False,
         )
@@ -165,12 +179,14 @@ def _render_provision_result(
             if step.status == "ok"
             else ("yellow" if step.status in ("dry_run", "skipped") else "red")
         )
-        table.add_row(step.step, Text(step.status, style=style))
+        table.add_row(step.step, Text(escape_controls(step.status), style=style))
     console.print(table)
     for warning in result.warnings:
-        console.print(f"Warning: {warning}", style="yellow", markup=False)
+        console.print(
+            f"Warning: {terminal_field(warning)}", style="yellow", markup=False
+        )
     if result.change_location is not None:
-        console.print(result.change_location.summary(), markup=False)
+        console.print(terminal_field(result.change_location.summary()), markup=False)
 
 
 # LPAR Boot Order Commands

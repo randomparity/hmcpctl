@@ -2,6 +2,8 @@
 
 ## Status
 
+> **Superseded in part by [0226](0226-scoped-lpar-inspection.md)** (2026-10-16): supplied-scope UUID containment.
+
 Accepted (2026-08-14)
 
 ## Context

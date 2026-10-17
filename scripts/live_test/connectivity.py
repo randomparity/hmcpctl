@@ -9,34 +9,12 @@ from fastmcp import Client
 
 from hmcpctl.xmlutil import console_version
 
-from .observation import Assertion, CallFailure, ExpectedOutcome
+from .observation import Assertion
 from .results import entries, field
 from .results import resource as get_resource
 
 if TYPE_CHECKING:
     from live_test_runner import RunState
-
-# Known HMC firmware limitation: list_systems and list_console fail with
-# HTTP 500 on hardware where a null VirtualPersistentMemoryVolume/Uuid field
-# cannot be serialized. Direct-object lookups (get_system, get_lpar) work.
-_FIRMWARE_INVENTORY_500 = ExpectedOutcome(
-    operation="system.list",
-    variant="firmware-inventory-serialization",
-    reason="HMC firmware cannot serialize a null hardware property (HTTP 500 — known firmware limitation on this hardware; direct-object lookups still work)",
-    error_codes=frozenset({"VirtualPersistentMemoryVolume"}),
-)
-_FIRMWARE_CAPACITY_500 = ExpectedOutcome(
-    operation="capacity.report",
-    variant="firmware-inventory-serialization",
-    reason=_FIRMWARE_INVENTORY_500.reason,
-    error_codes=_FIRMWARE_INVENTORY_500.error_codes,
-)
-_FIRMWARE_PLACEMENT_500 = ExpectedOutcome(
-    operation="placement.find",
-    variant="firmware-inventory-serialization",
-    reason=_FIRMWARE_INVENTORY_500.reason,
-    error_codes=_FIRMWARE_INVENTORY_500.error_codes,
-)
 
 # hmc_list_systems lists from quick/All (#1501), so it succeeds even where the raw
 # feed 500s (ADR 0138). ST1 reads the raw feed through
@@ -74,16 +52,6 @@ def _uuids(items: Sequence[object]) -> set[str]:
     return {
         uuid.lower() for item in items if isinstance(uuid := field(item, "UUID"), str)
     }
-
-
-def _declared(status: str, data: object, outcome: ExpectedOutcome) -> bool:
-    """Whether ``record_with_expected`` would turn this result into the declared gap."""
-    return status == "SKIP" or (
-        status == "FAIL"
-        and isinstance(data, CallFailure)
-        and data.exception_type != "InvalidDispatch"
-        and outcome.matches(data)
-    )
 
 
 def _number(value: object) -> float | None:
@@ -137,8 +105,11 @@ async def _discover_console(client: Client, state: RunState) -> object:
     console_uuid = None
     if st == "PASS" and isinstance(data, dict):
         console_uuid = data.get("uuid") or data.get("UUID")
-    # console.info can fail with HTTP 500 on the same firmware bug that breaks
-    # list_systems; record the assertion so the gap is visible in the maturity catalog.
+    # console.info reads the ManagementConsole feed, which some HMC firmware builds
+    # have answered with HTTP 500 over a null Session/SessionId/Value (#880). #1531's
+    # sweep read only ManagedSystem, so it says nothing about this endpoint. No outcome
+    # is declared: a 500 records a failed assertion, keeping the gap visible in the
+    # maturity catalog.
     state.record_verified(
         1,
         "hmc_get_console_info",
@@ -169,9 +140,7 @@ async def _discover_system(
     config = state.config
     artifacts = state.artifacts
 
-    st, data = await state.call(
-        client, "hmc_list_systems", expected=[_FIRMWARE_INVENTORY_500]
-    )
+    st, data = await state.call(client, "hmc_list_systems")
     listed = entries(data) if st == "PASS" else []
     matched_uuid = next(
         (
@@ -181,33 +150,27 @@ async def _discover_system(
         ),
         None,
     )
-    if _declared(st, data, _FIRMWARE_INVENTORY_500):
-        state.record_with_expected(
-            1, "hmc_list_systems", st, data, [_FIRMWARE_INVENTORY_500]
-        )
-    else:
-        listed_uuids = _uuids(listed)
-        state.record_verified(
-            1,
-            "hmc_list_systems",
-            operation="system.list",
-            scenario="st1-system-inventory",
-            assertions=[
-                Assertion("system-list-non-empty", bool(listed)),
-                Assertion("boundary-system-listed", matched_uuid is not None),
-                Assertion(
-                    "entries-carry-uuid",
-                    bool(listed)
-                    and all(isinstance(e.get("UUID"), str) for e in listed),
-                ),
-                Assertion(
-                    "feed-served-directly",
-                    feed is not None and bool(listed_uuids) and listed_uuids == feed,
-                ),
-            ],
-            cleanup="not-required",
-            data=data,
-        )
+    listed_uuids = _uuids(listed)
+    state.record_verified(
+        1,
+        "hmc_list_systems",
+        operation="system.list",
+        scenario="st1-system-inventory",
+        assertions=[
+            Assertion("system-list-non-empty", bool(listed)),
+            Assertion("boundary-system-listed", matched_uuid is not None),
+            Assertion(
+                "entries-carry-uuid",
+                bool(listed) and all(isinstance(e.get("UUID"), str) for e in listed),
+            ),
+            Assertion(
+                "feed-served-directly",
+                feed is not None and bool(listed_uuids) and listed_uuids == feed,
+            ),
+        ],
+        cleanup="not-required",
+        data=data,
+    )
     if isinstance(matched_uuid, str):
         artifacts.system_uuid = matched_uuid
 
@@ -228,8 +191,8 @@ async def _discover_system(
         cleanup="not-required",
         data=data,
     )
-    # Fall back: extract system UUID from the single-system lookup if the list
-    # returned empty (e.g. HMC firmware bug on unfiltered ManagedSystem feed)
+    # Fall back to the single-system lookup's UUID when the list did not name
+    # the boundary system.
     if system_uuid and not artifacts.system_uuid:
         artifacts.system_uuid = system_uuid
     print(f"  System UUID: {artifacts.system_uuid}")
@@ -322,35 +285,28 @@ async def _probe_capacity_and_resources(
 ) -> None:
     config = state.config
 
-    st, data = await state.call(
-        client, "hmc_capacity_report", expected=[_FIRMWARE_CAPACITY_500]
-    )
+    st, data = await state.call(client, "hmc_capacity_report")
     rows = _items(data) if st == "PASS" else []
     boundary = next(
         (row for row in rows if _same(field(row, "system_name"), config.system_name)),
         None,
     )
-    if _declared(st, data, _FIRMWARE_CAPACITY_500):
-        state.record_with_expected(
-            1, "hmc_capacity_report", st, data, [_FIRMWARE_CAPACITY_500]
-        )
-    else:
-        state.record_verified(
-            1,
-            "hmc_capacity_report",
-            operation="capacity.report",
-            scenario="st1-capacity",
-            assertions=[
-                Assertion("boundary-system-reported", boundary is not None),
-                Assertion(
-                    "capacity-figures-consistent",
-                    boundary is not None and _capacity_consistent(boundary),
-                ),
-                Assertion("feed-served-directly", feed is not None),
-            ],
-            cleanup="not-required",
-            data=data,
-        )
+    state.record_verified(
+        1,
+        "hmc_capacity_report",
+        operation="capacity.report",
+        scenario="st1-capacity",
+        assertions=[
+            Assertion("boundary-system-reported", boundary is not None),
+            Assertion(
+                "capacity-figures-consistent",
+                boundary is not None and _capacity_consistent(boundary),
+            ),
+            Assertion("feed-served-directly", feed is not None),
+        ],
+        cleanup="not-required",
+        data=data,
+    )
     await _find_placement(client, state, feed, boundary)
 
     st, data = await state.call(
@@ -383,48 +339,42 @@ async def _find_placement(
         "hmc_find_placement",
         desired_memory_mib=request,
         desired_proc_units=_PLACEMENT_PROC_UNITS,
-        expected=[_FIRMWARE_PLACEMENT_500],
     )
-    if _declared(st, data, _FIRMWARE_PLACEMENT_500):
-        state.record_with_expected(
-            1, "hmc_find_placement", st, data, [_FIRMWARE_PLACEMENT_500]
-        )
-    else:
-        answered = st == "PASS"
-        candidates = _items(data) if answered else []
-        free = [_number(field(c, "free_memory_mib")) for c in candidates]
-        boundary_is_candidate = any(
-            _same(field(c, "system_name"), config.system_name) for c in candidates
-        )
-        state.record_verified(
-            1,
-            "hmc_find_placement",
-            operation="placement.find",
-            scenario="st1-capacity",
-            assertions=[
-                Assertion(
-                    "candidates-fit",
-                    answered and all(_covers(c, request) for c in candidates),
-                ),
-                Assertion(
-                    "candidates-best-fit-first",
-                    answered
-                    and None not in free
-                    and free == sorted(m for m in free if m is not None),
-                ),
-                # Unknowable without the capacity report's boundary row, so its
-                # absence fails the assertion rather than passing it vacuously.
-                Assertion(
-                    "boundary-candidate-when-it-fits",
-                    answered
-                    and boundary is not None
-                    and (boundary_is_candidate or not _covers(boundary, request)),
-                ),
-                Assertion("feed-served-directly", feed is not None),
-            ],
-            cleanup="not-required",
-            data=data,
-        )
+    answered = st == "PASS"
+    candidates = _items(data) if answered else []
+    free = [_number(field(c, "free_memory_mib")) for c in candidates]
+    boundary_is_candidate = any(
+        _same(field(c, "system_name"), config.system_name) for c in candidates
+    )
+    state.record_verified(
+        1,
+        "hmc_find_placement",
+        operation="placement.find",
+        scenario="st1-capacity",
+        assertions=[
+            Assertion(
+                "candidates-fit",
+                answered and all(_covers(c, request) for c in candidates),
+            ),
+            Assertion(
+                "candidates-best-fit-first",
+                answered
+                and None not in free
+                and free == sorted(m for m in free if m is not None),
+            ),
+            # Unknowable without the capacity report's boundary row, so its
+            # absence fails the assertion rather than passing it vacuously.
+            Assertion(
+                "boundary-candidate-when-it-fits",
+                answered
+                and boundary is not None
+                and (boundary_is_candidate or not _covers(boundary, request)),
+            ),
+            Assertion("feed-served-directly", feed is not None),
+        ],
+        cleanup="not-required",
+        data=data,
+    )
 
 
 async def _record_inventory_summaries(client: Client, state: RunState) -> None:

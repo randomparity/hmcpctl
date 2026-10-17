@@ -171,6 +171,7 @@ def _real_guard_hmc() -> AsyncMock:
     ]
     hmc.get_logical_partition.return_value = {"Resource": {"PartitionName": LPAR_NAME}}
     hmc.list_logical_partitions.return_value = [{"UUID": LPAR}]
+    hmc.list_vios.return_value = [{"UUID": VIOS}]
     hmc.list_optical_mappings.return_value = [
         {
             "ServerAdapter": {"AdapterName": "vhost0"},

@@ -17,13 +17,13 @@ from ...operations.vios.labels import (
     update_vios_vfc_group_label,
 )
 from ...ssh.vios_labels import ViosGroupUpdateAction
-from ..output import output, print_json
+from ..output import output, print_json, terminal_field
 from ..runtime import run_cli_coroutine, ssh_config
 
 
 def _confirm_on_stderr(prompt: str) -> bool:
     with redirect_stdout(sys.stderr):
-        return typer.confirm(prompt, err=True)
+        return typer.confirm(terminal_field(prompt, err=True), err=True)
 
 
 def _prompt_value(value: object) -> str:

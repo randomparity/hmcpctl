@@ -21,7 +21,7 @@ from ...operations.virtualization.pcie import (
 )
 from ...ssh.io_inventory import PciClass, list_io_slots
 from ...ssh.sriov import SriovMode
-from ..output import VerbatimTable, console, output, print_json
+from ..output import VerbatimTable, console, output, print_json, terminal_field
 from ..runtime import run_cli_coroutine, ssh_config, with_client
 
 
@@ -31,11 +31,15 @@ def _print_pcie_inventory(result, as_json: bool) -> None:
         return
     if result.capability == "capability-unavailable":
         console.print(
-            f"Capability unavailable: {result.unavailable_reason}", markup=False
+            f"Capability unavailable: {terminal_field(result.unavailable_reason)}",
+            markup=False,
         )
         return
     if not result.items:
-        console.print(f"{result.resource_kind} available; no items found", markup=False)
+        console.print(
+            f"{terminal_field(result.resource_kind)} available; no items found",
+            markup=False,
+        )
         return
 
     rows = [asdict(item) for item in result.items]
@@ -221,12 +225,15 @@ def network_set_sriov_mode(
     )
 
     console.print(
-        f"Adapter {adapter_id} verified in '{mode}' mode on '{system_name}'",
+        (
+            f"Adapter {terminal_field(adapter_id)} verified in '{terminal_field(mode)}"
+            f"' mode on '{terminal_field(system_name)}'"
+        ),
         style="green",
         markup=False,
     )
     if result.strip():
-        console.print(result.strip(), markup=False)
+        console.print(terminal_field(result.strip()), markup=False)
 
 
 def register_commands(group: typer.Typer) -> None:

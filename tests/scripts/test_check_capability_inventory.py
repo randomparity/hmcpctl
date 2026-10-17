@@ -1465,6 +1465,34 @@ def test_derivation_preserves_read_failure(tmp_path, monkeypatch, shared_evidenc
     )
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    ("other", "expected"),
+    [
+        # Two producers in one scenario record the same second; the greater id
+        # decides, as in promotion, whichever row the catalog lists first.
+        ({"identity": "st1-hmc-get-console-info-b"}, "failed"),
+        ({"identity": "st1-hmc-a-console"}, "current"),
+        # A newer retained row decides whatever its result.
+        (
+            {"identity": "st1-hmc-other", "observed_at": "2026-09-06T12:00:01Z"},
+            "failed",
+        ),
+    ],
+)
+def test_newest_live_row_by_time_then_id_decides_state(
+    tmp_path, shared_evidence, other, expected, reverse
+):
+    records, registry = shared_evidence
+    passed = records[0]["evidence"][0]
+    failed = _observation(result="failed", **other)
+    failed["closure_fingerprint"] = passed["closure_fingerprint"]
+    records[0]["evidence"] = [failed, passed] if reverse else [passed, failed]
+
+    state = inventory.derive_states(records, registry, tmp_path, _NOW)
+    assert state[records[0]["operation"]].state == expected
+
+
 @pytest.mark.parametrize("fail_on_stale", [False, True])
 def test_report_reuses_fingerprints_and_preserves_outputs(
     tmp_path, monkeypatch, capsys, registered_inventory, fail_on_stale

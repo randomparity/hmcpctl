@@ -10,6 +10,7 @@ exactly as it would against a real HMC.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -72,6 +73,17 @@ def schemas() -> dict[str, dict[str, Any]]:
 
 @pytest.fixture(autouse=True)
 def _no_waiting(monkeypatch):
+    async def cli_read(_state, arguments):
+        if arguments[:2] == ["lpars", "state"]:
+            return "open firmware"
+        if arguments[:2] == ["lpars", "refcodes"]:
+            return json.dumps([{"lpar_name": arguments[3], "refcode": "C2001150"}])
+        assert arguments[:2] == ["jobs", "show"]
+        return json.dumps(
+            {"job_id": arguments[2], "found": True, "status": "COMPLETED_OK"}
+        )
+
+    monkeypatch.setattr(bare_cec.cli, "execute", cli_read)
     monkeypatch.setattr(bare_cec, "_STATE_POLL_DELAY_S", 0)
     monkeypatch.setattr(pcie, "_ABSENCE_REREAD_DELAY_S", 0)
     monkeypatch.setattr(bare_cec, "_power_operations_authorized", lambda: True)
@@ -878,3 +890,33 @@ def test_record_held_judges_cleanup_as_record_verified_does(cleanup):
 
     expected = "PASS" if cleanup in {"passed", "not-required"} else "FAIL"
     assert [args[-3] for args in recorded] == [expected]
+
+
+def test_cli_steps_run_on_fixture_and_keep_mcp_observations(schemas):
+    world = World()
+    state = _state(schemas)
+    _run(world, state)
+    rows = [row for row in state.results if "cli_observation" in row]
+    assert {row["cli_observation"]["operation"] for row in rows} == {
+        "job.get",
+        "lpar.get_state",
+        "lpar.list_refcodes",
+    }
+    assert all(row["result"] == "passed" for row in rows)
+    assert set(_observations(state)) == _PROMOTED
+    _assert_torn_down(world)
+
+
+def test_cli_failure_keeps_existing_fixture_cleanup(schemas, monkeypatch):
+    async def failed(*args):
+        raise bare_cec.cli.CLIError("safe test failure")
+
+    monkeypatch.setattr(bare_cec.cli, "execute", failed)
+    world = World()
+    state = _state(schemas)
+    _run(world, state)
+    assert any(row["tool"].startswith("CLI ") for row in _rows(state, "FAIL"))
+    assert all(
+        row["result"] == "failed" for row in state.results if "cli_observation" in row
+    )
+    _assert_torn_down(world)

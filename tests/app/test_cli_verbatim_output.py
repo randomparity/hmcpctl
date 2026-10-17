@@ -1,4 +1,4 @@
-"""HMC and argument text reaches the terminal verbatim, never as Rich markup -- #1029.
+"""Literal markup and encoded terminal fields at CLI boundaries -- #1029, #1275.
 
 Rich parses every ``str`` it prints as console markup, so an HMC name, a raw REST body
 or a CLI argument holding ``[word]`` loses that segment, and a crafted argument can
@@ -212,11 +212,112 @@ def markup_violations(source: str, filename: str) -> list[str]:
     return sorted(set(found))
 
 
+def _terminal_safe(node: ast.AST, tables: set[str], err: bool | None) -> bool:
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in tables
+    if isinstance(node, ast.JoinedStr):
+        return all(
+            (
+                _terminal_safe(part.value, tables, err)
+                and (
+                    part.format_spec is None
+                    or _terminal_safe(part.format_spec, tables, err)
+                )
+            )
+            for part in node.values
+            if isinstance(part, ast.FormattedValue)
+        )
+    if isinstance(node, ast.IfExp):
+        return all(
+            _terminal_safe(part, tables, err) for part in (node.body, node.orelse)
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return all(
+            _terminal_safe(part, tables, err) for part in (node.left, node.right)
+        )
+    if _is_call_to(node, frozenset({"escape_controls"})):
+        return True
+    if _is_call_to(node, frozenset({"terminal_field"})):
+        destination = next(
+            (k.value for k in node.keywords if k.arg == "err"), ast.Constant(False)
+        )
+        return (
+            err is not None
+            and isinstance(destination, ast.Constant)
+            and destination.value is err
+        )
+    if _is_text(node):
+        return all(
+            _terminal_safe(
+                arg.elts[0] if isinstance(arg, ast.Tuple) else arg, tables, err
+            )
+            for arg in node.args
+        )
+    if _is_call_to(node, frozenset({"escape"})):
+        return all(_terminal_safe(arg, tables, err) for arg in node.args)
+    return False
+
+
+def terminal_violations(source: str, filename: str) -> list[str]:
+    """Guard known text sink forms; output.py owns byte/JSON exceptions and is tested directly."""
+    if filename == "output.py":
+        return []
+    tree = ast.parse(source)
+    owners = _enclosing_functions(tree)
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = ast.unparse(node.func)
+        if target in (
+            "typer.echo",
+            "typer.secho",
+            "sys.stdout.write",
+            "sys.stderr.write",
+            "console.print_json",
+            "err_console.print_json",
+            "print",
+        ):
+            found.append(f"{filename}:{node.lineno}: unowned text output")
+        elif _is_console_print(node) or target in (
+            "typer.confirm",
+            "confirm_on_stderr",
+            "typer.prompt",
+            "typer.BadParameter",
+        ):
+            err = (
+                "err_console" in target.split(".")[:-1]
+                or target in ("typer.BadParameter", "confirm_on_stderr")
+                or any(
+                    k.arg == "err"
+                    and isinstance(k.value, ast.Constant)
+                    and k.value.value is True
+                    for k in node.keywords
+                )
+            )
+            tables = _table_names(owners[node])
+            if not all(_terminal_safe(arg, tables, err) for arg in node.args):
+                found.append(f"{filename}:{node.lineno}: unencoded terminal field")
+        elif (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("add_row", "add_column")
+            and any(
+                _is_text(arg) and not _terminal_safe(arg, set(), None)
+                for arg in node.args
+            )
+        ):
+            found.append(f"{filename}:{node.lineno}: unencoded styled table field")
+    return found
+
+
 def test_cli_commands_print_external_text_verbatim():
     violations = [
         violation
         for path in sorted(CLI_COMMANDS.rglob("*.py"))
-        for violation in markup_violations(
+        for guard in (markup_violations, terminal_violations)
+        for violation in guard(
             path.read_text(encoding="utf-8"),
             path.relative_to(CLI_COMMANDS).as_posix(),
         )
@@ -409,7 +510,7 @@ def test_systems_list_table_prints_bracketed_system_name_verbatim(monkeypatch):
     system = {"UUID": "u1", "Resource": {"SystemName": MARKED, "State": "operating"}}
     _stub(monkeypatch, cli_systems, [system], "with_client")
 
-    result = RUNNER.invoke(cli.app, ["systems", "list"], terminal_width=200)
+    result = RUNNER.invoke(cli.app, ["systems", "list", "--format", "table"])
 
     assert result.exit_code == 0, result.output
     assert PRINTED_VERBATIM.search(result.stdout), result.stdout
@@ -429,3 +530,38 @@ def test_raw_commands_print_the_body_as_received(monkeypatch, value, argv):
 
     assert result.exit_code == 0, result.output
     assert result.stdout == RAW_BODY + "\n"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "console.print(name, markup=False)",
+        'err_console.print(Text.assemble(("Error", "red"), name))',
+        'typer.confirm(f"Delete {name}?")',
+        'confirm_on_stderr(f"Delete {name}?")',
+        "confirm_on_stderr(terminal_field(name))",
+        "typer.echo(body, color=True)",
+        "console.print_json(json.dumps(data))",
+        'console.print(f"Value: {name}", markup=False)',
+        "err_console.print(terminal_field(name), markup=False)",
+        'table.add_row(Text(name, style="red"))',
+    ],
+)
+def test_terminal_guard_rejects_unencoded_fields(source):
+    assert terminal_violations(source, "example.py")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'console.print(f"Value: {terminal_field(name)}", markup=False)',
+        "err_console.print(terminal_field(name, err=True), markup=False)",
+        'typer.confirm(f"Delete {terminal_field(name)}?")',
+        'confirm_on_stderr(f"Delete {terminal_field(name, err=True)}?")',
+        'console.print(Text.assemble(("Error", "red"), terminal_field(name)))',
+        'console.print("[green]Done[/green]")',
+        'table.add_row(Text(escape_controls(name), style="red"))',
+    ],
+)
+def test_terminal_guard_accepts_encoded_fields(source):
+    assert terminal_violations(source, "example.py") == []

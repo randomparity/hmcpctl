@@ -149,7 +149,9 @@ def _package_imports(
                 if alias.asname and alias.name.startswith(f"{_PACKAGE}."):
                     packages[alias.asname] = alias.name.removeprefix(f"{_PACKAGE}.")
             continue
-        origin = _import_origin(node) if isinstance(node, ast.ImportFrom) else None
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        origin = _import_origin(node)
         if origin is None:
             continue
         for alias in node.names:
@@ -230,6 +232,7 @@ def scan_source(source: str, label: str, module: str) -> Scan:
                 unreadable.append(f"{site} {dispatch.unreadable}")
             else:
                 names = tuple(name for name, _ in dispatch.arguments if name)
+                assert function is not None and dispatch.tool is not None
                 dispatches.append(Dispatch(site, function, dispatch.tool, names))
             continue
         if function is None:

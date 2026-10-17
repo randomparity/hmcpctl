@@ -75,6 +75,7 @@ def _web_file_client(**client_mocks) -> MagicMock:
     """A stand-in HMC client for tests that drive the web File steps directly."""
     hmc = MagicMock()
     hmc.config.iso_url_allowlist_entries = parse_iso_url_allowlist(ISO_HOST)
+    hmc.list_volume_groups = AsyncMock(return_value=[{"UUID": VG_UUID}])
     hmc.get_media_repository = AsyncMock(return_value=REPOSITORY)
     hmc.list_optical_media = _visible_after_upload()
     hmc._web_file_create = AsyncMock(return_value=FILE_UUID)
@@ -126,7 +127,8 @@ def stage_download(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_upload_iso_success(mock_hmc, stage_download):
+@pytest.mark.parametrize("selector", [VG_UUID, "rootvg"])
+async def test_upload_iso_success(mock_hmc, stage_download, selector):
     """The upload creates the File, streams the ISO, sees it listed, then releases the File."""
     download = stage_download()
     routes = _web_file_routes(mock_hmc)
@@ -135,7 +137,7 @@ async def test_upload_iso_success(mock_hmc, stage_download):
     async with HMCClient(config) as hmc:
         hmc.list_optical_media = _visible_after_upload()
         result = await upload_iso(
-            hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
+            hmc, VIOS_UUID, selector, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
         )
 
     assert result["status"] == "uploaded"
@@ -1399,6 +1401,7 @@ async def test_upload_iso_refuses_unbuildable_url_before_side_effects(
 async def test_upload_iso_translates_download_invalid_url(monkeypatch):
     cause = httpx.InvalidURL("cannot build ISO request")
     hmc = _client_for(ISO_HOST)
+    hmc.list_volume_groups = AsyncMock(return_value=[{"UUID": VG_UUID}])
     hmc.get_media_repository = AsyncMock(return_value=REPOSITORY)
     hmc.list_optical_media = AsyncMock(return_value=[])
     monkeypatch.setattr(
@@ -1416,3 +1419,13 @@ async def test_upload_iso_translates_download_invalid_url(monkeypatch):
     assert not isinstance(caught.value, HMCTransportError)
     assert caught.value.__cause__ is cause
     assert ISO_URL not in str(caught.value)
+
+
+@pytest.fixture(autouse=True)
+def scoped_volume_group_inventory(monkeypatch):
+    """Supply membership at the HMC boundary for these media/guard tests."""
+    lookup = AsyncMock(
+        return_value=[{"UUID": VG_UUID, "Resource": {"GroupName": "rootvg"}}]
+    )
+    monkeypatch.setattr(HMCClient, "list_volume_groups", lookup)
+    return lookup

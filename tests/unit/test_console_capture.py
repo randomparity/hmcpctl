@@ -651,7 +651,8 @@ async def test_cancellation_still_runs_release_to_completion():
 
 
 @pytest.mark.asyncio
-async def test_cancellation_during_acquisition_releases_proven_session():
+@pytest.mark.parametrize("stop_on_cancel", [False, True])
+async def test_cancellation_during_acquisition_releases_proven_session(stop_on_cancel):
     entered = asyncio.Event()
     finish = asyncio.Event()
     process = FakeProcess(BANNER, None)
@@ -678,21 +679,30 @@ async def test_cancellation_during_acquisition_releases_proven_session():
                 "sys1",
                 "lp1",
                 **_capture_kwargs(duration_seconds=30.0, idle_timeout_seconds=30.0),
+                stop_on_cancel=stop_on_cancel,
             )
         )
         await asyncio.wait_for(entered.wait(), timeout=5)
         task.cancel()
         await asyncio.sleep(0)
         finish.set()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        if stop_on_cancel:
+            result = await task
+            assert result.stop_reason == "interrupted"
+            assert result.released is True
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
     release.assert_awaited_once_with(make_config(), "sys1", "lp1")
     assert connection.closed is True
 
 
 @pytest.mark.asyncio
-async def test_cancellation_during_contended_acquisition_never_releases_holder():
+@pytest.mark.parametrize("stop_on_cancel", [False, True])
+async def test_cancellation_during_contended_acquisition_never_releases_holder(
+    stop_on_cancel,
+):
     entered = asyncio.Event()
     finish = asyncio.Event()
     connection = FakeConnection([])
@@ -718,14 +728,20 @@ async def test_cancellation_during_contended_acquisition_never_releases_holder()
                 "sys1",
                 "lp1",
                 **_capture_kwargs(duration_seconds=30.0, idle_timeout_seconds=30.0),
+                stop_on_cancel=stop_on_cancel,
             )
         )
         await asyncio.wait_for(entered.wait(), timeout=5)
         task.cancel()
         await asyncio.sleep(0)
         finish.set()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        if stop_on_cancel:
+            result = await task
+            assert result.stop_reason == "interrupted"
+            assert result.released is False
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
     release.assert_not_awaited()
     assert connection.closed is True
@@ -906,6 +922,8 @@ def test_capture_tool_resolves_identity_and_forwards_bounds(
         duration_seconds=12.5,
         max_bytes=4096,
         idle_timeout_seconds=3.5,
+        on_chunk=None,
+        stop_on_cancel=False,
     )
     context.__aexit__.assert_awaited_once()
     assert resolve_system_name.await_count == int(system_selector != system_name)
@@ -1282,7 +1300,8 @@ async def test_session_close_propagates_cancelled_release():
 
 
 @pytest.mark.asyncio
-async def test_capture_cancelled_during_release_raises_after_release():
+@pytest.mark.parametrize("stop_on_cancel", [False, True])
+async def test_capture_cancelled_during_release_raises_after_release(stop_on_cancel):
     started = asyncio.Event()
     finish = asyncio.Event()
     calls: list[tuple] = []
@@ -1301,14 +1320,25 @@ async def test_capture_cancelled_during_release_raises_after_release():
         patch("hmcpctl.ssh.console._release_and_verify", slow_release),
     ):
         task = asyncio.create_task(
-            capture_lpar_console(_client(), "sys1", "lp1", **_capture_kwargs())
+            capture_lpar_console(
+                _client(),
+                "sys1",
+                "lp1",
+                **_capture_kwargs(),
+                stop_on_cancel=stop_on_cancel,
+            )
         )
         await asyncio.wait_for(started.wait(), timeout=5)
         task.cancel()
         await asyncio.sleep(0)
         finish.set()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        if stop_on_cancel:
+            result = await task
+            assert result.stop_reason == "interrupted"
+            assert result.released is True
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
     assert calls == [(make_config(), "sys1", "lp1")]
     assert stream.closed
@@ -2171,11 +2201,10 @@ async def test_raw_mode_refuses_while_another_pause_is_active():
         FakeConnection([FakeProcess(BANNER)]),
     )
     with connect, run_command, probe_seconds, _audited():
-        async with _writable() as session:
-            async with session.hand_over():
-                with pytest.raises(RuntimeError):
-                    async with session.raw_mode():
-                        pass
+        async with _writable() as session, session.hand_over():
+            with pytest.raises(RuntimeError):
+                async with session.raw_mode():
+                    pass
 
 
 @pytest.mark.asyncio
@@ -2724,3 +2753,42 @@ async def test_release_probe_lost_hold_during_eof_skips_rmvterm():
 
     assert released is True
     release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("released", [True, False])
+@pytest.mark.parametrize("data", [b"", b"partial\x00\xff", HELD_SENTINEL])
+async def test_opt_in_cancel_returns_partial_data_and_release_proof(released, data):
+    started = asyncio.Event()
+    stream = FakeConnection(
+        [
+            FakeProcess(
+                BANNER, *([data] if data else []), None, blocked_read_started=started
+            )
+        ]
+    )
+    probe = FakeConnection([FakeProcess(BANNER if released else CONTENTION)])
+    with (
+        _session_patches(stream, probe)[0],
+        patch(
+            "hmcpctl.ssh.console.run_hmc_command",
+            AsyncMock(return_value="Close command sent"),
+        ),
+        patch("hmcpctl.ssh.console._RELEASE_PROBE_SECONDS", 0.01),
+    ):
+        task = asyncio.create_task(
+            capture_lpar_console(
+                _client(),
+                "sys1",
+                "lp1",
+                **_capture_kwargs(duration_seconds=30.0, idle_timeout_seconds=30.0),
+                stop_on_cancel=True,
+            )
+        )
+        await asyncio.wait_for(started.wait(), 2)
+        task.cancel()
+        result = await asyncio.wait_for(task, 2)
+    assert result.stop_reason == "interrupted"
+    assert result.released is released
+    assert result.data == _truncate(BANNER + data, MAX_CAPTURE_BYTES)
+    assert stream.closed and probe.closed

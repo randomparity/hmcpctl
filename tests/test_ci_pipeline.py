@@ -14,12 +14,12 @@ import pytest
 ROOT = Path(__file__).parents[1]
 TOOL_PINS = {
     "detect-secrets==1.5.0",
-    "prek==0.5.0",
-    "ruff==0.16.5",
-    "ty==0.0.75",
-    "zizmor==1.29.0",
+    "prek==0.5.5",
+    "ruff==0.16.10",
+    "ty==0.0.85",
+    "zizmor==1.30.1",
 }
-TY_INCLUDE = ["src/hmcpctl", "scripts/live_test"]
+TY_INCLUDE = ["src/hmcpctl", "scripts"]
 RUFF_EXTEND_SELECT = {
     "E401",
     "E402",
@@ -45,10 +45,11 @@ RUFF_PER_FILE_IGNORE_MODULES = {
     "tests/unit/test_ownership.py",
 }
 BASELINED_FINDINGS = {
-    "docs/capabilities/maturity.json": 57,
+    "docs/capabilities/maturity.json": 59,
     "justfile": 1,
+    # Public PDF checksum and extracted code-inventory checksum (#1690).
+    "src/hmcpctl/_progress_codes.json": 2,
     "tests/app/test_cli.py": 2,
-    "tests/app/test_cli_e2e.py": 1,
     "tests/conftest.py": 1,
     # An enum type name long enough to read as Base64 entropy, once per enum list (#1202).
     "tests/fixtures/live/vocabulary/enums-v10r3-p8-8247-22l.json": 1,
@@ -61,8 +62,8 @@ BASELINED_FINDINGS = {
     "tests/fixtures/live/vocabulary/enums-v11r2-p11-9242-21b.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p11-9824-42a.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p9-9009-42a.json": 1,
+    "tests/fixtures/progress-code-inventory.json": 1,
     "tests/unit/test_ssh.py": 1,
-    "tests/unit/test_client.py": 1,
 }
 ACTION_PINS = {
     "actions/checkout": (
@@ -70,20 +71,20 @@ ACTION_PINS = {
         "v7.0.1",
     ),
     "astral-sh/setup-uv": (
-        "20cfd1bf945f4377ade1205e4dbc17946fc9a30d",  # pragma: allowlist secret
-        "v10.0.1",
+        "c18668ad3cf93ea998bef934396af7bb5c839dc7",  # pragma: allowlist secret
+        "v10.2.0",
     ),
     "extractions/setup-just": (
         "53165ef7e734c5c07cb06b3c8e7b647c5aa16db3",  # pragma: allowlist secret
         "v4",
     ),
     "actions/upload-artifact": (
-        "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",  # pragma: allowlist secret
-        "v7.0.1",
+        "cf430e030ddbb5b0abf93d22962f4752f3646cd9",  # pragma: allowlist secret
+        "v7.0.2",
     ),
     "actions/download-artifact": (
-        "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",  # pragma: allowlist secret
-        "v8.0.1",
+        "9000827ccba6bdab643e8b6fd33ac0654aef8333",  # pragma: allowlist secret
+        "v8.0.2",
     ),
     "docker/setup-qemu-action": (
         "96fe6ef7f33517b61c61be40b68a1882f3264fb8",  # pragma: allowlist secret
@@ -178,12 +179,12 @@ SCORECARD_ACTION_PINS = {
         "v7.0.1",
     ),
     "actions/upload-artifact": (
-        "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",  # pragma: allowlist secret
-        "v7.0.1",
+        "cf430e030ddbb5b0abf93d22962f4752f3646cd9",  # pragma: allowlist secret
+        "v7.0.2",
     ),
     "github/codeql-action/upload-sarif": (
-        "cdf488f595d80d6e07e03d4674febd5ab45fa938",  # pragma: allowlist secret
-        "v4.37.9",
+        "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",  # pragma: allowlist secret
+        "v4.38.2",
     ),
     "ossf/scorecard-action": (
         "2d1146689b8cda280b9bc96326124645441f03bc",  # pragma: allowlist secret
@@ -602,7 +603,7 @@ def test_github_ci_smokes_each_retained_wheel_in_a_fresh_environment() -> None:
     assert "    timeout-minutes: 10\n" in body
     assert (
         "uses: actions/download-artifact@"
-        "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1" in body
+        "9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2" in body
     )
     assert (
         "name: release-wheel-${{ matrix.architecture }}-py"

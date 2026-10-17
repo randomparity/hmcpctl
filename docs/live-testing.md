@@ -1,6 +1,7 @@
 # Running a live test against real HMC hardware
 
-This is the whole procedure. Follow it without reading the runner's source.
+Use the release-window procedure below for a release candidate. Named-arm details
+remain the reference for inspecting an authorized attempt and its recovery.
 
 A live run **creates, mutates and deletes real partitions and profiles on a
 managed system**. Nothing here runs in CI, and no `just` recipe reaches an HMC:
@@ -37,7 +38,7 @@ supply from its own partitions:
   adapter. It must already have a virtual network on `LIVE_TEST_SYSTEM_NAME`; the
   runner never creates one. Subtask 14 lists the virtual networks and stops before
   deleting anything when the VLAN is not there.
-- `LIVE_TEST_PROVISION_DISK_MIB` — the size of the test disk subtask 14 recreates,
+- `LIVE_TEST_PROVISION_DISK_MIB` — the size of subtask 14's temporary test disk,
   in MiB and a multiple of 1024.
 
 ## 1. Ask whether the run would start
@@ -80,7 +81,78 @@ either.
 Preflight predicts. Only the run decides — an arm can SKIP where preflight said
 RUNNABLE, because it checks preconditions against hardware at dispatch.
 
-## 2. Run one arm
+## 2. Run the authorized window
+
+Live verification is a release stage, not a requirement after development merges.
+Ordinary changes do not require a live rerun or a rerun issue. The operator may
+separately authorize an ad-hoc development window; its catalog evidence counts at
+release time only if the candidate closure and age gate still match. Such evidence
+does not change the packaged release snapshot between releases.
+
+For a release, name and freeze the candidate as [Releasing](development.md#freeze)
+describes. Create a separate non-default worktree at that commit and run `just setup`.
+At its root, use the normal runner configuration above and a clean tracked, staged
+and untracked tree. `origin/HEAD` must identify the default branch. Commit the release's
+claims file under `docs/capabilities/releases/` first; its validated triples determine
+the arm list. The following uses `vX.Y.Z.json` as a filename placeholder.
+
+Choose a new `promotion/` branch name and an existing physical mode-0700 directory
+outside the checkout for private output. Preserve prior selected-arm results and
+sidecars, and any prior round2/vmedia outputs, outside this attempt: the command
+refuses them rather than risk using stale runner state. Do not run concurrent arms.
+
+```sh
+uv run --no-sync python scripts/run_release_window.py \
+  --claims docs/capabilities/releases/vX.Y.Z.json \
+  --branch promotion/release-X-Y-Z --output-dir "$WINDOW_PRIVATE" --dry-run
+```
+
+Set `WINDOW_PRIVATE` to that private directory before the command. Dry-run requires
+valid local configuration but contacts no HMC, launches no arm and creates no output.
+Its JSON contains private mutation descriptions: retain it locally. Have the operator
+review the arm details below and the exact candidate, arms and mutation boundary.
+Save only its `authorization` object in a private JSON file, set `authorized` to
+`true`, and explicitly set `vios_access` to `true` when the selection includes round2,
+vmedia, sriov, profiles, vios-backup, network, storage or lpar-power; otherwise keep
+it `false`. Keep the remaining fields unchanged. The file must match the derived
+candidate and boundary exactly; a general approval or dry run is not authorization.
+Set `WINDOW_AUTHORIZATION` to that file's path, then run once per authorized attempt:
+
+```sh
+uv run --no-sync python scripts/run_release_window.py \
+  --claims docs/capabilities/releases/vX.Y.Z.json \
+  --branch promotion/release-X-Y-Z --output-dir "$WINDOW_PRIVATE" \
+  --authorization "$WINDOW_AUTHORIZATION"
+```
+
+The command captures independent before-baselines for the selected systems, including
+all discovered VIOS partitions there when a VIOS-bearing arm is selected. It then runs
+each selected arm in named-wrapper order: preflight → arm → recovery. After successful
+arms and clean recovery it captures and compares after-baselines, generates evidence,
+promotes onto the new local branch and reads the claimed-set gate. No push or tag occurs.
+
+An attempted arm gets recovery even after failure or catchable interruption, once
+its child has terminated. A failed phase or non-clean recovery stops later arms and
+promotion; drift or an unreadable baseline is not waivable by prose. SIGKILL, host loss
+or an unreaped child cannot guarantee recovery: inspect the retained artifacts and
+perform section 4 before another attempt. There is no automatic resume or rollback.
+A failed promotion or final gate may leave an unpushed promotion branch to inspect.
+
+Logs, before/after snapshots, filtered matrices and `summary.json` go in a new private
+`window-` subdirectory beneath `WINDOW_PRIVATE`; raw results and observation sidecars
+remain ignored at checkout root. Exit 0 means the window passed, 1 means a phase failed,
+and 2 means configuration/authorization, execution setup or summary handling failed.
+Read the private phase summary and logs; never infer clean hardware from process exit alone.
+Review the promotion diff and actual evidence before publishing its PR. See
+[Recording an observation](capabilities/README.md#recording-an-observation) for the
+allowlist and snapshot rules. The tag still requires its own gate read.
+
+### Named arms
+
+The window invokes these wrappers itself. For a separately authorized manual arm,
+use section 1's preflight, the named command, then section 4's recovery before producing
+evidence or proceeding to another arm. Capture and compare independent baselines as
+below. The table does not grant hardware or VIOS access.
 
 | Arm | Command | Covers |
 |---|---|---|
@@ -137,35 +209,40 @@ the arm selects or mutates. An empty SR-IOV or vNIC listing records an
 reads. The bare-cec arm
 reuses the dedicated baseline without these reads.
 
-Before the run, capture an independent baseline outside the repository. After
-recovery, capture again with the same selectors and compare:
+The release-window command owns its independent before/after baseline sequence.
+For an authorized manual arm, capture outside the repository before mutation and
+again after recovery, using the same system and VIOS selectors:
 
 ```sh
-uv run --no-sync python scripts/live_test_baseline.py capture --system sys-R1 --output /private/before.json --dry-run
-uv run --no-sync python scripts/live_test_baseline.py capture --system sys-R1 --output /private/before.json
+uv run --no-sync python scripts/live_test_baseline.py capture \
+  --system sys-R1 --output "$WINDOW_PRIVATE/before.json" --dry-run
+uv run --no-sync python scripts/live_test_baseline.py capture \
+  --system sys-R1 --output "$WINDOW_PRIVATE/before.json"
 # Run the authorized arm and its recovery check, then:
-uv run --no-sync python scripts/live_test_baseline.py capture --system sys-R1 --output /private/after.json
-uv run --no-sync python scripts/live_test_baseline.py compare /private/before.json /private/after.json
+uv run --no-sync python scripts/live_test_baseline.py capture \
+  --system sys-R1 --output "$WINDOW_PRIVATE/after.json"
+uv run --no-sync python scripts/live_test_baseline.py compare \
+  "$WINDOW_PRIVATE/before.json" "$WINDOW_PRIVATE/after.json"
 ```
 
+`sys-R1` is an anonymous system selector; replace it with the authorized system.
 Use an existing private directory and new filenames. Capture reads system identity,
 partitions/states, slot owners, every profile's `io_slots`, and SR-IOV adapters and
-ports. Repeat `--vios-id ID` only for VIOS partitions whose mapping and volume-group
-reads are authorized; without it there are no VIOS-side reads. `--profile NAME`
-uses the normal connection configuration and environment precedence. VIOS capture
-refuses surrounding system-name whitespace and UUID-shaped system or partition
-names because the shared resolver cannot
-distinguish those names from resource UUIDs. Keep other
-changes quiescent during these sequential reads. Dry-run opens no connections.
-Snapshots contain private infrastructure identifiers, are created mode 0600,
-and must stay local. Inherited transport/configuration diagnostics may also contain
-private identifiers; keep terminal output local or redact it before publication.
-Existing files and symlinks are refused. Comparison ignores
-row order and profile slot order, but preserves structural identity and state.
-Exit 0 means capture succeeded or snapshots match, 1 means drift, and 2 means
-unreadable/incomplete evidence. Only category names appear in comparison output.
-Drift or unreadable evidence requires operator inspection; this script performs
-no recovery or mutation.
+physical/logical ports. Add the same repeated `--vios-id ID` arguments to both captures
+for authorized VIOS partitions; without them manual capture does no VIOS-side reads.
+VIOS capture includes identity, vSCSI mappings/backing resources, volume groups and
+volume rows. `--profile NAME` uses normal connection configuration and precedence.
+VIOS capture refuses surrounding system-name whitespace and UUID-shaped system or
+partition names because the shared resolver cannot distinguish them from resource UUIDs.
+
+Keep other changes quiescent during these sequential reads. Dry-run opens no connections.
+Snapshots contain private identifiers, are created mode 0600, and stay local; inherited
+transport diagnostics also need redaction before publication. Existing files and symlinks
+are refused. Validation rejects incomplete/malformed evidence. Comparison ignores row and
+profile-slot ordering but preserves structural identity, UUIDs and state. Exit 0 means
+capture succeeded or snapshots match, 1 means drift, and 2 means unreadable/incomplete
+evidence. Comparison prints category names only. Drift or unreadable evidence holds the
+window for operator inspection and recovery; the baseline script never mutates hardware.
 
 ### The io_slots scenario
 
@@ -710,6 +787,10 @@ and changes nothing.
 
 ## 3. Produce the evidence
 
+The release-window command does this only after section 4's recovery checks and
+independent after-baseline comparisons pass. For an authorized manual arm, complete
+those checks first, then generate its matrix:
+
 ```sh
 uv run --no-sync python scripts/live_test_evidence.py test-results-dedicated.json
 ```
@@ -720,11 +801,13 @@ so nothing marks it stale when the branch moves — which is how PR #869's matri
 survived two weeks and a merge that left the arm unable to import.
 
 If it refuses with "cannot be attributed to a commit", the document has no
-`run.tested_commit`. It was written by an older runner; re-run.
+`run.tested_commit`. It cannot support a release claim. After recovery, obtain
+authorization for a new attempt using the current runner before trying to replace that evidence.
 
 If the header says **tree was dirty**, `src/` or `scripts/` had uncommitted
-changes, so the sha does not name the code that ran. Commit and re-run before
-citing it.
+changes, so the SHA does not name the code that ran. Do not cite it as clean
+candidate evidence. Recover first; a replacement run needs a clean committed candidate
+and explicit operator authorization.
 
 If the matrix opens with **PARTIAL run**, an exception or interrupt stopped the
 run. The script still renders it, because the rows it recorded are attributable
@@ -737,9 +820,21 @@ The matrix deliberately omits each row's `data` and `note` and the document's
 names, location codes — and are redacted only on FAIL rows. **Do not paste the
 results JSON itself into a pull request, issue, or any public location.**
 
+### CLI coverage
+
+The bare-CEC arm also runs the installed CLI's `lpars state`, `lpars refcodes` and
+`jobs show` paths against its existing fixture and activation job. Their asserted
+`record_verified` observations remain separate `cli_observation` raw result rows;
+they do not replace MCP catalog sidecars or acquire MCP closure currency. The private
+window summary reports `exercised: bare-cec CLI at candidate` or an explicit CLI gap
+for each claim. A dry run reports gaps because no wrapper has run yet. Remaining
+wrappers are unverified; historical v0.1.0's 15 claims remain MCP-only. Cite the
+actual candidate and state the CLI gaps in release evidence.
+
 ## 4. Confirm the system is clean
 
-Always, after every arm, including after a run that looked fine. Pass the arm's
+Run this after every attempted arm, including one that looked fine, before the next
+arm or evidence promotion. The release-window command does so automatically. Pass the arm's
 own results document:
 
 ```sh
@@ -764,8 +859,13 @@ these sets of them:
 | 41 (lpar-power) | any partition named `hmcpctl-live-pwr-*`, running or not; on each VIOS, any mapping backed by an `lppwr*` volume, any vSCSI adapter serving a `hmcpctl-live-pwr-*` partition, and any `lppwr*` volume left in the configured volume group (read with the one admitted `viosvrcmd … -c 'lsvg -lv <group>'` command) |
 | 2, 9 (network) | a network on the run's test VLAN, the test partition's client adapters off the run's baseline, the serving VIOS's FC-port labels off their originals, and a vFC group label named `hmcl-*` |
 
-It also counts the server adapters after round2's subtask 14 provisions the test
-partition. Every other dispatched subtask is printed as `NOT WITNESSED`.
+A complete current round2 run carries a fresh producer baseline. Recovery validates
+its scope against the run, independently recaptures system/VIOS tables and compares
+the original partition's description and profile compatibility. ST14 now provisions
+and removes a temporary owned partition/disk while retaining the configured originals;
+its residue or identity drift fails recovery. Missing legacy or malformed producer
+witnesses are unreadable, never clean. Other unsupported dispatched subtasks print
+`NOT WITNESSED`.
 
 | Exit | Meaning |
 |---|---|
@@ -773,12 +873,9 @@ partition. Every other dispatched subtask is printed as `NOT WITNESSED`.
 | 1 | something is stranded; the output names it and the command that clears it |
 | 2 | some state could not be read, the run dispatched subtasks the check does not witness, or the run was interrupted (`run.partial`), even when something is also stranded — **this is not clean** |
 
-Exit 2 is expected after round2, SR-IOV, profiles, pcm and `all` runs: they dispatch
+Exit 2 remains expected after SR-IOV, profiles, pcm and `all` runs: they dispatch
 subtasks the check does not witness. For those, check by hand:
 
-- **round2**: the scratch partition is gone, the test partition's description
-  and properties match the baseline, and the provisioned test partition and its
-  disk exist.
 - **SR-IOV**: the test logical port is no longer assigned to the test
   partition, and its profile no longer lists it.
 - **profiles**: compare an independent `lssyscfg` read with one taken before
@@ -788,6 +885,9 @@ subtasks the check does not witness. For those, check by hand:
   restore. The backup file `hmcpctl-live-st10` is the one expected addition.
 - **pcm**: `hmcpctl metrics prefs ManagedSystem <system>` matches the read saved
   before the run.
+
+Manual inspection does not convert exit 2 into an automated release-window pass.
+Keep the window held if its selected arm lacks a complete witness.
 
 The check issues no mutating call. When it reports something stranded, run the
 command it prints yourself, then run the check again.

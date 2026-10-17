@@ -5,13 +5,13 @@ from __future__ import annotations
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import (
     _authorize_system_lpar_profile_restore,
-    _hosts_partition,
     _resolve_system_name,
     authorize_lpar_mutation,
     resolve_and_authorize_lpar_names,
 )
 from hmcpctl.resource_identity import (
     ResourceNotFoundError,
+    _hosts_partition,
     is_uuid,
     resolve_system_uuid,
 )

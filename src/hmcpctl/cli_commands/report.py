@@ -33,7 +33,7 @@ from hmcpctl.operations.inventory.utilization import (
     utilization_pct,
 )
 
-from .output import err_console, fail, usage_error
+from .output import err_console, fail, terminal_field, usage_error
 from .report_html import render_html
 from .runtime import current_options, run_cli_coroutine
 
@@ -432,7 +432,10 @@ def report_utilization(
         )
         for failure in survey.failures:
             err_console.print(
-                Text.assemble((failure.profile, "yellow"), f": {failure.reason}")
+                Text.assemble(
+                    (terminal_field(failure.profile, err=True), "yellow"),
+                    f": {terminal_field(failure.reason, err=True)}",
+                )
             )
         return survey
 
@@ -440,8 +443,12 @@ def report_utilization(
     surveyed = len(survey.profiles) - len(survey.failures)
     written = " and ".join(str(path) for path in (csv_path, html_path) if path)
     err_console.print(
-        f"Wrote {len(fleet_systems(survey.readings))} systems from {surveyed} of "
-        f"{len(survey.profiles)} profiles to {written}",
+        (
+            f"Wrote {terminal_field(len(fleet_systems(survey.readings)), err=True)}"
+            f" systems from {terminal_field(surveyed, err=True)} of "
+            f"{terminal_field(len(survey.profiles), err=True)} profiles to "
+            f"{terminal_field(written, err=True)}"
+        ),
         markup=False,
     )
 

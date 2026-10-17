@@ -28,7 +28,7 @@ from ...operations.lpar.migration import (
     remote_restart_lpar,
     validate_lpar_migration,
 )
-from ..output import console, print_json
+from ..output import console, print_json, terminal_field
 from ..runtime import with_client
 
 
@@ -37,17 +37,26 @@ def _lpm_run(name_or_uuid: str, fn, action: str, target: str | None, yes: bool) 
 
     if not yes:
         dest = f" to '{target}'" if target else ""
-        if not typer.confirm(f"Really {action} partition '{name_or_uuid}'{dest}?"):
+        if not typer.confirm(
+            f"Really {terminal_field(action)} partition '{terminal_field(name_or_uuid)}'"
+            f"{terminal_field(dest)}?"
+        ):
             raise typer.Abort()
 
     result = with_client(fn)
     if isinstance(result, LpmAffinityMigrationResult):
         status = "Submitted" if result.job is not None else "Stopped"
-        console.print(f"{status} {action}", style="green", markup=False)
+        console.print(
+            f"{terminal_field(status)} {terminal_field(action)}",
+            style="green",
+            markup=False,
+        )
         print_json(asdict(result))
         return
     console.print(
-        f"Submitted {action} for {result.lpar_uuid}", style="green", markup=False
+        f"Submitted {terminal_field(action)} for {terminal_field(result.lpar_uuid)}",
+        style="green",
+        markup=False,
     )
     job = asdict(result.job) if isinstance(result.job, JobOutcome) else result.job
     print_json(job)
@@ -253,7 +262,8 @@ def lpars_remote_restart(
     validate_wait_timing(wait, timeout, interval)
     if operation not in REMOTE_RESTART_OPERATIONS:
         raise typer.BadParameter(
-            f"operation must be one of: {', '.join(sorted(REMOTE_RESTART_OPERATIONS))}"
+            f"operation must be one of: "
+            f"{terminal_field(', '.join(sorted(REMOTE_RESTART_OPERATIONS)), err=True)}"
         )
 
     async def _fn(hmc):

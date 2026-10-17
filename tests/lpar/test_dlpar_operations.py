@@ -801,7 +801,7 @@ async def test_an_unreadable_feed_carries_its_error(mock_hmc, operation):
     route = _mock_modify(mock_hmc)
 
     async with HMCClient(make_config()) as hmc:
-        with pytest.raises(ValueError, match="Cannot confirm LPAR") as info:
+        with pytest.raises(HMCError, match="HTTP 500") as info:
             await operation(
                 hmc,
                 SYSTEM_UUID,
@@ -809,9 +809,8 @@ async def test_an_unreadable_feed_carries_its_error(mock_hmc, operation):
                 LparResources(desired_procs=1.0, desired_memory=1024),
             )
 
-    assert str(info.value.__cause__) in str(info.value)
+    assert info.value.status_code == 500
     assert "retry" not in str(info.value)
-    assert isinstance(info.value.__cause__, HMCError)
     assert not route.called
 
 

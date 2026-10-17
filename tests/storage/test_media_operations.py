@@ -79,13 +79,11 @@ async def test_list_optical_media_operation(mock_hmc):
 async def test_get_media_repository_none_propagates(mock_hmc):
     """get_media_repository propagates None when repository not found."""
     route = mock_hmc.get(
-        f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/99999999-9999-9999-9999-999999999999"
+        f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/{VG_UUID}"
     ).mock(return_value=httpx.Response(404, text=""))
 
     async with HMCClient(make_config()) as hmc:
-        result = await get_media_repository(
-            hmc, VIOS_UUID, "99999999-9999-9999-9999-999999999999"
-        )
+        result = await get_media_repository(hmc, VIOS_UUID, VG_UUID)
 
     assert route.called
     assert result is None
@@ -437,3 +435,13 @@ def test_detach_optical_mapping_alias_is_gone():
 def test_optical_unmount_reuses_the_storage_mapping_remover():
     """The client has one parent-VIOS VirtualSCSIMapping remover."""
     assert not hasattr(HMCClient, "delete_optical_mapping")
+
+
+@pytest.fixture(autouse=True)
+def scoped_volume_group_inventory(monkeypatch):
+    """Supply membership at the HMC boundary for these media/guard tests."""
+    lookup = AsyncMock(
+        return_value=[{"UUID": VG_UUID, "Resource": {"GroupName": "rootvg"}}]
+    )
+    monkeypatch.setattr(HMCClient, "list_volume_groups", lookup)
+    return lookup

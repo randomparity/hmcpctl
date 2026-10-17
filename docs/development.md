@@ -115,12 +115,14 @@ shows the form.
 Versions are semver. The tag is `vX.Y.Z`, and the GitHub release is titled
 `hmcpctl X.Y.Z (<short-sha>)`, where `<short-sha>` is the tag commit's
 `git rev-parse --short` ID. The version
-is static in `pyproject.toml`, as ADR 0033 sets out, and stays so for 0.1.0. From 0.2.0 the
-version is planned to be derived from Git with hatch-vcs instead (#1471, an ADR superseding
-0033): a tagged build would be `X.Y.Z`, and an untagged one `X.Y.(Z+1).devN+g<sha>`, marked
-when the tree is dirty. Until #1471 lands, the steps below use the static version. Either way
-the changelog heading stays `## [X.Y.Z] - YYYY-MM-DD`, because a commit cannot name its own
-SHA.
+is static in `pyproject.toml`, as ADR 0033 sets out. The changelog heading stays
+`## [X.Y.Z] - YYYY-MM-DD`, because a commit cannot name its own SHA.
+
+Live verification is a release stage ([ADR 0212](adr/0212-release-scoped-live-verification.md)).
+Between releases, installed CLI/MCP discovery and generated tool documentation retain the last
+release's verification, without runtime age decay. Ordinary development changes do not require
+live reruns or rerun issues. An operator may authorize an ad-hoc window; its catalog evidence
+counts toward a candidate only while the closure matches and the gate's age ceiling holds.
 
 A release runs in the order of the subsections below: scope it, name the candidate and freeze
 `main`, verify the candidate live, read the evidence gate, review the docs and cut the
@@ -132,14 +134,17 @@ the maintainer who owns the release.
 A release is scoped by a release epic, an issue that names:
 
 - the consumer contract the release serves, and
-- the operations it claims as live-verified, by their `just verification-report` operation
-  names, each with the live-testing arm and scenario that evidences it, taken from the
-  scenario id of its catalog observation. Those arms are the window's arm list.
+- the committed claimed-set file under `docs/capabilities/releases/vX.Y.Z.json`, whose
+  `operations` rows name each `operation`, evidencing `arm` and `scenario`. The offline
+  `just capability-inventory` guard validates these triples against registered scenarios.
 
 The claimed set is what the release promises; nothing outside it is promised, whatever its
-verification state. For 0.1.0 the epic is #871: the Tier A kdive adopt contract and the
-Tier B bare-CEC path, 15 claimed operations. Changing the claimed set after the live window
-reopens the window for any operation it adds.
+verification state. The historical `v0.1.0.json` contains 15 MCP claims from #871, the Tier A
+kdive adopt contract and Tier B bare-CEC path. It does not claim CLI wrappers. For a new
+release, commit and review its own versioned claims file before naming the candidate.
+Changing claims after the window requires fresh validation and matching evidence for added
+claims; never infer coverage from a similarly named scenario. Report CLI evidence or gaps
+separately as [live testing](live-testing.md#cli-coverage) describes.
 
 Before naming the candidate, run the
 [coupled dependency bump](../CONTRIBUTING.md#coupled-dependency-bumps) for `fastmcp-slim`,
@@ -163,64 +168,72 @@ the whole rule. Changes that pass it include:
   `src/hmcpctl/_operation_maturity.json` projection they regenerate, which is data, not a
   module.
 
-A merge that does move a claimed operation's closure re-stales that operation. Re-run its
-evidencing arms at the new tip, under the window's authorization or a new one, and re-read
-the gate there; never argue that the delta is harmless. The new tip becomes the candidate.
+A merge that moves a claimed closure invalidates its candidate evidence, even though the
+packaged historical state stays frozen. Name the new candidate, obtain authorization bound
+to that commit, and run the release-window command for its claims before reading the gate
+again. Never treat a supposedly harmless delta as evidence. This is a release-freeze rule,
+not an instruction to run hardware after ordinary development merges.
 
 ### Live window
 
-The live window produces the evidence that makes each claimed operation `current`. A live run
-creates, mutates and deletes real partitions, so the operator authorizes every window
-explicitly, with:
+The operator authorizes every hardware window explicitly, naming its arms, mutation boundary
+and VIOS access when needed, including the independent read-only baseline. Record the public-safe
+authorization on the release epic; keep actual system identifiers and the command's exact
+candidate-bound authorization JSON private. A development or PR approval is not a hardware grant.
 
-- the arm list, naming each arm the window may run;
-- the mutation boundary: the managed system and partitions the arms may change;
-- an explicit grant for any arm that touches a VIOS. A grant that does not name VIOS access
-  does not include it; and
-- the read-only reads that make up the window's independent baseline, below.
+Follow [the release-window procedure](live-testing.md#2-run-the-authorized-window) from a clean,
+non-default candidate worktree created at the named commit. Its dry run contacts no HMC and
+prints the authorization template. One authorized invocation then captures independent
+baselines, runs each selected arm as preflight → named arm → recovery, compares after-baselines,
+generates evidence, promotes observations on a new local branch, and reads the claimed-set gate.
+Recovery runs after an attempted arm, even if the arm fails; an unclean or unreadable recovery
+stops the window. Failed phases, baseline drift or unreadable evidence block promotion; a
+written explanation does not turn a failed comparison into a pass.
 
-The operator records the authorization on the release epic before the first arm runs. Each
-authorized arm then runs on the candidate as [live testing](live-testing.md) describes: the
-preflight, the arm, and the recovery check, in that order, with the recovery check run after
-every arm, including one that looked clean.
+The independent baseline reads system identity, partitions/states, slot owners, profile
+`io_slots`, SR-IOV resources and, when authorized, VIOS identity, mappings, volume groups and
+volumes. It preserves structural identity, including UUIDs, and compares the same selectors
+before and after the window. Keep other actors quiescent. See the
+[baseline commands and failure exits](live-testing.md#the-inventory-reads) for manual inspection.
 
-The window also takes an independent read-only baseline of the mutation boundary before the
-first arm and after the last, separate from the baselines the arms record for themselves.
-Record the comparison on the release epic. Any difference holds the gate until it is
-recovered under live testing's "Confirm the system is clean" step, or explained on the
-release epic.
-
-Each arm's evidence matrix comes from `scripts/live_test_evidence.py`. The runner never
-writes into the catalog, so its observations are promoted by hand in evidence commits, as the
-[capability catalog](capabilities/README.md) describes under "Recording an observation".
+The command never pushes, tags or commits to the original candidate branch. Review its
+promotion PR before merging: only the catalog, release snapshot, packaged projection and
+generated tool references belong in that evidence commit. Raw results, authorization, logs
+and baseline snapshots remain private. Publish only the generated, filtered evidence matrices
+with their actual tested candidate; record the promotion and gate-read commits separately.
 
 ### Evidence gate
 
-Read the gate on the `main` commit that carries the promoted observations: the candidate plus
-the evidence commits the freeze admits. At the candidate itself the window's observations are
-not in the catalog yet. Run `just verification-report` on a clean checkout of that commit. It
-prints each operation's derived live-verification state (ADR 0127).
+Read the gate on the clean commit carrying the reviewed promotion, then again at the intended
+tag commit. Substitute the release's committed claims file for `vX.Y.Z.json`:
 
-- **Gating:** every claimed operation must read `current`. A claimed operation that reads
-  anything else holds the tag until its evidencing arms re-run at the candidate and their
-  observations are promoted.
-- **Reported, not gating:** `--fail-on-stale` exits 1 when any operation in the whole catalog
-  is stale, including operations the release does not claim and its window did not cover.
-  Run it and record its result on the release epic, but its exit status does not hold the
-  tag. The changelog entry's Known issues list states the global counts from that read
-  (current, stale, unevidenced and unrecorded, of the catalog's total) and points to
-  `just verification-report` and the [capability catalog](capabilities/README.md) for the
-  per-operation list; the full read stays on the release epic. Before the 0.1.0 window, on
-  2026-10-12, the catalog's 163 operations read 17 current, 90 stale, 39 unevidenced and
-  17 unrecorded.
+```sh
+uv run --no-sync python scripts/check_capability_inventory.py \
+  --require-current docs/capabilities/releases/vX.Y.Z.json
+```
 
-No check yet reads the claimed set alone, so compare the claimed rows against the report by
-hand. Record the pass on the epic with both commits: the candidate and the commit the gate
-was read on.
+`--require-current` selects and reports the claimed operations and exits nonzero unless each
+is `current`; it includes closure matching and the 90-day age ceiling at read time. No manual
+row comparison is needed. It cannot be combined with the global `--fail-on-stale` flag.
+An added claim, changed closure, failed/missing observation or expired evidence holds the tag;
+resolve it in an operator-authorized release window and review the resulting promotion.
 
-An observation goes stale either when its closure changes or when it is older than 90 days
-(ADR 0127). A long freeze can therefore re-stale a claimed operation with no merge at all;
-the remedy is the same, re-running its evidencing arms.
+`just verification-report` remains a global candidate diagnostic. Record its five-state counts
+(current, stale, failed, unevidenced and unrecorded) on the epic and in Known issues, but unclaimed
+non-current operations do not block the claimed-set gate. The optional global diagnostic is:
+
+```sh
+uv run --no-sync python scripts/check_capability_inventory.py \
+  --verification-report --fail-on-stale
+```
+
+Its nonzero stale result is informational for release claims, not a reason to run unclaimed
+arms. CI no longer runs a per-commit verification-report job or a weekly stale-failure job.
+
+The packaged snapshot and the live gate answer different questions. The snapshot preserves
+historical release state without age decay; the gate tests candidate eligibility now. A long
+freeze can therefore fail the age gate without changing packaged state. Record the actual
+candidate, promotion commit and gate-read commit on the release epic.
 
 ### Docs and changelog
 
@@ -267,15 +280,30 @@ release.
    history. This applies to 0.1.0 alone; later releases keep their itemized categories.
    Merge that change to `main`.
 2. Choose the tag commit: the `main` commit that change merged as, or a later `main` commit
-   the freeze admits. Its CI run must be green, and on a clean checkout of it `just verify`
-   must pass.
-3. Re-read `just verification-report` on that checkout and confirm every claimed operation
-   still reads `current`. If one reads anything else, either a merge moved its closure or its
-   observation passed 90 days; in both cases re-run its evidencing arms, as the
-   [freeze](#freeze) rule says, promote their observations, and repeat from step 2 on the
-   commit that carries them. Record the passing read on the release epic with the tag commit.
-   Its global counts must match the entry's Known issues list; if they do not, correct the
-   entry, merge it, and repeat from step 2 on that commit.
+   the freeze admits. Its CI must be green and `just verify` must pass on a clean checkout.
+   Also run the release-mode inventory check; ordinary verification deliberately permits
+   development closures to differ from the last release snapshot:
+
+   ```sh
+   uv run --no-sync python scripts/check_capability_inventory.py --release
+   uv run --no-sync python tests/validate_release_artifacts.py dist . --release
+   ```
+
+   `just verify` builds the fresh wheel and sdist consumed by the second command. Release
+   validation recomputes snapshot verification from the catalog and candidate closures;
+   it does not apply the age ceiling. A mismatch holds the tag for reviewed release evidence.
+3. On that exact checkout, require both the claimed-set gate and release-mode validation:
+
+   ```sh
+   uv run --no-sync python scripts/check_capability_inventory.py \
+     --require-current docs/capabilities/releases/vX.Y.Z.json --release
+   ```
+
+   A failed claim holds the tag even when the snapshot matches. Follow the
+   [freeze](#freeze) and [evidence gate](#evidence-gate) rules, then repeat from step 2
+   at the new evidence-bearing commit. Record the passing tag-commit read on the epic.
+   Re-read `just verification-report`; if its global counts differ from Known issues,
+   correct that entry, merge it, and repeat from step 2 on the resulting commit.
 4. Tag that exact commit and push the tag:
 
    ```bash

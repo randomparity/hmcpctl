@@ -425,6 +425,11 @@ def test_create_volume_group_declares_hmc_resource_result() -> None:
 def test_create_virtual_disk_builds_xml(monkeypatch, mock_hmc):
     """hmc_create_virtual_disk POSTs the fetched VolumeGroup with a new VirtualDisk."""
     _hmc_env(monkeypatch)
+    mock_hmc.get(f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup").mock(
+        return_value=httpx.Response(
+            200, text=_feed(VG_UUID, "VolumeGroup", GroupName="rootvg")
+        )
+    )
     path = f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/{VG_UUID}"
     mock_hmc.get(path).mock(
         return_value=httpx.Response(
@@ -559,6 +564,11 @@ def test_create_media_repository_builds_xml(monkeypatch, mock_hmc):
     are emitted by ET.tostring() — assertions check for element/text presence only.
     """
     _hmc_env(monkeypatch)
+    mock_hmc.get(f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup").mock(
+        return_value=httpx.Response(
+            200, text=_feed(VG_UUID, "VolumeGroup", GroupName="rootvg")
+        )
+    )
     vg_path = f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/{VG_UUID}"
     mock_hmc.get(vg_path).mock(
         return_value=httpx.Response(
@@ -578,6 +588,11 @@ def test_create_media_repository_builds_xml(monkeypatch, mock_hmc):
 def test_create_optical_media_builds_xml(monkeypatch, mock_hmc):
     """hmc_create_optical_media GETs the VG then POSTs a blank-media doc."""
     _hmc_env(monkeypatch)
+    mock_hmc.get(f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup").mock(
+        return_value=httpx.Response(
+            200, text=_feed(VG_UUID, "VolumeGroup", GroupName="rootvg")
+        )
+    )
     vg_path = f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/{VG_UUID}"
     mock_hmc.get(vg_path).mock(
         return_value=httpx.Response(
@@ -602,6 +617,11 @@ def test_delete_media_repository_returns_confirmation(monkeypatch, mock_hmc):
     delete_media_repository (read-modify-write). Both calls hit the same mock.
     """
     _hmc_env(monkeypatch)
+    mock_hmc.get(f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup").mock(
+        return_value=httpx.Response(
+            200, text=_feed(VG_UUID, "VolumeGroup", GroupName="rootvg")
+        )
+    )
     vg_path = f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup/{VG_UUID}"
     # Both list_optical_media and delete_media_repository GET the same path.
     mock_hmc.get(vg_path).mock(

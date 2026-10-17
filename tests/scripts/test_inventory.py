@@ -19,6 +19,7 @@ class ScenarioState:
 
     def __init__(self, responses: dict[str, Any]) -> None:
         self.responses = responses
+        self.group = None
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.results: list[tuple[int, str, str, Any]] = []
         self.config = SimpleNamespace(

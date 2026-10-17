@@ -11,7 +11,14 @@ from ...operations.virtualization.network import (
     list_virtual_networks,
     list_virtual_switches,
 )
-from ..output import VerbatimTable, console, first_field, output, print_json
+from ..output import (
+    VerbatimTable,
+    console,
+    first_field,
+    output,
+    print_json,
+    terminal_field,
+)
 from ..runtime import with_client
 
 
@@ -74,7 +81,9 @@ def network_create(
 ) -> None:
     """Create a Virtual Network (VLAN) on a managed system."""
     if not yes and not typer.confirm(
-        f"Create network '{name}' (VLAN {vlan}, switch ID {virtual_switch_id}) on {system}?"
+        f"Create network '{terminal_field(name)}' (VLAN {terminal_field(vlan)}"
+        f", switch ID {terminal_field(virtual_switch_id)}) on "
+        f"{terminal_field(system)}?"
     ):
         raise typer.Abort()
 
@@ -84,7 +93,9 @@ def network_create(
         )
     )
 
-    console.print(f"Created virtual network '{name}'", style="green", markup=False)
+    console.print(
+        f"Created virtual network '{terminal_field(name)}'", style="green", markup=False
+    )
     print_json(result.resource)
 
 
@@ -94,12 +105,16 @@ def network_delete(
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
     """Delete a Virtual Network from a managed system."""
-    if not yes and not typer.confirm(f"Delete virtual network {uuid} from {system}?"):
+    if not yes and not typer.confirm(
+        f"Delete virtual network {terminal_field(uuid)} from {terminal_field(system)}?"
+    ):
         raise typer.Abort()
 
     with_client(lambda hmc: delete_virtual_network(hmc, system, uuid))
 
-    console.print(f"Deleted virtual network {uuid}", style="green", markup=False)
+    console.print(
+        f"Deleted virtual network {terminal_field(uuid)}", style="green", markup=False
+    )
 
 
 def network_list_bridges(

@@ -63,7 +63,8 @@ export HMC_VERIFY_SSL=true
 
 Set `HMC_PASSWORD` through your shell or secret manager before running commands.
 Replace the example host and user with your own. TLS verification requires the
-HMC's CA certificate to be trusted locally. Verification is off by default if
+HMC's CA certificate to be trusted through `SSL_CERT_FILE`; see
+[TLS trust](docs/configuration.md#tls-trust). Verification is off by default if
 `HMC_VERIFY_SSL` is omitted, which exposes credentials to interception.
 
 Check the connection:
@@ -155,7 +156,8 @@ An MCP client normally launches this process for you. For clients that use an
 
 Replace the placeholders and use your client's secret handling if available.
 If it cannot find the executable, use its absolute path from `uv tool dir --bin`.
-The client process must have access to the policy file and trusted HMC CA.
+The client process must have access to the policy file, and `SSL_CERT_FILE` must be set in its
+environment when verifying a private CA ([TLS trust](docs/configuration.md#tls-trust)).
 
 Try asking: “List my managed Power systems” or “Show fleet health.”
 Call `hmc_effective_permissions` to inspect the active policy.

@@ -13,7 +13,7 @@ from ...operations.lpar.boot_order import (
     read_lpar_boot_order,
     set_lpar_boot_order,
 )
-from ..output import console, print_json
+from ..output import console, print_json, terminal_field
 from ..runtime import with_client
 
 
@@ -79,7 +79,7 @@ def lpars_set_boot_order(
     try:
         boot_string = join_boot_device_paths(devices)
     except ValueError as exc:
-        raise typer.BadParameter(str(exc)) from exc
+        raise typer.BadParameter(terminal_field(exc, err=True)) from exc
 
     result = with_client(
         lambda hmc: set_lpar_boot_order(
@@ -91,11 +91,15 @@ def lpars_set_boot_order(
         )
     )
 
-    console.print(f"[green]Boot order set to: {escape(boot_string)}[/green]")
+    console.print(
+        f"[green]Boot order set to: {escape(terminal_field(boot_string))}[/green]"
+    )
     if as_json:
         print_json(result)
         return
-    console.print(f"Pending boot string: {escape(_pending_boot_string(result) or '-')}")
+    console.print(
+        f"Pending boot string: {escape(terminal_field(_pending_boot_string(result) or '-'))}"
+    )
 
 
 def lpars_clear_boot_order(

@@ -33,10 +33,12 @@ class SystemsMixin:
     # -- Convenience wrappers for the common resources ----------------- #
     async def get_console_info(self: SystemsClient) -> dict[str, Any] | None:
         """ManagementConsole: HMC version, network info, links to systems."""
-        # Some HMC firmware builds return HTTP 500 on the unfiltered
-        # ManagementConsole feed over a null nested property (observed:
-        # Session/SessionId/Value). Translate that known response into an
-        # actionable error rather than making a firmware failure
+        # The unfiltered ManagementConsole feed has returned HTTP 500 over a
+        # null nested property (observed: Session/SessionId/Value, #880).
+        # The same 500 on the ManagedSystem feed is reproduced by the
+        # X-HMC-Schema-Version: V1_0 pin alone (ADR 0138); that this console
+        # 500 shares the cause is likely but unverified. Translate the known
+        # response into an actionable error rather than making it
         # indistinguishable from an empty feed. The marker is the
         # live-confirmed text the two managed-system guards below also match
         # (ADR 0138), but it is tested against the body rather than their
@@ -60,9 +62,10 @@ class SystemsMixin:
                 "Nested path contains null property" in (exc.body or "")
             ):
                 raise HMCError(
-                    "Management-console inventory is unavailable because this HMC "
-                    "firmware could not serialize a null property; update the HMC "
-                    "firmware and retry",
+                    "Management-console inventory is unavailable because the HMC "
+                    "could not serialize a null property; the likely cause is an "
+                    "X-HMC-Schema-Version pin (HMC_SCHEMA_VERSION): unset "
+                    "HMC_SCHEMA_VERSION and any profile schema_version, and retry",
                     status_code=500,
                     body=exc.body,
                 ) from exc
@@ -132,9 +135,10 @@ class SystemsMixin:
     async def get_managed_system(
         self: SystemsClient, uuid: str
     ) -> dict[str, Any] | None:
-        # Some firmware 500s on a direct UUID fetch over a null hardware
-        # property (ADR 0138); quick/All supplies the missing name so
-        # find_system_by_name (a different, working path) can resolve it.
+        # A direct UUID fetch can 500 over a null hardware property; the
+        # observed trigger is an X-HMC-Schema-Version: V1_0 pin (ADR 0138).
+        # quick/All supplies the missing name so find_system_by_name (a
+        # different, working path) can resolve it.
         try:
             return await self.get_uom("ManagedSystem", uuid)
         except HMCError as exc:
@@ -154,11 +158,13 @@ class SystemsMixin:
                 fallback_exc = fb_exc
             if entry is None:
                 raise HMCError(
-                    f"Managed system {uuid} is unavailable because this "
-                    "HMC firmware could not serialize a null hardware "
-                    "property, and it could not be resolved from the "
-                    "managed-system summary; update the HMC firmware or "
-                    "query the system by name with systems show",
+                    f"Managed system {uuid} is unavailable because the HMC "
+                    "could not serialize a null hardware property, and it "
+                    "could not be resolved from the managed-system summary; "
+                    "the likely cause is an X-HMC-Schema-Version pin "
+                    "(HMC_SCHEMA_VERSION): unset HMC_SCHEMA_VERSION and any "
+                    "profile schema_version, and retry, or query the system by "
+                    "name with systems show",
                     status_code=500,
                     body=exc.body,
                 ) from (fallback_exc or exc)

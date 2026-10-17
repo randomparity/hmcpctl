@@ -146,7 +146,17 @@ async def read_fleet(
         skipped = unreadable_system(system)
         if skipped is None:
             try:
-                entries.extend(await read_system(system["UUID"]))
+                rows = await read_system(system["UUID"])
+                entries.extend(
+                    {
+                        **entry,
+                        "ManagedSystem": {
+                            "UUID": system["UUID"],
+                            "SystemName": system.get("SystemName"),
+                        },
+                    }
+                    for entry in rows
+                )
                 continue
             except HMCError:
                 skipped = await _stopped_operating(hmc, system["UUID"])

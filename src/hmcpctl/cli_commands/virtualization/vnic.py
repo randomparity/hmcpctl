@@ -19,14 +19,14 @@ from ...operations.virtualization.vnic import (
     list_vnics,
     remove_vnic,
 )
-from ..output import output, print_json
+from ..output import output, print_json, terminal_field
 from ..runtime import with_client
 
 
 def _confirm_on_stderr(prompt: str) -> bool:
     """Keep confirmation prompts and terminal input echoes off JSON stdout."""
     with redirect_stdout(sys.stderr):
-        return typer.confirm(prompt, err=True)
+        return typer.confirm(terminal_field(prompt, err=True), err=True)
 
 
 def network_list_fc_ports(

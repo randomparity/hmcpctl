@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import ssl
 import warnings
 from collections.abc import Mapping
 from threading import Lock
@@ -19,6 +21,7 @@ from typing import Any, Literal, Self, cast, get_args
 from urllib.parse import quote, unquote, urlparse
 
 import httpx
+import truststore
 
 from ..audit import records as audit
 from ..config import HMCConfig, env_var_value
@@ -237,15 +240,16 @@ def _reject_dot_segments(method: str, path: str) -> None:
                 )
 
 
-# The one job path the HMC documents and every captured SELF link uses:
-# `/rest/api/uom/jobs/{JobID}` (docs/refs/hmc-rest-api-p10/017-jobs.md). A read-side
+# The job paths the HMC documents and every captured SELF link uses:
+# `/rest/api/uom/jobs/{JobID}` (docs/refs/hmc-rest-api-p10/017-jobs.md) and
+# `/rest/api/templates/jobs/{JobID}` for template deployment jobs. A read-side
 # `jobs/{JobID}/{uuid}` link is reduced to it before this check. The per-operation
 # `.../do/{Op}/Job/{id}` form issue #95 accepted was never observed and is refused
 # (#1202).
 #
 # Both raw and decoded forms use this grammar. A decoded query or fragment
 # delimiter is unsafe in a prefix too, not just in the identifier (ADR 0152).
-_JOB_PATH = re.compile(r"/rest/api/uom/jobs/[^/?#]+")
+_JOB_PATH = re.compile(r"/rest/api/(?:uom|templates)/jobs/[^/?#]+")
 
 
 def _reject_non_job_path(path: str, argument: str) -> None:
@@ -336,6 +340,14 @@ class TLSVerificationDisabledWarning(UserWarning):
     """Warning emitted when HMC TLS certificate verification is disabled."""
 
 
+class HMCVerifySSLDefaultWarning(UserWarning):
+    """Warning emitted at client construction when ``verify_ssl`` defaults to false.
+
+    The ``false`` default will change to ``true`` in the 1.0 release; this warning
+    names the forthcoming change and the migration options available before then.
+    """
+
+
 _reported_tls_warning_keys: set[tuple[str, VerifySSLSource]] = set()
 _tls_warning_lock = Lock()
 
@@ -411,6 +423,22 @@ class HMCClient(
                 host=self.config.host,
                 source=self._verify_ssl_source,
             )
+        if not self.config.verify_ssl and self._verify_ssl_source == "field-default":
+            # ADR 0224 Decision 3: one-time pre-1.0 startup warning that the
+            # false default will flip to true in 1.0. Only operators who have
+            # not set HMC_VERIFY_SSL explicitly (field-default) hear it; an
+            # explicit false is a deliberate choice and is silent here.
+            warnings.warn(
+                "HMC_VERIFY_SSL defaults to false, but that default will change "
+                "to true in the 1.0 release. To keep verification off for this "
+                "HMC, set HMC_VERIFY_SSL=false explicitly (or pass "
+                "--no-verify-ssl). To verify instead, trust the HMC's "
+                "certificate: set HMC_TRUST_SYSTEM_STORE=true (the default) and "
+                "HMC_VERIFY_SSL=true, set HMC_CA_BUNDLE to a PEM file, or set "
+                "SSL_CERT_FILE/SSL_CERT_DIR. See docs/configuration.md#tls-trust.",
+                HMCVerifySSLDefaultWarning,
+                stacklevel=2,
+            )
         # X-Audit-Memento is evaluated once at construction time — this is safe
         # because each tool invocation creates a new HMCClient (via asyncio.run(_go)).
         # If the transport ever moves to a persistent shared client, this header would
@@ -426,9 +454,27 @@ class HMCClient(
 
     def _new_http_client(self, port: int) -> httpx.AsyncClient:
         base_url = httpx.URL(self.config.base_url).copy_with(port=port)
+        verify: bool | ssl.SSLContext | str = self.config.verify_ssl
+        if self.config.verify_ssl and self.config.ca_bundle:
+            # ADR 0223: HMC_CA_BUNDLE takes the highest precedence. Pass the
+            # path string directly; httpx accepts a PEM path for verify=.
+            # SSL_CERT_FILE/SSL_CERT_DIR and trust_system_store are ignored.
+            verify = self.config.ca_bundle
+        elif (
+            self.config.verify_ssl
+            and self.config.trust_system_store
+            and not os.environ.get("SSL_CERT_FILE")
+            and not os.environ.get("SSL_CERT_DIR")
+        ):
+            # ADR 0222: use the OS trust store via truststore when both
+            # verify_ssl and trust_system_store are on and no explicit bundle
+            # is set. SSL_CERT_FILE or SSL_CERT_DIR takes precedence, so the
+            # operator can always pin a bundle without toggling this flag.
+            ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            verify = ctx
         return httpx.AsyncClient(
             base_url=base_url,
-            verify=self.config.verify_ssl,
+            verify=verify,
             timeout=self.config.timeout,
             headers={
                 "X-Audit-Memento": self.config.effective_audit_memento,
@@ -1513,7 +1559,10 @@ class HMCClient(
         applies (ADR 0152).
         """
         path = _job_request_path(job_id, job_href)
-        xml = await self._web_get(path)
+        if "/templates/jobs/" in path:
+            xml = await self._templates_get(path)
+        else:
+            xml = await self._web_get(path)
         if not xml:
             return None
         entries = _parse_feed(xml, path)

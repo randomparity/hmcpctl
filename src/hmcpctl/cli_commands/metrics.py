@@ -14,7 +14,7 @@ from ..operations.metrics.pcm import (
     validate_pcm_metric_target,
     validate_pcm_preferences_category,
 )
-from .output import console, print_json, usage_error
+from .output import console, print_json, terminal_field, usage_error
 from .runtime import with_client
 
 
@@ -65,7 +65,8 @@ def metrics_set_prefs(
     validate_pcm_preferences_category(category)
 
     if not yes and not typer.confirm(
-        f"Enable/disable PCM monitoring on {category} {resource_name_or_uuid}?"
+        f"Enable/disable PCM monitoring on {terminal_field(category)} "
+        f"{terminal_field(resource_name_or_uuid)}?"
     ):
         raise typer.Abort()
 
@@ -74,7 +75,10 @@ def metrics_set_prefs(
     )
 
     console.print(
-        f"Updated {category} {resource_name_or_uuid}: {flags}",
+        (
+            f"Updated {terminal_field(category)} {terminal_field(resource_name_or_uuid)}"
+            f": {terminal_field(flags)}"
+        ),
         style="green",
         markup=False,
     )

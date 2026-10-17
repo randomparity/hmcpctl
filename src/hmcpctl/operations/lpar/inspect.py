@@ -76,7 +76,7 @@ class Refcodes:
     """At most 20 reference codes, newest first."""
 
     source: SectionSource
-    codes: list[dict[str, str]]
+    codes: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -160,7 +160,7 @@ async def _refcodes(
     if denial is not None:
         return Refcodes(SectionSource("denied", REFCODES_TOOL, _detail(denial)), [])
 
-    async def read() -> list[dict[str, str]]:
+    async def read() -> list[dict[str, Any]]:
         system_name, lpar_name = await resolve_ssh_names(
             hmc.config, system, name or lpar
         )

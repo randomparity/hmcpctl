@@ -80,6 +80,35 @@ inventories to make the added latency material.
 > fallback still resolves the name through `find_system_by_name`, whose `SystemName` search
 > stalled only for a system with no connection, and such a system is not read.
 
+> **Amended by #1648** (2026-10-15): the observed trigger is the `X-HMC-Schema-Version: V1_0`
+> pin, not a firmware class. The fallback is kept, re-scoped to that pin.
+>
+> - **Evidence.** #1646's read-only probe (one V10R3 SP1060 HMC, one session) read the full
+>   `ManagedSystem` feed twice, seconds apart. Without the header it answered 200 at the HMC's
+>   native schema (`V1_17_0`), with no `VirtualPersistentMemoryVolume` element. With
+>   `X-HMC-Schema-Version: V1_0` it answered 500, "Nested path contains null property",
+>   `nestedPath=VirtualPersistentMemoryVolume/Uuid/Value/Value`: this record's 500. #1531's
+>   2026-10-14 sweep sent no header and saw no 500 on 12 HMCs: quick/All listed 130 systems, the
+>   full feed answered on 10 HMCs, and 107 `ManagedSystem/{uuid}` reads returned no 500. This
+>   record's own 2026-09-15 confirmation (PR #800) ran with schema `V1_0` configured; it read only
+>   quick endpoints (no full feed, no per-UUID read) and saw no 500, so it is circumstantial, not a
+>   reproduction.
+> - **Decision.** Keep the quick/All fallback and its control flow unchanged, as a mitigation for a
+>   pinned schema version rather than for broken firmware. `HMC_SCHEMA_VERSION` is empty by default,
+>   which sends no header, and no header-less read has produced this 500. The fallback's error and
+>   the `ManagementConsole` guard's error (`get_console_info`, #880) name the pin as the likely
+>   cause and tell the operator to unset both `HMC_SCHEMA_VERSION` and any profile `schema_version`
+>   (the variable overrides the profile), rather than update the HMC firmware, which would not help
+>   a pinned operator.
+> - **Unverified.** Whether `ManagedSystem/{uuid}` — the read this fallback guards — also 500s with
+>   the pin, since #1646 read only the feed; whether other releases (V11R2, V9R2) behave the same;
+>   whether any HMC 500s here without the header; whether the fallback's own `SystemName` search,
+>   which also sends the pin and returns full `ManagedSystem` entries, succeeds under `V1_0`; what
+>   schema setting #784's original report ran with, which it does not record; and whether the pin
+>   also explains the `ManagementConsole` 500 on `Session/SessionId/Value` recorded in #880, which
+>   #1531's sweeps never read. Until that is known, an operator who hits either 500 without a pin
+>   gets advice that does not apply. Retiring the fallback waits on that evidence.
+
 ## Considered & rejected
 - Fall back to `search_uom("ManagedSystem", "UUID", uuid)`. judgment: no
   evidence in this repo or `project-pim` that `UUID` is a supported

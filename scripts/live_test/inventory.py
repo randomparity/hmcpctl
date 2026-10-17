@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, cast
 
 from fastmcp import Client
 
+from hmcpctl.config import HMCConfig
 from hmcpctl.ssh.commands import build_filter
 
+from .observation import plain_data
 from .results import entries
 from .results import resource as get_resource
 
@@ -77,7 +79,7 @@ async def _capture_lpar_properties(client: Client, state: RunState) -> None:
     )
     state.record(0, "hmc_get_lpar_proc_compat (baseline)", st, data)
     if st == "PASS":
-        artifacts.lp3_baseline["proc_compat"] = data
+        artifacts.lp3_baseline["proc_compat"] = plain_data(data)
 
 
 async def _capture_adapter_topology(client: Client, state: RunState) -> None:
@@ -210,4 +212,23 @@ async def capture_lpar_baseline(client: Client, state: RunState) -> None:
     await _capture_vios_identity(client, state)
     await _capture_lpar_cli_dump(client, state)
     await _capture_sync_state(client, state)
+    if state.group == "round2":
+        # Import locally: the runner also imports this scenario module.
+        import live_test_baseline as baseline
+
+        captured = state.artifacts.lp3_baseline
+        vios_id = state.artifacts.vios_partition_id
+        if (
+            type(vios_id) is not int
+            or vios_id <= 0
+            or not isinstance(captured.get("description"), str)
+            or not isinstance(captured.get("proc_compat"), dict)
+            or any(
+                row["status"] == "FAIL" for row in state.results if row["subtask"] == 0
+            )
+        ):
+            raise ValueError("round2 baseline incomplete; refusing mutations")
+        captured["round2_snapshot"] = await baseline.capture(
+            state.hmc_config or HMCConfig(), state.config.system_name, [vios_id]
+        )
     _print_baseline_summary(state)

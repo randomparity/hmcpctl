@@ -345,3 +345,27 @@ _INACTIVE = Rmc(SectionSource("ok", "hmc_get_lpar"), "inactive")
 )
 def test_next_actions_follow_state_and_rmc(state, rmc, expected):
     assert next_actions(state, rmc) == expected
+
+
+def test_inspection_preserves_enrichment_from_real_reader(monkeypatch):
+    from hmcpctl.ssh import refcodes
+
+    async def resolve(*_args):
+        return "system", "web1"
+
+    async def transport(*_args):
+        return (
+            "lpar_name,time_stamp,refcode\n"
+            "web1,now,CA00E105 LP=00002\nweb1,earlier,B2001230\n"
+        )
+
+    monkeypatch.setattr(inspect_module, "resolve_ssh_names", resolve)
+    monkeypatch.setattr(refcodes, "run_hmc_command", transport)
+    monkeypatch.setattr(
+        inspect_module, "list_lpar_refcodes", refcodes.list_lpar_refcodes
+    )
+    result = _inspect(_HMC(), ("refcodes",))
+    assert result.refcodes.source.status == "ok"
+    assert "operating system" in result.refcodes.codes[0]["definition"].lower()
+    assert result.refcodes.codes[0]["refcode"] == "CA00E105 LP=00002"
+    assert result.refcodes.codes[1]["definition"] is None

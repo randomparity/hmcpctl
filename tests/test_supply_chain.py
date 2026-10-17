@@ -29,6 +29,7 @@ LIBRARY_DEPENDENCIES = frozenset(
         "httpx",
         "pydantic",
         "pydantic-settings",
+        "truststore",
         "typing-extensions",
     }
 )
