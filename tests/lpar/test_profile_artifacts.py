@@ -190,3 +190,19 @@ async def test_empty_system_refused_before_inventory(selector):
     with pytest.raises(ValueError, match="system"):
         await list_backup_profile_artifacts(hmc, selector)
     hmc.list_system_summaries.assert_not_called()
+
+
+async def test_oversized_job_handle_refused_before_polling():
+    hmc = client(job(JobID="j" * 4097))
+    with pytest.raises(HMCError, match="identity exceeds"):
+        await list_backup_profile_artifacts(hmc, SYSTEM)
+    hmc.wait_for_job_entry.assert_not_awaited()
+
+
+async def test_file_identity_is_xml_escaped_without_changing_its_matching_name():
+    name = 'backup<&"'
+    hmc = client(job([artifact(name)]), job(), job())
+    result = await delete_backup_profile_artifact(hmc, SYSTEM, name)
+    assert result.file_name == name and result.postcondition == "absent"
+    xml = hmc.submit_job.call_args_list[1].args[1]
+    assert "backup&lt;&amp;&quot;" in xml

@@ -145,6 +145,8 @@ async def list_backup_profile_artifacts(
         f"/rest/api/uom/ManagedSystem/{system_uuid}/do/ListBackupProfileData",
         build_job_request("ListBackupProfileData", "ManagedSystem"),
     )
+    if submitted is not None:
+        _project(job_outcome("", submitted))
     terminal = await wait_for_submitted_job(hmc, submitted, True, 300, 5)
     outcome = job_outcome(
         job_identifier(submitted or {}) or "ListBackupProfileData", terminal
@@ -178,6 +180,8 @@ async def delete_backup_profile_artifact(
             "DeleteBackupProfileData", "ManagedSystem", {"file": file_name}
         ),
     )
+    if submitted is not None:
+        _project(job_outcome("", submitted))
     terminal = await wait_for_submitted_job(hmc, submitted, True, 300, 5)
     outcome = _project(
         job_outcome(
