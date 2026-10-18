@@ -213,6 +213,67 @@ except typer.Exit as exc:
     assert "\x1b[" in stderr  # the application's own Error style remains
 
 
+@pytest.mark.parametrize("stderr_tty", [False, True])
+@pytest.mark.parametrize("with_notes", [False, True])
+def test_upload_failure_renders_ordered_notes_at_stderr_boundary(
+    stderr_tty, with_notes
+):
+    from rendered_output import collapse_whitespace
+
+    from hmcpctl.operations.storage.resources import _ACCEPTED_NOTE
+
+    notes = (
+        (_ACCEPTED_NOTE, PAYLOAD, "Cleanup failed [bold]:smile:") if with_notes else ()
+    )
+    source = f"""
+from contextlib import asynccontextmanager
+from hmcpctl import cli
+from hmcpctl.cli_commands import runtime
+from hmcpctl.cli_commands.storage import resources
+
+@asynccontextmanager
+async def client():
+    yield object()
+
+async def upload(*args, **kwargs):
+    error = RuntimeError("upload failed")
+    for note in {notes!r}:
+        error.add_note(note)
+    raise error
+
+runtime.client = client
+resources.upload_iso = upload
+cli.app(["storage", "upload-iso", "vios-test", "https://images.test/probe.iso",
+         "--vg", "group-test", "--name", "probe.iso"])
+"""
+    code, stdout, stderr = _child(
+        source,
+        stdout_tty=not stderr_tty,
+        stderr_tty=stderr_tty,
+        environment={"FORCE_COLOR": "1"},
+    )
+    assert code == 1 and stdout == ""
+    rendered = click.unstyle(stderr)
+    assert rendered.startswith("Error: upload failed\n")
+    if not with_notes:
+        assert rendered == "Error: upload failed\n"
+        return
+    normalized = collapse_whitespace(rendered)
+    assert collapse_whitespace(_ACCEPTED_NOTE) in normalized
+    assert (
+        rendered.index("Note:")
+        < rendered.index("雪")
+        < rendered.index("Cleanup failed")
+    )
+    assert "Cleanup failed [bold]:smile:" in rendered
+    if stderr_tty:
+        assert VISIBLE in rendered
+        assert "\u202e" not in rendered and "\x9b" not in rendered
+    else:
+        assert "\u202e" in rendered
+        assert r"\u202e" not in rendered
+
+
 def test_raw_confirmation_encodes_argument_before_prompt():
     code, stdout, stderr = _child(
         f"from hmcpctl import cli\ncli.app(['raw', 'post', {PAYLOAD!r}, '<x/>'])",

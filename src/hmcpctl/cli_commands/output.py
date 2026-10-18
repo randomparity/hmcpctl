@@ -153,7 +153,7 @@ def report_unreadable(listing: FleetListing) -> None:
 
 
 def fail(exc: Exception, *, code: int = 1, guidance: str = "") -> NoReturn:
-    """Report an exception and exit with the requested runtime-error code."""
+    """Report an exception and its notes, then exit with the requested error code."""
     message = str(exc)
     if isinstance(exc, ResourceNotFoundError):
         commands = {
@@ -171,6 +171,10 @@ def fail(exc: Exception, *, code: int = 1, guidance: str = "") -> NoReturn:
             ("Error:", "red"), f" {terminal_field(message, err=True)}", guidance
         )
     )
+    for note in getattr(exc, "__notes__", ()):
+        err_console.print(
+            Text.assemble(("Note:", "yellow"), f" {terminal_field(note, err=True)}")
+        )
     raise typer.Exit(code=code)
 
 
