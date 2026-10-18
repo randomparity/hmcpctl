@@ -162,6 +162,7 @@ below. The table does not grant hardware or VIOS access.
 | dedicated | `uv run --no-sync python scripts/live_dedicated.py` | subtask 24 |
 | bare-cec | `uv run --no-sync python scripts/live_bare_cec.py` | subtask 25 |
 | profiles | `uv run --no-sync python scripts/live_profiles.py` | subtasks 0, 4, 10 and 15 |
+| profile-artifacts | `uv run --no-sync python scripts/live_profile_artifacts.py` | subtask 43; one disposable backup, no restore |
 | users | `uv run --no-sync python scripts/live_users.py` | subtask 11 |
 | vios-backup | `uv run --no-sync python scripts/live_vios_backup.py` | subtask 37 |
 | pcm | `uv run --no-sync python scripts/live_pcm.py` | subtask 38 |
@@ -1100,3 +1101,41 @@ A reproducible native attempt requires this ordered procedure:
 Offline tests simulate unreachable destination resolution, cancellation and partial
 completion without disrupting hardware. They preserve source/job attribution and
 propagate failure details; they do not prove native recovery or destination health.
+
+## Focused backup-artifact proof (#1726)
+
+This arm requires separate operator authorization for one managed system and
+HMC 10.3.1061.0 or later with the supported complete inventory shape. Confirm
+the deployed revision equals the candidate HEAD; retain that revision and the
+private baseline. Do not substitute the broad `profiles` arm: it performs a
+system-wide restore. The focused arm performs no restore or initialization.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group profile-artifacts
+uv run --no-sync python scripts/live_profile_artifacts.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-profile-artifacts.json
+uv run --no-sync python scripts/live_test_evidence.py test-results-profile-artifacts.json
+```
+
+Use the configured explicit system and connection in the normal validated live
+configuration. First retain a complete baseline of the selected system's backup
+names and identify required recovery artifacts. The arm refuses before creation
+if inventory is unavailable or any `hmcpctl-live-prof-` scratch artifact already
+exists. It creates one `hmcpctl-live-prof-<16 hex>` backup with overwrite disabled,
+asserts its exact listed name and asks the dedicated delete operation to remove
+only that name. The operation checks a complete pre-list and successful-job fresh
+absence readback. The scratch file is disposable and is never used for restore.
+
+An uncertain create, failed list or inconclusive deletion is a failed attempt,
+not permission to retry or remove another file. Run independent recovery after
+success, failure or interruption. It re-lists the selected system and reports
+reserved-prefix residue without deleting or restoring anything. Unreadable
+inventory or missing system identity cannot report clean. Inspect any retained
+backup and the private run before separately authorizing exact-name manual cleanup;
+keep required recovery artifacts. Offline tests cover collision, invalid names,
+failed restore/cleanup and ambiguous outcomes; they are not passing native arms.
+
+The evidence generator stamps the actual tested commit and filters identifiers.
+Keep raw results private. Not-run/skipped/failed is not passing live evidence,
+and no artifact operation is promoted merely because its source-format read
+was captured. No native run is authorized by this procedure's presence.

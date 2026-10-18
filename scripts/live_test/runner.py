@@ -17,7 +17,7 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-With no selection every subtask runs, 0 through 42: there is none from 26 to 36,
+With no selection every subtask runs, 0 through 43: there is none from 26 to 36,
 which are other arms' row ids, and 9, 11, 37, 38, 39, 40, 41 and 42 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power` groups. A bare
@@ -106,7 +106,7 @@ from live_test.observation import (
     classify_failure,
     grade_assertions,
 )
-from live_test.profiles import inventory_lpar_profiles
+from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
 from live_test.provisioning import (
     exercise_storage_provisioning,
     validate_provisioning_dry_run,
@@ -671,6 +671,7 @@ SUBTASKS = {
     40: exercise_disk_lifecycle,
     41: exercise_lpar_power,
     42: exercise_volume_group,
+    43: exercise_backup_artifacts,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -695,6 +696,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "dedicated": [24],
     "bare-cec": [25],
     "profiles": [0, 4, 10, 15],
+    "profile-artifacts": [43],
     "users": [11],
     # ST9 runs only here: its round trips need the operator's network authorization.
     "network": [2, 9],

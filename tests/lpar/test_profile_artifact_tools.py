@@ -72,3 +72,38 @@ def test_cli_delete_success_requires_verified_absence(
     else:
         cli.lpars_delete_profile_backup(SYSTEM, "backup-1")
     assert printed == [asdict(result)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name", ["hmc_list_backup_lpar_profiles", "hmc_delete_backup_lpar_profile"]
+)
+async def test_mcp_serializes_bounded_artifact_result(tool_name, monkeypatch):
+    from dataclasses import replace
+
+    from fastmcp import Client
+
+    from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
+    from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
+    from hmcpctl.server import TOOL_SECURITY, create_mcp
+
+    job = replace(
+        job_outcome(
+            "job-1", {"Resource": {"JobID": "job-1", "Status": "COMPLETED_OK"}}
+        ),
+        job=None,
+    )
+    result = (
+        BackupProfileInventory(SYSTEM, job, ())
+        if "list" in tool_name
+        else BackupProfileDeletion(SYSTEM, "backup-1", job, "absent")
+    )
+    monkeypatch.setattr(tools, "with_client", lambda operation, **kwargs: result)
+    policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
+    arguments = {"system_name_or_uuid": SYSTEM}
+    if "delete" in tool_name:
+        arguments["file_name"] = "backup-1"
+    async with Client(create_mcp(policy)) as client:
+        response = await client.call_tool(tool_name, arguments)
+    assert response.structured_content["system_uuid"] == SYSTEM
+    assert response.structured_content["job"]["job"] is None
