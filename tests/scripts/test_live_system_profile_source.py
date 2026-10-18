@@ -41,6 +41,7 @@ def packet():
 def client():
     h = AsyncMock()
     h.config.host = "hmc.test"
+    h.config.port = 443
     h.get_managed_system.return_value = {
         "UUID": S,
         "Resource": {"SystemName": "system1"},
@@ -79,7 +80,45 @@ def client():
             },
         }
     }
+
+    async def wait(identity, **kwargs):
+        terminal = json.loads(json.dumps(h.wait_for_job_entry.return_value))
+        terminal["Resource"]["JobID"] = identity
+        return terminal
+
+    h.wait_for_job_entry.side_effect = wait
     return h
+
+
+def completed_document(p, before, h):
+    from datetime import UTC, datetime
+
+    records = []
+    for i, operation in enumerate(source.OPERATIONS):
+        identity = f"own-{i}"
+        terminal = json.loads(json.dumps(h.wait_for_job_entry.return_value))
+        terminal["Resource"]["JobID"] = identity
+        records.append(
+            {
+                "operation": operation,
+                "id": identity,
+                "href": f"/rest/api/uom/jobs/{identity}",
+                "submission": {"Resource": {"JobID": identity}},
+                "terminal": terminal,
+                "own_job_deleted": True,
+            }
+        )
+    return {
+        "packet_sha256": source.digest(p),
+        "before": before,
+        "phase": "captured-and-reconciled",
+        "jobs": records,
+        "run": {
+            "partial": False,
+            "group": source.GROUP,
+            "finished": datetime.now(UTC).isoformat(),
+        },
+    }
 
 
 def grant(p):
@@ -222,11 +261,7 @@ async def test_recovery_fails_closed(kind, monkeypatch):
     p, h = packet(), client()
     monkeypatch.setattr(source, "run_hmc_command", AsyncMock(return_value="name\n"))
     before = await source.snapshot(h, p)
-    document = {
-        "packet_sha256": source.digest(p),
-        "before": before,
-        "run": {"partial": False},
-    }
+    document = completed_document(p, before, h)
     if kind == "partial":
         document["run"]["partial"] = True
     if kind == "wrong-binding":
@@ -344,10 +379,12 @@ def test_packet_digest_and_explicit_grant_fail_before_connecting(monkeypatch, tm
     monkeypatch.setattr(
         source, "load_profile", lambda _: pytest.fail("no connection allowed")
     )
-    with pytest.raises(ValueError, match="digest"):
+    assert (
         source.main(["preflight", "--packet", str(path), "--packet-sha256", "0" * 64])
+        == 2
+    )
     raw_digest = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
-    with pytest.raises(ValueError, match="grant|assertions"):
+    assert (
         source.main(
             [
                 "capture",
@@ -359,6 +396,8 @@ def test_packet_digest_and_explicit_grant_fail_before_connecting(monkeypatch, tm
                 str(tmp_path / "out"),
             ]
         )
+        == 2
+    )
 
 
 @pytest.mark.asyncio
@@ -369,6 +408,8 @@ async def test_empty_get_result_retains_scratch_for_explicit_reconciliation(
     successful = h.wait_for_job_entry.return_value
     empty = json.loads(json.dumps(successful))
     empty["Resource"]["Results"]["JobParameter"][1]["ParameterValue"] = ""
+    successful["Resource"]["JobID"] = "job0"
+    empty["Resource"]["JobID"] = "job1"
     h.wait_for_job_entry.side_effect = [successful, empty]
     monkeypatch.setattr(source, "run_hmc_command", AsyncMock(return_value="name\n"))
     with pytest.raises(ValueError, match="nonempty raw result"):
@@ -442,7 +483,7 @@ def test_capture_output_cannot_put_private_native_results_in_checkout(
     monkeypatch.setattr(
         source, "load_profile", lambda _: pytest.fail("no connection allowed")
     )
-    with pytest.raises(ValueError, match="outside the checkout"):
+    assert (
         source.main(
             [
                 "capture",
@@ -458,3 +499,267 @@ def test_capture_output_cannot_put_private_native_results_in_checkout(
                 str(Path(source.__file__).resolve().parents[2] / "raw"),
             ]
         )
+        == 2
+    )
+
+
+@pytest.mark.parametrize("override", ["host", "port"])
+def test_effective_ambient_host_is_rejected_before_client_authentication(
+    monkeypatch, tmp_path, override
+):
+    from functools import partial
+
+    from hmcpctl.config import load_profile
+
+    configuration = tmp_path / "config.toml"
+    configuration.write_text(
+        '[profiles.fixture]\nhost="hmc.test"\nuser="fixture"\npassword="p"\n'
+    )
+    monkeypatch.setenv(
+        "HMC_HOST", "wrong-destination.test" if override == "host" else "hmc.test"
+    )
+    monkeypatch.setenv("HMC_PORT", "443" if override == "host" else "12443")
+    monkeypatch.setattr(
+        source, "load_profile", partial(load_profile, config_path=configuration)
+    )
+    constructed = []
+
+    def forbidden(config):
+        constructed.append(config)
+        raise AssertionError("authentication must not be attempted")
+
+    monkeypatch.setattr(source, "HMCClient", forbidden)
+    path = tmp_path / "packet.json"
+    path.write_text(json.dumps(packet()))
+    raw_digest = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+    assert (
+        source.main(["preflight", "--packet", str(path), "--packet-sha256", raw_digest])
+        == 2
+    )
+    assert not constructed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "submission-link",
+        "namespace",
+        "terminal-id",
+        "terminal-link",
+        "missing-terminal-id",
+        "effective-repeat",
+    ],
+)
+async def test_job_identity_ambiguity_stops_before_poll_or_cleanup(fault, tmp_path):
+    h, p = client(), packet()
+    submitted = {"Resource": {"JobID": "own-job"}}
+    terminal = json.loads(json.dumps(h.wait_for_job_entry.return_value))
+    terminal["Resource"]["JobID"] = "own-job"
+    document = {"jobs": []}
+    if fault == "submission-link":
+        submitted["link"] = "/rest/api/uom/jobs/unrelated-job"
+    if fault == "namespace":
+        submitted["link"] = "/rest/api/templates/jobs/own-job"
+    if fault == "terminal-id":
+        terminal["Resource"]["JobID"] = "unrelated-job"
+    if fault == "terminal-link":
+        terminal["link"] = "/rest/api/uom/jobs/unrelated-job"
+    if fault == "missing-terminal-id":
+        terminal["Resource"].pop("JobID")
+    if fault == "effective-repeat":
+        submitted["Resource"]["JobID"] = "second-id"
+        submitted["link"] = "/rest/api/uom/jobs/first-id"
+        document["jobs"] = [{"id": "first-id", "href": "/rest/api/uom/jobs/first-id"}]
+    h.submit_job.side_effect = [submitted]
+    h.wait_for_job_entry.side_effect = None
+    h.wait_for_job_entry.return_value = terminal
+    with pytest.raises(ValueError):
+        await source._job(h, p, "CreateSystemProfile", {}, document, tmp_path)
+    h.delete_job.assert_not_awaited()
+    if fault in {"submission-link", "namespace", "effective-repeat"}:
+        h.wait_for_job_entry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "queued",
+        "wrong-group",
+        "unfinished",
+        "empty-jobs",
+        "scratch-baseline",
+        "failed-job",
+        "uncleaned-job",
+        "wrong-sequence",
+        "terminal-id",
+    ],
+)
+async def test_forged_partial_false_cannot_claim_clean(fault, monkeypatch):
+    p, h = packet(), client()
+    scratch = p["scratch_system_profile"]
+    monkeypatch.setattr(source, "run_hmc_command", AsyncMock(return_value="name\n"))
+    before = await source.snapshot(h, p)
+    document = completed_document(p, before, h)
+    records = document["jobs"]
+    if fault == "queued":
+        document["phase"] = "submitting-CreateSystemProfile"
+    if fault == "wrong-group":
+        document["run"]["group"] = "other"
+    if fault == "unfinished":
+        document["run"]["finished"] = None
+    if fault == "empty-jobs":
+        document["jobs"] = []
+    if fault == "scratch-baseline":
+        before["namespace"] = [scratch]
+        source.run_hmc_command.return_value = f"name\n{scratch}\n"
+    if fault == "failed-job":
+        records[0]["terminal"]["Resource"]["Status"] = "FAILED_BEFORE_COMPLETION"
+    if fault == "uncleaned-job":
+        records[1]["own_job_deleted"] = False
+    if fault == "wrong-sequence":
+        records.reverse()
+    if fault == "terminal-id":
+        records[0]["terminal"]["Resource"]["JobID"] = "unrelated-job"
+    with pytest.raises(ValueError):
+        await source.recover(h, p, document)
+    h.submit_job.assert_not_awaited()
+    h.delete_job.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure_kind", ["ssh", "rest"])
+def test_cli_native_errors_are_sanitized(monkeypatch, tmp_path, capsys, failure_kind):
+    from hmcpctl.config import HMCConfig
+    from hmcpctl.errors import HMCError
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    cfg = HMCConfig.from_mapping(
+        {"host": "hmc.test", "user": "fixture", "password": "p"}
+    )
+    monkeypatch.setattr(source, "load_profile", lambda _: cfg)
+
+    class FailedClient:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            print("native-host.test secret-sentinel", file=sys.stderr)
+            if failure_kind == "ssh":
+                raise HMCCLIError("native-host.test account-identifier secret-sentinel")
+            raise HMCError(
+                "REST failure",
+                status_code=500,
+                body="native-host.test account-identifier secret-sentinel",
+            )
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(source, "HMCClient", FailedClient)
+    path = tmp_path / "packet.json"
+    path.write_text(json.dumps(packet()))
+    raw_digest = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+    assert (
+        source.main(["preflight", "--packet", str(path), "--packet-sha256", raw_digest])
+        == 2
+    )
+    output = capsys.readouterr()
+    assert "secret-sentinel" not in output.out + output.err
+    assert "native-host.test" not in output.out + output.err
+    assert "Traceback" not in output.out + output.err
+    assert "STOPPED" in output.err
+
+
+def test_provenance_uses_checkout_and_existing_renderer_clean_field(monkeypatch):
+    calls = []
+
+    def command(args, **kwargs):
+        calls.append((args, kwargs))
+        return "a" * 40 + "\n" if "rev-parse" in args else ""
+
+    monkeypatch.setattr(source.subprocess, "check_output", command)
+    assert source._revision() == ("a" * 40, True)
+    assert all(
+        c[1].get("cwd") == Path(source.__file__).resolve().parents[2] for c in calls
+    )
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        None,
+        "/rest/api/uom/jobs/own-1",
+        "https://hmc.test:443/rest/api/uom/jobs/own-1/00000009-0000-4000-8000-000000000009",
+    ],
+)
+def test_canonical_stable_job_identity_supports_real_read_self_links(link):
+    job = {"Resource": {"JobID": "own-1"}}
+    if link is not None:
+        job["link"] = link
+    assert source._identity(job, packet()) == ("own-1", "/rest/api/uom/jobs/own-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_requires_live_scratch_absence_with_a_valid_clean_baseline(
+    monkeypatch,
+):
+    p, h = packet(), client()
+    monkeypatch.setattr(source, "run_hmc_command", AsyncMock(return_value="name\n"))
+    document = completed_document(p, await source.snapshot(h, p), h)
+    source.run_hmc_command.return_value = "name\n" + p["scratch_system_profile"] + "\n"
+    with pytest.raises(ValueError):
+        await source.recover(h, p, document)
+    h.submit_job.assert_not_awaited()
+    h.delete_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_raw_failure_detail_is_saved_only_in_owned_private_journal(
+    monkeypatch, tmp_path
+):
+    p, h = packet(), client()
+    monkeypatch.setattr(source, "run_hmc_command", AsyncMock(return_value="name\n"))
+    h.wait_for_job_entry.side_effect = OSError("native-diagnostic.test secret-sentinel")
+    monkeypatch.setattr(source, "_revision", lambda: ("a" * 40, False))
+    with pytest.raises(OSError):
+        await source.capture(h, p, tmp_path / "private", **grant(p))
+    journal = tmp_path / "private" / "results.json"
+    document = json.loads(journal.read_text())
+    assert document["failure"]["detail"] == "native-diagnostic.test secret-sentinel"
+    assert journal.stat().st_mode & 0o777 == 0o600
+    assert document["run"]["partial"] is True
+    assert (
+        document["run"]["tree_clean"] is False
+    )  # Controlled dirty-tree provenance input.
+
+
+@pytest.mark.asyncio
+async def test_final_journal_save_failure_cannot_leave_a_completed_marker(
+    monkeypatch, tmp_path
+):
+    p, h = packet(), client()
+    scratch = p["scratch_system_profile"]
+    monkeypatch.setattr(
+        source,
+        "run_hmc_command",
+        AsyncMock(side_effect=["name\n", "name\n", f"name\n{scratch}\n", "name\n"]),
+    )
+    original = source.save
+    failed = False
+
+    def fail_final_once(directory, document):
+        nonlocal failed
+        if document.get("phase") == "captured-and-reconciled" and not failed:
+            failed = True
+            raise OSError("controlled final save failure")
+        original(directory, document)
+
+    monkeypatch.setattr(source, "save", fail_final_once)
+    with pytest.raises(OSError):
+        await source.capture(h, p, tmp_path / "private", **grant(p))
+    document = json.loads((tmp_path / "private" / "results.json").read_text())
+    assert document["run"]["partial"] is True
+    with pytest.raises(ValueError):
+        await source.recover(h, p, document)
+    assert h.submit_job.await_count == 3

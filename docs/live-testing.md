@@ -1180,7 +1180,8 @@ uv run --no-sync python scripts/live_test_preflight.py --group system-profile-so
   --packet "$PACKET" --packet-sha256 "$PACKET_SHA256"
 ```
 
-Preflight only reads the pinned context, exact contained references and name-only namespace.
+Preflight resolves and checks the effective pinned host/port before client construction or
+authentication, then only reads the exact contained references and name-only namespace.
 It rejects changed bindings, profile association, power/ownership observations or scratch-name
 collision. It does not load a fallback default scenario or infer an execution grant.
 Only after the operator approves the exact targets/effects, source revision and cleanup:
@@ -1200,7 +1201,10 @@ further domain writes; there is no replay or automatic rollback. Retain the jour
 handles for manual reconciliation. A timeout does not cancel the job or release coordination.
 Only definite scratch creation followed by unchanged member baselines and exactly the expected
 namespace permits one Delete. Get's raw unknown membership grammar is never cleanup authority.
-Own successful jobs are removed only after saving their results. Files have private permissions;
+The stable submission JobID, canonical UOM SELF path and terminal JobID/path must agree;
+contradictions or reused effective handles stop before polling/cleanup. The shared generic
+client compatibility policy is unchanged. Own successful jobs are removed only after saving
+their identity-consistent terminal results. Files have private permissions;
 raw captures must remain private and outside the checkout.
 
 After every attempt, including an apparently successful one, run the independent read-only witness:
@@ -1212,9 +1216,14 @@ uv run --no-sync python scripts/live_test_recovery.py \
 uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE_NEW_DIRECTORY/results.json"
 ```
 
+Recovery requires a coherent completed group/phase/timestamp and exactly three ordered,
+successful, identity-consistent, cleaned own-job records; a false partial flag alone proves
+nothing. Scratch must be absent in both the purported original and independently read namespace.
 Recovery submits or deletes no job and changes no hardware. It independently compares the
 pinned namespace and complete member-profile baselines, and refuses partial runs or changed
 packet bindings. A failed/unreadable witness is not clean. The source journal records the exact
-revision, dirty-tree status, packet identities and harness digest. The evidence renderer's
+revision anchored to the source checkout, the renderer-compatible `tree_clean` flag, packet
+identities and harness digest. CLI failures return a sanitized summary without a native
+traceback; raw failure details are retained only in an owned private capture journal. The evidence renderer's
 allowlist excludes raw native fields; source capture does not create maturity observations or
 substitute for a final deployed product test. No native run is authorized by these instructions.

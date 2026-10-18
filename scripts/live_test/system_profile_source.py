@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import csv
 import hashlib
 import io
@@ -12,21 +13,23 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_profile
-from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, build_job_request, job_identifier
-from hmcpctl.jobs.core import _job_href
+from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, build_job_request, canonical_job_path
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh.transport import run_hmc_command
 
 GROUP = "system-profile-source"
 LIMIT = 5 * 1024 * 1024
-JOBS = frozenset({"CreateSystemProfile", "GetSystemProfiles", "DeleteSystemProfile"})
+OPERATIONS = ("CreateSystemProfile", "GetSystemProfiles", "DeleteSystemProfile")
+JOBS = frozenset(OPERATIONS)
 
 
 def digest(value: Any) -> str:
@@ -110,11 +113,18 @@ async def namespace(hmc: HMCClient, packet: dict) -> list[str]:
     return sorted(names)
 
 
+def _require_context(config, packet: dict) -> None:
+    if (config.host, config.port) != (
+        packet["context_host"],
+        packet.get("context_port", 443),
+    ):
+        raise ValueError("source connection differs from the pinned context")
+
+
 async def snapshot(hmc: HMCClient, packet: dict) -> dict:
     """Read exact member/profile identities and namespace without any job."""
     validate_packet(packet)
-    if hmc.config.host != packet["context_host"]:
-        raise ValueError("source connection differs from the pinned context")
+    _require_context(hmc.config, packet)
     system_uuid = packet["system"]["system_uuid"]
     system = await hmc.get_managed_system(system_uuid)
     if not system or system.get("Resource", {}).get("SystemName") != _system_name(
@@ -208,6 +218,79 @@ def save(directory: Path, document: dict) -> None:
             os.unlink(name)
 
 
+def _identity(job: object, packet: dict) -> tuple[str, str]:
+    if not isinstance(job, dict) or not isinstance(job.get("Resource"), dict):
+        raise ValueError("source job resource is malformed")  # noqa: TRY004 — malformed external HMC data, not a caller type error
+    resource = job["Resource"]
+    identity = resource.get("JobID")
+    if (
+        not isinstance(identity, str)
+        or not re.fullmatch(r"[A-Za-z0-9_.:-]+", identity)
+        or set(identity) == {"."}
+    ):
+        raise ValueError("source job lacks an unambiguous stable JobID")
+    path = f"/rest/api/uom/jobs/{identity}"
+    link = job.get("link")
+    if link is not None:
+        if (
+            not isinstance(link, str)
+            or not link.isprintable()
+            or any(c.isspace() for c in link)
+        ):
+            raise ValueError("source job SELF link is malformed")
+        parts = urlsplit(link)
+        if (
+            parts.query
+            or parts.fragment
+            or parts.username
+            or parts.password
+            or parts.scheme not in {"", "https"}
+            or parts.hostname
+            and parts.hostname.casefold() != packet["context_host"].casefold()
+            or parts.port is not None
+            and parts.port != packet.get("context_port", 443)
+            or canonical_job_path(parts.path) != path
+        ):
+            raise ValueError(
+                "source job SELF link contradicts its stable JobID/context/namespace"
+            )
+    return identity, path
+
+
+def _successful_record(record: dict, packet: dict) -> tuple[str, str]:
+    identity, path = _identity(record.get("submission"), packet)
+    if (record.get("id"), record.get("href")) != (identity, path) or _identity(
+        record.get("terminal"), packet
+    ) != (identity, path):
+        raise ValueError("source submission and terminal job identities disagree")
+    resource = record["terminal"]["Resource"]
+    raw = resource.get("Results", {}).get("JobParameter", [])
+    raw = [raw] if isinstance(raw, dict) else raw
+    if not isinstance(raw, list) or any(not isinstance(p, dict) for p in raw):
+        raise ValueError("source job results are malformed")
+    values = {}
+    for parameter in raw:
+        key = parameter.get("ParameterName")
+        if not isinstance(key, str) or key in values:
+            raise ValueError("source job has malformed or duplicate result parameters")
+        values[key] = parameter.get("ParameterValue")
+    if (
+        resource.get("Status") not in SUCCESSFUL_JOB_STATUSES
+        or values.get("returnCode") != "0"
+        or values.get("ErrorData")
+    ):
+        raise ValueError(
+            "source job lacks definite terminal success; manual reconciliation required"
+        )
+    if record["operation"] == "GetSystemProfiles" and (
+        not isinstance(values.get("result"), str) or not values["result"].strip()
+    ):
+        raise ValueError(
+            "source Get has no nonempty raw result; retain evidence for reconciliation"
+        )
+    return identity, path
+
+
 async def _job(
     hmc: HMCClient,
     packet: dict,
@@ -230,51 +313,41 @@ async def _job(
         f"/rest/api/uom/ManagedSystem/{packet['system']['system_uuid']}/do/{operation}",
         request,
     )
-    identity, href = job_identifier(job or {}), _job_href(job)
-    record = {"operation": operation, "id": identity, "href": href, "submission": job}
+    record = {"operation": operation, "submission": job}
     document["jobs"].append(record)
     save(directory, document)
-    if not identity or any(j["id"] == identity for j in document["jobs"][:-1]):
-        raise ValueError(
-            "source job identity unavailable; manual reconciliation required"
-        )
+    identity, path = _identity(job, packet)
+    if any(
+        j.get("id") == identity or j.get("href") == path for j in document["jobs"][:-1]
+    ):
+        raise ValueError("source job reuses a prior effective handle")
+    record.update(id=identity, href=path)
+    save(directory, document)
     terminal = await hmc.wait_for_job_entry(
-        identity, timeout_seconds=40, poll_interval=2, job_href=href
+        identity, timeout_seconds=40, poll_interval=2, job_href=path
     )
     record["terminal"] = terminal
     save(directory, document)
-    resource = (terminal or {}).get("Resource") or {}
-    raw = resource.get("Results", {}).get("JobParameter", [])
-    raw = [raw] if isinstance(raw, dict) else raw
-    values = {}
-    for parameter in raw:
-        key = parameter.get("ParameterName")
-        if key in values:
-            raise ValueError("source job has duplicate result parameters")
-        values[key] = parameter.get("ParameterValue")
-    if (
-        resource.get("Status") not in SUCCESSFUL_JOB_STATUSES
-        or values.get("returnCode") != "0"
-        or values.get("ErrorData")
-    ):
-        raise ValueError(
-            "source job lacks definite terminal success; manual reconciliation required"
-        )
-    if operation == "GetSystemProfiles" and (
-        not isinstance(values.get("result"), str) or not values["result"].strip()
-    ):
-        raise ValueError(
-            "source Get has no nonempty raw result; retain evidence for reconciliation"
-        )
-    await hmc.delete_job(identity, job_href=href)
+    _successful_record(record, packet)
+    await hmc.delete_job(identity, job_href=path)
     record["own_job_deleted"] = True
     save(directory, document)
 
 
 def _revision() -> tuple[str, bool]:
     return (
-        subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-        bool(subprocess.check_output(["git", "status", "--porcelain"], text=True)),
+        subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+            cwd=Path(__file__).resolve().parents[2],
+        ).strip(),
+        not bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"],
+                text=True,
+                cwd=Path(__file__).resolve().parents[2],
+            )
+        ),
     )
 
 
@@ -308,7 +381,7 @@ async def capture(
             "group": GROUP,
             "partial": True,
             "tested_commit": revision[0],
-            "dirty_tree": revision[1],
+            "tree_clean": revision[1],
             "subtasks": [],
             "finished": None,
         },
@@ -316,70 +389,124 @@ async def capture(
         "results": [],
     }
     save(directory, document)
-    before = await snapshot(hmc, packet)
-    document["before"] = before
-    save(directory, document)
-    scratch = packet["scratch_system_profile"]
+    try:
+        before = await snapshot(hmc, packet)
+        document["before"] = before
+        save(directory, document)
+        scratch = packet["scratch_system_profile"]
+        if (
+            scratch.casefold() in {name.casefold() for name in before["namespace"]}
+            or await snapshot(hmc, packet) != before
+        ):
+            raise ValueError("source scratch collision or baseline drift; no create")
+        await _job(
+            hmc,
+            packet,
+            "CreateSystemProfile",
+            {
+                "systemProfileName": scratch,
+                "logicalPartitionNames": ",".join(
+                    m["partition_name"] for m in packet["members"]
+                ),
+                "logicalPartitionProfileNames": ",".join(
+                    m["profile_name"] for m in packet["members"]
+                ),
+            },
+            document,
+            directory,
+        )
+        await _job(hmc, packet, "GetSystemProfiles", {}, document, directory)
+        current = await snapshot(hmc, packet)
+        if current != {**before, "namespace": sorted(before["namespace"] + [scratch])}:
+            raise ValueError(
+                "source scratch identity, namespace or member drift; no delete"
+            )
+        await _job(
+            hmc,
+            packet,
+            "DeleteSystemProfile",
+            {"systemProfileName": scratch},
+            document,
+            directory,
+        )
+        if await snapshot(hmc, packet) != before:
+            raise ValueError(
+                "source cleanup or member baseline differs; manual reconciliation required"
+            )
+        document["run"].update(partial=False, finished=datetime.now(UTC).isoformat())
+        document["phase"] = "captured-and-reconciled"
+        save(directory, document)
+        return document
+    except BaseException as error:
+        document["run"]["partial"] = True
+        document["phase"] = "manual-reconciliation-required"
+        document["failure"] = {
+            "type": type(error).__name__,
+            "detail": str(error)[:16384],
+        }
+        try:
+            save(directory, document)
+        except (OSError, ValueError):
+            pass  # The last atomic journal remains the uncertainty/reconciliation anchor.
+        raise
+
+
+def _require_completed_journal(packet: dict, document: dict) -> None:
+    run = document.get("run", {})
+    before = document.get("before", {})
+    jobs = document.get("jobs")
     if (
-        scratch.casefold() in {name.casefold() for name in before["namespace"]}
-        or await snapshot(hmc, packet) != before
+        document.get("packet_sha256") != digest(packet)
+        or "failure" in document
+        or document.get("phase") != "captured-and-reconciled"
+        or run.get("partial") is not False
+        or run.get("group") != GROUP
+        or not isinstance(run.get("finished"), str)
+        or not isinstance(before, dict)
+        or set(before) != {"namespace", "members"}
+        or not isinstance(jobs, list)
+        or len(jobs) != len(OPERATIONS)
     ):
-        raise ValueError("source scratch collision or baseline drift; no create")
-    await _job(
-        hmc,
-        packet,
-        "CreateSystemProfile",
-        {
-            "systemProfileName": scratch,
-            "logicalPartitionNames": ",".join(
-                m["partition_name"] for m in packet["members"]
-            ),
-            "logicalPartitionProfileNames": ",".join(
-                m["profile_name"] for m in packet["members"]
-            ),
-        },
-        document,
-        directory,
-    )
-    await _job(hmc, packet, "GetSystemProfiles", {}, document, directory)
-    current = await snapshot(hmc, packet)
-    if current != {**before, "namespace": sorted(before["namespace"] + [scratch])}:
-        raise ValueError(
-            "source scratch identity, namespace or member drift; no delete"
-        )
-    await _job(
-        hmc,
-        packet,
-        "DeleteSystemProfile",
-        {"systemProfileName": scratch},
-        document,
-        directory,
-    )
-    if await snapshot(hmc, packet) != before:
-        raise ValueError(
-            "source cleanup or member baseline differs; manual reconciliation required"
-        )
-    document["run"].update(partial=False, finished=datetime.now(UTC).isoformat())
-    document["phase"] = "captured-and-reconciled"
-    save(directory, document)
-    return document
+        raise ValueError("incomplete source journal; manual reconciliation required")
+    if datetime.fromisoformat(run["finished"]).tzinfo is None:
+        raise ValueError("source journal lacks an attributable completion time")
+    names = before["namespace"]
+    if (
+        not isinstance(names, list)
+        or any(not isinstance(n, str) or not n for n in names)
+        or len(names) != len(set(names))
+        or packet["scratch_system_profile"].casefold() in {n.casefold() for n in names}
+    ):
+        raise ValueError("source baseline contains scratch or malformed namespace")
+    handles = []
+    for record, operation in zip(jobs, OPERATIONS, strict=True):
+        if (
+            not isinstance(record, dict)
+            or record.get("operation") != operation
+            or record.get("own_job_deleted") is not True
+        ):
+            raise ValueError(
+                "source journal has an unfinished or wrong own-job sequence"
+            )
+        handles.append(_successful_record(record, packet))
+    if len(set(handles)) != len(handles):
+        raise ValueError("source journal repeats an effective job handle")
 
 
 async def recover(hmc: HMCClient, packet: dict, document: dict) -> str:
     """Independent observational witness: no submission or job deletion is reachable."""
+    _require_completed_journal(packet, document)
+    current = await snapshot(hmc, packet)
     if (
-        document.get("packet_sha256") != digest(packet)
-        or document.get("run", {}).get("partial") is not False
+        packet["scratch_system_profile"].casefold()
+        in {n.casefold() for n in current["namespace"]}
+        or current != document["before"]
     ):
-        raise ValueError(
-            "partial run or changed source binding; manual reconciliation required"
-        )
-    if not document.get("before") or await snapshot(hmc, packet) != document["before"]:
         raise ValueError("source namespace/member baseline is unreadable or differs")
     return "clean"
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("preflight", "capture", "recover"))
     parser.add_argument("--packet", type=Path, required=True)
@@ -413,11 +540,11 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("recovery requires the retained private results journal")
 
     async def run():
-        async with HMCClient(
-            load_profile(packet["configured_profile"]).model_copy(
-                update={"timeout": 20, "ssh_timeout": 15}
-            )
-        ) as hmc:
+        config = load_profile(packet["configured_profile"]).model_copy(
+            update={"timeout": 20, "ssh_timeout": 15}
+        )
+        _require_context(config, packet)
+        async with HMCClient(config) as hmc:
             async with asyncio.timeout(180):
                 if args.mode == "preflight":
                     observed = await snapshot(hmc, packet)
@@ -427,13 +554,8 @@ def main(argv: list[str] | None = None) -> int:
                         raise ValueError(
                             "scratch collision; source capture would not start"
                         )
-                    print(
-                        "READ-ONLY PREFLIGHT: exact references contained; scratch absent; no execution grant inferred"
-                    )
                 elif args.mode == "recover":
-                    print(
-                        await recover(hmc, packet, json.loads(args.results.read_text()))
-                    )
+                    await recover(hmc, packet, json.loads(args.results.read_text()))
                 else:
                     await capture(
                         hmc,
@@ -444,7 +566,29 @@ def main(argv: list[str] | None = None) -> int:
                         exclusive_writer_window=args.exclusive_writer_window,
                         raw_packet_sha256=args.packet_sha256,
                     )
-                    print("Source capture finished; run independent read-only recovery")
 
-    asyncio.run(run())
+    with (
+        tempfile.TemporaryFile(mode="w+") as private_diagnostics,
+        contextlib.redirect_stdout(private_diagnostics),
+        contextlib.redirect_stderr(private_diagnostics),
+    ):
+        asyncio.run(run())
+    print(
+        {
+            "preflight": "READ-ONLY PREFLIGHT: exact references contained; scratch absent; no execution grant inferred",
+            "recover": "CLEAN: independent source namespace/member witness",
+            "capture": "Source capture finished; run independent read-only recovery",
+        }[args.mode]
+    )
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except (Exception, KeyboardInterrupt, asyncio.CancelledError) as error:  # noqa: BLE001 — CLI privacy boundary: native errors must not escape
+        print(
+            f"SOURCE STOPPED ({type(error).__name__}): check the exact private packet/configuration and retained journal; reconcile before retry.",
+            file=sys.stderr,
+        )
+        return 2
