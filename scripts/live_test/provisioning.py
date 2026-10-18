@@ -193,7 +193,7 @@ async def _fixture_partition(client: Client, state: RunState, name: str) -> bool
 async def _fixture_disk_unmapped(
     client: Client, state: RunState, fixture: dict[str, str]
 ) -> bool:
-    import live_test_baseline as baseline
+    from live_test import baseline
 
     status, detail = await state.call(
         client,

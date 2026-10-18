@@ -63,7 +63,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import live_test_baseline as independent_baseline
+from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import (
     lpar_config,

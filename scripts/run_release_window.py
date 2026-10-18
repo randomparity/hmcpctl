@@ -17,9 +17,8 @@ import time
 from pathlib import Path
 
 import check_capability_inventory as inventory
-import live_test_baseline as baseline
 import live_test_preflight as preflight
-from live_test import cli, runner
+from live_test import baseline, cli, runner
 from live_test import config as live_config
 
 from hmcpctl.config import HMCConfig

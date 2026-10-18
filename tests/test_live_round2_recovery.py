@@ -12,9 +12,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-import live_test_baseline as baseline
 import live_test_recovery as recovery
-from live_test import inventory, provisioning, runner
+from live_test import baseline, inventory, provisioning, runner
 
 from hmcpctl.config import HMCConfig
 

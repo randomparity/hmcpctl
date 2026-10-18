@@ -34,12 +34,13 @@ def window(tmp_path):
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     git(root, "switch", "-c", "fixture-window")
-    for name in ("cli.py", "config.py", "runner.py"):
+    for name in ("baseline.py", "cli.py", "config.py", "runner.py"):
         shutil.copyfile(
             ROOT / "scripts/live_test" / name, root / "scripts/live_test" / name
         )
     for name in (
         "run_release_window.py",
+        "live_test_baseline.py",
         "check_capability_inventory.py",
         "promote_live_observations.py",
         "live_test_runner.py",
@@ -162,7 +163,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import check_capability_inventory as inventory
-import live_test_baseline as baseline
+from live_test import baseline
 from live_test import runner
 
 def run(phase):
