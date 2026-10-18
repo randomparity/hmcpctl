@@ -1603,6 +1603,15 @@ async def test_lpar_power_clean_system_has_no_finding():
     )
 
 
+@pytest.mark.parametrize("listing", [None, 42, "", "  ", "datavg:", "not a listing"])
+@pytest.mark.asyncio
+async def test_lpar_power_malformed_pass_volume_inventory_is_unreadable(listing):
+    call = _lpar_power_caller("vios-A,Running,vioserver,2\n", [], volumes=listing)
+
+    with pytest.raises(recovery.StateUnreadable, match="volumes of"):
+        await recovery.check_run(call, None, None, lpar_power_inputs=_LPAR_POWER)
+
+
 @pytest.mark.asyncio
 async def test_lpar_power_unreadable_mappings_are_not_clean():
     call = _lpar_power_caller("vios-A,Running,vioserver,2\n", None)

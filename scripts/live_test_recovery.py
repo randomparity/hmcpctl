@@ -445,7 +445,7 @@ async def _lpar_power_volumes_left(
             f"the volumes of {group!r} (a name outside the read shape)"
         )
     status, listing = await call("hmc_run_command", cmd=command)
-    names = lpar_power._volume_names(listing) if status == "PASS" else None
+    names = storage_lifecycle.volume_names(listing) if status == "PASS" else None
     if names is None:
         raise StateUnreadable(f"the volumes of {group!r} on VIOS {vios}")
     system = shlex.quote(inputs.system_name)
