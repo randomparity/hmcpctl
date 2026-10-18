@@ -393,3 +393,44 @@ def test_attach_pending_job_evidence_is_retained_without_claiming_completion(
     assert "incomplete" in result.stdout
     assert "job-test" in result.stdout
     assert "RUNNING" in result.stdout
+
+
+@pytest.mark.parametrize("identity", ["job_id", "uuid", "link"])
+@pytest.mark.parametrize("enveloped", [False, True])
+@pytest.mark.parametrize("output", ["json", "tsv"])
+def test_mutation_summary_preserves_normalized_job_handle(
+    monkeypatch, identity, enveloped, output
+):
+    href = "/rest/api/uom/jobs/job-test"
+    entry = {"Resource": {"Status": "RUNNING"}, "link": href}
+    if identity == "job_id":
+        entry["Resource"]["JobID"] = "job-test"
+    elif identity == "uuid":
+        entry["UUID"] = "job-test"
+    else:
+        entry["link"] = f"{href}/11111111-1111-1111-1111-111111111111"
+    data = {"resource": entry} if enveloped else entry
+    command, args, _, _ = CASES[2]
+    result, _ = _invoke(monkeypatch, command, args, data, ("--format", output))
+
+    assert result.exit_code == 0, result.output
+    decoded = (
+        json.loads(result.stdout)
+        if output == "json"
+        else dict(line.split("\t", 1) for line in result.stdout.splitlines()[1:])
+    )
+    assert decoded["outcome"] == "submitted"
+    assert decoded["job_id"] == "job-test"
+    assert decoded["job_status"] == "RUNNING"
+    assert decoded["job_href"] == href
+
+
+def test_storage_resource_uuid_does_not_imply_a_job(monkeypatch):
+    command, args, _, _ = CASES[0]
+    data = {"UUID": "volume-group-uuid", "Resource": {"VolumeGroupName": "vg-test"}}
+    result, _ = _invoke(monkeypatch, command, args, data, ("--json",))
+    assert result.exit_code == 0, result.output
+    decoded = json.loads(result.stdout)
+    assert decoded["outcome"] == "request_succeeded"
+    assert "job_id" not in decoded
+    assert "job_href" not in decoded

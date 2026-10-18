@@ -15,7 +15,7 @@ from typer._click.globals import get_current_context
 from hmcpctl.client.core import HMCClient
 
 from ...documents.storage import StorageKind, validate_virtual_disk
-from ...jobs import job_outcome
+from ...jobs import job_identifier, job_outcome
 from ...operations.lpar.profile_sync import ChangeLocation
 from ...operations.lpar.provision import (
     AttachDiskResult,
@@ -124,9 +124,22 @@ def _print_mutation(
         summary["change_location_summary"] = location.summary()
     source = raw.get("resource", raw) if isinstance(raw, dict) else None
     resource = source.get("Resource", source) if isinstance(source, dict) else None
-    if isinstance(resource, dict) and resource.get("JobID"):
-        job = job_outcome(summary["operation"], {"Resource": resource})
-        summary.update(job_id=job.job_id, job_status=job.status, error=job.error)
+    entry = (
+        source
+        if isinstance(source, dict) and "Resource" in source
+        else {"Resource": resource}
+    )
+    is_job = isinstance(resource, dict) and (
+        "JobID" in resource or "Status" in resource
+    )
+    if is_job and job_identifier(entry):
+        job = job_outcome(summary["operation"], entry)
+        summary.update(
+            job_id=job.job_id,
+            job_href=job.job_href,
+            job_status=job.status,
+            error=job.error,
+        )
         summary["outcome"] = "completed"
         if job.error:
             summary["outcome"] = "failed"
