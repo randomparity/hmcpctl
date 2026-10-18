@@ -112,7 +112,7 @@ _SEARCH_PARAMETER_CONTAINER_ELEMENT = "SearchParameterSet"
 # One of these per parameter the container holds, and the direct evidence that
 # the type defines something this parse could not name: an empty ParameterName
 # evidences that only on a level still spelling the name element that way
-# (ADR 0144). find_all_text matches the exact local name, so this matches
+# (ADR 0144). Discovery matches exact local names, so this matches
 # neither SearchParameters nor SearchParameterSet.
 _SEARCH_PARAMETER_ELEMENT = "SearchParameter"
 

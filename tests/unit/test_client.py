@@ -3636,7 +3636,7 @@ _LOGICAL_PARTITION_SEARCH_PARAMETERS = [
 # LogicalUnit and SharedProcessorPool answer the same way.
 _EMPTY_SET_TYPE = "ManagementConsole"
 # Captured: the single-parameter type. ADR 0139's element_to_dict collapse is
-# reachable through it, which is why the parse reads _find_all_text.
+# reachable through it; discovery must preserve single-member collections.
 _SINGLE_PARAMETER_TYPE = "Cluster"
 _SINGLE_PARAMETER_NAMES = ["ClusterName"]
 
