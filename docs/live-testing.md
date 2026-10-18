@@ -1155,3 +1155,66 @@ The evidence generator stamps the actual tested commit and filters identifiers.
 Keep raw results private. Not-run/skipped/failed is not passing live evidence,
 and no artifact operation is promoted merely because its source-format read
 was captured. No native run is authorized by this procedure's presence.
+
+
+## Metadata-only system-profile source capture
+
+This narrowly selected source arm captures the unknown GetSystemProfiles association response.
+It is not the system-profile product lifecycle or passing activation evidence. It references
+exactly two existing regular AIX/Linux partitions and their differently named contained
+profiles without changing their profiles, power, descriptions, ownership or defaults. Only
+one unique scratch **system profile** is created, read and deleted. There is no Update,
+activation, validation, restore, arbitrary command or generic job parameter surface.
+
+A private immutable candidate packet binds the configured connection, host, managed system,
+two partition/profile identities, names, power and ownership observations, and reserved scratch
+name. Its SHA-256 is pinned by the operator. Existing unowned reference targets need explicit
+source-only approval; the arm does not stamp them or bypass product ownership policy.
+The flags below are operator assertions, not credentials or proof of permission. Obtain and
+record the exact native grant before capture; interface approval alone is insufficient.
+
+On the isolated, exact deployed source-probe revision, use private paths outside the checkout:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group system-profile-source \
+  --packet "$PACKET" --packet-sha256 "$PACKET_SHA256"
+```
+
+Preflight only reads the pinned context, exact contained references and name-only namespace.
+It rejects changed bindings, profile association, power/ownership observations or scratch-name
+collision. It does not load a fallback default scenario or infer an execution grant.
+Only after the operator approves the exact targets/effects, source revision and cleanup:
+
+```sh
+uv run --no-sync python scripts/live_system_profile_source.py capture \
+  --packet "$PACKET" --packet-sha256 "$PACKET_SHA256" --output "$PRIVATE_NEW_DIRECTORY" \
+  --grant-packet-sha256 "$PACKET_SHA256" --references-approved --exclusive-writer-window
+```
+
+The coordinated writer interval begins before preflight and continues through terminal job and
+cleanup reconciliation. The arm checks complete member-profile/name/power/ownership baselines
+and scratch absence again immediately before Create. A bounded private atomic journal records
+partial execution before submission, submission identity and terminal results separately.
+Failed/warning/nonterminal status, nonzero return code, interruption, ambiguity or drift stops
+further domain writes; there is no replay or automatic rollback. Retain the journal and job
+handles for manual reconciliation. A timeout does not cancel the job or release coordination.
+Only definite scratch creation followed by unchanged member baselines and exactly the expected
+namespace permits one Delete. Get's raw unknown membership grammar is never cleanup authority.
+Own successful jobs are removed only after saving their results. Files have private permissions;
+raw captures must remain private and outside the checkout.
+
+After every attempt, including an apparently successful one, run the independent read-only witness:
+
+```sh
+uv run --no-sync python scripts/live_test_recovery.py \
+  --source-packet "$PACKET" --packet-sha256 "$PACKET_SHA256" \
+  --results "$PRIVATE_NEW_DIRECTORY/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE_NEW_DIRECTORY/results.json"
+```
+
+Recovery submits or deletes no job and changes no hardware. It independently compares the
+pinned namespace and complete member-profile baselines, and refuses partial runs or changed
+packet bindings. A failed/unreadable witness is not clean. The source journal records the exact
+revision, dirty-tree status, packet identities and harness digest. The evidence renderer's
+allowlist excludes raw native fields; source capture does not create maturity observations or
+substitute for a final deployed product test. No native run is authorized by these instructions.

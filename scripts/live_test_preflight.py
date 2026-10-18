@@ -583,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--group",
-        choices=tuple(runner.SUBTASK_GROUPS),
+        choices=(*runner.SUBTASK_GROUPS, "system-profile-source"),
         help="predict one arm instead of every arm",
     )
     parser.add_argument(
@@ -596,7 +596,32 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="predict only the bounded ST41 mapping/RMC investigation",
     )
+    parser.add_argument("--packet", type=Path)
+    parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.group == "system-profile-source":
+        from live_test import system_profile_source
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "system-profile-source requires packet, digest and live read-only checks"
+            )
+        return system_profile_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+            ]
+        )
+    if args.packet or args.packet_sha256:
+        parser.error("source packet arguments require --group system-profile-source")
     if args.detach_probe and args.group != "lpar-power":
         parser.error("--detach-probe requires --group lpar-power")
 

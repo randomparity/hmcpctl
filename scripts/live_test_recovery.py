@@ -1756,7 +1756,27 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("test-results-dedicated.json"),
         help="the run's results document (default: %(default)s)",
     )
+    parser.add_argument("--source-packet", type=Path)
+    parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.source_packet:
+        from live_test import system_profile_source
+
+        if not args.packet_sha256:
+            parser.error("source recovery requires --packet-sha256")
+        return system_profile_source.main(
+            [
+                "recover",
+                "--packet",
+                str(args.source_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+            ]
+        )
+    if args.packet_sha256:
+        parser.error("--packet-sha256 requires --source-packet")
 
     try:
         document = json.loads(args.results.read_text(encoding="utf-8"))
