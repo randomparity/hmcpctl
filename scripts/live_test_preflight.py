@@ -59,7 +59,7 @@ from live_test import config as live_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, env_var_value
-from hmcpctl.operations.lpar.provision import _check_vlan_exists
+from hmcpctl.operations.lpar.provision import check_vlan_exists
 from hmcpctl.operations.virtualization.pcie import (
     require_admitted_environment,
 )
@@ -498,7 +498,7 @@ async def _probe_environment(system_name: str) -> str:
 async def _probe_provision_vlan(system_name: str, vlan_id: int) -> str:
     """Report whether ST13/ST14's configured VLAN has a virtual network (#970).
 
-    Asks `_check_vlan_exists`, the predicate `hmc_provision_lpar` refuses on, so
+    Asks `check_vlan_exists`, the predicate `hmc_provision_lpar` refuses on, so
     preflight cannot pass a VLAN the provision rejects. Advisory, like the envelope:
     any failure other than the predicate's own refusal is reported as unknown.
     """
@@ -506,7 +506,7 @@ async def _probe_provision_vlan(system_name: str, vlan_id: int) -> str:
         async with HMCClient(HMCConfig()) as hmc:
             system_uuid = await resolve_system_uuid(hmc, system_name)
             try:
-                await _check_vlan_exists(hmc, system_uuid, vlan_id)
+                await check_vlan_exists(hmc, system_uuid, vlan_id)
             except ValueError:
                 return (
                     f"no virtual network on VLAN {vlan_id} — ST13 and ST14 will fail; "

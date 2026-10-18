@@ -152,11 +152,11 @@ class Hardware:
             self.mappings = []
             return "PASS", {"resource_deleted": True, "workflow_completed": True}
         if tool == "hmc_list_storage_mappings":
-            from hmcpctl.operations.storage.resources import _storage_mapping
+            from hmcpctl.operations.storage.resources import storage_mapping
 
             return "PASS", [
                 *self.mappings,
-                *(asdict(_storage_mapping(row)) for row in self.raw_mappings),
+                *(asdict(storage_mapping(row)) for row in self.raw_mappings),
             ]
         if tool == "hmc_get_vios_storage_detail":
             return "PASS", {

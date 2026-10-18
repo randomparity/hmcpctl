@@ -176,7 +176,7 @@ async def _check_name_unique(hmc, system_uuid: str, name: str) -> None:
         )
 
 
-async def _check_vlan_exists(hmc, system_uuid: str, port_vlan_id: int) -> None:
+async def check_vlan_exists(hmc, system_uuid: str, port_vlan_id: int) -> None:
     """Raise ValueError if no VirtualNetwork with *port_vlan_id* exists."""
     networks = await hmc.list_virtual_networks(system_uuid)
     malformed: list[str] = []
@@ -591,7 +591,7 @@ async def _preflight_provision_request(
         system_name, _ = await resolve_ssh_names(hmc.config, system_name_or_uuid, None)
         await require_minimum_affinity_policy_capability(hmc.config, system_name)
     await _check_name_unique(hmc, system_uuid, request.name)
-    await _check_vlan_exists(hmc, system_uuid, request.adapters.port_vlan_id)
+    await check_vlan_exists(hmc, system_uuid, request.adapters.port_vlan_id)
     if request.storage.vg_uuid is not None:
         await _check_vg_exists(hmc, request.storage.vios_uuid, request.storage.vg_uuid)
     await prevalidate_lpar_pcie_assignments(

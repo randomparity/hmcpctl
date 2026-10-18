@@ -162,7 +162,7 @@ def _optional_gib_as_mib(
     return int(mib) if mib == mib.to_integral_value() else float(mib)
 
 
-def _volume_group(entry: Mapping[str, Any]) -> VolumeGroup:
+def volume_group(entry: Mapping[str, Any]) -> VolumeGroup:
     operation = "list_volume_groups"
     resource = _resource(entry, operation)
     uuid = entry.get("UUID")
@@ -197,7 +197,7 @@ def _optical_media(entry: Mapping[str, Any]) -> OpticalMedia:
     )
 
 
-def _storage_mapping(entry: Mapping[str, Any]) -> StorageMapping:
+def storage_mapping(entry: Mapping[str, Any]) -> StorageMapping:
     operation = "list_storage_mappings"
     resource = _resource(entry, operation)
     mapping_id = storage_mapping_id(resource)
@@ -255,7 +255,7 @@ async def list_volume_groups(
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
-    return [_volume_group(entry) for entry in await hmc.list_volume_groups(vios_uuid)]
+    return [volume_group(entry) for entry in await hmc.list_volume_groups(vios_uuid)]
 
 
 async def resolve_volume_group_uuid(hmc: HMCClient, vios_uuid: str, value: str) -> str:
@@ -565,7 +565,7 @@ async def list_storage_mappings(
             hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         )
     return [
-        _storage_mapping(entry)
+        storage_mapping(entry)
         for entry in await hmc.list_storage_mappings(vios_uuid, lpar_uuid)
     ]
 
@@ -750,7 +750,7 @@ def _require_http_url(iso_source: str) -> str:
     """Return an http(s) source; reject controls as ``HMCError``, scheme as ``ValueError``.
 
     This is the first half of ``upload_iso``'s input validation — the host check
-    in ``_require_allowlisted_iso_url`` is the other — and it runs before the
+    in ``require_allowlisted_iso_url`` is the other — and it runs before the
     operation touches the filesystem, the network, or the HMC. ADR 0049
     records why: anything that is not an http(s) URL used to be read as a path on
     the MCP server's own host, so a caller holding a grant for the tool could
@@ -780,7 +780,7 @@ def _require_http_url(iso_source: str) -> str:
 DEFAULT_SCHEME_PORTS = {"http": 80, "https": 443}
 
 
-def _require_allowlisted_iso_url(
+def require_allowlisted_iso_url(
     iso_url: str, allowlist: tuple[tuple[str, int | None], ...]
 ) -> str:
     """Return ``iso_url`` if its host is on the operator's allowlist, else raise.
@@ -850,7 +850,7 @@ async def _download_iso_from_url(url: str) -> tuple[Path, str, int]:
     """Download an ISO file from an HTTP(S) URL with bounds and validation.
 
     The scheme and the host are the caller's responsibility: ``upload_iso``
-    admits only what ``_require_http_url`` and ``_require_allowlisted_iso_url``
+    admits only what ``_require_http_url`` and ``require_allowlisted_iso_url``
     accept, and it is this function's only caller.
 
     **Redirects are not followed.** Following them would send the fetch to a URL
@@ -1064,7 +1064,7 @@ async def upload_iso(
     ``iso_source`` must be an ``http`` or ``https`` URL whose host the operator
     has put on ``iso_url_allowlist`` (``HMC_ISO_URL_ALLOWLIST``), and both
     conditions are checked before any other work happens. **With no allowlist
-    configured every URL is refused** — see ``_require_allowlisted_iso_url`` and
+    configured every URL is refused** — see ``require_allowlisted_iso_url`` and
     ADR 0050. The media name is then validated against a conservative assumed
     grammar (ADR 0177), the volume group must hold a media repository, and a name
     that collides with existing media is refused, all before any transfer begins. The
@@ -1108,7 +1108,7 @@ async def upload_iso(
                    or ambiguous, or its inventory contains incomplete identities.
         FileExistsError: If media_name already exists in the repository.
     """
-    iso_url = _require_allowlisted_iso_url(
+    iso_url = require_allowlisted_iso_url(
         _require_http_url(iso_source), hmc.config.iso_url_allowlist_entries
     )
     vios_uuid = await resolve_vios_uuid(

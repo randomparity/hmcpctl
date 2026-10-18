@@ -36,13 +36,13 @@ from ..affinity.rest import ProvisionAffinityAssessment, validate_affinity_reque
 from ..inventory.capacity import system_capacity
 from ..storage.resources import (
     VolumeGroup,
-    _require_allowlisted_iso_url,
-    _storage_mapping,
-    _volume_group,
+    require_allowlisted_iso_url,
+    storage_mapping,
+    volume_group,
 )
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
-from .provision import _check_vlan_exists
+from .provision import check_vlan_exists
 
 InstallProfile = Literal["ubuntu-26.04.1", "rocky-9.8"]
 INSTALL_PROFILES: tuple[str, ...] = ("ubuntu-26.04.1", "rocky-9.8")
@@ -858,7 +858,7 @@ class _Evaluator:
 
         async def missing() -> str | None:
             try:
-                await _check_vlan_exists(
+                await check_vlan_exists(
                     self.hmc, candidate.uuid, self.request.adapters.port_vlan_id
                 )
             except ValueError as exc:
@@ -927,7 +927,7 @@ class _Evaluator:
         if entries is _FAILED:
             return None
         try:
-            return [(_volume_group(entry), _disk_names(entry)) for entry in entries]
+            return [(volume_group(entry), _disk_names(entry)) for entry in entries]
         except HMCError as exc:
             text = f"{VOLUME_GROUPS_TOOL} returned an unreadable group: {exc}"
             blockers.append(
@@ -1042,7 +1042,7 @@ class _Evaluator:
         resource = (detail or {}).get("Resource") or {}
         storage = self.request.storage
         for entry in _items(resource.get("VirtualSCSIMappings"), "VirtualSCSIMapping"):
-            mapping = _storage_mapping(entry)
+            mapping = storage_mapping(entry)
             if (mapping.backing_kind, mapping.backing_name) == (
                 storage.kind,
                 storage.storage_name,
@@ -1199,7 +1199,7 @@ def _request_blockers(hmc: Any, request: PlanRequest) -> list[PlanBlocker]:
         )
     if install is not None and install.media.url is not None:
         try:
-            _require_allowlisted_iso_url(
+            require_allowlisted_iso_url(
                 install.media.url, hmc.config.iso_url_allowlist_entries
             )
         except (ValueError, HMCError):

@@ -700,7 +700,7 @@ def test_a_vlan_with_no_virtual_network_does_not_change_the_exit_status(
     monkeypatch.setattr(preflight, "HMCClient", FakeClient)
     monkeypatch.setattr(preflight, "HMCConfig", lambda: object())
     monkeypatch.setattr(preflight, "resolve_system_uuid", resolve)
-    monkeypatch.setattr(preflight, "_check_vlan_exists", check)
+    monkeypatch.setattr(preflight, "check_vlan_exists", check)
     (workspace / ".env").write_text(_env_text(), encoding="utf-8")
     _credentials(monkeypatch)
 

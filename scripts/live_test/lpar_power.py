@@ -27,7 +27,7 @@ from fastmcp import Client
 from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, job_outcome
 from hmcpctl.operations.lpar.decommission import _vscsi_detach_inventory
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
-from hmcpctl.operations.storage.resources import _storage_mapping
+from hmcpctl.operations.storage.resources import storage_mapping
 from hmcpctl.ssh.commands import HMC_NO_RESULTS
 from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME
 
@@ -269,7 +269,7 @@ async def _complete_mapping_proof(
     projected: set[tuple[str, ...]] = set()
     foreign: list[str] = []
     for item in records:
-        decoded = _storage_mapping(item)
+        decoded = storage_mapping(item)
         projected.add(
             tuple(
                 str(value or "")
