@@ -274,13 +274,13 @@ def power_body(
             if replay:
                 # Replay after the write: re-resolving could turn a transient read
                 # error into a terminal "failed" for a partition already powered.
-                ctx.phase("transitioning")
+                ctx.set_phase("transitioning")
                 lpar_uuid = _lpar_uuid(recorded)
                 system_uuid = (ctx.partition or ("", lpar_uuid))[0]
                 identity = recorded.identity or {}
                 result = _result(action, mode, system_uuid, lpar_uuid, None)
             else:
-                ctx.phase("validating")
+                ctx.set_phase("validating")
                 (
                     system_uuid,
                     lpar_uuid,
@@ -292,7 +292,7 @@ def power_body(
                 if _precheck(action, mode, lpar_uuid, entry):
                     result["already_in_state"] = True
                     return BodyResult("completed", result)
-                ctx.phase("transitioning")
+                ctx.set_phase("transitioning")
                 identity = await ctx.effect(
                     EFFECT_KEY,
                     EFFECT_KINDS[action],

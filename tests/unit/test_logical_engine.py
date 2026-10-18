@@ -53,7 +53,7 @@ def _body(*writers, outcome="completed", kinds=None):
     async def body(ctx):
         identities = []
         for index, (writer, kind) in enumerate(zip(writers, kinds, strict=True)):
-            ctx.phase(f"step{index}")
+            ctx.set_phase(f"step{index}")
             identities.append(await ctx.effect(f"step{index}", kind, "lpar:x", writer))
         return BodyResult(outcome, {"identities": [dict(i) for i in identities]})
 
@@ -99,6 +99,29 @@ def _classify(status, *, identity=None, reason=None, raises=None):
         return Classification(status, identity, reason)
 
     return classifier
+
+
+def test_phase_mutator_is_explicit():
+    assert callable(getattr(engine.OperationContext, "set_phase", None))
+    assert not hasattr(engine.OperationContext, "phase")
+
+
+def test_set_phase_journals_transition_once():
+    async def body(ctx):
+        ctx.set_phase("transitioning")
+        ctx.set_phase("transitioning")
+        with store.session() as conn:
+            assert (
+                store.get_operation(conn, ctx.operation_id)["phase"] == "transitioning"
+            )
+        return BodyResult("completed", {})
+
+    record = _submit(body=body)
+    assert record.outcome == "completed"
+    assert record.phase == "transitioning"
+    assert [event.detail for event in record.events if event.kind == "phase"] == [
+        {"phase": "transitioning"}
+    ]
 
 
 def test_completes_and_journals_the_effect():

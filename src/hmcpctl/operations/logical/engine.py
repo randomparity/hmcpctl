@@ -484,7 +484,7 @@ class OperationContext:
         """Return the journaled effect for *key*, or None if it was never attempted."""
         return self._effects.get(key)
 
-    def phase(self, name: str) -> None:
+    def set_phase(self, name: str) -> None:
         if name == self._phase:
             return
         with store.session() as conn, store.write_transaction(conn):
