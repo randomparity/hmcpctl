@@ -455,7 +455,7 @@ def authorized(monkeypatch):
 
 async def _rename(name: str):
     async with HMCClient(make_config()) as hmc:
-        return await rename_lpar(hmc, SYSTEM, LPAR, name)
+        return await rename_lpar(hmc, LPAR, name, system_name_or_uuid=SYSTEM)
 
 
 async def _modify(resources: LparResources, new_name: str | None = None):

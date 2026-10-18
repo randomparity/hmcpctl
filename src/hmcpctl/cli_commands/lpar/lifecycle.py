@@ -206,8 +206,8 @@ def lpars_delete(
     uuid = with_client(
         lambda hmc: delete_lpar(
             hmc,
-            system,
             name_or_uuid,
+            system_name_or_uuid=system,
             ownership_override=ownership_override,
         )
     )

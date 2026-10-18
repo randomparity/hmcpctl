@@ -655,9 +655,9 @@ def _unapplied_profile_warnings(
 
 async def delete_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> str:
     """Authorize and delete a powered-off LPAR, returning its UUID."""
@@ -939,10 +939,10 @@ async def submit_power_off(
 
 async def rename_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     new_name: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> tuple[str, dict[str, Any] | None]:
     """Resolve, authorize, and rename one LPAR by whole-partition read-modify-write."""

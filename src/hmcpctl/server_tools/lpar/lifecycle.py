@@ -118,9 +118,9 @@ def hmc_rename_lpar(
     async def renamed(hmc):
         _, updated = await rename_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             new_name,
+            system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         )
         return updated
@@ -257,8 +257,8 @@ def hmc_delete_lpar(
     async def delete_lpar_and_confirm(hmc):
         lpar_uuid = await delete_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         )
         return f"Deleted LPAR {lpar_uuid}"

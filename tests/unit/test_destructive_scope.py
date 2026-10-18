@@ -33,7 +33,9 @@ async def test_delete_lpar_uses_required_system_to_scope_name_resolution():
     hmc.get_quick_property.return_value = "not activated"
 
     assert (
-        await delete_lpar(hmc, "system-name", "aix1", ownership_override=True)
+        await delete_lpar(
+            hmc, "aix1", system_name_or_uuid="system-name", ownership_override=True
+        )
         == "lpar-uuid"
     )
 
@@ -56,15 +58,49 @@ async def test_rename_lpar_uses_required_system_to_scope_name_resolution():
 
     await rename_lpar(
         hmc,
-        "system-name",
         "aix1",
         "renamed",
+        system_name_or_uuid="system-name",
         ownership_override=True,
     )
 
     hmc.find_partition_by_name.assert_awaited_once_with(
         "aix1", system_uuid="system-uuid"
     )
+
+
+@pytest.mark.parametrize("operation", [delete_lpar, rename_lpar])
+@pytest.mark.parametrize("contained", [True, False])
+@pytest.mark.asyncio
+async def test_required_uuid_scope_is_verified_before_mutation(operation, contained):
+    system = "cccc0000-0000-0000-0000-000000000001"
+    partition = "aaaa0000-0000-0000-0000-000000000001"
+    hmc = AsyncMock()
+    hmc.list_logical_partitions.return_value = (
+        [{"UUID": partition}] if contained else []
+    )
+    hmc.get_logical_partition.return_value = {"Resource": {"PartitionName": "aix1"}}
+    hmc.get_quick_property.return_value = "not activated"
+    args = (partition, "renamed") if operation is rename_lpar else (partition,)
+    if contained:
+        result = await operation(
+            hmc, *args, system_name_or_uuid=system, ownership_override=True
+        )
+        assert (result[0] if operation is rename_lpar else result) == partition
+        if operation is rename_lpar:
+            assert hmc.update_logical_partition.await_args.args[0] == partition
+        else:
+            hmc.delete_logical_partition.assert_awaited_once_with(partition)
+    else:
+        with pytest.raises(ValueError, match="does not belong"):
+            await operation(
+                hmc, *args, system_name_or_uuid=system, ownership_override=True
+            )
+        hmc.update_logical_partition.assert_not_awaited()
+        hmc.delete_logical_partition.assert_not_awaited()
+        hmc.get_logical_partition.assert_not_awaited()
+    hmc.list_logical_partitions.assert_awaited_once_with(system)
+    hmc.find_partition_by_name.assert_not_awaited()
 
 
 @pytest.mark.asyncio
