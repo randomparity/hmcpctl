@@ -223,7 +223,18 @@ def test_pcm_preferences_update_refuses_a_slice_that_loses_its_namespace():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read", [httpx.Response(204), httpx.Response(200, text="<x>")])
+@pytest.mark.parametrize(
+    "read",
+    [
+        httpx.Response(204),
+        httpx.Response(200, text="<x>"),
+        httpx.Response(
+            200,
+            text='<!DOCTYPE preferences [<!ENTITY unsafe "value">]>'
+            "<preferences>&unsafe;</preferences>",
+        ),
+    ],
+)
 async def test_set_pcm_preferences_unusable_read_posts_nothing(mock_hmc, read):
     """An empty or malformed read is an HMCError naming the GET; nothing is posted."""
     path = (

@@ -225,6 +225,13 @@ async def test_set_pending_boot_string_escapes_the_value_once(mock_hmc):
             "no LogicalPartition",
         ),
         ({"entry": "<not-xml"}, "not valid XML"),
+        (
+            {
+                "entry": '<!DOCTYPE entry [<!ENTITY unsafe "value">]>'
+                "<entry>&unsafe;</entry>"
+            },
+            "not valid XML",
+        ),
         ({"get_status": 500}, "failed"),
     ],
 )

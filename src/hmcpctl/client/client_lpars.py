@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from defusedxml import ElementTree as DET
+from defusedxml.common import DefusedXmlException
 
 from ..errors import HMCError
 from ..xmlutil import localname
@@ -181,7 +182,7 @@ class LparsMixin:
         ET.register_namespace("atom", _ATOM_NS)
         try:
             root = DET.fromstring(got.text)
-        except DET.ParseError as exc:
+        except (DET.ParseError, DefusedXmlException) as exc:
             raise HMCError(
                 f"GET {path} response is not valid XML", 200, got.text[:500]
             ) from exc
