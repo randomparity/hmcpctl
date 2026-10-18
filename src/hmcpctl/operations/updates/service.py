@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import quote
 
 from hmcpctl.client.client_contracts import _reject_over_long_path_value
+from hmcpctl.client.client_updates import PlatformUpdateJobEntry
 from hmcpctl.client.core import HMCClient
 
 from ...errors import HMCError
@@ -50,26 +51,27 @@ def _with_vios_stdout(
 
 async def _wait_for_platform_update(
     hmc: HMCClient,
-    job: dict[str, Any] | None,
+    job: PlatformUpdateJobEntry | None,
     wait: bool,
     timeout_seconds: int,
     poll_interval: int,
 ) -> dict[str, Any] | None:
     """Validate and optionally wait for an already-submitted PlatformUpdate job."""
+    raw_job = dict(job) if job is not None else None
     if not wait:
-        return job
+        return raw_job
     if job is not None:
-        resource = job.get("Resource")
-        status = resource.get("Status") if isinstance(resource, dict) else None
-        if isinstance(status, str) and status in TERMINAL_JOB_STATUSES:
-            return job
+        if job["Resource"]["Status"] in TERMINAL_JOB_STATUSES:
+            return raw_job
         link = job.get("link")
-        if not isinstance(link, str) or not link.strip():
+        if not link:
             raise HMCError(
                 "PlatformUpdate was accepted but cannot be polled because the HMC "
                 "returned a nonterminal response without a selfLink"
             )
-    return await wait_for_submitted_job(hmc, job, wait, timeout_seconds, poll_interval)
+    return await wait_for_submitted_job(
+        hmc, raw_job, wait, timeout_seconds, poll_interval
+    )
 
 
 def _require_platform_update_version(console: dict[str, Any] | None) -> None:
@@ -193,7 +195,6 @@ async def update_firmware(
     job = await hmc.submit_platform_update(
         system_uuid, platform_update_job(platform_update)
     )
-    raw_job = dict(job) if job is not None else None
     return await _wait_for_platform_update(
-        hmc, raw_job, wait, timeout_seconds, poll_interval
+        hmc, job, wait, timeout_seconds, poll_interval
     )
