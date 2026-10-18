@@ -64,6 +64,17 @@ class LparsMixin:
     async def find_partition_by_name(
         self: LparsClient, name: str, system_uuid: str | None = None
     ) -> dict[str, Any] | None:
+        """Find an LPAR by exact PartitionName, optionally within one system.
+
+        Returns:
+            The matching entry, or None for confirmed absence in the searched scope.
+            An unscoped miss is confirmed only when every system is readable.
+
+        Raises:
+            ValueError: The name is ambiguous or its candidates cannot be identified.
+            HMCError: A transport/API request fails, or unreadable system inventory
+                prevents confirming an unscoped miss.
+        """
         if system_uuid:
             entries = await self.list_logical_partitions(system_uuid)
             results = [
