@@ -386,6 +386,10 @@ class HMCClient(
 ):
     """Async context-manager client for one HMC session.
 
+    ``get_uom`` and its delegating resource getters return None for empty
+    successful responses; HTTP 404 and other statuses outside 200/204 raise
+    HMCError. Individual methods document exceptions to this contract.
+
     Usage:
         async with HMCClient(config) as hmc:
             systems = await hmc.list_system_summaries()
@@ -890,6 +894,9 @@ class HMCClient(
         self, resource_type: str, uuid: str, group: str | None = None
     ) -> dict[str, Any] | None:
         """GET /rest/api/uom/{ResourceType}/{uuid} and parse the entry.
+
+        Returns None for an empty HTTP 200 body, HTTP 204, or no parsed entries.
+        HTTP 404 and every other status outside 200/204 raise HMCError.
 
         *group* is percent-encoded before it reaches the query string, on the
         same terms as ``list_uom`` (ADR 0145).

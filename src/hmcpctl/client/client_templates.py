@@ -38,7 +38,11 @@ class TemplatesMixin:
     async def get_partition_template(
         self: TemplatesClient, template_uuid: str
     ) -> dict[str, Any] | None:
-        """Get one partition template by UUID."""
+        """Get one partition template by UUID.
+
+        Returns None for an empty HTTP 200 body, HTTP 204, or no parsed entries.
+        HTTP 404 and every other status outside 200/204 raise HMCError.
+        """
         xml = await self._templates_get(
             f"/rest/api/templates/PartitionTemplate/{template_uuid}"
         )

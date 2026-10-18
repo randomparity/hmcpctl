@@ -59,6 +59,11 @@ class LparsMixin:
     async def get_logical_partition(
         self: LparsClient, uuid: str
     ) -> dict[str, Any] | None:
+        """Get one LogicalPartition using the ``get_uom`` empty-success/error contract.
+
+        None means an empty successful response or no parsed entries; HTTP 404
+        and other statuses outside 200/204 raise HMCError.
+        """
         return await self.get_uom("LogicalPartition", uuid)
 
     async def find_partition_by_name(
