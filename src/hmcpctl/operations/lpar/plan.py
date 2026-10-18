@@ -824,7 +824,9 @@ class _Evaluator:
             blockers.append(_blocker("insufficient_processors", "capacity", text))
         return figures.free_memory_mib, figures.free_proc_units
 
-    async def _name(self, candidate: _Candidate, blockers: list[PlanBlocker]) -> None:
+    async def _check_name_available(
+        self, candidate: _Candidate, blockers: list[PlanBlocker]
+    ) -> None:
         if self.enumerated and not self._admitted(
             PARTITIONS_TOOL, candidate.uuid, None, blockers, "name"
         ):
@@ -848,7 +850,7 @@ class _Evaluator:
                 _blocker("name_exists", "name", text, target=candidate.uuid)
             )
 
-    async def _vlan(
+    async def _check_vlan_exists(
         self, candidate: _Candidate, spelling: str, blockers: list[PlanBlocker]
     ) -> None:
         if not self._admitted(NETWORKS_TOOL, spelling, None, blockers, "vlan"):
@@ -995,7 +997,7 @@ class _Evaluator:
             pairs.extend(self._qualifying(vios, groups, reasons))
         return (pairs, reasons) if complete else None
 
-    async def _storage(
+    async def _resolve_storage_placement(
         self, candidate: _Candidate, spelling: str, blockers: list[PlanBlocker]
     ) -> _Pair | None:
         """Resolve exactly one (VIOS, volume group) pair, or add the blocker."""
@@ -1022,7 +1024,7 @@ class _Evaluator:
             return None
         return pairs[0]
 
-    async def _mapping(
+    async def _check_storage_unmapped(
         self, pair: _Pair, spelling: str, blockers: list[PlanBlocker]
     ) -> None:
         vios = pair.vios.uuid
@@ -1091,11 +1093,11 @@ class _Evaluator:
     ) -> _Pair | None:
         spelling = candidate.selector or candidate.uuid
         try:
-            await self._name(candidate, blockers)
-            await self._vlan(candidate, spelling, blockers)
-            pair = await self._storage(candidate, spelling, blockers)
+            await self._check_name_available(candidate, blockers)
+            await self._check_vlan_exists(candidate, spelling, blockers)
+            pair = await self._resolve_storage_placement(candidate, spelling, blockers)
             if pair is not None and self.request.storage.capacity_mib is None:
-                await self._mapping(pair, spelling, blockers)
+                await self._check_storage_unmapped(pair, spelling, blockers)
         except _Stalled:
             return None
         return pair
