@@ -8,5 +8,5 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_invoke_tool` | `destructive` | `tools.invoke` | `none` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Call one tool this server exposes by name, exactly as a direct call would run it. |
-| `hmc_search_tools` | `read` | `tools.search` | `none` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Find tools this server exposes by intent, or describe one tool by exact name. |
+| `hmc_invoke_tool` | `destructive` | `tools.invoke` | `none` | `implemented` | `unevidenced` | `existing-runtime-guards` | Call one tool this server exposes by name, exactly as a direct call would run it. |
+| `hmc_search_tools` | `read` | `tools.search` | `none` | `implemented` | `unevidenced` | `existing-runtime-guards` | Find tools this server exposes by intent, or describe one tool by exact name. |

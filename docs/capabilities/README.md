@@ -45,9 +45,14 @@ states for this inventory. They are separate from the maturity and live-evidence
 contract owned by #622 and from runtime eligibility. A proposed exclusion is not an
 approved exclusion, and either it or an unknown blocks a complete-coverage claim.
 
+The [existing-code baseline](baseline.md) reconciles the supported operation set and links
+native procedures, prerequisites and remaining obligations. The inventory gate requires
+a maturity record and nonempty automated-test links for each registered operation;
+this does not claim complete reference coverage or native verification.
+
 ## Maturity and evidence catalog
 
-`maturity.json` is a sparse, format-versioned catalog keyed by the stable operation
+`maturity.json` is a complete current, format-versioned catalog keyed by the stable operation
 IDs in `operations.json`. Format 3 ([ADR 0132](../adr/0132-confirmed-live-limitation-gaps.md))
 added optional confirmations to missing scope; format 4
 ([ADR 0186](../adr/0186-observation-schema-version-stamp.md)) adds a required `schema_version`

@@ -8,4 +8,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_operation_status` | `read` | `operation.status` | `console` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | List this agent's logical operations, newest first, from the local operation store. |
+| `hmc_operation_status` | `read` | `operation.status` | `console` | `implemented` | `unevidenced` | `existing-runtime-guards` | List this agent's logical operations, newest first, from the local operation store. |

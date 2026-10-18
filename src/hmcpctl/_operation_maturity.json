@@ -101,6 +101,20 @@
       "observed_at": null
     },
     {
+      "operation": "command.run",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "config.list_hosts",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "console.info",
       "implementation": "implemented",
       "verification": "stale",
@@ -591,6 +605,13 @@
       "observed_at": "2026-10-07T11:35:53Z"
     },
     {
+      "operation": "operation.status",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "pcie.assign_dedicated_slot",
       "implementation": "partial",
       "verification": "current",
@@ -647,6 +668,13 @@
       "observed_at": null
     },
     {
+      "operation": "permissions.describe",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "placement.find",
       "implementation": "implemented",
       "verification": "stale",
@@ -655,7 +683,7 @@
     },
     {
       "operation": "provision.lpar",
-      "implementation": "implemented",
+      "implementation": "partial",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-07T02:44:34Z"
@@ -892,6 +920,20 @@
       "observed_at": "2026-10-06T17:15:35Z"
     },
     {
+      "operation": "tools.invoke",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "tools.search",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "update.console",
       "implementation": "implemented",
       "verification": "unevidenced",
@@ -956,7 +998,7 @@
     },
     {
       "operation": "user.modify",
-      "implementation": "partial",
+      "implementation": "implemented",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-07T18:37:01Z"
@@ -967,6 +1009,27 @@
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T15:27:07Z"
+    },
+    {
+      "operation": "vios.create",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.delete",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.get",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "vios.install",
@@ -988,6 +1051,20 @@
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T15:24:49Z"
+    },
+    {
+      "operation": "vios.power_off",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.power_on",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "vios.restore",

@@ -8,6 +8,6 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_run_command` | `arbitrary-command` | `command.run` | `console` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Execute an arbitrary HMC CLI command over SSH. |
+| `hmc_run_command` | `arbitrary-command` | `command.run` | `console` | `implemented` | `unevidenced` | `existing-runtime-guards` | Execute an arbitrary HMC CLI command over SSH. |
 
 > Registered but not exposed by a default deployment: `hmc_run_command`. The server must be started with `--enable-arbitrary-command` and the selected access policy must name the tool in a grant's `tools`.

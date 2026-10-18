@@ -16,6 +16,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Existing-code baseline reconciles all registered operation maturity and automated-test
+  links, retaining explicit native gaps and historical failures without promotion (#635).
+
 - Migration and remote-restart workflow verification records bounded implementation
   scope, endpoint/failure assertions and explicit unrun native obligations (#631).
 

@@ -516,6 +516,8 @@ def _validate_operations(
         if not isinstance(tests, list):
             errors.append(f"operation evidence {tool}: tests must be an array")
         else:
+            if not tests:
+                errors.append(f"operation evidence {tool}: tests must not be empty")
             for path_text in tests:
                 path = repo_root / str(path_text)
                 if (
@@ -1543,6 +1545,13 @@ def validate_inventory(
         if isinstance(operation := record.get("operation"), str)
     }
     _validate_maturity(maturity_records, operation_ids, errors)
+    maturity_ids = {
+        operation
+        for record in maturity_records
+        if isinstance(operation := record.get("operation"), str)
+    }
+    for operation in sorted(operation_ids - maturity_ids):
+        errors.append(f"maturity operation {operation}: missing maturity record")
     errors.extend(_release_claim_errors(root, operation_ids))
     return Report(
         tuple(errors),

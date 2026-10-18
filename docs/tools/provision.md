@@ -8,4 +8,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_provision_lpar` | `mutate` | `provision.lpar` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Provision an LPAR with a virtual Ethernet adapter, vSCSI storage, and optional power-on. |
+| `hmc_provision_lpar` | `mutate` | `provision.lpar` | `managed_system` | `partial` | `stale (closure-changed)` | `existing-runtime-guards` | Provision an LPAR with a virtual Ethernet adapter, vSCSI storage, and optional power-on. |
