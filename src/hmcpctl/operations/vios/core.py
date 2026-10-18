@@ -78,7 +78,13 @@ async def get_vios_storage_detail(
     """Get VIOS storage detail by UUID or an optionally system-scoped name.
 
     System scope disambiguates duplicate VIOS names; UUID selectors do not
-    require it.
+    require it. Return None when the resolved VIOS read has no entry, rather
+    than when a VIOS name cannot be resolved.
+
+    Raises:
+        ResourceNotFoundError: If the VIOS name or supplied system name cannot be resolved.
+        ValueError: If a name is ambiguous or a UUID lies outside the supplied system.
+        HMCError: If the HMC request fails or absence cannot be established.
     """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid

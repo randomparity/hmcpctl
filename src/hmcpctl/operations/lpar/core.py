@@ -159,7 +159,15 @@ async def get_lpar(
     *,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Get one LPAR by UUID or by an optionally system-scoped exact name."""
+    """Get one LPAR by UUID or by an optionally system-scoped exact name.
+
+    Return None when an exact name has no match or the UUID read has no entry.
+
+    Raises:
+        ResourceNotFoundError: If a supplied managed-system name cannot be resolved.
+        ValueError: If a name is ambiguous or a UUID lies outside the supplied system.
+        HMCError: If the HMC request fails or absence cannot be established.
+    """
     if is_uuid(lpar_name_or_uuid):
         lpar_uuid = await resolve_lpar_uuid(
             hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
@@ -181,7 +189,13 @@ async def get_lpar_state(
     """Return one LPAR's state by UUID or an optionally system-scoped name.
 
     System scope disambiguates duplicate partition names; UUID selectors do not
-    require it.
+    require it. Return None when the quick-property response is empty (including
+    HTTP 204), rather than when a partition name cannot be resolved.
+
+    Raises:
+        ResourceNotFoundError: If the LPAR name or supplied system name cannot be resolved.
+        ValueError: If a name is ambiguous or a UUID lies outside the supplied system.
+        HMCError: If the HMC request fails or absence cannot be established.
     """
     lpar_uuid = await resolve_lpar_uuid(
         hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
