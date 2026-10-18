@@ -249,6 +249,7 @@ async def test_resolve_system_name_ssh_fallback_uses_supplied_config():
     with patch("hmcpctl.ssh.selectors.HMCClient") as mock_client_type:
         # REST leg raises a transport error → SSH fallback runs
         mock_client = AsyncMock()
+        mock_client.config = DEV_CONFIG
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.list_system_summaries = AsyncMock(

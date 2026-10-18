@@ -2001,14 +2001,21 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
         "lpar_uuid": LPAR_UUID,
         "dry_run": True,
         "steps": [
-            {"step": "power_off", "status": "dry_run", "result": {"state": "running"}},
+            {
+                "step": "power_off",
+                "status": "dry_run",
+                "result": {"state": "running"},
+                "job": None,
+            },
             {
                 "step": "detach_storage_mappings",
+                "job": None,
                 "status": "dry_run",
                 "result": {"mappings": []},
             },
             {
                 "step": "detach_adapters",
+                "job": None,
                 "status": "dry_run",
                 "result": {
                     "adapters": [
@@ -2033,6 +2040,7 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
             },
             {
                 "step": "delete_lpar",
+                "job": None,
                 "status": "dry_run",
                 "result": {"lpar_uuid": LPAR_UUID},
             },

@@ -63,6 +63,7 @@ _MUTATOR_PREFIXES = (
 _INVENTORY_PATHS = tuple(
     _SOURCE_ROOT / path
     for path in (
+        "operations/lpar/activation.py",
         "operations/lpar/assignments.py",
         "operations/lpar/boot_order.py",
         "operations/lpar/configuration.py",
