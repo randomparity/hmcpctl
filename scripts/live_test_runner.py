@@ -1228,7 +1228,8 @@ def _destination_is_ignored(path: Path, repo_root: Path | None = None) -> bool:
     there is nothing to commit into and the write is safe.
     """
     return (
-        _git(repo_root or Path.cwd(), "check-ignore", "-q", str(path)).returncode != 1
+        _git(repo_root or Path.cwd(), "check-ignore", "-q", "--", str(path)).returncode
+        != 1
     )
 
 

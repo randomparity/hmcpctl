@@ -8069,6 +8069,40 @@ def test_an_ignored_results_path_passes_the_startup_gate(monkeypatch, tmp_path):
     assert not runner._destination_is_ignored(Path("evidence.json"))
 
 
+@pytest.mark.parametrize("name", ["-evidence.json", "--no-index", "--"])
+def test_unignored_option_shaped_results_refuse_before_credentials(
+    monkeypatch, tmp_path, capsys, name
+):
+    repo = _live_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        live_config.LiveTestConfig,
+        "from_env_file",
+        classmethod(lambda _cls: live_config.LiveTestConfig()),
+    )
+    monkeypatch.setattr(runner, "_read_environment", lambda: None)
+    monkeypatch.setattr(
+        runner, "_bootstrap_config", lambda: pytest.fail("entered credential bootstrap")
+    )
+    assert runner._run_from_arguments([f"--results-file={name}"]) == 1
+    assert "git does not ignore" in capsys.readouterr().out
+    assert not (repo / name).exists()
+    assert not (repo / runner._observations_path(name)).exists()
+
+
+@pytest.mark.parametrize("name", ["-evidence.json", "--no-index", "--"])
+def test_explicitly_ignored_option_shaped_paths_are_evaluated_literally(
+    monkeypatch, tmp_path, name
+):
+    repo = _live_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    observations = runner._observations_path(name)
+    ignore = repo / ".gitignore"
+    ignore.write_text(ignore.read_text() + f"\n{name}\n{observations}\n")
+    assert runner._destination_is_ignored(Path(name))
+    assert runner._destination_is_ignored(observations)
+
+
 def test_record_honours_an_explicit_result():
     """`record_verified` supplies its verdict here rather than patching it after."""
     state = runner.RunState()
