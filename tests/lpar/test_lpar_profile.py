@@ -371,3 +371,18 @@ def test_restore_empty_hmc_file_refused_before_ssh(file_path):
     ):
         asyncio.run(restore_lpar_profiles(make_config(), "sys", file_path, 1))
     run.assert_not_awaited()
+
+
+@pytest.mark.parametrize("force_keystore", ["false", 1, None])
+def test_restore_keystore_requires_explicit_boolean(force_keystore):
+    run = AsyncMock()
+    with (
+        patch("hmcpctl.ssh.profiles.run_hmc_command", run),
+        pytest.raises(TypeError, match="force_keystore must be a boolean"),
+    ):
+        asyncio.run(
+            restore_lpar_profiles(
+                make_config(), "sys", "backup-1", 1, force_keystore=force_keystore
+            )
+        )
+    run.assert_not_awaited()

@@ -322,6 +322,8 @@ async def restore_lpar_profiles(
             "with the current data winning. Type 4 (initialize, which deletes "
             "every partition) is not offered."
         )
+    if not isinstance(force_keystore, bool):
+        raise TypeError("force_keystore must be a boolean")
     if not file_path or not file_path.strip():
         raise ValueError("file_path must not be empty")
     cmd = (
