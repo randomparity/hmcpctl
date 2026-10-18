@@ -12,7 +12,6 @@ from ...jobs import (
     SUCCESSFUL_JOB_STATUSES,
     JobOutcome,
     build_job_request,
-    job_identifier,
     job_outcome,
     wait_for_submitted_job,
 )
@@ -145,12 +144,11 @@ async def list_backup_profile_artifacts(
         f"/rest/api/uom/ManagedSystem/{system_uuid}/do/ListBackupProfileData",
         build_job_request("ListBackupProfileData", "ManagedSystem"),
     )
-    if submitted is not None:
-        _project(job_outcome("", submitted))
+    handle = _project(job_outcome("", submitted))
     terminal = await wait_for_submitted_job(hmc, submitted, True, 300, 5)
-    outcome = job_outcome(
-        job_identifier(submitted or {}) or "ListBackupProfileData", terminal
-    )
+    outcome = job_outcome(handle.job_id, terminal)
+    if terminal is None:
+        outcome = replace(outcome, job_href=handle.job_href)
     artifacts = (
         _parse_inventory(terminal)
         if outcome.status in SUCCESSFUL_JOB_STATUSES
@@ -180,14 +178,12 @@ async def delete_backup_profile_artifact(
             "DeleteBackupProfileData", "ManagedSystem", {"file": file_name}
         ),
     )
-    if submitted is not None:
-        _project(job_outcome("", submitted))
+    handle = _project(job_outcome("", submitted))
     terminal = await wait_for_submitted_job(hmc, submitted, True, 300, 5)
-    outcome = _project(
-        job_outcome(
-            job_identifier(submitted or {}) or "DeleteBackupProfileData", terminal
-        )
-    )
+    outcome = job_outcome(handle.job_id, terminal)
+    if terminal is None:
+        outcome = replace(outcome, job_href=handle.job_href)
+    outcome = _project(outcome)
     if outcome.status not in SUCCESSFUL_JOB_STATUSES:
         return BackupProfileDeletion(system_uuid, file_name, outcome, "not-checked")
     try:

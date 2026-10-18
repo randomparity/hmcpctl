@@ -206,3 +206,31 @@ async def test_file_identity_is_xml_escaped_without_changing_its_matching_name()
     assert result.file_name == name and result.postcondition == "absent"
     xml = hmc.submit_job.call_args_list[1].args[1]
     assert "backup&lt;&amp;&quot;" in xml
+
+
+async def test_missing_poll_preserves_the_submission_polling_link():
+    submitted = {
+        "UUID": "entry-id",
+        "link": "/rest/api/uom/jobs/stable-job",
+        "Resource": {"Status": "RUNNING"},
+    }
+    hmc = client(submitted)
+    hmc.wait_for_job_entry = AsyncMock(return_value=None)
+    result = await list_backup_profile_artifacts(hmc, SYSTEM)
+    assert result.artifacts is None and result.job.found is False
+    assert result.job.job_href == "/rest/api/uom/jobs/stable-job"
+
+
+async def test_missing_delete_poll_retains_handle_without_retry():
+    submitted = {
+        "UUID": "entry-id",
+        "link": "/rest/api/uom/jobs/stable-job",
+        "Resource": {"Status": "RUNNING"},
+    }
+    before = job([artifact()])
+    hmc = client(before, submitted)
+    hmc.wait_for_job_entry = AsyncMock(side_effect=[before, None])
+    result = await delete_backup_profile_artifact(hmc, SYSTEM, "backup-1")
+    assert result.postcondition == "not-checked"
+    assert result.job.job_href == "/rest/api/uom/jobs/stable-job"
+    assert hmc.submit_job.await_count == 2
