@@ -179,3 +179,59 @@ async def test_failed_validation_message_is_repr_quoted() -> None:
     assert not any(
         ord(ch) < 0x20 or ord(ch) == 0x7F or ch in "\u2028\u2029" for ch in message
     )
+
+
+@pytest.mark.asyncio
+async def test_unreachable_destination_prevents_validation_and_migration() -> None:
+    client = _client(_job("COMPLETED_OK"))
+    client.list_system_summaries.side_effect = HMCError("destination unreachable")
+
+    with pytest.raises(HMCError, match="destination unreachable"):
+        await migrate_lpar(
+            client,
+            "00000000-0000-0000-0000-000000000002",
+            LpmMigrationRequest("00000000-0000-0000-0000-000000000003"),
+        )
+
+    client.lpar_migrate_validate.assert_not_awaited()
+    client.lpar_migrate.assert_not_awaited()
+    client.wait_for_job_entry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", ["CANCELED_WHILE_RUNNING", "FAILED_BEFORE_COMPLETION"]
+)
+async def test_waited_migration_preserves_source_and_failed_job(status: str) -> None:
+    client = _client(_job("COMPLETED_OK"))
+    submitted = {"UUID": "migration-1", "link": "/jobs/migration-1"}
+    terminal = {
+        "Resource": {
+            "JobID": "migration-1",
+            "Status": status,
+            "Results": {
+                "JobParameter": {
+                    "ParameterName": "detailedStatus",
+                    "ParameterValue": "Partial migration requires operator recovery",
+                }
+            },
+        }
+    }
+    client.lpar_migrate.return_value = submitted
+    client.wait_for_job_entry.side_effect = [_job("COMPLETED_OK"), terminal]
+
+    result = await migrate_lpar(
+        client, "lpar", LpmMigrationRequest("destination"), wait=True
+    )
+
+    assert result.lpar_uuid == "lpar-1"
+    assert result.job.job_id == "migration-1"
+    assert result.job.status == status
+    assert result.job.error == "Partial migration requires operator recovery"
+    assert result.job.timed_out is False
+    assert result.job.job is terminal
+    assert client.wait_for_job_entry.await_args_list[-1] == call(
+        "migration-1", 300, 5, job_href="/jobs/migration-1"
+    )
+    client.lpar_migrate_abort.assert_not_awaited()
+    client.lpar_migrate_recover.assert_not_awaited()

@@ -407,3 +407,35 @@ def test_migrate_validate_wait_true_polls_to_completion(monkeypatch, mock_hmc):
     assert submit_route.called
     assert poll_route.called
     assert result.status == "COMPLETED_OK"
+
+
+def test_remote_restart_keeps_source_and_destination_uuid_distinct(
+    monkeypatch, mock_hmc
+):
+    from xml.etree import ElementTree
+
+    _hmc_env(monkeypatch)
+    route = _job_route(mock_hmc, "RemoteRestart")
+    destination_uuid = "00000000-0000-0000-0000-000000000003"
+
+    result = hmc_remote_restart_lpar(
+        LPAR_UUID, "restart", TARGET_SYSTEM_UUID, destination_uuid
+    )
+
+    request = route.calls.last.request
+    root = ElementTree.fromstring(request.content)
+    parameters = {
+        item.findtext("{*}ParameterName"): item.findtext("{*}ParameterValue")
+        for item in root.findall(".//{*}JobParameter")
+    }
+    assert (
+        request.url.path
+        == f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/RemoteRestart"
+    )
+    assert parameters == {
+        "Operation": "restart",
+        "managedSystem": "source-system",
+        "logicalPartitionUuid": LPAR_UUID,
+        "targetManagedSystemUUID": destination_uuid,
+    }
+    assert result.job_id == JOB_ID
