@@ -39,6 +39,10 @@ def hmc_list_backup_lpar_profiles(
     Returns a complete bounded inventory, not local files. A failed, warning or
     timed-out job has artifacts=null, distinct from a successful empty list.
     Raw job payloads are omitted; job status, identity and bounded errors remain.
+
+    Args:
+        system_name_or_uuid: Exact managed system name or UUID whose backups are listed.
+        profile: Optional TOML connection profile; omitted uses the configured default.
     """
     return with_client(
         lambda hmc: list_backup_profile_artifacts(hmc, system_name_or_uuid),
@@ -63,6 +67,11 @@ def hmc_delete_backup_lpar_profile(
     present/unknown/not-checked are not clean deletion success. Never retries a
     mutation or selects another file. Independent writers are not fenced.
     Retain required recovery backups; no local-file transfer or restore occurs.
+
+    Args:
+        system_name_or_uuid: Exact managed system name or UUID owning the backup.
+        file_name: Exact listed HMC backup name; paths and ambiguous names are rejected.
+        profile: Optional TOML connection profile; omitted uses the configured default.
     """
     return with_client(
         lambda hmc: delete_backup_profile_artifact(hmc, system_name_or_uuid, file_name),

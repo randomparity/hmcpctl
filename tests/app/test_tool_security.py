@@ -1256,6 +1256,7 @@ _NOT_EXHAUSTIVE = frozenset(
         "hmc_run_command",
         # Selectors, but they do not name every resource the call acts on.
         "hmc_backup_lpar_profiles",
+        "hmc_delete_backup_lpar_profile",
         "hmc_backup_vios",
         "hmc_create_lpar",
         "hmc_modify_lpar",
@@ -1306,6 +1307,7 @@ def test_every_selector_less_tool_is_unbounded_and_no_other_is_by_accident():
         "hmc_add_vfc_adapter",
         "hmc_add_vscsi_adapter",
         "hmc_backup_lpar_profiles",
+        "hmc_delete_backup_lpar_profile",
         "hmc_backup_vios",
         "hmc_create_lpar",
         "hmc_get_job",
