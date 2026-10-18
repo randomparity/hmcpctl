@@ -9,7 +9,7 @@ import traceback
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import httpx
 import pytest
@@ -4628,3 +4628,150 @@ def test_tls_audit_record_still_names_verify_ssl_source_not_ca_bundle(
 
     assert len(caught) == 1
     assert caught[0]["source"] == "environment:HMC_VERIFY_SSL"
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "method", "container", "member", "name"),
+    [
+        (
+            "quick",
+            "list_quick_properties",
+            "QuickProperty_Collection",
+            "QuickProperty",
+            "Nickname",
+        ),
+        (
+            "search",
+            "list_search_parameters",
+            "SearchParameterSet",
+            "SearchParameter",
+            "ParameterName",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("shape", "expected"),
+    [
+        ("empty", []),
+        ("blank", None),
+        ("member", None),
+        ("names", ["B", "A", "B"]),
+        ("outside", ["B", "A", "B"]),
+        ("missing", "missing"),
+        ("dtd", []),
+    ],
+)
+@pytest.mark.asyncio
+async def test_discovery_classifies_with_one_parse(
+    mock_hmc, monkeypatch, endpoint, method, container, member, name, shape, expected
+):
+    names = f"<{name}> B </{name}><{name}>A</{name}><{name}>B</{name}>"
+    contents = {
+        "blank": f"<{name}>  </{name}>",
+        "member": f"<{member}/>",
+        "names": names,
+    }
+    body = f'<root xmlns="urn:test"><{container}>{contents.get(shape, "")}</{container}></root>'
+    if shape == "outside":
+        body = f"<root>{names}</root>"
+    elif shape == "missing":
+        body = "<root/>"
+    elif shape == "dtd":
+        body = "<!DOCTYPE root>" + body
+    path = f"/rest/api/uom/ManagedSystem/{endpoint}"
+    mock_hmc.get(path).mock(
+        return_value=httpx.Response(
+            200, text=body, headers={"X-HMC-Schema-Version": " V1_20_0 "}
+        )
+    )
+    async with HMCClient(make_config()) as hmc:
+        parse = Mock(wraps=DET.fromstring)
+        monkeypatch.setattr(DET, "fromstring", parse)
+        if expected == "missing":
+            with pytest.raises(HMCError) as error:
+                await getattr(hmc, method)("ManagedSystem")
+            assert str(error.value).startswith(
+                f"GET {path} returned no {container} element;"
+            )
+            assert error.value.status_code == 200
+            assert error.value.body == body
+        else:
+            assert await getattr(hmc, method)("ManagedSystem") == (
+                expected,
+                " V1_20_0 ",
+            )
+        # HMCError separately parses the body for its existing diagnostic detail.
+        assert parse.call_count == (2 if expected == "missing" else 1)
+
+
+@pytest.mark.parametrize(
+    "endpoint,method",
+    [("quick", "list_quick_properties"), ("search", "list_search_parameters")],
+)
+@pytest.mark.parametrize("status", [204, 400])
+@pytest.mark.asyncio
+async def test_discovery_http_gates_do_not_parse(
+    mock_hmc, monkeypatch, endpoint, method, status
+):
+    path = f"/rest/api/uom/ManagedSystem/{endpoint}"
+    mock_hmc.get(path).mock(return_value=httpx.Response(status, text="not xml"))
+    async with HMCClient(make_config()) as hmc:
+        parse = Mock(wraps=DET.fromstring)
+        monkeypatch.setattr(DET, "fromstring", parse)
+        if status == 204:
+            assert await getattr(hmc, method)("ManagedSystem") == (None, None)
+        else:
+            with pytest.raises(HMCError) as error:
+                await getattr(hmc, method)("ManagedSystem")
+            assert error.value.status_code == status
+            assert error.value.body == "not xml"
+        # A refusal retains HMCError's error-detail parse, without discovery parsing.
+        assert parse.call_count == (1 if status == 400 else 0)
+
+
+@pytest.mark.parametrize(
+    "endpoint,method",
+    [("quick", "list_quick_properties"), ("search", "list_search_parameters")],
+)
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<root>",
+        "<!DOCTYPE root [<!ENTITY x 'hidden'>]><root>&x;</root>",
+        "<!DOCTYPE root [<!ENTITY x SYSTEM 'file:///unread'>]><root>&x;</root>",
+    ],
+)
+@pytest.mark.asyncio
+async def test_discovery_xml_errors_keep_context_and_cause(
+    mock_hmc, endpoint, method, body
+):
+    from defusedxml.common import DefusedXmlException
+
+    path = f"/rest/api/uom/ManagedSystem/{endpoint}"
+    mock_hmc.get(path).mock(return_value=httpx.Response(200, text=body))
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError) as error:
+            await getattr(hmc, method)("ManagedSystem")
+    assert f"Failed to parse GET {path} response" in str(error.value)
+    assert isinstance(error.value.__cause__, (DET.ParseError, DefusedXmlException))
+
+
+@pytest.mark.parametrize(
+    "endpoint,method",
+    [("quick", "list_quick_properties"), ("search", "list_search_parameters")],
+)
+@pytest.mark.asyncio
+async def test_discovery_nesting_failure_keeps_context_and_cause(
+    mock_hmc, monkeypatch, endpoint, method
+):
+    path = f"/rest/api/uom/ManagedSystem/{endpoint}"
+    mock_hmc.get(path).mock(return_value=httpx.Response(200, text="<root/>"))
+    async with HMCClient(make_config()) as hmc:
+        failure = RecursionError()
+        monkeypatch.setattr(DET, "fromstring", Mock(side_effect=failure))
+        with pytest.raises(HMCError) as error:
+            await getattr(hmc, method)("ManagedSystem")
+    assert str(error.value) == (
+        f"Failed to parse GET {path} response: document nesting is too deep"
+    )
+    assert error.value.__cause__ is failure
