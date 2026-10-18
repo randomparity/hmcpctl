@@ -176,7 +176,9 @@ async def _check_name_unique(hmc, system_uuid: str, name: str) -> None:
         )
 
 
-async def check_vlan_exists(hmc, system_uuid: str, port_vlan_id: int) -> None:
+async def check_vlan_exists(
+    hmc: HMCClient, system_uuid: str, port_vlan_id: int
+) -> None:
     """Raise ValueError if no VirtualNetwork with *port_vlan_id* exists."""
     networks = await hmc.list_virtual_networks(system_uuid)
     malformed: list[str] = []
