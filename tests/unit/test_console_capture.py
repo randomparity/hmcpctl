@@ -1812,8 +1812,9 @@ async def test_read_timeout_during_reconnect_keeps_the_gap():
             finish.set()
             reconnect = session._reconnect_task
             assert reconnect is not None
-            while not reconnect.done():
-                await asyncio.sleep(0)
+            async with asyncio.timeout(5):
+                while not reconnect.done():
+                    await asyncio.sleep(0)
             with pytest.raises(RuntimeError):
                 await session.suspend()  # the unread gap comes first
             assert await asyncio.wait_for(session.read(), 5) == KEEPALIVE_GAP
@@ -1944,8 +1945,9 @@ async def test_reader_cancelled_as_reconnect_completes_keeps_the_gap():
             reconnect = session._reconnect_task
             assert reconnect is not None
             finish.set()
-            while not reconnect.done():
-                await asyncio.sleep(0)
+            async with asyncio.timeout(5):
+                while not reconnect.done():
+                    await asyncio.sleep(0)
             reading.cancel()  # the consumer's timeout lands in the same tick
             with pytest.raises(asyncio.CancelledError):
                 await reading
