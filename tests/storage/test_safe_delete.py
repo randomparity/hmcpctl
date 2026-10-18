@@ -184,7 +184,7 @@ async def test_delete_media_repository_succeeds_when_empty(mock_hmc):
     async with HMCClient(config) as hmc:
         result = await delete_media_repository(hmc, VIOS_UUID, VG_UUID)
 
-    assert result == VIOS_UUID
+    assert result.raw == VIOS_UUID
     assert post.call_count == 1
     assert "MediaRepositories" not in post.calls.last.request.content.decode()
 

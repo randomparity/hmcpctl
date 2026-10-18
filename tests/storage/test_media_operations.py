@@ -310,7 +310,7 @@ async def test_unmount_optical_media_removes_the_named_mapping_for_that_lpar(moc
             hmc, VIOS_UUID, LPAR_UUID, media_name="rhel9.iso"
         )
 
-    assert result == ChangeLocation("Disabled", "current-configuration")
+    assert result.change_location == ChangeLocation("Disabled", "current-configuration")
     body = _posted_document(post)
     assert "vtopt0" not in body
     assert "vtscsi0" in body

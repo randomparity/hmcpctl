@@ -230,3 +230,183 @@ async def test_storage_mapping_without_adapter_name_is_listed_with_null_id() -> 
     mappings = await list_storage_mappings(cast(HMCClient, Unidentified()), VIOS_UUID)
 
     assert [(m.id, m.backing_name) for m in mappings] == [(None, "vd-R1")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw,job_id,status",
+    [
+        (None, None, None),
+        ({"UUID": "resource-id", "Resource": {"DiskName": "disk"}}, None, None),
+        ({"JobID": "job-id", "Status": "RUNNING"}, "job-id", "RUNNING"),
+        ({"Resource": {"JobID": "job-id"}}, "job-id", None),
+        (
+            {"UUID": "entry-id", "Resource": {"Status": "COMPLETED_OK"}},
+            "entry-id",
+            "COMPLETED_OK",
+        ),
+        (
+            {"link": "/rest/api/uom/jobs/job-id", "Resource": {"Status": "RUNNING"}},
+            "job-id",
+            "RUNNING",
+        ),
+        (
+            {
+                "resource": {
+                    "Resource": {"JobID": "job-id", "Status": "COMPLETED_WITH_ERROR"}
+                }
+            },
+            "job-id",
+            "COMPLETED_WITH_ERROR",
+        ),
+        ({"Resource": {"Status": "RUNNING"}}, None, None),
+    ],
+)
+async def test_mutation_operation_owns_job_interpretation(raw, job_id, status):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.storage.resources import create_volume_group
+
+    client = AsyncMock(spec=HMCClient)
+    client.create_volume_group.return_value = raw
+    result = await create_volume_group(client, VIOS_UUID, "vg", ["hdisk1"])
+
+    assert result.raw is raw
+    if job_id is None:
+        assert result.job is None
+    else:
+        assert result.job.job_id == job_id
+        assert result.job.status == status
+        assert result.job.timed_out == (
+            status not in {"COMPLETED_OK", "COMPLETED_WITH_ERROR"}
+        )
+        assert bool(result.job.error) == (status == "COMPLETED_WITH_ERROR")
+    client.create_volume_group.assert_awaited_once_with(VIOS_UUID, "vg", ["hdisk1"])
+
+
+@pytest.mark.parametrize(
+    "status,code,outcome",
+    [("RUNNING", 0, "submitted"), ("COMPLETED_WITH_ERROR", 1, "failed")],
+)
+def test_cli_uses_real_mutation_operation_and_preserves_details(
+    monkeypatch, status, code, outcome
+):
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock
+
+    from typer.testing import CliRunner
+
+    from hmcpctl import cli
+    from hmcpctl.cli_commands.storage import resources
+
+    raw = {
+        "UUID": "entry-id",
+        "link": "/rest/api/uom/jobs/job-id",
+        "Resource": {"JobID": "job-id", "Status": status},
+    }
+    client = AsyncMock(spec=HMCClient)
+    client.create_volume_group.return_value = raw
+    monkeypatch.setattr(
+        resources, "with_client", lambda operation: asyncio.run(operation(client))
+    )
+    arguments = [
+        "storage",
+        "create-vg",
+        VIOS_UUID,
+        "--name",
+        "vg",
+        "--pvs",
+        "hdisk1",
+        "--yes",
+    ]
+    rendered = CliRunner().invoke(cli.app, [*arguments, "--json"])
+    assert rendered.exit_code == code, rendered.output
+    summary = json.loads(rendered.stdout)
+    assert summary["outcome"] == outcome
+    assert summary["job_id"] == "job-id"
+    assert summary["job_href"] == raw["link"]
+    assert summary["verification"] == "returned job status"
+    detailed = CliRunner().invoke(cli.app, [*arguments, "--details"])
+    assert detailed.exit_code == code, detailed.output
+    assert json.loads(detailed.stdout) == raw
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        {"UUID": "volume-id", "Resource": {"GroupName": "vg"}},
+        {
+            "link": "/rest/api/uom/jobs/job-id",
+            "Resource": {"JobID": "job-id", "Status": "RUNNING"},
+        },
+    ],
+)
+async def test_mcp_mutation_wire_and_schema_exclude_internal_result(monkeypatch, raw):
+    import contextlib
+    import json
+    from unittest.mock import AsyncMock
+
+    from fastmcp import Client
+
+    from hmcpctl.authorization.access_policy import compile_access_policy
+    from hmcpctl.server import TOOL_SECURITY, create_mcp
+
+    name = "hmc_create_volume_group"
+    client = AsyncMock(spec=HMCClient)
+    client.create_volume_group.return_value = raw
+
+    @contextlib.asynccontextmanager
+    async def open_client(*_args, **_kwargs):
+        yield client
+
+    monkeypatch.setenv("HMC_HOST", "hmc.test")
+    monkeypatch.setattr("hmcpctl._app.client_from_env", open_client)
+    policy = compile_access_policy(
+        {
+            "policies": {
+                "test": {
+                    "grants": [
+                        {
+                            "tools": [name],
+                            "connections": ["<default>"],
+                            "targets": "all-targets",
+                        }
+                    ]
+                }
+            }
+        },
+        "test",
+        TOOL_SECURITY,
+        "test-storage.toml",
+    )
+    async with Client(create_mcp(policy)) as mcp:
+        tool = next(tool for tool in await mcp.list_tools() if tool.name == name)
+        assert tool.output_schema == {
+            "properties": {
+                "result": {
+                    "anyOf": [
+                        {"additionalProperties": True, "type": "object"},
+                        {"type": "null"},
+                    ]
+                }
+            },
+            "required": ["result"],
+            "type": "object",
+            "x-fastmcp-wrap-result": True,
+        }
+        response = await mcp.call_tool(
+            name,
+            {
+                "vios_name_or_uuid": VIOS_UUID,
+                "name": "vg",
+                "physical_volumes": ["hdisk1"],
+            },
+        )
+        if raw is None:
+            assert response.content == []
+            assert response.structured_content == {"result": None}
+        else:
+            assert json.loads(response.content[0].text) == raw

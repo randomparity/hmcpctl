@@ -18,6 +18,7 @@ import inspect
 import json
 import textwrap
 import xml.etree.ElementTree as ET  # nosec B405 - parses a literal test partition
+from dataclasses import asdict
 from typing import Self
 from unittest.mock import AsyncMock
 
@@ -62,7 +63,7 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.operations.storage.resources import (
     OpticalMedia,
     StorageMapping,
-    StorageMapResult,
+    StorageMutationResult,
     VolumeGroup,
 )
 from hmcpctl.operations.virtualization.adapters import AdapterResult
@@ -2519,7 +2520,7 @@ def _storage_app() -> typer.Typer:
         (
             ["detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--yes"],
             "detach_storage_mapping",
-            UNSYNCED,
+            StorageMutationResult.from_raw(asdict(UNSYNCED), change_location=UNSYNCED),
         ),
         (
             [
@@ -2532,7 +2533,9 @@ def _storage_app() -> typer.Typer:
                 "https://images.test/aix.iso",
             ],
             "upload_iso",
-            {"status": "uploaded", "media_name": "aix.iso"},
+            StorageMutationResult.from_raw(
+                {"status": "uploaded", "media_name": "aix.iso"}
+            ),
         ),
     ],
 )
@@ -2588,7 +2591,7 @@ def test_storage_delete_disk_deletes_when_confirmed(fake_hmc, monkeypatch):
 
     async def fake_delete(_hmc, vios, vg, name, *, system_name_or_uuid=None):
         seen.update(vios=vios, vg=vg, name=name)
-        return {"UUID": "disk-1"}
+        return StorageMutationResult.from_raw({"UUID": "disk-1"})
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.delete_virtual_disk", fake_delete
@@ -2690,7 +2693,7 @@ def test_storage_create_media_creates_when_confirmed(fake_hmc, monkeypatch):
 
     async def fake_create(_hmc, vios, vg, name, size_mib, *, system_name_or_uuid=None):
         seen.update(vios=vios, vg=vg, name=name, size_mib=size_mib)
-        return {"MediaName": "aix.iso"}
+        return StorageMutationResult.from_raw({"MediaName": "aix.iso"})
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.create_optical_media", fake_create
@@ -2759,6 +2762,7 @@ def test_storage_delete_media_deletes_when_confirmed(fake_hmc, monkeypatch):
 
     async def fake_delete(_hmc, vios, vg, media_name, *, system_name_or_uuid=None):
         seen.update(vios=vios, vg=vg, media_name=media_name)
+        return StorageMutationResult(None)
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.delete_optical_media", fake_delete
@@ -2808,8 +2812,14 @@ def test_storage_delete_media_declined_confirmation_aborts(fake_hmc, monkeypatch
 @pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
     mount = AsyncMock(
-        return_value=StorageMapResult(
-            LPAR_UUID, {"UUID": "mapping-1", "MediaName": "install.iso"}, UNSYNCED
+        return_value=StorageMutationResult.from_raw(
+            {
+                "lpar_uuid": LPAR_UUID,
+                "resource": {"UUID": "mapping-1", "MediaName": "install.iso"},
+                "change_location": asdict(UNSYNCED),
+            },
+            lpar_uuid=LPAR_UUID,
+            change_location=UNSYNCED,
         )
     )
     monkeypatch.setattr(
@@ -2853,7 +2863,11 @@ def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
 
 
 def test_storage_unmount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
-    unmount = AsyncMock(return_value=UNSYNCED)
+    unmount = AsyncMock(
+        return_value=StorageMutationResult.from_raw(
+            asdict(UNSYNCED), change_location=UNSYNCED
+        )
+    )
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.unmount_optical_media", unmount
     )
@@ -3154,7 +3168,9 @@ def test_storage_detach_mapping_deletes_when_confirmed(fake_hmc, monkeypatch):
             mapping_id=mapping_id,
             ownership_override=ownership_override,
         )
-        return UNSYNCED
+        return StorageMutationResult.from_raw(
+            asdict(UNSYNCED), change_location=UNSYNCED
+        )
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.detach_storage_mapping", fake_detach
@@ -3247,13 +3263,15 @@ def test_storage_upload_iso_reports_uploaded_media(fake_hmc, monkeypatch):
         assert (vios, vg, media_name) == (VIOS_UUID, VG_UUID, "aix.iso")
         assert iso_source == "https://images.test/aix.iso"
         assert system_name_or_uuid is None
-        return {
-            "status": "uploaded",
-            "media_name": "aix.iso",
-            "media_size_bytes": 1048576,
-            "source_sha256": "abc123",
-            "media": {"MediaName": "aix.iso"},
-        }
+        return StorageMutationResult.from_raw(
+            {
+                "status": "uploaded",
+                "media_name": "aix.iso",
+                "media_size_bytes": 1048576,
+                "source_sha256": "abc123",
+                "media": {"MediaName": "aix.iso"},
+            }
+        )
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.upload_iso", fake_upload
@@ -3284,7 +3302,9 @@ def test_storage_upload_iso_json(fake_hmc, monkeypatch):
         _hmc, _vios, _vg, _media_name, _iso_source, *, system_name_or_uuid
     ):
         assert system_name_or_uuid is None
-        return {"status": "uploaded", "media_name": "aix.iso"}
+        return StorageMutationResult.from_raw(
+            {"status": "uploaded", "media_name": "aix.iso"}
+        )
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.upload_iso", fake_upload

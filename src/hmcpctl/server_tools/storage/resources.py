@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from ..._app import (
@@ -106,13 +105,15 @@ def hmc_create_volume_group(
     """
 
     async def operation(hmc):
-        return await create_volume_group(
-            hmc,
-            vios_name_or_uuid,
-            name,
-            physical_volumes,
-            system_name_or_uuid=system_name_or_uuid,
-        )
+        return (
+            await create_volume_group(
+                hmc,
+                vios_name_or_uuid,
+                name,
+                physical_volumes,
+                system_name_or_uuid=system_name_or_uuid,
+            )
+        ).raw
 
     return with_client(operation, profile=profile)
 
@@ -195,15 +196,20 @@ def hmc_create_virtual_disk(
         profile: TOML profile name, or the environment-default HMC when omitted.
     """
 
+    async def operation(hmc):
+        return (
+            await create_virtual_disk(
+                hmc,
+                vios_name_or_uuid,
+                vg_uuid,
+                disk_name,
+                capacity_mib=capacity_mib,
+                system_name_or_uuid=system_name_or_uuid,
+            )
+        ).raw
+
     return with_client(
-        lambda hmc: create_virtual_disk(
-            hmc,
-            vios_name_or_uuid,
-            vg_uuid,
-            disk_name,
-            capacity_mib=capacity_mib,
-            system_name_or_uuid=system_name_or_uuid,
-        ),
+        operation,
         profile=profile,
     )
 
@@ -229,14 +235,19 @@ def hmc_delete_virtual_disk(
         profile: TOML profile name, or the environment-default HMC when omitted.
     """
 
+    async def operation(hmc):
+        return (
+            await delete_virtual_disk(
+                hmc,
+                vios_name_or_uuid,
+                vg_uuid,
+                disk_name,
+                system_name_or_uuid=system_name_or_uuid,
+            )
+        ).raw
+
     return with_client(
-        lambda hmc: delete_virtual_disk(
-            hmc,
-            vios_name_or_uuid,
-            vg_uuid,
-            disk_name,
-            system_name_or_uuid=system_name_or_uuid,
-        ),
+        operation,
         profile=profile,
     )
 
@@ -278,18 +289,17 @@ def hmc_map_storage_to_lpar(
     """
 
     async def mapping(hmc: HMCClient):
-        return serialize_tool_result(
-            await map_storage(
-                hmc,
-                vios_name_or_uuid,
-                lpar_name_or_uuid,
-                system_name_or_uuid=system_name_or_uuid,
-                kind=storage_kind,
-                storage_name=storage_name,
-                target=target_device,
-                ownership_override=ownership_override,
-            )
+        result = await map_storage(
+            hmc,
+            vios_name_or_uuid,
+            lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
+            kind=storage_kind,
+            storage_name=storage_name,
+            target=target_device,
+            ownership_override=ownership_override,
         )
+        return result.raw
 
     return with_client(mapping, profile=profile)
 
@@ -316,14 +326,19 @@ def hmc_create_media_repository(
         profile: TOML profile name, or the environment-default HMC when omitted.
     """
 
+    async def operation(hmc):
+        return (
+            await create_media_repository(
+                hmc,
+                vios_name_or_uuid,
+                vg_uuid,
+                size_mib,
+                system_name_or_uuid=system_name_or_uuid,
+            )
+        ).raw
+
     return with_client(
-        lambda hmc: create_media_repository(
-            hmc,
-            vios_name_or_uuid,
-            vg_uuid,
-            size_mib,
-            system_name_or_uuid=system_name_or_uuid,
-        ),
+        operation,
         profile=profile,
     )
 
@@ -352,15 +367,20 @@ def hmc_create_optical_media(
         profile: TOML profile name, or the environment-default HMC when omitted.
     """
 
+    async def operation(hmc):
+        return (
+            await create_optical_media(
+                hmc,
+                vios_name_or_uuid,
+                vg_uuid,
+                media_name,
+                size_mib,
+                system_name_or_uuid=system_name_or_uuid,
+            )
+        ).raw
+
     return with_client(
-        lambda hmc: create_optical_media(
-            hmc,
-            vios_name_or_uuid,
-            vg_uuid,
-            media_name,
-            size_mib,
-            system_name_or_uuid=system_name_or_uuid,
-        ),
+        operation,
         profile=profile,
     )
 
@@ -556,7 +576,7 @@ def hmc_detach_storage_mapping(
             system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         )
-        return {"mapping_id": mapping_id, "change_location": asdict(location)}
+        return {"mapping_id": mapping_id, "change_location": location.raw}
 
     return with_client(detach_mapping, profile=profile)
 
@@ -757,15 +777,20 @@ def hmc_upload_iso(
         FileExistsError: If media_name already exists in the repository.
     """
 
+    async def operation(hmc):
+        return (
+            await upload_iso(
+                hmc,
+                vios_name_or_uuid,
+                vg_uuid,
+                media_name,
+                iso_source,
+                system_name_or_uuid=system_name_or_uuid,
+            )
+        ).raw
+
     return with_client(
-        lambda hmc: upload_iso(
-            hmc,
-            vios_name_or_uuid,
-            vg_uuid,
-            media_name,
-            iso_source,
-            system_name_or_uuid=system_name_or_uuid,
-        ),
+        operation,
         profile=profile,
     )
 
@@ -850,7 +875,10 @@ def hmc_mount_optical_media(
             ownership_override=ownership_override,
             system_name_or_uuid=system_name_or_uuid,
         )
-        return resource_with_change_location(result.resource, result.change_location)
+        assert result.change_location is not None
+        return resource_with_change_location(
+            result.raw["resource"], result.change_location
+        )
 
     return with_client(mount, profile=profile)
 
@@ -899,9 +927,10 @@ def hmc_unmount_optical_media(
             ownership_override=ownership_override,
             system_name_or_uuid=system_name_or_uuid,
         )
+        assert location.change_location is not None
         return (
             f"Unmounted {media_name!r} from LPAR {lpar_name_or_uuid} on VIOS "
-            f"{vios_name_or_uuid}. {location.summary()}"
+            f"{vios_name_or_uuid}. {location.change_location.summary()}"
         )
 
     return with_client(unmount_media_and_confirm, profile=profile)

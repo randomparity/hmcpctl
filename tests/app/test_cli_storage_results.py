@@ -18,7 +18,7 @@ from hmcpctl.cli_commands.storage import resources as storage
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation
 from hmcpctl.operations.lpar.provision import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-from hmcpctl.operations.storage.resources import StorageMapResult
+from hmcpctl.operations.storage.resources import StorageMutationResult
 
 RUNNER = CliRunner()
 RAW = {"Resource": {"MachineSerialNumber": "unrelated-hardware-marker"}}
@@ -81,7 +81,7 @@ CASES = [
     (
         "map",
         ["vi-test", "--lpar", "lp-test", "--name", "disk-test", "--yes"],
-        StorageMapResult("lp-test", RAW, LOCATION),
+        {"lpar_uuid": "lp-test", "resource": RAW, "change_location": asdict(LOCATION)},
         "disk-test",
     ),
     (
@@ -120,7 +120,7 @@ CASES = [
     (
         "mount-optical-media",
         ["vi-test", "--lpar", "lp-test", "--name", "media-test", "--yes"],
-        StorageMapResult("lp-test", RAW, LOCATION),
+        {"lpar_uuid": "lp-test", "resource": RAW, "change_location": asdict(LOCATION)},
         "media-test",
     ),
     (
@@ -151,8 +151,22 @@ CASES = [
 ]
 
 
+def operation_result(data):
+    if isinstance(data, AttachDiskResult):
+        return data
+    location = data if isinstance(data, ChangeLocation) else None
+    if isinstance(data, dict) and "change_location" in data:
+        location = ChangeLocation(**data["change_location"])
+    raw = asdict(data) if isinstance(data, ChangeLocation) else data
+    return StorageMutationResult.from_raw(
+        raw,
+        change_location=location,
+        lpar_uuid=data.get("lpar_uuid") if isinstance(data, dict) else None,
+    )
+
+
 def _invoke(monkeypatch, command, args, data, flags=(), input=None):
-    call = Mock(return_value=data)
+    call = Mock(return_value=operation_result(data))
     monkeypatch.setattr(storage, "with_client", call)
     return RUNNER.invoke(
         cli.app, ["storage", command, *args, *flags], input=input
@@ -214,13 +228,17 @@ def test_confirmed_machine_output_keeps_prompt_on_stderr(
     # CliRunner echoes prompt input to stdout; use actual stdin/stdout for this contract.
     args = [arg for arg in args if arg != "--yes"]
     source = f"""
+from dataclasses import asdict
 from hmcpctl import cli
 from hmcpctl.cli_commands.storage import resources
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation
 from hmcpctl.operations.lpar.provision import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-from hmcpctl.operations.storage.resources import StorageMapResult
-resources.with_client = lambda op: {data!r}
+from hmcpctl.operations.storage.resources import StorageMutationResult
+data = {data!r}
+raw = asdict(data) if isinstance(data, ChangeLocation) else data
+location = data if isinstance(data, ChangeLocation) else (ChangeLocation(**data['change_location']) if isinstance(data, dict) and 'change_location' in data else None)
+resources.with_client = lambda op: data if isinstance(data, AttachDiskResult) else StorageMutationResult.from_raw(raw, change_location=location, lpar_uuid=data.get('lpar_uuid') if isinstance(data, dict) else None)
 cli.app(prog_name='hmcpctl')
 """
     import pty
@@ -283,7 +301,11 @@ def test_returned_job_is_not_opaque_success(
     command, args, _, _ = CASES[case_index]
     resource = {"JobID": "job-test", "Status": status}
     data = (
-        StorageMapResult("lp-test", resource, LOCATION)
+        {
+            "lpar_uuid": "lp-test",
+            "resource": resource,
+            "change_location": asdict(LOCATION),
+        }
         if case_index == 9
         else {"Resource": resource}
     )
@@ -351,7 +373,7 @@ def test_mapping_location_and_retention_survive_projection(monkeypatch, index):
 @pytest.mark.parametrize("width", [40, 80, 200])
 def test_actual_redirected_json_round_trips_target(tmp_path, width):
     target = "disk-[test]-東京-" * 20 + "\\\t\n"
-    code = "from hmcpctl import cli\nfrom hmcpctl.cli_commands.storage import resources\nresources.with_client=lambda op: None\ncli.app(prog_name='hmcpctl')\n"
+    code = "from hmcpctl import cli\nfrom hmcpctl.cli_commands.storage import resources\nfrom hmcpctl.operations.storage.resources import StorageMutationResult\nresources.with_client=lambda op: StorageMutationResult(None)\ncli.app(prog_name='hmcpctl')\n"
     destination = tmp_path / "result.json"
     with destination.open("w") as output:
         result = subprocess.run(

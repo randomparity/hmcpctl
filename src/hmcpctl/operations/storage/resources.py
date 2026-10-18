@@ -9,7 +9,7 @@ import os
 import re
 import sys
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -25,18 +25,41 @@ from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_loc
 from ...config import ISO_URL_ALLOWLIST_HELP
 from ...documents.storage import StorageKind
 from ...errors import HMCError
+from ...jobs import JobOutcome, job_identifier, job_outcome
 from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class StorageMapResult:
-    """Authorized LPAR identity, the resulting VIOS storage resource, and where it lives."""
+class StorageMutationResult:
+    """Original storage projection and its interpreted job, without extra HMC requests."""
 
-    lpar_uuid: str
-    resource: dict[str, Any] | None
-    change_location: ChangeLocation
+    raw: Any
+    job: JobOutcome | None = None
+    lpar_uuid: str | None = None
+    change_location: ChangeLocation | None = None
+
+    @classmethod
+    def from_raw(
+        cls,
+        raw: Any,
+        *,
+        lpar_uuid: str | None = None,
+        change_location: ChangeLocation | None = None,
+    ) -> StorageMutationResult:
+        source = raw.get("resource", raw) if isinstance(raw, dict) else None
+        resource = source.get("Resource", source) if isinstance(source, dict) else None
+        entry = (
+            source
+            if isinstance(source, dict) and "Resource" in source
+            else {"Resource": resource}
+        )
+        is_job = isinstance(resource, dict) and (
+            "JobID" in resource or "Status" in resource
+        )
+        job = job_outcome("", entry) if is_job and job_identifier(entry) else None
+        return cls(raw, job, lpar_uuid, change_location)
 
 
 @dataclass(frozen=True)
@@ -280,7 +303,7 @@ async def create_volume_group(
     physical_volumes: list[str],
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Create a volume group from the selected physical volumes.
 
     Raises:
@@ -288,12 +311,14 @@ async def create_volume_group(
             be resolved.
         HMCError: If the HMC rejects the creation request or it cannot be completed.
     """
-    return await hmc.create_volume_group(
-        await resolve_vios_uuid(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
-        name,
-        physical_volumes,
+    return StorageMutationResult.from_raw(
+        await hmc.create_volume_group(
+            await resolve_vios_uuid(
+                hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+            ),
+            name,
+            physical_volumes,
+        )
     )
 
 
@@ -305,7 +330,7 @@ async def create_virtual_disk(
     capacity_mib: int,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Create a virtual disk of ``capacity_mib`` in a volume group.
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -321,11 +346,13 @@ async def create_virtual_disk(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
     vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
-    return await hmc.create_virtual_disk(
-        vios_uuid,
-        vg_uuid,
-        name,
-        capacity_mib,
+    return StorageMutationResult.from_raw(
+        await hmc.create_virtual_disk(
+            vios_uuid,
+            vg_uuid,
+            name,
+            capacity_mib,
+        )
     )
 
 
@@ -352,7 +379,7 @@ async def delete_virtual_disk(
     disk_name: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Delete a Virtual Disk from a Volume Group.
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -368,8 +395,8 @@ async def delete_virtual_disk(
         disk_name: Name of the Virtual Disk to delete.
 
     Returns:
-        The parsed HMC response entry from the VolumeGroup update, or ``None``
-        when a successful response contains no resource entry.
+        A mutation result whose raw value is the parsed HMC response entry from
+        the VolumeGroup update, or ``None`` when no resource entry is returned.
 
     Raises:
         ResourceNotFoundError: If the VIOS or optional managed-system selector
@@ -402,7 +429,9 @@ async def delete_virtual_disk(
                     "remove the mapping."
                 )
 
-    return await hmc.delete_virtual_disk(vios_uuid, vg_uuid, disk_name)
+    return StorageMutationResult.from_raw(
+        await hmc.delete_virtual_disk(vios_uuid, vg_uuid, disk_name)
+    )
 
 
 async def map_storage(
@@ -415,7 +444,7 @@ async def map_storage(
     storage_name: str,
     target: str | None = None,
     ownership_override: bool = False,
-) -> StorageMapResult:
+) -> StorageMutationResult:
     """Authorize an LPAR and map VIOS storage to it.
 
     Raises:
@@ -438,7 +467,15 @@ async def map_storage(
     resource = await hmc.map_storage_to_lpar(
         vios_uuid, kind, storage_name, lpar_uuid, target
     )
-    return StorageMapResult(lpar_uuid, resource, location)
+    return StorageMutationResult.from_raw(
+        {
+            "lpar_uuid": lpar_uuid,
+            "resource": resource,
+            "change_location": asdict(location),
+        },
+        lpar_uuid=lpar_uuid,
+        change_location=location,
+    )
 
 
 async def create_media_repository(
@@ -448,7 +485,7 @@ async def create_media_repository(
     size_mib: int,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Create a media repository in a VIOS volume group.
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -464,10 +501,12 @@ async def create_media_repository(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
     vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
-    return await hmc.create_media_repository(
-        vios_uuid,
-        vg_uuid,
-        size_mib,
+    return StorageMutationResult.from_raw(
+        await hmc.create_media_repository(
+            vios_uuid,
+            vg_uuid,
+            size_mib,
+        )
     )
 
 
@@ -479,7 +518,7 @@ async def create_optical_media(
     size_mib: int,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Create blank optical media in a VIOS media repository.
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -495,11 +534,13 @@ async def create_optical_media(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
     vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
-    return await hmc.create_optical_media(
-        vios_uuid,
-        vg_uuid,
-        name,
-        size_mib,
+    return StorageMutationResult.from_raw(
+        await hmc.create_optical_media(
+            vios_uuid,
+            vg_uuid,
+            name,
+            size_mib,
+        )
     )
 
 
@@ -536,7 +577,7 @@ async def detach_storage_mapping(
     *,
     system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
-) -> ChangeLocation:
+) -> StorageMutationResult:
     """Authorize the mapped LPAR, then detach its VirtualSCSIMapping.
 
     ``mapping_id`` is the exact ``<server adapter>/<target device>`` identity
@@ -579,7 +620,7 @@ async def detach_storage_mapping(
     )
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
-    return location
+    return StorageMutationResult.from_raw(asdict(location), change_location=location)
 
 
 async def delete_media_repository(
@@ -588,7 +629,7 @@ async def delete_media_repository(
     vg_uuid: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> str:
+) -> StorageMutationResult:
     """Delete the Virtual Media Repository from a Volume Group.
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -615,7 +656,7 @@ async def delete_media_repository(
             f"image(s): {names!r}. Delete all images first."
         )
     await hmc.delete_media_repository(vios_uuid, vg_uuid)
-    return vios_uuid
+    return StorageMutationResult.from_raw(vios_uuid)
 
 
 async def delete_optical_media(
@@ -625,7 +666,7 @@ async def delete_optical_media(
     media_name: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Delete a VirtualOpticalMedia (ISO image) from the media repository.
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -664,7 +705,9 @@ async def delete_optical_media(
             "Unmount the media first."
         )
 
-    return await hmc.delete_optical_media(vios_uuid, vg_uuid, media_name)
+    return StorageMutationResult.from_raw(
+        await hmc.delete_optical_media(vios_uuid, vg_uuid, media_name)
+    )
 
 
 async def get_media_repository(
@@ -1013,7 +1056,7 @@ async def upload_iso(
     iso_source: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any]:
+) -> StorageMutationResult:
     """Upload an ISO to a VIOS media repository via the HMC web File API (ADR 0177).
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -1040,7 +1083,7 @@ async def upload_iso(
             a VIOS name.
 
     Returns:
-        Dict with:
+        Mutation result whose raw dictionary contains:
         - 'status': 'uploaded'
         - 'media_name': Name of the media in the repository.
         - 'media_size_bytes': Size of the downloaded ISO.
@@ -1108,13 +1151,15 @@ async def upload_iso(
             hmc, vios_uuid, vg_uuid, media_name, iso_path, file_size
         )
 
-        return {
-            "status": "uploaded",
-            "media_name": media_name,
-            "media_size_bytes": file_size,
-            "source_sha256": iso_sha256,
-            "media": uploaded_media_entry,
-        }
+        return StorageMutationResult.from_raw(
+            {
+                "status": "uploaded",
+                "media_name": media_name,
+                "media_size_bytes": file_size,
+                "source_sha256": iso_sha256,
+                "media": uploaded_media_entry,
+            }
+        )
     finally:
         primary_error = sys.exception()
 
@@ -1164,7 +1209,7 @@ async def mount_optical_media(
     media_name: str,
     target_device: str | None = None,
     ownership_override: bool = False,
-) -> StorageMapResult:
+) -> StorageMutationResult:
     """Create a VirtualSCSIMapping for optical media (mount ISO to LPAR).
 
     Creates a read-only optical mapping from a VirtualOpticalMedia (ISO container)
@@ -1192,7 +1237,15 @@ async def mount_optical_media(
     resource = await hmc.create_optical_mapping(
         vios_uuid, media_name, lpar_uuid, target_device
     )
-    return StorageMapResult(lpar_uuid, resource, location)
+    return StorageMutationResult.from_raw(
+        {
+            "lpar_uuid": lpar_uuid,
+            "resource": resource,
+            "change_location": asdict(location),
+        },
+        lpar_uuid=lpar_uuid,
+        change_location=location,
+    )
 
 
 async def unmount_optical_media(
@@ -1203,7 +1256,7 @@ async def unmount_optical_media(
     system_name_or_uuid: str | None = None,
     media_name: str,
     ownership_override: bool = False,
-) -> ChangeLocation:
+) -> StorageMutationResult:
     """Remove the VirtualSCSIMapping for an optical device (unmount).
 
     Resolves the LPAR-scoped optical inventory entry whose ``MediaName`` equals
@@ -1273,4 +1326,4 @@ async def unmount_optical_media(
         raise HMCError("VirtualSCSIMapping has no adapter/target identity")
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
-    return location
+    return StorageMutationResult.from_raw(asdict(location), change_location=location)
