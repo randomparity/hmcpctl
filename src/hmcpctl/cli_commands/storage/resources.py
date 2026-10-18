@@ -55,6 +55,21 @@ from ..output import (
 from ..runtime import with_client
 
 
+def _quote_storage_token(value: str) -> str:
+    if value.isprintable():
+        return shlex.quote(value)
+    # ANSI-C quotes preserve control characters without emitting terminal controls.
+    escaped = []
+    for char in value:
+        if char in "\\'":
+            escaped.append("\\" + char)
+        elif char.isprintable():
+            escaped.append(char)
+        else:
+            escaped.extend(f"\\x{byte:02x}" for byte in os.fsencode(char))
+    return "$'" + "".join(escaped) + "'"
+
+
 def _confirm_storage(yes: bool, text: str) -> None:
     if yes:
         return
@@ -73,22 +88,9 @@ def _confirm_storage(yes: bool, text: str) -> None:
             options.append(parameter.opts[0])
             if value is not True:
                 options.append(str(value))
-    tokens = []
-    for value in [*options, "--yes", "--", *arguments]:
-        if value.isprintable():
-            tokens.append(shlex.quote(value))
-        else:
-            # ANSI-C quotes preserve control characters without emitting terminal controls.
-            escaped = []
-            for char in value:
-                if char in "\\'":
-                    escaped.append("\\" + char)
-                elif char.isprintable():
-                    escaped.append(char)
-                else:
-                    escaped.extend(f"\\x{byte:02x}" for byte in os.fsencode(char))
-            tokens.append("$'" + "".join(escaped) + "'")
-    invocation = " ".join(tokens)
+    invocation = " ".join(
+        _quote_storage_token(value) for value in [*options, "--yes", "--", *arguments]
+    )
     if sys.stdin is None or not sys.stdin.isatty():
         err_console.print(
             "Error: noninteractive storage mutation requires --yes/-y.\n"
