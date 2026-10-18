@@ -1,12 +1,12 @@
 # HMC CLI Cheatsheet
 
 This cheatsheet covers the IBM HMC CLI commands used by hmcpctl production code
-and repository tooling.  It is a practical reference, not a reproduction of IBM
-documentation.  For exhaustive syntax, options, and return codes see the
+and repository tooling, plus local hmcpctl operator commands.  It is a practical
+reference, not a reproduction of IBM documentation.  For exhaustive syntax, options, and return codes see the
 [IBM HMC commands reference](https://www.ibm.com/docs/en/power10/7063-CR1?topic=hmc-commands)
 or run `<command> --help` on the HMC itself.
 
-> **SSH execution** — every command here runs over SSH as `hscroot` (or the
+> **SSH execution** — the HMC commands here run over SSH as `hscroot` (or the
 > configured HMC user).  hmcpctl opens one SSH connection per command via
 > asyncssh; there is no persistent shell session.  `hmc_run_command` exposes
 > this transport directly to callers.
@@ -24,6 +24,28 @@ or run `<command> --help` on the HMC itself.
 > HMC V10 and V11.  `UUID` (upper-case) is rejected with *invalid attribute*.
 
 ---
+
+## Local logical-operation records
+
+These commands run on the operator's computer against the same private SQLite
+store as the MCP server (`HMCPCTL_STATE_DIR`, or the platform state directory).
+They need no HMC connection or credentials and make no HMC calls. Unlike
+`hmc_operation_status`, they can access records across every agent id and connection.
+Both commands output JSON.
+
+```sh
+hmcpctl operations list --limit 50
+hmcpctl operations list --cursor '<next_cursor from the previous page>'
+hmcpctl operations abandon <operation_id>
+```
+
+Listing returns newest-first pages of at most 50 operations with each operation's
+newest 200 events; pass `next_cursor` unchanged to continue. Abandon accepts
+`interrupted` and `paused` operations, releases their partition guard and preserves
+the resource ledger and effects. It does not undo HMC writes or delete resources.
+Running operations refuse; terminal records return unchanged. An unreadable,
+corrupt, non-private or lost store refuses either command. Listing an unused store
+returns an empty page; abandoning a missing operation refuses without creating a store.
 
 ## Read-only commands
 
