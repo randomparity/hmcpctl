@@ -283,6 +283,41 @@
       "observed_at": "2026-10-12T21:45:03Z"
     },
     {
+      "operation": "lpar.migrate",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_abort",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_affinity",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_recover",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_validate",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.modify",
       "implementation": "implemented",
       "verification": "stale",
@@ -323,6 +358,13 @@
       "verification": "current",
       "reason": null,
       "observed_at": "2026-10-12T22:11:29Z"
+    },
+    {
+      "operation": "lpar.remote_restart",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar.rename",

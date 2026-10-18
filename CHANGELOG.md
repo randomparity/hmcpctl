@@ -16,6 +16,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Migration and remote-restart workflow verification records bounded implementation
+  scope, endpoint/failure assertions and explicit unrun native obligations (#631).
+
 - Offline POWER9 progress-code lookup and 2,202 independently written definitions,
   with public IBM page/code provenance. CLI, MCP and partition inspection reference-code
   rows carry definitions and explicit unknowns while preserving raw codes (#1690).
