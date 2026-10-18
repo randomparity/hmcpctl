@@ -317,7 +317,7 @@ def test_power_on_lpar_submits_job(monkeypatch, mock_hmc):
     assert route.called
     body = route.calls.last.request.content.decode()
     assert "PowerOn</OperationName>" in body
-    assert result.already_running is False
+    assert result.already_activated is False
     assert result.job["Resource"]["JobID"] == JOB_ID
     assert result.message is None
 
@@ -1376,6 +1376,6 @@ def test_power_on_with_wait_polls_the_submission_jobid(monkeypatch, mock_hmc):
     result = hmc_power_on_lpar(LPAR_UUID, wait=True, poll_interval=1)
     assert poll_route.called
     assert not entry_uuid_route.called
-    assert result.already_running is False
+    assert result.already_activated is False
     assert result.job["Resource"]["Status"] == "COMPLETED_OK"
     assert result.message is None

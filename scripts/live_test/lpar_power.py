@@ -618,7 +618,7 @@ async def _running_cases(client: Client, state: RunState, run: Run) -> None:
         "lpar.power_on",
         "running-reported-without-job",
         st == "PASS"
-        and result_field(data, "already_running") is True
+        and result_field(data, "already_activated") is True
         and result_field(data, "job") is None
         and isinstance(message, str)
         and "boot mode was not applied" in message

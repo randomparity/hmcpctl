@@ -82,7 +82,7 @@ def _created(uuid: str | None) -> dict[str, Any]:
 def _power_on(already: bool, job: Any, message: str | None) -> dict[str, Any]:
     """A complete `hmc_power_on_lpar` result."""
     return {
-        "already_running": already,
+        "already_activated": already,
         "job": job,
         "message": message,
         "affinity_assessment": _NOT_MEASURED,

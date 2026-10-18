@@ -636,7 +636,7 @@ async def test_power_operation_already_running_names_the_dropped_activation_para
         plain = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     hmc.submit_job.assert_not_awaited()
-    assert requested.job["already_running"] is True
+    assert requested.job["already_activated"] is True
     # Only the parameter actually supplied is named, and force=True is not
     # offered: the HMC fails a PowerOn from any activated state (HSCL3681).
     assert "The requested boot mode was not applied" in requested.job["message"]
@@ -686,7 +686,7 @@ async def test_power_operation_already_active_state_submits_no_job(state):
         result = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     hmc.submit_job.assert_not_awaited()
-    assert result.job["already_running"] is True
+    assert result.job["already_activated"] is True
     assert state in result.job["message"]
     assert "No PowerOn job was submitted." in result.job["message"]
     assert "force=True" not in result.job["message"]
@@ -711,7 +711,7 @@ async def test_power_operation_guard_accepts_the_cli_title_case_rendering(
         result = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     assert hmc.submit_job.await_count == int(submitted)
-    assert result.job.get("already_running", False) is not submitted
+    assert result.job.get("already_activated", False) is not submitted
 
 
 @pytest.mark.asyncio
@@ -748,7 +748,7 @@ async def test_power_operation_force_submits_from_open_firmware_and_surfaces_hsc
     hmc.get_quick_property.assert_not_awaited()
     hmc.submit_job.assert_awaited_once()
     outcome = power_on_outcome(result)
-    assert outcome.already_running is False
+    assert outcome.already_activated is False
     assert outcome.job == HSCL3681_JOB
     assert activation_allows_assessment(result) == (False, HSCL3681.strip())
 
@@ -1109,7 +1109,7 @@ async def test_waited_power_on_completed_ok_but_failed_state_raises(state):
 async def test_waited_power_on_accepts_every_activated_state(state):
     hmc, outcome = await _waited_power_on(state)
 
-    assert outcome.already_running is False
+    assert outcome.already_activated is False
     assert outcome.job == _ok_job()
     assert hmc.get_quick_property.await_count == 2
 

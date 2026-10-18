@@ -1211,6 +1211,8 @@ def test_lpars_power_on_skips_running_partition_without_force(fake_hmc):
 
     assert result.exit_code == 0
     assert "already running" in result.stdout
+    assert '"already_activated": true' in result.stdout
+    assert "already_running" not in result.stdout
     assert [call[0] for call in fake_hmc.calls] == ["get_quick_property"]
 
 

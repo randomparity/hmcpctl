@@ -350,7 +350,7 @@ def hmc_power_on_lpar(
     """Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection.
 
     lpar_name_or_uuid: accepts either a PartitionName or a UUID
-    (find it with hmc_list_lpars). Returns ``already_running``, nullable ``job``,
+    (find it with hmc_list_lpars). Returns ``already_activated``, nullable ``job``,
     and nullable ``message`` fields. A submitted job is in ``job``; check it
     with hmc_get_job. This changes the state of a real partition — confirm the
     target with hmc_get_lpar(lpar_name_or_uuid=...) before calling.
@@ -367,7 +367,7 @@ def hmc_power_on_lpar(
 
     The HMC accepts PowerOn only from the 'not activated' state. If the
     partition is already activated — 'running', 'starting' or 'open firmware' —
-    ``already_running`` is true, ``job`` is null, and ``message`` names the
+    ``already_activated`` is true, ``job`` is null, and ``message`` names the
     state and explains that no job was submitted. Any other state is refused
     with an error naming it, and no job is submitted. Pass force=True to skip
     this check and submit PowerOn unconditionally; the HMC then fails the job

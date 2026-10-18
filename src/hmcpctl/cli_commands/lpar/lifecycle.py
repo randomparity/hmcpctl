@@ -168,7 +168,7 @@ def _confirm_power(name_or_uuid: str, operation: str, yes: bool) -> None:
 
 def _render_power(result: LparPowerResult) -> None:
     uuid, job = result.lpar_uuid, result.job
-    if job and job.get("already_running"):
+    if job and job.get("already_activated"):
         console.print(terminal_field(job["message"]), style="yellow", markup=False)
         print_json(job)
         return

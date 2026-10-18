@@ -59,7 +59,7 @@ mapping comes from epic #871 and issue #872):
 - The vendor's fourth value, `dumpretry`, is not accepted.
 - `on` submits a job only from the 'not activated' state, unless `force=True`. An activated
   partition ('running', 'starting', 'open firmware') submits no job and reports
-  `already_running`; any other state is refused with an HTTP 409 error naming it.
+  `already_activated`; any other state is refused with an HTTP 409 error naming it.
   With `force=True` the job is always submitted; outside 'not activated' the HMC fails it
   (HSCL3681).
 - With `wait=True`, a wait that times out returns the last-seen, non-terminal job. Poll it

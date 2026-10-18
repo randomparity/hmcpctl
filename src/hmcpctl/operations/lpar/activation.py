@@ -73,7 +73,7 @@ class LparPowerResult:
 class LparPowerOnOutcome:
     """Stable public result for an LPAR PowerOn request."""
 
-    already_running: bool
+    already_activated: bool
     job: dict[str, Any] | None
     message: str | None
     affinity_assessment: LparAffinityAssessmentOutcome
@@ -84,12 +84,12 @@ def power_on_outcome(
     result: LparPowerResult,
     affinity_assessment: LparAffinityAssessmentOutcome | None = None,
 ) -> LparPowerOnOutcome:
-    """Normalize submitted and already-running PowerOn results."""
+    """Normalize submitted and already-activated PowerOn results."""
     job = result.job
-    if job is not None and job.get("already_running") is True:
+    if job is not None and job.get("already_activated") is True:
         message = job.get("message")
         return LparPowerOnOutcome(
-            already_running=True,
+            already_activated=True,
             job=None,
             message=message if isinstance(message, str) else None,
             affinity_assessment=affinity_assessment
@@ -100,7 +100,7 @@ def power_on_outcome(
             warnings=result.warnings,
         )
     return LparPowerOnOutcome(
-        already_running=False,
+        already_activated=False,
         job=job,
         message=None,
         affinity_assessment=affinity_assessment
@@ -204,13 +204,13 @@ async def power_on_lpar(
     if (
         wait
         and result.job is not None
-        and result.job.get("already_running") is not True
+        and result.job.get("already_activated") is not True
     ):
         await require_activated(hmc, result)
     if (
         affinity_assessment is None
         or result.job is None
-        or result.job.get("already_running") is True
+        or result.job.get("already_activated") is True
     ):
         return power_on_outcome(result)
     if not wait:
@@ -360,7 +360,7 @@ async def submit_power_on_lpar(
     """Submit activation and optionally wait, retaining the raw job result.
 
     Activation options are validated before ownership reads or audited overrides.
-    An active partition returns an already_running result unless force is set.
+    An active partition returns an already_activated result unless force is set.
     A partition profile must belong to the target; its adapter warnings accompany
     the job. Use power_on_lpar for activation readback and affinity assessment.
     """
@@ -384,7 +384,7 @@ async def submit_power_on_lpar(
             return LparPowerResult(
                 lpar_uuid,
                 {
-                    "already_running": True,
+                    "already_activated": True,
                     "message": (
                         f"LPAR {lpar_uuid} is already {described}. "
                         f"No PowerOn job was submitted.{unapplied}"

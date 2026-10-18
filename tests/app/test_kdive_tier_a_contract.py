@@ -64,7 +64,7 @@ PROSE_TERMS = {
     "cycle",
     "reset",
     "dumpretry",
-    "already_running",
+    "already_activated",
     "ValueError",
     "mkvterm",
     "rmvterm",

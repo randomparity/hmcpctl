@@ -212,7 +212,7 @@ class World:
             job = _job("COMPLETED_WITH_ERROR", "HSCL3680 No current configuration")
         else:
             self.lpar_state, job = "open firmware", _job()
-        return {"already_running": False, "job": job, "message": None}
+        return {"already_activated": False, "job": job, "message": None}
 
     def _hmc_power_off_lpar(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         if kwargs.get("operation") == "osshutdown":
@@ -477,7 +477,7 @@ def test_a_no_profile_activation_that_boots_is_powered_off_before_sms(schemas):
     def boots(kwargs: dict[str, Any]) -> Any:
         if kwargs.get("partition_profile_uuid") is None:
             world.lpar_state = "open firmware"
-            return {"already_running": False, "job": _job(), "message": None}
+            return {"already_activated": False, "job": _job(), "message": None}
         return _DEFAULT
 
     world.overrides["hmc_power_on_lpar"] = boots
@@ -515,7 +515,7 @@ def test_a_timed_out_activation_fails_ends_the_steps_and_still_tears_down(schema
         if kwargs.get("partition_profile_uuid") is None:
             return _DEFAULT
         world.lpar_state = "starting"
-        return {"already_running": False, "job": _job("RUNNING"), "message": None}
+        return {"already_activated": False, "job": _job("RUNNING"), "message": None}
 
     world.overrides["hmc_power_on_lpar"] = hangs
 
