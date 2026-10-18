@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ...config import UNRESOLVED_CONNECTION, ConfigError, resolve_connection_profile
-from ..lpar.workflow_contract import (
+from .models import (
     EffectRecord,
     OperationEvent,
     OperationPage,

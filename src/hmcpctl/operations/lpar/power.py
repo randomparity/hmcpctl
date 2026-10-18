@@ -29,10 +29,10 @@ from ..logical.engine import (
     OperationContext,
     OperationFailed,
 )
+from ..logical.models import EffectRecord
 from ..logical.store import DEFAULT_CONNECTION
 from .core import ACTIVATED_STATES, submit_power_off
 from .ownership import resolve_and_authorize_lpar_mutation
-from .workflow_contract import EffectRecord
 
 PowerAction = Literal["start", "stop", "restart"]
 PowerMode = Literal["graceful", "immediate"]

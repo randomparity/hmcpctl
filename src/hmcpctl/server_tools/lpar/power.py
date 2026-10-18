@@ -16,6 +16,7 @@ from fastmcp import FastMCP
 from ...config import build_config
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
+from ...operations.logical.models import OperationRecord
 from ...operations.logical.store import OperationRefused, connection_label
 from ...operations.lpar.power import (
     DELEGATED,
@@ -24,7 +25,6 @@ from ...operations.lpar.power import (
     check_inputs,
     power_body,
 )
-from ...operations.lpar.workflow_contract import OperationRecord
 from ...tool_registry import (
     Authorize,
     TargetSelector,

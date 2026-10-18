@@ -9,9 +9,8 @@ import os
 
 import pytest
 
-from hmcpctl.operations.logical import store
+from hmcpctl.operations.logical import models, store
 from hmcpctl.operations.logical.store import OperationRefused
-from hmcpctl.operations.lpar import workflow_contract
 
 
 def _reason(fn, *args, **kwargs) -> str:
@@ -54,11 +53,12 @@ def _oid(n: int) -> str:
 
 def test_record_fields_are_described():
     for record in (
-        workflow_contract.EffectRecord,
-        workflow_contract.OperationEvent,
-        workflow_contract.OperationRecord,
-        workflow_contract.OperationPage,
+        models.EffectRecord,
+        models.OperationEvent,
+        models.OperationRecord,
+        models.OperationPage,
     ):
+        assert record.__module__ == "hmcpctl.operations.logical.models"
         for item in dataclasses.fields(record):
             assert item.metadata.get("description"), (record.__name__, item.name)
 
@@ -400,7 +400,7 @@ def test_status_without_store_is_empty():
     page = store.operation_status(
         agent_id="agent-a", connection="<default>", host="hmc.test"
     )
-    assert page == workflow_contract.OperationPage((), 50, False, None)
+    assert page == models.OperationPage((), 50, False, None)
     assert not store.state_dir().exists()
 
 

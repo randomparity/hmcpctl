@@ -21,8 +21,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ..lpar.workflow_contract import EffectRecord, OperationRecord
 from . import store
+from .models import EffectRecord, OperationRecord
 from .store import OperationRefused
 
 EXCLUDED_ARGUMENTS = frozenset({"continuation", "wait_seconds", "hold_id"})
