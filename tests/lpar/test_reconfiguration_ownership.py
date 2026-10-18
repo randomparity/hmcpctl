@@ -104,16 +104,16 @@ CASES: tuple[tuple[str, Operation], ...] = (
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
         lambda hmc: migrate_lpar(
-            hmc, None, LPAR, LpmMigrationRequest("target"), validate_first=False
+            hmc, LPAR, LpmMigrationRequest("target"), validate_first=False
         ),
     ),
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
-        lambda hmc: abort_lpar_migration(hmc, None, LPAR),
+        lambda hmc: abort_lpar_migration(hmc, LPAR),
     ),
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
-        lambda hmc: recover_lpar_migration(hmc, None, LPAR),
+        lambda hmc: recover_lpar_migration(hmc, LPAR),
     ),
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",

@@ -86,8 +86,8 @@ LPM_RECOVERY_TOOL_CASES = [
     ),
 ]
 LPM_RECOVERY_OPERATION_CASES = [
-    (abort_lpar_migration, "lpar_migrate_abort", (None, LPAR_UUID)),
-    (recover_lpar_migration, "lpar_migrate_recover", (None, LPAR_UUID)),
+    (abort_lpar_migration, "lpar_migrate_abort", (LPAR_UUID,)),
+    (recover_lpar_migration, "lpar_migrate_recover", (LPAR_UUID,)),
     (
         remote_restart_lpar,
         "lpar_remote_restart",

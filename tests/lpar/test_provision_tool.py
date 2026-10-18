@@ -451,8 +451,8 @@ def test_provision_affinity_power_on_waits_for_terminal_result():
     assert result.timed_out is False
     power.assert_awaited_once_with(
         hmc,
-        SYSTEM_UUID,
         LPAR_UUID,
+        system_name_or_uuid=SYSTEM_UUID,
         power_on=True,
         force=True,
         wait=True,

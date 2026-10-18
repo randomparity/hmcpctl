@@ -500,8 +500,8 @@ def hmc_power_off_lpar(
     async def power_off_job(hmc: HMCClient) -> dict[str, Any] | None:
         result = await power_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
             power_on=False,
             immediate=immediate,
             wait=wait,
@@ -552,8 +552,8 @@ def hmc_dump_restart_lpar(
     async def dump_restart_job(hmc: HMCClient) -> dict[str, Any] | None:
         result = await power_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
             power_on=False,
             wait=wait,
             timeout_seconds=timeout_seconds,

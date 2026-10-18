@@ -181,7 +181,6 @@ async def test_fail_closed_preflight_timeout_submits_no_hmc_work() -> None:
 
     result = await migrate_lpar_with_affinity_preflight(
         hmc,
-        None,
         "lpar-1",
         LpmMigrationRequest("target-1"),
         _request(response="fail", preflight_timeout_seconds=0),
@@ -199,7 +198,6 @@ async def test_fail_closed_preflight_submits_no_hmc_work() -> None:
 
     result = await migrate_lpar_with_affinity_preflight(
         hmc,
-        None,
         "lpar-1",
         LpmMigrationRequest("target-1"),
         _request(destination_estimated_score=70, response="fail"),
@@ -246,11 +244,7 @@ async def test_passing_preflight_composes_before_canonical_validation(
 
     monkeypatch.setattr("hmcpctl.operations.lpar.migration.migrate_lpar", fake_migrate)
     result = await migrate_lpar_with_affinity_preflight(
-        hmc,
-        None,
-        "lpar-1",
-        LpmMigrationRequest("target-1"),
-        _request(response=response),
+        hmc, "lpar-1", LpmMigrationRequest("target-1"), _request(response=response)
     )
 
     assert order == ["validation-and-migration"]
@@ -270,7 +264,6 @@ async def test_warning_proceeds_to_canonical_validation() -> None:
 
     result = await migrate_lpar_with_affinity_preflight(
         hmc,
-        None,
         "lpar-1",
         LpmMigrationRequest("target-1"),
         _request(destination_estimated_score=70, response="warn"),
@@ -293,7 +286,6 @@ async def test_canonical_validation_timeout_never_submits_migration() -> None:
     with pytest.raises(HMCError, match="migration was not submitted"):
         await migrate_lpar_with_affinity_preflight(
             hmc,
-            None,
             "lpar-1",
             LpmMigrationRequest("target-1"),
             _request(),

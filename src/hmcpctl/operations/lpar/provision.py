@@ -307,8 +307,8 @@ async def _power_on(
     """
     result = await power_lpar(
         hmc,
-        system_name_or_uuid,
         lpar_uuid,
+        system_name_or_uuid=system_name_or_uuid,
         power_on=True,
         force=True,
         wait=assessment is not None,

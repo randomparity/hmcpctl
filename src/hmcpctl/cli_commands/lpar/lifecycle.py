@@ -181,8 +181,8 @@ def _power_lpar(
     result = with_client(
         lambda hmc: power_lpar(
             hmc,
-            system,
             name_or_uuid,
+            system_name_or_uuid=system,
             power_on=on,
             immediate=immediate,
             force=force,

@@ -361,8 +361,8 @@ async def power_on_lpar(
 
     result = await power_lpar(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
+        system_name_or_uuid=system_name_or_uuid,
         power_on=True,
         force=force,
         wait=wait,
@@ -761,9 +761,9 @@ def _unapplied_activation_clause(
 
 async def power_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str | None = None,
     power_on: bool,
     immediate: bool = False,
     force: bool = False,

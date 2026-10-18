@@ -250,11 +250,11 @@ async def run_lpm_affinity_preflight(
 
 async def migrate_lpar_with_affinity_preflight(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     migration: LpmMigrationRequest,
     affinity_preflight: LpmAffinityPreflightRequest,
     *,
+    system_name_or_uuid: str | None = None,
     wait: bool = False,
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
@@ -271,9 +271,9 @@ async def migrate_lpar_with_affinity_preflight(
         return LpmAffinityMigrationResult(None, preflight, None)
     result = await migrate_lpar(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         migration,
+        system_name_or_uuid=system_name_or_uuid,
         wait=wait,
         timeout_seconds=timeout_seconds,
         poll_interval=poll_interval,
@@ -320,10 +320,10 @@ async def _submit_migration_job(
 
 async def validate_lpar_migration(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     migration: LpmMigrationRequest,
     *,
+    system_name_or_uuid: str | None = None,
     wait: bool = False,
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
@@ -354,10 +354,10 @@ async def validate_lpar_migration(
 
 async def migrate_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     migration: LpmMigrationRequest,
     *,
+    system_name_or_uuid: str | None = None,
     validate_first: bool = True,
     wait: bool = False,
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
@@ -417,9 +417,9 @@ async def migrate_lpar(
 
 async def abort_lpar_migration(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str | None = None,
     wait: bool = False,
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
@@ -446,9 +446,9 @@ async def abort_lpar_migration(
 
 async def recover_lpar_migration(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str | None = None,
     wait: bool = False,
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,

@@ -83,12 +83,7 @@ async def test_power_lpar_forwards_optional_system_scope():
     hmc.find_partition_by_name.return_value = {"UUID": "lpar-uuid"}
     hmc.submit_job.return_value = {"UUID": "job-uuid"}
 
-    await power_lpar(
-        hmc,
-        "system-name",
-        "aix1",
-        power_on=False,
-    )
+    await power_lpar(hmc, "aix1", system_name_or_uuid="system-name", power_on=False)
 
     hmc.find_partition_by_name.assert_awaited_once_with(
         "aix1", system_uuid="system-uuid"
@@ -122,7 +117,7 @@ def test_power_off_lpar_tool_forwards_system_scope(monkeypatch):
 
     server_lpars.hmc_power_off_lpar("aix1", system_name_or_uuid="system-name")
 
-    assert operation.await_args.args[1] == "system-name"
+    assert operation.await_args.kwargs["system_name_or_uuid"] == "system-name"
 
 
 def test_delete_vios_tool_scopes_name_before_mutation(monkeypatch):

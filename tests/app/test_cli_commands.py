@@ -2124,8 +2124,11 @@ def test_lpar_scoped_commands_pass_system_scope(
 ):
     seen = []
 
-    async def fake_operation(_hmc, system, lpar, *_args, **_kwargs):
-        seen.append((system, lpar))
+    async def fake_operation(_hmc, *positional, **keywords):
+        if "system_name_or_uuid" in keywords:
+            seen.append((keywords["system_name_or_uuid"], positional[0]))
+        else:
+            seen.append(positional[:2])
         return returned
 
     monkeypatch.setattr(f"hmcpctl.cli_commands.{module}.{operation}", fake_operation)
@@ -3827,16 +3830,15 @@ def test_migrate_affinity_cli_builds_preflight_request(
 
     assert result.exit_code == 0, result.output
     [(operation_args, operation_controls)] = calls
-    assert operation_args[1] is None
-    assert operation_args[2] == LPAR_NAME
-    assert operation_args[3].target_system_name_or_uuid == "sys1"
-    request = operation_args[4]
+    assert operation_args[1] == LPAR_NAME
+    assert operation_args[2].target_system_name_or_uuid == "sys1"
+    request = operation_args[3]
     for field, expected in expected_request.items():
         assert getattr(request, field) == expected
     assert request.capability_limits == (
         "Destination affinity is estimated, not guaranteed.",
     )
-    assert operation_controls == expected_controls
+    assert operation_controls == {"system_name_or_uuid": None, **expected_controls}
 
 
 def test_migrate_cli_rejects_effective_wait_timing_before_confirmation(fake_hmc):

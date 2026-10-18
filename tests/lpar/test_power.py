@@ -363,7 +363,6 @@ async def test_power_lpar_forwards_activation_parameters():
     ):
         await power_lpar(
             hmc,
-            None,
             LPAR_UUID,
             power_on=True,
             boot_mode="sms",
@@ -389,12 +388,7 @@ async def test_power_lpar_forwards_power_off_parameters():
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=False,
-            restart=True,
-            operation="osshutdown",
+            hmc, LPAR_UUID, power_on=False, restart=True, operation="osshutdown"
         )
 
     path, document = hmc.submit_job.await_args.args
@@ -414,7 +408,6 @@ async def test_power_lpar_power_on_document_ignores_power_off_parameters():
     ):
         await power_lpar(
             hmc,
-            None,
             LPAR_UUID,
             power_on=True,
             force=True,
@@ -448,7 +441,7 @@ async def test_power_lpar_refuses_before_any_side_effect(kwargs, expected, caplo
         caplog.at_level(logging.INFO),
         pytest.raises(ValueError) as refused,
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=False, **kwargs)
+        await power_lpar(hmc, LPAR_UUID, power_on=False, **kwargs)
 
     assert expected in str(refused.value)
     resolver.assert_not_awaited()
@@ -498,7 +491,6 @@ async def test_power_off_records_the_variant_it_sends(
     ):
         await power_lpar(
             hmc,
-            None,
             "lpar-a",
             power_on=False,
             immediate=immediate,
@@ -558,7 +550,6 @@ async def test_power_off_is_recorded_even_when_the_submit_raises(caplog):
     ):
         await power_lpar(
             hmc,
-            None,
             LPAR_UUID,
             power_on=False,
             operation="dumprestart",
@@ -583,7 +574,7 @@ async def test_power_on_emits_no_power_off_record(caplog):
         ),
         caplog.at_level(logging.INFO),
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        await power_lpar(hmc, LPAR_UUID, power_on=True)
 
     hmc.submit_job.assert_awaited_once()
     assert _audit_records(caplog) == []
@@ -642,7 +633,6 @@ async def test_power_lpar_power_off_document_is_unchanged():
     ):
         await power_lpar(
             hmc,
-            None,
             LPAR_UUID,
             power_on=False,
             boot_mode="sms",
@@ -694,10 +684,8 @@ async def test_power_lpar_already_running_names_the_dropped_activation_parameter
         "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        requested = await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, boot_mode="sms"
-        )
-        plain = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        requested = await power_lpar(hmc, LPAR_UUID, power_on=True, boot_mode="sms")
+        plain = await power_lpar(hmc, LPAR_UUID, power_on=True)
 
     hmc.submit_job.assert_not_awaited()
     assert requested.job["already_running"] is True
@@ -747,7 +735,7 @@ async def test_power_lpar_already_active_state_submits_no_job(state):
         "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        result = await power_lpar(hmc, LPAR_UUID, power_on=True)
 
     hmc.submit_job.assert_not_awaited()
     assert result.job["already_running"] is True
@@ -770,7 +758,7 @@ async def test_power_lpar_guard_accepts_the_cli_title_case_rendering(state, subm
         "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        result = await power_lpar(hmc, LPAR_UUID, power_on=True)
 
     assert hmc.submit_job.await_count == int(submitted)
     assert result.job.get("already_running", False) is not submitted
@@ -789,7 +777,7 @@ async def test_power_lpar_refuses_power_on_outside_not_activated(state):
         ),
         pytest.raises(HMCError, match=f"current state is {state!r}") as raised,
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        await power_lpar(hmc, LPAR_UUID, power_on=True)
 
     assert raised.value.status_code == 409
     hmc.submit_job.assert_not_awaited()
@@ -805,9 +793,7 @@ async def test_power_lpar_force_submits_from_open_firmware_and_surfaces_hscl3681
         "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, force=True, wait=True
-        )
+        result = await power_lpar(hmc, LPAR_UUID, power_on=True, force=True, wait=True)
 
     hmc.get_quick_property.assert_not_awaited()
     hmc.submit_job.assert_awaited_once()
@@ -885,11 +871,7 @@ async def test_power_lpar_accepts_a_profile_contained_by_the_target_partition():
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=True,
-            partition_profile_uuid=PROFILE_UUID,
+            hmc, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
         )
 
     hmc.list_child.assert_awaited_once_with(
@@ -918,11 +900,7 @@ async def test_power_lpar_refuses_a_profile_the_target_partition_does_not_contai
         pytest.raises(ValueError) as refused,
     ):
         await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=True,
-            partition_profile_uuid=PROFILE_UUID,
+            hmc, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
         )
 
     hmc.submit_job.assert_not_awaited()
@@ -939,7 +917,7 @@ async def test_power_lpar_reads_no_profile_feed_when_no_profile_is_supplied():
         "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True, boot_mode="sms")
+        await power_lpar(hmc, LPAR_UUID, power_on=True, boot_mode="sms")
 
     hmc.list_child.assert_not_awaited()
     hmc.submit_job.assert_awaited_once()
@@ -960,11 +938,7 @@ async def test_power_lpar_matches_a_profile_uuid_case_insensitively():
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=True,
-            partition_profile_uuid=PROFILE_UUID.upper(),
+            hmc, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID.upper()
         )
 
     # The partition's own spelling reaches the wire, not the caller's: the match
@@ -993,7 +967,7 @@ async def test_power_lpar_distinguishes_a_degraded_profile_feed_from_a_refusal(f
         pytest.raises(ValueError) as refused,
     ):
         await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
+            hmc, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
         )
 
     hmc.submit_job.assert_not_awaited()
@@ -1026,7 +1000,7 @@ async def test_power_lpar_refuses_an_invalid_activation_value_on_the_already_run
         patch("hmcpctl.operations.lpar.core.resolve_lpar_uuid", new=resolver),
         pytest.raises(ValueError, match=expected),
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True, **kwargs)
+        await power_lpar(hmc, LPAR_UUID, power_on=True, **kwargs)
 
     resolver.assert_not_awaited()
     hmc.get_quick_property.assert_not_awaited()
@@ -1073,7 +1047,7 @@ async def _power_on_with_profile(hmc: AsyncMock) -> LparPowerResult:
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         return await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
+            hmc, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
         )
 
 
@@ -1125,7 +1099,7 @@ async def test_power_on_without_a_profile_reads_no_adapter_feed():
         "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        result = await power_lpar(hmc, LPAR_UUID, power_on=True)
 
     assert result.warnings == ()
     hmc.list_adapters.assert_not_awaited()
