@@ -34,7 +34,14 @@ def window(tmp_path):
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     git(root, "switch", "-c", "fixture-window")
-    for name in ("baseline.py", "cli.py", "config.py", "runner.py"):
+    for name in (
+        "baseline.py",
+        "cli.py",
+        "config.py",
+        "runner.py",
+        "evidence.py",
+        "scenario_validation.py",
+    ):
         shutil.copyfile(
             ROOT / "scripts/live_test" / name, root / "scripts/live_test" / name
         )

@@ -47,6 +47,7 @@ from live_test import (  # noqa: E402
     connectivity,
     dedicated_pcie,
     escape_hatch,
+    evidence,
     inventory,
     lpar,
     lpar_config,
@@ -57,6 +58,7 @@ from live_test import (  # noqa: E402
     profiles,
     provisioning,
     results,
+    scenario_validation,
     sriov,
     storage,
     storage_lifecycle,
@@ -925,7 +927,7 @@ async def test_pcm_declarations_match_only_authority() -> None:
     assert [
         (gap["operation"], gap["missing_scope"]["variant"]) for gap in state.gaps
     ] == [("pcm.get_preferences", "pcm-authority")]
-    runner._validate_declared_outcomes()
+    scenario_validation.validate_declared_outcomes(runner._SCENARIO_MODULES)
 
 
 @pytest.mark.asyncio
@@ -2826,7 +2828,7 @@ def _startup_gate(monkeypatch, tmp_path) -> list[dict[str, object]]:
         "from_env_file",
         classmethod(lambda _cls: live_config.LiveTestConfig()),
     )
-    monkeypatch.setattr(runner, "_read_environment", lambda *_a: ("V10R3", "POWER10"))
+    monkeypatch.setattr(evidence, "read_environment", lambda *_a: ("V10R3", "POWER10"))
     monkeypatch.setattr(runner, "_bootstrap_config", lambda: True)
     started: list[dict[str, object]] = []
 
@@ -3608,7 +3610,7 @@ async def scenario(client, state):
     state.record_with_expected(5, "{second_tool}", st_b, data_b, [A])
 '''
     monkeypatch.setattr(runner, "_SCENARIO_MODULES", [module])
-    monkeypatch.setattr(runner.inspect, "getsource", lambda _: source)
+    monkeypatch.setattr(scenario_validation.inspect, "getsource", lambda _: source)
     monkeypatch.setattr(runner, "create_mcp", lambda *_a: pytest.fail("created client"))
     assert (
         await runner.main(
@@ -3636,7 +3638,7 @@ def test_declared_results_require_one_matching_record(tail):
         f"    {tail}\n"
     )
     with pytest.raises(ValueError, match="declared|pair"):
-        runner._validate_declared_function(
+        scenario_validation._validate_declared_function(
             ast.parse(source).body[0], {"A": metrics._PREFERENCES_AUTHORITY}
         )
 
@@ -3647,7 +3649,7 @@ def test_declared_calls_require_assigned_status_and_data():
         '    await state.call(client, "hmc_get_pcm_preferences", expected=[A])\n'
     )
     with pytest.raises(ValueError, match="assigned"):
-        runner._validate_declared_function(
+        scenario_validation._validate_declared_function(
             ast.parse(source).body[0], {"A": metrics._PREFERENCES_AUTHORITY}
         )
 
@@ -3698,7 +3700,7 @@ def test_gap_output_can_be_copied_and_loaded_for_next_run(tmp_path):
         [expected],
     )
     destination = repo / "test-results-gaps-observations.json"
-    assert runner._emit_observations(
+    assert evidence.emit_observations(
         state, destination, ("V10R3", "POWER10"), "(not set)", repo
     )
     emitted = json.loads(destination.read_text())
@@ -3723,19 +3725,19 @@ def test_gap_output_can_be_copied_and_loaded_for_next_run(tmp_path):
             }
         )
     )
-    assert runner._load_known_gaps(("V10R3", "POWER10"), repo, catalog) == {
+    assert evidence.load_known_gaps(("V10R3", "POWER10"), repo, catalog) == {
         (expected.operation, expected.variant)
     }
-    assert runner._load_known_gaps(("V10R4", "POWER10"), repo, catalog) == set()
-    assert runner._load_known_gaps(None, repo, catalog) == set()
+    assert evidence.load_known_gaps(("V10R4", "POWER10"), repo, catalog) == set()
+    assert evidence.load_known_gaps(None, repo, catalog) == set()
     document = json.loads(catalog.read_text())
     scope = document["operations"][0]["implementation"]["missing_scope"][0]
     scope["confirmation"]["observed_at"] = "1970-01-01T00:00:00Z"
     catalog.write_text(json.dumps(document))
-    assert runner._load_known_gaps(("V10R3", "POWER10"), repo, catalog) == set()
+    assert evidence.load_known_gaps(("V10R3", "POWER10"), repo, catalog) == set()
     del scope["confirmation"]
     catalog.write_text(json.dumps(document))
-    assert runner._load_known_gaps(("V10R3", "POWER10"), repo, catalog) == set()
+    assert evidence.load_known_gaps(("V10R3", "POWER10"), repo, catalog) == set()
 
 
 @pytest.mark.parametrize(
@@ -3755,7 +3757,7 @@ def test_invalid_gap_catalog_fails_even_without_environment(tmp_path, records):
         )
     )
     with pytest.raises(ValueError, match="invalid gap catalog"):
-        runner._load_known_gaps(None, tmp_path, catalog)
+        evidence.load_known_gaps(None, tmp_path, catalog)
 
 
 def test_classify_failure_reads_the_message_not_the_traceback():
@@ -4181,7 +4183,7 @@ def test_help_renders_the_docstring_unwrapped_with_every_group(capsys):
 def test_run_provenance_stamps_the_commit_and_a_clean_tree(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
 
-    block = runner._run_provenance([24], "dedicated", repo_root, "V1_0", False)
+    block = evidence.run_provenance([24], "dedicated", repo_root, "V1_0", False)
 
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -4200,7 +4202,7 @@ def test_run_provenance_stamps_the_commit_and_a_clean_tree(tmp_path):
 
 def test_run_provenance_outside_a_repository_reports_no_commit():
     """A run that cannot be attributed says so; it does not omit the block."""
-    block = runner._run_provenance([0, 1], None, None, "(not set)", True)
+    block = evidence.run_provenance([0, 1], None, None, "(not set)", True)
 
     assert block == {
         "tested_commit": None,
@@ -4227,7 +4229,7 @@ def test_run_provenance_reports_a_dirty_tree(tmp_path):
         subprocess.run(["git", *args], cwd=tmp_path, check=True)
     (tmp_path / "scripts" / "thing.py").write_text("x = 2\n", encoding="utf-8")
 
-    block = runner._run_provenance([24], "dedicated", tmp_path, "(not set)", False)
+    block = evidence.run_provenance([24], "dedicated", tmp_path, "(not set)", False)
 
     assert block["tested_commit"] is not None
     assert block["tree_clean"] is False
@@ -5590,8 +5592,8 @@ async def test_main_stamps_run_provenance_into_the_results_document(
     monkeypatch.setattr(runner, "SUBTASKS", {24: fake_subtask})
     emitted: list[str] = []
     monkeypatch.setattr(
-        runner,
-        "_emit_observations",
+        evidence,
+        "emit_observations",
         lambda _state, _path, _environment, schema_version, _root: emitted.append(
             schema_version
         ),
@@ -5692,7 +5694,7 @@ def test_result_write_preserves_existing_report_when_replacement_fails(
     monkeypatch.setattr(Path, "replace", fail_replace)
 
     with pytest.raises(OSError, match="replacement failed"):
-        runner._write_results(path, '{"new": true}')
+        evidence.write_results(path, '{"new": true}')
 
     assert path.read_text(encoding="utf-8") == '{"old": true}'
     assert not list(tmp_path.glob(".results.json.*.tmp"))
@@ -7745,7 +7747,7 @@ def test_a_lone_environment_key_is_rejected(tmp_path):
     env_file.write_text("LIVE_TEST_ENV_HMC_RELEASE=V10R3\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="must be set together"):
-        runner._read_environment(env_file)
+        evidence.read_environment(env_file)
 
 
 def test_both_environment_keys_are_read(tmp_path):
@@ -7755,7 +7757,7 @@ def test_both_environment_keys_are_read(tmp_path):
         encoding="utf-8",
     )
 
-    assert runner._read_environment(env_file) == ("V10R3M1060", "POWER10")
+    assert evidence.read_environment(env_file) == ("V10R3M1060", "POWER10")
 
 
 def test_a_release_without_its_maintenance_level_is_rejected(tmp_path):
@@ -7771,21 +7773,21 @@ def test_a_release_without_its_maintenance_level_is_rejected(tmp_path):
 
     assert runner.check_capability_inventory.HMC_RELEASE.fullmatch("V10R3")
     with pytest.raises(ValueError, match=r"expected V<n>R<n>M<n>, e\.g\. V10R3M1060"):
-        runner._read_environment(env_file)
+        evidence.read_environment(env_file)
 
 
 def test_the_example_environment_is_accepted():
     """Copying `.env.example` must not fail the release rule at startup."""
     example = Path(__file__).parents[1] / ".env.example"
 
-    assert runner._read_environment(example) is not None
+    assert evidence.read_environment(example) is not None
 
 
 def test_observations_are_not_emitted_without_environment(tmp_path, capsys):
     repo = _live_repo(tmp_path)
     destination = repo / "test-results-round2-observations.json"
 
-    assert not runner._emit_observations(
+    assert not evidence.emit_observations(
         _state_with_one_observation(), destination, None, "(not set)", repo
     )
     assert "no LIVE_TEST_ENV_* settings" in capsys.readouterr().out
@@ -7794,10 +7796,10 @@ def test_observations_are_not_emitted_without_environment(tmp_path, capsys):
 
 def test_observations_are_not_emitted_from_a_dirty_tree(tmp_path, capsys, monkeypatch):
     repo = _live_repo(tmp_path)
-    monkeypatch.setattr(runner, "_tree_is_clean", lambda _root: False)
+    monkeypatch.setattr(evidence, "_tree_is_clean", lambda _root: False)
     destination = repo / "test-results-round2-observations.json"
 
-    assert not runner._emit_observations(
+    assert not evidence.emit_observations(
         _state_with_one_observation(),
         destination,
         ("V10R3", "POWER10"),
@@ -7813,7 +7815,7 @@ def test_emission_refuses_a_path_git_does_not_ignore(tmp_path, capsys):
     repo = _live_repo(tmp_path)
     destination = repo / "evidence-observations.json"
 
-    assert not runner._emit_observations(
+    assert not evidence.emit_observations(
         _state_with_one_observation(),
         destination,
         ("V10R3", "POWER10"),
@@ -7831,7 +7833,7 @@ def test_emitted_observations_validate_against_the_catalog_shape(
     repo = _live_repo(tmp_path)
     destination = repo / "test-results-round2-observations.json"
 
-    assert runner._emit_observations(
+    assert evidence.emit_observations(
         _state_with_one_observation(),
         destination,
         ("V10R3", "POWER10"),
@@ -7863,7 +7865,7 @@ def test_emission_refuses_an_unrecordable_schema_version(tmp_path, capsys):
     repo = _live_repo(tmp_path)
     destination = repo / "test-results-round2-observations.json"
 
-    assert not runner._emit_observations(
+    assert not evidence.emit_observations(
         _state_with_one_observation(),
         destination,
         ("V10R3", "POWER10"),
@@ -7891,7 +7893,7 @@ async def test_an_unrecordable_schema_version_is_warned_before_the_run(
         state.record(24, "fake", "PASS", {})
 
     monkeypatch.setattr(runner, "SUBTASKS", {24: fake_subtask})
-    monkeypatch.setattr(runner, "_emit_observations", lambda *_args: False)
+    monkeypatch.setattr(evidence, "emit_observations", lambda *_args: False)
 
     assert (
         await runner.main(
@@ -7910,8 +7912,8 @@ async def test_an_unrecordable_schema_version_is_warned_before_the_run(
 def test_a_lone_environment_key_exits_before_the_run(monkeypatch, tmp_path, capsys):
     """A one-line `.env` typo costs a startup exit, not a hardware run's output."""
     monkeypatch.setattr(
-        runner,
-        "_read_environment",
+        evidence,
+        "read_environment",
         lambda *_a: (_ for _ in ()).throw(ValueError("lone key")),
     )
     monkeypatch.setattr(
@@ -7970,7 +7972,7 @@ def test_emission_skips_an_unknown_operation_and_keeps_the_rest(tmp_path, capsys
     )
     destination = repo / "test-results-round2-observations.json"
 
-    assert runner._emit_observations(
+    assert evidence.emit_observations(
         state, destination, ("V10R3", "POWER10"), "(not set)", repo
     )
 
@@ -8014,7 +8016,7 @@ def test_an_environment_value_outside_its_grammar_is_rejected(tmp_path, value):
     )
 
     with pytest.raises(ValueError, match="does not match its grammar") as raised:
-        runner._read_environment(env_file)
+        evidence.read_environment(env_file)
     assert value not in str(raised.value)
 
 
@@ -8026,7 +8028,7 @@ def test_the_repository_root_is_resolved_from_git_not_the_working_directory(
     subdirectory = repo / "scripts"
     monkeypatch.chdir(subdirectory)
 
-    assert runner._repository_root() == repo
+    assert evidence.repository_root() == repo
 
 
 def test_the_repository_root_refuses_a_checkout_without_the_package(
@@ -8036,7 +8038,7 @@ def test_the_repository_root_refuses_a_checkout_without_the_package(
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
     monkeypatch.chdir(tmp_path)
 
-    assert runner._repository_root() is None
+    assert evidence.repository_root() is None
 
 
 def test_an_unignored_results_path_exits_before_the_run(monkeypatch, tmp_path, capsys):
@@ -8052,7 +8054,7 @@ def test_an_unignored_results_path_exits_before_the_run(monkeypatch, tmp_path, c
         "from_env_file",
         classmethod(lambda _cls: live_config.LiveTestConfig()),
     )
-    monkeypatch.setattr(runner, "_read_environment", lambda *_a: ("V10R3", "POWER10"))
+    monkeypatch.setattr(evidence, "read_environment", lambda *_a: ("V10R3", "POWER10"))
     monkeypatch.setattr(
         runner, "create_mcp", lambda *_a, **_k: pytest.fail("created MCP")
     )
@@ -8069,11 +8071,11 @@ def test_an_ignored_results_path_passes_the_startup_gate(monkeypatch, tmp_path):
     repo = _live_repo(tmp_path)
     monkeypatch.chdir(repo)
 
-    assert runner._destination_is_ignored(Path("test-results-round2.json"))
-    assert runner._destination_is_ignored(
-        runner._observations_path("test-results-round2.json")
+    assert evidence.destination_is_ignored(Path("test-results-round2.json"))
+    assert evidence.destination_is_ignored(
+        evidence.observations_path("test-results-round2.json")
     )
-    assert not runner._destination_is_ignored(Path("evidence.json"))
+    assert not evidence.destination_is_ignored(Path("evidence.json"))
 
 
 @pytest.mark.parametrize("name", ["-evidence.json", "--no-index", "--"])
@@ -8087,14 +8089,14 @@ def test_unignored_option_shaped_results_refuse_before_credentials(
         "from_env_file",
         classmethod(lambda _cls: live_config.LiveTestConfig()),
     )
-    monkeypatch.setattr(runner, "_read_environment", lambda: None)
+    monkeypatch.setattr(evidence, "read_environment", lambda: None)
     monkeypatch.setattr(
         runner, "_bootstrap_config", lambda: pytest.fail("entered credential bootstrap")
     )
     assert runner._run_from_arguments([f"--results-file={name}"]) == 1
     assert "git does not ignore" in capsys.readouterr().out
     assert not (repo / name).exists()
-    assert not (repo / runner._observations_path(name)).exists()
+    assert not (repo / evidence.observations_path(name)).exists()
 
 
 @pytest.mark.parametrize("name", ["-evidence.json", "--no-index", "--"])
@@ -8103,11 +8105,11 @@ def test_explicitly_ignored_option_shaped_paths_are_evaluated_literally(
 ):
     repo = _live_repo(tmp_path)
     monkeypatch.chdir(repo)
-    observations = runner._observations_path(name)
+    observations = evidence.observations_path(name)
     ignore = repo / ".gitignore"
     ignore.write_text(ignore.read_text() + f"\n{name}\n{observations}\n")
-    assert runner._destination_is_ignored(Path(name))
-    assert runner._destination_is_ignored(observations)
+    assert evidence.destination_is_ignored(Path(name))
+    assert evidence.destination_is_ignored(observations)
 
 
 def test_record_honours_an_explicit_result():
@@ -8215,7 +8217,7 @@ async def test_partial_results_write_failure_does_not_mask_the_run_failure(
     def refuse(_path, _document):
         raise OSError("disk full")
 
-    monkeypatch.setattr(runner, "_write_results", refuse)
+    monkeypatch.setattr(evidence, "write_results", refuse)
 
     with pytest.raises(RuntimeError) as raised:
         await runner.main(
@@ -8244,12 +8246,12 @@ def test_detach_probe_selection_and_provenance():
     args = runner._parse_arguments(["--group", "lpar-power", "--detach-probe"])
     assert args.detach_probe and args.group == "lpar-power"
     assert (
-        runner._run_provenance(
+        evidence.run_provenance(
             [41], args.group, None, "(not set)", False, detach_probe=True
         )["detach_probe"]
         is True
     )
-    assert "detach_probe" not in runner._run_provenance(
+    assert "detach_probe" not in evidence.run_provenance(
         [41], args.group, None, "(not set)", False
     )
 
@@ -8408,11 +8410,11 @@ def test_executable_delegates_prebootstrap_refusals(
     monkeypatch.setattr(
         owner, "_bootstrap_config", lambda: pytest.fail("entered credential bootstrap")
     )
-    monkeypatch.setattr(owner, "_read_environment", lambda: None)
+    monkeypatch.setattr(evidence, "read_environment", lambda: None)
     monkeypatch.setattr(
         owner.LiveTestConfig, "from_env_file", lambda: owner.LiveTestConfig()
     )
-    monkeypatch.setattr(owner, "_destination_is_ignored", lambda _path: False)
+    monkeypatch.setattr(evidence, "destination_is_ignored", lambda _path: False)
     monkeypatch.setattr(sys, "argv", [str(_RUNNER_PATH), *arguments])
     with pytest.raises(SystemExit) as exit_info:
         runpy.run_path(str(_RUNNER_PATH), run_name="__main__")
@@ -8574,3 +8576,62 @@ async def test_job_get_consumers_grade_normalized_outcomes_strictly(
     await bare_cec._inspect_job(None, state, "job-uuid")
     row = next(row for row in state.results if row["tool"] == "hmc_get_job")
     assert (row["result"] == "passed") is (invalid is None)
+
+
+def test_validation_and_evidence_have_direct_owners():
+    from live_test import evidence, scenario_validation
+
+    assert evidence.write_results.__module__ == "live_test.evidence"
+    assert (
+        scenario_validation.validate_declared_outcomes.__module__
+        == "live_test.scenario_validation"
+    )
+    owners = {
+        scenario_validation: (
+            "validate_expected_dispatch",
+            "_declared_names",
+            "_result_names",
+            "_call_result_names",
+            "_validate_declared_function",
+            "validate_declared_outcomes",
+        ),
+        evidence: (
+            "write_results",
+            "read_environment",
+            "_git",
+            "repository_root",
+            "run_provenance",
+            "destination_is_ignored",
+            "observations_path",
+            "_tree_is_clean",
+            "emit_observations",
+            "load_known_gaps",
+        ),
+    }
+    for module, names in owners.items():
+        for name in names:
+            assert getattr(module, name).__module__ == module.__name__
+            obsolete = name if name.startswith("_") else "_" + name
+            assert not hasattr(runner, obsolete)
+    for name in ("ENVIRONMENT_KEYS", "RUN_HMC_RELEASE"):
+        assert hasattr(evidence, name)
+        assert not hasattr(runner, name)
+    source = ast.parse(Path(runner.__file__).read_text())
+    calls = [node for node in ast.walk(source) if isinstance(node, ast.Call)]
+    validation = [
+        node
+        for node in calls
+        if isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "scenario_validation"
+        and node.func.attr == "validate_declared_outcomes"
+    ]
+    assert len(validation) == 1
+    assert ast.dump(validation[0].args[0]) == ast.dump(
+        ast.Name(id="_SCENARIO_MODULES", ctx=ast.Load())
+    )
+    for module in (evidence, scenario_validation):
+        tree = ast.parse(Path(module.__file__).read_text())
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                assert node.module not in {"live_test.runner", "live_test_runner"}

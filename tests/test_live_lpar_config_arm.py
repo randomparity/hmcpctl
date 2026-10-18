@@ -20,6 +20,7 @@ _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
 from live_test import (  # noqa: E402
+    evidence,
     lpar_config,
     runner,
 )
@@ -743,7 +744,7 @@ async def test_actual_runner_preserves_exit_and_recovery_baseline(
 
     monkeypatch.setattr(runner, "served_client", served)
     monkeypatch.setattr(runner, "served_schemas", schemas)
-    monkeypatch.setattr(runner, "_repository_root", lambda: None)
+    monkeypatch.setattr(evidence, "repository_root", lambda: None)
     monkeypatch.chdir(tmp_path)
     config = live_config.LiveTestConfig(
         system_name=SYSTEM,

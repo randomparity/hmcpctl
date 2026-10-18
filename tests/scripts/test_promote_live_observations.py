@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
 import check_capability_inventory as inventory
 import promote_live_observations as promotion
-from live_test import runner
+from live_test import evidence, runner
 
 ROOT = Path(__file__).parents[2]
 
@@ -43,6 +43,8 @@ def candidate(tmp_path):
         "scripts/check_capability_inventory.py",
         "scripts/live_test_runner.py",
         "scripts/live_test/runner.py",
+        "scripts/live_test/evidence.py",
+        "scripts/live_test/scenario_validation.py",
         "scripts/live_test/observation.py",
     )
     for name in scripts:
@@ -752,13 +754,13 @@ def producer_candidate(candidate, request):
     results = []
     for arm, state in producer_states():
         path = root / f"test-results-{arm}.json"
-        run = runner._run_provenance(
+        run = evidence.run_provenance(
             runner.SUBTASK_GROUPS[arm], arm, root, "V1_0", False
         )
         write_json(path, {"run": run, "results": state.results})
-        assert runner._emit_observations(
+        assert evidence.emit_observations(
             state,
-            runner._observations_path(str(path)),
+            evidence.observations_path(str(path)),
             ("V10R3M1060", "POWER10"),
             "V1_0",
             root,
@@ -824,7 +826,7 @@ def test_reject_claimed_uncatalogued_operation(producer_candidate):
 @pytest.mark.parametrize("defect", ["unknown", "malformed", "stale", "mismatched"])
 def test_reject_invalid_incidental_observation(producer_candidate, defect, capsys):
     root, claims, results = producer_candidate
-    sidecar = runner._observations_path(str(results[0]))
+    sidecar = evidence.observations_path(str(results[0]))
     rows = json.loads(sidecar.read_text())
     row = next(row for row in rows if row["operation"] == "command.run")
     if defect == "unknown":
@@ -854,7 +856,7 @@ def test_reject_invalid_incidental_observation(producer_candidate, defect, capsy
 @pytest.mark.parametrize("producer_candidate", ["scenario"], indirect=True)
 def test_reject_st31_relabelled_as_st36_before_branch_creation(producer_candidate):
     root, claims, results = producer_candidate
-    sidecar = runner._observations_path(str(results[0]))
+    sidecar = evidence.observations_path(str(results[0]))
     rows = json.loads(sidecar.read_text())
     observation = next(
         row["observation"]
