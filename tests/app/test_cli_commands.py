@@ -1522,6 +1522,79 @@ def test_lpars_provision_passes_nondefault_request_to_operation(monkeypatch, fak
     assert request.power_on is False
 
 
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize(
+    ("outcome", "expected_exit"),
+    [("create_failed", 1), ("partial", 1), ("completed", 0), ("dry_run", 0)],
+)
+def test_lpars_provision_exit_matches_rendered_outcome(
+    monkeypatch, fake_hmc, as_json, outcome, expected_exit
+):
+    dry_run = outcome == "dry_run"
+    completed = outcome == "completed"
+    created = outcome in {"partial", "completed"}
+    statuses = {
+        "create_failed": ("error", "skipped"),
+        "partial": ("ok", "error"),
+        "completed": ("ok", "ok"),
+        "dry_run": ("dry_run", "dry_run"),
+    }[outcome]
+    steps = (WorkflowStep("create", statuses[0]), WorkflowStep("network", statuses[1]))
+    returned = ProvisionResult(
+        resource_created=created,
+        workflow_completed=completed,
+        lpar_uuid=LPAR_UUID if created else None,
+        dry_run=dry_run,
+        ownership_stamped=True if created else None,
+        steps=steps,
+        warnings=("inspect recorded steps",),
+    )
+    operation = AsyncMock(return_value=returned)
+    monkeypatch.setattr(cli_lpar_provision, "provision_lpar", operation)
+    arguments = [
+        "lpars",
+        "provision",
+        "--system",
+        SYSTEM_UUID,
+        "--name",
+        "newlpar",
+        "--vlan",
+        "200",
+        "--vios-uuid",
+        VIOS_UUID,
+        "--storage-name",
+        "rootdisk",
+        "--yes",
+    ]
+    if as_json:
+        arguments.append("--json")
+    if dry_run:
+        arguments.append("--dry-run")
+    result = RUNNER.invoke(cli.app, arguments)
+    assert result.exit_code == expected_exit, result.output
+    operation.assert_awaited_once()
+    assert result.stderr == ""
+    if as_json:
+        payload = json.loads(result.stdout)
+        assert payload["resource_created"] == created
+        assert payload["workflow_completed"] == completed
+        assert payload["dry_run"] == dry_run
+        assert payload["lpar_uuid"] == returned.lpar_uuid
+        assert [(step["step"], step["status"]) for step in payload["steps"]] == [
+            (step.step, step.status) for step in steps
+        ]
+        assert payload["warnings"] == ["inspect recorded steps"]
+    else:
+        assert "newlpar" in result.stdout
+        assert "inspect recorded steps" in result.stdout
+        assert all(
+            step.step in result.stdout and step.status in result.stdout
+            for step in steps
+        )
+        if created and not completed:
+            assert LPAR_UUID in result.stdout
+
+
 def test_lpars_provision_renders_change_location(monkeypatch, fake_hmc):
     """#1056: provision prints the same CurrentProfileSync line add-network does."""
     provision = AsyncMock(
