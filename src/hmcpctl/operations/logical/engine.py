@@ -77,17 +77,9 @@ class Classification:
 
 Body = Callable[["OperationContext"], Awaitable[BodyResult]]
 Classifier = Callable[["OperationContext", EffectRecord], Awaitable[Classification]]
-CLASSIFIERS: dict[str, Classifier] = {}
 _WORKERS: dict[str, threading.Thread] = {}
 _WORKERS_GUARD = threading.Lock()
 _ADMISSION = threading.Lock()
-
-
-def register_classifier(kind: str, classifier: Classifier) -> None:
-    """Register the live check for an ``intended`` or ``uncertain`` effect of *kind*."""
-    if kind in CLASSIFIERS:
-        raise ValueError(f"a classifier for effect kind {kind!r} is already registered")
-    CLASSIFIERS[kind] = classifier
 
 
 def canonical_request(request: OperationRequest) -> tuple[str, str]:
@@ -150,6 +142,7 @@ def submit(
     request: OperationRequest,
     body: Body,
     *,
+    classifiers: Mapping[str, Classifier] | None = None,
     continuation: str = "none",
     wait_seconds: int = 60,
 ) -> OperationRecord:
@@ -157,9 +150,12 @@ def submit(
 
     The caller has already authorized this call (ADR 0189). The call returns within
     *wait_seconds*; work continues in this process after it returns.
+    Supply the body's live checks again on each continuation. Their mapping is
+    copied before admission; omitted kinds retain unknown outcomes (ADR 0236).
     """
     _check_inputs(request, continuation, wait_seconds)
     request_json, digest = canonical_request(request)
+    execution_classifiers = dict(classifiers) if classifiers is not None else {}
     # Lock recovery, admission and worker start are one step, so no concurrent call in this
     # process can see a running record whose worker it has not counted and orphan it.
     with _ADMISSION:
@@ -177,7 +173,7 @@ def submit(
                     conn, row, request, digest, continuation
                 )
         if run:
-            _start_worker(operation_id, body, continuation)
+            _start_worker(operation_id, body, continuation, execution_classifiers)
     join(operation_id, wait_seconds)
     with store.session() as conn:
         return store.read_record(conn, operation_id)
@@ -280,10 +276,15 @@ def _admit_existing(
     return operation_id, True
 
 
-def _start_worker(operation_id: str, body: Body, continuation: str) -> None:
+def _start_worker(
+    operation_id: str,
+    body: Body,
+    continuation: str,
+    classifiers: Mapping[str, Classifier],
+) -> None:
     thread = threading.Thread(
         target=_work,
-        args=(operation_id, body, continuation),
+        args=(operation_id, body, continuation, classifiers),
         name=f"hmcpctl-operation-{operation_id[:8]}",
         daemon=True,
     )
@@ -322,9 +323,14 @@ def join(operation_id: str, timeout: float) -> None:
         joined = thread
 
 
-def _work(operation_id: str, body: Body, continuation: str) -> None:
+def _work(
+    operation_id: str,
+    body: Body,
+    continuation: str,
+    classifiers: Mapping[str, Classifier],
+) -> None:
     try:
-        asyncio.run(_run(operation_id, body, continuation))
+        asyncio.run(_run(operation_id, body, continuation, classifiers))
     except Exception:  # noqa: BLE001 - a worker must never die silently; logged below
         _LOG.exception(
             "logical operation %s could not record its end; it reads as running until "
@@ -372,8 +378,13 @@ def _result_json(result: BodyResult) -> str:
     return text
 
 
-async def _run(operation_id: str, body: Body, continuation: str) -> None:
-    ctx = OperationContext.load(operation_id, continuation)
+async def _run(
+    operation_id: str,
+    body: Body,
+    continuation: str,
+    classifiers: Mapping[str, Classifier],
+) -> None:
+    ctx = OperationContext.load(operation_id, continuation, classifiers)
     warnings = await ctx.reconcile()
     if warnings:
         _end(operation_id, "paused", "needs_attention", warnings)
@@ -420,7 +431,11 @@ class OperationContext:
     """What an operation body sees: its request, and the journal its writes go through."""
 
     def __init__(
-        self, row: sqlite3.Row, effects: dict[str, EffectRecord], continuation: str
+        self,
+        row: sqlite3.Row,
+        effects: dict[str, EffectRecord],
+        continuation: str,
+        classifiers: Mapping[str, Classifier],
     ) -> None:
         self.operation_id: str = row["operation_id"]
         self.agent_id: str = row["agent_id"]
@@ -434,12 +449,17 @@ class OperationContext:
             else (row["system_uuid"], row["partition_uuid"])
         )
         self._effects = effects
+        self._classifiers = classifiers
 
     @classmethod
-    def load(cls, operation_id: str, continuation: str) -> OperationContext:
+    def load(
+        cls, operation_id: str, continuation: str, classifiers: Mapping[str, Classifier]
+    ) -> OperationContext:
         with store.session() as conn:
             row = store.get_operation(conn, operation_id)
-            return cls(row, store.load_effects(conn, operation_id), continuation)
+            return cls(
+                row, store.load_effects(conn, operation_id), continuation, classifiers
+            )
 
     def has_uncertain(self) -> bool:
         return any(effect.status in _OPEN for effect in self._effects.values())
@@ -559,7 +579,7 @@ class OperationContext:
         return tuple(warnings)
 
     async def _classify(self, effect: EffectRecord) -> str | None:
-        classifier = CLASSIFIERS.get(effect.kind)
+        classifier = self._classifiers.get(effect.kind)
         if classifier is None:
             return (
                 f"effect {effect.key} ({effect.kind}) has no live check; inspect "

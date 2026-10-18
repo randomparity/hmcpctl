@@ -20,6 +20,7 @@ from ...operations.logical.models import OperationRecord
 from ...operations.logical.store import OperationRefused, connection_label
 from ...operations.lpar.power import (
     DELEGATED,
+    POWER_CLASSIFIERS,
     PowerAction,
     PowerMode,
     check_inputs,
@@ -178,6 +179,7 @@ def power_handler(
         return engine.submit(
             request,
             body,
+            classifiers=POWER_CLASSIFIERS,
             continuation=continuation,
             wait_seconds=wait_seconds,
         )

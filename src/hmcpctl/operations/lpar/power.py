@@ -345,7 +345,9 @@ async def _classify_power_off(
     )
 
 
-# lpar.restart registers none: a finished cycle and no cycle both read as running, so
+# lpar.restart has none: a finished cycle and no cycle both read as running, so
 # an open restart always pauses for attention (ADR 0199 Decision 4).
-engine.register_classifier(EFFECT_KINDS["start"], _classify_power_on)
-engine.register_classifier(EFFECT_KINDS["stop"], _classify_power_off)
+POWER_CLASSIFIERS: Mapping[str, engine.Classifier] = {
+    EFFECT_KINDS["start"]: _classify_power_on,
+    EFFECT_KINDS["stop"]: _classify_power_off,
+}

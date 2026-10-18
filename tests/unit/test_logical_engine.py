@@ -223,6 +223,7 @@ def _hold_first_end(monkeypatch):
 
 
 def test_finishing_worker_keeps_its_successor_registered(monkeypatch):
+    classifiers = {}
     ended, hold, held = _hold_first_end(monkeypatch)
     release, calls, joined_after_release = threading.Event(), [], []
 
@@ -233,9 +234,9 @@ def test_finishing_worker_keeps_its_successor_registered(monkeypatch):
         await asyncio.to_thread(release.wait, 10)
         return {"uuid": "u1"}
 
-    monkeypatch.setitem(engine.CLASSIFIERS, "test.k0", _classify("not_applied"))
+    classifiers["test.k0"] = _classify("not_applied")
     try:
-        first = _submit(body=_body(write), wait_seconds=0)
+        first = _submit(body=_body(write), wait_seconds=0, classifiers=classifiers)
         assert ended.wait(10)
         joiner = threading.Thread(
             target=lambda: (
@@ -244,12 +245,20 @@ def test_finishing_worker_keeps_its_successor_registered(monkeypatch):
             )
         )
         joiner.start()
-        resumed = _submit(body=_body(write), continuation="resume", wait_seconds=0)
+        resumed = _submit(
+            body=_body(write),
+            continuation="resume",
+            wait_seconds=0,
+            classifiers=classifiers,
+        )
         assert resumed.state == "running"
         hold.set()
         held[0].join(10)
         assert engine._has_worker(first.operation_id)
-        assert _submit(body=_body(write), wait_seconds=0).state == "running"
+        assert (
+            _submit(body=_body(write), wait_seconds=0, classifiers=classifiers).state
+            == "running"
+        )
     finally:
         hold.set()
         release.set()
@@ -304,17 +313,20 @@ def test_effect_with_unknown_outcome_needs_attention():
 
 
 def test_warning_text_is_bounded(monkeypatch):
-    record = _submit(body=_body(Writer(raises=RuntimeError("x" * 2000))))
+    classifiers = {}
+    record = _submit(
+        body=_body(Writer(raises=RuntimeError("x" * 2000))), classifiers=classifiers
+    )
     assert record.warnings[0] == ("RuntimeError: " + "x" * 2000)[:512]
-    monkeypatch.setitem(
-        engine.CLASSIFIERS, "test.k0", _classify("needs_attention", reason="y" * 2000)
+    classifiers["test.k0"] = _classify("needs_attention", reason="y" * 2000)
+    resumed = _submit(
+        body=_body(Writer()), continuation="resume", classifiers=classifiers
     )
-    resumed = _submit(body=_body(Writer()), continuation="resume")
     assert resumed.warnings[0] == ("effect step0: " + "y" * 2000)[:512]
-    monkeypatch.setitem(
-        engine.CLASSIFIERS, "test.k0", _classify("applied", raises=OSError("z" * 2000))
+    classifiers["test.k0"] = _classify("applied", raises=OSError("z" * 2000))
+    again = _submit(
+        body=_body(Writer()), continuation="resume", classifiers=classifiers
     )
-    again = _submit(body=_body(Writer()), continuation="resume")
     assert len(again.warnings[0]) == 512
     assert again.warnings[0].endswith("zz); retry resume")
 
@@ -361,6 +373,7 @@ def test_failed_end_write_is_recovered_in_the_same_process(monkeypatch):
 
 
 def test_intent_left_by_a_failed_settle_is_reconciled_on_resume(monkeypatch):
+    classifiers = {}
     real, failures = store.record_outcome, []
 
     def flaky(conn, operation_id, key, status, identity):
@@ -371,11 +384,11 @@ def test_intent_left_by_a_failed_settle_is_reconciled_on_resume(monkeypatch):
 
     monkeypatch.setattr(store, "record_outcome", flaky)
     writer = Writer(raises=RuntimeError("timeout"))
-    stuck = _submit(body=_body(writer))
+    stuck = _submit(body=_body(writer), classifiers=classifiers)
     assert (stuck.outcome, stuck.effects[0].status) == ("needs_attention", "intended")
-    monkeypatch.setitem(engine.CLASSIFIERS, "test.k0", _classify("not_applied"))
+    classifiers["test.k0"] = _classify("not_applied")
     writer.raises = None
-    record = _submit(body=_body(writer), continuation="resume")
+    record = _submit(body=_body(writer), continuation="resume", classifiers=classifiers)
     assert (record.state, record.outcome, writer.calls) == ("terminal", "completed", 2)
 
 
@@ -401,23 +414,23 @@ def test_operation_failed_is_terminal():
 
 
 def test_resume_applied_classifier_skips_the_write(monkeypatch):
+    classifiers = {}
     _crashed()
     store.acquire_execution_lock()
-    monkeypatch.setitem(
-        engine.CLASSIFIERS, "test.k0", _classify("applied", identity={"uuid": "live"})
-    )
+    classifiers["test.k0"] = _classify("applied", identity={"uuid": "live"})
     writer = Writer()
-    record = _submit(body=_body(writer), continuation="resume")
+    record = _submit(body=_body(writer), continuation="resume", classifiers=classifiers)
     assert writer.calls == 0
     assert (record.state, record.outcome) == ("terminal", "completed")
     assert record.result == {"identities": [{"uuid": "live"}]}
 
 
 def test_resume_not_applied_rewrites_once(monkeypatch):
+    classifiers = {}
     _crashed()
-    monkeypatch.setitem(engine.CLASSIFIERS, "test.k0", _classify("not_applied"))
+    classifiers["test.k0"] = _classify("not_applied")
     writer = Writer()
-    record = _submit(body=_body(writer), continuation="resume")
+    record = _submit(body=_body(writer), continuation="resume", classifiers=classifiers)
     assert writer.calls == 1
     assert record.outcome == "completed"
 
@@ -431,11 +444,12 @@ def test_resume_not_applied_rewrites_once(monkeypatch):
     ],
 )
 def test_resume_that_cannot_classify_pauses_without_writing(monkeypatch, classifier):
+    classifiers = {}
     _crashed()
     if classifier is not None:
-        monkeypatch.setitem(engine.CLASSIFIERS, "test.k0", classifier)
+        classifiers["test.k0"] = classifier
     writer = Writer()
-    record = _submit(body=_body(writer), continuation="resume")
+    record = _submit(body=_body(writer), continuation="resume", classifiers=classifiers)
     assert writer.calls == 0
     assert (record.state, record.outcome) == ("paused", "needs_attention")
     assert record.effects[0].status == "uncertain"
@@ -443,13 +457,12 @@ def test_resume_that_cannot_classify_pauses_without_writing(monkeypatch, classif
 
 
 def test_owner_change_is_reported_not_adopted(monkeypatch):
+    classifiers = {}
     _crashed()
-    monkeypatch.setitem(
-        engine.CLASSIFIERS,
-        "test.k0",
-        _classify("needs_attention", reason="owner changed"),
+    classifiers["test.k0"] = _classify("needs_attention", reason="owner changed")
+    record = _submit(
+        body=_body(Writer()), continuation="resume", classifiers=classifiers
     )
-    record = _submit(body=_body(Writer()), continuation="resume")
     assert "owner changed" in record.warnings[0]
     assert record.effects[0].identity is None
 
@@ -463,12 +476,13 @@ def test_crash_before_any_effect_replays_from_the_start():
 
 
 def test_applied_effect_is_not_rewritten_on_replay(monkeypatch):
+    classifiers = {}
     first, second = Writer(), Writer(raises=RuntimeError("timeout"))
     body = _body(first, second)
-    assert _submit(body=body).outcome == "needs_attention"
-    monkeypatch.setitem(engine.CLASSIFIERS, "test.k1", _classify("not_applied"))
+    assert _submit(body=body, classifiers=classifiers).outcome == "needs_attention"
+    classifiers["test.k1"] = _classify("not_applied")
     second.raises = None
-    record = _submit(body=body, continuation="resume")
+    record = _submit(body=body, continuation="resume", classifiers=classifiers)
     assert (first.calls, second.calls) == (1, 2)
     assert record.outcome == "completed"
 
@@ -604,13 +618,6 @@ def test_oversized_identity_is_uncertain():
     assert record.effects[0].status == "uncertain"
 
 
-def test_register_classifier_rejects_a_duplicate(monkeypatch):
-    monkeypatch.setattr(engine, "CLASSIFIERS", {})
-    engine.register_classifier("test.k", _classify("applied"))
-    with pytest.raises(ValueError, match="already registered"):
-        engine.register_classifier("test.k", _classify("applied"))
-
-
 def test_a_lock_held_elsewhere_refuses_submit(monkeypatch):
     def held(live_operation_ids=()):
         raise OperationRefused(
@@ -677,3 +684,60 @@ def test_recorded_arguments_refuses_a_malformed_request_id():
     assert _reason(engine.recorded_arguments, "agent-a", "bad id", "t") == (
         "invalid_request_id"
     )
+
+
+def test_classifier_maps_are_local_to_each_submission():
+    for request_id, status, expected_calls, expected_identity in (
+        ("r1", "applied", 0, {"uuid": "live"}),
+        ("r2", "not_applied", 1, {"uuid": "u1"}),
+    ):
+        request = _request(request_id)
+        first = _submit(request, _body(Writer(raises=RuntimeError("unknown outcome"))))
+        assert first.outcome == "needs_attention"
+        writer = Writer()
+        record = _submit(
+            request,
+            _body(writer),
+            continuation="resume",
+            classifiers={"test.k0": _classify(status, identity={"uuid": "live"})},
+        )
+        assert (record.state, record.outcome) == ("terminal", "completed")
+        assert writer.calls == expected_calls
+        assert record.effects[0].identity == expected_identity
+
+
+def test_submission_snapshots_classifiers_before_reconciliation():
+    _crashed(effects=("test.k0", "test.k1"))
+    entered, release = threading.Event(), threading.Event()
+
+    async def first_check(_ctx, _effect):
+        entered.set()
+        assert await asyncio.to_thread(release.wait, 10)
+        return Classification("applied", {"uuid": "first"})
+
+    classifiers = {
+        "test.k0": first_check,
+        "test.k1": _classify("applied", identity={"uuid": "second"}),
+    }
+    writers = (Writer(), Writer())
+    record = None
+    try:
+        record = _submit(
+            body=_body(*writers),
+            continuation="resume",
+            wait_seconds=0,
+            classifiers=classifiers,
+        )
+        assert entered.wait(10)
+        classifiers["test.k1"] = _classify("needs_attention", reason="replacement")
+    finally:
+        release.set()
+        if record is not None:
+            engine.join(record.operation_id, 10)
+    later = _submit(body=_body(*writers))
+    assert (later.state, later.outcome) == ("terminal", "completed")
+    assert [effect.identity for effect in later.effects] == [
+        {"uuid": "first"},
+        {"uuid": "second"},
+    ]
+    assert [writer.calls for writer in writers] == [0, 0]
