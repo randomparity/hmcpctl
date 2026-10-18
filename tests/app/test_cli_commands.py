@@ -51,6 +51,7 @@ from hmcpctl.cli_commands.virtualization import pcie as cli_pcie
 from hmcpctl.cli_commands.virtualization import vnic as cli_vnic
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
+from hmcpctl.operations import jobs as operations_jobs
 from hmcpctl.operations.inventory.composite import _lpar_summary
 from hmcpctl.operations.lpar import ownership as lpar_ownership
 from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
@@ -4981,6 +4982,46 @@ def test_jobs_wait(fake_hmc):
     assert result.exit_code == 0
     assert "COMPLETED_OK" in result.stdout
     assert fake_hmc.calls == [("get_job_entry", (JOB_UUID,), {"job_href": None})]
+
+
+def test_jobs_wait_respects_custom_deadline_interval_and_handle(fake_hmc, monkeypatch):
+    class Clock:
+        elapsed = 0.0
+
+        def time(self):
+            return self.elapsed
+
+    clock = Clock()
+    sleeps = []
+
+    async def advance(seconds):
+        sleeps.append(seconds)
+        clock.elapsed += seconds
+
+    monkeypatch.setattr(operations_jobs.asyncio, "get_running_loop", lambda: clock)
+    monkeypatch.setattr(operations_jobs.asyncio, "sleep", advance)
+    fake_hmc.job["Resource"]["Status"] = "RUNNING"
+    href = f"/jobs/{JOB_UUID}"
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "jobs",
+            "wait",
+            JOB_UUID,
+            "--timeout",
+            "7",
+            "--interval",
+            "3",
+            "--job-href",
+            href,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "RUNNING" in result.stdout
+    assert sleeps == [3, 3, 1]
+    assert clock.elapsed == 7
+    assert fake_hmc.calls == [("get_job_entry", (JOB_UUID,), {"job_href": href})] * 4
 
 
 def test_jobs_wait_not_found_exits_1_after_one_poll(fake_hmc):
