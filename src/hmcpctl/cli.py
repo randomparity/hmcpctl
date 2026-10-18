@@ -84,12 +84,6 @@ from .cli_commands.lpar import (
 from .cli_commands.lpar import (
     provision as lpar_provision,
 )
-from .cli_commands.output import (
-    console as console,  # noqa: PLC0414 - PEP 484 explicit re-export; see the module docstring
-)
-from .cli_commands.runtime import (
-    GlobalOpts as GlobalOpts,  # noqa: PLC0414 - PEP 484 explicit re-export; see the module docstring
-)
 from .cli_commands.storage import cluster
 from .cli_commands.storage import resources as storage
 from .cli_commands.systems import core as systems
