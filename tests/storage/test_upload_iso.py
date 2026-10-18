@@ -19,6 +19,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import parse_iso_url_allowlist
 from hmcpctl.errors import HMCError, HMCTransportError
 from hmcpctl.operations.storage.resources import (
+    DEFAULT_CHUNK_SIZE,
     UPLOAD_CHUNK_SIZE,
     VISIBILITY_POLLS,
     _aiter_file_chunks,
@@ -1218,6 +1219,74 @@ def _install_iso_transport(monkeypatch, handler):
         functools.partial(httpx.AsyncClient, transport=httpx.MockTransport(_record)),
     )
     return requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [404, 500, "connect", "read", "stream"])
+async def test_upload_iso_normalizes_download_http_errors(
+    monkeypatch, tmp_path, failure
+):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    url = f"{ISO_URL}?token=private-source-token"
+    detail = f"private response body from {url}"
+    cause = None
+    response = None
+    partial_files = []
+
+    class BrokenDownload(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b"x" * DEFAULT_CHUNK_SIZE
+            partial_files.extend(tmp_path.glob("hmc_upload_*.iso"))
+            assert partial_files[0].stat().st_size == DEFAULT_CHUNK_SIZE
+            raise cause
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = BrokenDownload()
+
+    def respond(request):
+        nonlocal cause, response
+        if isinstance(failure, int):
+            response = httpx.Response(failure, text=detail)
+            return response
+        error_type = {
+            "connect": httpx.ConnectTimeout,
+            "read": httpx.ReadTimeout,
+            "stream": httpx.ReadError,
+        }[failure]
+        cause = error_type(detail, request=request)
+        if failure == "stream":
+            return httpx.Response(200, stream=stream)
+        raise cause
+
+    hmc = _web_file_client()
+    requests = _install_iso_transport(monkeypatch, respond)
+    with pytest.raises(HMCError, match="ISO download") as caught:
+        await upload_iso(hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, url)
+
+    if isinstance(failure, int):
+        assert isinstance(caught.value.__cause__, httpx.HTTPStatusError)
+        assert caught.value.__cause__.response is response
+    else:
+        assert caught.value.__cause__ is cause
+    assert caught.value.status_code is None
+    message = str(caught.value)
+    assert len(message) < 200
+    for private in (url, ISO_HOST, "private-source-token", detail):
+        assert private not in message
+    assert [str(request.url) for request in requests] == [url]
+    hmc._web_file_create.assert_not_awaited()
+    hmc._web_file_upload.assert_not_awaited()
+    hmc._web_file_delete.assert_not_awaited()
+    if failure == "stream":
+        assert partial_files
+        assert stream.closed
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio

@@ -1097,7 +1097,8 @@ async def upload_iso(
     Raises:
         ResourceNotFoundError: If the VIOS or optional managed-system selector
             cannot be resolved.
-        HMCError: For malformed ISO URLs, HMC API errors during the web File
+        HMCError: For malformed ISO URLs, HTTP download failures (with the
+                  original exception chained), HMC API errors during the web File
                   requests, or a repository that does not list the media after
                   the upload.
         ValueError: If ``iso_source`` is not an http(s) URL, if its host is not
@@ -1145,6 +1146,8 @@ async def upload_iso(
         raise HMCError(
             "ISO download refused: the request URL could not be built."
         ) from exc
+    except httpx.HTTPError as exc:
+        raise HMCError("ISO download failed: HTTP request could not complete.") from exc
 
     try:
         uploaded_media_entry = await _upload_iso_via_web_file(
