@@ -1547,9 +1547,10 @@ class HMCClient(
         with 400 REST000E to ``Accept: */*`` (issue #1160, api-patterns P4).
 
         When *job_href* is provided (a SELF link from a job entry), its job path
-        is read instead; it must be a ``/rest/api/uom/jobs/{JobID}`` path, which
-        is what lets a handle that stored the entry UUID as *job_id* still read
-        its job. A read-side ``/rest/api/uom/jobs/{JobID}/{uuid}`` SELF
+        is read instead; either ``/rest/api/uom/jobs/{JobID}`` or
+        ``/rest/api/templates/jobs/{JobID}`` is accepted. The supplied SELF link
+        selects the namespace, letting a handle that stored the entry UUID as
+        *job_id* still read its job. A read-side ``/rest/api/uom/jobs/{JobID}/{uuid}`` SELF
         link is addressed by its JobID segment; the HMC refuses the link itself
         (HTTP 400 REST000B) and its trailing UUID changes on every read.
 
