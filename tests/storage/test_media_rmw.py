@@ -264,3 +264,36 @@ async def test_create_optical_media_builds_the_captured_container(mock_hmc):
     assert container is not None
     assert container.attrib == captured.attrib
     assert [tag for tag, _ in _shape(container)] == ["Metadata", "VirtualOpticalMedia"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("namespace", [UOM_NS, "", "urn:foreign"])
+@pytest.mark.parametrize("has_anchor", [True, False], ids=["first-anchor", "append"])
+async def test_create_optical_media_insertion_preserves_namespace_anchors(
+    mock_hmc, namespace, has_anchor
+):
+    anchor = f'<RepositoryName xmlns="{namespace}">first</RepositoryName>'
+    children = (
+        "<Metadata/>"
+        + (anchor + anchor if has_anchor else "")
+        + "<RepositorySize>7</RepositorySize>"
+    )
+    route = _routes(
+        mock_hmc,
+        f"<MediaRepositories><VirtualMediaRepository>{children}</VirtualMediaRepository></MediaRepositories>",
+    )
+
+    await _run("create_optical_media", ("new.iso", 3072))
+
+    posted = ET.fromstring(route.calls.last.request.content)
+    repository = posted.find(f".//{{{UOM_NS}}}VirtualMediaRepository")
+    assert repository is not None
+    expected = [f"{{{UOM_NS}}}Metadata"]
+    if has_anchor:
+        expected += [f"{{{UOM_NS}}}OpticalMedia"] + [
+            f"{{{namespace or UOM_NS}}}RepositoryName"
+        ] * 2
+    expected += [f"{{{UOM_NS}}}RepositorySize"]
+    if not has_anchor:
+        expected += [f"{{{UOM_NS}}}OpticalMedia"]
+    assert [child.tag for child in repository] == expected
