@@ -2,10 +2,12 @@
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from xml.etree.ElementTree import ParseError
 
+import httpx
 import pytest
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTransportError
 from hmcpctl.operations.templates import core as operations_templates
 from hmcpctl.operations.templates.core import (
     _new_lpar_from_snapshots,
@@ -153,12 +155,25 @@ async def test_waited_deploy_reports_stamp_failure(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed_snapshot", ["baseline", "post"])
+@pytest.mark.parametrize(
+    ("error_type", "cause_type", "status"),
+    [
+        (HMCTransportError, httpx.ReadTimeout, None),
+        (HMCTransportError, httpx.ConnectError, None),
+        (HMCError, ParseError, None),
+        (HMCError, None, 500),
+    ],
+)
 async def test_waited_deploy_keeps_success_when_snapshot_fails(
-    monkeypatch, caplog, failed_snapshot
+    monkeypatch, caplog, failed_snapshot, error_type, cause_type, status
 ):
     old = _lpar("old-uuid", "old")
     sensitive_body = "SENSITIVE-HMC-RESPONSE-BODY"
-    snapshot_error = HMCError("snapshot unavailable", 500, sensitive_body)
+    sensitive_message = "SENSITIVE-ERROR-MESSAGE"
+    sensitive_cause = "SENSITIVE-CAUSE-MESSAGE"
+    snapshot_error = error_type(sensitive_message, status, sensitive_body)
+    if cause_type is not None:
+        snapshot_error.__cause__ = cause_type(sensitive_cause)
     snapshots = (
         [snapshot_error] if failed_snapshot == "baseline" else [[old], snapshot_error]
     )
@@ -183,10 +198,35 @@ async def test_waited_deploy_keeps_success_when_snapshot_fails(
         poll_interval=1,
     )
 
-    assert result["job"] == COMPLETED_JOB
-    assert result["ownership_stamped"] is None
-    assert failed_snapshot in result["warnings"][0]
-    assert sensitive_body not in caplog.text
+    expected_warning = (
+        "ownership stamp not attempted: baseline LPAR snapshot is unavailable"
+        if failed_snapshot == "baseline"
+        else "ownership stamp not attempted: post-deployment LPAR snapshot is unavailable"
+    )
+    assert result == {
+        "job": COMPLETED_JOB,
+        "ownership_stamped": None,
+        "warnings": [expected_warning],
+    }
+    hmc.deploy_partition_template.assert_awaited_once_with("draft-uuid", SYSTEM_UUID)
+    assert hmc.list_logical_partitions.await_count == (
+        1 if failed_snapshot == "baseline" else 2
+    )
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert SYSTEM_UUID in record.getMessage()
+    assert (
+        "baseline" if failed_snapshot == "baseline" else "post-deployment"
+    ) in record.message
+    assert f"HTTP status {status}" in record.message
+    assert f"exception {error_type.__name__}" in record.message
+    assert f"cause {cause_type.__name__ if cause_type else None}" in record.message
+    assert record.exc_info is None
+    assert record.exc_text is None
+    assert record.stack_info is None
+    for sensitive in (sensitive_body, sensitive_message, sensitive_cause):
+        assert sensitive not in caplog.text
+        assert sensitive not in repr(record.__dict__)
     stamp.assert_not_awaited()
 
 
