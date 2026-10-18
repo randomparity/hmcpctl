@@ -72,7 +72,7 @@ async def get_lpar_memopt_score(
     """Return one LPAR's current memory-optimization score."""
     config = _config(hmc)
     system_name, lpar_name = await resolve_ssh_names(
-        config, system_name_or_uuid, lpar_name_or_uuid
+        hmc, system_name_or_uuid, lpar_name_or_uuid
     )
     return await _get_lpar_memopt_score(config, system_name, lpar_name)
 
@@ -85,7 +85,7 @@ async def list_lpar_memopt_scores(
     """Return current memory-optimization scores for selected system LPARs."""
     config = _config(hmc)
     system_name, lpar_name = await resolve_ssh_names(
-        config, system_name_or_uuid, lpar_name_or_uuid
+        hmc, system_name_or_uuid, lpar_name_or_uuid
     )
     return await _list_lpar_memopt_scores(config, system_name, lpar_name)
 
@@ -95,7 +95,7 @@ async def get_system_memopt_score(
 ) -> dict[str, object]:
     """Return a managed system's current memory-optimization score."""
     config = _config(hmc)
-    system_name, _ = await resolve_ssh_names(config, system_name_or_uuid, None)
+    system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
     return await _get_system_memopt_score(config, system_name)
 
 
@@ -108,7 +108,7 @@ async def plan_lpar_memopt_scores(
     """Return predicted LPAR scores for a read-only affinity scenario."""
     config = _config(hmc)
     validate_memopt_scenario(prioritized, excluded)
-    system_name, _ = await resolve_ssh_names(config, system_name_or_uuid, None)
+    system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
     return await _plan_lpar_memopt_scores(config, system_name, prioritized, excluded)
 
 
@@ -121,7 +121,7 @@ async def plan_system_memopt_score(
     """Return a predicted system score for a read-only affinity scenario."""
     config = _config(hmc)
     validate_memopt_scenario(prioritized, excluded)
-    system_name, _ = await resolve_ssh_names(config, system_name_or_uuid, None)
+    system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
     return await _plan_system_memopt_score(config, system_name, prioritized, excluded)
 
 
@@ -134,7 +134,7 @@ async def _resource_group_memopt_scores(
 ) -> ResourceGroupAffinityResult:
     config = _config(hmc)
     selected = selector or MemoptResourceGroupSelector(all=True)
-    system_name, _ = await resolve_ssh_names(config, system_name_or_uuid, None)
+    system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
     resolved = system_name
     query = await query_resource_group_memopt_scores(
         config, resolved, selected, calculated=calculated
@@ -181,7 +181,7 @@ async def get_minimum_affinity_policy(
     """Return an LPAR's minimum-affinity policy when supported."""
     config = _config(hmc)
     system_name, lpar_name = await resolve_ssh_names(
-        config, system_name_or_uuid, lpar_name_or_uuid
+        hmc, system_name_or_uuid, lpar_name_or_uuid
     )
     resolved_system = system_name
     resolved_lpar = lpar_name

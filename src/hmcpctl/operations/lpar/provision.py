@@ -588,7 +588,7 @@ async def _preflight_provision_request(
 
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     if request.minimum_affinity_policy is not None:
-        system_name, _ = await resolve_ssh_names(hmc.config, system_name_or_uuid, None)
+        system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
         await require_minimum_affinity_policy_capability(hmc.config, system_name)
     await _check_name_unique(hmc, system_uuid, request.name)
     await check_vlan_exists(hmc, system_uuid, request.adapters.port_vlan_id)

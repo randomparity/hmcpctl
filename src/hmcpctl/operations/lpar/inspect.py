@@ -166,9 +166,7 @@ async def _refcodes(
         return Refcodes(SectionSource("denied", REFCODES_TOOL, _detail(denial)), [])
 
     async def read() -> list[dict[str, Any]]:
-        system_name, lpar_name = await resolve_ssh_names(
-            hmc.config, system, name or lpar
-        )
+        system_name, lpar_name = await resolve_ssh_names(hmc, system, name or lpar)
         return await list_lpar_refcodes(
             hmc.config, system_name, lpar_name, MAX_REFCODES
         )

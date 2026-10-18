@@ -298,7 +298,7 @@ async def prevalidate_lpar_pcie_assignments(
     """Validate the complete collection without reserving or mutating resources."""
     requested_capacity, vios_identities = _analyze_assignment_requests(assignments)
     if assignments.dedicated or requested_capacity:
-        system_name, _ = await resolve_ssh_names(hmc.config, system_name_or_uuid, None)
+        system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
     if assignments.dedicated:
         await require_dedicated_pcie_environment(hmc.config, system_name)
     if requested_capacity:

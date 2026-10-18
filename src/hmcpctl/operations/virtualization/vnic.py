@@ -135,7 +135,7 @@ async def list_fc_ports(
     """List Fibre Channel ports, optionally scoped to one LPAR."""
     config = hmc.config
     system_name, lpar_name = await resolve_ssh_names(
-        config, system_name_or_uuid, lpar_name_or_uuid
+        hmc, system_name_or_uuid, lpar_name_or_uuid
     )
     return await _list_fc_ports(config, system_name, lpar_name)
 
@@ -148,7 +148,7 @@ async def list_sea_adapters(
     """List shared Ethernet adapters, optionally scoped to one LPAR."""
     config = hmc.config
     system_name, lpar_name = await resolve_ssh_names(
-        config, system_name_or_uuid, lpar_name_or_uuid
+        hmc, system_name_or_uuid, lpar_name_or_uuid
     )
     return await _list_sea_adapters(config, system_name, lpar_name)
 
@@ -159,7 +159,7 @@ async def list_vnics(
     """List vNICs on an LPAR."""
     config = hmc.config
     system_name, lpar_name = await resolve_ssh_names(
-        config, system_name_or_uuid, lpar_name_or_uuid
+        hmc, system_name_or_uuid, lpar_name_or_uuid
     )
     return await _list_vnics(config, system_name, lpar_name)
 
