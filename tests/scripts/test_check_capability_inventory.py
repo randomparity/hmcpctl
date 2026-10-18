@@ -2141,12 +2141,20 @@ def test_claimed_gate_usage(extra, capsys):
     )
 
 
-def test_registered_operation_requires_maturity_record():
+def test_registered_operation_requires_maturity_record(registered_inventory, tmp_path):
+    report = _maturity_report(tmp_path, registered_inventory, [])
+
+    assert "maturity operation system.list: missing maturity record" in report.errors
+
+
+def test_maturity_record_validation_accepts_sparse_catalog():
     errors: list[str] = []
 
-    inventory._validate_maturity([], {"tools.search"}, errors)
+    inventory._validate_maturity(
+        [_operation("system.list")], {"system.list", "system.get"}, errors
+    )
 
-    assert errors == ["maturity operation tools.search: missing maturity record"]
+    assert errors == []
 
 
 def test_registered_operation_requires_automated_test_links(

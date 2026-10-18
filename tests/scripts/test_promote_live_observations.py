@@ -339,6 +339,18 @@ def test_select_claimed_route_and_latest_unclaimed():
         )
 
 
+def test_merge_omits_unclaimed_uncatalogued_observation(capsys):
+    catalog = {"operations": []}
+    observation = {"id": "anonymous-run", "observed_at": "2026-10-13T00:00:00Z"}
+
+    promotion._merge(catalog, {"command.run": [("dedicated", observation)]}, [], [])
+
+    assert catalog == {"operations": []}
+    assert capsys.readouterr().err == (
+        "promotion: omitted unclaimed observation for uncatalogued operation command.run\n"
+    )
+
+
 def test_merge_confirmed_gap_preserves_reviewed_implementation():
     scope = {"variant": "feature", "parameters": []}
     catalog = {
@@ -749,6 +761,16 @@ def producer_candidate(candidate, request):
                 }
             )
         write_json(claims, document)
+        if request.param is True:
+            catalog_path = root / "docs/capabilities/maturity.json"
+            catalog = json.loads(catalog_path.read_text())
+            catalog["operations"] = [
+                row
+                for row in catalog["operations"]
+                if row["operation"] != "command.run"
+            ]
+            write_json(catalog_path, catalog)
+            git(root, "add", str(catalog_path))
     git(root, "add", str(claims))
     git(root, "commit", "-qm", "Select anonymous fixture arm claims")
     results = []
@@ -775,9 +797,6 @@ def test_promote_actual_dedicated_and_bare_producer_outputs(producer_candidate, 
     root, claims, results = producer_candidate
     original = git(root, "rev-parse", "HEAD")
     catalog_path = root / "docs/capabilities/maturity.json"
-    assert "command.run" not in {
-        row["operation"] for row in json.loads(catalog_path.read_text())["operations"]
-    }
     promoted = promotion.promote(
         root,
         claims,
@@ -802,10 +821,8 @@ def test_promote_actual_dedicated_and_bare_producer_outputs(producer_candidate, 
     )
     assert record["evidence"][-1]["scenario"] == "st35-bare-cec"
 
-    assert "command.run" not in {row["operation"] for row in catalog["operations"]}
-    assert capsys.readouterr().err == (
-        "promotion: omitted unclaimed observation for uncatalogued operation command.run\n"
-    )
+    assert "command.run" in {row["operation"] for row in catalog["operations"]}
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize("producer_candidate", [True], indirect=True)

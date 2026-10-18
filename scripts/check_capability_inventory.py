@@ -782,8 +782,6 @@ def _validate_maturity(
             continue
         for observation in evidence:
             _validate_observation(observation, str(operation), evidence_ids, errors)
-    for operation in sorted(set(operation_ids) - seen):
-        errors.append(f"maturity operation {operation}: missing maturity record")
 
 
 @dataclass(frozen=True)
@@ -1547,6 +1545,13 @@ def validate_inventory(
         if isinstance(operation := record.get("operation"), str)
     }
     _validate_maturity(maturity_records, operation_ids, errors)
+    maturity_ids = {
+        operation
+        for record in maturity_records
+        if isinstance(operation := record.get("operation"), str)
+    }
+    for operation in sorted(operation_ids - maturity_ids):
+        errors.append(f"maturity operation {operation}: missing maturity record")
     errors.extend(_release_claim_errors(root, operation_ids))
     return Report(
         tuple(errors),
