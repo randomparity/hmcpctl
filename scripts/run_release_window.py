@@ -282,8 +282,11 @@ class Execution:
         code = 125
         truncated = False
         orphaned = False
+        orchestration_error = None
+        operation = "open phase log"
         try:
             with path.open("xb") as log:
+                operation = "spawn child"
                 process = subprocess.Popen(
                     [sys.executable, *map(str, arguments)],
                     cwd=self.root,
@@ -292,6 +295,7 @@ class Execution:
                     start_new_session=True,
                 )
                 self.safe = False
+                operation = "set up child output selector"
                 with selectors.DefaultSelector() as selector:
                     assert process.stdout is not None
                     selector.register(process.stdout, selectors.EVENT_READ)
@@ -318,19 +322,26 @@ class Execution:
                                 self.stop(process, signal.SIGKILL)
                                 orphaned = True
                                 break
+                        operation = "wait for child output"
                         for key, _ in selector.select(0.1):
+                            operation = "read child output"
                             chunk = os.read(key.fd, 65536)
                             if not chunk:
                                 selector.unregister(key.fileobj)
                                 continue
                             room = MAX_LOG - written
+                            operation = "write phase log"
                             log.write(chunk[:room])
                             written += min(room, len(chunk))
                             truncated |= len(chunk) > room
+                    operation = "close child output selector"
+                operation = "wait for child"
                 code = process.wait(timeout=GRACE)
                 self.safe = True
-        except (OSError, subprocess.TimeoutExpired):
+                operation = "close phase log"
+        except (OSError, subprocess.TimeoutExpired) as exc:
             code = 125
+            orchestration_error = f"{operation}: {type(exc).__name__}: {exc}"[:1024]
         finally:
             if process is not None:
                 if not self.safe:
@@ -355,6 +366,7 @@ class Execution:
                     "passed": passed,
                     "output_truncated": truncated,
                     "orphaned_output": orphaned,
+                    "orchestration_error": orchestration_error,
                 }
             )
         return passed
@@ -373,7 +385,9 @@ def capture(execution, index, system, when, ids=()):
     for vios in ids:
         argv.extend(["--vios-id", str(vios)])
     if not execution.run(f"baseline-{index}-{when}", argv):
-        raise WindowError("baseline capture failed; inspect private phase output")
+        raise WindowError(
+            "baseline capture failed; inspect the private phase record and output"
+        )
     return path
 
 

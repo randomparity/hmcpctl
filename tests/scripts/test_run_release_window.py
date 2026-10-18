@@ -736,3 +736,92 @@ def test_window_collects_bare_cec_cli_coverage_after_recovery(tmp_path, monkeypa
         "system.get": "gap: CLI not verified in this window",
     }
     assert phases.index("bare-cec-recovery") < phases.index("promotion")
+
+
+@pytest.mark.parametrize(
+    "boundary", ["open", "spawn", "read", "write", "wait", "close"]
+)
+def test_orchestration_failure_retains_bounded_private_context(
+    tmp_path, monkeypatch, capsys, boundary
+):
+    import run_release_window as command
+
+    actual_open = Path.open
+    actual_spawn = command.subprocess.Popen
+    actual_read = command.os.read
+    process = None
+    detail = "private failure " + "x" * 2000
+
+    def refuse(*_args, **_kwargs):
+        raise OSError(detail)
+
+    def open_log(path, *args, **kwargs):
+        if path != tmp_path / "fault.log":
+            return actual_open(path, *args, **kwargs)
+        if boundary == "open":
+            return refuse()
+        log = actual_open(path, *args, **kwargs)
+        if boundary == "write":
+            monkeypatch.setattr(log, "write", refuse)
+        elif boundary == "close":
+            actual_close = log.close
+
+            def close():
+                actual_close()
+                refuse()
+
+            monkeypatch.setattr(log, "close", close)
+        return log
+
+    def spawn(*args, **kwargs):
+        nonlocal process
+        if boundary == "spawn":
+            return refuse()
+        process = actual_spawn(*args, **kwargs)
+        if boundary == "wait":
+            actual_wait = process.wait
+            attempts = []
+
+            def wait(*args, **kwargs):
+                if not attempts:
+                    attempts.append(1)
+                    raise command.subprocess.TimeoutExpired("private child", 0)
+                return actual_wait(*args, **kwargs)
+
+            monkeypatch.setattr(process, "wait", wait)
+        return process
+
+    def read(fd, size):
+        if boundary == "read" and process is not None and fd == process.stdout.fileno():
+            return refuse()
+        return actual_read(fd, size)
+
+    monkeypatch.setattr(Path, "open", open_log)
+    monkeypatch.setattr(command.subprocess, "Popen", spawn)
+    monkeypatch.setattr(command.os, "read", read)
+    execution = command.Execution(tmp_path, tmp_path)
+    assert not execution.run("fault", ["-c", 'print("child output")'])
+    phase = execution.phases[-1]
+    operation = {
+        "open": "open phase log",
+        "spawn": "spawn child",
+        "read": "read child output",
+        "write": "write phase log",
+        "wait": "wait for child",
+        "close": "close phase log",
+    }[boundary]
+    exception = "TimeoutExpired" if boundary == "wait" else "OSError"
+    assert phase["orchestration_error"].startswith(f"{operation}: {exception}:")
+    assert len(phase["orchestration_error"]) <= 1024
+    assert phase["exit_code"] == 125
+    assert phase["passed"] is False
+    assert execution.safe
+    if process is not None:
+        assert process.poll() is not None
+        assert process.stdout.closed
+    elif boundary == "spawn":
+        assert (tmp_path / "fault.log").read_bytes() == b""
+    else:
+        assert not (tmp_path / "fault.log").exists()
+    captured = capsys.readouterr()
+    assert "private failure" not in captured.out + captured.err
