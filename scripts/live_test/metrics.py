@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client
 
-from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, JobOutcome, job_outcome
+from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, JobOutcome
 
 from .observation import Assertion, ExpectedOutcome
 
@@ -64,7 +64,7 @@ _JOB_SCENARIO = "st12-job-inspection"
 def _as_outcome(data: Any) -> JobOutcome | None:
     """Normalize a job tool's result, whatever shape FastMCP served it in.
 
-    ``hmc_wait_for_job`` is annotated ``-> JobOutcome``, so FastMCP serves an
+    Both job tools are annotated ``-> JobOutcome``, so FastMCP serves an
     unwrapped output schema and ``result.data`` arrives as a generated pydantic
     model rather than a mapping. Reading it by field name covers both shapes;
     an ``isinstance(data, dict)`` test would silently reject every real run.
@@ -113,7 +113,7 @@ async def inspect_metrics_jobs(client: Client, state: RunState) -> None:
             operation="job.get",
             scenario=_JOB_SCENARIO,
             assertions=_job_assertions(
-                job_outcome(job_uuid, data if isinstance(data, dict) else None),
+                _as_outcome(data),
                 job_uuid,
             ),
             cleanup="not-required",

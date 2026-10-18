@@ -646,19 +646,7 @@ def test_wait_for_job_has_one_stable_output_schema():
             "null",
         }
 
-    assert by_name["hmc_get_job"].output_schema == {
-        "properties": {
-            "result": {
-                "anyOf": [
-                    {"additionalProperties": True, "type": "object"},
-                    {"type": "null"},
-                ]
-            }
-        },
-        "required": ["result"],
-        "type": "object",
-        "x-fastmcp-wrap-result": True,
-    }
+    assert by_name["hmc_get_job"].output_schema == schema
 
 
 def test_lpm_recovery_tools_have_standard_wait_contract():

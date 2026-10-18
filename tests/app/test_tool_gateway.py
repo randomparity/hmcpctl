@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
+from unittest.mock import AsyncMock, call
 
 import pytest
 from fastmcp import Client, FastMCP
@@ -392,3 +393,45 @@ def test_workflow_step_job_survives_actual_mcp_schema_and_serialization(
     assert job_schema["default"] is None
     assert {"type": "null"} in job_schema["anyOf"]
     assert "job_id" in job_schema["anyOf"][0]["required"]
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_get_job_wire_preserves_corrected_handle_and_raw_entry(monkeypatch, missing):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.server_tools import jobs
+
+    stale = "/rest/api/uom/jobs/stale-job"
+    raw = {
+        "Resource": {"JobID": "job-1", "Status": "RUNNING"},
+        "link": stale,
+    }
+    hmc = AsyncMock()
+    hmc.get_job_entry.side_effect = [
+        HMCError("missing", status_code=404),
+        None if missing else raw,
+    ]
+
+    def with_client(operation, **kwargs):
+        return asyncio.run(operation(hmc))
+
+    monkeypatch.setattr(jobs, "with_client", with_client)
+    app = _app("hmc_get_job")
+    schema = _listed(app)["hmc_get_job"].output_schema
+    assert set(schema["required"]) == {
+        "job_id",
+        "status",
+        "timed_out",
+        "error",
+        "job",
+        "found",
+        "job_href",
+    }
+    data = _call(app, "hmc_get_job", {"job_id": "job-1", "job_href": stale})
+    assert data["job_id"] == "job-1"
+    assert data["found"] is (not missing)
+    assert data["job_href"] is None
+    assert data["job"] == (None if missing else raw)
+    assert hmc.get_job_entry.call_args_list == [
+        call("job-1", job_href=stale),
+        call("job-1", job_href=None),
+    ]

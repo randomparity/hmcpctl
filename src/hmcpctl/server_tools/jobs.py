@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from .._app import with_client
 from ..jobs import JobOutcome
 from ..operations import jobs as operations_jobs
@@ -28,16 +26,15 @@ def hmc_get_job(
     job_id: str,
     job_href: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any] | None:
-    """Get one HMC job by JobID, optionally using its submission SELF link.
+) -> JobOutcome:
+    """Inspect one HMC job and return its normalized outcome and original entry.
 
-    Returns null when the HMC produced no entry for this identifier — reaped,
-    deleted, or never present. Any other HMC failure still raises. Null is one
-    poll's answer, never a confirmed disappearance: this tool does not re-read to
-    confirm, so a momentary 404 reads as null too. Null for *every* identifier is
-    a deployment whose jobs path is absent, and null for one job polled with a
-    ``job_href`` can be a link that stopped resolving while the job runs. Re-read
-    by ``job_id`` alone before acting on a null (ADR 0093).
+    Returns the normalized JobOutcome with the original HMC entry in ``job``.
+    Read ``found`` first: a missing entry returns ``found`` false and ``job`` null,
+    with null status and ``timed_out`` true; that timeout carries no information.
+    Every non-missing HMC failure still raises. Absence on this single read is
+    unconfirmed, and does not prove whether the work happened. Re-read by
+    ``job_id`` alone before acting on absence (ADR 0093, refined by ADR 0239).
 
     An empty identifier, a bare dot, or one carrying a path, query, fragment,
     percent, or interior whitespace character is rejected outright rather than
@@ -45,12 +42,16 @@ def hmc_get_job(
     even when ``job_href`` is supplied.
 
     A ``job_href`` that stops resolving is re-read against the global jobs path
-    before the job is called gone, so the ``link`` in the returned mapping can be
-    the one that failed, and nothing in the result says which happened. A supplied
-    link also decides **which job is read** — its path is fetched directly and
-    checked only for addressing a job resource — so a mispaired handle returns the
-    *other* job. Compare the returned entry's JobID against the identifier
-    you passed.
+    before the job is called gone. Persist the returned ``job_href``: a stale
+    link is retired, even if the original entry in ``job`` still advertises it.
+    A null handle on a found job means to drop the stored link. An echoed link
+    is validated only by its requested path; its host, query and fragment remain
+    unattested.
+
+    A supplied link decides **which job is read**, so a mispaired handle returns
+    the other job. Compare the response-derived ``job_id`` with the requested
+    identifier; never overwrite a stored identifier on a mismatch. An earlier
+    release's entry UUID can differ legitimately from the response JobID.
 
     Persist the JobID and the stable ``/rest/api/uom/jobs/{JobID}`` ``job_href`` that
     submitting tools return. The Atom entry UUID is not a usable ``job_id`` on V10R3:
@@ -65,8 +66,7 @@ def hmc_get_job(
     """
 
     async def operation(hmc):
-        outcome = await operations_jobs.get_job(hmc, job_id, job_href=job_href)
-        return outcome.job
+        return await operations_jobs.get_job(hmc, job_id, job_href=job_href)
 
     return with_client(operation, profile=profile)
 

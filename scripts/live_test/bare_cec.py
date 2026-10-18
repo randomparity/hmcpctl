@@ -516,9 +516,7 @@ async def _inspect_job(client: Client, state: RunState, job_id: str) -> None:
         operation="job.get",
         scenario=_SCENARIO,
         assertions=_job_assertions(
-            job_outcome(
-                job_id, data if st == "PASS" and isinstance(data, dict) else None
-            ),
+            _as_outcome(data) if st == "PASS" else None,
             job_id,
         ),
         cleanup="not-required",

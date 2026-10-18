@@ -7088,7 +7088,18 @@ async def test_final_restore_replays_baseline_and_audits(monkeypatch):
 @pytest.mark.parametrize(
     ("tool", "response"),
     [
-        ("hmc_get_job", {"UUID": "job-uuid", "Status": "FAILED_BEFORE_COMPLETION"}),
+        (
+            "hmc_get_job",
+            {
+                "job_id": "job-uuid",
+                "status": "FAILED_BEFORE_COMPLETION",
+                "timed_out": False,
+                "error": "failed",
+                "job": {"UUID": "job-uuid"},
+                "found": True,
+                "job_href": None,
+            },
+        ),
         (
             "hmc_wait_for_job",
             {
@@ -8492,3 +8503,74 @@ def test_live_grading_contract(caller, cleanup, holds):
     )
     assert metadata["result"] == row["result"] == ("passed" if passed else "failed")
     datetime.strptime(metadata["observed_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("served_model", [False, True])
+@pytest.mark.parametrize("invalid", [None, "missing", "identity", "status", "raw"])
+async def test_job_get_consumers_grade_normalized_outcomes_strictly(
+    monkeypatch, served_model, invalid
+):
+    from live_test import bare_cec
+
+    application = FastMCP("job-inspection-probe")
+
+    @application.tool
+    async def probe() -> JobOutcome:
+        return JobOutcome(
+            "job-uuid", "COMPLETED_OK", False, None, {"UUID": "job-uuid"}, True, None
+        )
+
+    async with Client(application) as client:
+        result = await client.call_tool("probe", {})
+    data = result.data if served_model else result.structured_content
+    if invalid:
+        values = {
+            name: getattr(result.data, name)
+            for name in (
+                "job_id",
+                "status",
+                "timed_out",
+                "error",
+                "job",
+                "found",
+                "job_href",
+            )
+        }
+        if invalid == "missing":
+            values["found"] = False
+        elif invalid == "identity":
+            values["job_id"] = "other-job"
+        elif invalid == "status":
+            values["status"] = "RUNNING"
+        else:
+            values = {"UUID": "job-uuid", "Status": "COMPLETED_OK"}
+        if served_model:
+            data = result.data
+            if invalid == "raw":
+                from types import SimpleNamespace
+
+                data = SimpleNamespace(**values)
+            else:
+                for name, value in values.items():
+                    setattr(data, name, value)
+        else:
+            data = values
+
+    async def scripted_call(_state, _client, _tool, **_kwargs):
+        return "PASS", data
+
+    async def no_cli(*_args):
+        pass
+
+    monkeypatch.setattr(runner.RunState, "call", scripted_call)
+    monkeypatch.setattr(bare_cec.cli, "observe_job", no_cli)
+    state = runner.RunState()
+    state.artifacts.job_uuid_sample = "job-uuid"
+    await metrics.inspect_metrics_jobs(None, state)
+    row = next(row for row in state.results if row["tool"] == "hmc_get_job")
+    assert (row["result"] == "passed") is (invalid is None)
+    state = runner.RunState()
+    await bare_cec._inspect_job(None, state, "job-uuid")
+    row = next(row for row in state.results if row["tool"] == "hmc_get_job")
+    assert (row["result"] == "passed") is (invalid is None)

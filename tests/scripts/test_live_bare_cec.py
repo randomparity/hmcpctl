@@ -232,8 +232,8 @@ class World:
     def _hmc_get_lpar_state(self, _kwargs: dict[str, Any]) -> str:
         return self.lpar_state
 
-    def _hmc_get_job(self, _kwargs: dict[str, Any]) -> dict[str, Any]:
-        return _job()
+    def _hmc_get_job(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return self._hmc_wait_for_job(kwargs)
 
     def _hmc_wait_for_job(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return {
