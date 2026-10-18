@@ -855,6 +855,7 @@ async def _power_off(
             "error",
             f"PowerOff for LPAR {inventory.lpar_name!r} timed out before reaching "
             "a successful terminal status.",
+            outcome,
         )
     if outcome.status not in SUCCESSFUL_JOB_STATUSES:
         detail = outcome.error or "no error detail returned"
@@ -863,6 +864,7 @@ async def _power_off(
             "error",
             f"PowerOff for LPAR {inventory.lpar_name!r} did not complete successfully "
             f"(status {outcome.status!r}: {detail}).",
+            outcome,
         )
     return WorkflowStep(
         "power_off",
@@ -872,6 +874,7 @@ async def _power_off(
             "job_id": outcome.job_id,
             "status": outcome.status,
         },
+        outcome,
     )
 
 

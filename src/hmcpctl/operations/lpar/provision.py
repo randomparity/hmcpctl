@@ -18,7 +18,7 @@ from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_loc
 from ...documents.lpar import LparResources, PartitionType, validate_partition_type
 from ...documents.storage import StorageKind, validate_virtual_disk
 from ...errors import HMCError
-from ...jobs import JobOutcome, job_outcome
+from ...jobs import JobOutcome, job_identifier, job_outcome
 from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
 from ...ssh.affinity import (
     MinimumAffinityPolicy,
@@ -477,11 +477,13 @@ async def _run_power_leg(
             message = result.error or (
                 "PowerOn did not reach a successful terminal status before timeout"
             )
-            steps.append(WorkflowStep("power_on", "error", message))
+            steps.append(WorkflowStep("power_on", "error", message, result))
             return False
-        steps.append(WorkflowStep("power_on", "ok", asdict(result)))
+        steps.append(WorkflowStep("power_on", "ok", asdict(result), result))
     else:
-        steps.append(WorkflowStep("power_on", "ok", result))
+        identifier = job_identifier(result) if result else None
+        job = job_outcome(identifier, result) if identifier else None
+        steps.append(WorkflowStep("power_on", "ok", result, job))
     return True
 
 

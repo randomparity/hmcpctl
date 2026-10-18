@@ -19,7 +19,7 @@ from conftest import assert_only_these_client_methods_used
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
-from hmcpctl.jobs import power_off_lpar_job
+from hmcpctl.jobs import job_outcome, power_off_lpar_job
 from hmcpctl.operations.lpar.assignments import WorkflowStep
 from hmcpctl.operations.lpar.decommission import (
     DecommissionAdapterRecord,
@@ -58,7 +58,21 @@ def test_decommission_blast_radius_schema_is_named_and_complete() -> None:
 
 def _workflow_steps(*entries: dict[str, Any]) -> tuple[WorkflowStep, ...]:
     return tuple(
-        WorkflowStep(entry["step"], entry["status"], entry.get("result"))
+        WorkflowStep(
+            entry["step"],
+            entry["status"],
+            entry.get("result"),
+            job_outcome(
+                "job-uuid",
+                {
+                    "UUID": "job-uuid",
+                    "Resource": {"JobID": "job-uuid", "Status": "COMPLETED_OK"},
+                },
+            )
+            if entry["step"] == "power_off"
+            and entry.get("result", {}).get("already_off") is False
+            else None,
+        )
         for entry in entries
     )
 
@@ -1054,6 +1068,7 @@ async def test_decommission_reports_power_off_failure_and_skips_later_steps(
     assert result.workflow_completed is False
     assert result.steps[0].status == "error"
     assert fragment in result.steps[0].result
+    assert result.steps[0].job == job_outcome("job-uuid", job)
     assert result.steps[1:] == _workflow_steps(
         {"step": "detach_storage_mappings", "status": "skipped"},
         {"step": "detach_adapters", "status": "skipped"},

@@ -611,6 +611,10 @@ def test_provision_lpar_full_workflow(monkeypatch, mock_hmc):
     assert steps["network"].status == "ok"
     assert steps["storage"].status == "ok"
     assert steps["power_on"].status == "ok"
+    assert steps["power_on"].job is not None
+    assert steps["power_on"].job.job == steps["power_on"].result
+    assert steps["network"].job is None
+    assert steps["storage"].job is None
     assert "vscsi" not in steps
     assert not vscsi_route.called
     assert isinstance(result.warnings, tuple)
@@ -1315,3 +1319,89 @@ def test_provision_tool_refuses_a_dedicated_slot_before_logon(monkeypatch, mock_
     with pytest.raises(ValueError, match="partition_profile_uuid"):
         hmc_provision_lpar(**_provision_args(assignments=_DEDICATED))
     assert not mock_hmc.calls
+
+
+@pytest.mark.parametrize("assessment", [False, True])
+@pytest.mark.parametrize("status", ["RUNNING", "COMPLETED_OK", "COMPLETED_WITH_ERROR"])
+@pytest.mark.parametrize("handle", ["JobID", "UUID", "link"])
+@pytest.mark.asyncio
+async def test_power_leg_carries_job_without_changing_raw_projection(
+    assessment, status, handle
+):
+    from dataclasses import asdict
+
+    from hmcpctl.jobs import job_outcome
+    from hmcpctl.operations.lpar.provision import _run_power_leg
+
+    raw = {"Resource": {"Status": status}}
+    if handle == "JobID":
+        raw["Resource"]["JobID"] = "job-1"
+    else:
+        raw[handle] = "job-1" if handle == "UUID" else "/rest/api/uom/jobs/job-1"
+    outcome = job_outcome("PowerOn", raw)
+    steps = []
+    with patch(
+        "hmcpctl.operations.lpar.provision.submit_power_on_lpar",
+        new=AsyncMock(return_value=LparPowerResult(LPAR_UUID, raw)),
+    ) as submit:
+        completed = await _run_power_leg(
+            steps,
+            ANY,
+            SYSTEM_UUID,
+            LPAR_UUID,
+            _affinity_request() if assessment else None,
+        )
+    step = steps[0]
+    assert step.job == outcome
+    assert step.job.job is raw
+    assert step.job.job_id == "job-1"
+    failed = assessment and (outcome.timed_out or outcome.error is not None)
+    assert completed is not failed
+    assert step.status == ("error" if failed else "ok")
+    assert step.result == (
+        (
+            outcome.error
+            or "PowerOn did not reach a successful terminal status before timeout"
+        )
+        if failed
+        else asdict(outcome)
+        if assessment
+        else raw
+    )
+    submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_power_leg_retains_normalized_identity():
+    from hmcpctl.operations.lpar.provision import _run_power_leg
+
+    outcome = _successful_power_outcome()
+    steps = []
+    with patch(
+        "hmcpctl.operations.lpar.provision._power_on",
+        new=AsyncMock(return_value=outcome),
+    ):
+        assert await _run_power_leg(
+            steps, ANY, SYSTEM_UUID, LPAR_UUID, _affinity_request()
+        )
+    assert steps[0].job is outcome
+    assert (
+        WorkflowStep(
+            "storage", "ok", {"UUID": "volume-1", "Resource": {"Status": "RUNNING"}}
+        ).job
+        is None
+    )
+
+
+@pytest.mark.parametrize("raw", [None, {}, {"Resource": {}}])
+@pytest.mark.asyncio
+async def test_empty_power_submission_has_no_fabricated_job(raw):
+    from hmcpctl.operations.lpar.provision import _run_power_leg
+
+    steps = []
+    with patch(
+        "hmcpctl.operations.lpar.provision.submit_power_on_lpar",
+        new=AsyncMock(return_value=LparPowerResult(LPAR_UUID, raw)),
+    ):
+        assert await _run_power_leg(steps, ANY, SYSTEM_UUID, LPAR_UUID, None)
+    assert steps == [WorkflowStep("power_on", "ok", raw)]

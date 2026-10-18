@@ -15,7 +15,6 @@ from typer._click.globals import get_current_context
 from hmcpctl.client.core import HMCClient
 
 from ...documents.storage import StorageKind, validate_virtual_disk
-from ...jobs import job_outcome
 from ...operations.lpar.profile_sync import ChangeLocation
 from ...operations.lpar.provision import (
     AttachDiskResult,
@@ -435,11 +434,8 @@ def storage_attach_disk(
         "warnings": result.warnings,
     }
     for step_summary, step in zip(summary["steps"], result.steps, strict=True):
-        resource = (
-            step.result.get("Resource") if isinstance(step.result, dict) else None
-        )
-        if isinstance(resource, dict) and resource.get("JobID"):
-            job = job_outcome(step.step, step.result)
+        job = step.job
+        if job is not None:
             step_summary.update(
                 job_id=job.job_id, job_status=job.status, error=job.error
             )

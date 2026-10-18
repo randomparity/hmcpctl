@@ -405,9 +405,15 @@ def test_actual_redirected_json_round_trips_target(tmp_path, width):
 def test_attach_pending_job_evidence_is_retained_without_claiming_completion(
     monkeypatch,
 ):
+    from hmcpctl.jobs import job_outcome
+
     job = {"Resource": {"JobID": "job-test", "Status": "RUNNING"}}
     data = AttachDiskResult(
-        False, "lp-test", False, (WorkflowStep("storage", "ok", job),), ()
+        False,
+        "lp-test",
+        False,
+        (WorkflowStep("storage", "ok", job, job_outcome("job-test", job)),),
+        (),
     )
     command, args, _, _ = CASES[3]
     result, _ = _invoke(monkeypatch, command, args, data)
@@ -456,3 +462,21 @@ def test_storage_resource_uuid_does_not_imply_a_job(monkeypatch):
     assert decoded["outcome"] == "request_succeeded"
     assert "job_id" not in decoded
     assert "job_href" not in decoded
+
+
+def test_attach_summary_uses_typed_job_independent_of_raw_result(monkeypatch):
+    from hmcpctl.jobs import job_outcome
+
+    job = job_outcome(
+        "job-test", {"Resource": {"JobID": "job-test", "Status": "RUNNING"}}
+    )
+    data = AttachDiskResult(
+        True, "lp-test", False, (WorkflowStep("storage", "ok", RAW, job),), (), LOCATION
+    )
+    command, args, _, _ = CASES[3]
+    result, _ = _invoke(monkeypatch, command, args, data)
+    assert result.exit_code == 0, result.output
+    assert "job-test" in result.stdout
+    assert "RUNNING" in result.stdout
+    detailed, _ = _invoke(monkeypatch, command, args, data, ("--json",))
+    assert json.loads(detailed.stdout) == json.loads(json.dumps(asdict(data)))

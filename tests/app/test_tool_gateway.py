@@ -327,3 +327,68 @@ def test_listing_marks_primary_tools_without_changing_the_listing():
         _STATUS: "primary",
         "hmc_list_lpars": "secondary",
     }
+
+
+@pytest.mark.parametrize("has_job", [False, True])
+def test_workflow_step_job_survives_actual_mcp_schema_and_serialization(
+    monkeypatch, has_job
+):
+    from hmcpctl.jobs import job_outcome
+    from hmcpctl.operations.lpar.provision import AttachDiskResult
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+    from hmcpctl.server_tools.storage import resources
+
+    name = "hmc_attach_disk_to_lpar"
+    job = (
+        job_outcome("job-1", {"Resource": {"JobID": "job-1", "Status": "RUNNING"}})
+        if has_job
+        else None
+    )
+    result = AttachDiskResult(
+        True,
+        "lp-test",
+        False,
+        (WorkflowStep("storage", "ok", {"UUID": "volume-1"}, job),),
+        (),
+    )
+    monkeypatch.setattr(resources, "with_client", lambda op, **kwargs: result)
+    app = _app(name)
+    response = _call(
+        app,
+        name,
+        {
+            "lpar_name_or_uuid": "lp-test",
+            "vios_uuid": "vios-test",
+            "vg_uuid": "vg-test",
+            "disk_name": "disk-test",
+            "capacity_mib": 1,
+        },
+    )
+    assert response["steps"][0]["result"] == {"UUID": "volume-1"}
+    assert response["steps"][0]["job"] == (
+        {
+            "job_id": "job-1",
+            "status": "RUNNING",
+            "timed_out": True,
+            "error": None,
+            "job": {"Resource": {"JobID": "job-1", "Status": "RUNNING"}},
+            "found": True,
+            "job_href": None,
+        }
+        if has_job
+        else None
+    )
+
+    async def schema():
+        async with Client(app) as client:
+            return next(
+                tool.output_schema
+                for tool in await client.list_tools()
+                if tool.name == name
+            )
+
+    output_schema = asyncio.run(schema())
+    job_schema = output_schema["properties"]["steps"]["items"]["properties"]["job"]
+    assert job_schema["default"] is None
+    assert {"type": "null"} in job_schema["anyOf"]
+    assert "job_id" in job_schema["anyOf"][0]["required"]

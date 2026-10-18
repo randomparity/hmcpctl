@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from ...jobs import JobOutcome
+
 
 @dataclass(frozen=True)
 class WorkflowStep:
@@ -13,3 +15,4 @@ class WorkflowStep:
     step: str
     status: Literal["ok", "error", "skipped", "dry_run"]
     result: Any = None
+    job: JobOutcome | None = None
