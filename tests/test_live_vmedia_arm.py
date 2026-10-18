@@ -431,6 +431,66 @@ async def test_st16_creates_only_when_no_group_holds_a_repository(arm):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("restore_fails", [False, True])
+async def test_st17_owned_repository_roundtrip_and_failed_restoration(
+    arm, monkeypatch, restore_fails
+):
+    state, hmc = arm
+    hmc.repository_vg = None
+    hmc.media.clear()
+    hmc.mappings = {DISK_MAPPING}
+    await _run(state, 16)
+    assert state.artifacts.vmedia_repo_created
+    before = hmc.snapshot()
+    hmc.calls.clear()
+    original = hmc.call
+
+    async def call(_state, client, tool, **kwargs):
+        if (
+            restore_fails
+            and tool == "hmc_create_media_repository"
+            and kwargs["size_mib"] == state.config.vmedia_repository_size_mib
+        ):
+            hmc.calls.append((tool, kwargs))
+            return "FAIL", _failure("repository restoration refused")
+        return await original(client, tool, **kwargs)
+
+    monkeypatch.setattr(runner.RunState, "call", call)
+    await _run(state, 17)
+    assert [tool for tool, _ in hmc.calls] == [
+        "hmc_delete_media_repository",
+        "hmc_create_media_repository",
+        "hmc_get_media_repository",
+        "hmc_list_optical_media",
+        "hmc_delete_media_repository",
+        "hmc_get_media_repository",
+        "hmc_create_media_repository",
+    ]
+    assert all(
+        kwargs["vios_name_or_uuid"] == VIOS and kwargs["vg_uuid"] == hmc.configured_vg
+        for _, kwargs in hmc.calls
+    )
+    assert [
+        kwargs["size_mib"]
+        for tool, kwargs in hmc.calls
+        if tool == "hmc_create_media_repository"
+    ] == [
+        state.config.vmedia_short_repository_size_mib,
+        state.config.vmedia_repository_size_mib,
+    ]
+    if restore_fails:
+        assert hmc.repository_vg is None
+        assert not state.artifacts.vmedia_repo_created
+        assert state.artifacts.vmedia_vg_uuid is None
+        assert state.results[-1]["status"] == "FAIL"
+    else:
+        assert hmc.snapshot() == before
+        assert state.artifacts.vmedia_repo_created
+        assert state.artifacts.vmedia_vg_uuid == hmc.configured_vg
+        assert state.results[-1]["status"] == "PASS"
+
+
+@pytest.mark.asyncio
 async def test_st16_records_a_failed_repository_read_as_failed_not_skipped(arm):
     state, hmc = arm
     hmc.repository_read_fails = True
