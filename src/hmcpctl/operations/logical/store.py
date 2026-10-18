@@ -305,8 +305,12 @@ def write_transaction(conn: sqlite3.Connection) -> Generator[sqlite3.Connection]
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
-    except BaseException:
-        conn.execute("ROLLBACK")
+    except BaseException as exc:
+        try:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+        except BaseException as cleanup_error:  # noqa: BLE001 - preserve the original failure, including cancellation
+            exc.add_note(f"transaction rollback failed: {type(cleanup_error).__name__}")
         raise
     conn.execute("COMMIT")
 

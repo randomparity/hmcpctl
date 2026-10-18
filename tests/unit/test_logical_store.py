@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import fcntl
 import json
 import os
+import sqlite3
+from contextlib import closing
 from typing import get_args
 
 import pytest
@@ -679,3 +682,52 @@ def test_event_truncation_sentinel_is_not_decoded():
     assert record.events_truncated is True
     assert len(record.events) == store.STATUS_EVENTS
     assert all(event.kind == "phase" for event in record.events)
+
+
+def test_write_transaction_preserves_sqlite_trigger_failure():
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.executescript(
+            "CREATE TABLE example (value INTEGER);"
+            "CREATE TRIGGER abort_insert BEFORE INSERT ON example "
+            "BEGIN SELECT RAISE(ROLLBACK, 'original write failure'); END;"
+        )
+        with (
+            pytest.raises(sqlite3.IntegrityError, match="original write failure"),
+            store.write_transaction(conn),
+        ):
+            conn.execute("INSERT INTO example VALUES (1)")
+        assert not conn.in_transaction
+        assert conn.execute("SELECT * FROM example").fetchall() == []
+
+
+@pytest.mark.parametrize(
+    "primary", [ValueError("write failed"), asyncio.CancelledError()]
+)
+def test_write_transaction_preserves_primary_when_rollback_fails(primary):
+    class RollbackFailure(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "ROLLBACK":
+                raise sqlite3.OperationalError("controlled rollback failure")
+            return super().execute(sql, parameters)
+
+    with closing(sqlite3.connect(":memory:", factory=RollbackFailure)) as conn:
+        with pytest.raises(type(primary)) as caught, store.write_transaction(conn):
+            raise primary
+        assert caught.value is primary
+        assert any("OperationalError" in note for note in primary.__notes__)
+        assert all(
+            "controlled rollback failure" not in note for note in primary.__notes__
+        )
+        conn.rollback()
+
+
+def test_write_transaction_rolls_back_body_failure():
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.execute("CREATE TABLE example (value INTEGER)")
+        primary = ValueError("write failed")
+        with pytest.raises(ValueError) as caught, store.write_transaction(conn):
+            conn.execute("INSERT INTO example VALUES (1)")
+            raise primary
+        assert caught.value is primary
+        assert not conn.in_transaction
+        assert conn.execute("SELECT * FROM example").fetchall() == []
