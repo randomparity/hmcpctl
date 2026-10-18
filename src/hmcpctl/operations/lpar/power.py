@@ -91,10 +91,10 @@ def _match(entries: list[dict[str, Any]], selector: str) -> list[dict[str, Any]]
     ]
 
 
-async def _resolve(
+async def _resolve_and_authorize_power_target(
     hmc: HMCClient, system: str, lpar: str
 ) -> tuple[str, str, dict[str, Any]]:
-    """Return the system UUID, the partition UUID and its listing entry."""
+    """Resolve the target, enforce configured ownership authorization, and return its entry."""
     try:
         # Lower-cased: the guard key must not depend on the caller's spelling (ADR 0094).
         system_uuid = (await resolve_system_uuid(hmc, system)).lower()
@@ -281,7 +281,11 @@ def power_body(
                 result = _result(action, mode, system_uuid, lpar_uuid, None)
             else:
                 ctx.phase("validating")
-                system_uuid, lpar_uuid, entry = await _resolve(hmc, system, lpar)
+                (
+                    system_uuid,
+                    lpar_uuid,
+                    entry,
+                ) = await _resolve_and_authorize_power_target(hmc, system, lpar)
                 ctx.guard(system_uuid, lpar_uuid)
                 state = _norm((entry.get("Resource") or {}).get("PartitionState"))
                 result = _result(action, mode, system_uuid, lpar_uuid, state)
