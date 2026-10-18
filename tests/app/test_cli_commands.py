@@ -143,7 +143,8 @@ RUNNER = CliRunner()
         cli_storage_resources.storage_map,
         cli_vios_core.vios_power_on,
         cli_vios_core.vios_power_off,
-        cli_lpar_lifecycle._power_lpar,
+        cli_lpar_lifecycle.lpars_power_on,
+        cli_lpar_lifecycle.lpars_power_off,
         cli_lpar_lifecycle.lpars_delete,
     ),
 )

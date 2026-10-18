@@ -72,7 +72,6 @@ from ...xmlutil import escape_xml
 
 _logger = logging.getLogger(__name__)
 
-_LPAR_POWER_OPERATIONS = frozenset({"PowerOn", "PowerOff"})
 # The HMC accepts PowerOn only from ``not activated`` (otherwise the REST job fails
 # with HSCL3681, and ``chsysstate -o on`` with HSCL05EA). In these
 # states the partition is already activated, so the request is already satisfied;
@@ -359,11 +358,10 @@ async def power_on_lpar(
             raise ValueError("affinity assessment LPAR identity must match target")
         validate_affinity_request(affinity_assessment)
 
-    result = await power_lpar(
+    result = await submit_power_on_lpar(
         hmc,
         lpar_name_or_uuid,
         system_name_or_uuid=system_name_or_uuid,
-        power_on=True,
         force=force,
         wait=wait,
         timeout_seconds=timeout_seconds,
@@ -759,74 +757,19 @@ def _unapplied_activation_clause(
     return f" The requested {named} {verb} not applied; power the partition off first."
 
 
-async def power_lpar(
+async def _resolve_power_target(
     hmc: HMCClient,
     lpar_name_or_uuid: str,
-    *,
-    system_name_or_uuid: str | None = None,
-    power_on: bool,
-    immediate: bool = False,
-    force: bool = False,
-    wait: bool = False,
-    timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
-    poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
-    ownership_override: bool = False,
-    boot_mode: BootMode = "norm",
-    partition_profile_uuid: str | None = None,
-    operation_type: PowerOnOperationType | None = None,
-    keylock: PowerOnKeylock | None = None,
-    restart: bool = False,
-    operation: PowerOffOperation = "shutdown",
-    allow_dump_restart: bool = False,
-) -> LparPowerResult:
-    """Apply shared LPAR power policy, submit the job, and optionally wait.
+    system_name_or_uuid: str | None,
+    ownership_override: bool,
+) -> str:
+    """Resolve a power target with the opt-in ADR 0092 ownership guard.
 
-    ``boot_mode``, ``partition_profile_uuid``, ``operation_type`` and ``keylock``
-    are activation parameters and apply to PowerOn only; the PowerOff arm builds a
-    different document and ignores them. ``partition_profile_uuid`` is the UUID
-    of a partition profile, not the connection profile the tool and CLI call
-    ``profile``. Their defaults emit the document this call has always emitted.
-
-    ``restart``, ``operation`` and ``allow_dump_restart`` mirror them on the other
-    arm: they apply to PowerOff only, and the PowerOn arm ignores them. ``operation`` is the
-    job's closed vocabulary — ``shutdown``, ``osshutdown`` (needs an active RMC
-    connection to the partition's operating system), and ``dumprestart``, which
-    crashes the partition and takes a platform dump and is refused unless
-    ``allow_dump_restart`` is set (ADR 0164). Their defaults likewise emit the
-    document this call has always emitted.
-
-    ADR 0011 ownership is advisory here by default. Powering a partition another
-    agent owns is only rejected when the operator sets
-    ``authorize_power_operations`` (``HMC_AUTHORIZE_POWER_OPERATIONS``), the
-    opt-in ADR 0092 §4 records; with the setting off this call reads no
-    ownership token and opens no SSH connection, so a caller that cares should
-    read the description itself — ``list_lpar_ownership`` reports it for a whole
-    managed system in one REST call.
-
-    With the setting on the resolve chain is ADR 0094's
-    :func:`resolve_and_authorize_lpar_mutation`, shared with the DLPAR operations —
-    the same shape, because these are the operations whose managed-system
-    selector is optional (ADR 0063). It derives the owning system when the
-    caller omits the selector, and confirms the partition lives on the system
-    the caller named when they supply one, so the token read is never taken
-    from a system the partition does not belong to.
-
-    ``ownership_override=True`` bypasses the rejection for this one call and
-    records an audited override. It skips the SSH ownership read and the fleet
-    walk, not the partition-name read that names the audit record. When the
-    ownership read fails or times out, the call fails with
-    :class:`HMCCLIError` and submits no job.
+    With the guard off, resolution reads no ownership token and opens no SSH
+    connection. With it on, an omitted system is derived and a supplied system
+    is checked for containment. An override skips the SSH read and fleet walk,
+    but still reads the partition name for the audited override.
     """
-    validate_wait_timing(wait, timeout_seconds, poll_interval)
-    if power_on:
-        # Ahead of every side effect: the ownership leg below can write an
-        # audited override, and the already-running branch never reaches a builder.
-        validate_power_on_activation(boot_mode, operation_type, keylock)
-    else:
-        # Same reason on this arm: the ownership leg runs before the builder does.
-        validate_power_off_operation(
-            operation, allow_dump_restart, immediate=immediate, restart=restart
-        )
     if hmc.config.authorize_power_operations:
         lpar_uuid = await resolve_and_authorize_lpar_mutation(
             hmc,
@@ -838,7 +781,37 @@ async def power_lpar(
         lpar_uuid = await resolve_lpar_uuid(
             hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         )
-    if power_on and not force:
+    return lpar_uuid
+
+
+async def submit_power_on_lpar(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    *,
+    system_name_or_uuid: str | None = None,
+    force: bool = False,
+    wait: bool = False,
+    timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
+    poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
+    ownership_override: bool = False,
+    boot_mode: BootMode = "norm",
+    partition_profile_uuid: str | None = None,
+    operation_type: PowerOnOperationType | None = None,
+    keylock: PowerOnKeylock | None = None,
+) -> LparPowerResult:
+    """Submit activation and optionally wait, retaining the raw job result.
+
+    Activation options are validated before ownership reads or audited overrides.
+    An active partition returns an already_running result unless force is set.
+    A partition profile must belong to the target; its adapter warnings accompany
+    the job. Use power_on_lpar for activation readback and affinity assessment.
+    """
+    validate_wait_timing(wait, timeout_seconds, poll_interval)
+    validate_power_on_activation(boot_mode, operation_type, keylock)
+    lpar_uuid = await _resolve_power_target(
+        hmc, lpar_name_or_uuid, system_name_or_uuid, ownership_override
+    )
+    if not force:
         state = await hmc.get_quick_property(
             "LogicalPartition", lpar_uuid, "PartitionState"
         )
@@ -868,41 +841,66 @@ async def power_lpar(
                 status_code=409,
             )
     warnings: tuple[str, ...] = ()
-    if power_on and partition_profile_uuid:
+    if partition_profile_uuid:
         profile = await _require_contained_partition_profile(
             hmc, lpar_uuid, partition_profile_uuid
         )
         partition_profile_uuid = str(profile["UUID"])
         warnings = await profile_adapter_warnings(hmc, lpar_uuid, profile)
-    # Named for the ``/do/{operation}`` path segment ADR 0158 governs, and kept
-    # distinct from the PowerOff job parameter that now owns the name ``operation``.
-    path_operation = "PowerOn" if power_on else "PowerOff"
-    if path_operation not in _LPAR_POWER_OPERATIONS:
-        allowed = ", ".join(sorted(_LPAR_POWER_OPERATIONS))
-        raise ValueError(f"LPAR power job operation must be one of: {allowed}")
-    if power_on:
-        job = await hmc.submit_job(
-            f"/rest/api/uom/LogicalPartition/{lpar_uuid}/do/{path_operation}",
-            power_on_lpar_job(
-                profile_uuid=partition_profile_uuid,
-                bootmode=boot_mode,
-                operation_type=operation_type,
-                keylock=keylock,
-            ),
-        )
-    else:
-        job = await submit_power_off(
-            hmc,
-            lpar_uuid,
-            operation=operation,
-            immediate=immediate,
-            restart=restart,
-            allow_dump_restart=allow_dump_restart,
-        )
+    job = await hmc.submit_job(
+        f"/rest/api/uom/LogicalPartition/{lpar_uuid}/do/PowerOn",
+        power_on_lpar_job(
+            profile_uuid=partition_profile_uuid,
+            bootmode=boot_mode,
+            operation_type=operation_type,
+            keylock=keylock,
+        ),
+    )
     selected_job = await wait_for_submitted_job(
         hmc, job, wait, timeout_seconds, poll_interval
     )
     return LparPowerResult(lpar_uuid, selected_job, warnings)
+
+
+async def power_off_lpar(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    *,
+    system_name_or_uuid: str | None = None,
+    immediate: bool = False,
+    wait: bool = False,
+    timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
+    poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
+    ownership_override: bool = False,
+    restart: bool = False,
+    operation: PowerOffOperation = "shutdown",
+    allow_dump_restart: bool = False,
+) -> LparPowerResult:
+    """Shut down an LPAR, optionally restarting it or requesting a platform dump.
+
+    Ownership is advisory unless authorize_power_operations is enabled. An
+    ownership override bypasses rejection for this call and records an audit.
+    Validation precedes ownership reads, audited overrides and job submission.
+    """
+    validate_wait_timing(wait, timeout_seconds, poll_interval)
+    validate_power_off_operation(
+        operation, allow_dump_restart, immediate=immediate, restart=restart
+    )
+    lpar_uuid = await _resolve_power_target(
+        hmc, lpar_name_or_uuid, system_name_or_uuid, ownership_override
+    )
+    job = await submit_power_off(
+        hmc,
+        lpar_uuid,
+        operation=operation,
+        immediate=immediate,
+        restart=restart,
+        allow_dump_restart=allow_dump_restart,
+    )
+    selected_job = await wait_for_submitted_job(
+        hmc, job, wait, timeout_seconds, poll_interval
+    )
+    return LparPowerResult(lpar_uuid, selected_job)
 
 
 async def submit_power_off(

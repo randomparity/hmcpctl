@@ -12,7 +12,12 @@ from ...jobs import (
     PowerOnOperationType,
     validate_wait_timing,
 )
-from ...operations.lpar.core import delete_lpar, power_lpar
+from ...operations.lpar.core import (
+    LparPowerResult,
+    delete_lpar,
+    power_off_lpar,
+    submit_power_on_lpar,
+)
 from ..output import console, err_console, print_json, terminal_field
 from ..runtime import with_client
 
@@ -66,21 +71,25 @@ def lpars_power_on(
     ),
 ) -> None:
     """Power on an LPAR (submits a PowerOn job)."""
-    _power_lpar(
-        name_or_uuid,
-        on=True,
-        force=force,
-        yes=yes,
-        wait=wait,
-        timeout=timeout,
-        interval=interval,
-        system=system,
-        ownership_override=ownership_override,
-        boot_mode=boot_mode,
-        partition_profile=partition_profile,
-        operation_type=operation_type,
-        keylock=keylock,
+    validate_wait_timing(wait, timeout, interval)
+    _confirm_power(name_or_uuid, "PowerOn", yes)
+    result = with_client(
+        lambda hmc: submit_power_on_lpar(
+            hmc,
+            name_or_uuid,
+            system_name_or_uuid=system,
+            force=force,
+            wait=wait,
+            timeout_seconds=timeout,
+            poll_interval=interval,
+            ownership_override=ownership_override,
+            boot_mode=boot_mode,
+            partition_profile_uuid=partition_profile,
+            operation_type=operation_type,
+            keylock=keylock,
+        )
     )
+    _render_power(result)
 
 
 def lpars_power_off(
@@ -124,81 +133,40 @@ def lpars_power_off(
     ),
 ) -> None:
     """Power off an LPAR (submits a PowerOff job)."""
-    _power_lpar(
-        name_or_uuid,
-        on=False,
-        immediate=immediate,
-        yes=yes,
-        wait=wait,
-        timeout=timeout,
-        interval=interval,
-        system=system,
-        ownership_override=ownership_override,
-        restart=restart,
-        operation=operation,
-        allow_dump_restart=allow_dump_restart,
-    )
-
-
-def _power_lpar(
-    name_or_uuid: str,
-    on: bool,
-    immediate: bool = False,
-    force: bool = False,
-    yes: bool = False,
-    wait: bool = False,
-    timeout: int = 300,
-    interval: int = 5,
-    system: str | None = None,
-    ownership_override: bool = False,
-    boot_mode: BootMode = "norm",
-    partition_profile: str | None = None,
-    operation_type: PowerOnOperationType | None = None,
-    keylock: PowerOnKeylock | None = None,
-    restart: bool = False,
-    operation: PowerOffOperation = "shutdown",
-    allow_dump_restart: bool = False,
-) -> None:
     validate_wait_timing(wait, timeout, interval)
-    if not yes:
-        if on:
-            op = "PowerOn"
-        else:
-            # The prompt is the only place a human is asked, so it names what the
-            # job will actually do: a restart reboots rather than powers off, and
-            # dumprestart crashes the partition (ADR 0164).
-            op = "Immediate PowerOff" if immediate else "PowerOff"
-            if restart:
-                op = f"{op} with restart"
-            if operation != "shutdown":
-                op = f"{op} (operation={operation})"
-        if not typer.confirm(
-            f"Really submit {terminal_field(op)} for partition '{terminal_field(name_or_uuid)}'?"
-        ):
-            err_console.print("Aborted.")
-            raise typer.Abort()
-
+    op = "Immediate PowerOff" if immediate else "PowerOff"
+    if restart:
+        op = f"{op} with restart"
+    if operation != "shutdown":
+        op = f"{op} (operation={operation})"
+    _confirm_power(name_or_uuid, op, yes)
     result = with_client(
-        lambda hmc: power_lpar(
+        lambda hmc: power_off_lpar(
             hmc,
             name_or_uuid,
             system_name_or_uuid=system,
-            power_on=on,
             immediate=immediate,
-            force=force,
             wait=wait,
             timeout_seconds=timeout,
             poll_interval=interval,
             ownership_override=ownership_override,
-            boot_mode=boot_mode,
-            partition_profile_uuid=partition_profile,
-            operation_type=operation_type,
-            keylock=keylock,
             restart=restart,
             operation=operation,
             allow_dump_restart=allow_dump_restart,
         )
     )
+    _render_power(result)
+
+
+def _confirm_power(name_or_uuid: str, operation: str, yes: bool) -> None:
+    if not yes and not typer.confirm(
+        f"Really submit {terminal_field(operation)} for partition '{terminal_field(name_or_uuid)}'?"
+    ):
+        err_console.print("Aborted.")
+        raise typer.Abort()
+
+
+def _render_power(result: LparPowerResult) -> None:
     uuid, job = result.lpar_uuid, result.job
     if job and job.get("already_running"):
         console.print(terminal_field(job["message"]), style="yellow", markup=False)

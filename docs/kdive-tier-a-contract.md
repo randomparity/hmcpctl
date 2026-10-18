@@ -13,7 +13,7 @@ kdive imports the LPAR domain modules under `hmcpctl.operations.lpar`:
 
 | Need | Import |
 |------|--------|
-| Power on, off, cycle, reset | `hmcpctl.operations.lpar.core.power_lpar`, returning `hmcpctl.operations.lpar.core.LparPowerResult` |
+| Power on, off, cycle, reset | `hmcpctl.operations.lpar.core.submit_power_on_lpar` and `hmcpctl.operations.lpar.core.power_off_lpar`, returning `hmcpctl.operations.lpar.core.LparPowerResult` |
 | Partition and RMC readback | `hmcpctl.operations.lpar.core.get_lpar` |
 | Partition state only | `hmcpctl.operations.lpar.core.get_lpar_state` |
 | Console capture | `hmcpctl.operations.lpar.console.capture_lpar_console_by_selector` |
@@ -40,14 +40,14 @@ kdive's `PowerAction` maps onto the HMC's PowerOn and PowerOff jobs. The PowerOf
 the job's own parameters ([ADR 0164](adr/0164-lpar-poweroff-operation-parameters.md); the
 mapping comes from epic #871 and issue #872):
 
-| `PowerAction` | Job | `power_lpar` arguments |
+| `PowerAction` | Job | Operation and arguments |
 |---------------|-----|------------------------|
-| `on` | PowerOn | `power_on=True` |
-| `off` | PowerOff | `power_on=False`, `operation=shutdown`, `immediate=True` |
+| `on` | PowerOn | `submit_power_on_lpar` |
+| `off` | PowerOff | `power_off_lpar`, `operation=shutdown`, `immediate=True` |
 | `cycle` | PowerOff with restart | as `off`, plus `restart=True` |
 | `reset` | PowerOff with restart | as `off`, plus `restart=True` |
-| graceful off | PowerOff | `power_on=False`, `operation=osshutdown` |
-| force crash | PowerOff | `power_on=False`, `operation=dumprestart`, `allow_dump_restart=True` |
+| graceful off | PowerOff | `power_off_lpar`, `operation=osshutdown` |
+| force crash | PowerOff | `power_off_lpar`, `operation=dumprestart`, `allow_dump_restart=True` |
 
 - `cycle` and `reset` submit the same job; the HMC cannot tell them apart.
 - `operation=osshutdown` asks the partition's operating system to shut down and needs an
@@ -96,20 +96,20 @@ bytes.
 ## Ownership opt-in
 
 `HMC_AUTHORIZE_POWER_OPERATIONS` (profile key `authorize_power_operations`) is off by
-default. Off, `power_lpar` reads no ownership and opens no SSH connection: it powers a
-partition another agent owns. A provider that cares reads
+default. Off, the power operations read no ownership and open no SSH connection: they can power
+a partition another agent owns. A provider that cares reads
 `hmcpctl.operations.lpar.ownership.list_lpar_ownership` itself.
 
-On, `power_lpar` reads the partition's ownership stamp and refuses a partition another agent
+On, the power operations read the partition's ownership stamp and refuse a partition another agent
 owns unless the caller passes `ownership_override=True`, which records an audited override.
-When no managed-system selector is given it finds the owning system itself, which is a
+When no managed-system selector is given they find the owning system, which is a
 fleet-wide search; an override skips that search. A failed ownership read fails the call
 with no job submitted. See
 [ADR 0092](adr/0092-uniform-lpar-ownership-authorization-rule.md).
 
 ## SSH host-key verification
 
-Console capture and `power_lpar`'s guarded ownership check run over SSH;
+Console capture and the power operations' guarded ownership check run over SSH;
 `list_lpar_ownership` is a REST read. `HMC_SSH_VERIFY_HOST_KEY` (profile key
 `ssh_verify_host_key`) defaults to true: the HMC's host key must already be in the process
 user's `~/.ssh/known_hosts` ([SSH trust setup](HMC_HINTS.md#ssh-host-key-trust)). Setting it

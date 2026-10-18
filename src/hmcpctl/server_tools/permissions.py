@@ -134,7 +134,7 @@ class PowerOwnershipGuard:
 
     The field keeps the setting's own name, and its polarity: ``true`` means the
     ADR 0011 ownership guard is **enforced** on power operations, ``false`` that
-    `power_lpar` reads no ownership token and opens no SSH connection. Naming it
+    LPAR power operations read no ownership token and opens no SSH connection. Naming it
     ``authorized`` would have read as "this connection is not authorized" for the
     permissive value — the reassuring misreading of the fail-open state, which is
     the misreading #470 exists to end. `hmcpctl config show` emits the same key

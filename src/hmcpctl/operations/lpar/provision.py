@@ -45,7 +45,7 @@ from .core import (
     LparCreation,
     LparCreationResult,
     create_and_stamp_lpar,
-    power_lpar,
+    submit_power_on_lpar,
 )
 from .workflow_contract import WorkflowStep
 
@@ -305,11 +305,10 @@ async def _power_on(
     ``docs/authorization-audit.md`` records that the event is not
     human-triggered only.
     """
-    result = await power_lpar(
+    result = await submit_power_on_lpar(
         hmc,
         lpar_uuid,
         system_name_or_uuid=system_name_or_uuid,
-        power_on=True,
         force=True,
         wait=assessment is not None,
         timeout_seconds=assessment.timeout_seconds if assessment else 300,

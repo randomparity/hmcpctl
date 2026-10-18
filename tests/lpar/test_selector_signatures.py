@@ -4,7 +4,11 @@ import inspect
 
 import pytest
 
-from hmcpctl.operations.lpar.core import power_lpar
+from hmcpctl.operations.lpar.core import (
+    power_off_lpar,
+    power_on_lpar,
+    submit_power_on_lpar,
+)
 from hmcpctl.operations.lpar.migration import (
     abort_lpar_migration,
     migrate_lpar,
@@ -17,7 +21,9 @@ from hmcpctl.operations.lpar.migration import (
 @pytest.mark.parametrize(
     "operation",
     [
-        power_lpar,
+        power_on_lpar,
+        power_off_lpar,
+        submit_power_on_lpar,
         validate_lpar_migration,
         migrate_lpar,
         migrate_lpar_with_affinity_preflight,

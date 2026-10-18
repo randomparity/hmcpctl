@@ -18,7 +18,7 @@ from ...operations.lpar.assignments import (
 from ...operations.lpar.core import (
     LparPowerOnOutcome,
     delete_lpar,
-    power_lpar,
+    power_off_lpar,
     power_on_lpar,
     rename_lpar,
 )
@@ -498,11 +498,10 @@ def hmc_power_off_lpar(
     """
 
     async def power_off_job(hmc: HMCClient) -> dict[str, Any] | None:
-        result = await power_lpar(
+        result = await power_off_lpar(
             hmc,
             lpar_name_or_uuid,
             system_name_or_uuid=system_name_or_uuid,
-            power_on=False,
             immediate=immediate,
             wait=wait,
             timeout_seconds=timeout_seconds,
@@ -550,11 +549,10 @@ def hmc_dump_restart_lpar(
     """
 
     async def dump_restart_job(hmc: HMCClient) -> dict[str, Any] | None:
-        result = await power_lpar(
+        result = await power_off_lpar(
             hmc,
             lpar_name_or_uuid,
             system_name_or_uuid=system_name_or_uuid,
-            power_on=False,
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,

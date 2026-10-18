@@ -440,7 +440,7 @@ def test_provision_affinity_power_on_waits_for_terminal_result():
     terminal_job = {"Resource": {"Status": "COMPLETED_OK"}}
     hmc = object()
     with patch(
-        "hmcpctl.operations.lpar.provision.power_lpar",
+        "hmcpctl.operations.lpar.provision.submit_power_on_lpar",
         new=AsyncMock(return_value=LparPowerResult(LPAR_UUID, terminal_job)),
     ) as power:
         result = asyncio.run(
@@ -453,7 +453,6 @@ def test_provision_affinity_power_on_waits_for_terminal_result():
         hmc,
         LPAR_UUID,
         system_name_or_uuid=SYSTEM_UUID,
-        power_on=True,
         force=True,
         wait=True,
         timeout_seconds=30,

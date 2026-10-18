@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.operations.lpar.core import delete_lpar, power_lpar, rename_lpar
+from hmcpctl.operations.lpar.core import delete_lpar, power_off_lpar, rename_lpar
 from hmcpctl.operations.vios import core as operations_vios
 from hmcpctl.operations.vios.core import power_vios
 from hmcpctl.server_tools.lpar import lifecycle as server_lpars
@@ -68,9 +68,9 @@ async def test_rename_lpar_uses_required_system_to_scope_name_resolution():
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_forwards_optional_system_scope():
+async def test_power_off_lpar_forwards_optional_system_scope():
     hmc = AsyncMock()
-    # A real config: power_lpar reads authorize_power_operations off it, and a
+    # A real config: power_off_lpar reads authorize_power_operations off it, and a
     # child mock would be truthy — silently enabling the ADR 0092 §4 guard.
     # from_mapping so an exported HMC_AUTHORIZE_POWER_OPERATIONS cannot enable
     # it either (ADR 0096).
@@ -83,7 +83,7 @@ async def test_power_lpar_forwards_optional_system_scope():
     hmc.find_partition_by_name.return_value = {"UUID": "lpar-uuid"}
     hmc.submit_job.return_value = {"UUID": "job-uuid"}
 
-    await power_lpar(hmc, "aix1", system_name_or_uuid="system-name", power_on=False)
+    await power_off_lpar(hmc, "aix1", system_name_or_uuid="system-name")
 
     hmc.find_partition_by_name.assert_awaited_once_with(
         "aix1", system_uuid="system-uuid"
@@ -113,7 +113,7 @@ def test_power_off_lpar_tool_forwards_system_scope(monkeypatch):
     hmc = AsyncMock()
     operation = AsyncMock(return_value=AsyncMock(job={"UUID": "job-uuid"}))
     monkeypatch.setattr("hmcpctl._app.client_from_env", _client_factory(hmc))
-    monkeypatch.setattr(server_lpars, "power_lpar", operation)
+    monkeypatch.setattr(server_lpars, "power_off_lpar", operation)
 
     server_lpars.hmc_power_off_lpar("aix1", system_name_or_uuid="system-name")
 

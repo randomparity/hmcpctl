@@ -182,7 +182,7 @@ def test_completed_activation_runs_and_returns_assessment() -> None:
             return_value=_ClientContext(),
         ),
         patch(
-            "hmcpctl.operations.lpar.core.power_lpar",
+            "hmcpctl.operations.lpar.core.submit_power_on_lpar",
             new=AsyncMock(return_value=_power_result("COMPLETED_OK")),
         ),
         patch(
@@ -212,7 +212,7 @@ def test_unconfirmed_activation_never_runs_assessment(status: str) -> None:
             return_value=_ClientContext(),
         ),
         patch(
-            "hmcpctl.operations.lpar.core.power_lpar",
+            "hmcpctl.operations.lpar.core.submit_power_on_lpar",
             new=AsyncMock(return_value=_power_result(status)),
         ),
         patch(
@@ -244,7 +244,7 @@ def test_malformed_measurement_preserves_job_and_applies_intent(
             return_value=_ClientContext(),
         ),
         patch(
-            "hmcpctl.operations.lpar.core.power_lpar",
+            "hmcpctl.operations.lpar.core.submit_power_on_lpar",
             new=AsyncMock(return_value=_power_result("COMPLETED_OK")),
         ),
         patch(

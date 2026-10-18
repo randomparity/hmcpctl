@@ -15,7 +15,7 @@ from typing import Any
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.jobs.requests import POWER_OFF_OPERATIONS
-from hmcpctl.operations.lpar.core import power_lpar
+from hmcpctl.operations.lpar.core import power_off_lpar, submit_power_on_lpar
 from hmcpctl.server import TOOL_SECURITY
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +28,8 @@ SETTING = re.compile(r"HMC_[A-Z_]+")
 
 EXPECTED_IMPORT_PATHS = {
     "hmcpctl.operations.lpar",
-    "hmcpctl.operations.lpar.core.power_lpar",
+    "hmcpctl.operations.lpar.core.submit_power_on_lpar",
+    "hmcpctl.operations.lpar.core.power_off_lpar",
     "hmcpctl.operations.lpar.core.get_lpar",
     "hmcpctl.operations.lpar.core.get_lpar_state",
     "hmcpctl.operations.lpar.core.LparPowerResult",
@@ -103,9 +104,10 @@ def _classify(token: str, short_names: set[str]) -> str:
         return "tool"
     if match := PARAMETER.fullmatch(token):
         name, value = match.groups()
-        assert name in inspect.signature(power_lpar).parameters, (
-            f"not a power_lpar parameter: {token!r}"
-        )
+        assert any(
+            name in inspect.signature(operation).parameters
+            for operation in (submit_power_on_lpar, power_off_lpar)
+        ), f"not a power operation parameter: {token!r}"
         if name == "operation":
             assert value in POWER_OFF_OPERATIONS, (
                 f"not an accepted PowerOff operation: {token!r}"
