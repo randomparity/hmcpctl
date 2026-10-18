@@ -16,6 +16,7 @@ OperationOutcome = Literal[
     "abandoned",
 ]
 EffectStatus = Literal["intended", "applied", "not_applied", "uncertain"]
+EventKind = Literal["phase", "intent", "outcome"]
 
 
 @dataclass(frozen=True)
@@ -45,9 +46,7 @@ class OperationEvent:
         metadata={"description": "Event sequence number within the operation."}
     )
     at: str = field(metadata={"description": "UTC time, ISO 8601 with a Z suffix."})
-    kind: Literal["phase", "intent", "outcome"] = field(
-        metadata={"description": "phase, intent or outcome."}
-    )
+    kind: EventKind = field(metadata={"description": "phase, intent or outcome."})
     detail: dict[str, Any] = field(metadata={"description": "The event's fields."})
 
 

@@ -558,7 +558,7 @@ def test_connection_label_sanitizes_unreadable_configuration(lab_config):
     ("field", "value"),
     [
         (field, value)
-        for field in ("state", "outcome", "effect_status")
+        for field in ("state", "outcome", "effect_status", "event_kind")
         for value in ("private-invalid-value", 0, [], None)
         if not (field == "outcome" and value is None)
     ],
@@ -572,7 +572,9 @@ def test_invalid_vocabulary_write_leaves_rows_and_events_unchanged(field, value)
         before_effect = tuple(conn.execute("SELECT * FROM effects").fetchone())
         before_events = conn.execute("SELECT count(*) FROM events").fetchone()[0]
         with pytest.raises(OperationRefused) as caught:
-            if field == "effect_status":
+            if field == "event_kind":
+                store.add_event(conn, _oid(1), value, {})
+            elif field == "effect_status":
                 store.record_outcome(conn, _oid(1), "step", value, None)
             else:
                 store.set_state(
@@ -598,14 +600,17 @@ def test_invalid_vocabulary_write_leaves_rows_and_events_unchanged(field, value)
         for field in ("state", "outcome")
         for reader in ("get", "find", "record", "status")
     ]
-    + [("effect_status", reader) for reader in ("effects", "record", "status")],
+    + [("effect_status", reader) for reader in ("effects", "record", "status")]
+    + [("event_kind", reader) for reader in ("record", "status")],
 )
 def test_corrupt_vocabulary_never_decodes_as_a_typed_record(field, reader):
     with store.session() as conn:
         _seed(conn, _oid(1))
         with store.write_transaction(conn):
             store.record_intent(conn, _oid(1), "step", "test.write", "target")
-            if field == "effect_status":
+            if field == "event_kind":
+                conn.execute("UPDATE events SET kind = ?", ("private-invalid-value",))
+            elif field == "effect_status":
                 conn.execute(
                     "UPDATE effects SET status = ?", ("private-invalid-value",)
                 )
@@ -650,3 +655,27 @@ def test_every_declared_effect_status_roundtrips(status):
             store.record_intent(conn, _oid(1), "step", "test.write", "target")
             store.record_outcome(conn, _oid(1), "step", status, None)
         assert store.load_effects(conn, _oid(1))["step"].status == status
+
+
+@pytest.mark.parametrize("kind", ["phase", "intent", "outcome"])
+def test_every_declared_event_kind_roundtrips(kind):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.add_event(conn, _oid(1), kind, {"step": "probe"})
+        record = store.read_record(conn, _oid(1))
+    assert record.events[-1].kind == kind
+    assert record.events[-1].detail == {"step": "probe"}
+
+
+def test_event_truncation_sentinel_is_not_decoded():
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            for n in range(store.STATUS_EVENTS + 1):
+                store.add_event(conn, _oid(1), "phase", {"phase": f"p{n}"})
+            conn.execute("UPDATE events SET kind = 'old-invalid-kind' WHERE seq = 1")
+        record = store.read_record(conn, _oid(1))
+    assert record.events_truncated is True
+    assert len(record.events) == store.STATUS_EVENTS
+    assert all(event.kind == "phase" for event in record.events)

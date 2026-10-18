@@ -23,6 +23,7 @@ from ...config import UNRESOLVED_CONNECTION, ConfigError, resolve_connection_pro
 from .models import (
     EffectRecord,
     EffectStatus,
+    EventKind,
     OperationEvent,
     OperationOutcome,
     OperationPage,
@@ -564,8 +565,12 @@ def interrupt_orphan(conn: sqlite3.Connection, operation_id: str) -> None:
 
 
 def add_event(
-    conn: sqlite3.Connection, operation_id: str, kind: str, detail: Mapping[str, Any]
+    conn: sqlite3.Connection,
+    operation_id: str,
+    kind: EventKind,
+    detail: Mapping[str, Any],
 ) -> None:
+    _require_vocabulary(kind, get_args(EventKind), "event_kind")
     seq = conn.execute(
         "SELECT coalesce(max(seq), 0) + 1 FROM events WHERE operation_id = ?",
         (operation_id,),
@@ -708,8 +713,17 @@ def read_record(conn: sqlite3.Connection, operation_id: str) -> OperationRecord:
         "SELECT * FROM events WHERE operation_id = ? ORDER BY seq DESC LIMIT ?",
         (operation_id, STATUS_EVENTS + 1),
     ).fetchall()
+    for event in newest[:STATUS_EVENTS]:
+        _require_vocabulary(
+            event["kind"], get_args(EventKind), "event_kind", persisted=True
+        )
     events = tuple(
-        OperationEvent(r["seq"], _iso(r["at"]), r["kind"], json.loads(r["detail_json"]))
+        OperationEvent(
+            r["seq"],
+            _iso(r["at"]),
+            cast(EventKind, r["kind"]),
+            json.loads(r["detail_json"]),
+        )
         for r in reversed(newest[:STATUS_EVENTS])
     )
     return OperationRecord(
