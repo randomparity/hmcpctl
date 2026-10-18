@@ -830,35 +830,36 @@ async def _download_iso_from_url(url: str) -> tuple[Path, str, int]:
         httpx.HTTPStatusError: If HTTP request fails (4xx/5xx).
     """
     timeout = httpx.Timeout(CONNECT_TIMEOUT, read=READ_TIMEOUT)
-    async with (
-        httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=False,
-        ) as client,
-        client.stream("GET", url) as response,
-    ):
-        # Every 3xx, not just httpx's `is_redirect` (which additionally
-        # requires a Location header): a 3xx without one is not a body to
-        # import into a media repository either.
-        if 300 <= response.status_code < 400:
-            raise ValueError(
-                f"iso_source is refused: {url!r} answered with HTTP "
-                f"{response.status_code}, a redirect. The ISO must be served "
-                "at the URL you pass, because a redirect would move the "
-                "download to a host the operator's allowlist never checked. "
-                "Pass the URL the ISO is actually served from."
-            )
-        response.raise_for_status()
+    temp_file: Path | None = None
+    try:
+        async with (
+            httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+            ) as client,
+            client.stream("GET", url) as response,
+        ):
+            # Every 3xx, not just httpx's `is_redirect` (which additionally
+            # requires a Location header): a 3xx without one is not a body to
+            # import into a media repository either.
+            if 300 <= response.status_code < 400:
+                raise ValueError(
+                    f"iso_source is refused: {url!r} answered with HTTP "
+                    f"{response.status_code}, a redirect. The ISO must be served "
+                    "at the URL you pass, because a redirect would move the "
+                    "download to a host the operator's allowlist never checked. "
+                    "Pass the URL the ISO is actually served from."
+                )
+            response.raise_for_status()
 
-        import tempfile
+            import tempfile
 
-        fd, temp_path = tempfile.mkstemp(suffix=".iso", prefix="hmc_upload_")
-        temp_file = Path(temp_path)
+            fd, temp_path = tempfile.mkstemp(suffix=".iso", prefix="hmc_upload_")
+            temp_file = Path(temp_path)
 
-        sha256_hash = hashlib.sha256()
-        downloaded_size = 0
+            sha256_hash = hashlib.sha256()
+            downloaded_size = 0
 
-        try:
             with os.fdopen(fd, "wb") as f:
                 async for chunk in response.aiter_bytes(chunk_size=DEFAULT_CHUNK_SIZE):
                     downloaded_size += len(chunk)
@@ -874,15 +875,16 @@ async def _download_iso_from_url(url: str) -> tuple[Path, str, int]:
             iso_sha256 = sha256_hash.hexdigest()
             return temp_file, iso_sha256, downloaded_size
 
-        except BaseException:
-            # Cancellation also leaves this function before upload owns the file.
+    except BaseException:
+        # Ownership transfers only after both HTTP contexts finish closing.
+        if temp_file is not None:
             try:
                 temp_file.unlink(missing_ok=True)
             except OSError:
                 logger.exception(
                     "failed to remove incomplete ISO download %s", temp_file
                 )
-            raise
+        raise
 
 
 async def _aiter_file_chunks(

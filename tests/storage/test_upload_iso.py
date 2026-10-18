@@ -1259,6 +1259,49 @@ async def test_download_cancellation_removes_partial_iso(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["cancel", "close_error"])
+async def test_download_cleanup_covers_client_close(monkeypatch, tmp_path, failure):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    closing = asyncio.Event()
+    completed = []
+
+    class ClosingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return httpx.Response(200, content=b"complete ISO")
+
+        async def aclose(self):
+            completed.extend(p.read_bytes() for p in tmp_path.glob("hmc_upload_*.iso"))
+            closing.set()
+            if failure == "close_error":
+                raise RuntimeError("transport close failed")
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "hmcpctl.operations.storage.resources.httpx.AsyncClient",
+        functools.partial(httpx.AsyncClient, transport=ClosingTransport()),
+    )
+    task = asyncio.create_task(_download_iso_from_url(ISO_URL))
+    try:
+        await asyncio.wait_for(closing.wait(), timeout=2)
+        assert completed == [b"complete ISO"]
+        if failure == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            with pytest.raises(RuntimeError, match="transport close failed"):
+                await task
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
+@pytest.mark.asyncio
 async def test_upload_iso_uploads_from_an_allowlisted_url_end_to_end(
     mock_hmc, monkeypatch
 ):
