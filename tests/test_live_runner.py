@@ -175,6 +175,94 @@ def _profile_state(value: str = "none") -> tuple[str, str, object]:
     return ("hmc_run_command", "PASS", value)
 
 
+def _sriov_baseline_responses(state):
+    healthy = {
+        "items": [
+            {
+                "adapter_id": str(state.config.sriov_adapter_id),
+                "mode": "sriov",
+                "availability": "1",
+            }
+        ]
+    }
+    free = _logical_port_state(state)
+    return [
+        ("hmc_list_sriov_adapters", "PASS", healthy),
+        (
+            "hmc_list_sriov_physical_ports",
+            "PASS",
+            {"items": [{"physical_port_id": str(state.config.sriov_physical_port_id)}]},
+        ),
+        ("hmc_list_sriov_logical_ports", "PASS", free),
+        ("hmc_list_sriov_logical_ports", "PASS", free),
+        ("hmc_list_sriov_logical_ports", "PASS", free),
+        _profile_state(),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sriov_baseline_admits_clean_inventory_with_scoped_selectors():
+    state = _ScriptedSriovState([])
+    state._responses = iter(_sriov_baseline_responses(state))
+    assert await sriov.capture_sriov_baseline(object(), state)
+    assert next(state._responses, None) is None
+    assert len(state.calls) == 6
+    for tool, arguments in state.calls[:-1]:
+        assert arguments["system_name_or_uuid"] == state.config.system_name
+        assert arguments["adapter_id"] == str(state.config.sriov_adapter_id)
+        assert tool.startswith("hmc_list_sriov_")
+    for index in (1, 2):
+        assert state.calls[index][1]["physical_port_id"] == str(
+            state.config.sriov_physical_port_id
+        )
+    for index in (3, 4):
+        assert (
+            state.calls[index][1]["logical_port_id"]
+            == state.config.sriov_logical_port_id
+        )
+    assert state.calls[-1] == (
+        "hmc_run_command",
+        {
+            "cmd": (
+                f"lssyscfg -r prof -m {state.config.system_name} "
+                f"--filter 'lpar_names={state.config.lp3_name},profile_names={state.config.sriov_profile_name}' "
+                "-F sriov_eth_logical_ports"
+            )
+        },
+    )
+    assert all(row["status"] == "PASS" for row in state.results)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("index", "status", "data"),
+    [
+        (0, "FAIL", None),
+        (0, "PASS", {"capability": "capability-unavailable"}),
+        (0, "PASS", {"items": []}),
+        (1, "FAIL", None),
+        (2, "FAIL", None),
+        (2, "PASS", {"items": [{"availability": "1", "capacity_percent": 99}]}),
+        (3, "FAIL", None),
+        (3, "PASS", "configured"),
+        (5, "PASS", "17:foreign-port:2"),
+    ],
+)
+async def test_sriov_baseline_stops_at_first_failed_admission(index, status, data):
+    state = _ScriptedSriovState([])
+    if data == "configured":
+        data = _logical_port_state(state, owner="foreign-partition")
+    responses = _sriov_baseline_responses(state)
+    tool = responses[index][0]
+    responses[index] = (tool, status, data)
+    state._responses = iter(responses[: index + 1])
+    assert not await sriov.capture_sriov_baseline(object(), state)
+    assert len(state.calls) == index + 1
+    assert next(state._responses, None) is None
+    assert state.results[-1]["status"] in {"FAIL", "SKIP"}
+    assert not any("assign" in tool for tool, _ in state.calls)
+
+
 def test_sriov_baseline_helpers_require_healthy_adapter() -> None:
     """Baseline predicates reject wrong mode/availability and accept healthy data."""
     assert sriov._adapter_is_healthy(
