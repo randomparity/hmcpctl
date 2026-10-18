@@ -308,7 +308,11 @@ async def create_virtual_disk(
 ) -> dict[str, Any] | None:
     """Create a virtual disk of ``capacity_mib`` in a volume group.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     Raises:
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         ResourceNotFoundError: If the VIOS or optional managed-system selector cannot
             be resolved.
         HMCError: If the HMC rejects the creation request or it cannot be completed.
@@ -351,6 +355,8 @@ async def delete_virtual_disk(
 ) -> dict[str, Any] | None:
     """Delete a Virtual Disk from a Volume Group.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     Validates that the disk is not mapped to any LPAR before deletion.
 
     Args:
@@ -358,7 +364,7 @@ async def delete_virtual_disk(
         system_name_or_uuid: Optional managed-system name or UUID used to scope
             a VIOS name.
         vios_name_or_uuid: VIOS partition name or UUID.
-        vg_uuid: Volume Group UUID containing the disk.
+        vg_uuid: Volume Group name or UUID identifying the group containing the disk.
         disk_name: Name of the Virtual Disk to delete.
 
     Returns:
@@ -366,6 +372,10 @@ async def delete_virtual_disk(
         when a successful response contains no resource entry.
 
     Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         HMCError: If the disk is mapped to an LPAR or deletion fails.
     """
     vios_uuid = await resolve_vios_uuid(
@@ -439,7 +449,17 @@ async def create_media_repository(
     *,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Create a media repository in a VIOS volume group."""
+    """Create a media repository in a VIOS volume group.
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
+    """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
@@ -460,7 +480,17 @@ async def create_optical_media(
     *,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Create blank optical media in a VIOS media repository."""
+    """Create blank optical media in a VIOS media repository.
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
+    """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
@@ -561,10 +591,16 @@ async def delete_media_repository(
 ) -> str:
     """Delete the Virtual Media Repository from a Volume Group.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     Refuses deletion if the repository contains any VirtualOpticalMedia
     entries (ISO images). Delete all media first.
 
     Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         HMCError: If the repository is not empty.
     """
     vios_uuid = await resolve_vios_uuid(
@@ -592,10 +628,16 @@ async def delete_optical_media(
 ) -> dict[str, Any] | None:
     """Delete a VirtualOpticalMedia (ISO image) from the media repository.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     Validates that no optical mapping references the media before deletion.
     Returns an error listing every blocking mapping when the image is in use.
 
     Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         HMCError: If the media is referenced by any optical mapping.
     """
     vios_uuid = await resolve_vios_uuid(
@@ -634,10 +676,19 @@ async def get_media_repository(
 ) -> dict[str, Any] | None:
     """Get the VolumeGroup Atom entry containing a Virtual Media Repository.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     The repository is nested at ``Resource.MediaRepositories.VirtualMediaRepository``.
     Its ``RepositorySize`` is in GiB; optional media entries are nested under
     ``OpticalMedia.VirtualOpticalMedia`` within the repository. Returns None when
     no repository-bearing VolumeGroup entry is available.
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
     """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
@@ -858,9 +909,18 @@ async def list_optical_media(
 ) -> list[OpticalMedia]:
     """List Virtual Optical Media in the Virtual Media Repository.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     Returns a list of optical media entries (ISO containers) with their
     name, size in MiB (converted from the HMC's GiB Size), and media type.
     The repository must exist (VMLibrary on the specified Volume Group).
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
     """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
@@ -954,6 +1014,8 @@ async def upload_iso(
 ) -> dict[str, Any]:
     """Upload an ISO to a VIOS media repository via the HMC web File API (ADR 0177).
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     ``iso_source`` must be an ``http`` or ``https`` URL whose host the operator
     has put on ``iso_url_allowlist`` (``HMC_ISO_URL_ALLOWLIST``), and both
     conditions are checked before any other work happens. **With no allowlist
@@ -969,7 +1031,7 @@ async def upload_iso(
     Args:
         hmc: HMC client instance.
         vios_name_or_uuid: VIOS name or UUID.
-        vg_uuid: Volume Group UUID containing the media repository.
+        vg_uuid: Volume Group name or UUID containing the media repository.
         media_name: Target name for the ISO in the repository.
         iso_source: HTTP(S) URL to download the ISO from.
         system_name_or_uuid: Optional managed-system name or UUID used to scope
@@ -988,6 +1050,8 @@ async def upload_iso(
           mode VIOS ``lsrep`` reports (for example ``rw`` here, ``ro`` there).
 
     Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
         HMCError: For malformed ISO URLs, HMC API errors during the web File
                   requests, or a repository that does not list the media after
                   the upload.
@@ -995,7 +1059,8 @@ async def upload_iso(
                    on the operator's allowlist (including the unset allowlist,
                    which permits nothing), if the server answers with a
                    redirect, if the download exceeds the size bound, or if the
-                   volume group holds no media repository.
+                   volume group holds no media repository, its selector is missing
+                   or ambiguous, or its inventory contains incomplete identities.
         FileExistsError: If media_name already exists in the repository.
     """
     iso_url = _require_allowlisted_iso_url(
