@@ -51,7 +51,22 @@ async def modify_lpar(
     new_name: str | None = None,
     ownership_override: bool = False,
 ) -> LparPcieWorkflowResult:
-    """Authorize and apply rename, resource, and PCIe changes in order."""
+    """Authorize and apply rename, resource, and PCIe changes in order.
+
+    Validation and ownership authorization run before any write. Invalid scope,
+    resource values, or assignments raise ``ValueError``; ownership refusal raises
+    ``PermissionError``. Inventory and transport errors can also propagate.
+
+    A rename failure propagates. A resource-update ``HMCError`` or ``ValueError``
+    also propagates when no rename has succeeded (with actionable write-error
+    translation where available). After a successful rename, that same failure
+    returns an incomplete result retaining the renamed resource, an error step,
+    warnings, and skipped assignment steps. Assignment failures likewise return
+    their completed, failed, and skipped steps. Completed changes are never rolled
+    back: callers must inspect ``workflow_completed`` and ``steps`` before treating
+    a returned result as success. A failed final readback after recorded steps is
+    reported in ``warnings`` without discarding those steps.
+    """
     system_name_or_uuid = optional_system_selector(system_name_or_uuid)
     if (
         assignments != LparPcieAssignments() or new_name is not None
