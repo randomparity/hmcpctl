@@ -178,7 +178,10 @@ def test_permitting_read_returns_scoped_systems_and_partitions():
         "active",
     )
     assert (partition.partition_id, partition.current_memory_mib) == (1, 4096)
-    assert (partition.current_proc_units, partition.dedicated_procs) == (0.5, False)
+    assert (partition.current_proc_units, partition.has_dedicated_processors) == (
+        0.5,
+        False,
+    )
     assert (partition.owned, partition.owner) == (True, "agent-a")
     assert (page.limit, page.truncated, page.next_cursor) == (50, False, None)
     assert (page.systems_limit, page.systems_truncated) == (16, False)

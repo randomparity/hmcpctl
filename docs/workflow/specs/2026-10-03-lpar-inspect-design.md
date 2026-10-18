@@ -29,7 +29,7 @@ duplicates collapse; an empty list includes no section), `profile`.
 | `connection`, `id` | ADR 0189 scoped id `<connection>/<system uuid>/<partition uuid>` |
 | `system_uuid`, `uuid`, `name`, `partition_id`, `state` | from the base read |
 | `rmc` | `{source, state}`, or null when not included; `unavailable` when the read carries no RMC state |
-| `resources` | `{current_memory_mib, desired_memory_mib, current_proc_units, desired_proc_units, desired_vcpus, dedicated_procs, storage_source, vios[], mappings[], unresolved_mappings}`, or null |
+| `resources` | `{current_memory_mib, desired_memory_mib, current_proc_units, desired_proc_units, desired_vcpus, has_dedicated_processors, storage_source, vios[], mappings[], unresolved_mappings}`, or null |
 | `refcodes` | `{source, codes[]}` with at most 20 rows, newest first, or null |
 | `profile_drift` | a `source`, always `unavailable` (ADR 0200 Decision 4), or null |
 | `next_actions` | tool names |

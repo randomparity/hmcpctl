@@ -105,7 +105,7 @@ class InventoryPartition:
     rmc_state: str | None
     current_memory_mib: int | None
     current_proc_units: float | None
-    dedicated_procs: bool | None
+    has_dedicated_processors: bool | None
     owned: bool | None
     owner: str | None
 
@@ -290,7 +290,7 @@ def _partition(
         rmc_state=optional_text(resource.get("ResourceMonitoringControlState")),
         current_memory_mib=optional_int(memory.get("CurrentMemory")),
         current_proc_units=optional_float(processors["current_proc_units"]),
-        dedicated_procs=processors["dedicated_procs"],
+        has_dedicated_processors=processors["has_dedicated_processors"],
         owned=ownership.get("owned"),
         owner=ownership.get("owner"),
     )

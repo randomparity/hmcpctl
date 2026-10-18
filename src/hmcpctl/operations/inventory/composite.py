@@ -29,7 +29,7 @@ class LparSummary:
     current_proc_units: object | None
     desired_proc_units: object | None
     desired_vcpus: object | None
-    dedicated_procs: object | None
+    has_dedicated_processors: object | None
     os_version: object | None
     os_type: object | None
     client_network_adapter_count: int
@@ -97,7 +97,7 @@ def processor_figures(resource: dict[str, Any]) -> dict[str, Any]:
             "current_proc_units": current.get("CurrentProcessors"),
             "desired_proc_units": desired.get("DesiredProcessors"),
             "desired_vcpus": None,
-            "dedicated_procs": True,
+            "has_dedicated_processors": True,
         }
     desired = resource_container(config, "SharedProcessorConfiguration")
     current = resource_container(config, "CurrentSharedProcessorConfiguration")
@@ -105,7 +105,7 @@ def processor_figures(resource: dict[str, Any]) -> dict[str, Any]:
         "current_proc_units": current.get("CurrentProcessingUnits"),
         "desired_proc_units": desired.get("DesiredProcessingUnits"),
         "desired_vcpus": desired.get("DesiredVirtualProcessors"),
-        "dedicated_procs": False if mode == "false" else None,
+        "has_dedicated_processors": False if mode == "false" else None,
     }
 
 

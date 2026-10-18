@@ -104,7 +104,7 @@ class Resources:
     current_proc_units: float | None
     desired_proc_units: float | None
     desired_vcpus: int | None
-    dedicated_procs: bool | None
+    has_dedicated_processors: bool | None
     storage_source: SectionSource
     vios: list[ViosRead]
     mappings: list[dict[str, str]]
@@ -273,7 +273,7 @@ async def _resources(
         current_proc_units=optional_float(processors["current_proc_units"]),
         desired_proc_units=optional_float(processors["desired_proc_units"]),
         desired_vcpus=optional_int(processors["desired_vcpus"]),
-        dedicated_procs=processors["dedicated_procs"],
+        has_dedicated_processors=processors["has_dedicated_processors"],
         storage_source=_storage_source(listing, reads, extra),
         vios=reads,
         mappings=mappings,

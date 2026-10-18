@@ -64,7 +64,7 @@ Each `InventoryPartition` carries:
 
 - `id`, `system_id`, `uuid`, `name`, `partition_id`, `partition_type`;
 - `state`, `rmc_state`;
-- `current_memory_mib`, `current_proc_units`, `dedicated_procs`;
+- `current_memory_mib`, `current_proc_units`, `has_dedicated_processors`;
 - `owned`, `owner`.
 
 **Scoped identifiers** are `<connection>/<system uuid>` and

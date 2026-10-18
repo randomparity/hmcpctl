@@ -24,7 +24,7 @@ def hmc_lpar_summary(
 
     Memory and processor figures come from the partition's configuration containers.
     ``current_proc_units`` and ``desired_proc_units`` are processing units for a shared
-    partition and whole processors for a dedicated one; ``dedicated_procs`` says which
+    partition and whole processors for a dedicated one; ``has_dedicated_processors`` says which
     (``desired_vcpus`` is set for shared partitions only). A figure whose container is
     absent is null. On V10R3 an inactive partition reads 0 for every current and desired
     figure, even when its profile holds values.

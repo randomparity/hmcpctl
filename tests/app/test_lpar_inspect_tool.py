@@ -291,3 +291,30 @@ def test_mcp_inspection_serializes_definitions_without_changing_state(monkeypatc
     assert rows[1]["definition"] is None
     assert rows[1]["definition_source"] is None
     assert result["state"] == "error"
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"), [("true", True), ("false", False), (None, None)]
+)
+def test_processor_mode_wire_name_preserves_three_values(monkeypatch, mode, expected):
+    hmc = _HMC()
+    original = hmc.list_logical_partitions
+
+    async def partitions(uuid):
+        rows = await original(uuid)
+        for row in rows:
+            row["Resource"]["PartitionProcessorConfiguration"] = {
+                "HasDedicatedProcessors": mode,
+                "CurrentDedicatedProcessorConfiguration": {"CurrentProcessors": "2"},
+                "CurrentSharedProcessorConfiguration": {
+                    "CurrentProcessingUnits": "0.5"
+                },
+            }
+        return rows
+
+    monkeypatch.setattr(hmc, "list_logical_partitions", partitions)
+    result = _call(_app(_ALL), hmc, {**_ARGUMENTS, "include": ["resources"]})
+    serialized = result["resources"]
+    assert serialized["has_dedicated_processors"] is expected
+    assert "dedicated_procs" not in serialized
+    assert serialized["current_proc_units"] == (2.0 if expected is True else 0.5)

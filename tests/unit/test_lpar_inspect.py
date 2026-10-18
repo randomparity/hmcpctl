@@ -224,7 +224,7 @@ def test_resources_report_figures_and_this_partitions_mappings():
     assert resources.storage_source.status == "ok"
     assert (resources.current_memory_mib, resources.desired_memory_mib) == (4096, 8192)
     assert (resources.current_proc_units, resources.desired_vcpus) == (0.5, 2)
-    assert resources.dedicated_procs is False
+    assert resources.has_dedicated_processors is False
     assert [(v.uuid, v.status) for v in resources.vios] == [
         (VIOS_1, "ok"),
         (VIOS_2, "ok"),
