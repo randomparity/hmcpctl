@@ -6668,6 +6668,77 @@ def _st14_volumes(state, *names):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "partition-read-error",
+        "partition-missing-uuid",
+        "mapping-read-error",
+        "mapping-not-document",
+        "mapping-invalid-resource",
+        "mapping-malformed-backing",
+    ],
+)
+async def test_st14_cleanup_retains_assets_when_identity_or_mapping_is_unreadable(
+    monkeypatch, fault
+):
+    state = runner.RunState()
+    state.artifacts.vios_partition_id = 7
+    calls = []
+    absent = ("FAIL", _failure("HSCL8012 partition not found"))
+    partition = {
+        "partition-read-error": ("FAIL", _failure("transport timeout")),
+        "partition-missing-uuid": ("PASS", {}),
+    }.get(fault, absent)
+    mappings = {
+        "mapping-read-error": ("FAIL", _failure("transport timeout")),
+        "mapping-not-document": ("PASS", None),
+        "mapping-invalid-resource": ("PASS", {"Resource": []}),
+        "mapping-malformed-backing": (
+            "PASS",
+            {
+                "Resource": {
+                    "VirtualSCSIMappings": {
+                        "VirtualSCSIMapping": [
+                            {"Storage": {"VirtualDisk": {"DiskName": "hp14deadbeef"}}}
+                        ]
+                    }
+                }
+            },
+        ),
+    }
+
+    async def call(_state, _client, tool, **kwargs):
+        calls.append(tool)
+        if tool == "hmc_get_lpar":
+            return partition
+        if tool == "hmc_get_vios_storage_detail" and fault in mappings:
+            return mappings[fault]
+        pytest.fail(
+            f"unproven fixture identity or mapping permitted later call: {tool}"
+        )
+
+    monkeypatch.setattr(runner.RunState, "call", call)
+    await provisioning._cleanup_fixture(
+        None,
+        state,
+        {
+            "name": "fixture",
+            "disk": "hp14deadbeef",
+            "token": "round2-deadbeef",
+            "vios_uuid": "selected-vios-uuid",
+            "vg_uuid": "configured-vg-uuid",
+        },
+    )
+    expected = ["hmc_get_lpar"]
+    if fault.startswith("mapping-"):
+        expected.append("hmc_get_vios_storage_detail")
+    assert calls == expected
+    assert state.results[-1]["status"] == "FAIL"
+    assert not any(row["status"] == "SKIP" for row in state.results)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("present", [False, True])
 async def test_st14_cleanup_uses_scoped_delete_and_independent_exact_inventory(
     monkeypatch, present
