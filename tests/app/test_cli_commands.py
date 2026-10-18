@@ -1103,6 +1103,68 @@ def test_lpars_state(fake_hmc):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("state", ["error", "not activated"])
+def test_lpars_power_on_wait_rejects_failed_activation(fake_hmc, state):
+    fake_hmc.lpar["Resource"]["PartitionState"] = state
+    result = RUNNER.invoke(
+        cli.app,
+        ["lpars", "power-on", LPAR_UUID, "--force", "--wait", "--yes"],
+    )
+
+    assert result.exit_code == 1
+    assert "activation failed" in result.stderr
+    assert "Job submitted" not in result.stdout
+    assert [call[0] for call in fake_hmc.calls] == [
+        "submit_job",
+        "wait_for_job_entry",
+        "get_quick_property",
+    ]
+
+
+@pytest.mark.parametrize("state", ["running", "starting", "open firmware"])
+def test_lpars_power_on_wait_renders_normalized_outcome(fake_hmc, state):
+    fake_hmc.lpar["Resource"]["PartitionState"] = state
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "lpars",
+            "power-on",
+            LPAR_UUID,
+            "--force",
+            "--wait",
+            "--yes",
+            "--timeout",
+            "17",
+            "--interval",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout[result.stdout.index("{") :])
+    assert set(payload) == {
+        "already_activated",
+        "job",
+        "message",
+        "affinity_assessment",
+        "warnings",
+    }
+    assert payload["already_activated"] is False
+    assert payload["message"] is None
+    assert payload["warnings"] == []
+    assert payload["affinity_assessment"]["status"] == "skipped"
+    assert payload["job"] == {
+        **fake_hmc.job,
+        "Resource": {**fake_hmc.job["Resource"], "Status": "COMPLETED_OK"},
+    }
+    assert (
+        "wait_for_job_entry",
+        (JOB_UUID, 17, 2),
+        {"job_href": fake_hmc.job["link"]},
+    ) in fake_hmc.calls
+    assert [call[0] for call in fake_hmc.calls].count("submit_job") == 1
+
+
 def test_lpars_power_on_submits_power_on_job(fake_hmc):
     result = RUNNER.invoke(
         cli.app, ["lpars", "power-on", LPAR_UUID, "--force", "--yes"]
@@ -1181,6 +1243,12 @@ def test_lpars_power_on_activation_flags_reach_the_job(fake_hmc):
     assert ">keylock</ParameterName>" in job_xml
     assert '<ParameterValue kb="CUR" kxe="false">manual</ParameterValue>' in job_xml
     # #981: the fake's adapters carry no slot, so the profile check warns about each.
+    payload, _ = json.JSONDecoder().raw_decode(
+        result.stdout[result.stdout.index("{") :]
+    )
+    assert payload["job"] == fake_hmc.job
+    assert payload["warnings"]
+    assert all(warning in result.stdout for warning in payload["warnings"])
     assert "Warning: The partition profile lacks" in result.stdout
     assert "ClientNetworkAdapter in virtual slot not reported" in result.stdout
 
@@ -1211,7 +1279,18 @@ def test_lpars_power_on_skips_running_partition_without_force(fake_hmc):
 
     assert result.exit_code == 0
     assert "already running" in result.stdout
-    assert '"already_activated": true' in result.stdout
+    payload = json.loads(result.stdout[result.stdout.index("{") :])
+    assert set(payload) == {
+        "already_activated",
+        "job",
+        "message",
+        "affinity_assessment",
+        "warnings",
+    }
+    assert payload["already_activated"] is True
+    assert payload["job"] is None
+    assert "already running" in payload["message"]
+    assert payload["warnings"] == []
     assert "already_running" not in result.stdout
     assert [call[0] for call in fake_hmc.calls] == ["get_quick_property"]
 
@@ -1302,11 +1381,20 @@ def test_power_commands_forward_submission_link_when_waiting(fake_hmc, command):
     )
 
     assert result.exit_code == 0
-    assert fake_hmc.calls[-1] == (
-        "wait_for_job_entry",
-        (JOB_UUID, 90, 3),
-        {"job_href": f"/jobs/{JOB_UUID}"},
-    )
+    if command[:2] == ["lpars", "power-on"]:
+        assert fake_hmc.calls[-1] == (
+            "get_quick_property",
+            ("LogicalPartition", LPAR_UUID, "PartitionState"),
+            {},
+        )
+    waits = [call for call in fake_hmc.calls if call[0] == "wait_for_job_entry"]
+    assert waits == [
+        (
+            "wait_for_job_entry",
+            (JOB_UUID, 90, 3),
+            {"job_href": f"/jobs/{JOB_UUID}"},
+        )
+    ]
 
 
 def test_lpars_power_off_confirms_public_selector_then_submits(fake_hmc):

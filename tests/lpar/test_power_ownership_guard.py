@@ -405,12 +405,19 @@ def test_power_cli_forwards_the_system_selector_and_override(
     monkeypatch, command, power_on
 ) -> None:
     hmc = _hmc(authorize=True)
-    operation = AsyncMock(return_value=AsyncMock(lpar_uuid=LPAR_UUID, job=None))
+    outcome = (
+        lpar_activation.power_on_outcome(
+            lpar_activation.LparPowerResult(LPAR_UUID, None)
+        )
+        if power_on
+        else AsyncMock(lpar_uuid=LPAR_UUID, job=None)
+    )
+    operation = AsyncMock(return_value=outcome)
     monkeypatch.setattr(
         "hmcpctl.cli_commands.runtime.client", lambda: _factory_for(hmc)
     )
     monkeypatch.setattr(
-        cli_lpars, "submit_power_on_lpar" if power_on else "power_off_lpar", operation
+        cli_lpars, "power_on_lpar" if power_on else "power_off_lpar", operation
     )
 
     result = CliRunner().invoke(
@@ -429,4 +436,5 @@ def test_power_cli_forwards_the_system_selector_and_override(
     assert result.exit_code == 0, result.output
     assert operation.await_args.kwargs["ownership_override"] is True
     assert operation.await_args.kwargs["system_name_or_uuid"] == "sys1"
+    assert operation.await_args.args == (hmc, "aix1")
     operation.assert_awaited_once()

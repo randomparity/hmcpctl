@@ -117,6 +117,13 @@ raw HMC payloads. Every entry is the parsed uom resource:
 `{UUID, title, link, ResourceType, Resource}` where `Resource` is the flattened
 XML (namespace-stripped, HMC bookkeeping attributes removed).
 
+`lpars power-on` prints its activation outcome as a JSON object after the status
+message: `already_activated`, `job`, `message`, `affinity_assessment`, and `warnings`.
+The submitted HMC job is nested under `job`; an already-activated partition reports
+`already_activated: true` and `job: null` without submitting a job, unless forced.
+With `--wait`, a successful job followed by partition state `error` or `not activated`
+exits nonzero. Power-off retains its raw job output.
+
 The memory-affinity planning commands are read-only `lsmemopt` calculations.
 Repeat `--prioritize-name`, `--prioritize-id`, `--exclude-name`, or `--exclude-id`
 to describe a scenario, using names or IDs consistently. Calculated scores are

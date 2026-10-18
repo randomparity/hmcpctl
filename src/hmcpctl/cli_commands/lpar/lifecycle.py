@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import typer
 from rich.text import Text
 
@@ -13,9 +15,10 @@ from ...jobs import (
     validate_wait_timing,
 )
 from ...operations.lpar.activation import (
+    LparPowerOnOutcome,
     LparPowerResult,
     power_off_lpar,
-    submit_power_on_lpar,
+    power_on_lpar,
 )
 from ...operations.lpar.core import delete_lpar
 from ..output import console, err_console, print_json, terminal_field
@@ -74,7 +77,7 @@ def lpars_power_on(
     validate_wait_timing(wait, timeout, interval)
     _confirm_power(name_or_uuid, "PowerOn", yes)
     result = with_client(
-        lambda hmc: submit_power_on_lpar(
+        lambda hmc: power_on_lpar(
             hmc,
             name_or_uuid,
             system_name_or_uuid=system,
@@ -89,7 +92,7 @@ def lpars_power_on(
             keylock=keylock,
         )
     )
-    _render_power(result)
+    _render_power_on(result, name_or_uuid)
 
 
 def lpars_power_off(
@@ -166,12 +169,24 @@ def _confirm_power(name_or_uuid: str, operation: str, yes: bool) -> None:
         raise typer.Abort()
 
 
+def _render_power_on(result: LparPowerOnOutcome, selector: str) -> None:
+    if result.message:
+        console.print(terminal_field(result.message), style="yellow", markup=False)
+    else:
+        console.print(
+            Text.assemble(
+                ("Job submitted", "green"), f" for {terminal_field(selector)}"
+            )
+        )
+    print_json(asdict(result))
+    for warning in result.warnings:
+        console.print(
+            f"Warning: {terminal_field(warning)}", style="yellow", markup=False
+        )
+
+
 def _render_power(result: LparPowerResult) -> None:
     uuid, job = result.lpar_uuid, result.job
-    if job and job.get("already_activated"):
-        console.print(terminal_field(job["message"]), style="yellow", markup=False)
-        print_json(job)
-        return
     console.print(
         Text.assemble(("Job submitted", "green"), f" for {terminal_field(uuid)}")
     )
