@@ -1789,16 +1789,12 @@ def main(argv: list[str] | None = None) -> int:
     lpar_config_inputs = lpar_config_inputs_from_document(document, subtasks)
     lpar_power_inputs = lpar_power_inputs_from_document(document, subtasks)
 
-    artifact_config = document.get("config")
-    artifact_system = (
-        (
-            artifact_config.get("system_name", "") or ""
-            if isinstance(artifact_config, dict)
-            else ""
-        )
-        if 43 in subtasks
-        else None
-    )
+    artifact_system = None
+    if 43 in subtasks:
+        artifact_config = document.get("config")
+        artifact_system = ""
+        if isinstance(artifact_config, dict):
+            artifact_system = artifact_config.get("system_name") or ""
     checks = tuple(
         (checker, inputs)
         for checker, inputs in (

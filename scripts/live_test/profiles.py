@@ -389,7 +389,6 @@ async def inventory_lpar_profiles(client: Client, state: RunState) -> None:
     await _capability_reads(client, state)
 
 
-ARTIFACT_SUBTASK = 43
 ARTIFACT_GROUP = "profile-artifacts"
 ARTIFACT_PREFIX = "hmcpctl-live-prof-"
 _ARTIFACT_SCENARIO = "st43-profile-artifacts"
