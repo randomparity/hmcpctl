@@ -22,7 +22,13 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from . import store
-from .models import EffectRecord, OperationRecord
+from .models import (
+    EffectRecord,
+    EffectStatus,
+    OperationOutcome,
+    OperationRecord,
+    OperationState,
+)
 from .store import OperationRefused
 
 EXCLUDED_ARGUMENTS = frozenset({"continuation", "wait_seconds", "hold_id"})
@@ -346,8 +352,8 @@ def _work(
 
 def _end(
     operation_id: str,
-    state: str,
-    outcome: str,
+    state: OperationState,
+    outcome: OperationOutcome,
     warnings: tuple[str, ...] = (),
     result_json: str | None = None,
 ) -> None:
@@ -413,7 +419,7 @@ async def _run(
             result_json,
         )
         return
-    state = "paused" if result.outcome in _PAUSING else "terminal"
+    state: OperationState = "paused" if result.outcome in _PAUSING else "terminal"
     _end(operation_id, state, result.outcome, (), result_json)
 
 
@@ -525,7 +531,9 @@ class OperationContext:
                 identity=plain,
             )
 
-    def _settle(self, key: str, status: str, identity: dict[str, Any] | None) -> None:
+    def _settle(
+        self, key: str, status: EffectStatus, identity: dict[str, Any] | None
+    ) -> None:
         with store.session() as conn, store.write_transaction(conn):
             store.record_outcome(conn, self.operation_id, key, status, identity)
         self._effects[key] = dataclasses.replace(

@@ -741,3 +741,19 @@ def test_submission_snapshots_classifiers_before_reconciliation():
         {"uuid": "second"},
     ]
     assert [writer.calls for writer in writers] == [0, 0]
+
+
+@pytest.mark.parametrize("field", ["state", "outcome", "effect_status"])
+def test_corrupt_control_vocabulary_refuses_before_effect_execution(field):
+    _crashed()
+    with store.session() as conn, store.write_transaction(conn):
+        if field == "effect_status":
+            conn.execute("UPDATE effects SET status = ?", ("invalid-value",))
+        else:
+            conn.execute("UPDATE operations SET state = 'paused'")
+            conn.execute(f"UPDATE operations SET {field} = ?", ("invalid-value",))
+    writer = Writer()
+    with pytest.raises(OperationRefused) as caught:
+        _submit(body=_body(writer), continuation="resume")
+    assert caught.value.reason == "store_corrupt"
+    assert writer.calls == 0

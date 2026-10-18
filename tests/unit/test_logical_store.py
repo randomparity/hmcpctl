@@ -6,6 +6,7 @@ import dataclasses
 import fcntl
 import json
 import os
+from typing import get_args
 
 import pytest
 
@@ -551,3 +552,101 @@ def test_connection_label_sanitizes_unreadable_configuration(lab_config):
         store.connection_label("lab", tool="t")
     assert str(path) not in str(raised.value)
     assert isinstance(raised.value.__cause__, ConfigError)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (field, value)
+        for field in ("state", "outcome", "effect_status")
+        for value in ("private-invalid-value", 0, [], None)
+        if not (field == "outcome" and value is None)
+    ],
+)
+def test_invalid_vocabulary_write_leaves_rows_and_events_unchanged(field, value):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.record_intent(conn, _oid(1), "step", "test.write", "target")
+        before = tuple(conn.execute("SELECT * FROM operations").fetchone())
+        before_effect = tuple(conn.execute("SELECT * FROM effects").fetchone())
+        before_events = conn.execute("SELECT count(*) FROM events").fetchone()[0]
+        with pytest.raises(OperationRefused) as caught:
+            if field == "effect_status":
+                store.record_outcome(conn, _oid(1), "step", value, None)
+            else:
+                store.set_state(
+                    conn,
+                    _oid(1),
+                    value if field == "state" else "running",
+                    value if field == "outcome" else None,
+                )
+        assert caught.value.reason == f"invalid_{field}"
+        if isinstance(value, str):
+            assert value not in str(caught.value)
+        assert tuple(conn.execute("SELECT * FROM operations").fetchone()) == before
+        assert tuple(conn.execute("SELECT * FROM effects").fetchone()) == before_effect
+        assert (
+            conn.execute("SELECT count(*) FROM events").fetchone()[0] == before_events
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "reader"),
+    [
+        (field, reader)
+        for field in ("state", "outcome")
+        for reader in ("get", "find", "record", "status")
+    ]
+    + [("effect_status", reader) for reader in ("effects", "record", "status")],
+)
+def test_corrupt_vocabulary_never_decodes_as_a_typed_record(field, reader):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.record_intent(conn, _oid(1), "step", "test.write", "target")
+            if field == "effect_status":
+                conn.execute(
+                    "UPDATE effects SET status = ?", ("private-invalid-value",)
+                )
+            else:
+                conn.execute(
+                    f"UPDATE operations SET {field} = ?", ("private-invalid-value",)
+                )
+        reads = {
+            "get": lambda: store.get_operation(conn, _oid(1)),
+            "find": lambda: store.find_operation(conn, "agent-a", "r1"),
+            "record": lambda: store.read_record(conn, _oid(1)),
+            "effects": lambda: store.load_effects(conn, _oid(1)),
+            "status": lambda: store.operation_status(
+                agent_id="agent-a", connection="<default>", host="hmc.test"
+            ),
+        }
+        with pytest.raises(OperationRefused) as caught:
+            reads[reader]()
+        assert caught.value.reason == "store_corrupt"
+        assert "private-invalid-value" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("state", "outcome"),
+    [(state, None) for state in get_args(models.OperationState)]
+    + [("terminal", outcome) for outcome in get_args(models.OperationOutcome)],
+)
+def test_every_declared_operation_value_roundtrips(state, outcome):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.set_state(conn, _oid(1), state, outcome)
+        record = store.read_record(conn, _oid(1))
+    assert (record.state, record.outcome) == (state, outcome)
+
+
+@pytest.mark.parametrize("status", get_args(models.EffectStatus))
+def test_every_declared_effect_status_roundtrips(status):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.record_intent(conn, _oid(1), "step", "test.write", "target")
+            store.record_outcome(conn, _oid(1), "step", status, None)
+        assert store.load_effects(conn, _oid(1))["step"].status == status
