@@ -65,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import live_test_baseline as independent_baseline
 import live_test_runner as runner
+from live_test import config as live_config
 from live_test import (
     lpar_config,
     lpar_power,
@@ -1546,7 +1547,7 @@ def round2_inputs_from_document(
         return None
     if subtasks != runner.SUBTASK_GROUPS["round2"]:
         raise ValueError("round2 dispatch does not match the complete named arm")
-    config = runner._decode_saved_config(document.get("config"))
+    config = live_config.decode_saved_config(document.get("config"))
     artifacts = document.get("artifacts")
     saved = artifacts.get("lp3_baseline") if isinstance(artifacts, dict) else None
     if not isinstance(artifacts, dict) or not isinstance(saved, dict):
@@ -1677,7 +1678,7 @@ async def _run_checks(
     lpar_power_inputs: LparPowerInputs | None = None,
     round2_inputs: Round2Inputs | None = None,
 ) -> list[Finding]:
-    state = runner.RunState(config=runner.LiveTestConfig())
+    state = runner.RunState(config=live_config.LiveTestConfig())
     # The checks need the live run's composition, not bare ``create_mcp``:
     # ``hmc_run_command`` is an opt-in escape hatch that only it registers. Without
     # it the profile-drift check was answered "Unknown tool", which read as "no

@@ -18,6 +18,7 @@ import pytest
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 import live_test_recovery as recovery  # noqa: E402
+from live_test import config as live_config  # noqa: E402
 from live_test import vios_backup  # noqa: E402
 
 _SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
@@ -209,7 +210,7 @@ def _state(monkeypatch, vios: FakeVios, group: str | None = "vios-backup"):
     monkeypatch.setattr(vios_backup, "RESTORE_WAIT_SECONDS", 0)
     monkeypatch.setattr(vios_backup, "POLL_SECONDS", 0)
     monkeypatch.setenv("HMC_SSH_TIMEOUT", str(vios_backup.MIN_SSH_TIMEOUT))
-    config = runner.LiveTestConfig(system_name=SYSTEM, lp3_name=LPAR)
+    config = live_config.LiveTestConfig(system_name=SYSTEM, lp3_name=LPAR)
     return runner.RunState(config=config, group=group)
 
 

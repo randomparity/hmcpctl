@@ -30,7 +30,9 @@ from .storage import resolve_configured_volume_group, vios_command
 from .vmedia import adapter_rows, scsi_adapter_listing, storage_rows
 
 if TYPE_CHECKING:
-    from live_test_runner import LiveTestConfig, RunState
+    from live_test_runner import RunState
+
+    from live_test.config import LiveTestConfig
 
 SUBTASK = 40
 GROUP = "storage"

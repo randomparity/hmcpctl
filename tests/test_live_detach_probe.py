@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_runner as runner
 import test_live_lpar_power_arm as arm
+from live_test import config as live_config
 from live_test import detach_probe, lpar_power
 from test_live_lpar_power_arm import GROUP, SYSTEM, FakeClient, World
 
@@ -94,7 +95,9 @@ def no_waiting(monkeypatch):
 
 def run_probe(world, schemas, output_schemas):
     state = runner.RunState(
-        config=runner.LiveTestConfig(system_name=SYSTEM, vdisk_volume_group_name=GROUP),
+        config=live_config.LiveTestConfig(
+            system_name=SYSTEM, vdisk_volume_group_name=GROUP
+        ),
         group="lpar-power",
         schemas=schemas,
     )

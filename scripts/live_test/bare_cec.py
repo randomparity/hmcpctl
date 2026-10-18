@@ -51,7 +51,9 @@ from .metrics import _as_outcome
 from .observation import CLEANUP, Assertion, CallFailure, ExpectedOutcome
 
 if TYPE_CHECKING:
-    from live_test_runner import LiveTestConfig, RunState
+    from live_test_runner import RunState
+
+    from live_test.config import LiveTestConfig
 
 _ROW = 35
 _SCENARIO = "st35-bare-cec"

@@ -18,6 +18,7 @@ SCRIPTS_ROOT = Path(__file__).parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_runner as runner  # noqa: E402
 from fastmcp.utilities.json_schema_type import json_schema_to_type  # noqa: E402
+from live_test import config as live_config  # noqa: E402
 from live_test import lpar_config, lpar_power, pcie  # noqa: E402
 from pydantic import TypeAdapter  # noqa: E402
 
@@ -549,7 +550,7 @@ def _typed_outputs(output_schemas):
 
 def _run(schemas, world: World, group: str = "lpar-power", **config: Any):
     state = runner.RunState(
-        config=runner.LiveTestConfig(
+        config=live_config.LiveTestConfig(
             system_name=SYSTEM,
             vdisk_volume_group_name=GROUP,
             provision_vlan_id=VLAN,

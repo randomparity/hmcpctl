@@ -12,6 +12,7 @@ import pytest
 
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
+from live_test import config as live_config  # noqa: E402
 from live_test import network  # noqa: E402
 
 _SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
@@ -285,7 +286,7 @@ def _state(monkeypatch, hmc: FakeHMC, group: str | None = "network"):
         return hmc.answer(tool, kwargs)
 
     monkeypatch.setattr(runner.RunState, "call", scripted)
-    config = runner.LiveTestConfig(system_name=SYSTEM, lp3_name=LPAR)
+    config = live_config.LiveTestConfig(system_name=SYSTEM, lp3_name=LPAR)
     return runner.RunState(config=config, group=group)
 
 

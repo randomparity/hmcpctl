@@ -15,8 +15,9 @@ from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 LIVE_TEST_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(LIVE_TEST_ROOT))
 from live_test import pcie  # noqa: E402
+from live_test.config import LiveTestArtifacts, LiveTestConfig  # noqa: E402
 from live_test.observation import CLEANUP, Assertion, CallFailure  # noqa: E402
-from live_test_runner import LiveTestArtifacts, LiveTestConfig, RunState  # noqa: E402
+from live_test_runner import RunState  # noqa: E402
 
 #: The arm's own settings. Everything else on `LiveTestConfig` keeps its
 #: declared default: this arm reads only these four, and reads them from the

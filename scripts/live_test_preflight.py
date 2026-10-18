@@ -55,6 +55,7 @@ from live_test import (
     vios_backup,
     vmedia,
 )
+from live_test import config as live_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, env_var_value
@@ -89,7 +90,7 @@ _DEDICATED_CONFIG_REQUIRED = (
 )
 
 
-def _dedicated_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _dedicated_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Predict the dedicated PCIe arm from the predicate the arm itself uses.
 
     `pcie._dedicated_config` is called rather than restated: it applies the
@@ -134,7 +135,7 @@ def _io_slots_scenario_line(resolved: pcie._DedicatedConfig) -> str:
     return f"io_slots scenario: two further spare slots {pcie.AUTO_SELECTED_SLOT}"
 
 
-def _bare_cec_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _bare_cec_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Predict the bare-cec arm from the predicates the arm itself admits on.
 
     It shares the dedicated arm's configuration, and adds its own two refusals:
@@ -180,7 +181,7 @@ def _bare_cec_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _profiles_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the profiles arm (#627) changes, each restored by the arm itself."""
     return ArmVerdict(
         "profiles",
@@ -208,7 +209,7 @@ def _profiles_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _vios_backup_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _vios_backup_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the vios-backup arm (#1349) changes and removes again."""
     if HMCConfig().ssh_timeout < vios_backup.MIN_SSH_TIMEOUT:
         return ArmVerdict(
@@ -241,7 +242,7 @@ def _vios_backup_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _pcm_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _pcm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the system-wide PCM preferences the pcm arm (#634) toggles and restores."""
     return ArmVerdict(
         "pcm",
@@ -258,7 +259,7 @@ def _pcm_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _lpar_config_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the one partition the lpar-config arm (#1345) creates and deletes again."""
     arm = pcie._dedicated_config(config)
     dedicated = (
@@ -289,7 +290,7 @@ def _lpar_config_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _lpar_power_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the partitions and the VIOS volume the lpar-power arm (#1346) creates."""
     return ArmVerdict(
         "lpar-power",
@@ -322,7 +323,7 @@ def _lpar_power_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _network_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _network_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the network arm (#629) changes, each reversed by the arm itself."""
     return ArmVerdict(
         "network",
@@ -354,7 +355,7 @@ def _network_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _users_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _users_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the HMC user the users arm (#632) creates and deletes again."""
     return ArmVerdict(
         "users",
@@ -371,7 +372,7 @@ def _users_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _vmedia_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _vmedia_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the vmedia arm (#1347) changes, each removed by the arm itself."""
     return ArmVerdict(
         "vmedia",
@@ -401,7 +402,7 @@ def _vmedia_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _storage_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _storage_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the storage arm (#1348) changes, each removed by the arm itself."""
     volume = f"{storage_lifecycle.DISK_PREFIX}<8 hex>"
     return ArmVerdict(
@@ -448,7 +449,7 @@ _ARM_VERDICTS = {
 }
 
 
-def _generic_verdict(group: str, config: runner.LiveTestConfig) -> ArmVerdict:
+def _generic_verdict(group: str, config: live_config.LiveTestConfig) -> ArmVerdict:
     """The arms whose settings `LiveTestConfig` supplies with defaults.
 
     These have no arm-specific admission predicate to import: `from_env_file`
@@ -466,7 +467,7 @@ def _generic_verdict(group: str, config: runner.LiveTestConfig) -> ArmVerdict:
 
 
 def arm_verdicts(
-    config: runner.LiveTestConfig, group: str | None
+    config: live_config.LiveTestConfig, group: str | None
 ) -> tuple[ArmVerdict, ...]:
     """Predict each selected arm. `None` and `"all"` select every arm."""
     selected = tuple(runner.SUBTASK_GROUPS) if group in (None, "all") else (group,)
@@ -516,10 +517,10 @@ async def _probe_provision_vlan(system_name: str, vlan_id: int) -> str:
     return f"{vlan_id} has a virtual network"
 
 
-def _check_configuration() -> tuple[runner.LiveTestConfig | None, str]:
+def _check_configuration() -> tuple[live_config.LiveTestConfig | None, str]:
     """Run the runner's own `.env` validator and report its verdict."""
     try:
-        return runner.LiveTestConfig.from_env_file(), ""
+        return live_config.LiveTestConfig.from_env_file(), ""
     except ValueError as exc:
         return None, str(exc)
 

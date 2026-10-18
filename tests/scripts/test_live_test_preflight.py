@@ -17,6 +17,7 @@ SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_preflight as preflight  # noqa: E402
 import live_test_runner as runner  # noqa: E402
+from live_test import config as live_config  # noqa: E402
 
 
 def _env_text(**overrides: str) -> str:
@@ -26,9 +27,9 @@ def _env_text(**overrides: str) -> str:
     fails for the wrong reason. Building from `_CONFIG_FIELDS` also means a new
     setting cannot silently leave these tests testing a rejected file.
     """
-    defaults = runner.LiveTestConfig()
+    defaults = live_config.LiveTestConfig()
     values = {}
-    for key, field in runner.LiveTestConfig._CONFIG_FIELDS.items():
+    for key, field in live_config.LiveTestConfig._CONFIG_FIELDS.items():
         value = getattr(defaults, field)
         values[key] = ",".join(value) if isinstance(value, tuple) else str(value)
     # Replacing, not appending: a second line for the same key is a duplicate,
@@ -63,7 +64,7 @@ def test_the_generated_fixture_env_is_one_the_runner_accepts(workspace):
     """Guards every case below: a fixture the validator rejects proves nothing."""
     (workspace / ".env").write_text(_env_text(**_DEDICATED), encoding="utf-8")
 
-    config = runner.LiveTestConfig.from_env_file()
+    config = live_config.LiveTestConfig.from_env_file()
 
     assert config.dedicated_pcie_system_name == "sys-R1"
 
@@ -122,7 +123,7 @@ def test_each_rejection_the_runner_makes_is_a_non_zero_exit(
     _credentials(monkeypatch)
 
     with pytest.raises(ValueError) as runner_error:
-        runner.LiveTestConfig.from_env_file()
+        live_config.LiveTestConfig.from_env_file()
 
     assert preflight.main(["--skip-hardware"]) == 1
     output = capsys.readouterr().out
@@ -137,7 +138,7 @@ def test_a_configuration_the_runner_accepts_is_never_rejected_here(
     (workspace / ".env").write_text(_env_text(**_DEDICATED), encoding="utf-8")
     _credentials(monkeypatch)
 
-    runner.LiveTestConfig.from_env_file()  # the runner accepts it
+    live_config.LiveTestConfig.from_env_file()  # the runner accepts it
 
     assert preflight.main(["--skip-hardware"]) == 0
 
@@ -172,7 +173,7 @@ def test_a_dotenv_only_schema_version_is_reported_as_set(
         _env_text(**_DEDICATED) + "HMC_SCHEMA_VERSION=V1_0\n", encoding="utf-8"
     )
     monkeypatch.setattr(runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(runner, "_ENV_FILE", workspace / ".env")
+    monkeypatch.setattr(live_config, "ENV_FILE", workspace / ".env")
     for key in ("HMC_HOST", "HMC_USER", "HMC_PASSWORD"):
         monkeypatch.setenv(key, f"value-for-{key}")
 
@@ -669,7 +670,7 @@ def test_the_provision_vlan_is_reported_under_round2(
     assert preflight.main(group) == 0
 
     output = capsys.readouterr().out
-    assert probed == [(runner.LiveTestConfig().system_name, 42)]
+    assert probed == [(live_config.LiveTestConfig().system_name, 42)]
     round2 = output.index("  round2 ")
     assert output.index("    provision VLAN: 42 has a virtual network") > round2
 
@@ -793,7 +794,7 @@ def test_st42_preflight_discloses_exact_optin_or_skip(pv, group):
     from dataclasses import replace
 
     config = replace(
-        preflight.runner.LiveTestConfig(), scratch_pv_name=pv, scratch_vg_name=group
+        live_config.LiveTestConfig(), scratch_pv_name=pv, scratch_vg_name=group
     )
     verdict = preflight._storage_verdict(config)
     text = str(verdict)
@@ -806,7 +807,7 @@ def test_st42_preflight_discloses_exact_optin_or_skip(pv, group):
 
 
 def test_lpar_config_discloses_configured_dedicated_slot():
-    config = preflight.runner.LiveTestConfig(
+    config = live_config.LiveTestConfig(
         system_name="sys-A",
         dedicated_pcie_system_name="sys-A",
         dedicated_pcie_lpar_prefix="scratch-",

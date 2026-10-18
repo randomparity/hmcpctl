@@ -64,6 +64,7 @@ from live_test import (  # noqa: E402
     vios_backup,
     vmedia,
 )
+from live_test import config as live_config  # noqa: E402
 
 LIVE_WORKFLOW_MODULES = (
     bare_cec,
@@ -1466,7 +1467,7 @@ async def test_main_records_the_dispatched_group(monkeypatch, tmp_path) -> None:
     await runner.main(
         results_path=str(tmp_path / "results.json"),
         group="profiles",
-        config=runner.LiveTestConfig(),
+        config=live_config.LiveTestConfig(),
     )
 
     assert seen == ["profiles"]
@@ -2734,9 +2735,9 @@ def _startup_gate(monkeypatch, tmp_path) -> list[dict[str, object]]:
     repo = _live_repo(tmp_path)
     monkeypatch.chdir(repo)
     monkeypatch.setattr(
-        runner.LiveTestConfig,
+        live_config.LiveTestConfig,
         "from_env_file",
-        classmethod(lambda _cls: runner.LiveTestConfig()),
+        classmethod(lambda _cls: live_config.LiveTestConfig()),
     )
     monkeypatch.setattr(runner, "_read_environment", lambda *_a: ("V10R3", "POWER10"))
     monkeypatch.setattr(runner, "_bootstrap_config", lambda: True)
@@ -2774,7 +2775,7 @@ def test_the_startup_gate_resolves_a_dotenv_only_schema_version(monkeypatch, tmp
     started = _startup_gate(monkeypatch, tmp_path)
     dotenv = tmp_path / ".env"
     dotenv.write_text("HMC_SCHEMA_VERSION=V1_0\n", encoding="utf-8")
-    monkeypatch.setattr(runner, "_ENV_FILE", dotenv)
+    monkeypatch.setattr(live_config, "ENV_FILE", dotenv)
 
     assert runner._run_from_arguments([]) == 0
 
@@ -2811,7 +2812,7 @@ async def test_the_run_header_records_which_way_the_run_went(
         assert HMCConfig(host="h", user="u", password="p").schema_version == "V1_0"
 
     await runner.main(
-        999, str(tmp_path / "results.json"), config=runner.LiveTestConfig()
+        999, str(tmp_path / "results.json"), config=live_config.LiveTestConfig()
     )
 
     assert reported in capsys.readouterr().out
@@ -2834,7 +2835,7 @@ def test_the_iso_allowlist_merge_reaches_the_field_and_is_idempotent(monkeypatch
     monkeypatch.setenv(name, "canonical.example.com")
     monkeypatch.setenv("hmc_iso_url_allowlist", "variant.example.com")
 
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     vmedia._allow_iso_host(config)
 
     merged = os.environ[name]
@@ -2860,14 +2861,14 @@ def test_the_iso_allowlist_merge_keeps_a_variant_only_operator_entry(monkeypatch
     _clear(monkeypatch, name)
     monkeypatch.setenv("hmc_iso_url_allowlist", "operator.example.com")
 
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     vmedia._allow_iso_host(config)
 
     assert os.environ[name].split(",") == ["operator.example.com", config.iso_host]
 
 
 def test_live_config_is_frozen() -> None:
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
 
     with pytest.raises(FrozenInstanceError):
         config.system_name = "changed"
@@ -2882,7 +2883,7 @@ def test_live_config_reads_the_complete_example_and_ignores_exports(
     config_path.write_text(example.read_text())
     monkeypatch.setenv("LIVE_TEST_SYSTEM_NAME", "ambient-target")
 
-    config = runner.LiveTestConfig.from_env_file(config_path)
+    config = live_config.LiveTestConfig.from_env_file(config_path)
 
     assert config.system_name == "example-lt-609-system"
     assert config.sriov_logical_port_id == "917003"
@@ -2918,9 +2919,10 @@ def test_live_config_reads_the_bare_cec_dump_opt_in_from_the_example(tmp_path) -
     config_path.write_text(text)
 
     assert (
-        runner.LiveTestConfig.from_env_file(config_path).accept_platform_dump == "true"
+        live_config.LiveTestConfig.from_env_file(config_path).accept_platform_dump
+        == "true"
     )
-    assert runner.LiveTestConfig().accept_platform_dump == ""
+    assert live_config.LiveTestConfig().accept_platform_dump == ""
 
 
 def test_live_config_keeps_a_hex_sriov_logical_port_id_as_a_string(tmp_path) -> None:
@@ -2929,7 +2931,7 @@ def test_live_config_keeps_a_hex_sriov_logical_port_id_as_a_string(tmp_path) -> 
         tmp_path, "LIVE_TEST_SRIOV_LOGICAL_PORT_ID", "2700400a"
     )
 
-    config = runner.LiveTestConfig.from_env_file(config_path)
+    config = live_config.LiveTestConfig.from_env_file(config_path)
 
     assert config.sriov_logical_port_id == "2700400a"
 
@@ -2942,7 +2944,7 @@ def test_live_config_rejects_a_non_hex_sriov_logical_port_id(tmp_path, value) ->
     config_path = _example_env_with(tmp_path, "LIVE_TEST_SRIOV_LOGICAL_PORT_ID", value)
 
     with pytest.raises(ValueError, match="LIVE_TEST_SRIOV_LOGICAL_PORT_ID"):
-        runner.LiveTestConfig.from_env_file(config_path)
+        live_config.LiveTestConfig.from_env_file(config_path)
 
 
 def test_live_config_accepts_zero_sriov_physical_port_id(tmp_path) -> None:
@@ -2953,7 +2955,7 @@ def test_live_config_accepts_zero_sriov_physical_port_id(tmp_path) -> None:
     """
     config_path = _example_env_with(tmp_path, "LIVE_TEST_SRIOV_PHYSICAL_PORT_ID", "0")
 
-    config = runner.LiveTestConfig.from_env_file(config_path)
+    config = live_config.LiveTestConfig.from_env_file(config_path)
 
     assert config.sriov_physical_port_id == 0
 
@@ -2975,13 +2977,13 @@ def test_default_sriov_capacity_is_a_multiple_of_every_recorded_port_granularity
             r'"min_eth_capacity_granularity": "([^"]+)"', fixture.read_text()
         )
     }
-    example = runner.LiveTestConfig.from_env_file(
+    example = live_config.LiveTestConfig.from_env_file(
         Path(__file__).parents[1] / ".env.example"
     )
 
     assert granularities == {Decimal("1.0"), Decimal("2.0")}
     defaults = (
-        runner.LiveTestConfig().sriov_capacity_percent,
+        live_config.LiveTestConfig().sriov_capacity_percent,
         example.sriov_capacity_percent,
     )
     for capacity in defaults:
@@ -3018,7 +3020,7 @@ def test_live_config_rejects_unusable_scratch_processing_units(
     config_path = _example_env_with(tmp_path, key, value)
 
     with pytest.raises(ValueError, match=match):
-        runner.LiveTestConfig.from_env_file(config_path)
+        live_config.LiveTestConfig.from_env_file(config_path)
 
 
 @pytest.mark.parametrize(
@@ -3035,7 +3037,7 @@ def test_live_config_rejects_a_media_repository_size_that_is_not_whole_gib(
     config_path = _example_env_with(tmp_path, key, "1536")
 
     with pytest.raises(ValueError, match=f"{key} must be a multiple of 1024"):
-        runner.LiveTestConfig.from_env_file(config_path)
+        live_config.LiveTestConfig.from_env_file(config_path)
 
 
 def test_live_config_default_and_example_vdisk_name_fit_the_vios_limit() -> None:
@@ -3045,7 +3047,7 @@ def test_live_config_default_and_example_vdisk_name_fit_the_vios_limit() -> None
         line.split("=", 1) for line in example.read_text().splitlines() if "=" in line
     )["LIVE_TEST_VDISK_NAME"]
 
-    assert len(runner.LiveTestConfig().vdisk_name) <= VIRTUAL_DISK_NAME_MAX
+    assert len(live_config.LiveTestConfig().vdisk_name) <= VIRTUAL_DISK_NAME_MAX
     assert len(example_value) <= VIRTUAL_DISK_NAME_MAX
 
 
@@ -3055,10 +3057,10 @@ def test_live_config_rejects_an_over_length_vdisk_name(tmp_path) -> None:
     config_path = _example_env_with(tmp_path, "LIVE_TEST_VDISK_NAME", name)
 
     with pytest.raises(ValueError, match="LIVE_TEST_VDISK_NAME must be at most 15"):
-        runner.LiveTestConfig.from_env_file(config_path)
+        live_config.LiveTestConfig.from_env_file(config_path)
 
     exact = _example_env_with(tmp_path, "LIVE_TEST_VDISK_NAME", "x" * 15)
-    assert runner.LiveTestConfig.from_env_file(exact).vdisk_name == "x" * 15
+    assert live_config.LiveTestConfig.from_env_file(exact).vdisk_name == "x" * 15
 
 
 @pytest.mark.parametrize(
@@ -3073,20 +3075,22 @@ def test_live_config_rejects_shell_unsafe_vios_names(tmp_path, key, value) -> No
     config_path = _example_env_with(tmp_path, key, value)
 
     with pytest.raises(ValueError, match=f"{key} may contain only"):
-        runner.LiveTestConfig.from_env_file(config_path)
+        live_config.LiveTestConfig.from_env_file(config_path)
 
 
 def test_live_config_accepts_allowlisted_vios_names(tmp_path) -> None:
     config_path = _example_env_with(tmp_path, "LIVE_TEST_VDISK_NAME", "lt_1.a-b")
 
-    assert runner.LiveTestConfig.from_env_file(config_path).vdisk_name == "lt_1.a-b"
+    assert (
+        live_config.LiveTestConfig.from_env_file(config_path).vdisk_name == "lt_1.a-b"
+    )
 
 
 def test_live_config_reads_the_provision_fixture_settings(tmp_path) -> None:
     """#970: ST13/ST14's VLAN and disk size come from `.env`, not lab fixtures."""
     config_path = _example_env_with(tmp_path, "LIVE_TEST_PROVISION_VLAN_ID", "4094")
 
-    config = runner.LiveTestConfig.from_env_file(config_path)
+    config = live_config.LiveTestConfig.from_env_file(config_path)
 
     assert config.provision_vlan_id == 4094
     assert config.provision_disk_mib == 10240
@@ -3113,14 +3117,14 @@ def test_live_config_rejects_unusable_provision_fixture_settings(
     config_path = _example_env_with(tmp_path, key, value)
 
     with pytest.raises(ValueError, match=match):
-        runner.LiveTestConfig.from_env_file(config_path)
+        live_config.LiveTestConfig.from_env_file(config_path)
 
 
 def test_live_config_rejects_negative_sriov_physical_port_id(tmp_path) -> None:
     config_path = _example_env_with(tmp_path, "LIVE_TEST_SRIOV_PHYSICAL_PORT_ID", "-1")
 
     with pytest.raises(ValueError, match="sriov_physical_port_id"):
-        runner.LiveTestConfig.from_env_file(config_path)
+        live_config.LiveTestConfig.from_env_file(config_path)
 
 
 @pytest.mark.asyncio
@@ -3128,7 +3132,7 @@ async def test_main_rejects_missing_live_test_file_before_creating_mcp(
     monkeypatch, tmp_path, capsys
 ) -> None:
     """Programmatic invocation cannot bypass required local live-test settings."""
-    monkeypatch.setattr(runner, "_ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(live_config, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(
         runner, "create_mcp", lambda *_args, **_kwargs: pytest.fail("created MCP")
     )
@@ -3153,7 +3157,7 @@ def test_a_dotenv_entry_never_outranks_a_case_variant_export(monkeypatch, tmp_pa
     monkeypatch.setenv("hmc_host", "lab-hmc.example.com")
     env_file = tmp_path / ".env"
     env_file.write_text("HMC_HOST=prod-hmc.example.com\nHMC_SCHEMA_VERSION=V1_0\n")
-    monkeypatch.setattr(runner, "_ENV_FILE", env_file)
+    monkeypatch.setattr(live_config, "ENV_FILE", env_file)
 
     runner._load_dotenv()
 
@@ -3281,7 +3285,7 @@ def test_a_case_variant_of_an_exact_case_reader_does_not_suppress_its_dotenv_lin
     monkeypatch.setenv("hmc_host", "lab-hmc.example.com")
     env_file = tmp_path / ".env"
     env_file.write_text("HMC_PROFILE=lab\nHMC_HOST=prod-hmc.example.com\n")
-    monkeypatch.setattr(runner, "_ENV_FILE", env_file)
+    monkeypatch.setattr(live_config, "ENV_FILE", env_file)
 
     runner._load_dotenv()
 
@@ -3313,7 +3317,7 @@ def test_the_already_set_gate_folds_down_like_the_loader(monkeypatch, tmp_path):
     monkeypatch.setenv("HMC_SSH_KEY_FILE", "/home/op/exported")
     env_file = tmp_path / ".env"
     env_file.write_text(f"{kelvin}=/home/op/from-dotenv\n")
-    monkeypatch.setattr(runner, "_ENV_FILE", env_file)
+    monkeypatch.setattr(live_config, "ENV_FILE", env_file)
 
     runner._load_dotenv()
 
@@ -3464,7 +3468,9 @@ async def test_later_invalid_declaration_stops_run_before_client(monkeypatch):
     )
     monkeypatch.setattr(runner, "create_mcp", lambda *_a: pytest.fail("created client"))
     assert (
-        await runner.main(config=runner.LiveTestConfig(), hmc_config=_live_hmc_config())
+        await runner.main(
+            config=live_config.LiveTestConfig(), hmc_config=_live_hmc_config()
+        )
         == 1
     )
 
@@ -3518,7 +3524,9 @@ async def scenario(client, state):
     monkeypatch.setattr(runner.inspect, "getsource", lambda _: source)
     monkeypatch.setattr(runner, "create_mcp", lambda *_a: pytest.fail("created client"))
     assert (
-        await runner.main(config=runner.LiveTestConfig(), hmc_config=_live_hmc_config())
+        await runner.main(
+            config=live_config.LiveTestConfig(), hmc_config=_live_hmc_config()
+        )
         == 1
     )
 
@@ -4145,22 +4153,22 @@ def _live_hmc_config() -> HMCConfig:
 
 
 def _result_document(
-    config: runner.LiveTestConfig,
+    config: live_config.LiveTestConfig,
     hmc_config: HMCConfig,
-    artifacts: runner.LiveTestArtifacts | None = None,
+    artifacts: live_config.LiveTestArtifacts | None = None,
 ) -> dict:
     return {
         "config": asdict(config),
         "hmc": runner._hmc_identity(hmc_config),
-        "artifacts": asdict(artifacts or runner.LiveTestArtifacts()),
+        "artifacts": asdict(artifacts or live_config.LiveTestArtifacts()),
         "results": [{"status": "PASS"}],
     }
 
 
 def test_restore_artifacts_round_trips_config_and_preserves_result_rows(tmp_path):
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
-    artifacts = runner.LiveTestArtifacts(
+    artifacts = live_config.LiveTestArtifacts(
         system_uuid="system-1",
         vios_uuid="vios-1",
         lp3_baseline={"description": "original"},
@@ -4187,9 +4195,9 @@ async def test_subset_preserves_destination_pending_scratch_recovery(
 
     _isolate_runner(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
-    artifacts = runner.LiveTestArtifacts(
+    artifacts = live_config.LiveTestArtifacts(
         vios_uuid="vios-1", storage_volume_group_name="hpvg1234abcd"
     )
     destination = tmp_path / "test-results-storage.json"
@@ -4235,14 +4243,14 @@ def test_subset_rejection_preserves_destination_for_recovery(
 
     _isolate_runner(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    config = runner.LiveTestConfig(
+    config = live_config.LiveTestConfig(
         scratch_pv_name="hdisk9", scratch_vg_name="hpvg1234abcd"
     )
     hmc_config = _live_hmc_config()
     document = _result_document(
         config,
         hmc_config,
-        runner.LiveTestArtifacts(
+        live_config.LiveTestArtifacts(
             vios_uuid="vios-1", storage_volume_group_name="hpvg1234abcd"
         ),
     )
@@ -4283,7 +4291,7 @@ def test_default_interruption_then_real_subset_preserves_recovery(
     import live_test_recovery as recovery
 
     monkeypatch.chdir(tmp_path)
-    config = runner.LiveTestConfig(
+    config = live_config.LiveTestConfig(
         system_name="sys-A",
         vdisk_volume_group_name="data-A",
         scratch_pv_name="hdisk9",
@@ -4293,7 +4301,7 @@ def test_default_interruption_then_real_subset_preserves_recovery(
     document = _result_document(
         config,
         hmc_config,
-        runner.LiveTestArtifacts(
+        live_config.LiveTestArtifacts(
             vios_uuid="vios-A",
             vios_partition_id=1,
             storage_volume_group_name="hpvg1234abcd",
@@ -4382,14 +4390,14 @@ def test_default_rejection_preserves_destination_before_client(
     import live_test_recovery as recovery
 
     monkeypatch.chdir(tmp_path)
-    config = runner.LiveTestConfig(
+    config = live_config.LiveTestConfig(
         scratch_pv_name="hdisk9", scratch_vg_name="hpvg1234abcd"
     )
     hmc_config = _live_hmc_config()
     document = _result_document(
         config,
         hmc_config,
-        runner.LiveTestArtifacts(
+        live_config.LiveTestArtifacts(
             vios_uuid="vios-A", storage_volume_group_name="hpvg1234abcd"
         ),
     )
@@ -4427,7 +4435,7 @@ def test_default_rejection_preserves_destination_before_client(
 
 def test_restore_artifacts_accepts_a_document_carrying_the_run_block(tmp_path):
     """The runner writes `run`; the guard that reads its own output must admit it."""
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     document["run"] = {"tested_commit": "a" * 40, "tree_clean": True, "subtasks": [24]}
@@ -4437,7 +4445,7 @@ def test_restore_artifacts_accepts_a_document_carrying_the_run_block(tmp_path):
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == runner.LiveTestArtifacts()
+    assert state.artifacts == live_config.LiveTestArtifacts()
 
 
 def test_restore_drops_the_configured_test_user_from_before_632(tmp_path):
@@ -4446,7 +4454,7 @@ def test_restore_drops_the_configured_test_user_from_before_632(tmp_path):
     That UUID named a configured user, never a users-arm scratch user, so no
     later step may act on it.
     """
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     del document["artifacts"]["test_user_name"]
@@ -4464,7 +4472,7 @@ def test_restore_drops_the_configured_test_user_from_before_632(tmp_path):
 
 def test_restore_drops_the_network_test_partition_from_before_1377(tmp_path):
     """A report written while the runner still carried the #1361-retired partition restores."""
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     document["config"]["nettest_name"] = "lpar-A"
@@ -4476,7 +4484,7 @@ def test_restore_drops_the_network_test_partition_from_before_1377(tmp_path):
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == runner.LiveTestArtifacts(system_uuid="system-uuid")
+    assert state.artifacts == live_config.LiveTestArtifacts(system_uuid="system-uuid")
 
 
 @pytest.mark.parametrize(
@@ -4492,9 +4500,9 @@ def test_a_retired_setting_still_loads_with_a_notice(tmp_path, capsys, key):
     env = tmp_path / ".env"
     env.write_text(example.read_text() + f"{key}=someone\n")
 
-    config = runner.LiveTestConfig.from_env_file(env)
+    config = live_config.LiveTestConfig.from_env_file(env)
 
-    assert config == runner.LiveTestConfig()
+    assert config == live_config.LiveTestConfig()
     assert f"{key} (line" in capsys.readouterr().out
 
 
@@ -4508,10 +4516,10 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vios_backup_arm(
     tmp_path,
 ):
     """A report written before #1349 added the ST37 fields is still a restore source."""
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
-    for name in runner._VIOS_BACKUP_ARTIFACTS:
+    for name in live_config._VIOS_BACKUP_ARTIFACTS:
         del document["artifacts"][name]
     document["artifacts"]["vios_uuid"] = "vios-1"
     results_path = tmp_path / "previous.json"
@@ -4528,10 +4536,10 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vmedia_artifacts
     tmp_path,
 ):
     """A report written before #1347 tracked the repository group still restores."""
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
-    for name in runner._VMEDIA_REPOSITORY_ARTIFACTS:
+    for name in live_config._VMEDIA_REPOSITORY_ARTIFACTS:
         del document["artifacts"][name]
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
@@ -4544,26 +4552,26 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vmedia_artifacts
 
 
 def test_decode_artifacts_refuses_a_non_string_vmedia_field():
-    artifacts = asdict(runner.LiveTestArtifacts())
+    artifacts = asdict(live_config.LiveTestArtifacts())
     artifacts["vmedia_blank_name"] = 3
 
     with pytest.raises(TypeError, match="vmedia_blank_name"):
-        runner._decode_artifacts(artifacts)
+        live_config.decode_artifacts(artifacts)
 
 
 def test_decode_artifacts_refuses_a_non_string_vios_backup_field():
-    artifacts = asdict(runner.LiveTestArtifacts())
+    artifacts = asdict(live_config.LiveTestArtifacts())
     artifacts["vios_backup_mapping"] = 3
 
     with pytest.raises(TypeError, match="vios_backup_mapping"):
-        runner._decode_artifacts(artifacts)
+        live_config.decode_artifacts(artifacts)
 
 
 def test_restore_artifacts_tolerates_a_config_with_the_removed_vios_slot_settings(
     tmp_path,
 ):
     """A report written before #1030 dropped the dry-run VIOS settings still restores."""
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     document["config"]["dry_run_vios_slot"] = 17
@@ -4595,14 +4603,14 @@ def test_restore_artifacts_reports_expected_results_file_failures(
 def test_restore_artifacts_rejects_wrong_types_without_partial_mutation(
     tmp_path, capsys
 ):
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     document["artifacts"]["system_uuid"] = "would-be-installed"
     document["artifacts"]["vios_partition_id"] = True
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = runner.LiveTestArtifacts(system_uuid="original")
+    original = live_config.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4613,13 +4621,13 @@ def test_restore_artifacts_rejects_wrong_types_without_partial_mutation(
 
 
 def test_restore_artifacts_rejects_config_mismatch_without_mutation(tmp_path, capsys):
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     document["config"]["system_name"] = "other-system"
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = runner.LiveTestArtifacts(system_uuid="original")
+    original = live_config.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4629,13 +4637,13 @@ def test_restore_artifacts_rejects_config_mismatch_without_mutation(tmp_path, ca
 
 
 def test_restore_artifacts_rejects_unknown_fields_without_mutation(tmp_path, capsys):
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     document["artifacts"]["unknown"] = "value"
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = runner.LiveTestArtifacts(system_uuid="original")
+    original = live_config.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4646,7 +4654,7 @@ def test_restore_artifacts_rejects_unknown_fields_without_mutation(tmp_path, cap
 
 @pytest.mark.parametrize("field", ["host", "port", "user", "verify_ssl"])
 def test_restore_artifacts_rejects_each_hmc_identity_mismatch(tmp_path, capsys, field):
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
     document["hmc"][field] = {
@@ -4661,7 +4669,7 @@ def test_restore_artifacts_rejects_each_hmc_identity_mismatch(tmp_path, capsys, 
     state = runner.RunState(config=config)
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == runner.LiveTestArtifacts()
+    assert state.artifacts == live_config.LiveTestArtifacts()
     assert "does not match this run" in capsys.readouterr().out
 
 
@@ -4670,10 +4678,12 @@ def test_restore_artifacts_propagates_unexpected_restoration_defects(
 ):
     results_path = tmp_path / "previous.json"
     results_path.write_text(
-        json.dumps(_result_document(runner.LiveTestConfig(), _live_hmc_config()))
+        json.dumps(_result_document(live_config.LiveTestConfig(), _live_hmc_config()))
     )
     monkeypatch.setattr(
-        runner, "asdict", lambda _context: (_ for _ in ()).throw(RuntimeError("defect"))
+        live_config,
+        "asdict",
+        lambda _context: (_ for _ in ()).throw(RuntimeError("defect")),
     )
 
     with pytest.raises(RuntimeError, match="defect"):
@@ -4738,7 +4748,7 @@ def test_live_runner_parses_selection_and_result_defaults():
 
 
 def test_live_config_has_no_mapping_facade():
-    config = runner.LiveTestConfig()
+    config = live_config.LiveTestConfig()
 
     assert not hasattr(config, "__getitem__")
     assert not hasattr(config, "get")
@@ -4894,7 +4904,7 @@ def _dispatched_tool_names(source: str) -> set[str]:
 #: config field's default has its declared type because the runner validates
 #: every one at startup. Run artifacts are deliberately absent — they default to
 #: None and are filled in mid-run, so their defaults describe no dispatch.
-_ARGUMENT_SOURCES = {"config": runner.LiveTestConfig()}
+_ARGUMENT_SOURCES = {"config": live_config.LiveTestConfig()}
 
 _UNRESOLVED = runner.UNRESOLVED_ARGUMENT
 
@@ -5215,8 +5225,8 @@ def test_static_argument_resolution_reads_config_field_types():
     resolved = {name: _resolved_argument(node) for name, node in site.arguments}
 
     assert rest == []
-    assert resolved["adapter_id"] == runner.LiveTestConfig().sriov_adapter_id
-    assert resolved["system_name_or_uuid"] == runner.LiveTestConfig().system_name
+    assert resolved["adapter_id"] == live_config.LiveTestConfig().sriov_adapter_id
+    assert resolved["system_name_or_uuid"] == live_config.LiveTestConfig().system_name
     assert resolved["physical_port_id"] is _UNRESOLVED
     assert resolved["logical_port_id"] == "917003"
 
@@ -5443,12 +5453,16 @@ async def test_main_uses_fresh_state_for_repeated_runs(monkeypatch, tmp_path):
     second_path = tmp_path / "second.json"
 
     assert (
-        await runner.main(results_path=str(first_path), config=runner.LiveTestConfig())
+        await runner.main(
+            results_path=str(first_path), config=live_config.LiveTestConfig()
+        )
         == 0
     )
     seen_states[0].artifacts.system_uuid = "mutated-after-run"
     assert (
-        await runner.main(results_path=str(second_path), config=runner.LiveTestConfig())
+        await runner.main(
+            results_path=str(second_path), config=live_config.LiveTestConfig()
+        )
         == 0
     )
 
@@ -5495,7 +5509,7 @@ async def test_main_stamps_run_provenance_into_the_results_document(
     assert (
         await runner.main(
             results_path=str(results_path),
-            config=runner.LiveTestConfig(),
+            config=live_config.LiveTestConfig(),
             environment=("V10R3", "POWER10"),
         )
         == 0
@@ -5540,7 +5554,7 @@ async def test_main_redacts_direct_failure_before_persisting(
 
     assert (
         await runner.main(
-            results_path=str(results_path), config=runner.LiveTestConfig()
+            results_path=str(results_path), config=live_config.LiveTestConfig()
         )
         == 1
     )
@@ -5565,7 +5579,8 @@ async def test_main_rejects_unknown_numeric_workflow(monkeypatch, tmp_path):
     results_path = tmp_path / "unknown.json"
 
     assert (
-        await runner.main(999, str(results_path), config=runner.LiveTestConfig()) == 1
+        await runner.main(999, str(results_path), config=live_config.LiveTestConfig())
+        == 1
     )
 
     saved = json.loads(results_path.read_text())
@@ -6562,7 +6577,9 @@ async def test_st14_cleanup_uses_scoped_delete_and_independent_exact_inventory(
     monkeypatch, present
 ):
     state = runner.RunState(
-        config=dataclasses.replace(runner.LiveTestConfig(), system_name="sys; reboot")
+        config=dataclasses.replace(
+            live_config.LiveTestConfig(), system_name="sys; reboot"
+        )
     )
     state.artifacts.vios_uuid = "unused-stale-uuid"
     state.artifacts.vios_partition_id = 7
@@ -7705,7 +7722,7 @@ async def test_an_unrecordable_schema_version_is_warned_before_the_run(
     assert (
         await runner.main(
             results_path=str(tmp_path / "results.json"),
-            config=runner.LiveTestConfig(),
+            config=live_config.LiveTestConfig(),
             environment=("V10R3", "POWER10"),
         )
         == 0
@@ -7724,9 +7741,9 @@ def test_a_lone_environment_key_exits_before_the_run(monkeypatch, tmp_path, caps
         lambda *_a: (_ for _ in ()).throw(ValueError("lone key")),
     )
     monkeypatch.setattr(
-        runner.LiveTestConfig,
+        live_config.LiveTestConfig,
         "from_env_file",
-        classmethod(lambda _cls: runner.LiveTestConfig()),
+        classmethod(lambda _cls: live_config.LiveTestConfig()),
     )
     monkeypatch.setattr(
         runner, "create_mcp", lambda *_a, **_k: pytest.fail("created MCP")
@@ -7857,9 +7874,9 @@ def test_an_unignored_results_path_exits_before_the_run(monkeypatch, tmp_path, c
     repo = _live_repo(tmp_path)
     monkeypatch.chdir(repo)
     monkeypatch.setattr(
-        runner.LiveTestConfig,
+        live_config.LiveTestConfig,
         "from_env_file",
-        classmethod(lambda _cls: runner.LiveTestConfig()),
+        classmethod(lambda _cls: live_config.LiveTestConfig()),
     )
     monkeypatch.setattr(runner, "_read_environment", lambda *_a: ("V10R3", "POWER10"))
     monkeypatch.setattr(
@@ -7963,7 +7980,7 @@ async def test_main_writes_partial_results_when_a_subtask_raises(
 
     with pytest.raises(type(error)) as raised:
         await runner.main(
-            results_path=str(results_path), config=runner.LiveTestConfig()
+            results_path=str(results_path), config=live_config.LiveTestConfig()
         )
 
     assert raised.value is error
@@ -7995,7 +8012,7 @@ async def test_partial_results_write_failure_does_not_mask_the_run_failure(
     with pytest.raises(RuntimeError) as raised:
         await runner.main(
             results_path=str(tmp_path / "results.json"),
-            config=runner.LiveTestConfig(),
+            config=live_config.LiveTestConfig(),
         )
 
     assert raised.value is error
@@ -8036,7 +8053,7 @@ async def test_direct_detach_probe_refuses_bad_selection_before_configuration(
     def forbidden():
         raise AssertionError("configuration accessed for invalid probe selection")
 
-    monkeypatch.setattr(runner.LiveTestConfig, "from_env_file", forbidden)
+    monkeypatch.setattr(live_config.LiveTestConfig, "from_env_file", forbidden)
     assert await runner.main(group="storage", detach_probe=True) == 1
     assert (
         await runner.main(subtask_filter=41, group="lpar-power", detach_probe=True) == 1
@@ -8065,7 +8082,7 @@ async def test_detach_probe_dispatches_only_the_probe_and_stamps_private_results
             group="lpar-power",
             detach_probe=True,
             results_path=str(path),
-            config=runner.LiveTestConfig(),
+            config=live_config.LiveTestConfig(),
         )
         == 0
     )
@@ -8080,14 +8097,14 @@ def test_scratch_settings_are_optional_and_dotenv_only(tmp_path, monkeypatch):
     path.write_text(text)
     monkeypatch.setenv("LIVE_TEST_SCRATCH_PV_NAME", "hdisk8")
     monkeypatch.setenv("LIVE_TEST_SCRATCH_VG_NAME", "hpvg88888888")
-    config = runner.LiveTestConfig.from_env_file(path)
+    config = live_config.LiveTestConfig.from_env_file(path)
     assert (config.scratch_pv_name, config.scratch_vg_name) == ("", "")
     path.write_text(
         text
         + "\nLIVE_TEST_SCRATCH_PV_NAME=hdisk9\n"
         + "LIVE_TEST_SCRATCH_VG_NAME=hpvg00000009\n"
     )
-    config = runner.LiveTestConfig.from_env_file(path)
+    config = live_config.LiveTestConfig.from_env_file(path)
     assert (config.scratch_pv_name, config.scratch_vg_name) == (
         "hdisk9",
         "hpvg00000009",
@@ -8120,3 +8137,39 @@ def test_baseline_numeric_fields_keep_truthy_fallbacks_and_conversion_errors():
         provisioning._baseline_provision_resources(state)
     with pytest.raises(ValueError):
         inventory._capture_cna_identifiers([{"PortVLANID": "invalid"}], {})
+
+
+def test_live_configuration_imports_without_the_execution_runner():
+    script = """
+import importlib.abc
+import json
+import sys
+from dataclasses import asdict
+
+class NoExecutionPackages(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'live_test_runner', 'fastmcp', 'mcp'}:
+            raise ModuleNotFoundError(fullname)
+
+sys.path.insert(0, sys.argv[1])
+sys.meta_path.insert(0, NoExecutionPackages())
+from live_test.config import (
+    LiveTestConfig, LiveTestArtifacts, decode_saved_config, decode_artifacts,
+)
+config = LiveTestConfig()
+assert decode_saved_config(json.loads(json.dumps(asdict(config)))) == config
+artifacts = LiveTestArtifacts(lp3_baseline={'state': 'running'}, vmedia_orig_boot_order=['disk'])
+value = asdict(artifacts)
+decoded = decode_artifacts(value)
+value['lp3_baseline']['state'] = 'changed'
+value['vmedia_orig_boot_order'].append('network')
+assert decoded == artifacts
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(_RUNNER_PATH.parent)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

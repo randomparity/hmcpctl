@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
 import live_test_runner as runner
+from live_test import config as live_config
 
 ROOT = Path(__file__).parents[2]
 
@@ -33,9 +34,10 @@ def window(tmp_path):
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     git(root, "switch", "-c", "fixture-window")
-    shutil.copyfile(
-        ROOT / "scripts/live_test/cli.py", root / "scripts/live_test/cli.py"
-    )
+    for name in ("cli.py", "config.py"):
+        shutil.copyfile(
+            ROOT / "scripts/live_test" / name, root / "scripts/live_test" / name
+        )
     script = ROOT / "scripts/run_release_window.py"
     if script.exists():
         shutil.copyfile(script, root / "scripts/run_release_window.py")
@@ -68,12 +70,12 @@ def window(tmp_path):
     )
     git(root, "add", "scripts", str(claims))
     git(root, "commit", "-qm", "Prepare offline window fixture")
-    defaults = runner.LiveTestConfig()
+    defaults = live_config.LiveTestConfig()
     values = {
         key: ",".join(value)
         if isinstance(value := getattr(defaults, field), tuple)
         else str(value)
-        for key, field in runner.LiveTestConfig._CONFIG_FIELDS.items()
+        for key, field in live_config.LiveTestConfig._CONFIG_FIELDS.items()
     }
     (root / ".env").write_text(
         "".join(f"{key}={value}\n" for key, value in values.items())

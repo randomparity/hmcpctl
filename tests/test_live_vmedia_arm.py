@@ -17,6 +17,7 @@ from hmcpctl import cli
 
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
+from live_test import config as live_config  # noqa: E402
 from live_test import observation, vmedia  # noqa: E402
 
 _SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
@@ -259,7 +260,7 @@ class FakeHMC:
 def arm(monkeypatch, tmp_path):
     """A fresh run state on synthetic names, and the HMC it talks to."""
     config = replace(
-        runner.LiveTestConfig(),
+        live_config.LiveTestConfig(),
         system_name=SYSTEM,
         lp3_name=LPAR,
         iso_path=str(tmp_path / "absent.iso"),
@@ -727,7 +728,7 @@ async def test_st18_uploads_under_a_run_tagged_name_and_removes_it(arm, tmp_path
 
 
 def test_the_iso_name_keeps_the_configured_stem_and_suffix():
-    config = replace(runner.LiveTestConfig(), iso_media_name="boot.media.iso")
+    config = replace(live_config.LiveTestConfig(), iso_media_name="boot.media.iso")
 
     first, second = vmedia.iso_media_name(config), vmedia.iso_media_name(config)
 

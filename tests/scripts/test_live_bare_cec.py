@@ -23,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_bare_cec as wrapper  # noqa: E402
 import live_test_runner as runner  # noqa: E402
 from live_test import bare_cec, pcie  # noqa: E402
+from live_test import config as live_config  # noqa: E402
 from live_test.observation import CLEANUP, Assertion  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402
@@ -280,7 +281,7 @@ class FakeClient:
 
 def _state(schemas, **config: str) -> runner.RunState:
     state = runner.RunState(
-        config=runner.LiveTestConfig(
+        config=live_config.LiveTestConfig(
             dedicated_pcie_system_name=_SYSTEM,
             dedicated_pcie_lpar_prefix="live-",
             dedicated_pcie_drc_index=_DRC,

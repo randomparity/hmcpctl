@@ -19,6 +19,7 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
+from live_test import config as live_config  # noqa: E402
 from live_test import lpar_config  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
 
@@ -230,7 +231,7 @@ async def _run(monkeypatch, hmc: FakeHMC, group: str | None = "lpar-config"):
 
     monkeypatch.setattr(runner.RunState, "call", scripted)
     state = runner.RunState(
-        config=runner.LiveTestConfig(system_name=SYSTEM), group=group
+        config=live_config.LiveTestConfig(system_name=SYSTEM), group=group
     )
     await lpar_config.exercise_lpar_config(object(), state)
     return state
@@ -582,7 +583,7 @@ async def _run_dedicated(monkeypatch, hmc, *, system=SYSTEM, drc="21010020"):
 
     monkeypatch.setattr(runner.RunState, "call", scripted)
     state = runner.RunState(
-        config=runner.LiveTestConfig(
+        config=live_config.LiveTestConfig(
             system_name=SYSTEM,
             dedicated_pcie_system_name=system,
             dedicated_pcie_lpar_prefix="hmcpctl-dedicated-",
@@ -749,7 +750,7 @@ async def test_actual_runner_preserves_exit_and_recovery_baseline(
     monkeypatch.setattr(runner, "served_schemas", schemas)
     monkeypatch.setattr(runner, "_repository_root", lambda: None)
     monkeypatch.chdir(tmp_path)
-    config = runner.LiveTestConfig(
+    config = live_config.LiveTestConfig(
         system_name=SYSTEM,
         dedicated_pcie_system_name=SYSTEM,
         dedicated_pcie_lpar_prefix="scratch-",

@@ -87,7 +87,9 @@ from .observation import (
 )
 
 if TYPE_CHECKING:
-    from live_test_runner import LiveTestConfig, RunState
+    from live_test_runner import RunState
+
+    from live_test.config import LiveTestConfig
 
 
 # ---------------------------------------------------------------------------

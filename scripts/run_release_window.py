@@ -21,6 +21,7 @@ import live_test_baseline as baseline
 import live_test_preflight as preflight
 import live_test_runner as runner
 from live_test import cli
+from live_test import config as live_config
 
 from hmcpctl.config import HMCConfig
 
@@ -140,7 +141,7 @@ def prepare(args):
         if not runner._bootstrap_config():
             raise WindowError("configure the normal runner HMC environment first")
         runner._load_dotenv()
-        config = runner.LiveTestConfig.from_env_file()
+        config = live_config.LiveTestConfig.from_env_file()
         hmc = HMCConfig()
         verdicts = [preflight.arm_verdicts(config, arm)[0] for arm in arms]
     if any(not item.runnable for item in verdicts):

@@ -12,6 +12,7 @@ import pytest
 
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
+from live_test import config as live_config  # noqa: E402
 from live_test import observation, storage, storage_lifecycle  # noqa: E402
 
 _SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
@@ -207,7 +208,7 @@ class FakeHMC:
 def arm(monkeypatch):
     """A fresh storage-arm run state on synthetic names, and the HMC it talks to."""
     config = replace(
-        runner.LiveTestConfig(),
+        live_config.LiveTestConfig(),
         system_name=SYSTEM,
         lp3_name=LPAR,
         protected_lpar_names=("vios-A",),
