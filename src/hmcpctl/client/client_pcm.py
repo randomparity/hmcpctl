@@ -87,7 +87,16 @@ class PcmMixin:
         *,
         system_uuid: str | None = None,
     ) -> list[dict[str, str]]:
-        """Links to ProcessedMetrics JSON (30s granularity, ~2h retention)."""
+        """Links to ProcessedMetrics JSON (30s granularity, ~2h retention).
+
+        For category LogicalPartition, system_uuid must identify its owning system.
+        For category ManagedSystem, omit system_uuid; resource_uuid is the system.
+
+        Raises:
+            ValueError: system_uuid is missing for LogicalPartition or supplied
+                for ManagedSystem.
+            HMCError: The PCM feed request fails or returns invalid XML.
+        """
         return await self._metrics_links(
             category,
             resource_uuid,
@@ -108,7 +117,16 @@ class PcmMixin:
         *,
         system_uuid: str | None = None,
     ) -> list[dict[str, str]]:
-        """Links to AggregatedMetrics JSON (long-term rollup)."""
+        """Links to AggregatedMetrics JSON (long-term rollup).
+
+        For category LogicalPartition, system_uuid must identify its owning system.
+        For category ManagedSystem, omit system_uuid; resource_uuid is the system.
+
+        Raises:
+            ValueError: system_uuid is missing for LogicalPartition or supplied
+                for ManagedSystem.
+            HMCError: The PCM feed request fails or returns invalid XML.
+        """
         return await self._metrics_links(
             category,
             resource_uuid,
@@ -155,7 +173,7 @@ class PcmMixin:
         if category == "LogicalPartition":
             if system_uuid is None:
                 raise ValueError(
-                    "LogicalPartition metrics require the owning system_name_or_uuid."
+                    "LogicalPartition metrics require the owning system_uuid."
                 )
             resource_path = (
                 f"ManagedSystem/{system_uuid}/LogicalPartition/{resource_uuid}"
@@ -163,7 +181,7 @@ class PcmMixin:
         elif category == "ManagedSystem":
             if system_uuid is not None:
                 raise ValueError(
-                    "system_name_or_uuid is valid only for LogicalPartition metrics."
+                    "system_uuid is valid only for LogicalPartition metrics."
                 )
             resource_path = f"ManagedSystem/{resource_uuid}"
         else:

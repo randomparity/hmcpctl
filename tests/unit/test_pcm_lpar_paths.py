@@ -87,8 +87,12 @@ async def test_direct_metric_client_preserves_requested_time_window(
 @pytest.mark.parametrize(
     ("category", "owner", "message"),
     [
-        ("LogicalPartition", None, "require the owning"),
-        ("ManagedSystem", SYSTEM_UUID, "valid only for LogicalPartition"),
+        ("LogicalPartition", None, "require the owning system_uuid"),
+        (
+            "ManagedSystem",
+            SYSTEM_UUID,
+            "system_uuid is valid only for LogicalPartition",
+        ),
     ],
 )
 async def test_direct_metric_client_rejects_inconsistent_owner_before_transport(
