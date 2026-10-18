@@ -555,6 +555,23 @@ def _evidence_backing_device(mapping: dict[str, Any]) -> str:
     return _text(leaf_text(port.get("WWPNPair"))) or "unknown"
 
 
+def _scsi_identity_evidence(
+    mapping: dict[str, Any],
+) -> tuple[str, str, list[str]]:
+    adapter = _resource({"Resource": mapping.get("ServerAdapter")})
+    target = _resource({"Resource": mapping.get("TargetDevice")})
+    devices = [value for key, value in target.items() if not key.startswith("@")]
+    device = devices[0] if len(devices) == 1 and isinstance(devices[0], dict) else {}
+    server_adapter = _text(leaf_text(adapter.get("AdapterName")))
+    target_device = _text(leaf_text(device.get("TargetName")))
+    missing = []
+    if not server_adapter:
+        missing.append("ServerAdapter.AdapterName")
+    if not target_device:
+        missing.append("TargetDevice.TargetName")
+    return server_adapter or "unknown", target_device or "unknown", missing
+
+
 def _mapping_evidence(
     resource: dict[str, Any], vios_uuid: str, lpar_uuid: str, partition_id: str | None
 ) -> list[dict[str, str]]:
@@ -584,32 +601,13 @@ def _mapping_evidence(
                 missing.append("AssociatedLogicalPartition UUID")
             record = _mapping_record(mapping, vios_uuid, kind)
             if scsi:
-                adapter = _resource({"Resource": mapping.get("ServerAdapter")})
-                target = _resource({"Resource": mapping.get("TargetDevice")})
-                devices = [
-                    value for key, value in target.items() if not key.startswith("@")
-                ]
-                device = (
-                    devices[0]
-                    if len(devices) == 1 and isinstance(devices[0], dict)
-                    else {}
+                server_adapter, target_device, missing_scsi = _scsi_identity_evidence(
+                    mapping
                 )
-                for field, value, label in (
-                    (
-                        "server_adapter",
-                        adapter.get("AdapterName"),
-                        "ServerAdapter.AdapterName",
-                    ),
-                    (
-                        "target_device",
-                        device.get("TargetName"),
-                        "TargetDevice.TargetName",
-                    ),
-                ):
-                    name = _text(leaf_text(value))
-                    record[field] = name or "unknown"
-                    if not name:
-                        missing.append(label)
+                record.update(
+                    server_adapter=server_adapter, target_device=target_device
+                )
+                missing.extend(missing_scsi)
                 if identity is None and all(
                     record[field] != "unknown"
                     for field in ("server_adapter", "target_device")
