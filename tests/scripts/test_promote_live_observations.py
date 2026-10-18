@@ -644,10 +644,10 @@ def test_confirmed_gap_matches_fresh_producer_result():
 
 
 def producer_states():
-    from live_test import bare_cec, pcie
+    from live_test import bare_cec, dedicated_pcie
 
     dedicated = runner.RunState()
-    pcie.record_dedicated_listing(
+    dedicated_pcie.record_dedicated_listing(
         dedicated,
         "PASS",
         {
@@ -655,7 +655,7 @@ def producer_states():
             "items": [{"drc_index": "1", "owner_lpar": None}],
         },
     )
-    pcie._record_dedicated_additions(
+    dedicated_pcie._record_dedicated_additions(
         dedicated,
         SimpleNamespace(
             evidence={"assign": (True, True), "reassign": (True, True)},
@@ -871,10 +871,10 @@ def test_reject_st31_relabelled_as_st36_before_branch_creation(producer_candidat
 
 
 def test_accept_actual_st36_and_reject_relabelled_st31():
-    from live_test import pcie
+    from live_test import dedicated_pcie
 
     state = runner.RunState()
-    pcie._record_dedicated_additions(
+    dedicated_pcie._record_dedicated_additions(
         state,
         SimpleNamespace(
             evidence={"io-slots-add": (True, True, True)},

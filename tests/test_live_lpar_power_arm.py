@@ -19,7 +19,7 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_runner as runner  # noqa: E402
 from fastmcp.utilities.json_schema_type import json_schema_to_type  # noqa: E402
 from live_test import config as live_config  # noqa: E402
-from live_test import lpar_config, lpar_power, pcie  # noqa: E402
+from live_test import dedicated_pcie, lpar_config, lpar_power  # noqa: E402
 from pydantic import TypeAdapter  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402
@@ -533,7 +533,7 @@ def _no_waiting(monkeypatch):
         (lpar_power, "_STATE_POLL_DELAY_S"),
         (lpar_power, "_OPERATION_POLL_DELAY_S"),
         (lpar_power, "_COMPARE_REREAD_DELAY_S"),
-        (pcie, "_ABSENCE_REREAD_DELAY_S"),
+        (dedicated_pcie, "_ABSENCE_REREAD_DELAY_S"),
     ):
         monkeypatch.setattr(module, name, 0)
     monkeypatch.setattr(lpar_power, "_STATE_POLL_ATTEMPTS", 2)

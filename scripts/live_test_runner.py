@@ -76,6 +76,7 @@ from live_test.config import (
     decode_saved_config,
 )
 from live_test.connectivity import inventory_connectivity
+from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
 from live_test.detach_probe import exercise_detach_probe
 from live_test.escape_hatch import exercise_cli_escape_hatch
 from live_test.inventory import capture_lpar_baseline
@@ -101,12 +102,12 @@ from live_test.observation import (
     KnownGap,
     classify_failure,
 )
-from live_test.pcie import exercise_dedicated_pcie_assignment, exercise_sriov_assignment
 from live_test.profiles import inventory_lpar_profiles
 from live_test.provisioning import (
     exercise_storage_provisioning,
     validate_provisioning_dry_run,
 )
+from live_test.sriov import exercise_sriov_assignment
 from live_test.storage import inventory_storage
 from live_test.storage_lifecycle import exercise_disk_lifecycle
 from live_test.storage_volume_group import exercise_volume_group

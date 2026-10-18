@@ -14,7 +14,7 @@ from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 
 LIVE_TEST_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(LIVE_TEST_ROOT))
-from live_test import pcie  # noqa: E402
+from live_test import dedicated_pcie  # noqa: E402
 from live_test.config import LiveTestArtifacts, LiveTestConfig  # noqa: E402
 from live_test.observation import CLEANUP, Assertion, CallFailure  # noqa: E402
 from live_test_runner import RunState  # noqa: E402
@@ -69,7 +69,7 @@ _SIBLING_NOT_FOUND = CallFailure(
 )
 def test_partition_not_found_reads_only_a_failed_hscl8012(status, data, expected):
     """HSCL8012 is the one "no such partition" answer; nothing else counts."""
-    assert pcie.partition_not_found(status, data) is expected
+    assert dedicated_pcie.partition_not_found(status, data) is expected
 
 
 class ScenarioState:
@@ -353,10 +353,18 @@ def _admitted_readback(io_slots: str, lpar_name: str) -> str:
     foreign assignment and the guards notice.
     """
     rows = [
-        (lpar_name, pcie._DEFAULT_DEDICATED_PROFILE, io_slots),
-        (f"{lpar_name}-createtime", pcie._DEFAULT_DEDICATED_PROFILE, io_slots),
+        (lpar_name, dedicated_pcie._DEFAULT_DEDICATED_PROFILE, io_slots),
+        (
+            f"{lpar_name}-createtime",
+            dedicated_pcie._DEFAULT_DEDICATED_PROFILE,
+            io_slots,
+        ),
         (lpar_name, "other_profile", f"{_DRC}/none/1"),
-        ("vios-1", pcie._DEFAULT_DEDICATED_PROFILE, f"{_DRC}/none/1,21030030/none/0"),
+        (
+            "vios-1",
+            dedicated_pcie._DEFAULT_DEDICATED_PROFILE,
+            f"{_DRC}/none/1,21030030/none/0",
+        ),
     ]
     lines = ["lpar_name,name,io_slots"]
     lines += [f'{lpar},{name},"{value}"' for lpar, name, value in rows]
@@ -412,36 +420,38 @@ async def _run_arm(
         async def no_reads(*_args: Any) -> None:
             return None
 
-        monkeypatch.setattr(pcie, "record_inventory_reads", no_reads)
-        monkeypatch.setattr(pcie, "record_dedicated_listing", lambda *_args: None)
+        monkeypatch.setattr(dedicated_pcie, "record_inventory_reads", no_reads)
+        monkeypatch.setattr(
+            dedicated_pcie, "record_dedicated_listing", lambda *_args: None
+        )
     responses = _rendering_profile_reads(
         responses, marker_holder, live.dedicated_pcie_lpar_prefix, selection_readback
     )
 
-    real_marker = pcie._new_run_marker
+    real_marker = dedicated_pcie._new_run_marker
 
     def capture() -> str:
         marker = real_marker()
         marker_holder["marker"] = marker
         return marker
 
-    monkeypatch.setattr(pcie, "_new_run_marker", capture)
-    monkeypatch.setattr(pcie, "_ABSENCE_REREAD_DELAY_S", 0)
+    monkeypatch.setattr(dedicated_pcie, "_new_run_marker", capture)
+    monkeypatch.setattr(dedicated_pcie, "_ABSENCE_REREAD_DELAY_S", 0)
 
     # The cleanup phase boundary: the arm reaches cleanup through this module
     # global, so wrapping it records where cleanup's calls begin.
-    real_cleanup = pcie.cleanup_dedicated
+    real_cleanup = dedicated_pcie.cleanup_dedicated
 
     async def marking_cleanup(client: Any, st: Any, fixture: Any) -> str | None:
         st.cleanup_start = len(st.calls)
         return await real_cleanup(client, st, fixture)
 
-    monkeypatch.setattr(pcie, "cleanup_dedicated", marking_cleanup)
+    monkeypatch.setattr(dedicated_pcie, "cleanup_dedicated", marking_cleanup)
 
     merged: dict[str, Any] = {"hmc_create_lpar": _probe_refused}
     merged.update(statuses or {})
     state = ScenarioState(responses, merged, config=live)
-    await pcie.exercise_dedicated_pcie_assignment(None, state)
+    await dedicated_pcie.exercise_dedicated_pcie_assignment(None, state)
     return state
 
 
@@ -1502,8 +1512,8 @@ async def test_never_assigned_no_cleanup_slot_removal_delete_happens(
 @pytest.mark.asyncio
 async def test_run_marker_uniqueness(monkeypatch: pytest.MonkeyPatch) -> None:
     """Two calls to _new_run_marker must return distinct values."""
-    m1 = pcie._new_run_marker()
-    m2 = pcie._new_run_marker()
+    m1 = dedicated_pcie._new_run_marker()
+    m2 = dedicated_pcie._new_run_marker()
     assert m1 != m2
     assert m1.startswith("pcie-")
     assert len(m1) == len("pcie-") + 8
@@ -1589,7 +1599,7 @@ def test_io_slots_membership_is_by_entry_not_substring(
     io_slots: str, drc: str, expected: bool
 ) -> None:
     """A DRC index counts as present only as a whole first field of an entry."""
-    assert pcie._io_slots_contains(io_slots, drc) is expected
+    assert dedicated_pcie._io_slots_contains(io_slots, drc) is expected
 
 
 @pytest.mark.parametrize(
@@ -1597,8 +1607,10 @@ def test_io_slots_membership_is_by_entry_not_substring(
 )
 def test_io_slots_membership_refuses_an_unadmitted_rendering(io_slots: str) -> None:
     """The documented input grammar's empty pool is not the read rendering (ADR 0165)."""
-    with pytest.raises(pcie.HMCCLIError, match="unadmitted io_slots rendering"):
-        pcie._io_slots_contains(io_slots, "21010020")
+    with pytest.raises(
+        dedicated_pcie.HMCCLIError, match="unadmitted io_slots rendering"
+    ):
+        dedicated_pcie._io_slots_contains(io_slots, "21010020")
 
 
 @pytest.mark.asyncio
@@ -1646,12 +1658,12 @@ async def test_profile_read_selects_exactly_the_arms_row(
 ) -> None:
     """The value of the one `lpar_name`/`name` row, or unreadable."""
     state = ScenarioState({"hmc_run_command": output})
-    arm = pcie._DedicatedConfig(
-        "sys-one", "live-", pcie._DEFAULT_DEDICATED_PROFILE, _DRC
+    arm = dedicated_pcie._DedicatedConfig(
+        "sys-one", "live-", dedicated_pcie._DEFAULT_DEDICATED_PROFILE, _DRC
     )
-    fixture = pcie._DedicatedFixture(arm, "x", "live-x", "live-x-createtime")
+    fixture = dedicated_pcie._DedicatedFixture(arm, "x", "live-x", "live-x-createtime")
 
-    assert await pcie._read_profile_io_slots(None, state, fixture) == expected
+    assert await dedicated_pcie._read_profile_io_slots(None, state, fixture) == expected
     assert state.commands() == [_PROFILE_READ]
 
 
@@ -1697,7 +1709,7 @@ async def test_fixture_create_failure_with_no_partition_skips_without_cleanup(
     async def record_sleep(seconds: float) -> None:
         delays.append(seconds)
 
-    monkeypatch.setattr(pcie.asyncio, "sleep", record_sleep)
+    monkeypatch.setattr(dedicated_pcie.asyncio, "sleep", record_sleep)
     state = await _run_arm(
         monkeypatch, responses, holder, statuses={"hmc_create_lpar": "FAIL"}
     )
@@ -1715,7 +1727,7 @@ async def test_fixture_create_failure_with_no_partition_skips_without_cleanup(
     ]
     assert len(lookups) == 4 and len(set(lookups)) == 2
     assert all(lookups.count(name) == 2 for name in lookups)
-    assert delays == [pcie._ABSENCE_REREAD_DELAY_S] * 2
+    assert delays == [dedicated_pcie._ABSENCE_REREAD_DELAY_S] * 2
 
 
 def _not_found_first(responses: dict[str, Any], probe: bool) -> None:
@@ -2043,7 +2055,7 @@ async def test_io_slots_scenario_skips_without_two_selectable_spares(
 # ---------------------------------------------------------------------------
 
 _SLOT_ETH = "21010030"
-_ARM = pcie._DedicatedConfig("sys-one", "live-", "default_profile", None)
+_ARM = dedicated_pcie._DedicatedConfig("sys-one", "live-", "default_profile", None)
 
 
 def _dedicated_listing(owner: str = "") -> dict[str, Any]:
@@ -2142,8 +2154,8 @@ async def _read_inventory(
 ) -> ScenarioState:
     state = ScenarioState(responses)
     data = _dedicated_listing() if listing is None else listing
-    pcie.record_dedicated_listing(state, "PASS", data)
-    await pcie.record_inventory_reads(None, state, _ARM, data)
+    dedicated_pcie.record_dedicated_listing(state, "PASS", data)
+    await dedicated_pcie.record_inventory_reads(None, state, _ARM, data)
     return state
 
 
@@ -2650,7 +2662,7 @@ async def test_inventory_phase_runs_before_selection_and_changes_nothing(
 
     tools = with_reads.tools()
     assert tools.index("hmc_list_sriov_adapters") < tools.index("hmc_create_lpar")
-    vnic_read = pcie._vnic_command("sys-one")
+    vnic_read = dedicated_pcie._vnic_command("sys-one")
     reads = {"hmc_list_io_slots", "hmc_list_sriov_adapters", "hmc_list_vnics"}
     remaining = [
         tool
@@ -2670,7 +2682,7 @@ def test_record_held_refuses_an_unknown_cleanup_value() -> None:
     state: Any = SimpleNamespace(record=lambda *args: recorded.append(args))
 
     with pytest.raises(ValueError, match="cleanup disposition is not a known value"):
-        pcie._record_held(
+        dedicated_pcie._record_held(
             state,
             34,
             "hmc_delete_lpar (judged)",
@@ -2687,7 +2699,7 @@ def test_record_held_judges_cleanup_as_record_verified_does(cleanup: str) -> Non
     recorded: list[Any] = []
     state: Any = SimpleNamespace(record=lambda *args: recorded.append(args))
 
-    pcie._record_held(
+    dedicated_pcie._record_held(
         state,
         34,
         "hmc_delete_lpar (judged)",

@@ -74,7 +74,7 @@ from live_test import (
     storage_volume_group,
     vios_backup,
 )
-from live_test.pcie import (
+from live_test.dedicated_pcie import (
     _DEFAULT_DEDICATED_PROFILE,
     _io_slots_contains,
     partition_not_found,

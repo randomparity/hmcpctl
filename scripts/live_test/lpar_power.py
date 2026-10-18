@@ -31,7 +31,7 @@ from hmcpctl.operations.storage.resources import _storage_mapping
 from hmcpctl.ssh.commands import HMC_NO_RESULTS
 from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME
 
-from . import lpar_config, pcie
+from . import dedicated_pcie, lpar_config
 from .bare_cec import _power_operations_authorized
 from .network import listed_vlans
 from .observation import Assertion, CallFailure, judge_create_result
@@ -397,7 +397,7 @@ async def _gone(client: Client, state: RunState, run: Run, name: str) -> bool:
     """Whether the listing names no partition *name*, read twice before believing it."""
     for attempt in range(2):
         if attempt:
-            await asyncio.sleep(pcie._ABSENCE_REREAD_DELAY_S)
+            await asyncio.sleep(dedicated_pcie._ABSENCE_REREAD_DELAY_S)
         listing = await _partition_lines(client, state, run.system)
         if listing is not None and name not in _names(listing):
             return True

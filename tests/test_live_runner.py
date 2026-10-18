@@ -46,6 +46,7 @@ import scenario_gap_report  # noqa: E402
 from live_test import (  # noqa: E402
     bare_cec,
     connectivity,
+    dedicated_pcie,
     escape_hatch,
     inventory,
     lpar,
@@ -54,10 +55,10 @@ from live_test import (  # noqa: E402
     metrics,
     network,
     observation,
-    pcie,
     profiles,
     provisioning,
     results,
+    sriov,
     storage,
     storage_lifecycle,
     users,
@@ -76,7 +77,8 @@ LIVE_WORKFLOW_MODULES = (
     lpar_power,
     metrics,
     network,
-    pcie,
+    dedicated_pcie,
+    sriov,
     profiles,
     provisioning,
     storage,
@@ -175,10 +177,10 @@ def _profile_state(value: str = "none") -> tuple[str, str, object]:
 
 def test_sriov_baseline_helpers_require_healthy_adapter() -> None:
     """Baseline predicates reject wrong mode/availability and accept healthy data."""
-    assert pcie._adapter_is_healthy(
+    assert sriov._adapter_is_healthy(
         {"items": [{"adapter_id": "17", "mode": "sriov", "availability": "1"}]}, "17"
     )
-    assert not pcie._adapter_is_healthy(
+    assert not sriov._adapter_is_healthy(
         {"items": [{"adapter_id": "17", "mode": "ded", "availability": "1"}]}, "17"
     )
 
@@ -193,15 +195,15 @@ def test_sriov_baseline_helpers_compute_capacity_and_configuration() -> None:
         ]
     }
     with pytest.raises(ValueError, match="row 1.*capacity_percent"):
-        pcie._available_capacity(data)
-    assert not pcie._logical_port_is_configured({"items": []}, "917003")
-    assert pcie._logical_port_is_configured(
+        sriov._available_capacity(data)
+    assert not sriov._logical_port_is_configured({"items": []}, "917003")
+    assert sriov._logical_port_is_configured(
         {"items": [{"logical_port_id": "917003", "availability": "1"}]},
         "917003",
     )
     # The rows are projected as str; comparing the numeric config value is the
     # #763 defect and must not read as "no such port".
-    assert not pcie._logical_port_is_configured(
+    assert not sriov._logical_port_is_configured(
         {"items": [{"logical_port_id": "917003", "availability": "1"}]},
         917003,
     )
@@ -225,11 +227,11 @@ async def test_sriov_phases_assign_verify_unassign_and_reassign() -> None:
         ]
     )
 
-    evidence = pcie._SriovEvidence()
-    assert await pcie.assign_sriov_to_lp3(object(), state, evidence)
-    assert await pcie.verify_sriov_assigned(object(), state, True, evidence)
-    assert await pcie.unassign_sriov_from_lp3(object(), state)
-    assert await pcie.reassign_sriov_to_lp3(object(), state, evidence)
+    evidence = sriov._SriovEvidence()
+    assert await sriov.assign_sriov_to_lp3(object(), state, evidence)
+    assert await sriov.verify_sriov_assigned(object(), state, True, evidence)
+    assert await sriov.unassign_sriov_from_lp3(object(), state)
+    assert await sriov.reassign_sriov_to_lp3(object(), state, evidence)
 
     assign_tool, assign_args = state.calls[0]
     assert assign_tool == "hmc_assign_sriov_logical_port"
@@ -267,8 +269,8 @@ async def test_sriov_verify_records_wrong_owner_without_mutation() -> None:
         ]
     )
 
-    assert not await pcie.verify_sriov_assigned(
-        object(), state, True, pcie._SriovEvidence()
+    assert not await sriov.verify_sriov_assigned(
+        object(), state, True, sriov._SriovEvidence()
     )
 
     assert [tool for tool, _ in state.calls] == [
@@ -293,7 +295,7 @@ async def test_sriov_cleanup_refuses_unowned_or_unconfigured_ports() -> None:
             _profile_state(),
         ]
     )
-    await pcie.cleanup_sriov(object(), unconfigured)
+    await sriov.cleanup_sriov(object(), unconfigured)
     assert "hmc_unassign_sriov_logical_port" not in [
         tool for tool, _ in unconfigured.calls
     ]
@@ -309,7 +311,7 @@ async def test_sriov_cleanup_refuses_unowned_or_unconfigured_ports() -> None:
             _profile_state(),
         ]
     )
-    await pcie.cleanup_sriov(object(), foreign)
+    await sriov.cleanup_sriov(object(), foreign)
     assert [tool for tool, _ in foreign.calls] == [
         "hmc_list_sriov_logical_ports",
         "hmc_run_command",
@@ -340,7 +342,7 @@ async def test_sriov_cleanup_removes_owned_port_and_verifies_baseline() -> None:
         ]
     )
 
-    await pcie.cleanup_sriov(object(), state)
+    await sriov.cleanup_sriov(object(), state)
 
     assert [tool for tool, _ in state.calls] == [
         "hmc_list_sriov_logical_ports",
@@ -413,8 +415,8 @@ async def _run_sriov_arm(monkeypatch, **faults) -> _ScriptedSriovState:
     async def baseline_ok(_client, _state) -> bool:
         return True
 
-    monkeypatch.setattr(pcie, "capture_sriov_baseline", baseline_ok)
-    await pcie.exercise_sriov_assignment(object(), state)
+    monkeypatch.setattr(sriov, "capture_sriov_baseline", baseline_ok)
+    await sriov.exercise_sriov_assignment(object(), state)
     assert next(state._responses, None) is None, "transcript not consumed"
     return state
 
@@ -2496,29 +2498,29 @@ async def test_sriov_orchestrator_runs_phases_in_order_and_cleans_up() -> None:
     monkeypatch = pytest.MonkeyPatch()
     try:
         monkeypatch.setattr(
-            pcie, "capture_sriov_baseline", AsyncMock(side_effect=phase("baseline"))
+            sriov, "capture_sriov_baseline", AsyncMock(side_effect=phase("baseline"))
         )
         monkeypatch.setattr(
-            pcie, "assign_sriov_to_lp3", AsyncMock(side_effect=phase("assign"))
+            sriov, "assign_sriov_to_lp3", AsyncMock(side_effect=phase("assign"))
         )
         monkeypatch.setattr(
-            pcie, "verify_sriov_assigned", AsyncMock(side_effect=phase("verify"))
+            sriov, "verify_sriov_assigned", AsyncMock(side_effect=phase("verify"))
         )
         monkeypatch.setattr(
-            pcie, "unassign_sriov_from_lp3", AsyncMock(side_effect=phase("unassign"))
+            sriov, "unassign_sriov_from_lp3", AsyncMock(side_effect=phase("unassign"))
         )
         monkeypatch.setattr(
-            pcie, "reassign_sriov_to_lp3", AsyncMock(side_effect=phase("reassign"))
+            sriov, "reassign_sriov_to_lp3", AsyncMock(side_effect=phase("reassign"))
         )
         monkeypatch.setattr(
-            pcie, "cleanup_sriov", AsyncMock(side_effect=phase("cleanup"))
+            sriov, "cleanup_sriov", AsyncMock(side_effect=phase("cleanup"))
         )
 
         class State:
             def skip(self, *_args) -> None:
                 raise AssertionError("successful orchestration must not skip a phase")
 
-        await pcie.exercise_sriov_assignment(object(), State())
+        await sriov.exercise_sriov_assignment(object(), State())
     finally:
         monkeypatch.undo()
 
@@ -2539,20 +2541,22 @@ async def test_sriov_orchestrator_stops_after_baseline_but_runs_cleanup() -> Non
 
     monkeypatch = pytest.MonkeyPatch()
     try:
-        monkeypatch.setattr(pcie, "capture_sriov_baseline", baseline)
-        monkeypatch.setattr(pcie, "cleanup_sriov", cleanup)
+        monkeypatch.setattr(sriov, "capture_sriov_baseline", baseline)
+        monkeypatch.setattr(sriov, "cleanup_sriov", cleanup)
         for name in (
             "assign_sriov_to_lp3",
             "verify_sriov_assigned",
             "unassign_sriov_from_lp3",
             "reassign_sriov_to_lp3",
         ):
-            monkeypatch.setattr(pcie, name, AsyncMock(side_effect=AssertionError(name)))
+            monkeypatch.setattr(
+                sriov, name, AsyncMock(side_effect=AssertionError(name))
+            )
 
         class State:
             pass
 
-        await pcie.exercise_sriov_assignment(object(), State())
+        await sriov.exercise_sriov_assignment(object(), State())
     finally:
         monkeypatch.undo()
 
@@ -2581,22 +2585,22 @@ async def test_sriov_orchestrator_skips_mutations_after_assign_failure() -> None
 
     monkeypatch = pytest.MonkeyPatch()
     try:
-        monkeypatch.setattr(pcie, "capture_sriov_baseline", baseline)
-        monkeypatch.setattr(pcie, "assign_sriov_to_lp3", assign)
-        monkeypatch.setattr(pcie, "verify_sriov_assigned", verify)
-        monkeypatch.setattr(pcie, "cleanup_sriov", cleanup)
+        monkeypatch.setattr(sriov, "capture_sriov_baseline", baseline)
+        monkeypatch.setattr(sriov, "assign_sriov_to_lp3", assign)
+        monkeypatch.setattr(sriov, "verify_sriov_assigned", verify)
+        monkeypatch.setattr(sriov, "cleanup_sriov", cleanup)
         monkeypatch.setattr(
-            pcie, "unassign_sriov_from_lp3", AsyncMock(side_effect=AssertionError)
+            sriov, "unassign_sriov_from_lp3", AsyncMock(side_effect=AssertionError)
         )
         monkeypatch.setattr(
-            pcie, "reassign_sriov_to_lp3", AsyncMock(side_effect=AssertionError)
+            sriov, "reassign_sriov_to_lp3", AsyncMock(side_effect=AssertionError)
         )
 
         class State:
             def skip(self, *_args) -> None:
                 calls.append("skip")
 
-        await pcie.exercise_sriov_assignment(object(), State())
+        await sriov.exercise_sriov_assignment(object(), State())
     finally:
         monkeypatch.undo()
 
@@ -2631,15 +2635,15 @@ async def test_sriov_orchestrator_cleans_up_after_post_baseline_error(
 
         return run
 
-    monkeypatch.setattr(pcie, "capture_sriov_baseline", phase("baseline"))
-    monkeypatch.setattr(pcie, "assign_sriov_to_lp3", phase("assign"))
-    monkeypatch.setattr(pcie, "verify_sriov_assigned", phase("verify"))
-    monkeypatch.setattr(pcie, "unassign_sriov_from_lp3", phase("unassign"))
-    monkeypatch.setattr(pcie, "reassign_sriov_to_lp3", phase("reassign"))
-    monkeypatch.setattr(pcie, "cleanup_sriov", phase("cleanup"))
+    monkeypatch.setattr(sriov, "capture_sriov_baseline", phase("baseline"))
+    monkeypatch.setattr(sriov, "assign_sriov_to_lp3", phase("assign"))
+    monkeypatch.setattr(sriov, "verify_sriov_assigned", phase("verify"))
+    monkeypatch.setattr(sriov, "unassign_sriov_from_lp3", phase("unassign"))
+    monkeypatch.setattr(sriov, "reassign_sriov_to_lp3", phase("reassign"))
+    monkeypatch.setattr(sriov, "cleanup_sriov", phase("cleanup"))
 
     with pytest.raises(RuntimeError, match=f"{failing_phase} failed"):
-        await pcie.exercise_sriov_assignment(object(), object())
+        await sriov.exercise_sriov_assignment(object(), object())
 
     assert calls == expected_calls
 
@@ -2649,15 +2653,15 @@ async def test_sriov_orchestrator_propagates_cleanup_error(monkeypatch) -> None:
     """Cleanup remains observable when it is the only failure."""
     cleanup = AsyncMock(side_effect=RuntimeError("cleanup failed"))
 
-    monkeypatch.setattr(pcie, "capture_sriov_baseline", AsyncMock(return_value=True))
-    monkeypatch.setattr(pcie, "assign_sriov_to_lp3", AsyncMock(return_value=True))
-    monkeypatch.setattr(pcie, "verify_sriov_assigned", AsyncMock(return_value=True))
-    monkeypatch.setattr(pcie, "unassign_sriov_from_lp3", AsyncMock(return_value=True))
-    monkeypatch.setattr(pcie, "reassign_sriov_to_lp3", AsyncMock(return_value=True))
-    monkeypatch.setattr(pcie, "cleanup_sriov", cleanup)
+    monkeypatch.setattr(sriov, "capture_sriov_baseline", AsyncMock(return_value=True))
+    monkeypatch.setattr(sriov, "assign_sriov_to_lp3", AsyncMock(return_value=True))
+    monkeypatch.setattr(sriov, "verify_sriov_assigned", AsyncMock(return_value=True))
+    monkeypatch.setattr(sriov, "unassign_sriov_from_lp3", AsyncMock(return_value=True))
+    monkeypatch.setattr(sriov, "reassign_sriov_to_lp3", AsyncMock(return_value=True))
+    monkeypatch.setattr(sriov, "cleanup_sriov", cleanup)
 
     with pytest.raises(RuntimeError, match="cleanup failed"):
-        await pcie.exercise_sriov_assignment(object(), object())
+        await sriov.exercise_sriov_assignment(object(), object())
 
     assert cleanup.await_count == 1
 
@@ -2669,16 +2673,16 @@ async def test_sriov_orchestrator_preserves_mutation_error_when_cleanup_fails(
     """A cleanup failure adds recovery context without replacing the mutation error."""
     cleanup = AsyncMock(side_effect=RuntimeError("cleanup failed"))
 
-    monkeypatch.setattr(pcie, "capture_sriov_baseline", AsyncMock(return_value=True))
+    monkeypatch.setattr(sriov, "capture_sriov_baseline", AsyncMock(return_value=True))
     monkeypatch.setattr(
-        pcie,
+        sriov,
         "assign_sriov_to_lp3",
         AsyncMock(side_effect=RuntimeError("assign failed")),
     )
-    monkeypatch.setattr(pcie, "cleanup_sriov", cleanup)
+    monkeypatch.setattr(sriov, "cleanup_sriov", cleanup)
 
     with pytest.raises(RuntimeError, match="assign failed") as exc_info:
-        await pcie.exercise_sriov_assignment(object(), object())
+        await sriov.exercise_sriov_assignment(object(), object())
 
     assert cleanup.await_count == 1
     assert exc_info.value.__notes__ == ["SR-IOV cleanup failed: cleanup failed"]
@@ -5270,12 +5274,16 @@ def test_every_sriov_identifier_argument_is_actually_type_checked():
     something else. These are the arguments the guard was extended for, so they
     are asserted by name.
     """
-    source = Path(pcie.__file__).read_text(encoding="utf-8")
+    sites = [
+        (module.__name__, site)
+        for module in (sriov, dedicated_pcie)
+        for site in _dispatch_sites(Path(module.__file__).read_text(encoding="utf-8"))
+    ]
     identifiers = {"adapter_id", "physical_port_id", "logical_port_id"}
 
     passed_over = [
-        f"pcie.py:{site.lineno} {site.tool}: {name}"
-        for site in _dispatch_sites(source)
+        f"{module}:{site.lineno} {site.tool}: {name}"
+        for module, site in sites
         if "sriov" in (site.tool or "")
         for name, node in site.arguments
         if name in identifiers and _resolved_argument(node) is _UNRESOLVED
@@ -5285,7 +5293,7 @@ def test_every_sriov_identifier_argument_is_actually_type_checked():
     assert (
         sum(
             name in identifiers
-            for site in _dispatch_sites(source)
+            for _, site in sites
             if "sriov" in (site.tool or "")
             for name, _ in site.arguments
         )
@@ -7026,7 +7034,7 @@ async def test_sriov_changed_reads_the_served_result_shape(changed: bool):
         result = await client.call_tool("probe", {})
 
     assert not isinstance(result.data, dict)
-    assert pcie._sriov_changed(result.data) is changed
+    assert sriov._sriov_changed(result.data) is changed
 
 
 def _recorded_scenarios() -> dict[str, set[str]]:

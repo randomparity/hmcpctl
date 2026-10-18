@@ -46,9 +46,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live_test_runner as runner
 from live_test import (
     bare_cec,
+    dedicated_pcie,
     lpar_config,
     lpar_power,
-    pcie,
     storage_lifecycle,
     storage_volume_group,
     users,
@@ -93,11 +93,11 @@ _DEDICATED_CONFIG_REQUIRED = (
 def _dedicated_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Predict the dedicated PCIe arm from the predicate the arm itself uses.
 
-    `pcie._dedicated_config` is called rather than restated: it applies the
+    `dedicated_pcie._dedicated_config` is called rather than restated: it applies the
     delimiter rejection and the no-fallback rule that decide whether the arm
     runs at all, and a second copy here would drift from the one that governs.
     """
-    resolved = pcie._dedicated_config(config)
+    resolved = dedicated_pcie._dedicated_config(config)
     if resolved is None:
         return ArmVerdict(
             "dedicated",
@@ -112,15 +112,15 @@ def _dedicated_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
             f"managed system {resolved.system_name}",
             f"partitions named {resolved.lpar_prefix}* (created, then deleted)",
             f"profile {resolved.profile_name} io_slots (assigned, then restored)",
-            f"dedicated slot {resolved.drc_index or pcie.AUTO_SELECTED_SLOT}",
+            f"dedicated slot {resolved.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}",
             _io_slots_scenario_line(resolved),
         ),
         resolved.system_name,
     )
 
 
-def _io_slots_scenario_line(resolved: pcie._DedicatedConfig) -> str:
-    """Predict `pcie._io_slots_scenario`'s (#985) effect on the dedicated arm.
+def _io_slots_scenario_line(resolved: dedicated_pcie._DedicatedConfig) -> str:
+    """Predict `dedicated_pcie._io_slots_scenario`'s (#985) effect on the dedicated arm.
 
     Mirrors the scenario's own gate (`fixture.config.drc_index is not None`):
     a pinned slot leaves no room for the two further slots the scenario needs,
@@ -132,7 +132,7 @@ def _io_slots_scenario_line(resolved: pcie._DedicatedConfig) -> str:
             "io_slots scenario: SKIP (LIVE_TEST_DEDICATED_PCIE_DRC_INDEX pins one slot; "
             "the scenario needs two more)"
         )
-    return f"io_slots scenario: two further spare slots {pcie.AUTO_SELECTED_SLOT}"
+    return f"io_slots scenario: two further spare slots {dedicated_pcie.AUTO_SELECTED_SLOT}"
 
 
 def _bare_cec_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
@@ -143,7 +143,7 @@ def _bare_cec_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     must be a value the arm recognises. Both are the arm's functions, called
     here after `_check_credentials` has loaded `.env`, as the runner has by then.
     """
-    resolved = pcie._dedicated_config(config)
+    resolved = dedicated_pcie._dedicated_config(config)
     accept_dump = bare_cec._dump_opt_in(config)
     refusals = [
         reason
@@ -173,7 +173,7 @@ def _bare_cec_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
                 "SMS, powered off and restarted, then deleted)"
             ),
             f"profile {resolved.profile_name} io_slots (assigned, then restored)",
-            f"dedicated slot {resolved.drc_index or pcie.AUTO_SELECTED_SLOT}",
+            f"dedicated slot {resolved.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}",
             "platform dump: "
             + ("taken (dumprestart opted in)" if accept_dump else "not taken"),
         ),
@@ -261,9 +261,9 @@ def _pcm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
 
 def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the one partition the lpar-config arm (#1345) creates and deletes again."""
-    arm = pcie._dedicated_config(config)
+    arm = dedicated_pcie._dedicated_config(config)
     dedicated = (
-        f"scratch profile {arm.profile_name}: dedicated slot {arm.drc_index or pcie.AUTO_SELECTED_SLOT}; "
+        f"scratch profile {arm.profile_name}: dedicated slot {arm.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}; "
         "requires unowned/no-profile baseline; assign through hmc_modify_lpar and restore "
         "before SMS, then compare all profiles and slot ownership"
         if arm is not None and arm.system_name == config.system_name

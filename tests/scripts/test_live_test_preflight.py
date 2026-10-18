@@ -464,7 +464,7 @@ def test_an_unpinned_slot_predicts_the_io_slots_scenario_will_mutate_two_spares(
     output = capsys.readouterr().out
     assert "RUNNABLE" in output
     assert (
-        f"io_slots scenario: two further spare slots {preflight.pcie.AUTO_SELECTED_SLOT}"
+        f"io_slots scenario: two further spare slots {preflight.dedicated_pcie.AUTO_SELECTED_SLOT}"
         in (output)
     )
 

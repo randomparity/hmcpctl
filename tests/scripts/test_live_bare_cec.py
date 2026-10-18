@@ -22,7 +22,7 @@ SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_bare_cec as wrapper  # noqa: E402
 import live_test_runner as runner  # noqa: E402
-from live_test import bare_cec, pcie  # noqa: E402
+from live_test import bare_cec, dedicated_pcie  # noqa: E402
 from live_test import config as live_config  # noqa: E402
 from live_test.observation import CLEANUP, Assertion  # noqa: E402
 
@@ -86,7 +86,7 @@ def _no_waiting(monkeypatch):
 
     monkeypatch.setattr(bare_cec.cli, "execute", cli_read)
     monkeypatch.setattr(bare_cec, "_STATE_POLL_DELAY_S", 0)
-    monkeypatch.setattr(pcie, "_ABSENCE_REREAD_DELAY_S", 0)
+    monkeypatch.setattr(dedicated_pcie, "_ABSENCE_REREAD_DELAY_S", 0)
     monkeypatch.setattr(bare_cec, "_power_operations_authorized", lambda: True)
 
 
@@ -796,15 +796,19 @@ def test_a_missing_profile_link_stops_before_assigning_and_deletes(schemas):
 def test_the_dedicated_arm_create_still_sends_no_resources(schemas):
     """The shared create sends `resources` only when a caller supplies them."""
     world, state = World(), _state(schemas)
-    fixture = pcie._DedicatedFixture(
-        config=pcie._DedicatedConfig(_SYSTEM, "live-", "default_profile", _DRC),
+    fixture = dedicated_pcie._DedicatedFixture(
+        config=dedicated_pcie._DedicatedConfig(
+            _SYSTEM, "live-", "default_profile", _DRC
+        ),
         run_marker="pcie-00000000",
         lpar_name="live-pcie-00000000",
         probe_lpar_name="live-pcie-00000000-createtime",
         drc_index=_DRC,
     )
 
-    assert asyncio.run(pcie.create_fixture_partition(FakeClient(world), state, fixture))
+    assert asyncio.run(
+        dedicated_pcie.create_fixture_partition(FakeClient(world), state, fixture)
+    )
     (create,) = world.calls_to("hmc_create_lpar")
     assert "resources" not in create
 

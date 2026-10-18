@@ -466,10 +466,13 @@ async def test_the_profile_read_is_the_admitted_form_selected_by_profile_name():
 
 def test_recovery_reads_the_profile_with_the_arms_own_builders():
     """One definition of the admitted read, so the two cannot drift apart."""
-    from live_test import pcie
+    from live_test import dedicated_pcie
 
-    assert recovery.profile_io_slot_rows_command is pcie.profile_io_slot_rows_command
-    assert recovery.select_profile_io_slots is pcie.select_profile_io_slots
+    assert (
+        recovery.profile_io_slot_rows_command
+        is dedicated_pcie.profile_io_slot_rows_command
+    )
+    assert recovery.select_profile_io_slots is dedicated_pcie.select_profile_io_slots
 
 
 def test_an_unset_profile_name_falls_back_to_the_arms_default():
@@ -478,14 +481,14 @@ def test_an_unset_profile_name_falls_back_to_the_arms_default():
     A second spelling would query, and tell the operator to repair, a profile
     the arm never touched.
     """
-    from live_test import pcie
+    from live_test import dedicated_pcie
 
     document = _document()
     document["config"]["dedicated_pcie_profile_name"] = ""
 
     inputs = recovery.inputs_from_document(document)
 
-    assert inputs.profile_name == pcie._DEFAULT_DEDICATED_PROFILE
+    assert inputs.profile_name == dedicated_pcie._DEFAULT_DEDICATED_PROFILE
 
 
 # ---------------------------------------------------------------------------
