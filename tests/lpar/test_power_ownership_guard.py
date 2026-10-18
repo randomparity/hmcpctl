@@ -19,9 +19,9 @@ from hmcpctl.audit import sink as audit_sink
 from hmcpctl.cli import app as cli_app
 from hmcpctl.cli_commands.lpar import lifecycle as cli_lpars
 from hmcpctl.config import HMCConfig
-from hmcpctl.operations.lpar import core as lpar_core
+from hmcpctl.operations.lpar import activation as lpar_activation
 from hmcpctl.operations.lpar import provision as operations_provision
-from hmcpctl.operations.lpar.core import power_off_lpar, submit_power_on_lpar
+from hmcpctl.operations.lpar.activation import power_off_lpar, submit_power_on_lpar
 from hmcpctl.server_tools.lpar import lifecycle as server_lpars
 from hmcpctl.ssh.transport import HMCCLIError
 
@@ -373,7 +373,7 @@ async def test_provision_activation_leg_overrides_its_own_stamp() -> None:
 @pytest.mark.parametrize(
     ("tool", "operation_module"),
     [
-        (server_lpars.hmc_power_on_lpar, lpar_core),
+        (server_lpars.hmc_power_on_lpar, lpar_activation),
         (server_lpars.hmc_power_off_lpar, server_lpars),
     ],
 )
@@ -385,7 +385,9 @@ def test_power_tools_forward_the_ownership_override(
     monkeypatch.setattr("hmcpctl._app.client_from_env", _client_factory(hmc))
     monkeypatch.setattr(
         operation_module,
-        "submit_power_on_lpar" if operation_module is lpar_core else "power_off_lpar",
+        "submit_power_on_lpar"
+        if operation_module is lpar_activation
+        else "power_off_lpar",
         operation,
     )
 

@@ -11,17 +11,16 @@ from ...client.core import HMCClient
 from ...documents.lpar import LparResources
 from ...jobs import BootMode, PowerOnKeylock, PowerOnOperationType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
+from ...operations.lpar.activation import (
+    LparPowerOnOutcome,
+    power_off_lpar,
+    power_on_lpar,
+)
 from ...operations.lpar.assignments import (
     LparPcieAssignments,
     LparPcieWorkflowResult,
 )
-from ...operations.lpar.core import (
-    LparPowerOnOutcome,
-    delete_lpar,
-    power_off_lpar,
-    power_on_lpar,
-    rename_lpar,
-)
+from ...operations.lpar.core import delete_lpar, rename_lpar
 from ...operations.lpar.decommission import DecommissionResult, decommission_lpar
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
 from ...tool_registry import tool_module

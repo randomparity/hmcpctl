@@ -15,7 +15,7 @@ from typing import Any
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.jobs.requests import POWER_OFF_OPERATIONS
-from hmcpctl.operations.lpar.core import power_off_lpar, submit_power_on_lpar
+from hmcpctl.operations.lpar.activation import power_off_lpar, submit_power_on_lpar
 from hmcpctl.server import TOOL_SECURITY
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,11 +28,11 @@ SETTING = re.compile(r"HMC_[A-Z_]+")
 
 EXPECTED_IMPORT_PATHS = {
     "hmcpctl.operations.lpar",
-    "hmcpctl.operations.lpar.core.submit_power_on_lpar",
-    "hmcpctl.operations.lpar.core.power_off_lpar",
-    "hmcpctl.operations.lpar.core.get_lpar",
-    "hmcpctl.operations.lpar.core.get_lpar_state",
-    "hmcpctl.operations.lpar.core.LparPowerResult",
+    "hmcpctl.operations.lpar.activation.submit_power_on_lpar",
+    "hmcpctl.operations.lpar.activation.power_off_lpar",
+    "hmcpctl.operations.lpar.inventory.get_lpar",
+    "hmcpctl.operations.lpar.inventory.get_lpar_state",
+    "hmcpctl.operations.lpar.activation.LparPowerResult",
     "hmcpctl.operations.lpar.console.capture_lpar_console_by_selector",
     "hmcpctl.operations.lpar.ownership.list_lpar_ownership",
     "hmcpctl.operations.systems.fleet.FleetListing",

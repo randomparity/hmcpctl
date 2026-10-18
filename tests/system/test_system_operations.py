@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.operations.lpar import core as lpar_operations
-from hmcpctl.operations.lpar.core import list_lpars
+from hmcpctl.operations.lpar import inventory as lpar_inventory
+from hmcpctl.operations.lpar.inventory import list_lpars
 from hmcpctl.operations.systems.core import get_system, list_systems
 
 OPERATING = "12345678-1234-1234-1234-123456789abc"
@@ -84,7 +84,7 @@ async def test_lpar_inventory_composes_system_and_state_filters(monkeypatch) -> 
         {"UUID": "two", "Resource": {"PartitionState": "not activated"}},
     ]
     resolve_system = AsyncMock(return_value="system-uuid")
-    monkeypatch.setattr(lpar_operations, "resolve_system_uuid", resolve_system)
+    monkeypatch.setattr(lpar_inventory, "resolve_system_uuid", resolve_system)
 
     result = await list_lpars(hmc, "system-1", "running")
 

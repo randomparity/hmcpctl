@@ -13,9 +13,9 @@ kdive imports the LPAR domain modules under `hmcpctl.operations.lpar`:
 
 | Need | Import |
 |------|--------|
-| Power on, off, cycle, reset | `hmcpctl.operations.lpar.core.submit_power_on_lpar` and `hmcpctl.operations.lpar.core.power_off_lpar`, returning `hmcpctl.operations.lpar.core.LparPowerResult` |
-| Partition and RMC readback | `hmcpctl.operations.lpar.core.get_lpar` |
-| Partition state only | `hmcpctl.operations.lpar.core.get_lpar_state` |
+| Power on, off, cycle, reset | `hmcpctl.operations.lpar.activation.submit_power_on_lpar` and `hmcpctl.operations.lpar.activation.power_off_lpar`, returning `hmcpctl.operations.lpar.activation.LparPowerResult` |
+| Partition and RMC readback | `hmcpctl.operations.lpar.inventory.get_lpar` |
+| Partition state only | `hmcpctl.operations.lpar.inventory.get_lpar_state` |
 | Console capture | `hmcpctl.operations.lpar.console.capture_lpar_console_by_selector` |
 | Ownership readback | `hmcpctl.operations.lpar.ownership.list_lpar_ownership`, returning `hmcpctl.operations.systems.fleet.FleetListing`, whose `hmcpctl.operations.systems.fleet.FleetListing.entries` holds the rows |
 

@@ -29,12 +29,13 @@ from hmcpctl.operations.affinity.rest import (
     PostActivationAffinityAssessment,
     validate_affinity_request,
 )
+from hmcpctl.operations.lpar.activation import LparPowerResult
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
     WorkflowStep,
 )
-from hmcpctl.operations.lpar.core import LparCreationResult, LparPowerResult
+from hmcpctl.operations.lpar.core import LparCreationResult
 from hmcpctl.operations.lpar.provision import (
     ProvisionAdapters,
     ProvisionAffinityAssessment,

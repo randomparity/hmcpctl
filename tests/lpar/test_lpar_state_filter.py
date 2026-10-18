@@ -14,7 +14,7 @@ import pytest
 from conftest import live_fixture, live_response, make_config, mock_system_summaries
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.operations.lpar.core import list_lpars
+from hmcpctl.operations.lpar.inventory import list_lpars
 from hmcpctl.operations.partition_state import PARTITION_STATES
 
 # The captured LPAR read (state `not activated`), and the same entry reading

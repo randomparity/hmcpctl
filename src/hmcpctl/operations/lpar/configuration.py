@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import (
     _authorize_system_lpar_profile_restore,
@@ -25,7 +27,37 @@ from ...ssh.profiles import (
     sync_lpar_profile,
     validate_profile_sync_mode,
 )
-from .core import ProcessorCompatibilityMode
+
+ProcessorCompatibilityMode = Literal[
+    "default",
+    "POWER5",
+    "POWER6",
+    "POWER6+",
+    "POWER7",
+    "POWER8",
+    "POWER9_Base",
+    "POWER9_base",
+    "POWER9",
+    "POWER10",
+    "POWER11",
+]
+
+
+PROCESSOR_COMPATIBILITY_MODES: frozenset[ProcessorCompatibilityMode] = frozenset(
+    {
+        "default",
+        "POWER5",
+        "POWER6",
+        "POWER6+",
+        "POWER7",
+        "POWER8",
+        "POWER9_Base",
+        "POWER9_base",
+        "POWER9",
+        "POWER10",
+        "POWER11",
+    }
+)
 
 
 async def restore_system_lpar_profiles(

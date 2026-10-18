@@ -17,10 +17,11 @@ import pytest
 
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.operations.affinity.rest import ProvisionAffinityAssessment
+from hmcpctl.operations.lpar.activation import power_on_lpar
 from hmcpctl.operations.lpar.assignments import LparPcieAssignments
 from hmcpctl.operations.lpar.boot_order import read_lpar_boot_order
-from hmcpctl.operations.lpar.core import get_lpar, list_lpars, power_on_lpar
 from hmcpctl.operations.lpar.dlpar import modify_lpar
+from hmcpctl.operations.lpar.inventory import get_lpar, list_lpars
 from hmcpctl.operations.lpar.ownership import list_lpar_ownership
 from hmcpctl.operations.metrics.pcm import (
     resolve_pcm_resource,

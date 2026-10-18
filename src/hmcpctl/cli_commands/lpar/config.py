@@ -20,9 +20,7 @@ from ...operations.affinity.ssh import (
     plan_resource_group_memopt_scores,
     plan_system_memopt_score,
 )
-from ...operations.lpar.core import (
-    ProcessorCompatibilityMode,
-)
+from ...operations.lpar.configuration import ProcessorCompatibilityMode
 from ...ssh.affinity import (
     MemoptLparSelector,
     MemoptResourceGroupSelector,

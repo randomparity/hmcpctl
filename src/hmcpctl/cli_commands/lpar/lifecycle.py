@@ -12,12 +12,12 @@ from ...jobs import (
     PowerOnOperationType,
     validate_wait_timing,
 )
-from ...operations.lpar.core import (
+from ...operations.lpar.activation import (
     LparPowerResult,
-    delete_lpar,
     power_off_lpar,
     submit_power_on_lpar,
 )
+from ...operations.lpar.core import delete_lpar
 from ..output import console, err_console, print_json, terminal_field
 from ..runtime import with_client
 

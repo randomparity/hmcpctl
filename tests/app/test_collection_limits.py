@@ -12,7 +12,7 @@ from hmcpctl import _app as app_runtime
 from hmcpctl._app import run_limited_collection
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
-from hmcpctl.operations.lpar import core as lpar_core
+from hmcpctl.operations.lpar import inventory as lpar_inventory
 from hmcpctl.operations.systems.fleet import FleetListing, UnreadableSystem
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.storage import resources as server_storage
@@ -259,7 +259,7 @@ def test_lpar_parent_selector_runs_before_results_are_capped():
             app_runtime, "client_from_env", return_value=_client_context(client)
         ),
         patch.object(
-            lpar_core,
+            lpar_inventory,
             "resolve_system_uuid",
             new=AsyncMock(return_value="system-uuid"),
         ) as resolve,

@@ -31,7 +31,7 @@ from ..logical.engine import (
 )
 from ..logical.models import EffectRecord
 from ..logical.store import DEFAULT_CONNECTION
-from .core import ACTIVATED_STATES, submit_power_off
+from .activation import ACTIVATED_STATES, submit_power_off
 from .ownership import resolve_and_authorize_lpar_mutation
 
 PowerAction = Literal["start", "stop", "restart"]

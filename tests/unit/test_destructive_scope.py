@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.operations.lpar.core import delete_lpar, power_off_lpar, rename_lpar
+from hmcpctl.operations.lpar.activation import power_off_lpar
+from hmcpctl.operations.lpar.core import delete_lpar, rename_lpar
 from hmcpctl.operations.vios import core as operations_vios
 from hmcpctl.operations.vios.core import power_vios
 from hmcpctl.server_tools.lpar import lifecycle as server_lpars

@@ -29,8 +29,8 @@ from hmcpctl.operations.inventory.capacity import fetch_capacity_report
 from hmcpctl.operations.inventory.composite import fetch_system_summary
 from hmcpctl.operations.inventory.utilization import read_system
 from hmcpctl.operations.lpar import decommission as decommission_module
-from hmcpctl.operations.lpar.core import get_lpar, list_lpars
 from hmcpctl.operations.lpar.decommission import decommission_lpar
+from hmcpctl.operations.lpar.inventory import get_lpar, list_lpars
 from hmcpctl.operations.lpar.ownership import (
     _discover_owning_system,
     list_lpar_ownership,

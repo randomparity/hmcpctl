@@ -7,11 +7,7 @@ from dataclasses import asdict
 import typer
 
 from ...operations.inventory.composite import fetch_lpar_summary
-from ...operations.lpar.core import (
-    get_lpar,
-    get_lpar_state,
-    list_lpars,
-)
+from ...operations.lpar.inventory import get_lpar, get_lpar_state, list_lpars
 from ...operations.partition_state import PartitionState
 from ...resource_identity import ResourceNotFoundError
 from ...ssh.refcodes import MAX_REFCODE_COUNT, list_lpar_refcodes

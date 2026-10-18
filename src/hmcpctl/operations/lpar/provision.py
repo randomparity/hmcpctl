@@ -35,18 +35,14 @@ from ..affinity.rest import (
 )
 from ..affinity.ssh import set_minimum_affinity_policy
 from ..storage.resources import create_virtual_disk, resolve_volume_group_uuid
+from .activation import submit_power_on_lpar
 from .assignments import (
     LparPcieAssignments,
     apply_validated_lpar_pcie_assignments,
     assignment_step_names,
     prevalidate_lpar_pcie_assignments,
 )
-from .core import (
-    LparCreation,
-    LparCreationResult,
-    create_and_stamp_lpar,
-    submit_power_on_lpar,
-)
+from .core import LparCreation, LparCreationResult, create_and_stamp_lpar
 from .workflow_contract import WorkflowStep
 
 

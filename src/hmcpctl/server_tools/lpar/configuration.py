@@ -22,10 +22,10 @@ from ...operations.affinity.ssh import (
     set_minimum_affinity_policy,
 )
 from ...operations.lpar.configuration import (
+    ProcessorCompatibilityMode,
     configure_lpar_msp,
     configure_lpar_processor_compatibility,
 )
-from ...operations.lpar.core import ProcessorCompatibilityMode
 from ...ssh.affinity import (
     MemoptLparSelector,
     MemoptResourceGroupSelector,

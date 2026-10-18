@@ -5,13 +5,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.operations.lpar.core import (
-    delete_lpar,
+from hmcpctl.operations.lpar.activation import (
     power_off_lpar,
     power_on_lpar,
-    rename_lpar,
     submit_power_on_lpar,
 )
+from hmcpctl.operations.lpar.core import delete_lpar, rename_lpar
 from hmcpctl.operations.lpar.migration import (
     abort_lpar_migration,
     migrate_lpar,

@@ -19,11 +19,7 @@ from ...documents.system import (
     PowerOffPolicy,
     PowerOnLparStartPolicy,
 )
-from ...operations.lpar.core import (
-    get_lpar,
-    get_lpar_state,
-    list_lpars,
-)
+from ...operations.lpar.inventory import get_lpar, get_lpar_state, list_lpars
 from ...operations.partition_state import PartitionState
 from ...operations.systems.core import (
     ManagedSystemPatch,
