@@ -823,8 +823,8 @@ async def _download_iso_from_url(url: str) -> tuple[Path, str, int]:
             iso_sha256 = sha256_hash.hexdigest()
             return temp_file, iso_sha256, downloaded_size
 
-        except Exception:
-            # Clean up temp file on any error
+        except BaseException:
+            # Cancellation also leaves this function before upload owns the file.
             try:
                 temp_file.unlink(missing_ok=True)
             except OSError:

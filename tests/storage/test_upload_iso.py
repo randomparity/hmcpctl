@@ -1,5 +1,6 @@
 """Tests for the ISO upload operation through the HMC web File API (ADR 0177)."""
 
+import asyncio
 import functools
 import hashlib
 import socket
@@ -1217,6 +1218,44 @@ def _install_iso_transport(monkeypatch, handler):
         functools.partial(httpx.AsyncClient, transport=httpx.MockTransport(_record)),
     )
     return requests
+
+
+@pytest.mark.asyncio
+async def test_download_cancellation_removes_partial_iso(monkeypatch, tmp_path):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    waiting = asyncio.Event()
+
+    class InterruptedDownload(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b"partial ISO"
+            waiting.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = InterruptedDownload()
+    _install_iso_transport(
+        monkeypatch, lambda request: httpx.Response(200, stream=stream)
+    )
+    task = asyncio.create_task(_download_iso_from_url(ISO_URL))
+    try:
+        await asyncio.wait_for(waiting.wait(), timeout=2)
+        assert len(list(tmp_path.glob("hmc_upload_*.iso"))) == 1
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert stream.closed
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
 
 @pytest.mark.asyncio
