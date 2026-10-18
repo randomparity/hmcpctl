@@ -529,10 +529,27 @@ class IsoHttpServer:
             http.server.SimpleHTTPRequestHandler,
             directory=str(Path(config.iso_path).parent),
         )
-        self._server = http.server.HTTPServer(
+        startup_decided = threading.Event()
+        serve_allowed = False
+        server = http.server.HTTPServer(
             (config.iso_bind_host, config.iso_http_port), handler
         )
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+        def serve() -> None:
+            startup_decided.wait()
+            if serve_allowed:
+                server.serve_forever()
+
+        try:
+            threading.Thread(target=serve, daemon=True).start()
+        except BaseException:
+            # A native worker may start after Thread.start is interrupted.
+            startup_decided.set()
+            server.server_close()
+            raise
+        self._server = server
+        serve_allowed = True
+        startup_decided.set()
 
     def close(self) -> None:
         """Stop serving and release the listening socket."""
