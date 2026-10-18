@@ -104,6 +104,10 @@ templates_app = typer.Typer(
 )
 vios_app = typer.Typer(help="Virtual I/O Servers.", no_args_is_help=True)
 console_app = typer.Typer(help="The HMC itself.", no_args_is_help=True)
+operations_app = typer.Typer(
+    help="Local logical-operation records across all agents and connections; no HMC calls.",
+    no_args_is_help=True,
+)
 jobs_app = typer.Typer(help="HMC jobs.", no_args_is_help=True)
 raw_app = typer.Typer(help="Raw REST escape hatch.", no_args_is_help=True)
 snapshot_app = typer.Typer(help="Portable LPAR snapshots.", no_args_is_help=True)
@@ -119,6 +123,7 @@ app.add_typer(templates_app, name="templates")
 app.add_typer(vios_app, name="vios")
 app.add_typer(console_app, name="console")
 app.add_typer(jobs_app, name="jobs")
+app.add_typer(operations_app, name="operations")
 app.add_typer(raw_app, name="raw")
 app.add_typer(snapshot_app, name="snapshot")
 

@@ -821,9 +821,6 @@ def operation_status(
         )
     if request_id is not None:
         validate_request_id(request_id)
-    if not 1 <= limit <= MAX_PAGE:
-        raise ValueError(f"invalid_limit: limit must be from 1 to {MAX_PAGE}")
-    after = None if cursor is None else _decode_cursor(cursor)
     clauses = ["agent_id = ?", "connection = ?", "host = ?"]
     params: list[Any] = [agent_id, connection, host]
     filters = (
@@ -836,6 +833,22 @@ def operation_status(
         if value is not None:
             clauses.append(f"{column} = ?")
             params.append(value)
+    return _operation_page(clauses, params, limit=limit, cursor=cursor)
+
+
+def operator_status(
+    *, limit: int = MAX_PAGE, cursor: str | None = None
+) -> OperationPage:
+    """List operations across all agents and connections for the local CLI operator."""
+    return _operation_page(["1"], [], limit=limit, cursor=cursor)
+
+
+def _operation_page(
+    clauses: list[str], params: list[Any], *, limit: int, cursor: str | None
+) -> OperationPage:
+    if not 1 <= limit <= MAX_PAGE:
+        raise ValueError(f"invalid_limit: limit must be from 1 to {MAX_PAGE}")
+    after = None if cursor is None else _decode_cursor(cursor)
     if after is not None:
         clauses.append("(created_at < ? OR (created_at = ? AND operation_id < ?))")
         params.extend((after[0], after[0], after[1]))
@@ -858,3 +871,36 @@ def operation_status(
         else _encode_cursor(last["created_at"], last["operation_id"])
     )
     return OperationPage(records, limit, truncated, next_cursor)
+
+
+def operator_abandon(operation_id: str) -> OperationRecord:
+    """Abandon a paused/interrupted operation locally without touching the resource ledger.
+
+    The short write transaction serializes the state check with any execution admission.
+    It deliberately does not take the execution lock: doing so would turn running records
+    into interrupted records before checking them, rather than refusing running work.
+    """
+    if not _OPERATION_ID.fullmatch(operation_id):
+        raise ValueError(
+            "invalid_operation_id: operation_id is 32 lower-case hex digits"
+        )
+    with read_session() as conn:
+        if conn is None:
+            raise OperationRefused(
+                "not_found", "no operation store exists; list operations first"
+            )
+        with write_transaction(conn):
+            record = read_record(conn, operation_id)
+            if record.state == "terminal":
+                return record
+            if record.state == "running":
+                raise OperationRefused(
+                    "running", "the operation is running; wait until it pauses"
+                )
+            if "abandon" not in record.next_actions:
+                raise OperationRefused(
+                    "continuation_not_accepted",
+                    "this operation does not accept abandon",
+                )
+            set_state(conn, operation_id, "terminal", "abandoned")
+            return read_record(conn, operation_id)
