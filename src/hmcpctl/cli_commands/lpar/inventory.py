@@ -39,7 +39,11 @@ def lpars_summary(
     """One-call summary: state, RMC, memory/CPU, OS details, adapter count, description."""
     selected = resolve_inventory_format(as_json, format)
     summary = asdict(
-        with_client(lambda hmc: fetch_lpar_summary(hmc, system, name_or_uuid))
+        with_client(
+            lambda hmc: fetch_lpar_summary(
+                hmc, name_or_uuid, system_name_or_uuid=system
+            )
+        )
     )
     print_inventory(summary, selected, title="LPAR Summary")
 

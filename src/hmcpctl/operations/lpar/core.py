@@ -324,9 +324,9 @@ async def delete_lpar(
     """Authorize and delete a powered-off LPAR, returning its UUID."""
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     state = await hmc.get_quick_property(
         "LogicalPartition", lpar_uuid, "PartitionState"
@@ -354,9 +354,9 @@ async def rename_lpar(
     escape_xml(new_name)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     try:
         updated = await hmc.update_logical_partition(

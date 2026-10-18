@@ -243,12 +243,12 @@ def hmc_assign_sriov_logical_port(
     async def _go(hmc):
         return await assign_sriov_logical_port(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             InventorySelector(adapter_id, physical_port_id, logical_port_id),
             Decimal(str(capacity_percent)),
             profile_name=profile_name,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
 
     return with_client(_go, profile=profile)
@@ -284,11 +284,11 @@ def hmc_unassign_sriov_logical_port(
     async def _go(hmc):
         return await unassign_sriov_logical_port(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             InventorySelector(adapter_id, physical_port_id, logical_port_id),
             profile_name=profile_name,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
 
     return with_client(_go, profile=profile)

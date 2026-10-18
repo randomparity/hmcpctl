@@ -1064,9 +1064,9 @@ async def _delete_lpar_step(hmc: HMCClient, lpar_uuid: str) -> WorkflowStep:
 
 async def decommission_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     dry_run: bool = False,
     ownership_override: bool = False,
     immediate: bool = False,

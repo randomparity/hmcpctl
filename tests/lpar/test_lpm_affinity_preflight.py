@@ -18,10 +18,12 @@ from hmcpctl.server_tools.lpar.migration import hmc_migrate_lpar_with_affinity_p
 
 @pytest.fixture(autouse=True)
 def _authorize_lpar_mutations(monkeypatch):
-    async def authorize(hmc, system, lpar, **_kwargs):
+    async def authorize(hmc, lpar, *, system_name_or_uuid=None, **_kwargs):
         from hmcpctl.resource_identity import resolve_lpar_uuid
 
-        return await resolve_lpar_uuid(hmc, lpar, system_name_or_uuid=system)
+        return await resolve_lpar_uuid(
+            hmc, lpar, system_name_or_uuid=system_name_or_uuid
+        )
 
     monkeypatch.setattr(
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",

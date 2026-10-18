@@ -272,7 +272,6 @@ def lpars_remote_restart(
     async def _fn(hmc):
         return await remote_restart_lpar(
             hmc,
-            system,
             name_or_uuid,
             RemoteRestartRequest(
                 operation=cast(RemoteRestartOperation, operation),
@@ -284,6 +283,7 @@ def lpars_remote_restart(
             wait=wait,
             timeout_seconds=timeout,
             poll_interval=interval,
+            system_name_or_uuid=system,
         )
 
     _lpm_run(name_or_uuid, _fn, f"RemoteRestart {operation}", target, yes)

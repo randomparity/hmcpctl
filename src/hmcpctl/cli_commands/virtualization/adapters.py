@@ -32,7 +32,9 @@ def adapters_list(
 ) -> None:
     """List an LPAR's virtual adapters of a given type."""
 
-    adapters = with_client(lambda hmc: list_adapters(hmc, system, lpar, adapter_type))
+    adapters = with_client(
+        lambda hmc: list_adapters(hmc, lpar, adapter_type, system_name_or_uuid=system)
+    )
 
     output(adapters, as_json, None, f"No {adapter_type} adapters on {lpar}")
 
@@ -68,7 +70,6 @@ def adapters_add_network(
     result = with_client(
         lambda hmc: add_network_adapter(
             hmc,
-            system,
             lpar,
             vlan,
             slot_number=slot,
@@ -76,6 +77,7 @@ def adapters_add_network(
             tagged=tagged,
             mac_address=mac,
             ownership_override=ownership_override,
+            system_name_or_uuid=system,
         )
     )
     _adapter_mutation(result, lpar, "network")
@@ -104,12 +106,12 @@ def adapters_add_vscsi(
     result = with_client(
         lambda hmc: add_vscsi_adapter(
             hmc,
-            system,
             lpar,
             vios_id,
             vios_slot,
             slot_number=slot,
             ownership_override=ownership_override,
+            system_name_or_uuid=system,
         )
     )
     _adapter_mutation(result, lpar, "vSCSI")
@@ -138,12 +140,12 @@ def adapters_add_vfc(
     result = with_client(
         lambda hmc: add_vfc_adapter(
             hmc,
-            system,
             lpar,
             vios_id,
             vios_slot,
             slot_number=slot,
             ownership_override=ownership_override,
+            system_name_or_uuid=system,
         )
     )
     _adapter_mutation(result, lpar, "vFC")
@@ -172,11 +174,11 @@ def adapters_delete(
     location = with_client(
         lambda hmc: delete_adapter(
             hmc,
-            system,
             lpar,
             adapter_type,
             adapter_uuid,
             ownership_override=ownership_override,
+            system_name_or_uuid=system,
         )
     )
 

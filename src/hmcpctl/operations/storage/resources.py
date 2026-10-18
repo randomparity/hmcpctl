@@ -459,9 +459,9 @@ async def map_storage(
     )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.map_storage_to_lpar(
@@ -614,9 +614,9 @@ async def detach_storage_mapping(
         )
     await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
@@ -1229,9 +1229,9 @@ async def mount_optical_media(
     )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.create_optical_mapping(
@@ -1295,9 +1295,9 @@ async def unmount_optical_media(
     )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     matches: list[dict[str, Any]] = []
     for mapping in await hmc.list_optical_mappings(vios_uuid, lpar_uuid):

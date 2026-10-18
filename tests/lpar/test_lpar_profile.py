@@ -283,7 +283,9 @@ def test_synchronize_refuses_an_unknown_mode_before_any_hmc_call():
         pytest.raises(ValueError, match="enable, disable or suspend"),
     ):
         asyncio.run(
-            synchronize_lpar_profile(hmc, SYSTEM_NAME, LPAR_NAME, mode=_BAD_MODE)
+            synchronize_lpar_profile(
+                hmc, LPAR_NAME, mode=_BAD_MODE, system_name_or_uuid=SYSTEM_NAME
+            )
         )
 
 

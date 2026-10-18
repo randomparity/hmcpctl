@@ -86,7 +86,7 @@ async def test_adapter_listing_ignores_a_blank_system(blank):
     hmc = _hmc()
     hmc.list_adapters.return_value = []
 
-    await list_adapters(hmc, blank, "lp1", "ClientNetworkAdapter")
+    await list_adapters(hmc, "lp1", "ClientNetworkAdapter", system_name_or_uuid=blank)
 
     hmc.list_system_summaries.assert_not_awaited()
     hmc.list_adapters.assert_awaited_once_with(LPAR_UUID, "ClientNetworkAdapter")
@@ -127,11 +127,11 @@ async def test_a_rename_with_a_blank_system_reports_the_missing_selector(blank):
     with pytest.raises(ValueError, match="system_name_or_uuid is required"):
         await modify_lpar(
             hmc,
-            blank,
             "lp1",
             LparResources(),
             LparPcieAssignments(),
             new_name="lp2",
+            system_name_or_uuid=blank,
         )
 
     hmc.list_system_summaries.assert_not_awaited()
@@ -279,6 +279,6 @@ async def test_a_boot_order_read_refuses_a_blank_required_system(blank):
     hmc = _hmc()
 
     with pytest.raises(ValueError, match="required to read a boot order"):
-        await read_lpar_boot_order(hmc, blank, "lp1")
+        await read_lpar_boot_order(hmc, "lp1", system_name_or_uuid=blank)
 
     hmc.find_partition_by_name.assert_not_awaited()

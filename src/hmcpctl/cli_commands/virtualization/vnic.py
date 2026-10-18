@@ -38,7 +38,9 @@ def network_list_fc_ports(
 ) -> None:
     """List Virtual Fibre Channel (NPIV) adapters on a managed system."""
 
-    ports = with_client(lambda hmc: list_fc_ports(hmc, system_name, lpar_name))
+    ports = with_client(
+        lambda hmc: list_fc_ports(hmc, lpar_name, system_name_or_uuid=system_name)
+    )
 
     output(ports, as_json, None, "No FC ports found")
 
@@ -52,7 +54,9 @@ def network_list_sea_adapters(
 ) -> None:
     """List Shared Ethernet Adapter (SEA) virtual Ethernet ports on a managed system."""
 
-    adapters = with_client(lambda hmc: list_sea_adapters(hmc, system_name, lpar_name))
+    adapters = with_client(
+        lambda hmc: list_sea_adapters(hmc, lpar_name, system_name_or_uuid=system_name)
+    )
 
     output(adapters, as_json, None, "No SEA adapters found")
 
@@ -63,7 +67,9 @@ def network_list_vnics(
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """List vNICs (SR-IOV-backed Virtual NICs) on an LPAR (HMC CLI via SSH)."""
-    vnics = with_client(lambda hmc: list_vnics(hmc, system_name, lpar))
+    vnics = with_client(
+        lambda hmc: list_vnics(hmc, lpar, system_name_or_uuid=system_name)
+    )
     output(vnics, as_json, None, "No vNICs found")
 
 
@@ -91,7 +97,6 @@ def network_add_vnic(
         try:
             return await add_vnic(
                 hmc,
-                system_name,
                 lpar,
                 VnicBackingSelector(
                     vios_name,
@@ -102,6 +107,7 @@ def network_add_vnic(
                 ),
                 port_vlan_id,
                 ownership_override=ownership_override,
+                system_name_or_uuid=system_name,
             )
         except VnicPartialError as exc:
             return exc
@@ -130,10 +136,10 @@ def network_remove_vnic(
         try:
             return await remove_vnic(
                 hmc,
-                system_name,
                 lpar,
                 slot_num,
                 ownership_override=ownership_override,
+                system_name_or_uuid=system_name,
             )
         except VnicPartialError as exc:
             return exc

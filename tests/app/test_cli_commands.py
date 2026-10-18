@@ -4188,8 +4188,11 @@ def test_lpars_set_msp_forwards_ownership_override(monkeypatch, fake_hmc):
 
     assert result.exit_code == 0, result.output
     operation.assert_awaited_once()
-    assert operation.call_args.args[1:] == ("sys1", "vios1", False)
-    assert operation.call_args.kwargs == {"ownership_override": True}
+    assert operation.call_args.args[1:] == ("vios1", False)
+    assert operation.call_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": "sys1",
+    }
 
 
 @pytest.mark.parametrize("command", ["add-vnic", "remove-vnic"])
@@ -4253,7 +4256,10 @@ def test_add_vnic_cli_default_confirmation_keeps_stdout_json(monkeypatch):
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["operation"] == "add"
     assert "Add vNIC" in result.stderr
-    assert operation.await_args.kwargs == {"ownership_override": True}
+    assert operation.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": "system",
+    }
 
 
 def test_remove_vnic_cli_default_confirmation_keeps_partial_stdout_json(monkeypatch):
@@ -4283,7 +4289,10 @@ def test_remove_vnic_cli_default_confirmation_keeps_partial_stdout_json(monkeypa
     assert result.exit_code == 1
     assert json.loads(result.stdout)["operation"] == "remove"
     assert "Remove vNIC" in result.stderr
-    assert operation.await_args.kwargs == {"ownership_override": True}
+    assert operation.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": "system",
+    }
 
 
 # --------------------------------------------------------------------------- #

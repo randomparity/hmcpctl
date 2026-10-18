@@ -139,9 +139,7 @@ def _lpar_summary(
 
 
 async def fetch_lpar_summary(
-    hmc: HMCClient,
-    system_name_or_uuid: str | None,
-    lpar_name_or_uuid: str,
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str | None = None
 ) -> LparSummary:
     """Compose partition details and adapter inventory into one summary.
 

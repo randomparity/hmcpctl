@@ -395,12 +395,12 @@ def storage_attach_disk(
         vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg)
         return await attach_disk_to_lpar(
             hmc,
-            system,
             lpar,
             ProvisionStorage(vios_uuid, name, vg_uuid=vg_uuid),
             capacity_mib=capacity_mib,
             dry_run=dry_run,
             ownership_override=ownership_override,
+            system_name_or_uuid=system,
         )
 
     result = with_client(_go)

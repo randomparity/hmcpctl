@@ -147,7 +147,7 @@ async def test_add_rejects_blank_selector_fields(field: str) -> None:
     values[field] = " "
     selector = VnicBackingSelector(**values, capacity_percent=Decimal(2))
     with pytest.raises(ValueError, match="must not be blank"):
-        await add_vnic(_hmc(), "system-a", "client-a", selector, 7)
+        await add_vnic(_hmc(), "client-a", selector, 7, system_name_or_uuid="system-a")
 
 
 @pytest.mark.parametrize(
@@ -157,7 +157,7 @@ async def test_add_rejects_blank_selector_fields(field: str) -> None:
 async def test_add_rejects_invalid_capacity(capacity: Decimal) -> None:
     selector = VnicBackingSelector("vios-a", "100", "1", "1", capacity)
     with pytest.raises(ValueError):
-        await add_vnic(_hmc(), "system-a", "client-a", selector, 7)
+        await add_vnic(_hmc(), "client-a", selector, 7, system_name_or_uuid="system-a")
 
 
 @pytest.mark.parametrize("vlan", [-1, 4095])
@@ -165,7 +165,9 @@ async def test_add_rejects_invalid_capacity(capacity: Decimal) -> None:
 async def test_add_rejects_vlan_out_of_range(vlan: int) -> None:
     selector = VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2))
     with pytest.raises(ValueError, match="between 0 and 4094"):
-        await add_vnic(_hmc(), "system-a", "client-a", selector, vlan)
+        await add_vnic(
+            _hmc(), "client-a", selector, vlan, system_name_or_uuid="system-a"
+        )
 
 
 @pytest.mark.parametrize("vlan", [7.5, True])
@@ -185,11 +187,7 @@ async def test_add_rejects_non_integer_vlan_before_preflight(
 
     with pytest.raises(ValueError, match="integer between 0 and 4094"):
         await add_vnic(
-            object(),  # ty: ignore[invalid-argument-type]
-            "system-a",
-            "client-a",
-            selector,
-            vlan,  # ty: ignore[invalid-argument-type]
+            object(), "client-a", selector, vlan, system_name_or_uuid="system-a"
         )
 
     preflight.assert_not_awaited()
@@ -217,7 +215,7 @@ async def test_add_rejects_each_delimiter_in_each_selector_field(
     values[field] += character
     selector = VnicBackingSelector(**values, capacity_percent=Decimal(2))
     with pytest.raises(ValueError):
-        await add_vnic(_hmc(), "system-a", "client-a", selector, 7)
+        await add_vnic(_hmc(), "client-a", selector, 7, system_name_or_uuid="system-a")
 
 
 @pytest.mark.parametrize(
@@ -290,7 +288,7 @@ async def test_add_preserves_shell_metacharacters_as_quoted_payload_data(
     )
 
     with pytest.raises(VnicPartialError):
-        await add_vnic(_hmc(), "system-a", "client-a", selector, 7)
+        await add_vnic(_hmc(), "client-a", selector, 7, system_name_or_uuid="system-a")
 
     mutate.assert_awaited_once()
     assert mutate.await_args_list[0].args[3] == "/".join(
@@ -325,10 +323,10 @@ async def test_add_rejects_wrong_vios_identity_or_type(
     with pytest.raises(VnicCapabilityError, match="name, ID, or partition type"):
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
 
@@ -383,10 +381,10 @@ async def test_add_rejects_adapter_or_port_mismatch(
     with pytest.raises(VnicCapabilityError):
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
 
@@ -417,10 +415,10 @@ async def test_add_rejects_exhausted_capacity(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(ValueError, match="capacity exhausted"):
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
 
@@ -441,10 +439,10 @@ async def test_add_verified_retry_is_unchanged(monkeypatch: pytest.MonkeyPatch) 
     )
     result = await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
         7,
+        system_name_or_uuid="system-a",
     )
     assert (result.changed, result.slot_num, result.mutation_dispatched) == (
         False,
@@ -487,10 +485,10 @@ async def test_add_verified_retry_resolves_before_new_allocation_capacity(
 
     result = await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(60)),
         7,
+        system_name_or_uuid="system-a",
     )
 
     assert (result.changed, result.slot_num, result.mutation_dispatched) == (
@@ -536,10 +534,10 @@ async def test_add_rejects_identical_duplicates_within_one_projection(
     with pytest.raises(ValueError, match=f"duplicate {projection}"):
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
     mutate.assert_not_awaited()
@@ -579,10 +577,10 @@ async def test_add_deduplicates_consistent_direct_and_backing_observations(
     with pytest.raises(VnicPartialError):
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
     mutate.assert_awaited_once()
@@ -607,10 +605,10 @@ async def test_add_successfully_correlates_new_slot(
     )
     result = await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
         7,
+        system_name_or_uuid="system-a",
     )
     assert (result.changed, result.slot_num, result.output) == (True, "2", "created")
 
@@ -636,10 +634,10 @@ async def test_add_ignores_unrelated_equal_selector_backing_for_target_identity(
 
     result = await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
         7,
+        system_name_or_uuid="system-a",
     )
 
     assert result.changed is True
@@ -668,10 +666,10 @@ async def test_add_before_state_after_dispatch_is_known_unchanged_partial(
     with pytest.raises(VnicPartialError) as caught:
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
     result = caught.value.result
@@ -725,10 +723,10 @@ async def test_add_reconciliation_decision_table(
     )
     call = add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
         7,
+        system_name_or_uuid="system-a",
     )
 
     if case == "final-success":
@@ -771,10 +769,10 @@ async def test_add_retry_ignores_unrelated_selector_matching_degraded_backing(
 
     result = await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
         7,
+        system_name_or_uuid="system-a",
     )
 
     assert result.changed is False
@@ -804,10 +802,10 @@ async def test_add_final_ignores_unrelated_selector_matching_degraded_backing(
 
     result = await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
         7,
+        system_name_or_uuid="system-a",
     )
 
     assert result.changed is True
@@ -836,10 +834,10 @@ async def test_add_retry_refuses_degraded_correlated_target_backing(
     with pytest.raises(VnicCapabilityError, match="ambiguous or degraded"):
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
     mutation.assert_not_awaited()
@@ -866,10 +864,10 @@ async def test_add_rejects_two_new_matching_vnics_despite_one_operational_backin
     with pytest.raises(VnicPartialError) as caught:
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
     result = caught.value.result
@@ -900,10 +898,10 @@ async def test_add_successful_reads_with_only_new_vnic_are_contradictory(
     with pytest.raises(VnicPartialError) as caught:
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
 
     result = caught.value.result
@@ -935,10 +933,10 @@ async def test_add_command_and_both_read_failures_are_retained_in_order(
     with pytest.raises(VnicPartialError) as caught:
         await add_vnic(
             _hmc(),
-            "system-a",
             "client-a",
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
+            system_name_or_uuid="system-a",
         )
     result = caught.value.result
     assert result.changed is None
@@ -961,7 +959,7 @@ async def test_remove_absent_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> No
         "hmcpctl.operations.virtualization.vnic.list_vnic_backing_rows",
         AsyncMock(return_value=[]),
     )
-    result = await remove_vnic(_hmc(), "system-a", "client-a", "2")
+    result = await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
     assert (result.changed, result.selector, result.slot_num) == (False, None, "2")
 
 
@@ -982,7 +980,7 @@ async def test_remove_success_preserves_captured_selector(
         "hmcpctl.operations.virtualization.vnic.remove_vnic_slot",
         AsyncMock(return_value="removed"),
     )
-    result = await remove_vnic(_hmc(), "system-a", "client-a", "2")
+    result = await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
     assert result.changed is True
     assert result.selector == VnicBackingSelector(
         "vios-a", "100", "1", "1", Decimal("2.0")
@@ -1030,7 +1028,7 @@ async def test_remove_reconciliation_decision_table(
     monkeypatch.setattr(
         "hmcpctl.operations.virtualization.vnic.remove_vnic_slot", mutation
     )
-    call = remove_vnic(_hmc(), "system-a", "client-a", "2")
+    call = remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
 
     if case == "final-success":
         result = await call
@@ -1063,7 +1061,7 @@ async def test_remove_refuses_uncorrelated_or_degraded_backing(
         AsyncMock(return_value=rows),
     )
     with pytest.raises(VnicCapabilityError):
-        await remove_vnic(_hmc(), "system-a", "client-a", "2")
+        await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
 
 
 @pytest.mark.parametrize("backing_devices", ["none", None, "extra"])
@@ -1095,7 +1093,7 @@ async def test_remove_requires_exactly_one_embedded_backing_before_mutation(
     )
 
     with pytest.raises(VnicCapabilityError, match="exactly one embedded backing"):
-        await remove_vnic(_hmc(), "system-a", "client-a", "2")
+        await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
 
     mutate.assert_not_awaited()
 
@@ -1129,7 +1127,7 @@ async def test_remove_requires_full_backing_correlation(
     )
 
     with pytest.raises(VnicCapabilityError):
-        await remove_vnic(_hmc(), "system-a", "client-a", "2")
+        await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
 
 
 @pytest.mark.parametrize(
@@ -1160,7 +1158,7 @@ async def test_remove_ignores_distinct_backing_reusing_adapter_and_logical_port(
         AsyncMock(return_value="removed"),
     )
 
-    result = await remove_vnic(_hmc(), "system-a", "client-a", "2")
+    result = await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
 
     assert result.changed is True
     assert result.backing_after == ()
@@ -1184,7 +1182,7 @@ async def test_remove_successful_reads_with_changed_slot_are_contradictory(
     )
 
     with pytest.raises(VnicPartialError) as caught:
-        await remove_vnic(_hmc(), "system-a", "client-a", "2")
+        await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
 
     result = caught.value.result
     assert result.changed is None
@@ -1221,10 +1219,10 @@ def _granularity_port(monkeypatch: pytest.MonkeyPatch, granularity: str) -> Asyn
 async def _add_at(capacity: str) -> VnicChangeResult:
     return await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(capacity)),
         7,
+        system_name_or_uuid="system-a",
     )
 
 
@@ -1303,10 +1301,10 @@ async def test_add_on_partition_with_no_vnics_reads_sentinel_as_empty(
     commands = _sentinel_hmc(monkeypatch, _vnic())
     result = await add_vnic(
         _hmc(),
-        "system-a",
         "client-a",
         VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
         7,
+        system_name_or_uuid="system-a",
     )
     assert (result.changed, result.slot_num, result.vnic_before) == (True, "2", ())
     assert sum(c.startswith("chhwres") for c in commands) == 1
@@ -1318,7 +1316,7 @@ async def test_remove_on_partition_with_no_vnics_reads_sentinel_as_absent(
 ) -> None:
     _common(monkeypatch)
     commands = _sentinel_hmc(monkeypatch, None)
-    result = await remove_vnic(_hmc(), "system-a", "client-a", "2")
+    result = await remove_vnic(_hmc(), "client-a", "2", system_name_or_uuid="system-a")
     assert (result.changed, result.selector, result.mutation_dispatched) == (
         False,
         None,

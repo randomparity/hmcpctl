@@ -161,12 +161,12 @@ def hmc_attach_disk_to_lpar(
     return with_client(
         lambda hmc: attach_disk_to_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             ProvisionStorage(vios_uuid, disk_name, vg_uuid=vg_uuid),
             capacity_mib=capacity_mib,
             dry_run=dry_run,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )

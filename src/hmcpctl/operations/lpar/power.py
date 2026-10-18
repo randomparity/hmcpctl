@@ -113,7 +113,10 @@ async def _resolve_and_authorize_power_target(
     if hmc.config.authorize_power_operations:
         try:
             await resolve_and_authorize_lpar_mutation(
-                hmc, system_uuid, lpar_uuid, ownership_override=False
+                hmc,
+                lpar_uuid,
+                ownership_override=False,
+                system_name_or_uuid=system_uuid,
             )
         except (HMCError, ValueError, LookupError, PermissionError) as exc:
             # The refusal text names the partition and an override this tool does not

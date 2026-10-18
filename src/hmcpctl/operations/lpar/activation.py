@@ -331,9 +331,9 @@ async def _resolve_power_target(
     if hmc.config.authorize_power_operations:
         lpar_uuid = await resolve_and_authorize_lpar_mutation(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
     else:
         lpar_uuid = await resolve_lpar_uuid(

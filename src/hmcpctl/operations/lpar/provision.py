@@ -351,10 +351,10 @@ async def _run_storage_leg(
 
 async def attach_disk_to_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     storage: ProvisionStorage,
     *,
+    system_name_or_uuid: str | None = None,
     capacity_mib: int,
     dry_run: bool = False,
     ownership_override: bool = False,
@@ -380,9 +380,9 @@ async def attach_disk_to_lpar(
 
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
 
     change_location, warnings = await _read_change_location(hmc, lpar_uuid)
@@ -434,7 +434,9 @@ async def _run_policy_leg(
     return await _record_hmc_step(
         steps,
         "minimum_affinity_policy",
-        set_minimum_affinity_policy(hmc, system_name_or_uuid, lpar_name, policy),
+        set_minimum_affinity_policy(
+            hmc, lpar_name, policy, system_name_or_uuid=system_name_or_uuid
+        ),
     )
 
 

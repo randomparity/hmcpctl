@@ -97,7 +97,9 @@ READS: dict[str, tuple[str, Read]] = {
     ),
     "decommission_target": (
         LPAR_FEED,
-        lambda hmc: decommission_lpar(hmc, SYSTEM_UUID, "lpar-a", dry_run=True),
+        lambda hmc: decommission_lpar(
+            hmc, "lpar-a", dry_run=True, system_name_or_uuid=SYSTEM_UUID
+        ),
     ),
     "resolve_vios_uuid": (
         VIOS_FEED,
@@ -500,7 +502,9 @@ async def test_decommission_refuses_an_untrusted_vios_feed(
     )
 
     async with HMCClient(make_config()) as hmc:
-        result = await decommission_lpar(hmc, SYSTEM_UUID, "lpar-a", dry_run=dry_run)
+        result = await decommission_lpar(
+            hmc, "lpar-a", dry_run=dry_run, system_name_or_uuid=SYSTEM_UUID
+        )
 
     assert result.resource_deleted is False
     assert result.workflow_completed is dry_run

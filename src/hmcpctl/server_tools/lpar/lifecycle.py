@@ -82,11 +82,11 @@ def hmc_modify_lpar(
     return with_client(
         lambda hmc: modify_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             resources,
             assignments,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -167,10 +167,10 @@ def hmc_dlpar_proc(
     return with_client(
         lambda hmc: set_lpar_processors(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             resources,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -210,10 +210,10 @@ def hmc_dlpar_mem(
     return with_client(
         lambda hmc: set_lpar_memory(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             resources,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -319,13 +319,13 @@ def hmc_decommission_lpar(
     return with_client(
         lambda hmc: decommission_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             dry_run=dry_run,
             ownership_override=ownership_override,
             immediate=immediate,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )

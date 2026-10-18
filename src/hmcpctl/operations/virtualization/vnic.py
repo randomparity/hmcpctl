@@ -128,9 +128,7 @@ class VnicPartialError(RuntimeError):
 
 
 async def list_fc_ports(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str | None = None,
+    hmc: HMCClient, lpar_name_or_uuid: str | None = None, *, system_name_or_uuid: str
 ) -> list[dict[str, str]]:
     """List Fibre Channel ports, optionally scoped to one LPAR."""
     config = hmc.config
@@ -141,9 +139,7 @@ async def list_fc_ports(
 
 
 async def list_sea_adapters(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str | None = None,
+    hmc: HMCClient, lpar_name_or_uuid: str | None = None, *, system_name_or_uuid: str
 ) -> list[dict[str, str]]:
     """List shared Ethernet adapters, optionally scoped to one LPAR."""
     config = hmc.config
@@ -154,7 +150,7 @@ async def list_sea_adapters(
 
 
 async def list_vnics(
-    hmc: HMCClient, system_name_or_uuid: str, lpar_name_or_uuid: str
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str
 ) -> list[dict[str, object]]:
     """List vNICs on an LPAR."""
     config = hmc.config
@@ -413,9 +409,9 @@ async def _preflight_add(
 ) -> _VnicPreflightContext:
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     config = hmc.config
     await require_admitted_environment(config, system_name)
@@ -633,11 +629,11 @@ def _reconcile_remove(
 
 async def add_vnic(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     selector: VnicBackingSelector,
     port_vlan_id: int,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> VnicChangeResult:
     """Add a vNIC backing and reconcile the resulting state.
@@ -718,10 +714,10 @@ async def add_vnic(
 
 async def remove_vnic(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     slot_num: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> VnicChangeResult:
     """Remove a vNIC slot and reconcile the resulting state.
@@ -734,9 +730,9 @@ async def remove_vnic(
     slot_num = require_command_safe_text(slot_num, "slot_num")
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     await require_admitted_environment(hmc.config, system_name)
     all_vnics = _parse_vnic_snapshots(

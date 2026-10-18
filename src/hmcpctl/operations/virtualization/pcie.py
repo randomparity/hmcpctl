@@ -220,11 +220,11 @@ def require_drc_index(value: str) -> str:
 
 async def assign_dedicated_pcie_slot(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str,
     drc_index: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> None:
     """Add a dedicated slot to an LPAR profile and verify it by exact readback.
@@ -249,11 +249,11 @@ async def assign_dedicated_pcie_slot(
 
 async def unassign_dedicated_pcie_slot(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str,
     drc_index: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> None:
     """Remove a dedicated slot from an LPAR profile and verify it by exact readback.
@@ -285,9 +285,9 @@ async def _authorize_pcie_profile_request(
     require_drc_index(drc_index)
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     config = hmc.config
     await require_dedicated_pcie_environment(config, system_name)
@@ -813,9 +813,9 @@ async def _preflight_sriov_assignment(
     capacity = validate_capacity_percent(capacity_percent)
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     config = hmc.config
     require_command_safe_text(profile_name, "profile_name")
@@ -937,11 +937,11 @@ def _raise_sriov_partial_error(
 
 async def assign_sriov_logical_port(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     selector: InventorySelector,
     capacity_percent: Decimal,
     *,
+    system_name_or_uuid: str,
     profile_name: str,
     ownership_override: bool = False,
 ) -> SriovLogicalPortChangeResult:
@@ -1040,10 +1040,10 @@ async def assign_sriov_logical_port(
 
 async def unassign_sriov_logical_port(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     selector: InventorySelector,
     *,
+    system_name_or_uuid: str,
     profile_name: str,
     ownership_override: bool = False,
 ) -> SriovLogicalPortChangeResult:
@@ -1060,9 +1060,9 @@ async def unassign_sriov_logical_port(
     require_command_safe_text(profile_name, "profile_name")
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     config = hmc.config
     await require_admitted_environment(config, system_name)

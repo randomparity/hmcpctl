@@ -397,9 +397,9 @@ async def migrate_lpar(
             )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     job = await _submit_migration_job(
         hmc,
@@ -433,9 +433,9 @@ async def abort_lpar_migration(
     validate_wait_timing(wait, timeout_seconds, poll_interval)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     job = await hmc.lpar_migrate_abort(lpar_uuid)
     return LpmResult(
@@ -462,9 +462,9 @@ async def recover_lpar_migration(
     validate_wait_timing(wait, timeout_seconds, poll_interval)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     job = await hmc.lpar_migrate_recover(lpar_uuid)
     return LpmResult(
@@ -475,10 +475,10 @@ async def recover_lpar_migration(
 
 async def remote_restart_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     request: RemoteRestartRequest,
     *,
+    system_name_or_uuid: str,
     wait: bool = False,
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
@@ -491,9 +491,9 @@ async def remote_restart_lpar(
     validate_wait_timing(wait, timeout_seconds, poll_interval)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=request.ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     source_system = await resolve_system_name(hmc, system_name_or_uuid)
     target_name = None

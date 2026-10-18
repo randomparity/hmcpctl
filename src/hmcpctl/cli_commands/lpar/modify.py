@@ -103,12 +103,12 @@ def lpars_modify(
     result = with_client(
         lambda hmc: modify_lpar(
             hmc,
-            system,
             name_or_uuid,
             resources,
             assignments,
             new_name=new_name,
             ownership_override=ownership_override,
+            system_name_or_uuid=system,
         )
     )
 

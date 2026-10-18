@@ -67,7 +67,7 @@ class MinimumAffinityPolicyResult:
 
 
 async def get_lpar_memopt_score(
-    hmc: HMCClient, system_name_or_uuid: str, lpar_name_or_uuid: str
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str
 ) -> dict[str, object]:
     """Return one LPAR's current memory-optimization score."""
     config = _config(hmc)
@@ -174,9 +174,7 @@ async def plan_resource_group_memopt_scores(
 
 
 async def get_minimum_affinity_policy(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str
 ) -> MinimumAffinityPolicyResult:
     """Return an LPAR's minimum-affinity policy when supported."""
     config = _config(hmc)
@@ -202,18 +200,18 @@ async def get_minimum_affinity_policy(
 
 async def set_minimum_affinity_policy(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     policy: MinimumAffinityPolicy,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> str:
     """Authorize and apply an LPAR minimum-affinity policy."""
     validate_minimum_affinity_policy(policy)
     names = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     return await set_minimum_affinity_policy_cli(hmc.config, *names, policy)

@@ -461,7 +461,12 @@ async def _rename(name: str):
 async def _modify(resources: LparResources, new_name: str | None = None):
     async with HMCClient(make_config()) as hmc:
         return await modify_lpar(
-            hmc, SYSTEM, LPAR, resources, LparPcieAssignments(), new_name=new_name
+            hmc,
+            LPAR,
+            resources,
+            LparPcieAssignments(),
+            new_name=new_name,
+            system_name_or_uuid=SYSTEM,
         )
 
 
@@ -576,7 +581,7 @@ async def test_dlpar_refuses_no_fields_before_any_request(
 
     async with HMCClient(make_config()) as hmc:
         with pytest.raises(ValueError, match=f"at least one {kind} field"):
-            await operation(hmc, SYSTEM, LPAR, resources)
+            await operation(hmc, LPAR, resources, system_name_or_uuid=SYSTEM)
 
     authorized.assert_not_awaited()
     assert not get.called
@@ -588,7 +593,10 @@ async def test_dlpar_memory_writes_only_memory_fields(mock_hmc, authorized):
 
     async with HMCClient(make_config()) as hmc:
         await set_lpar_memory(
-            hmc, SYSTEM, LPAR, LparResources(max_memory=8192, desired_procs=1.0)
+            hmc,
+            LPAR,
+            LparResources(max_memory=8192, desired_procs=1.0),
+            system_name_or_uuid=SYSTEM,
         )
 
     body = post.calls.last.request.content
@@ -604,7 +612,10 @@ async def test_dlpar_processors_write_only_processor_fields(mock_hmc, authorized
 
     async with HMCClient(make_config()) as hmc:
         await set_lpar_processors(
-            hmc, SYSTEM, LPAR, LparResources(desired_procs=0.4, desired_memory=8192)
+            hmc,
+            LPAR,
+            LparResources(desired_procs=0.4, desired_memory=8192),
+            system_name_or_uuid=SYSTEM,
         )
 
     assert _canonical(_lpar(post.calls.last.request.content)) == _expected(

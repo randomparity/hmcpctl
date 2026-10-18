@@ -125,11 +125,11 @@ async def test_assign_mutates_and_verifies_effective_readback(monkeypatch):
 
     result = await assign_sriov_logical_port(
         _hmc(),
-        "sys",
         "lpar",
         InventorySelector("1", "0", "3"),
         Decimal("2.0"),
         profile_name="prof",
+        system_name_or_uuid="sys",
     )
 
     assert result.changed is True
@@ -159,11 +159,11 @@ async def test_assign_is_idempotent_and_refuses_foreign_owner(monkeypatch):
     )
     unchanged = await assign_sriov_logical_port(
         _hmc(),
-        "sys",
         "lpar",
         InventorySelector("1", "0", "3"),
         Decimal("2.0"),
         profile_name="prof",
+        system_name_or_uuid="sys",
     )
     assert unchanged.changed is False
     mutate.assert_not_awaited()
@@ -172,11 +172,11 @@ async def test_assign_is_idempotent_and_refuses_foreign_owner(monkeypatch):
     with pytest.raises(PermissionError, match="already assigned"):
         await assign_sriov_logical_port(
             _hmc(),
-            "sys",
             "lpar",
             InventorySelector("1", "0", "3"),
             Decimal("2.0"),
             profile_name="prof",
+            system_name_or_uuid="sys",
         )
 
 
@@ -186,20 +186,20 @@ async def test_assign_rejects_capacity_and_unsupported_running_state(monkeypatch
     with pytest.raises(SriovLogicalPortCapabilityError, match="active RMC"):
         await assign_sriov_logical_port(
             _hmc(),
-            "sys",
             "lpar",
             InventorySelector("1", "0", "3"),
             Decimal("2.0"),
             profile_name="prof",
+            system_name_or_uuid="sys",
         )
     with pytest.raises(ValueError, match="between 1 and 100"):
         await assign_sriov_logical_port(
             _hmc(),
-            "sys",
             "lpar",
             InventorySelector("1", "0", "3"),
             Decimal("0.5"),
             profile_name="prof",
+            system_name_or_uuid="sys",
         )
 
 
@@ -215,11 +215,11 @@ def _dynamic_mutation(monkeypatch) -> AsyncMock:
 async def _assign(capacity: str):
     return await assign_sriov_logical_port(
         _hmc(),
-        "sys",
         "lpar",
         InventorySelector("1", "0", "3"),
         Decimal(capacity),
         profile_name="prof",
+        system_name_or_uuid="sys",
     )
 
 
@@ -301,7 +301,11 @@ async def test_profile_unassign_is_idempotent_and_verified(monkeypatch):
         mutate,
     )
     unchanged = await unassign_sriov_logical_port(
-        _hmc(), "sys", "lpar", InventorySelector("1", "0", "3"), profile_name="prof"
+        _hmc(),
+        "lpar",
+        InventorySelector("1", "0", "3"),
+        profile_name="prof",
+        system_name_or_uuid="sys",
     )
     assert unchanged.changed is False
 
@@ -316,7 +320,11 @@ async def test_profile_unassign_is_idempotent_and_verified(monkeypatch):
         "hmcpctl.operations.virtualization.pcie.read_sriov_profile_ports", reads
     )
     changed = await unassign_sriov_logical_port(
-        _hmc(), "sys", "lpar", InventorySelector("1", "0", "3"), profile_name="prof"
+        _hmc(),
+        "lpar",
+        InventorySelector("1", "0", "3"),
+        profile_name="prof",
+        system_name_or_uuid="sys",
     )
     assert changed.changed is True
     mutate.assert_awaited_once()
@@ -337,7 +345,11 @@ async def test_unassign_rejects_multiple_profile_records_before_dispatch(monkeyp
     )
     with pytest.raises(ValueError, match="exactly the selected"):
         await unassign_sriov_logical_port(
-            _hmc(), "sys", "lpar", InventorySelector("1", "0", "3"), profile_name="prof"
+            _hmc(),
+            "lpar",
+            InventorySelector("1", "0", "3"),
+            profile_name="prof",
+            system_name_or_uuid="sys",
         )
     mutate.assert_not_awaited()
 
@@ -356,11 +368,11 @@ async def test_assign_wraps_post_dispatch_read_failure(monkeypatch):
     with pytest.raises(SriovLogicalPortPartialError) as caught:
         await assign_sriov_logical_port(
             _hmc(),
-            "sys",
             "lpar",
             InventorySelector("1", "0", "3"),
             Decimal("2.0"),
             profile_name="prof",
+            system_name_or_uuid="sys",
         )
     assert caught.value.result.changed is True
     assert caught.value.result.effective_after is None
@@ -383,11 +395,11 @@ async def test_assign_reports_hmc_refusal_when_readback_is_unchanged(monkeypatch
     with pytest.raises(SriovLogicalPortPartialError) as caught:
         await assign_sriov_logical_port(
             _hmc(),
-            "sys",
             "lpar",
             InventorySelector("1", "0", "3"),
             Decimal("2.0"),
             profile_name="prof",
+            system_name_or_uuid="sys",
         )
     message = str(caught.value)
     assert "could not be verified" not in message
@@ -429,11 +441,11 @@ async def test_assign_keeps_unverified_wording_when_readback_also_changed(monkey
     with pytest.raises(SriovLogicalPortPartialError) as caught:
         await assign_sriov_logical_port(
             _hmc(),
-            "sys",
             "lpar",
             InventorySelector("1", "0", "3"),
             Decimal("2.0"),
             profile_name="prof",
+            system_name_or_uuid="sys",
         )
     message = str(caught.value)
     assert "could not be verified" in message
@@ -461,7 +473,11 @@ async def test_unassign_reports_hmc_refusal_when_readback_is_unchanged(monkeypat
     )
     with pytest.raises(SriovLogicalPortPartialError) as caught:
         await unassign_sriov_logical_port(
-            _hmc(), "sys", "lpar", InventorySelector("1", "0", "3"), profile_name="prof"
+            _hmc(),
+            "lpar",
+            InventorySelector("1", "0", "3"),
+            profile_name="prof",
+            system_name_or_uuid="sys",
         )
     message = str(caught.value)
     assert "could not be verified" not in message
@@ -496,7 +512,11 @@ async def test_unassign_keeps_unverified_wording_when_readback_also_changed(
     )
     with pytest.raises(SriovLogicalPortPartialError) as caught:
         await unassign_sriov_logical_port(
-            _hmc(), "sys", "lpar", InventorySelector("1", "0", "3"), profile_name="prof"
+            _hmc(),
+            "lpar",
+            InventorySelector("1", "0", "3"),
+            profile_name="prof",
+            system_name_or_uuid="sys",
         )
     message = str(caught.value)
     assert "could not be verified" in message
@@ -523,7 +543,11 @@ async def test_unassign_wraps_post_dispatch_read_failure(monkeypatch):
     )
     with pytest.raises(SriovLogicalPortPartialError) as caught:
         await unassign_sriov_logical_port(
-            _hmc(), "sys", "lpar", InventorySelector("1", "0", "3"), profile_name="prof"
+            _hmc(),
+            "lpar",
+            InventorySelector("1", "0", "3"),
+            profile_name="prof",
+            system_name_or_uuid="sys",
         )
     message = str(caught.value)
     assert "could not be verified" in message

@@ -20,7 +20,7 @@ VG_UUID = "33333333-3333-3333-3333-333333333333"
 
 @pytest.fixture(autouse=True)
 def _authorize_lpar_mutations(monkeypatch):
-    async def authorize(_hmc, _system, lpar, **_kwargs):
+    async def authorize(_hmc, lpar, *, system_name_or_uuid=None, **_kwargs):
         return lpar
 
     monkeypatch.setattr(
@@ -47,11 +47,11 @@ async def test_attach_disk_dry_run_validates_without_mutating() -> None:
 
     result = await attach_disk_to_lpar(
         client,
-        None,
         "existing-lpar",
         _storage(),
         capacity_mib=1024,
         dry_run=True,
+        system_name_or_uuid=None,
     )
 
     assert result == AttachDiskResult(
@@ -79,11 +79,7 @@ async def test_attach_disk_runs_shared_storage_leg_in_order() -> None:
     client.map_storage_to_lpar.side_effect = lambda *args: calls.append("storage")
 
     result = await attach_disk_to_lpar(
-        client,
-        None,
-        LPAR_UUID,
-        _storage(),
-        capacity_mib=1024,
+        client, LPAR_UUID, _storage(), capacity_mib=1024, system_name_or_uuid=None
     )
 
     # The mapping makes the HMC create its own client/server adapter pair
@@ -109,11 +105,7 @@ async def test_attach_disk_reports_a_failed_mapping_after_the_disk() -> None:
     client.map_storage_to_lpar.side_effect = HMCError("mapping failed")
 
     result = await attach_disk_to_lpar(
-        client,
-        None,
-        LPAR_UUID,
-        _storage(),
-        capacity_mib=1024,
+        client, LPAR_UUID, _storage(), capacity_mib=1024, system_name_or_uuid=None
     )
 
     assert [(step.step, step.status) for step in result.steps] == [
@@ -142,7 +134,12 @@ async def test_attach_disk_refuses_invalid_disk_before_any_hmc_request(
 
     with pytest.raises(ValueError, match=message):
         await attach_disk_to_lpar(
-            client, None, LPAR_UUID, storage, capacity_mib=capacity_mib, dry_run=dry_run
+            client,
+            LPAR_UUID,
+            storage,
+            capacity_mib=capacity_mib,
+            dry_run=dry_run,
+            system_name_or_uuid=None,
         )
 
     assert client.mock_calls == []
@@ -161,11 +158,11 @@ async def test_attach_disk_dry_run_makes_no_unclassified_call() -> None:
 
     await attach_disk_to_lpar(
         client,
-        None,
         "existing-lpar",
         _storage(),
         capacity_mib=1024,
         dry_run=True,
+        system_name_or_uuid=None,
     )
 
     used = assert_only_these_client_methods_used(
@@ -200,7 +197,7 @@ async def test_attach_disk_reports_change_location(sync: str, lives_in: str) -> 
     _with_sync(client, sync)
 
     result = await attach_disk_to_lpar(
-        client, None, LPAR_UUID, _storage(), capacity_mib=1024
+        client, LPAR_UUID, _storage(), capacity_mib=1024, system_name_or_uuid=None
     )
 
     assert result.change_location is not None
@@ -217,7 +214,7 @@ async def test_attach_disk_reports_change_location_after_a_failed_mapping() -> N
     client.map_storage_to_lpar.side_effect = HMCError("mapping failed")
 
     result = await attach_disk_to_lpar(
-        client, None, LPAR_UUID, _storage(), capacity_mib=1024
+        client, LPAR_UUID, _storage(), capacity_mib=1024, system_name_or_uuid=None
     )
 
     assert result.workflow_completed is False
@@ -231,7 +228,7 @@ async def test_attach_disk_change_location_read_failure_is_advisory() -> None:
     client.get_logical_partition.side_effect = HMCError("boom")
 
     result = await attach_disk_to_lpar(
-        client, None, LPAR_UUID, _storage(), capacity_mib=1024
+        client, LPAR_UUID, _storage(), capacity_mib=1024, system_name_or_uuid=None
     )
 
     assert result.workflow_completed is True
@@ -251,7 +248,9 @@ async def test_attach_disk_change_location_is_read_before_the_storage_leg() -> N
 
     client.get_logical_partition.side_effect = read
 
-    await attach_disk_to_lpar(client, None, LPAR_UUID, _storage(), capacity_mib=1024)
+    await attach_disk_to_lpar(
+        client, LPAR_UUID, _storage(), capacity_mib=1024, system_name_or_uuid=None
+    )
 
     assert calls == ["read", "storage"]
 
@@ -261,7 +260,12 @@ async def test_attach_disk_dry_run_reads_no_change_location() -> None:
     client = _client()
 
     result = await attach_disk_to_lpar(
-        client, None, LPAR_UUID, _storage(), capacity_mib=1024, dry_run=True
+        client,
+        LPAR_UUID,
+        _storage(),
+        capacity_mib=1024,
+        dry_run=True,
+        system_name_or_uuid=None,
     )
 
     assert result.change_location is None
@@ -274,7 +278,12 @@ async def test_attach_disk_dry_run_refuses_duplicate_volume_group_identity():
     client.list_volume_groups.return_value = [{"UUID": VG_UUID}, {"UUID": VG_UUID}]
     with pytest.raises(ValueError, match="ambiguous"):
         await attach_disk_to_lpar(
-            client, None, LPAR_UUID, _storage(), capacity_mib=1024, dry_run=True
+            client,
+            LPAR_UUID,
+            _storage(),
+            capacity_mib=1024,
+            dry_run=True,
+            system_name_or_uuid=None,
         )
     client.create_virtual_disk.assert_not_awaited()
 
@@ -285,11 +294,11 @@ async def test_attach_disk_typed_storage_requires_volume_group_uuid():
     with pytest.raises(ValueError, match="vg_uuid must be a canonical UUID"):
         await attach_disk_to_lpar(
             client,
-            None,
             LPAR_UUID,
             ProvisionStorage(VIOS_UUID, "disk01", vg_uuid="rootvg"),
             capacity_mib=1024,
             dry_run=True,
+            system_name_or_uuid=None,
         )
     client.list_volume_groups.assert_not_awaited()
     client.create_virtual_disk.assert_not_awaited()

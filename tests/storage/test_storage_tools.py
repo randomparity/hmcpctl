@@ -48,7 +48,7 @@ from hmcpctl.server_tools.virtualization.adapters import (
 
 @pytest.fixture(autouse=True)
 def _authorize_lpar_mutations(monkeypatch):
-    async def authorize(_hmc, _system, lpar, **_kwargs):
+    async def authorize(_hmc, lpar, *, system_name_or_uuid=None, **_kwargs):
         return lpar
 
     monkeypatch.setattr(
@@ -218,8 +218,8 @@ def test_detach_storage_mapping_posts_parent_vios(monkeypatch, mock_hmc):
 
     guard.assert_awaited_once_with(
         ANY,
-        None,
         LPAR_UUID,
+        system_name_or_uuid=None,
         ownership_override=False,
     )
     assert posted.called

@@ -719,7 +719,10 @@ def test_delete_lpar_refuses_when_active(monkeypatch, mock_hmc):
     assert exc_info.value.status_code == 409
     assert "not activated" in str(exc_info.value)
     assert not delete_route.called
-    assert guard.await_args.kwargs == {"ownership_override": True}
+    assert guard.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": SYSTEM_UUID,
+    }
 
 
 def test_delete_lpar_succeeds_when_powered_off(monkeypatch, mock_hmc):
@@ -733,7 +736,10 @@ def test_delete_lpar_succeeds_when_powered_off(monkeypatch, mock_hmc):
         result = hmc_delete_lpar(SYSTEM_UUID, LPAR_UUID, ownership_override=True)
 
     assert result == f"Deleted LPAR {LPAR_UUID}"
-    assert guard.await_args.kwargs == {"ownership_override": True}
+    assert guard.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": SYSTEM_UUID,
+    }
 
 
 VIOS_UUID = "00000005-ABCD-4EF0-8ABC-000000000005"

@@ -443,7 +443,7 @@ async def test_operation_uuid_selectors_reuse_borrowed_client():
         ) as factory,
         patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
     ):
-        result = await operation(hmc, SYSTEM_UUID, LPAR_UUID)
+        result = await operation(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
     assert result["lpar_name"] == LPAR_NAME
     factory.assert_not_called()
     hmc.__aenter__.assert_not_awaited()

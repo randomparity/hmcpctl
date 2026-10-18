@@ -328,7 +328,6 @@ def hmc_remote_restart_lpar(
     async def _go(hmc):
         result = await remote_restart_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             RemoteRestartRequest(
                 operation=operation,
@@ -340,6 +339,7 @@ def hmc_remote_restart_lpar(
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
+            system_name_or_uuid=system_name_or_uuid,
         )
         return result.job
 

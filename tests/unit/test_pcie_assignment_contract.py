@@ -159,11 +159,17 @@ def _install(monkeypatch, fake: _FakeHmc) -> _FakeHmc:
 
 
 def _assign(hmc, drc: str = _DRC, profile: str = "prof") -> None:
-    asyncio.run(assign_dedicated_pcie_slot(hmc, "sys", "lpar", profile, drc))
+    asyncio.run(
+        assign_dedicated_pcie_slot(hmc, "lpar", profile, drc, system_name_or_uuid="sys")
+    )
 
 
 def _unassign(hmc, drc: str = _DRC, profile: str = "prof") -> None:
-    asyncio.run(unassign_dedicated_pcie_slot(hmc, "sys", "lpar", profile, drc))
+    asyncio.run(
+        unassign_dedicated_pcie_slot(
+            hmc, "lpar", profile, drc, system_name_or_uuid="sys"
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -399,7 +405,9 @@ def test_assign_writes_the_documented_grammar_and_verifies(monkeypatch, hmc):
 
     _assign(hmc)
 
-    hmc.authorize.assert_awaited_once_with(hmc, "sys", "lpar", ownership_override=False)
+    hmc.authorize.assert_awaited_once_with(
+        hmc, "lpar", system_name_or_uuid="sys", ownership_override=False
+    )
     assert fake.mutations() == [
         "chsyscfg -r prof -m sys -i name=prof,io_slots+=21010020//0,lpar_name=lpar"
     ]
@@ -412,11 +420,18 @@ def test_unassign_removes_only_the_written_form_and_verifies(monkeypatch, hmc):
 
     asyncio.run(
         unassign_dedicated_pcie_slot(
-            hmc, "sys", "lpar", "prof", _DRC, ownership_override=True
+            hmc,
+            "lpar",
+            "prof",
+            _DRC,
+            ownership_override=True,
+            system_name_or_uuid="sys",
         )
     )
 
-    hmc.authorize.assert_awaited_once_with(hmc, "sys", "lpar", ownership_override=True)
+    hmc.authorize.assert_awaited_once_with(
+        hmc, "lpar", system_name_or_uuid="sys", ownership_override=True
+    )
     assert fake.mutations() == [
         "chsyscfg -r prof -m sys -i name=prof,io_slots-=21010020//0,lpar_name=lpar"
     ]

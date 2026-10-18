@@ -1071,7 +1071,9 @@ def test_provision_applies_explicit_fail_policy_before_network(monkeypatch, mock
         "minimum_affinity_policy",
         "network",
     ]
-    setter.assert_awaited_once_with(ANY, SYSTEM_UUID, "web01", policy)
+    setter.assert_awaited_once_with(
+        ANY, "web01", policy, system_name_or_uuid=SYSTEM_UUID
+    )
 
 
 # ---------------------------------------------------------------------- #

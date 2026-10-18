@@ -193,10 +193,10 @@ def hmc_sync_lpar_profile(
     return with_client(
         lambda hmc: synchronize_lpar_profile(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             ownership_override=ownership_override,
             mode=mode,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -233,11 +233,11 @@ def hmc_assign_dedicated_pcie_slot(
     async def _go(hmc) -> None:
         await assign_dedicated_pcie_slot(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             profile_name,
             drc_index,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
 
     return with_client(_go, profile=profile)
@@ -274,11 +274,11 @@ def hmc_unassign_dedicated_pcie_slot(
     async def _go(hmc) -> None:
         await unassign_dedicated_pcie_slot(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             profile_name,
             drc_index,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
 
     return with_client(_go, profile=profile)

@@ -193,7 +193,7 @@ async def assess_post_activation_affinity(
 ) -> PostActivationAffinityAssessment:
     """Measure and classify affinity using the accepted assessment contract."""
     current_row = await get_lpar_memopt_score(
-        hmc, request.system_name_or_uuid, request.lpar_name
+        hmc, request.lpar_name, system_name_or_uuid=request.system_name_or_uuid
     )
     predicted_rows = await plan_lpar_memopt_scores(hmc, request.system_name_or_uuid)
     predicted_row = next(
@@ -205,7 +205,7 @@ async def assess_post_activation_affinity(
     )
     if configured_minimum is None:
         policy = await get_minimum_affinity_policy(
-            hmc, request.system_name_or_uuid, request.lpar_name
+            hmc, request.lpar_name, system_name_or_uuid=request.system_name_or_uuid
         )
         if policy.capability == "capability-unavailable":
             policy_state: Literal["configured", "absent", "unsupported"] = "unsupported"

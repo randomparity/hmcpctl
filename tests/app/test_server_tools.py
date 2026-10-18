@@ -588,7 +588,9 @@ def test_rename_lpar_authorizes_and_writes_name(monkeypatch, mock_hmc):
 
     body = route.calls.last.request.content.decode()
     assert "<PartitionName>renamed</PartitionName>" in body
-    guard.assert_awaited_once_with(ANY, SYSTEM_UUID, LPAR_UUID, ownership_override=True)
+    guard.assert_awaited_once_with(
+        ANY, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID, ownership_override=True
+    )
     assert result["Resource"]["PartitionName"] == "renamed"
 
 

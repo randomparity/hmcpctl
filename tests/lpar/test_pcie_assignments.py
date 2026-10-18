@@ -315,7 +315,7 @@ async def test_public_apply_cannot_bypass_validation() -> None:
         pytest.raises(ValueError, match="unsafe collection"),
     ):
         await apply_lpar_pcie_assignments(
-            AsyncMock(), "sys", "lpar", LparPcieAssignments()
+            AsyncMock(), "lpar", LparPcieAssignments(), system_name_or_uuid="sys"
         )
     validation.assert_awaited_once()
 
@@ -334,7 +334,7 @@ async def test_first_assignment_failure_skips_remaining_steps() -> None:
         patch("hmcpctl.operations.lpar.assignments.add_vnic", vnic),
     ):
         result = await apply_lpar_pcie_assignments(
-            AsyncMock(), "sys", "lpar", assignments
+            AsyncMock(), "lpar", assignments, system_name_or_uuid="sys"
         )
     assert [(step.step, step.status) for step in result.steps] == [
         ("sriov[0]", "error"),
@@ -366,7 +366,7 @@ async def test_later_preflight_failure_preserves_prior_assignment(
         ),
     ):
         result = await apply_lpar_pcie_assignments(
-            AsyncMock(), "sys", "lpar", assignments
+            AsyncMock(), "lpar", assignments, system_name_or_uuid="sys"
         )
 
     assert [step.status for step in result.steps] == ["ok", "error"]
@@ -389,7 +389,9 @@ async def test_assignment_programming_defect_propagates() -> None:
         ),
         pytest.raises(TypeError, match="bad collaborator"),
     ):
-        await apply_lpar_pcie_assignments(AsyncMock(), "sys", "lpar", assignments)
+        await apply_lpar_pcie_assignments(
+            AsyncMock(), "lpar", assignments, system_name_or_uuid="sys"
+        )
 
 
 @pytest.mark.asyncio
@@ -414,7 +416,7 @@ async def test_success_composes_existing_operations_in_order() -> None:
         patch("hmcpctl.operations.lpar.assignments.add_vnic", add),
     ):
         result = await apply_lpar_pcie_assignments(
-            AsyncMock(), "sys", "lpar", assignments
+            AsyncMock(), "lpar", assignments, system_name_or_uuid="sys"
         )
     assert calls == ["sriov", "vnic"]
     assert result.workflow_completed is True

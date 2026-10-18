@@ -37,7 +37,9 @@ def hmc_lpar_summary(
     """
 
     async def summary(hmc):
-        return await fetch_lpar_summary(hmc, system_name_or_uuid, lpar_name_or_uuid)
+        return await fetch_lpar_summary(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        )
 
     return with_client(summary, profile=profile)
 
