@@ -48,7 +48,7 @@ from hmcpctl.ssh.transport import HMCCLIError
 
 from . import cli, dedicated_pcie
 from .metrics import _as_outcome
-from .observation import CLEANUP, Assertion, CallFailure, ExpectedOutcome
+from .observation import Assertion, CallFailure, ExpectedOutcome, grade_assertions
 
 if TYPE_CHECKING:
     from live_test.config import LiveTestConfig
@@ -146,13 +146,8 @@ def _record_held(
     The lpar-power arm (subtask 41) owns these operations' observations, and the
     catalog keeps one per operation, so this arm's would overwrite it (#1346).
     """
-    if cleanup not in CLEANUP:
-        raise ValueError(f"cleanup disposition is not a known value: {cleanup!r}")
-    unmet = [item.id for item in assertions if not item.holds]
-    if cleanup not in {"passed", "not-required"}:
-        unmet.append(f"cleanup {cleanup}")
-    note = "unmet: " + ", ".join(unmet) if unmet else ""
-    state.record(_ROW, tool, "FAIL" if unmet else "PASS", data, note)
+    status, note = grade_assertions(assertions, cleanup)
+    state.record(_ROW, tool, status, data, note)
 
 
 def _power_operations_authorized() -> bool:

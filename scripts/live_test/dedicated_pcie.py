@@ -42,9 +42,9 @@ from hmcpctl.ssh.profiles import (
 from hmcpctl.ssh.transport import HMCCLIError
 
 from .observation import (
-    CLEANUP,
     Assertion,
     CallFailure,
+    grade_assertions,
     judge_create_result,
     plain_data,
 )
@@ -1079,13 +1079,8 @@ def _record_held(
     observations, and the catalog keeps one per operation, so this arm's would
     overwrite it (#1389).
     """
-    if cleanup not in CLEANUP:
-        raise ValueError(f"cleanup disposition is not a known value: {cleanup!r}")
-    unmet = [item.id for item in assertions if not item.holds]
-    if cleanup not in {"passed", "not-required"}:
-        unmet.append(f"cleanup {cleanup}")
-    note = "unmet: " + ", ".join(unmet) if unmet else ""
-    state.record(subtask, tool, "FAIL" if unmet else "PASS", data, note)
+    status, note = grade_assertions(assertions, cleanup)
+    state.record(subtask, tool, status, data, note)
 
 
 async def _probe_create_time_assignment(

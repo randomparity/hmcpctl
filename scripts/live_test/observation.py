@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import traceback
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
@@ -48,6 +49,18 @@ class Assertion:
     def __post_init__(self) -> None:
         if not ASSERTION_ID.fullmatch(self.id):
             raise ValueError(f"assertion id is not a closed-shape token: {self.id!r}")
+
+
+def grade_assertions(assertions: Sequence[Assertion], cleanup: str) -> tuple[str, str]:
+    """Judge postconditions and cleanup without recording or promoting observations."""
+    if not assertions:
+        raise ValueError("a verified observation must assert at least one condition")
+    if cleanup not in CLEANUP:
+        raise ValueError(f"cleanup disposition is not a known value: {cleanup!r}")
+    unmet = [item.id for item in assertions if not item.holds]
+    if cleanup not in {"passed", "not-required"}:
+        unmet.append(f"cleanup {cleanup}")
+    return ("FAIL", "unmet: " + ", ".join(unmet)) if unmet else ("PASS", "")
 
 
 @dataclass(frozen=True)

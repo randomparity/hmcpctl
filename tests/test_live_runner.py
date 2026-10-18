@@ -8408,3 +8408,87 @@ def test_executable_delegates_prebootstrap_refusals(
     assert exit_info.value.code == expected_exit
     output = capsys.readouterr()
     assert message in output.out + output.err
+
+
+@pytest.mark.parametrize("caller", ["mcp", "cli", "bare-cec", "pcie"])
+@pytest.mark.parametrize(
+    "cleanup", ["passed", "not-required", "failed", "not-run", "invalid"]
+)
+@pytest.mark.parametrize("holds", [True, False, None])
+def test_live_grading_contract(caller, cleanup, holds):
+    state = runner.RunState()
+    assertions = (
+        []
+        if holds is None
+        else [
+            observation.Assertion("first-condition", holds),
+            observation.Assertion("second-condition", holds),
+            observation.Assertion("held-condition", True),
+        ]
+    )
+    data = {"uuid": "fixture"}
+
+    def record():
+        if caller == "bare-cec":
+            bare_cec._record_held(
+                state,
+                "hmc_get_console_info",
+                assertions=assertions,
+                cleanup=cleanup,
+                data=data,
+            )
+        elif caller == "pcie":
+            dedicated_pcie._record_held(
+                state,
+                1,
+                "hmc_get_console_info",
+                assertions=assertions,
+                cleanup=cleanup,
+                data=data,
+            )
+        else:
+            state.record_verified(
+                1,
+                "hmc_get_console_info",
+                operation="console.info",
+                scenario="st1-console-identity",
+                assertions=assertions,
+                cleanup=cleanup,
+                data=data,
+                surface=caller,
+            )
+
+    if holds is None or cleanup == "invalid":
+        message = "at least one condition" if holds is None else "cleanup disposition"
+        with pytest.raises(ValueError, match=message):
+            record()
+        assert state.results == []
+        assert state.observations == []
+        return
+
+    record()
+    passed = holds and cleanup in {"passed", "not-required"}
+    row = state.results[0]
+    assert row["status"] == ("PASS" if passed else "FAIL")
+    unmet = [] if holds else ["first-condition", "second-condition"]
+    if cleanup in {"failed", "not-run"}:
+        unmet.append(f"cleanup {cleanup}")
+    assert row["note"] == ("unmet: " + ", ".join(unmet) if unmet else "")
+    if caller in {"bare-cec", "pcie"}:
+        assert state.observations == []
+        assert "cli_observation" not in row
+        assert row["result"] == ("observed" if passed else "failed")
+        return
+    recorded = row["cli_observation"] if caller == "cli" else state.observations[0]
+    assert len(state.observations) == (0 if caller == "cli" else 1)
+    assert recorded["operation"] == "console.info"
+    metadata = recorded["observation"]
+    assert metadata["id"] == "st1-hmc-get-console-info"
+    assert metadata["scenario"] == "st1-console-identity"
+    assert metadata["channel"] == "live"
+    assert metadata["cleanup"] == cleanup
+    assert metadata["assertions"] == (
+        [item.id for item in assertions] if holds else ["held-condition"]
+    )
+    assert metadata["result"] == row["result"] == ("passed" if passed else "failed")
+    datetime.strptime(metadata["observed_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)

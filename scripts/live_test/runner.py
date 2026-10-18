@@ -100,13 +100,13 @@ from live_test.metrics import (
 )
 from live_test.network import inventory_network, mutate_virtual_networking
 from live_test.observation import (
-    CLEANUP,
     SCENARIO_ID,
     Assertion,
     CallFailure,
     ExpectedOutcome,
     KnownGap,
     classify_failure,
+    grade_assertions,
 )
 from live_test.profiles import inventory_lpar_profiles
 from live_test.provisioning import (
@@ -608,24 +608,14 @@ class RunState:
         """Record one scenario's asserted postconditions — the only promoting path."""
         if surface not in {"mcp", "cli"}:
             raise ValueError("verification surface must be mcp or cli")
-        if not assertions:
-            raise ValueError(
-                "a verified observation must assert at least one condition"
-            )
-        if cleanup not in CLEANUP:
-            raise ValueError(f"cleanup disposition is not a known value: {cleanup!r}")
+        status, note = grade_assertions(assertions, cleanup)
         if not SCENARIO_ID.fullmatch(scenario):
             raise ValueError(f"scenario id is not a closed-shape token: {scenario!r}")
-        passed = all(item.holds for item in assertions) and cleanup in {
-            "passed",
-            "not-required",
-        }
-        unmet = [item.id for item in assertions if not item.holds]
-        note = "" if passed else "unmet: " + ", ".join(unmet or [f"cleanup {cleanup}"])
+        passed = status == "PASS"
         self.record(
             subtask,
             tool,
-            "PASS" if passed else "FAIL",
+            status,
             data,
             note,
             result="passed" if passed else "failed",

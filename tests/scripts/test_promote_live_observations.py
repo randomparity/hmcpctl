@@ -43,6 +43,7 @@ def candidate(tmp_path):
         "scripts/check_capability_inventory.py",
         "scripts/live_test_runner.py",
         "scripts/live_test/runner.py",
+        "scripts/live_test/observation.py",
     )
     for name in scripts:
         shutil.copyfile(ROOT / name, root / name)
