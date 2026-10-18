@@ -111,6 +111,13 @@ def validate(document):
         raise ValueError("VIOS IDs must be distinct positive integers")
     if not isinstance(tables, dict) or set(tables) != set(TABLES):
         raise ValueError("snapshot tables are incomplete")
+    result = _normalize_tables(tables)
+    _validate_relationships(scope, result)
+    return {"version": 1, "scope": dict(scope, vios_ids=sorted(ids)), "tables": result}
+
+
+def _normalize_tables(tables):
+    """Validate each row and canonicalize table order without changing the input."""
     result = {}
     for name, (fields, keys) in TABLES.items():
         rows = tables[name]
@@ -152,6 +159,12 @@ def validate(document):
         result[name] = sorted(
             normalized, key=lambda row: tuple(row[k] for k in keys.split(","))
         )
+    return result
+
+
+def _validate_relationships(scope, result):
+    """Reject incomplete or out-of-scope relationships between normalized tables."""
+    ids = scope["vios_ids"]
     if (
         len(result["system"]) != 1
         or result["system"][0]["name"] != scope["system"]
@@ -215,7 +228,6 @@ def validate(document):
     for name in ("vios_mappings", "vios_groups", "vios_volumes"):
         if any(row["vios_id"] not in {str(i) for i in ids} for row in result[name]):
             raise ValueError("VIOS row lies outside the selected scope")
-    return {"version": 1, "scope": dict(scope, vios_ids=sorted(ids)), "tables": result}
 
 
 async def read_resources(hmc, path, kind):
