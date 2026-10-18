@@ -632,10 +632,12 @@ async def get_media_repository(
     *,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Get the Virtual Media Repository (VMLibrary) from a Volume Group.
+    """Get the VolumeGroup Atom entry containing a Virtual Media Repository.
 
-    Returns the repository with capacity (RepositorySize, in GiB) and optionally
-    embedded VirtualOpticalMedia entries if present.
+    The repository is nested at ``Resource.MediaRepositories.VirtualMediaRepository``.
+    Its ``RepositorySize`` is in GiB; optional media entries are nested under
+    ``OpticalMedia.VirtualOpticalMedia`` within the repository. Returns None when
+    no repository-bearing VolumeGroup entry is available.
     """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid

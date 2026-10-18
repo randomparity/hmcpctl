@@ -1213,11 +1213,12 @@ class StorageMixin:
     async def get_media_repository(
         self: StorageClient, vios_uuid: str, vg_uuid: str
     ) -> dict[str, Any] | None:
-        """Get the Virtual Media Repository (VMLibrary) from a Volume Group.
+        """Get the VolumeGroup Atom entry containing a Virtual Media Repository.
 
-        Returns the repository with capacity (RepositorySize, in GiB) and optionally
-        embedded VirtualOpticalMedia entries if present. Returns None if the
-        Volume Group does not exist or has no media repository.
+        The repository is nested at ``Resource.MediaRepositories.VirtualMediaRepository``.
+        Its ``RepositorySize`` is in GiB; optional media entries are nested under
+        ``OpticalMedia.VirtualOpticalMedia`` within the repository. Returns None when
+        no repository-bearing VolumeGroup entry is available.
         """
         path = f"/rest/api/uom/VirtualIOServer/{vios_uuid}/VolumeGroup/{vg_uuid}"
         try:
