@@ -181,9 +181,10 @@ def escapes_string_arguments(func: Callable[_P, str]) -> Callable[_P, str]:
     Escaping at the boundary rather than at each interpolation site is what
     makes the document builders correct by construction: the function body
     never holds an unescaped caller value, so the number of times it
-    interpolates one does not matter. Strings one level inside a list, a dict,
-    or a dataclass are escaped too; every other argument type is passed
-    through untouched.
+    interpolates one does not matter. Strings nested recursively in lists,
+    dictionary keys and values, or dataclass fields are escaped too. Booleans,
+    integers, floats, and None pass through unchanged; unsupported argument
+    shapes raise TypeError before the builder runs.
 
     A closed-vocabulary argument is escaped before the builder validates it,
     so a rejection message quotes the escaped form of an illegal value.
