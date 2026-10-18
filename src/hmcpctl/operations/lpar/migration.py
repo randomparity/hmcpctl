@@ -397,7 +397,7 @@ async def migrate_lpar(
             )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        lpar_name_or_uuid,
+        lpar_uuid,
         ownership_override=ownership_override,
         system_name_or_uuid=system_name_or_uuid,
     )

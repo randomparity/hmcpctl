@@ -235,3 +235,26 @@ async def test_waited_migration_preserves_source_and_failed_job(status: str) -> 
     )
     client.lpar_migrate_abort.assert_not_awaited()
     client.lpar_migrate_recover.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_migration_authorizes_the_partition_that_was_validated() -> None:
+    client = _client(_job("COMPLETED_OK"))
+    validated_uuid = "00000000-0000-0000-0000-000000000002"
+    replacement_uuid = "00000000-0000-0000-0000-000000000003"
+    client.find_partition_by_name.side_effect = [
+        {"UUID": validated_uuid},
+        {"UUID": replacement_uuid},
+    ]
+
+    result = await migrate_lpar(
+        client, "reused-name", LpmMigrationRequest("destination")
+    )
+
+    client.lpar_migrate_validate.assert_awaited_once_with(
+        validated_uuid, "destination", target_profile_name=None, wait_time=None
+    )
+    client.lpar_migrate.assert_awaited_once_with(
+        validated_uuid, "destination", target_profile_name=None, wait_time=None
+    )
+    assert result.lpar_uuid == validated_uuid

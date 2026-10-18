@@ -59,3 +59,19 @@ Run capability-inventory after catalog/projection generation, tool-docs-check af
 regeneration, then just verify and pinned prek over all files before pushing.
 Human procedure wording has no executable prose test; review it against the
 existing live runbook and explicitly preserve its unrun obligations.
+
+## Source identity repair and threat model
+
+A reproduced name-rebinding race validates one partition UUID but then resolves
+its old name again at ownership authorization. Retain that UUID through the
+existing ownership guard so migration cannot select a replacement partition.
+This directly implements #631's source identity/ownership criterion.
+
+- Boundary inventory: existing selector/HMC inventory → ownership → migration
+  submission; no added or widened boundary, and no new permission.
+- Actors: an authorized caller and concurrent inventory/name changes; HMC resource
+  data determines identity, while ownership/target policy remains authoritative.
+- Control: pass the resolved UUID to the existing ownership guard after validation;
+  reject vanished/wrong-system/foreign-owned resources under its existing rules.
+- Out of scope: atomic cross-system transactions and hardware failure injection;
+  unchanged runtime guards and the explicit native gap remain in force.

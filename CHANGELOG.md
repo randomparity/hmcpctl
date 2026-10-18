@@ -95,6 +95,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- Migration authorizes and submits the partition UUID selected for validation,
+  preventing a reassigned partition name from selecting another partition (#631).
+
 - A failed vSCSI or virtual-optical mapping create no longer says that `list-mappings` does not
   show a leftover VIOS server adapter. A partition-scoped listing omits it, an unscoped one
   shows it with no identity, and `hmc_list_optical_mappings` never shows it. The note still
