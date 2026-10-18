@@ -1787,20 +1787,14 @@ def test_restore_vios_scope_and_backup_name_containment_are_independent(monkeypa
                 )
 
 
-def test_power_on_partition_profile_is_bounded_by_a_containment_guard():
-    """ADR 0039: `hmc_power_on_lpar` declares exhaustive targets, so every
-    resource it acts on must be a declared selector's value or derived by the
-    server through the HMC's own containment from one.
+def test_power_on_profile_is_not_a_separate_target_selector():
+    """Profile containment is enforced under the declared LPAR target (ADR 0039).
 
-    `partition_profile_uuid` names a second HMC-side resource and is in neither
-    REQUIRED_TARGET_ARGUMENTS nor UNBOUNDED_ARGUMENTS, so `_unbounded_identities`
-    — which matches argument *names* — cannot see it, exactly as ADR 0044 records
-    for `backup_name`. The declaration and the guard are therefore pinned
-    together here: remove either and this fails on the other.
+    Runtime acceptance and rejection are exercised in tests/lpar/test_power.py;
+    this check keeps the security inventory's selector contract explicit.
     """
     import inspect
 
-    from hmcpctl.operations.lpar import core as lpar_core
     from hmcpctl.server_tools.lpar.lifecycle import hmc_power_on_lpar
     from hmcpctl.tool_registry import (
         REQUIRED_TARGET_ARGUMENTS,
@@ -1809,14 +1803,5 @@ def test_power_on_partition_profile_is_bounded_by_a_containment_guard():
 
     parameters = inspect.signature(hmc_power_on_lpar).parameters
     assert "partition_profile_uuid" in parameters
-    # The premise: no target selector is minted for it, and it is not declared
-    # unbounded, so dispatch-time authorization cannot bound it.
     assert "partition_profile_uuid" not in REQUIRED_TARGET_ARGUMENTS
     assert "partition_profile_uuid" not in UNBOUNDED_ARGUMENTS
-
-    # The guard that makes it a contained identity instead.
-    guard = lpar_core._require_contained_partition_profile
-    assert inspect.iscoroutinefunction(guard)
-    source = inspect.getsource(lpar_core.power_lpar)
-    assert "_require_contained_partition_profile" in source
-    assert "LogicalPartitionProfile" in inspect.getsource(guard)
