@@ -210,6 +210,41 @@ def test_withheld_section_tools_report_denied(ssh_refcodes: list[str]):
     assert not any(call.startswith(("list_vios", "get_vios")) for call in hmc.calls)
 
 
+@pytest.mark.parametrize(
+    ("section", "specialist", "restriction"),
+    [
+        (
+            "refcodes",
+            "hmc_read_lpar_refcodes",
+            {"targets": {"lpar": ["other"], "managed_system": ["sysA"]}},
+        ),
+        (
+            "resources",
+            "hmc_get_vios_storage_detail",
+            {"targets": {"vios": ["other"], "managed_system": ["sysA"]}},
+        ),
+        ("refcodes", "hmc_read_lpar_refcodes", {"connections": ["other"]}),
+    ],
+)
+def test_denied_section_scope_reports_partial_result_without_specialist_read(
+    section: str,
+    specialist: str,
+    restriction: dict,
+    ssh_refcodes: list[str],
+    records: list[dict],
+):
+    hmc = _HMC()
+    grant = {**_grant(specialist), **restriction}
+    app = _app(_grant(INSPECT, "hmc_get_lpar", "hmc_list_vios"), grant)
+    result = _call(app, hmc, {**_ARGUMENTS, "include": [section]})
+    key = "source" if section == "refcodes" else "storage_source"
+    assert result[section][key]["status"] == "denied"
+    assert result["state"] == "error"
+    assert ssh_refcodes == []
+    assert not any(call.startswith("get_vios_storage_detail") for call in hmc.calls)
+    assert (specialist, "deny") in {(r["tool"], r["decision"]) for r in records}
+
+
 def test_vios_granted_by_uuid_is_read(records: list[dict]):
     app = _app(
         _grant(INSPECT, "hmc_get_lpar", "hmc_list_vios"),
