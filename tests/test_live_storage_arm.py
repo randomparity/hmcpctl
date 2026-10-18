@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -12,14 +11,13 @@ import pytest
 
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
-from live_test import observation, storage, storage_lifecycle  # noqa: E402
-
-_SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-runner = sys.modules.get(_SPEC.name) or importlib.util.module_from_spec(_SPEC)
-if _SPEC.name not in sys.modules:
-    sys.modules[_SPEC.name] = runner
-    _SPEC.loader.exec_module(runner)
+from live_test import config as live_config  # noqa: E402
+from live_test import (  # noqa: E402
+    observation,
+    runner,
+    storage,
+    storage_lifecycle,
+)
 
 SYSTEM = "sys-A"
 LPAR = "sys-A-lp3"
@@ -207,7 +205,7 @@ class FakeHMC:
 def arm(monkeypatch):
     """A fresh storage-arm run state on synthetic names, and the HMC it talks to."""
     config = replace(
-        runner.LiveTestConfig(),
+        live_config.LiveTestConfig(),
         system_name=SYSTEM,
         lp3_name=LPAR,
         protected_lpar_names=("vios-A",),

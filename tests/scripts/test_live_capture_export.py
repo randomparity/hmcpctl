@@ -2156,6 +2156,40 @@ def test_enums_are_derived_from_the_captured_schema() -> None:
     assert enums["elements"] == {"DesignatedBootMode": "BootMode.Enum"}
 
 
+@pytest.mark.parametrize("body", ["<root>ordinary</root>", ENUMS_XSD])
+def test_xml_validation_accepts_ordinary_documents(body: str) -> None:
+    assert export._parses(body)
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        '<!ENTITY probe "expanded">',
+        '<!ENTITY probe SYSTEM "file:///nonexistent-capture-entity">',
+    ],
+)
+def test_xml_validation_rejects_entity_declarations(declaration: str) -> None:
+    body = f"<!DOCTYPE root [{declaration}]><root>&probe;</root>"
+    assert not export._parses(body)
+
+
+def test_enum_derivation_skips_entity_bearing_schema() -> None:
+    hostile = ENUMS_XSD.replace('value="Normal"', 'value="&probe;"')
+    hostile = (
+        '<!DOCTYPE schema [<!ENTITY probe "expanded">]>' + hostile.split("?>", 1)[1]
+    )
+    corpus = [
+        {
+            "kind": "rest",
+            "status": 200,
+            "path": "/rest/api/web/Enumerations.xsd",
+            "body": hostile,
+        }
+    ]
+    with pytest.raises(ValueError, match="no Enumerations.xsd"):
+        export.derive_enums(corpus, "vX")
+
+
 def test_enums_refuse_a_corpus_without_the_schema() -> None:
     with pytest.raises(ValueError, match="Enumerations.xsd"):
         export.derive_enums(_corpus()[1:], "vX")

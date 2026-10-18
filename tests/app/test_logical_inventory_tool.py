@@ -324,3 +324,30 @@ def test_profile_reaches_every_delegated_connection_check(two_profiles, records)
     assert ("hmc_list_lpars", "deny") in {(r["tool"], r["decision"]) for r in records}
     lab = _call(app, _HMC(), {"profile": "lab"})
     assert {s["sources"]["partitions"]["status"] for s in lab["systems"]} == {"ok"}
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"), [("true", True), ("false", False), (None, None)]
+)
+def test_processor_mode_wire_name_preserves_three_values(monkeypatch, mode, expected):
+    hmc = _HMC()
+    original = hmc.list_logical_partitions
+
+    async def partitions(uuid):
+        rows = await original(uuid)
+        for row in rows:
+            row["Resource"]["PartitionProcessorConfiguration"] = {
+                "HasDedicatedProcessors": mode,
+                "CurrentDedicatedProcessorConfiguration": {"CurrentProcessors": "2"},
+                "CurrentSharedProcessorConfiguration": {
+                    "CurrentProcessingUnits": "0.5"
+                },
+            }
+        return rows
+
+    monkeypatch.setattr(hmc, "list_logical_partitions", partitions)
+    result = _call(_app(_ALL), hmc, {})
+    serialized = result["partitions"][0]
+    assert serialized["has_dedicated_processors"] is expected
+    assert "dedicated_procs" not in serialized
+    assert serialized["current_proc_units"] == (2.0 if expected is True else 0.5)

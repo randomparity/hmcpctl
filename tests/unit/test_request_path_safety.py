@@ -495,27 +495,75 @@ _UUID_PATH_BUILDERS = {
 
 
 @pytest.mark.parametrize(
-    "owner, method, arguments",
+    "owner, method, argument",
     [
-        (owner, method, arguments)
+        (owner, method, argument)
         for owner, methods in _UUID_PATH_BUILDERS.items()
         for method, arguments in methods.items()
+        for argument in arguments
     ],
 )
-def test_uuid_only_path_builder_inventory_uses_explicit_metadata(
-    owner, method, arguments
+def test_uuid_path_builders_reject_invalid_identity_before_transport(
+    owner, method, argument
 ):
+    from xml.etree.ElementTree import Element
+
     from hmcpctl.client.client_storage import StorageMixin
     from hmcpctl.client.client_updates import UpdatesMixin
 
+    async def content():
+        yield b"x"
+
+    values = {
+        "resource_type": "LogicalPartition",
+        "parent_type": "ManagedSystem",
+        "child_type": "LogicalPartition",
+        "property_name": "PartitionState",
+        "uuid": UUID_A,
+        "parent_uuid": UUID_A,
+        "child_uuid": UUID_B,
+        "lpar_uuid": UUID_B,
+        "vios_uuid": UUID_A,
+        "vg_uuid": UUID_B,
+        "file_uuid": UUID_A,
+        "system_uuid": UUID_A,
+        "updates": lambda _: {},
+        "subject": "test update",
+        "child_xml": "<LogicalPartition/>",
+        "name": "test-vg",
+        "physical_volumes": ["hdisk1"],
+        "storage_kind": "PhysicalVolume",
+        "storage_name": "hdisk1",
+        "mapping_id": "mapping-1",
+        "vg_elem": Element("VolumeGroup"),
+        "media_name": "test.iso",
+        "content": content(),
+        "content_length": 1,
+        "job_request": {},
+    }
     owner_type = {
         "HMCClient": HMCClient,
         "StorageMixin": StorageMixin,
         "UpdatesMixin": UpdatesMixin,
     }[owner]
-    source = inspect.getsource(getattr(owner_type, method))
-    for argument in arguments:
-        assert f'"{argument}": {argument}' in source
+    operation = getattr(owner_type, method)
+    arguments = {
+        name: values[name]
+        for name, parameter in inspect.signature(operation).parameters.items()
+        if name != "self" and parameter.default is inspect.Parameter.empty
+    }
+    arguments[argument] = "not-a-uuid"
+    client = _client()
+    sent = []
+
+    def forbidden_transport(*args, **kwargs):
+        sent.append(True)
+        raise AssertionError("an invalid UUID reached the transport")
+
+    client._http.build_request = forbidden_transport  # type: ignore[method-assign]
+    with pytest.raises(ValueError, match=f"^{argument} must be a UUID$"):
+        asyncio.run(operation(client, **arguments))
+    assert sent == []
 
 
 def test_platform_update_rejects_a_non_uuid_system_before_transport():

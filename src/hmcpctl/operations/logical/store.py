@@ -17,14 +17,18 @@ from collections.abc import Collection, Generator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, get_args
 
-from ...authorization.connection_scope import UNRESOLVED, selected_connection
-from ..lpar.workflow_contract import (
+from ...config import UNRESOLVED_CONNECTION, ConfigError, resolve_connection_profile
+from .models import (
     EffectRecord,
+    EffectStatus,
+    EventKind,
     OperationEvent,
+    OperationOutcome,
     OperationPage,
     OperationRecord,
+    OperationState,
 )
 
 STATE_DIR_ENV = "HMCPCTL_STATE_DIR"
@@ -301,8 +305,12 @@ def write_transaction(conn: sqlite3.Connection) -> Generator[sqlite3.Connection]
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
-    except BaseException:
-        conn.execute("ROLLBACK")
+    except BaseException as exc:
+        try:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+        except BaseException as cleanup_error:  # noqa: BLE001 - preserve the original failure, including cancellation
+            exc.add_note(f"transaction rollback failed: {type(cleanup_error).__name__}")
         raise
     conn.execute("COMMIT")
 
@@ -415,7 +423,33 @@ def validate_request_id(request_id: str) -> None:
         )
 
 
-def accepted_continuations(state: str, outcome: str | None) -> tuple[str, ...]:
+def _require_vocabulary(
+    value: object,
+    choices: tuple[object, ...],
+    field: str,
+    *,
+    persisted: bool = False,
+) -> None:
+    if value not in choices:
+        detail = (
+            f"{field} must be one of {', '.join(repr(choice) for choice in choices)}"
+        )
+        if persisted:
+            raise _corrupt(detail)
+        raise OperationRefused(f"invalid_{field}", detail)
+
+
+def _validated_operation_row(row: sqlite3.Row) -> sqlite3.Row:
+    _require_vocabulary(row["state"], get_args(OperationState), "state", persisted=True)
+    _require_vocabulary(
+        row["outcome"], (*get_args(OperationOutcome), None), "outcome", persisted=True
+    )
+    return row
+
+
+def accepted_continuations(
+    state: OperationState, outcome: OperationOutcome | None
+) -> tuple[str, ...]:
     """Return the continuations ADR 0190 Decision 6 accepts in *state*."""
     if state == "interrupted" or (state == "paused" and outcome == "needs_attention"):
         return ("resume", "abandon")
@@ -427,10 +461,11 @@ def accepted_continuations(state: str, outcome: str | None) -> tuple[str, ...]:
 def find_operation(
     conn: sqlite3.Connection, agent_id: str, request_id: str
 ) -> sqlite3.Row | None:
-    return conn.execute(
+    row = conn.execute(
         "SELECT * FROM operations WHERE agent_id = ? AND request_id = ?",
         (agent_id, request_id),
     ).fetchone()
+    return None if row is None else _validated_operation_row(row)
 
 
 def get_operation(conn: sqlite3.Connection, operation_id: str) -> sqlite3.Row:
@@ -443,7 +478,7 @@ def get_operation(conn: sqlite3.Connection, operation_id: str) -> sqlite3.Row:
             f"operation {operation_id} is not in the store; terminal operations are pruned "
             f"after {RETENTION_SECONDS // 86_400} days",
         )
-    return row
+    return _validated_operation_row(row)
 
 
 def insert_operation(
@@ -496,12 +531,14 @@ def insert_operation(
 def set_state(
     conn: sqlite3.Connection,
     operation_id: str,
-    state: str,
-    outcome: str | None,
+    state: OperationState,
+    outcome: OperationOutcome | None,
     *,
     warnings: tuple[str, ...] = (),
     result_json: str | None = None,
 ) -> None:
+    _require_vocabulary(state, get_args(OperationState), "state")
+    _require_vocabulary(outcome, (*get_args(OperationOutcome), None), "outcome")
     now = _clock()
     conn.execute(
         "UPDATE operations SET state = ?, outcome = ?, warnings_json = ?,"
@@ -532,8 +569,12 @@ def interrupt_orphan(conn: sqlite3.Connection, operation_id: str) -> None:
 
 
 def add_event(
-    conn: sqlite3.Connection, operation_id: str, kind: str, detail: Mapping[str, Any]
+    conn: sqlite3.Connection,
+    operation_id: str,
+    kind: EventKind,
+    detail: Mapping[str, Any],
 ) -> None:
+    _require_vocabulary(kind, get_args(EventKind), "event_kind")
     seq = conn.execute(
         "SELECT coalesce(max(seq), 0) + 1 FROM events WHERE operation_id = ?",
         (operation_id,),
@@ -577,10 +618,19 @@ def set_partition(
 
 
 def _effect(row: sqlite3.Row) -> EffectRecord:
+    _require_vocabulary(
+        row["status"], get_args(EffectStatus), "effect_status", persisted=True
+    )
     identity = (
         None if row["identity_json"] is None else json.loads(row["identity_json"])
     )
-    return EffectRecord(row["key"], row["kind"], row["target"], row["status"], identity)
+    return EffectRecord(
+        row["key"],
+        row["kind"],
+        row["target"],
+        cast(EffectStatus, row["status"]),
+        identity,
+    )
 
 
 def load_effects(
@@ -615,9 +665,10 @@ def record_outcome(
     conn: sqlite3.Connection,
     operation_id: str,
     key: str,
-    status: str,
+    status: EffectStatus,
     identity: Mapping[str, Any] | None,
 ) -> None:
+    _require_vocabulary(status, get_args(EffectStatus), "effect_status")
     conn.execute(
         "UPDATE effects SET status = ?, identity_json = ? WHERE operation_id = ? AND key = ?",
         (
@@ -666,8 +717,17 @@ def read_record(conn: sqlite3.Connection, operation_id: str) -> OperationRecord:
         "SELECT * FROM events WHERE operation_id = ? ORDER BY seq DESC LIMIT ?",
         (operation_id, STATUS_EVENTS + 1),
     ).fetchall()
+    for event in newest[:STATUS_EVENTS]:
+        _require_vocabulary(
+            event["kind"], get_args(EventKind), "event_kind", persisted=True
+        )
     events = tuple(
-        OperationEvent(r["seq"], _iso(r["at"]), r["kind"], json.loads(r["detail_json"]))
+        OperationEvent(
+            r["seq"],
+            _iso(r["at"]),
+            cast(EventKind, r["kind"]),
+            json.loads(r["detail_json"]),
+        )
         for r in reversed(newest[:STATUS_EVENTS])
     )
     return OperationRecord(
@@ -677,9 +737,9 @@ def read_record(conn: sqlite3.Connection, operation_id: str) -> OperationRecord:
         connection=row["connection"],
         system_uuid=row["system_uuid"],
         partition_uuid=row["partition_uuid"],
-        state=row["state"],
+        state=cast(OperationState, row["state"]),
         phase=row["phase"],
-        outcome=row["outcome"],
+        outcome=cast(OperationOutcome | None, row["outcome"]),
         effects=tuple(load_effects(conn, operation_id).values()),
         events=events,
         events_truncated=len(newest) > STATUS_EVENTS,
@@ -725,8 +785,13 @@ def connection_label(profile: str | None, *, tool: str) -> str:
     ``HMC_HOST`` collapses every profile to ``<default>`` and a nickname resolves to its
     profile key, so records are labelled and filtered by the connection actually used.
     """
-    connection = selected_connection(profile, tool=tool)
-    if connection == UNRESOLVED:
+    try:
+        connection = resolve_connection_profile(profile)
+    except ConfigError as error:
+        raise ValueError(
+            f"{tool} cannot resolve the configured HMC connection"
+        ) from error
+    if connection == UNRESOLVED_CONNECTION:
         raise ValueError(f"{tool}: profile {profile!r} names no configured connection")
     return DEFAULT_CONNECTION if connection is None else connection
 

@@ -103,6 +103,7 @@ def test_shared_affinity_operations_resolve_system_uuid_before_delegating(
     system_uuid = "11111111-1111-1111-1111-111111111111"
     selector = MemoptLparSelector(names=("web",))
     delegated = AsyncMock(return_value=result)
+    hmc = _hmc()
 
     with (
         patch(
@@ -116,10 +117,10 @@ def test_shared_affinity_operations_resolve_system_uuid_before_delegating(
             if primitive.startswith("plan_")
             else {}
         )
-        actual = asyncio.run(operation(_hmc(), system_uuid, **kwargs))
+        actual = asyncio.run(operation(hmc, system_uuid, **kwargs))
 
     assert actual == result
-    resolve.assert_awaited_once_with(_config(), system_uuid, None)
+    resolve.assert_awaited_once_with(hmc, system_uuid, None)
     expected = (_config(), SYSTEM, selector, None) if kwargs else (_config(), SYSTEM)
     delegated.assert_awaited_once_with(*expected)
 

@@ -6,6 +6,8 @@ field-extraction logic in server_tools/composite.py is verified without a live H
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import httpx
 import pytest
 from conftest import captured_lpar_entry, mock_system_summaries
@@ -132,7 +134,10 @@ def test_lpar_summary_reads_dedicated_partition_containers():
     assert summary.current_proc_units == "2"
     assert summary.desired_proc_units == "2"
     assert summary.desired_vcpus is None
-    assert summary.dedicated_procs is True
+    assert summary.has_dedicated_processors is True
+    serialized = asdict(summary)
+    assert serialized["has_dedicated_processors"] is True
+    assert "dedicated_procs" not in serialized
     assert summary.os_type == "Linux"
     assert summary.os_version == "Unknown"
 
@@ -143,7 +148,10 @@ def test_lpar_summary_reads_shared_partition_containers():
     assert summary.current_proc_units == "0.5"
     assert summary.desired_proc_units == "0.5"
     assert summary.desired_vcpus == "1"
-    assert summary.dedicated_procs is False
+    assert summary.has_dedicated_processors is False
+    serialized = asdict(summary)
+    assert serialized["has_dedicated_processors"] is False
+    assert "dedicated_procs" not in serialized
 
 
 def test_lpar_summary_keeps_inactive_zeros_and_reports_missing_as_none():
@@ -165,7 +173,10 @@ def test_lpar_summary_keeps_inactive_zeros_and_reports_missing_as_none():
     assert bare.desired_memory_mib is None
     assert bare.current_proc_units is None
     assert bare.desired_proc_units is None
-    assert bare.dedicated_procs is None
+    assert bare.has_dedicated_processors is None
+    serialized = asdict(bare)
+    assert serialized["has_dedicated_processors"] is None
+    assert "dedicated_procs" not in serialized
 
 
 def test_lpar_summary_reads_text_of_attributed_description():
@@ -197,7 +208,7 @@ def test_lpar_summary_of_captured_inactive_partition_reads_zeros(monkeypatch, mo
     assert result.desired_memory_mib == "0"
     assert result.desired_proc_units == "0"
     assert result.current_proc_units is None
-    assert result.dedicated_procs is None
+    assert result.has_dedicated_processors is None
 
 
 # ---------------------------------------------------------------------- #
@@ -257,7 +268,7 @@ def test_lpar_summary_by_uuid_returns_flat_dict(monkeypatch, mock_hmc):
     assert result.desired_memory_mib == "8192"
     assert result.current_memory_mib == "4096"
     assert result.current_proc_units == "0.5"
-    assert result.dedicated_procs is False
+    assert result.has_dedicated_processors is False
     assert result.desired_proc_units == "1.0"
     assert result.desired_vcpus == "2"
     assert result.os_version == "AIX 7.2"

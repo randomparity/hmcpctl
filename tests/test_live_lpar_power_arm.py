@@ -16,9 +16,14 @@ import pytest
 
 SCRIPTS_ROOT = Path(__file__).parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
-import live_test_runner as runner  # noqa: E402
 from fastmcp.utilities.json_schema_type import json_schema_to_type  # noqa: E402
-from live_test import lpar_config, lpar_power, pcie  # noqa: E402
+from live_test import config as live_config  # noqa: E402
+from live_test import (  # noqa: E402
+    dedicated_pcie,
+    lpar_config,
+    lpar_power,
+    runner,
+)
 from pydantic import TypeAdapter  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402
@@ -77,7 +82,7 @@ def _created(uuid: str | None) -> dict[str, Any]:
 def _power_on(already: bool, job: Any, message: str | None) -> dict[str, Any]:
     """A complete `hmc_power_on_lpar` result."""
     return {
-        "already_running": already,
+        "already_activated": already,
         "job": job,
         "message": message,
         "affinity_assessment": _NOT_MEASURED,
@@ -532,7 +537,7 @@ def _no_waiting(monkeypatch):
         (lpar_power, "_STATE_POLL_DELAY_S"),
         (lpar_power, "_OPERATION_POLL_DELAY_S"),
         (lpar_power, "_COMPARE_REREAD_DELAY_S"),
-        (pcie, "_ABSENCE_REREAD_DELAY_S"),
+        (dedicated_pcie, "_ABSENCE_REREAD_DELAY_S"),
     ):
         monkeypatch.setattr(module, name, 0)
     monkeypatch.setattr(lpar_power, "_STATE_POLL_ATTEMPTS", 2)
@@ -549,7 +554,7 @@ def _typed_outputs(output_schemas):
 
 def _run(schemas, world: World, group: str = "lpar-power", **config: Any):
     state = runner.RunState(
-        config=runner.LiveTestConfig(
+        config=live_config.LiveTestConfig(
             system_name=SYSTEM,
             vdisk_volume_group_name=GROUP,
             provision_vlan_id=VLAN,
@@ -920,13 +925,88 @@ def test_scratch_name_helpers_match_only_the_reserved_prefixes():
     assert lpar_config.NAME_PREFIX != lpar_power.NAME_PREFIX
 
 
-def test_volume_names_drop_the_lsvg_group_and_header_lines():
-    text = (
-        "datavg:\nLV NAME  TYPE  LPs  PPs  PVs  LV STATE  MOUNT POINT\n"
-        "lv_op  jfs2  1  1  1  open/syncd  N/A\n"
+@pytest.mark.parametrize("listing", [None, 42, "", "  ", "datavg:", "not a listing"])
+def test_unreadable_volume_inventory_blocks_power_mutations(schemas, listing):
+    world = World()
+    real = world._hmc_run_command
+    world.overrides["hmc_run_command"] = lambda k: (
+        listing if "lsvg -lv" in k["cmd"] else real(k)
     )
-    assert lpar_power._volume_names(text) == {"lv_op"}
-    assert lpar_power._volume_names(None) is None
+
+    state = _run(schemas, world)
+
+    assert not any(world.calls_to(tool) for tool in MUTATIONS)
+    assert "the system baseline did not read" in str(state.results)
+
+
+@pytest.mark.parametrize(
+    "listing", [None, "", "datavg:", "not a listing", HMCError("read failed")]
+)
+def test_unreadable_volume_inventory_never_authorizes_disk_teardown(schemas, listing):
+    world = World()
+    real = world._hmc_run_command
+    world.overrides["hmc_run_command"] = lambda k: (
+        listing if "lsvg -lv" in k["cmd"] else real(k)
+    )
+    state = runner.RunState(config=live_config.LiveTestConfig(system_name=SYSTEM))
+    state.schemas = schemas
+    run = lpar_power.Run(
+        SYSTEM,
+        "0a1b2c3d",
+        vios=lpar_power.Vios(VIOS_UUID, 2, GROUP, VG_UUID),
+        volume_attempted=True,
+    )
+
+    clean = asyncio.run(
+        lpar_power._teardown_storage(FakeClient(world, _OUTPUTS), state, run)
+    )
+
+    assert not world.calls_to("hmc_delete_virtual_disk")
+    assert not clean
+    assert "MANUAL RECOVERY REQUIRED" in str(state.results)
+
+
+@pytest.mark.parametrize(
+    "listing", [None, "", "datavg:", "not a listing", HMCError("read failed")]
+)
+def test_unreadable_post_delete_inventory_keeps_teardown_unproven(schemas, listing):
+    world = World()
+    real = world._hmc_run_command
+    world.overrides["hmc_run_command"] = lambda k: (
+        listing
+        if "lsvg -lv" in k["cmd"] and world.calls_to("hmc_delete_virtual_disk")
+        else real(k)
+    )
+    state = runner.RunState(config=live_config.LiveTestConfig(system_name=SYSTEM))
+    state.schemas = schemas
+    run = lpar_power.Run(
+        SYSTEM,
+        "0a1b2c3d",
+        vios=lpar_power.Vios(VIOS_UUID, 2, GROUP, VG_UUID),
+        volume_attempted=True,
+    )
+    world.volumes.add(run.volume)
+
+    clean = asyncio.run(
+        lpar_power._teardown_storage(FakeClient(world, _OUTPUTS), state, run)
+    )
+
+    assert len(world.calls_to("hmc_delete_virtual_disk")) == 1
+    assert run.volume not in world.volumes
+    assert not clean
+    assert "MANUAL RECOVERY REQUIRED" in str(state.results)
+
+
+def test_header_only_volume_inventory_allows_normal_power_cleanup(schemas):
+    world = World()
+    world.volumes.clear()
+
+    state = _run(schemas, world)
+
+    assert world.calls_to("hmc_create_virtual_disk")
+    assert world.calls_to("hmc_delete_virtual_disk")
+    assert not world.volumes
+    assert _rows(state, "system baseline compare")[0]["status"] == "PASS"
 
 
 # ---------------------------------------------------------------------------

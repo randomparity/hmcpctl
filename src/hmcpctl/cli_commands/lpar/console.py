@@ -164,7 +164,7 @@ def lpars_capture_console(
             lambda hmc: capture_lpar_console_by_selector(
                 hmc,
                 lpar_name_or_uuid,
-                system_name_or_uuid,
+                system_name_or_uuid=system_name_or_uuid,
                 duration_seconds=duration_seconds,
                 max_bytes=max_bytes,
                 idle_timeout_seconds=idle_timeout_seconds,

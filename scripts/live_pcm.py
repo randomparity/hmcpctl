@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import live_test_runner
+from live_test import runner
 
 #: The one argument vector this wrapper dispatches.
 GROUP = "pcm"
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     ).parse_args(argv)
-    return live_test_runner._run_from_arguments(["--group", GROUP])
+    return runner._run_from_arguments(["--group", GROUP])
 
 
 if __name__ == "__main__":

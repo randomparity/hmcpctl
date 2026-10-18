@@ -19,7 +19,7 @@ from conftest import assert_only_these_client_methods_used
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
-from hmcpctl.jobs import power_off_lpar_job
+from hmcpctl.jobs import job_outcome, power_off_lpar_job
 from hmcpctl.operations.lpar.assignments import WorkflowStep
 from hmcpctl.operations.lpar.decommission import (
     DecommissionAdapterRecord,
@@ -58,7 +58,21 @@ def test_decommission_blast_radius_schema_is_named_and_complete() -> None:
 
 def _workflow_steps(*entries: dict[str, Any]) -> tuple[WorkflowStep, ...]:
     return tuple(
-        WorkflowStep(entry["step"], entry["status"], entry.get("result"))
+        WorkflowStep(
+            entry["step"],
+            entry["status"],
+            entry.get("result"),
+            job_outcome(
+                "job-uuid",
+                {
+                    "UUID": "job-uuid",
+                    "Resource": {"JobID": "job-uuid", "Status": "COMPLETED_OK"},
+                },
+            )
+            if entry["step"] == "power_off"
+            and entry.get("result", {}).get("already_off") is False
+            else None,
+        )
         for entry in entries
     )
 
@@ -308,13 +322,13 @@ def test_hmc_decommission_lpar_delegates_with_one_configured_client() -> None:
     assert entered_clients == [("ops", hmc)]
     decommission_mock.assert_awaited_once_with(
         hmc,
-        "system-a",
         "aix-prod",
         dry_run=True,
         ownership_override=True,
         immediate=True,
         timeout_seconds=123,
         poll_interval=7,
+        system_name_or_uuid="system-a",
     )
 
 
@@ -334,7 +348,7 @@ async def test_decommission_rejects_uuid_outside_selected_system(
     )
 
     with pytest.raises(ValueError, match="No LPAR .* on managed system"):
-        await decommission_lpar(hmc, "system-a", LPAR_UUID)
+        await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
 
     hmc.list_logical_partitions.assert_awaited_once_with(SYSTEM_UUID)
     authorize.assert_not_awaited()
@@ -353,10 +367,7 @@ async def test_decommission_resolves_uuid_case_insensitively(
     _patch_common(monkeypatch, calls)
 
     result = await decommission_lpar(
-        hmc,
-        "system-a",
-        hmc_uuid.upper(),
-        dry_run=True,
+        hmc, hmc_uuid.upper(), dry_run=True, system_name_or_uuid="system-a"
     )
 
     assert result.lpar_uuid == hmc_uuid
@@ -387,7 +398,7 @@ async def test_decommission_refuses_incomplete_adapter_inventory(
         ValueError,
         match=("Incomplete ClientNetworkAdapter inventory: missing its UUID"),
     ):
-        await decommission_lpar(hmc, "system-a", "aix-prod")
+        await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     hmc.submit_job.assert_not_awaited()
     hmc.delete_adapter.assert_not_awaited()
@@ -406,7 +417,9 @@ async def test_decommission_warns_when_listed_vios_has_no_uuid(
     hmc.list_vios.return_value = [{"Resource": {"PartitionName": "vios-missing-id"}}]
     _patch_common(monkeypatch, calls)
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod", dry_run=True)
+    result = await decommission_lpar(
+        hmc, "aix-prod", dry_run=True, system_name_or_uuid="system-a"
+    )
 
     assert result.blast_radius["storage_mappings"] == ()
     assert result.blast_radius["unresolved_storage_mapping_count"] == 0
@@ -429,7 +442,9 @@ async def test_decommission_warns_when_vios_storage_detail_is_unavailable(
     hmc.get_vios_storage_detail.return_value = None
     _patch_common(monkeypatch, calls)
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod", dry_run=True)
+    result = await decommission_lpar(
+        hmc, "aix-prod", dry_run=True, system_name_or_uuid="system-a"
+    )
 
     assert result.blast_radius["storage_mappings"] == ()
     assert result.blast_radius["unresolved_storage_mapping_count"] == 0
@@ -481,7 +496,7 @@ async def test_decommission_refuses_when_vios_storage_detail_is_unavailable(
         f"delete_lpar:{uuid}"
     )
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod")
+    result = await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert result.resource_deleted is False
     assert result.workflow_completed is False
@@ -514,7 +529,9 @@ async def test_decommission_dry_run_inventories_without_mutating(
     hmc = _client(complete=False)
     _patch_common(monkeypatch, calls)
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod", dry_run=True)
+    result = await decommission_lpar(
+        hmc, "aix-prod", dry_run=True, system_name_or_uuid="system-a"
+    )
 
     legacy = dict(result.blast_radius)
     assert legacy.pop("mapping_evidence")
@@ -658,7 +675,9 @@ async def test_decommission_enforces_ownership_even_for_dry_run(
         AsyncMock(side_effect=PermissionError("foreign owner")),
     )
     with pytest.raises(PermissionError, match="foreign owner"):
-        await decommission_lpar(hmc, "system-a", "aix-prod", dry_run=True)
+        await decommission_lpar(
+            hmc, "aix-prod", dry_run=True, system_name_or_uuid="system-a"
+        )
 
     hmc.get_quick_property.assert_not_awaited()
     hmc.submit_job.assert_not_awaited()
@@ -674,10 +693,10 @@ async def test_decommission_allows_explicit_ownership_override(
 
     result = await decommission_lpar(
         hmc,
-        "system-a",
         "aix-prod",
         dry_run=True,
         ownership_override=True,
+        system_name_or_uuid="system-a",
     )
 
     assert result.workflow_completed is True
@@ -712,7 +731,7 @@ async def test_decommission_override_reads_and_reports_both_ownership_snapshots(
     )
 
     result = await decommission_lpar(
-        hmc, "system-a", "aix-prod", ownership_override=True
+        hmc, "aix-prod", ownership_override=True, system_name_or_uuid="system-a"
     )
 
     assert result.workflow_completed is True
@@ -746,7 +765,7 @@ async def test_decommission_revalidates_changed_owner_before_mutation(
     )
 
     with pytest.raises(PermissionError, match="owned by 'bob'"):
-        await decommission_lpar(hmc, "system-a", "aix-prod")
+        await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert descriptions.await_count == 2
     hmc.submit_job.assert_not_awaited()
@@ -787,11 +806,11 @@ async def test_decommission_runs_power_off_adapter_delete_and_lpar_delete_in_ord
 
     result = await decommission_lpar(
         hmc,
-        "system-a",
         "aix-prod",
         immediate=True,
         timeout_seconds=90,
         poll_interval=3,
+        system_name_or_uuid="system-a",
     )
 
     assert result.resource_deleted is True
@@ -895,7 +914,7 @@ async def test_decommission_marks_already_off_lpar_without_power_job(
         f"delete_lpar:{uuid}"
     )
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod")
+    result = await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert result.steps[0] == WorkflowStep(
         "power_off", "ok", {"already_off": True, "state": "not activated"}
@@ -925,7 +944,7 @@ async def test_decommission_stops_when_initially_off_lpar_restarts_before_detach
     hmc.get_quick_property.return_value = "running"
     _patch_common(monkeypatch, calls)
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod")
+    result = await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert result.workflow_completed is False
     assert result.steps == _workflow_steps(
@@ -962,7 +981,7 @@ async def test_decommission_stops_when_lpar_restarts_after_power_off_job(
     hmc.get_quick_property.return_value = "running"
     _patch_common(monkeypatch, calls)
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod")
+    result = await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert result.workflow_completed is False
     assert result.steps[0].status == "ok"
@@ -995,7 +1014,7 @@ async def test_decommission_stops_when_detach_state_cannot_be_read(
     hmc.get_quick_property.side_effect = HMCError("state read failed")
     _patch_common(monkeypatch, calls)
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod")
+    result = await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert result.workflow_completed is False
     assert result.steps[1] == WorkflowStep(
@@ -1048,12 +1067,13 @@ async def test_decommission_reports_power_off_failure_and_skips_later_steps(
     _patch_common(monkeypatch, calls)
     hmc.wait_for_job_entry.return_value = job
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod")
+    result = await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert result.resource_deleted is False
     assert result.workflow_completed is False
     assert result.steps[0].status == "error"
     assert fragment in result.steps[0].result
+    assert result.steps[0].job == job_outcome("job-uuid", job)
     assert result.steps[1:] == _workflow_steps(
         {"step": "detach_storage_mappings", "status": "skipped"},
         {"step": "detach_adapters", "status": "skipped"},
@@ -1080,7 +1100,7 @@ async def test_decommission_stops_after_first_adapter_failure(
 
     hmc.delete_adapter.side_effect = delete_adapter
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod")
+    result = await decommission_lpar(hmc, "aix-prod", system_name_or_uuid="system-a")
 
     assert result.resource_deleted is False
     assert result.workflow_completed is False
@@ -1156,7 +1176,9 @@ async def test_decommission_dry_run_makes_no_unclassified_call(
     hmc = _client()
     _patch_common(monkeypatch, calls)
 
-    result = await decommission_lpar(hmc, "system-a", "aix-prod", dry_run=True)
+    result = await decommission_lpar(
+        hmc, "aix-prod", dry_run=True, system_name_or_uuid="system-a"
+    )
 
     assert result.dry_run is True
     assert result.resource_deleted is False
@@ -1217,7 +1239,7 @@ async def test_decommission_power_off_is_recorded_before_its_submit(
 
     with caplog.at_level(logging.INFO):
         result = await decommission_lpar(
-            hmc, "system-a", "aix-prod", immediate=immediate
+            hmc, "aix-prod", immediate=immediate, system_name_or_uuid="system-a"
         )
 
     assert result.resource_deleted is True
@@ -1255,7 +1277,9 @@ async def test_decommission_power_off_is_recorded_when_the_submit_raises(
     hmc.submit_job.side_effect = HMCError("submit failed")
 
     with caplog.at_level(logging.INFO):
-        result = await decommission_lpar(hmc, "system-a", "aix-prod")
+        result = await decommission_lpar(
+            hmc, "aix-prod", system_name_or_uuid="system-a"
+        )
 
     assert result.steps[0] == WorkflowStep("power_off", "error", "submit failed")
     assert [record["event"] for record in _audit_records(caplog)] == ["lpar-power-off"]
@@ -1279,7 +1303,9 @@ async def test_decommission_without_a_power_off_submit_records_none(
     _patch_common(monkeypatch, [])
 
     with caplog.at_level(logging.INFO):
-        await decommission_lpar(hmc, "system-a", "aix-prod", dry_run=dry_run)
+        await decommission_lpar(
+            hmc, "aix-prod", dry_run=dry_run, system_name_or_uuid="system-a"
+        )
 
     hmc.submit_job.assert_not_awaited()
     assert _audit_records(caplog) == []
@@ -1307,7 +1333,7 @@ async def test_decommission_detaches_exact_mapping_before_adapters(monkeypatch):
         ("mapping", args)
     )
     hmc.delete_adapter.side_effect = lambda *args: calls.append(("adapter", args))
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert result.workflow_completed
     assert [step.step for step in result.steps] == [
         "power_off",
@@ -1375,7 +1401,7 @@ async def test_decommission_incomplete_vscsi_blocks_first_mutation(
         hmc.list_vios.side_effect = HMCError("listing failed")
     hmc.get_vios_storage_detail.return_value = detail
     _patch_common(monkeypatch, [])
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert not result.resource_deleted and not result.workflow_completed
     assert [step.status for step in result.steps] == [
         "skipped",
@@ -1397,7 +1423,7 @@ async def test_decommission_mapping_error_retains_failure_and_skips_teardown(
     hmc.get_vios_storage_detail.return_value = _complete_storage_detail()
     hmc.delete_storage_mapping.side_effect = HMCError("HSCL2957")
     _patch_common(monkeypatch, [])
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert [step.status for step in result.steps] == [
         "ok",
         "error",
@@ -1422,7 +1448,7 @@ async def test_partial_mapping_detach_reports_success_then_stops(monkeypatch):
     hmc.get_vios_storage_detail.return_value = detail
     hmc.delete_storage_mapping.side_effect = [None, HMCError("second refused")]
     _patch_common(monkeypatch, [])
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert result.steps[1].result == {
         "mappings": ({"vios_uuid": VIOS_UUID, "mapping_id": "vhost0/vtscsi0"},),
         "error": "second refused",
@@ -1443,7 +1469,7 @@ async def test_explicit_empty_vscsi_collection_allows_decommission(monkeypatch, 
     detail["Resource"]["VirtualSCSIMappings"] = block
     hmc.get_vios_storage_detail.return_value = detail
     _patch_common(monkeypatch, [])
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert result.workflow_completed
     hmc.delete_storage_mapping.assert_not_awaited()
 
@@ -1454,7 +1480,9 @@ async def test_inventory_programming_error_is_not_advisory(monkeypatch):
     hmc.get_vios_storage_detail.side_effect = TypeError("bad decoder")
     _patch_common(monkeypatch, [])
     with pytest.raises(TypeError, match="bad decoder"):
-        await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=True)
+        await decommission_lpar(
+            hmc, LPAR_UUID, dry_run=True, system_name_or_uuid="system-a"
+        )
     hmc.submit_job.assert_not_awaited()
 
 
@@ -1471,7 +1499,7 @@ async def test_mapping_client_uuid_is_matched_case_insensitively(monkeypatch):
     )
     hmc.get_vios_storage_detail.return_value = detail
     _patch_common(monkeypatch, [])
-    await decommission_lpar(hmc, "system-a", target)
+    await decommission_lpar(hmc, target, system_name_or_uuid="system-a")
     hmc.delete_storage_mapping.assert_awaited_once_with(
         VIOS_UUID, "vhost0/vtscsi0", target
     )
@@ -1488,7 +1516,7 @@ async def test_changed_ownership_after_power_off_denies_mapping_mutation(monkeyp
         ops, "authorize_decommission_lpar_ownership_snapshot", authorize
     )
     with pytest.raises(HMCError, match="ownership changed"):
-        await decommission_lpar(hmc, "system-a", LPAR_UUID)
+        await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     hmc.submit_job.assert_awaited_once()
     hmc.delete_storage_mapping.assert_not_awaited()
     hmc.delete_adapter.assert_not_awaited()
@@ -1606,7 +1634,7 @@ async def test_native_metadata_invalid_inventory_has_no_first_mutation(
     hmc = _client()
     hmc.get_vios_storage_detail.return_value = {"Resource": resource}
     _patch_common(monkeypatch, [])
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert not result.workflow_completed and not result.resource_deleted
     hmc.submit_job.assert_not_awaited()
     hmc.delete_storage_mapping.assert_not_awaited()
@@ -1623,7 +1651,7 @@ async def test_native_metadata_canonical_detaches_only_exact_own_mapping(
         "Resource": {"VirtualSCSIMappings": native_vscsi_block}
     }
     _patch_common(monkeypatch, [])
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert result.workflow_completed and result.resource_deleted
     hmc.delete_storage_mapping.assert_awaited_once_with(
         VIOS_UUID, "vhost3/vtscsi2", LPAR_UUID
@@ -1661,7 +1689,7 @@ async def test_decommission_refresh_uses_surviving_original_adapters(
     hmc.list_adapters.side_effect = inventory
     hmc.delete_storage_mapping.side_effect = mapping
     hmc.delete_adapter.side_effect = adapter
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert result.workflow_completed and result.resource_deleted
     assert hmc.delete_adapter.await_count == (0 if mapping_removes_client else 1)
     assert hmc.list_adapters.await_count == 8
@@ -1761,9 +1789,9 @@ async def test_decommission_refresh_rejects_unverified_inventory(monkeypatch, fa
         )
     if fault == "cancel":
         with pytest.raises(asyncio.CancelledError):
-            await decommission_lpar(hmc, "system-a", LPAR_UUID)
+            await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     else:
-        result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+        result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
         assert not result.workflow_completed and not result.resource_deleted
         assert (
             result.steps[-2].status == "error" and result.steps[-1].status == "skipped"
@@ -1779,7 +1807,7 @@ async def test_decommission_mapping_failure_does_not_refresh(monkeypatch):
     hmc.delete_storage_mapping.side_effect = HMCError(
         "mapping refused", 500, "synthetic"
     )
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert not result.workflow_completed
     assert hmc.list_adapters.await_count == 4
     hmc.delete_adapter.assert_not_awaited()
@@ -1796,7 +1824,7 @@ async def test_decommission_refresh_genuine_partial_delete_error_stays_failed(
         None,
         HMCError("genuine DELETE refused", 404, "REST000B"),
     ]
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert not result.workflow_completed and not result.resource_deleted
     assert result.steps[-2].status == "error" and result.steps[-1].status == "skipped"
     assert len(result.steps[-2].result["adapters"]) == 1
@@ -1849,7 +1877,7 @@ async def test_initial_raw_adapter_inventory_fails_before_first_mutation(
     hmc._request_with_uuid_path_arguments.return_value = response
     hmc._request_with_uuid_path_arguments.side_effect = None
     with pytest.raises((ValueError, HMCError)):
-        await decommission_lpar(hmc, "system-a", LPAR_UUID)
+        await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     hmc.submit_job.assert_not_awaited()
     hmc.delete_storage_mapping.assert_not_awaited()
     hmc.delete_adapter.assert_not_awaited()
@@ -1862,7 +1890,7 @@ async def test_exact_empty_204_adapter_feed_is_complete(monkeypatch):
     _patch_common(monkeypatch, [])
     hmc._request_with_uuid_path_arguments.side_effect = None
     hmc._request_with_uuid_path_arguments.return_value = httpx.Response(204)
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert result.workflow_completed and result.resource_deleted
     assert hmc._request_with_uuid_path_arguments.await_count == 8
     hmc.delete_adapter.assert_not_awaited()
@@ -1904,7 +1932,7 @@ async def test_refresh_metadata_cannot_hide_existing_adapter(monkeypatch, hidden
     hmc.list_adapters.side_effect = inventory
     hmc.delete_storage_mapping.side_effect = detach
     hmc._request_with_uuid_path_arguments.side_effect = request
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert detached  # Actual canonical mapping phase was reached.
     assert not result.workflow_completed and not result.resource_deleted
     assert result.steps[2].status == "error" and result.steps[3].status == "skipped"
@@ -1938,7 +1966,7 @@ async def test_adapter_feed_preserves_native_metadata_and_person_fields(monkeypa
         return httpx.Response(200, text=tostring(root, encoding="unicode"))
 
     hmc._request_with_uuid_path_arguments.side_effect = request
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID)
+    result = await decommission_lpar(hmc, LPAR_UUID, system_name_or_uuid="system-a")
     assert result.workflow_completed and result.resource_deleted
     assert hmc.delete_adapter.await_count == 6
 
@@ -1980,7 +2008,9 @@ async def test_mapping_evidence_and_rendering(monkeypatch, capsys, dry_run, case
             f"/rest/api/uom/LogicalPartition/{target.upper()}"
         )
     hmc.get_vios_storage_detail.return_value = detail
-    result = await decommission_lpar(hmc, "system-a", target, dry_run=dry_run)
+    result = await decommission_lpar(
+        hmc, target, dry_run=dry_run, system_name_or_uuid="system-a"
+    )
     evidence = result.blast_radius["mapping_evidence"]
     assert evidence and all(item["vios_uuid"] == VIOS_UUID for item in evidence)
     assert all(item["backing_device"] != "hdisk99" for item in evidence)
@@ -2029,7 +2059,9 @@ async def test_unresolved_duplicate_remains_unproven(monkeypatch, dry_run):
     unknown.pop("AssociatedLogicalPartition")
     mappings.append(unknown)
     hmc.get_vios_storage_detail.return_value = detail
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=dry_run)
+    result = await decommission_lpar(
+        hmc, LPAR_UUID, dry_run=dry_run, system_name_or_uuid="system-a"
+    )
     evidence = result.blast_radius["mapping_evidence"]
     unresolved = [row for row in evidence if row["relationship"] == "unknown"]
     assert len(unresolved) == 1
@@ -2060,7 +2092,9 @@ async def test_evidence_preserves_wrapped_backing_text(monkeypatch, kind, field)
       </VirtualSCSIMapping></VirtualSCSIMappings></VirtualIOServer>""")
     )
     hmc.get_vios_storage_detail.return_value = {"Resource": resource}
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=True)
+    result = await decommission_lpar(
+        hmc, LPAR_UUID, dry_run=True, system_name_or_uuid="system-a"
+    )
     row = result.blast_radius["mapping_evidence"][0]
     assert row["backing_device"] == "known-backing"
     assert row["mapping_id"] == "vhost0/vtscsi0"
@@ -2078,7 +2112,9 @@ async def test_empty_metadata_collection_has_no_mapping_evidence(monkeypatch):
       </VirtualIOServer>""")
     )
     hmc.get_vios_storage_detail.return_value = {"Resource": resource}
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=True)
+    result = await decommission_lpar(
+        hmc, LPAR_UUID, dry_run=True, system_name_or_uuid="system-a"
+    )
     assert result.blast_radius["mapping_evidence"] == ()
 
 
@@ -2098,7 +2134,9 @@ async def test_evidence_preserves_wrapped_vios_and_fc_identity(monkeypatch):
     )
     hmc.list_vios.return_value = [{"UUID": VIOS_UUID, "Resource": resource}]
     hmc.get_vios_storage_detail.return_value = {"Resource": resource}
-    result = await decommission_lpar(hmc, "system-a", LPAR_UUID, dry_run=True)
+    result = await decommission_lpar(
+        hmc, LPAR_UUID, dry_run=True, system_name_or_uuid="system-a"
+    )
     row = result.blast_radius["mapping_evidence"][0]
     assert row["vios_name"] == "known-vios"
     assert row["uuid"] == row["mapping_id"] == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"

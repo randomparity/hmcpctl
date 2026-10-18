@@ -329,7 +329,7 @@ def test_targets_and_resolved_are_null_when_nothing_was_resolved():
 
 
 def test_resolved_connection_is_bound_to_the_sentinel_that_owns_it():
-    """`audit` restates `""` as a literal; `connection_scope` owns the value.
+    """`audit` restates `""` as a literal; `config` owns the value.
 
     `audit.py` may import nothing from the package, so the coupling cannot be an
     import — but this test may, and without it a change to `UNRESOLVED` would
@@ -338,9 +338,9 @@ def test_resolved_connection_is_bound_to_the_sentinel_that_owns_it():
     this is the connection half's equivalent, paid for in a test rather than a
     dependency.
     """
-    from hmcpctl.authorization import connection_scope
+    from hmcpctl.config import UNRESOLVED_CONNECTION
 
-    assert audit.resolved_connection(connection_scope.UNRESOLVED) == (
+    assert audit.resolved_connection(UNRESOLVED_CONNECTION) == (
         audit.UNRESOLVED_RENDERING
     )
     assert audit.resolved_connection(None) == audit.DEFAULT_RENDERING

@@ -63,29 +63,30 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import live_test_baseline as independent_baseline
-import live_test_runner as runner
+from live_test import baseline as independent_baseline
+from live_test import config as live_config
 from live_test import (
     lpar_config,
     lpar_power,
     network,
+    runner,
     storage_lifecycle,
     storage_volume_group,
     vios_backup,
 )
-from live_test.pcie import (
+from live_test.dedicated_pcie import (
     _DEFAULT_DEDICATED_PROFILE,
     _io_slots_contains,
     partition_not_found,
     select_profile_io_slots,
 )
 from live_test.results import entries
+from live_test.storage import scsi_adapter_listing
 from live_test.users import profile_rows, scratch_users
 from live_test.vmedia import (
     _BOOT_BASELINE_STEP,
     _mapping_identity,
     is_run_media_name,
-    scsi_adapter_listing,
 )
 
 from hmcpctl.config import HMCConfig
@@ -444,7 +445,7 @@ async def _lpar_power_volumes_left(
             f"the volumes of {group!r} (a name outside the read shape)"
         )
     status, listing = await call("hmc_run_command", cmd=command)
-    names = lpar_power._volume_names(listing) if status == "PASS" else None
+    names = storage_lifecycle.volume_names(listing) if status == "PASS" else None
     if names is None:
         raise StateUnreadable(f"the volumes of {group!r} on VIOS {vios}")
     system = shlex.quote(inputs.system_name)
@@ -1546,7 +1547,7 @@ def round2_inputs_from_document(
         return None
     if subtasks != runner.SUBTASK_GROUPS["round2"]:
         raise ValueError("round2 dispatch does not match the complete named arm")
-    config = runner._decode_saved_config(document.get("config"))
+    config = live_config.decode_saved_config(document.get("config"))
     artifacts = document.get("artifacts")
     saved = artifacts.get("lp3_baseline") if isinstance(artifacts, dict) else None
     if not isinstance(artifacts, dict) or not isinstance(saved, dict):
@@ -1617,14 +1618,9 @@ async def check_round2(call, inputs: Round2Inputs) -> list[Finding]:
 
 async def check_run(
     call,
-    pcie: RecoveryInputs | None,
-    partition: LparResidueInputs | None,
-    vios: VIOSBackupInputs | None = None,
-    network_inputs: NetworkInputs | None = None,
+    checks: tuple[tuple[Callable[..., Awaitable[list[Finding]]], object], ...],
+    *,
     users: bool = False,
-    lpar_config_inputs: LparConfigInputs | None = None,
-    lpar_power_inputs: LparPowerInputs | None = None,
-    round2_inputs: Round2Inputs | None = None,
 ) -> list[Finding]:
     """Each arm's checks in turn, each read whatever the others found."""
     findings: list[Finding] = []
@@ -1634,21 +1630,9 @@ async def check_run(
             findings += await _scratch_users_left(call)
         except StateUnreadable as unreadable:
             unread.append(str(unreadable))
-    for run_checks, inputs in (
-        (check, pcie),
-        (check_test_partition, partition),
-        (check_vios_backup, vios),
-        (check_network, network_inputs),
-        (check_lpar_config, lpar_config_inputs),
-        (check_lpar_power, lpar_power_inputs),
-        (check_round2, round2_inputs),
-    ):
-        if inputs is None:
-            continue
+    for run_checks, inputs in checks:
         try:
-            findings += await cast(Callable[..., Awaitable[list[Finding]]], run_checks)(
-                call, inputs
-            )
+            findings += await run_checks(call, inputs)
         except StateUnreadable as unreadable:
             findings += unreadable.findings
             unread.append(str(unreadable))
@@ -1668,16 +1652,11 @@ def _read_only_caller(client, state: runner.RunState):
 
 
 async def _run_checks(
-    pcie: RecoveryInputs | None,
-    partition: LparResidueInputs | None,
-    vios: VIOSBackupInputs | None = None,
-    network_inputs: NetworkInputs | None = None,
+    checks: tuple[tuple[Callable[..., Awaitable[list[Finding]]], object], ...],
+    *,
     users: bool = False,
-    lpar_config_inputs: LparConfigInputs | None = None,
-    lpar_power_inputs: LparPowerInputs | None = None,
-    round2_inputs: Round2Inputs | None = None,
 ) -> list[Finding]:
-    state = runner.RunState(config=runner.LiveTestConfig())
+    state = runner.RunState(config=live_config.LiveTestConfig())
     # The checks need the live run's composition, not bare ``create_mcp``:
     # ``hmc_run_command`` is an opt-in escape hatch that only it registers. Without
     # it the profile-drift check was answered "Unknown tool", which read as "no
@@ -1687,14 +1666,8 @@ async def _run_checks(
     async with runner.served_client() as client:
         return await check_run(
             _read_only_caller(client, state),
-            pcie,
-            partition,
-            vios,
-            network_inputs,
-            users,
-            lpar_config_inputs,
-            lpar_power_inputs,
-            round2_inputs,
+            checks,
+            users=users,
         )
 
 
@@ -1792,6 +1765,20 @@ def main(argv: list[str] | None = None) -> int:
     lpar_config_inputs = lpar_config_inputs_from_document(document, subtasks)
     lpar_power_inputs = lpar_power_inputs_from_document(document, subtasks)
 
+    checks = tuple(
+        (checker, inputs)
+        for checker, inputs in (
+            (check, pcie),
+            (check_test_partition, partition),
+            (check_vios_backup, vios),
+            (check_network, network_inputs),
+            (check_lpar_config, lpar_config_inputs),
+            (check_lpar_power, lpar_power_inputs),
+            (check_round2, round2_inputs),
+        )
+        if inputs is not None
+    )
+
     findings: list[Finding] = []
     unread: list[str] = [round2_error] if round2_error else []
     try:
@@ -1799,34 +1786,12 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         users = False
         unread.append(str(error))
-    if users or any(
-        inputs is not None
-        for inputs in (
-            pcie,
-            partition,
-            vios,
-            network_inputs,
-            lpar_config_inputs,
-            lpar_power_inputs,
-            round2_inputs,
-        )
-    ):
+    if users or checks:
         if not runner._bootstrap_config():
             print("ERROR: no HMC credentials; cannot check the system", file=sys.stderr)
             return 2
         try:
-            findings = asyncio.run(
-                _run_checks(
-                    pcie,
-                    partition,
-                    vios,
-                    network_inputs,
-                    users,
-                    lpar_config_inputs,
-                    lpar_power_inputs,
-                    round2_inputs,
-                )
-            )
+            findings = asyncio.run(_run_checks(checks, users=users))
         except MutatingCallRefused as refused:
             print(f"ERROR: refused a mutating call: {refused}", file=sys.stderr)
             return 2

@@ -50,7 +50,9 @@ def hmc_list_fc_ports(
     """
 
     return with_client(
-        lambda hmc: list_fc_ports(hmc, system_name_or_uuid, lpar_name_or_uuid),
+        lambda hmc: list_fc_ports(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
         profile=profile,
     )
 
@@ -81,7 +83,9 @@ def hmc_list_sea_adapters(
     """
 
     return with_client(
-        lambda hmc: list_sea_adapters(hmc, system_name_or_uuid, lpar_name_or_uuid),
+        lambda hmc: list_sea_adapters(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
         profile=profile,
     )
 
@@ -108,7 +112,9 @@ def hmc_list_vnics(
     """
 
     return with_client(
-        lambda hmc: list_vnics(hmc, system_name_or_uuid, lpar_name_or_uuid),
+        lambda hmc: list_vnics(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
         profile=profile,
     )
 
@@ -153,7 +159,6 @@ def hmc_add_vnic(
         try:
             result = await add_vnic(
                 hmc,
-                system_name_or_uuid,
                 lpar_name_or_uuid,
                 VnicBackingSelector(
                     vios_name,
@@ -164,6 +169,7 @@ def hmc_add_vnic(
                 ),
                 port_vlan_id,
                 ownership_override=ownership_override,
+                system_name_or_uuid=system_name_or_uuid,
             )
         except VnicPartialError as exc:
             evidence = json.dumps(serialize_tool_result(exc.result), default=str)
@@ -198,10 +204,10 @@ def hmc_remove_vnic(
         try:
             result = await remove_vnic(
                 hmc,
-                system_name_or_uuid,
                 lpar_name_or_uuid,
                 slot_num,
                 ownership_override=ownership_override,
+                system_name_or_uuid=system_name_or_uuid,
             )
         except VnicPartialError as exc:
             evidence = json.dumps(serialize_tool_result(exc.result), default=str)

@@ -23,9 +23,10 @@ class AdapterResult:
 
 async def list_adapters(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     adapter_type: AdapterType,
+    *,
+    system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
     """List one kind of virtual adapter on an LPAR.
 
@@ -41,10 +42,10 @@ async def list_adapters(
 
 async def add_network_adapter(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     port_vlan_id: int,
     *,
+    system_name_or_uuid: str | None = None,
     slot_number: int | None = None,
     virtual_switch_id: int | None = None,
     tagged: bool = False,
@@ -64,9 +65,9 @@ async def add_network_adapter(
     require_vlan_id("port_vlan_id", port_vlan_id)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.add_network_adapter(
@@ -82,11 +83,11 @@ async def add_network_adapter(
 
 async def add_vscsi_adapter(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     vios_partition_id: int,
     vios_slot: int,
     *,
+    system_name_or_uuid: str | None = None,
     slot_number: int | None = None,
     ownership_override: bool = False,
 ) -> AdapterResult:
@@ -101,9 +102,9 @@ async def add_vscsi_adapter(
     """
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.add_vscsi_adapter(
@@ -114,11 +115,11 @@ async def add_vscsi_adapter(
 
 async def add_vfc_adapter(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     vios_partition_id: int,
     vios_slot: int,
     *,
+    system_name_or_uuid: str | None = None,
     slot_number: int | None = None,
     ownership_override: bool = False,
 ) -> AdapterResult:
@@ -133,9 +134,9 @@ async def add_vfc_adapter(
     """
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.add_vfc_adapter(
@@ -146,11 +147,11 @@ async def add_vfc_adapter(
 
 async def delete_adapter(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     adapter_type: AdapterType,
     adapter_uuid: str,
     *,
+    system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
 ) -> ChangeLocation:
     """Authorize the LPAR, delete one virtual adapter, and say where that lived.
@@ -165,9 +166,9 @@ async def delete_adapter(
     validate_adapter_type(adapter_type)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_adapter(lpar_uuid, adapter_type, adapter_uuid)

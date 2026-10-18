@@ -21,8 +21,12 @@ import pytest
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_bare_cec as wrapper  # noqa: E402
-import live_test_runner as runner  # noqa: E402
-from live_test import bare_cec, pcie  # noqa: E402
+from live_test import (  # noqa: E402
+    bare_cec,
+    dedicated_pcie,
+    runner,
+)
+from live_test import config as live_config  # noqa: E402
 from live_test.observation import CLEANUP, Assertion  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402
@@ -85,7 +89,7 @@ def _no_waiting(monkeypatch):
 
     monkeypatch.setattr(bare_cec.cli, "execute", cli_read)
     monkeypatch.setattr(bare_cec, "_STATE_POLL_DELAY_S", 0)
-    monkeypatch.setattr(pcie, "_ABSENCE_REREAD_DELAY_S", 0)
+    monkeypatch.setattr(dedicated_pcie, "_ABSENCE_REREAD_DELAY_S", 0)
     monkeypatch.setattr(bare_cec, "_power_operations_authorized", lambda: True)
 
 
@@ -208,7 +212,7 @@ class World:
             job = _job("COMPLETED_WITH_ERROR", "HSCL3680 No current configuration")
         else:
             self.lpar_state, job = "open firmware", _job()
-        return {"already_running": False, "job": job, "message": None}
+        return {"already_activated": False, "job": job, "message": None}
 
     def _hmc_power_off_lpar(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         if kwargs.get("operation") == "osshutdown":
@@ -228,8 +232,8 @@ class World:
     def _hmc_get_lpar_state(self, _kwargs: dict[str, Any]) -> str:
         return self.lpar_state
 
-    def _hmc_get_job(self, _kwargs: dict[str, Any]) -> dict[str, Any]:
-        return _job()
+    def _hmc_get_job(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return self._hmc_wait_for_job(kwargs)
 
     def _hmc_wait_for_job(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -280,7 +284,7 @@ class FakeClient:
 
 def _state(schemas, **config: str) -> runner.RunState:
     state = runner.RunState(
-        config=runner.LiveTestConfig(
+        config=live_config.LiveTestConfig(
             dedicated_pcie_system_name=_SYSTEM,
             dedicated_pcie_lpar_prefix="live-",
             dedicated_pcie_drc_index=_DRC,
@@ -473,7 +477,7 @@ def test_a_no_profile_activation_that_boots_is_powered_off_before_sms(schemas):
     def boots(kwargs: dict[str, Any]) -> Any:
         if kwargs.get("partition_profile_uuid") is None:
             world.lpar_state = "open firmware"
-            return {"already_running": False, "job": _job(), "message": None}
+            return {"already_activated": False, "job": _job(), "message": None}
         return _DEFAULT
 
     world.overrides["hmc_power_on_lpar"] = boots
@@ -511,7 +515,7 @@ def test_a_timed_out_activation_fails_ends_the_steps_and_still_tears_down(schema
         if kwargs.get("partition_profile_uuid") is None:
             return _DEFAULT
         world.lpar_state = "starting"
-        return {"already_running": False, "job": _job("RUNNING"), "message": None}
+        return {"already_activated": False, "job": _job("RUNNING"), "message": None}
 
     world.overrides["hmc_power_on_lpar"] = hangs
 
@@ -795,15 +799,19 @@ def test_a_missing_profile_link_stops_before_assigning_and_deletes(schemas):
 def test_the_dedicated_arm_create_still_sends_no_resources(schemas):
     """The shared create sends `resources` only when a caller supplies them."""
     world, state = World(), _state(schemas)
-    fixture = pcie._DedicatedFixture(
-        config=pcie._DedicatedConfig(_SYSTEM, "live-", "default_profile", _DRC),
+    fixture = dedicated_pcie._DedicatedFixture(
+        config=dedicated_pcie._DedicatedConfig(
+            _SYSTEM, "live-", "default_profile", _DRC
+        ),
         run_marker="pcie-00000000",
         lpar_name="live-pcie-00000000",
         probe_lpar_name="live-pcie-00000000-createtime",
         drc_index=_DRC,
     )
 
-    assert asyncio.run(pcie.create_fixture_partition(FakeClient(world), state, fixture))
+    assert asyncio.run(
+        dedicated_pcie.create_fixture_partition(FakeClient(world), state, fixture)
+    )
     (create,) = world.calls_to("hmc_create_lpar")
     assert "resources" not in create
 

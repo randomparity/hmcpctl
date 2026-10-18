@@ -1,6 +1,6 @@
 """Tests for client_parse's error-tagging wrappers.
 
-The two helpers under test exist specifically so a ParseError surfaces as an
+The helpers under test exist specifically so a ParseError surfaces as an
 HMCError naming the HMC call that returned the malformed XML (the same
 behavior covered end-to-end in tests/unit/test_client.py for the feed and PCM
 preferences paths); these unit tests pin the tagging contract directly.
@@ -13,7 +13,7 @@ from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
 from hmcpctl.client.client_parse import (
-    _find_all_text,
+    _discovery_names,
     _find_text,
     _metric_links,
     _parse_feed,
@@ -49,9 +49,15 @@ def test_find_text_entity_error_tags_context():
     assert isinstance(exc_info.value.__cause__, DefusedXmlException)
 
 
-def test_find_all_text_parse_error_tags_context():
+def test_discovery_names_parse_error_tags_context():
     with pytest.raises(HMCError) as exc_info:
-        _find_all_text("<feed><entry>", "test context", "Nickname")
+        _discovery_names(
+            "<feed><entry>",
+            "test context",
+            "Nickname",
+            "QuickProperty_Collection",
+            "QuickProperty",
+        )
     assert "Failed to parse test context response" in str(exc_info.value)
     assert isinstance(exc_info.value.__cause__, DET.ParseError)
 

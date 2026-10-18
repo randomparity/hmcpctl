@@ -29,7 +29,7 @@ class LparSummary:
     current_proc_units: object | None
     desired_proc_units: object | None
     desired_vcpus: object | None
-    dedicated_procs: object | None
+    has_dedicated_processors: object | None
     os_version: object | None
     os_type: object | None
     client_network_adapter_count: int
@@ -61,35 +61,51 @@ class SystemSummary:
     warnings: tuple[str, ...] = ()
 
 
-def _container(resource: dict[str, Any], name: str) -> dict[str, Any]:
+def optional_int(value: object) -> int | None:
+    text = optional_text(value)
+    try:
+        return int(text) if text is not None else None
+    except ValueError:
+        return None
+
+
+def optional_float(value: object) -> float | None:
+    text = optional_text(value)
+    try:
+        return float(text) if text is not None else None
+    except ValueError:
+        return None
+
+
+def resource_container(resource: dict[str, Any], name: str) -> dict[str, Any]:
     value = resource.get(name)
     return value if isinstance(value, dict) else {}
 
 
-def _processor_figures(resource: dict[str, Any]) -> dict[str, Any]:
+def processor_figures(resource: dict[str, Any]) -> dict[str, Any]:
     """Read processors from the container that ``HasDedicatedProcessors`` selects.
 
     V10R3 nests them in ``PartitionProcessorConfiguration``. A partition whose mode is
     not ``true`` or ``false`` reads as shared, and a missing container yields ``None``.
     """
-    config = _container(resource, "PartitionProcessorConfiguration")
+    config = resource_container(resource, "PartitionProcessorConfiguration")
     mode = config.get("HasDedicatedProcessors")
     if mode == "true":
-        desired = _container(config, "DedicatedProcessorConfiguration")
-        current = _container(config, "CurrentDedicatedProcessorConfiguration")
+        desired = resource_container(config, "DedicatedProcessorConfiguration")
+        current = resource_container(config, "CurrentDedicatedProcessorConfiguration")
         return {
             "current_proc_units": current.get("CurrentProcessors"),
             "desired_proc_units": desired.get("DesiredProcessors"),
             "desired_vcpus": None,
-            "dedicated_procs": True,
+            "has_dedicated_processors": True,
         }
-    desired = _container(config, "SharedProcessorConfiguration")
-    current = _container(config, "CurrentSharedProcessorConfiguration")
+    desired = resource_container(config, "SharedProcessorConfiguration")
+    current = resource_container(config, "CurrentSharedProcessorConfiguration")
     return {
         "current_proc_units": current.get("CurrentProcessingUnits"),
         "desired_proc_units": desired.get("DesiredProcessingUnits"),
         "desired_vcpus": desired.get("DesiredVirtualProcessors"),
-        "dedicated_procs": False if mode == "false" else None,
+        "has_dedicated_processors": False if mode == "false" else None,
     }
 
 
@@ -98,7 +114,7 @@ def _lpar_summary(
     adapters: list[dict[str, Any]],
 ) -> LparSummary:
     res = lpar.get("Resource") or {}
-    memory = _container(res, "PartitionMemoryConfiguration")
+    memory = resource_container(res, "PartitionMemoryConfiguration")
     return LparSummary(
         uuid=lpar.get("UUID"),
         name=res.get("PartitionName"),
@@ -108,7 +124,7 @@ def _lpar_summary(
         partition_id=res.get("PartitionID"),
         current_memory_mib=memory.get("CurrentMemory"),
         desired_memory_mib=memory.get("DesiredMemory"),
-        **_processor_figures(res),
+        **processor_figures(res),
         os_version=res.get("OperatingSystemVersion"),
         os_type=leaf_text(res.get("OperatingSystemType")),
         client_network_adapter_count=len(adapters),
@@ -123,9 +139,7 @@ def _lpar_summary(
 
 
 async def fetch_lpar_summary(
-    hmc: HMCClient,
-    system_name_or_uuid: str | None,
-    lpar_name_or_uuid: str,
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str | None = None
 ) -> LparSummary:
     """Compose partition details and adapter inventory into one summary.
 
@@ -196,7 +210,7 @@ async def _fetch_system_summary_data(
     return system, lpars_task.result(), vios_task.result()
 
 
-def _text_or_none(value: object) -> str | None:
+def optional_text(value: object) -> str | None:
     text = leaf_text(value)
     return text if isinstance(text, str) else None
 
@@ -222,7 +236,7 @@ def _system_summary(
         name=res.get("SystemName"),
         state=res.get("State"),
         mtms=render_mtms(res),
-        firmware_version=_text_or_none(res.get("SystemFirmware")),
+        firmware_version=optional_text(res.get("SystemFirmware")),
         total_memory_mib=capacity.total_memory_mib,
         free_memory_mib=capacity.free_memory_mib,
         total_proc_units=capacity.total_proc_units,

@@ -133,7 +133,10 @@ async def test_dlpar_memory_refuses_desired_memory_above_configurable_before_the
 
     with pytest.raises(ValueError, match=r"8388608 MiB.*131072 MiB"):
         await set_lpar_memory(
-            hmc, SYSTEM_UUID, LPAR_UUID, LparResources(desired_memory=OVERSIZE_MIB)
+            hmc,
+            LPAR_UUID,
+            LparResources(desired_memory=OVERSIZE_MIB),
+            system_name_or_uuid=SYSTEM_UUID,
         )
 
     hmc.update_logical_partition.assert_not_awaited()

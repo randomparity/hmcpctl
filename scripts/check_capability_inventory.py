@@ -1267,7 +1267,7 @@ def _module_observation_sites(module: ModuleType | None) -> set[tuple[str, int, 
 
 def discover_observation_sites() -> dict[tuple[str, int], str]:
     """Associate result-row identities with scenarios, independently of dispatch IDs."""
-    from live_test_runner import _SCENARIO_MODULES
+    from live_test.runner import _SCENARIO_MODULES
 
     sites: dict[tuple[str, int], str] = {}
     for module in _SCENARIO_MODULES:
@@ -1282,7 +1282,7 @@ def discover_observation_sites() -> dict[tuple[str, int], str]:
 
 
 def _release_routes() -> set[tuple[str, str, str]]:
-    from live_test_runner import RELEASE_SCENARIO_SUBTASKS, SUBTASK_GROUPS, SUBTASKS
+    from live_test.runner import RELEASE_SCENARIO_SUBTASKS, SUBTASK_GROUPS, SUBTASKS
 
     routes: set[tuple[str, str, str]] = set()
     seen: set[str] = set()

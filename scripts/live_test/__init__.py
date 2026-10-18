@@ -1,1 +1,1 @@
-"""Scenario families used by :mod:`live_test_runner`."""
+"""Scenario families used by :mod:`live_test.runner`."""

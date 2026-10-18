@@ -298,7 +298,7 @@ async def prevalidate_lpar_pcie_assignments(
     """Validate the complete collection without reserving or mutating resources."""
     requested_capacity, vios_identities = _analyze_assignment_requests(assignments)
     if assignments.dedicated or requested_capacity:
-        system_name, _ = await resolve_ssh_names(hmc.config, system_name_or_uuid, None)
+        system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
     if assignments.dedicated:
         await require_dedicated_pcie_environment(hmc.config, system_name)
     if requested_capacity:
@@ -311,10 +311,10 @@ async def prevalidate_lpar_pcie_assignments(
 
 async def apply_lpar_pcie_assignments(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     assignments: LparPcieAssignments,
     *,
+    system_name_or_uuid: str,
     dry_run: bool = False,
     ownership_override: bool = False,
 ) -> AssignmentResult:
@@ -352,11 +352,11 @@ async def apply_validated_lpar_pcie_assignments(
             f"dedicated[{index}]",
             lambda item=item: assign_dedicated_pcie_slot(
                 hmc,
-                system,
                 lpar,
                 item.profile_name,
                 item.drc_index,
                 ownership_override=ownership_override,
+                system_name_or_uuid=system,
             ),
         )
         for index, item in enumerate(assignments.dedicated)
@@ -366,7 +366,6 @@ async def apply_validated_lpar_pcie_assignments(
             f"sriov[{index}]",
             lambda item=item: assign_sriov_logical_port(
                 hmc,
-                system,
                 lpar,
                 InventorySelector(
                     item.adapter_id, item.physical_port_id, item.logical_port_id
@@ -374,6 +373,7 @@ async def apply_validated_lpar_pcie_assignments(
                 item.capacity_percent,
                 profile_name=item.profile_name,
                 ownership_override=ownership_override,
+                system_name_or_uuid=system,
             ),
         )
         for index, item in enumerate(assignments.sriov)
@@ -383,11 +383,11 @@ async def apply_validated_lpar_pcie_assignments(
             f"vnic[{index}]",
             lambda item=item: add_vnic(
                 hmc,
-                system,
                 lpar,
                 item.backing,
                 item.port_vlan_id,
                 ownership_override=ownership_override,
+                system_name_or_uuid=system,
             ),
         )
         for index, item in enumerate(assignments.vnics)

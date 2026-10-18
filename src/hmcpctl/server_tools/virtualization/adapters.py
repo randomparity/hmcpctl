@@ -43,7 +43,10 @@ def hmc_list_adapters(
     """
     return run_limited_collection(
         lambda hmc: list_adapters(
-            hmc, system_name_or_uuid, lpar_name_or_uuid, adapter_type
+            hmc,
+            lpar_name_or_uuid,
+            adapter_type,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         limit,
         profile=profile,
@@ -86,7 +89,6 @@ def hmc_add_network_adapter(
     async def operation(hmc: HMCClient):
         result = await add_network_adapter(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             port_vlan_id,
             slot_number=slot_number,
@@ -94,6 +96,7 @@ def hmc_add_network_adapter(
             tagged=tagged,
             mac_address=mac_address,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
         return resource_with_change_location(result.resource, result.change_location)
 
@@ -137,12 +140,12 @@ def hmc_add_vscsi_adapter(
     async def operation(hmc: HMCClient):
         result = await add_vscsi_adapter(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             vios_partition_id,
             vios_slot,
             slot_number=slot_number,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
         return resource_with_change_location(result.resource, result.change_location)
 
@@ -186,12 +189,12 @@ def hmc_add_vfc_adapter(
     async def operation(hmc: HMCClient):
         result = await add_vfc_adapter(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             vios_partition_id,
             vios_slot,
             slot_number=slot_number,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
         return resource_with_change_location(result.resource, result.change_location)
 
@@ -225,11 +228,11 @@ def hmc_delete_adapter(
     async def operation(hmc: HMCClient):
         location = await delete_adapter(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             adapter_type,
             adapter_uuid,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         )
         return (
             f"Deleted {adapter_type} {adapter_uuid} from {lpar_name_or_uuid}. "

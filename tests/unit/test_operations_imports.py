@@ -30,3 +30,45 @@ def test_sibling_modules_import_in_either_order(
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize(
+    "module", ["hmcpctl.operations.logical.store", "hmcpctl.operations.logical.engine"]
+)
+def test_logical_operations_import_without_application_dependencies(module):
+    script = f"""
+import importlib
+import importlib.abc
+import sys
+
+class NoApplicationPackages(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {{'fastmcp', 'mcp', 'typer', 'rich'}}:
+            raise ModuleNotFoundError(fullname)
+
+sys.meta_path.insert(0, NoApplicationPackages())
+importlib.import_module({module!r})
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_power_provider_can_be_reloaded_without_initializing_the_engine():
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib; from hmcpctl.operations.lpar import power; importlib.reload(power)",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

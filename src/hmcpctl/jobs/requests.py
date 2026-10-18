@@ -76,7 +76,7 @@ def validate_power_on_activation(
     """Validate the PowerOn activation vocabularies for direct callers.
 
     Exposed the way ``validate_logical_unit_types`` is, because the builder is
-    not the only place that must refuse: ``power_lpar`` returns early when the
+    not the only place that must refuse: ``submit_power_on_lpar`` returns early when the
     partition is already running, reaching an activation-consuming exit without
     ever building a document. Both sites call this, so the permitted sets and
     the wording live in one place.
@@ -131,7 +131,7 @@ def validate_power_off_operation(
 ) -> None:
     """Validate the PowerOff shutdown vocabulary and its gated combinations.
 
-    Exposed the way ``validate_power_on_activation`` is: ``power_lpar`` reaches the
+    Exposed the way ``validate_power_on_activation`` is: ``power_off_lpar`` reaches the
     ADR 0092 ownership leg — which can write an audited override record — before it
     reaches a builder, so it calls this first. ``dumprestart`` crashes the partition
     and takes a platform dump, and no layer below the CLI asks for confirmation, so

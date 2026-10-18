@@ -1,5 +1,6 @@
 """Tests for the ISO upload operation through the HMC web File API (ADR 0177)."""
 
+import asyncio
 import functools
 import hashlib
 import socket
@@ -18,6 +19,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import parse_iso_url_allowlist
 from hmcpctl.errors import HMCError, HMCTransportError
 from hmcpctl.operations.storage.resources import (
+    DEFAULT_CHUNK_SIZE,
     UPLOAD_CHUNK_SIZE,
     VISIBILITY_POLLS,
     _aiter_file_chunks,
@@ -140,11 +142,11 @@ async def test_upload_iso_success(mock_hmc, stage_download, selector):
             hmc, VIOS_UUID, selector, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
         )
 
-    assert result["status"] == "uploaded"
-    assert result["media_name"] == MEDIA_NAME
-    assert result["media_size_bytes"] == len(TEST_CONTENT)
-    assert result["source_sha256"] == TEST_SHA256
-    assert result["media"] == VISIBLE
+    assert result.raw["status"] == "uploaded"
+    assert result.raw["media_name"] == MEDIA_NAME
+    assert result.raw["media_size_bytes"] == len(TEST_CONTENT)
+    assert result.raw["source_sha256"] == TEST_SHA256
+    assert result.raw["media"] == VISIBLE
     web_file_requests = [
         (call.request.method, call.request.url.path)
         for call in mock_hmc.calls
@@ -156,7 +158,7 @@ async def test_upload_iso_success(mock_hmc, stage_download, selector):
         ("DELETE", DELETE_PATH),
     ]
     assert routes.contents.calls.last.request.content == TEST_CONTENT
-    assert set(result) == {
+    assert set(result.raw) == {
         "status",
         "media_name",
         "media_size_bytes",
@@ -192,7 +194,7 @@ async def test_upload_iso_accepts_both_supported_schemes(
             hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, url, system_name_or_uuid=None
         )
 
-    assert result["status"] == "uploaded"
+    assert result.raw["status"] == "uploaded"
     download.assert_awaited_once_with(url)
 
 
@@ -543,7 +545,7 @@ async def test_upload_iso_waits_for_the_media_to_appear(stage_download, sleeps):
         hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
     )
 
-    assert result["media"] == VISIBLE
+    assert result.raw["media"] == VISIBLE
     assert sleeps.await_count == 2
     hmc._web_file_delete.assert_awaited_once_with(FILE_UUID)
 
@@ -708,7 +710,7 @@ async def test_upload_iso_streams_the_staged_file_in_bounded_chunks(
     assert max(len(chunk) for chunk in chunks) <= UPLOAD_CHUNK_SIZE
     assert b"".join(chunks) == payload
     assert captured["length"] == len(payload)
-    assert result["source_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert result.raw["source_sha256"] == hashlib.sha256(payload).hexdigest()
     staged, _, _ = download.return_value
     assert not staged.exists()
 
@@ -757,8 +759,8 @@ async def test_upload_iso_streams_a_zero_byte_file_as_an_empty_body(
     assert request.content == b""
     assert request.headers["Content-Length"] == "0"
     assert "Transfer-Encoding" not in request.headers
-    assert result["media_size_bytes"] == 0
-    assert result["source_sha256"] == hashlib.sha256(b"").hexdigest()
+    assert result.raw["media_size_bytes"] == 0
+    assert result.raw["source_sha256"] == hashlib.sha256(b"").hexdigest()
     staged, _, _ = download.return_value
     assert not staged.exists()
 
@@ -795,9 +797,9 @@ async def test_upload_iso_large_file(mock_hmc, stage_download):
             hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
         )
 
-    assert result["status"] == "uploaded"
-    assert result["media_size_bytes"] == len(large_content)
-    assert result["source_sha256"] == large_sha256
+    assert result.raw["status"] == "uploaded"
+    assert result.raw["media_size_bytes"] == len(large_content)
+    assert result.raw["source_sha256"] == large_sha256
 
 
 @pytest.mark.asyncio
@@ -1189,7 +1191,7 @@ async def test_upload_iso_matches_the_default_port_of_a_portless_url(
             hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
         )
 
-    assert result["status"] == "uploaded"
+    assert result.raw["status"] == "uploaded"
     download.assert_awaited_once_with(ISO_URL)
 
 
@@ -1220,6 +1222,179 @@ def _install_iso_transport(monkeypatch, handler):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "buffer_size"),
+    [
+        (404, None),
+        (500, None),
+        ("connect", None),
+        ("read", None),
+        ("stream", None),
+        ("stream", 128 * 1024),
+    ],
+)
+async def test_upload_iso_normalizes_download_http_errors(
+    monkeypatch, tmp_path, failure, buffer_size
+):
+    import os
+    import tempfile
+
+    if buffer_size is not None:
+        monkeypatch.setattr(
+            os, "fdopen", functools.partial(os.fdopen, buffering=buffer_size)
+        )
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    url = f"{ISO_URL}?token=private-source-token"
+    detail = f"private response body from {url}"
+    cause = None
+    response = None
+    partial_files = []
+    partial_contents = []
+    original_unlink = Path.unlink
+
+    def observe_partial_unlink(path, *args, **kwargs):
+        if path in partial_files:
+            partial_contents.append(path.read_bytes())
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", observe_partial_unlink)
+
+    class BrokenDownload(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b"x" * DEFAULT_CHUNK_SIZE
+            partial_files.extend(tmp_path.glob("hmc_upload_*.iso"))
+            raise cause
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = BrokenDownload()
+
+    def respond(request):
+        nonlocal cause, response
+        if isinstance(failure, int):
+            response = httpx.Response(failure, text=detail)
+            return response
+        error_type = {
+            "connect": httpx.ConnectTimeout,
+            "read": httpx.ReadTimeout,
+            "stream": httpx.ReadError,
+        }[failure]
+        cause = error_type(detail, request=request)
+        if failure == "stream":
+            return httpx.Response(200, stream=stream)
+        raise cause
+
+    hmc = _web_file_client()
+    requests = _install_iso_transport(monkeypatch, respond)
+    with pytest.raises(HMCError, match="ISO download") as caught:
+        await upload_iso(hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, url)
+
+    if isinstance(failure, int):
+        assert isinstance(caught.value.__cause__, httpx.HTTPStatusError)
+        assert caught.value.__cause__.response is response
+    else:
+        assert caught.value.__cause__ is cause
+    assert caught.value.status_code is None
+    message = str(caught.value)
+    assert len(message) < 200
+    for private in (url, ISO_HOST, "private-source-token", detail):
+        assert private not in message
+    assert [str(request.url) for request in requests] == [url]
+    hmc._web_file_create.assert_not_awaited()
+    hmc._web_file_upload.assert_not_awaited()
+    hmc._web_file_delete.assert_not_awaited()
+    if failure == "stream":
+        assert partial_contents == [b"x" * DEFAULT_CHUNK_SIZE]
+        assert stream.closed
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_download_cancellation_removes_partial_iso(monkeypatch, tmp_path):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    waiting = asyncio.Event()
+
+    class InterruptedDownload(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b"partial ISO"
+            waiting.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = InterruptedDownload()
+    _install_iso_transport(
+        monkeypatch, lambda request: httpx.Response(200, stream=stream)
+    )
+    task = asyncio.create_task(_download_iso_from_url(ISO_URL))
+    try:
+        await asyncio.wait_for(waiting.wait(), timeout=2)
+        assert len(list(tmp_path.glob("hmc_upload_*.iso"))) == 1
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert stream.closed
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["cancel", "close_error"])
+async def test_download_cleanup_covers_client_close(monkeypatch, tmp_path, failure):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    closing = asyncio.Event()
+    completed = []
+
+    class ClosingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return httpx.Response(200, content=b"complete ISO")
+
+        async def aclose(self):
+            completed.extend(p.read_bytes() for p in tmp_path.glob("hmc_upload_*.iso"))
+            closing.set()
+            if failure == "close_error":
+                raise RuntimeError("transport close failed")
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "hmcpctl.operations.storage.resources.httpx.AsyncClient",
+        functools.partial(httpx.AsyncClient, transport=ClosingTransport()),
+    )
+    task = asyncio.create_task(_download_iso_from_url(ISO_URL))
+    try:
+        await asyncio.wait_for(closing.wait(), timeout=2)
+        assert completed == [b"complete ISO"]
+        if failure == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            with pytest.raises(RuntimeError, match="transport close failed"):
+                await task
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
+@pytest.mark.asyncio
 async def test_upload_iso_uploads_from_an_allowlisted_url_end_to_end(
     mock_hmc, monkeypatch
 ):
@@ -1242,9 +1417,9 @@ async def test_upload_iso_uploads_from_an_allowlisted_url_end_to_end(
             hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
         )
 
-    assert result["status"] == "uploaded"
-    assert result["source_sha256"] == TEST_SHA256
-    assert result["media_size_bytes"] == len(TEST_CONTENT)
+    assert result.raw["status"] == "uploaded"
+    assert result.raw["source_sha256"] == TEST_SHA256
+    assert result.raw["media_size_bytes"] == len(TEST_CONTENT)
     assert [str(request.url) for request in requests] == [ISO_URL]
     # The bytes that reached the HMC are the bytes the returned digest describes.
     # Streaming makes that a claim worth pinning: a stream is consumed once, so a
@@ -1252,7 +1427,7 @@ async def test_upload_iso_uploads_from_an_allowlisted_url_end_to_end(
     # still described the whole download (#308).
     uploaded_body = uploaded.calls.last.request.content
     assert uploaded_body == TEST_CONTENT
-    assert hashlib.sha256(uploaded_body).hexdigest() == result["source_sha256"]
+    assert hashlib.sha256(uploaded_body).hexdigest() == result.raw["source_sha256"]
     assert uploaded.calls.last.request.headers["Content-Length"] == str(
         len(uploaded_body)
     )

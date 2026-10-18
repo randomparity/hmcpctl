@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import (
     _authorize_system_lpar_profile_restore,
@@ -25,7 +27,37 @@ from ...ssh.profiles import (
     sync_lpar_profile,
     validate_profile_sync_mode,
 )
-from .core import ProcessorCompatibilityMode
+
+ProcessorCompatibilityMode = Literal[
+    "default",
+    "POWER5",
+    "POWER6",
+    "POWER6+",
+    "POWER7",
+    "POWER8",
+    "POWER9_Base",
+    "POWER9_base",
+    "POWER9",
+    "POWER10",
+    "POWER11",
+]
+
+
+PROCESSOR_COMPATIBILITY_MODES: frozenset[ProcessorCompatibilityMode] = frozenset(
+    {
+        "default",
+        "POWER5",
+        "POWER6",
+        "POWER6+",
+        "POWER7",
+        "POWER8",
+        "POWER9_Base",
+        "POWER9_base",
+        "POWER9",
+        "POWER10",
+        "POWER11",
+    }
+)
 
 
 async def restore_system_lpar_profiles(
@@ -47,9 +79,9 @@ async def restore_system_lpar_profiles(
 
 async def synchronize_lpar_profile(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
     mode: ProfileSyncMode = "enable",
 ) -> str:
@@ -57,19 +89,19 @@ async def synchronize_lpar_profile(
     validate_profile_sync_mode(mode)
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     return await sync_lpar_profile(hmc.config, system_name, lpar_name, mode)
 
 
 async def configure_lpar_msp(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     enabled: bool,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> str:
     """Authorize a VIOS and set its migratable-service-partition flag (ADR 0092 §1)."""
@@ -125,10 +157,10 @@ async def _resolve_and_authorize_vios_names(
 
 async def configure_lpar_processor_compatibility(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     mode: ProcessorCompatibilityMode,
     *,
+    system_name_or_uuid: str,
     profile_name: str | None = None,
     ownership_override: bool = False,
 ) -> str:
@@ -139,9 +171,9 @@ async def configure_lpar_processor_compatibility(
     """
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     profile = await set_lpar_proc_compat(
         hmc.config, system_name, lpar_name, mode, profile_name

@@ -220,11 +220,11 @@ def require_drc_index(value: str) -> str:
 
 async def assign_dedicated_pcie_slot(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str,
     drc_index: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> None:
     """Add a dedicated slot to an LPAR profile and verify it by exact readback.
@@ -249,11 +249,11 @@ async def assign_dedicated_pcie_slot(
 
 async def unassign_dedicated_pcie_slot(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str,
     drc_index: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> None:
     """Remove a dedicated slot from an LPAR profile and verify it by exact readback.
@@ -285,9 +285,9 @@ async def _authorize_pcie_profile_request(
     require_drc_index(drc_index)
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     config = hmc.config
     await require_dedicated_pcie_environment(config, system_name)
@@ -509,8 +509,8 @@ def _holder_advice(holders: list[str], holder_error: HMCCLIError | None) -> str:
     )
 
 
-async def _system_name(config: HMCConfig, system: str) -> str:
-    system_name, _ = await resolve_ssh_names(config, system, None)
+async def _system_name(hmc: HMCClient, system: str) -> str:
+    system_name, _ = await resolve_ssh_names(hmc, system, None)
     return system_name
 
 
@@ -520,7 +520,7 @@ async def list_dedicated_slots(
 ) -> InventoryResult[DedicatedSlot]:
     """List dedicated PCIe slots with stable identity and explicit unknowns."""
     config = hmc.config
-    system_name = await _system_name(config, system_name_or_uuid)
+    system_name = await _system_name(hmc, system_name_or_uuid)
     rows = await list_dedicated_pcie_slot_rows(config, system_name)
     items: list[DedicatedSlot] = []
     for row in rows:
@@ -813,9 +813,9 @@ async def _preflight_sriov_assignment(
     capacity = validate_capacity_percent(capacity_percent)
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     config = hmc.config
     require_command_safe_text(profile_name, "profile_name")
@@ -937,11 +937,11 @@ def _raise_sriov_partial_error(
 
 async def assign_sriov_logical_port(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     selector: InventorySelector,
     capacity_percent: Decimal,
     *,
+    system_name_or_uuid: str,
     profile_name: str,
     ownership_override: bool = False,
 ) -> SriovLogicalPortChangeResult:
@@ -1040,10 +1040,10 @@ async def assign_sriov_logical_port(
 
 async def unassign_sriov_logical_port(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     selector: InventorySelector,
     *,
+    system_name_or_uuid: str,
     profile_name: str,
     ownership_override: bool = False,
 ) -> SriovLogicalPortChangeResult:
@@ -1060,9 +1060,9 @@ async def unassign_sriov_logical_port(
     require_command_safe_text(profile_name, "profile_name")
     system_name, lpar_name = await resolve_and_authorize_lpar_names(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     config = hmc.config
     await require_admitted_environment(config, system_name)
@@ -1145,7 +1145,7 @@ async def set_sriov_adapter_mode(
     config = hmc.config
     validate_sriov_mode(mode)
     validate_adapter_id(adapter_id)
-    system_name = await _system_name(config, system_name_or_uuid)
+    system_name = await _system_name(hmc, system_name_or_uuid)
     # Only reads: the check confirms the current mode and never changes it.
     await require_sriov_read_environment(config, system_name, "adapter")
     rows = [
@@ -1167,7 +1167,7 @@ async def list_sriov_adapters(
 ) -> InventoryResult[SriovAdapter]:
     """Return the evidence-bounded SR-IOV adapter capability state."""
     config = hmc.config
-    system_name = await _system_name(config, system_name_or_uuid)
+    system_name = await _system_name(hmc, system_name_or_uuid)
     try:
         await require_sriov_read_environment(config, system_name, "adapter")
     except SriovLogicalPortCapabilityError as caught:
@@ -1207,7 +1207,7 @@ async def list_sriov_physical_ports(
 ) -> InventoryResult[SriovPhysicalPort]:
     """Return the evidence-bounded SR-IOV physical-port capability state."""
     config = hmc.config
-    system_name = await _system_name(config, system_name_or_uuid)
+    system_name = await _system_name(hmc, system_name_or_uuid)
     selector = InventorySelector(adapter_id, physical_port_id)
     try:
         await require_sriov_read_environment(config, system_name, "physical_port")
@@ -1252,7 +1252,7 @@ async def list_sriov_logical_ports(
 ) -> InventoryResult[SriovLogicalPort]:
     """Return the evidence-bounded SR-IOV logical-port capability state."""
     config = hmc.config
-    system_name = await _system_name(config, system_name_or_uuid)
+    system_name = await _system_name(hmc, system_name_or_uuid)
     selector = InventorySelector(adapter_id, physical_port_id, logical_port_id)
     try:
         await require_sriov_read_environment(config, system_name, "logical_port")

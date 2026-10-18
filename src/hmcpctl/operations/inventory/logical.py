@@ -17,12 +17,17 @@ from typing import Any, Literal
 
 from ...errors import HMCError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
-from ...xmlutil import leaf_text
 from ..lpar.ownership import lpar_ownership_entry
 from ..partition_state import PartitionState
 from ..systems.fleet import sparse_system_entry, system_entry, unreadable_system
 from .capacity import system_capacity
-from .composite import _container, _processor_figures
+from .composite import (
+    optional_float,
+    optional_int,
+    optional_text,
+    processor_figures,
+    resource_container,
+)
 
 SYSTEMS_TOOL = "hmc_list_systems"
 PARTITIONS_TOOL = "hmc_list_lpars"
@@ -100,7 +105,7 @@ class InventoryPartition:
     rmc_state: str | None
     current_memory_mib: int | None
     current_proc_units: float | None
-    dedicated_procs: bool | None
+    has_dedicated_processors: bool | None
     owned: bool | None
     owner: str | None
 
@@ -184,27 +189,6 @@ def check_inputs(
     if owner is not None and not 1 <= len(owner) <= MAX_OWNER:
         raise ValueError(f"owner: must be 1 to {MAX_OWNER} characters")
     return decode_cursor(cursor) if cursor is not None else None
-
-
-def _text(value: object) -> str | None:
-    text = leaf_text(value)
-    return text if isinstance(text, str) else None
-
-
-def _int(value: object) -> int | None:
-    text = _text(value)
-    try:
-        return int(text) if text is not None else None
-    except ValueError:
-        return None
-
-
-def _float(value: object) -> float | None:
-    text = _text(value)
-    try:
-        return float(text) if text is not None else None
-    except ValueError:
-        return None
 
 
 async def _enumerate(hmc: Any, admit: Admit) -> tuple[SourceStatus, list[_Candidate]]:
@@ -291,22 +275,22 @@ def _partition(
     entry: dict[str, Any], system_id: str, ownership_ok: bool
 ) -> InventoryPartition:
     resource = entry.get("Resource") or {}
-    memory = _container(resource, "PartitionMemoryConfiguration")
-    processors = _processor_figures(resource)
+    memory = resource_container(resource, "PartitionMemoryConfiguration")
+    processors = processor_figures(resource)
     ownership = lpar_ownership_entry(entry) if ownership_ok else {}
     uuid = str(entry["UUID"])
     return InventoryPartition(
         id=f"{system_id}/{uuid}",
         system_id=system_id,
         uuid=uuid,
-        name=_text(resource.get("PartitionName")),
-        partition_id=_int(resource.get("PartitionID")),
-        partition_type=_text(resource.get("PartitionType")),
-        state=_text(resource.get("PartitionState")),
-        rmc_state=_text(resource.get("ResourceMonitoringControlState")),
-        current_memory_mib=_int(memory.get("CurrentMemory")),
-        current_proc_units=_float(processors["current_proc_units"]),
-        dedicated_procs=processors["dedicated_procs"],
+        name=optional_text(resource.get("PartitionName")),
+        partition_id=optional_int(resource.get("PartitionID")),
+        partition_type=optional_text(resource.get("PartitionType")),
+        state=optional_text(resource.get("PartitionState")),
+        rmc_state=optional_text(resource.get("ResourceMonitoringControlState")),
+        current_memory_mib=optional_int(memory.get("CurrentMemory")),
+        current_proc_units=optional_float(processors["current_proc_units"]),
+        has_dedicated_processors=processors["has_dedicated_processors"],
         owned=ownership.get("owned"),
         owner=ownership.get("owner"),
     )
@@ -388,8 +372,8 @@ class _Reader:
             id=system_id,
             selector=candidate.selector,
             uuid=candidate.uuid,
-            name=_text(resource.get("SystemName")),
-            state=_text(resource.get("State")),
+            name=optional_text(resource.get("SystemName")),
+            state=optional_text(resource.get("State")),
             total_memory_mib=figures.total_memory_mib if figures else None,
             free_memory_mib=figures.free_memory_mib if figures else None,
             total_proc_units=figures.total_proc_units if figures else None,

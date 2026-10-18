@@ -22,10 +22,10 @@ from ...operations.affinity.ssh import (
     set_minimum_affinity_policy,
 )
 from ...operations.lpar.configuration import (
+    ProcessorCompatibilityMode,
     configure_lpar_msp,
     configure_lpar_processor_compatibility,
 )
-from ...operations.lpar.core import ProcessorCompatibilityMode
 from ...ssh.affinity import (
     MemoptLparSelector,
     MemoptResourceGroupSelector,
@@ -58,7 +58,7 @@ def hmc_get_minimum_affinity_policy(
 
     return with_client(
         lambda hmc: get_minimum_affinity_policy(
-            hmc, system_name_or_uuid, lpar_name_or_uuid
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         ),
         profile=profile,
     )
@@ -88,10 +88,10 @@ def hmc_set_minimum_affinity_policy(
     return with_client(
         lambda hmc: set_minimum_affinity_policy(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             policy,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -110,7 +110,9 @@ def hmc_get_lpar_memopt_score(
     """
 
     return with_client(
-        lambda hmc: get_lpar_memopt_score(hmc, system_name_or_uuid, lpar_name_or_uuid),
+        lambda hmc: get_lpar_memopt_score(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
         profile=profile,
     )
 
@@ -321,10 +323,10 @@ def hmc_set_lpar_description(
     return with_client(
         lambda hmc: set_lpar_ownership_description(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             description,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -375,10 +377,10 @@ def hmc_set_lpar_msp(
     return with_client(
         lambda hmc: configure_lpar_msp(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             enabled,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -444,11 +446,11 @@ def hmc_set_lpar_proc_compat(
     return with_client(
         lambda hmc: configure_lpar_processor_compatibility(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             mode,
             profile_name=profile_name,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )

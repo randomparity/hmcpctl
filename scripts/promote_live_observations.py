@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import check_capability_inventory as inventory
-import live_test_runner as runner
-from live_test_runner import SUBTASK_GROUPS
+from live_test import runner
+from live_test.runner import SUBTASK_GROUPS
 
 ARTIFACTS = frozenset(
     {

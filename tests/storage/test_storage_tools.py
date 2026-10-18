@@ -20,7 +20,7 @@ from conftest import COMPLETED_JOB_ENTRY, JOB_ENTRY, JOB_ID, mock_change_locatio
 
 from hmcpctl.client.client_contracts import ADAPTER_TYPES
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.storage.resources import StorageMapResult
+from hmcpctl.operations.storage.resources import StorageMutationResult
 from hmcpctl.server_tools.storage.resources import (
     hmc_create_logical_unit,
     hmc_create_media_repository,
@@ -48,7 +48,7 @@ from hmcpctl.server_tools.virtualization.adapters import (
 
 @pytest.fixture(autouse=True)
 def _authorize_lpar_mutations(monkeypatch):
-    async def authorize(_hmc, _system, lpar, **_kwargs):
+    async def authorize(_hmc, lpar, *, system_name_or_uuid=None, **_kwargs):
         return lpar
 
     monkeypatch.setattr(
@@ -218,8 +218,8 @@ def test_detach_storage_mapping_posts_parent_vios(monkeypatch, mock_hmc):
 
     guard.assert_awaited_once_with(
         ANY,
-        None,
         LPAR_UUID,
+        system_name_or_uuid=None,
         ownership_override=False,
     )
     assert posted.called
@@ -793,7 +793,18 @@ def test_mount_optical_media_keeps_the_mapping_keys_beside_its_location(
     _hmc_env(monkeypatch)
     location = ChangeLocation("Disabled", "current-configuration")
     mount = AsyncMock(
-        return_value=StorageMapResult(LPAR_UUID, {"UUID": "mapping-1"}, location)
+        return_value=StorageMutationResult.from_raw(
+            {
+                "lpar_uuid": LPAR_UUID,
+                "resource": {"UUID": "mapping-1"},
+                "change_location": {
+                    "current_profile_sync": location.current_profile_sync,
+                    "lives_in": location.lives_in,
+                },
+            },
+            lpar_uuid=LPAR_UUID,
+            change_location=location,
+        )
     )
     monkeypatch.setattr(
         "hmcpctl.server_tools.storage.resources.mount_optical_media", mount
@@ -818,7 +829,20 @@ def test_mount_optical_media_without_a_resource_still_reports_its_location(
     location = ChangeLocation(None, "unknown")
     monkeypatch.setattr(
         "hmcpctl.server_tools.storage.resources.mount_optical_media",
-        AsyncMock(return_value=StorageMapResult(LPAR_UUID, None, location)),
+        AsyncMock(
+            return_value=StorageMutationResult.from_raw(
+                {
+                    "lpar_uuid": LPAR_UUID,
+                    "resource": None,
+                    "change_location": {
+                        "current_profile_sync": location.current_profile_sync,
+                        "lives_in": location.lives_in,
+                    },
+                },
+                lpar_uuid=LPAR_UUID,
+                change_location=location,
+            )
+        ),
     )
 
     result = hmc_mount_optical_media(VIOS_UUID, "install.iso", LPAR_UUID)

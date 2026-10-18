@@ -198,9 +198,9 @@ def test_resolve_and_authorize_lpar_names_forwards_resolution_and_override(
         result = asyncio.run(
             resolve_and_authorize_lpar_names(
                 hmc,
-                "system-selector",
                 "lpar-selector",
                 ownership_override=ownership_override,
+                system_name_or_uuid="system-selector",
             )
         )
 
@@ -240,9 +240,9 @@ def test_required_system_rejects_partition_uuid_from_another_system(ownership_ov
         asyncio.run(
             resolve_and_authorize_lpar_names(
                 hmc,
-                "selected-system",
                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 ownership_override=ownership_override,
+                system_name_or_uuid="selected-system",
             )
         )
 
@@ -301,9 +301,9 @@ def test_optional_system_rejects_partition_uuid_from_another_system(ownership_ov
         asyncio.run(
             lpar_ownership.resolve_and_authorize_lpar_mutation(
                 hmc,
-                "selected-system",
                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 ownership_override=ownership_override,
+                system_name_or_uuid="selected-system",
             )
         )
 
@@ -956,10 +956,10 @@ def _run_set_ownership_description(description, *, ownership_override=False):
         result = asyncio.run(
             lpar_ownership.set_lpar_ownership_description(
                 hmc,
-                "sys1",
                 "lpar1",
                 description,
                 ownership_override=ownership_override,
+                system_name_or_uuid="sys1",
             )
         )
     return result, write
@@ -1002,7 +1002,7 @@ def test_set_lpar_ownership_description_rejects_foreign_owned():
     ):
         asyncio.run(
             lpar_ownership.set_lpar_ownership_description(
-                hmc, "sys1", "lpar1", "replacement"
+                hmc, "lpar1", "replacement", system_name_or_uuid="sys1"
             )
         )
     write.assert_not_awaited()
@@ -1023,7 +1023,7 @@ def test_set_lpar_ownership_description_writes_unowned_lpar():
     with patches[0], patches[1], patches[2], patches[3], patches[4]:
         result = asyncio.run(
             lpar_ownership.set_lpar_ownership_description(
-                hmc, "sys1", "lpar1", "first stamp"
+                hmc, "lpar1", "first stamp", system_name_or_uuid="sys1"
             )
         )
     assert result == "ok"
@@ -1053,10 +1053,10 @@ def test_set_lpar_ownership_description_override_bypasses_guard(caplog):
         result = asyncio.run(
             lpar_ownership.set_lpar_ownership_description(
                 hmc,
-                "sys1",
                 "lpar1",
                 "replacement",
                 ownership_override=True,
+                system_name_or_uuid="sys1",
             )
         )
     assert result == "ok"
@@ -1082,7 +1082,9 @@ def test_set_lpar_ownership_description_rejects_invalid_text(bad):
         pytest.raises(ValueError),
     ):
         asyncio.run(
-            lpar_ownership.set_lpar_ownership_description(hmc, "sys1", "lpar1", bad)
+            lpar_ownership.set_lpar_ownership_description(
+                hmc, "lpar1", bad, system_name_or_uuid="sys1"
+            )
         )
     resolve_system.assert_not_awaited()
     write.assert_not_awaited()
@@ -1104,7 +1106,9 @@ def test_set_lpar_ownership_description_restamps_failed_create_stamp():
     )
     with patches[0], patches[1], patches[2], patches[3], patches[4]:
         result = asyncio.run(
-            lpar_ownership.set_lpar_ownership_description(hmc, "sys1", "lpar1", token)
+            lpar_ownership.set_lpar_ownership_description(
+                hmc, "lpar1", token, system_name_or_uuid="sys1"
+            )
         )
     assert result == "ok"
     assert write.call_args.args[3] == token
@@ -1127,7 +1131,7 @@ def _set_description_over(current, description, *, agent_id="alice"):
     with patches[0], patches[1], patches[2], patches[3], patches[4]:
         asyncio.run(
             lpar_ownership.set_lpar_ownership_description(
-                hmc, "sys1", "lpar1", description
+                hmc, "lpar1", description, system_name_or_uuid="sys1"
             )
         )
     return read, write
@@ -1232,7 +1236,11 @@ def test_set_description_refuses_a_stamp_that_does_not_parse(bad, ownership_over
     ):
         asyncio.run(
             lpar_ownership.set_lpar_ownership_description(
-                hmc, "sys1", "lpar1", bad, ownership_override=ownership_override
+                hmc,
+                "lpar1",
+                bad,
+                ownership_override=ownership_override,
+                system_name_or_uuid="sys1",
             )
         )
     resolve_system.assert_not_awaited()
@@ -1260,7 +1268,9 @@ def test_set_description_refuses_a_malformed_current_stamp():
         pytest.raises(PermissionError, match="malformed"),
     ):
         asyncio.run(
-            lpar_ownership.set_lpar_ownership_description(hmc, "sys1", "lpar1", "x")
+            lpar_ownership.set_lpar_ownership_description(
+                hmc, "lpar1", "x", system_name_or_uuid="sys1"
+            )
         )
     write.assert_not_awaited()
 

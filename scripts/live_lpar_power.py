@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import live_test_runner
+from live_test import runner
 
 #: The one argument vector this wrapper dispatches.
 GROUP = "lpar-power"
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     dispatched = ["--group", GROUP]
     if args.detach_probe:
         dispatched.append("--detach-probe")
-    return live_test_runner._run_from_arguments(dispatched)
+    return runner._run_from_arguments(dispatched)
 
 
 if __name__ == "__main__":

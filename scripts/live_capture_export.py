@@ -30,10 +30,12 @@ import re
 import shlex
 import sys
 import urllib.parse
-import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 UUID = re.compile(
     r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
@@ -1131,7 +1133,7 @@ def _parses(body: Any) -> bool:
         return False
     try:
         ET.fromstring(body.encode("utf-8"))
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         return False
     return True
 
@@ -1494,7 +1496,7 @@ def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, A
             continue
         try:
             root = ET.fromstring(body.encode("utf-8"))
-        except ET.ParseError:
+        except (ET.ParseError, DefusedXmlException):
             continue
         for simple in root.iter(f"{_XSD}simpleType"):
             name = simple.get("name") or ""

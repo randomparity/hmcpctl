@@ -258,14 +258,19 @@ async def test_cancelling_the_waiter_leaves_the_session_usable(mock_hmc) -> None
         waiter = asyncio.create_task(
             wait_for_job(hmc, _JOB_ID, timeout_seconds=3600, poll_interval=600)
         )
-        while not poll.called:
-            await asyncio.sleep(0)
-        for _ in range(10):
-            await asyncio.sleep(0)
-
-        waiter.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await waiter
+        try:
+            async with asyncio.timeout(5):
+                while not poll.called:
+                    if waiter.done():
+                        await waiter
+                        pytest.fail("job waiter finished before its first poll")
+                    await asyncio.sleep(0.01)
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+        finally:
+            waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
 
         assert hmc.is_logged_on
         assert not logoff.called
@@ -416,13 +421,23 @@ async def test_wait_for_job_warns_about_a_substituted_job_on_the_first_poll(
                     poll_interval=600,
                 )
             )
-            while not any("returned job" in r.getMessage() for r in caplog.records):
-                # A waiter that raised would otherwise leave this loop spinning.
-                assert not waiter.done(), waiter.exception()
-                await asyncio.sleep(0)
-            waiter.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await waiter
+            try:
+                async with asyncio.timeout(5):
+                    while not any(
+                        "returned job" in r.getMessage() for r in caplog.records
+                    ):
+                        if waiter.done():
+                            await waiter
+                            pytest.fail(
+                                "job waiter finished before its mismatch warning"
+                            )
+                        await asyncio.sleep(0.01)
+                waiter.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await waiter
+            finally:
+                waiter.cancel()
+                await asyncio.gather(waiter, return_exceptions=True)
 
     assert len([r for r in caplog.records if "returned job" in r.getMessage()]) == 1
 

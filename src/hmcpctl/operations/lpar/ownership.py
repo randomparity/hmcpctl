@@ -199,9 +199,9 @@ async def _discover_owning_system(
 
 async def resolve_and_authorize_lpar_mutation(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str | None = None,
     ownership_override: bool,
 ) -> str:
     """Resolve one LPAR, authorize the mutation, and return its UUID.
@@ -524,9 +524,9 @@ async def resolve_lpar_ownership_names(
 
 async def resolve_and_authorize_lpar_names(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> tuple[str, str]:
     """Resolve an LPAR's CLI names, authorize its mutation, and return the names."""
@@ -635,10 +635,10 @@ async def stamp_created_lpar_ownership(
 
 async def set_lpar_ownership_description(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     description: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> str:
     """Validate, authorize, and write one LPAR ownership description.

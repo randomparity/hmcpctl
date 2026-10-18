@@ -43,22 +43,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import live_test_runner as runner
 from live_test import (
     bare_cec,
+    dedicated_pcie,
     lpar_config,
     lpar_power,
-    pcie,
+    runner,
     storage_lifecycle,
     storage_volume_group,
     users,
     vios_backup,
     vmedia,
 )
+from live_test import config as live_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, env_var_value
-from hmcpctl.operations.lpar.provision import _check_vlan_exists
+from hmcpctl.operations.lpar.provision import check_vlan_exists
 from hmcpctl.operations.virtualization.pcie import (
     require_admitted_environment,
 )
@@ -89,14 +90,14 @@ _DEDICATED_CONFIG_REQUIRED = (
 )
 
 
-def _dedicated_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _dedicated_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Predict the dedicated PCIe arm from the predicate the arm itself uses.
 
-    `pcie._dedicated_config` is called rather than restated: it applies the
+    `dedicated_pcie._dedicated_config` is called rather than restated: it applies the
     delimiter rejection and the no-fallback rule that decide whether the arm
     runs at all, and a second copy here would drift from the one that governs.
     """
-    resolved = pcie._dedicated_config(config)
+    resolved = dedicated_pcie._dedicated_config(config)
     if resolved is None:
         return ArmVerdict(
             "dedicated",
@@ -111,15 +112,15 @@ def _dedicated_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
             f"managed system {resolved.system_name}",
             f"partitions named {resolved.lpar_prefix}* (created, then deleted)",
             f"profile {resolved.profile_name} io_slots (assigned, then restored)",
-            f"dedicated slot {resolved.drc_index or pcie.AUTO_SELECTED_SLOT}",
+            f"dedicated slot {resolved.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}",
             _io_slots_scenario_line(resolved),
         ),
         resolved.system_name,
     )
 
 
-def _io_slots_scenario_line(resolved: pcie._DedicatedConfig) -> str:
-    """Predict `pcie._io_slots_scenario`'s (#985) effect on the dedicated arm.
+def _io_slots_scenario_line(resolved: dedicated_pcie._DedicatedConfig) -> str:
+    """Predict `dedicated_pcie._io_slots_scenario`'s (#985) effect on the dedicated arm.
 
     Mirrors the scenario's own gate (`fixture.config.drc_index is not None`):
     a pinned slot leaves no room for the two further slots the scenario needs,
@@ -131,10 +132,10 @@ def _io_slots_scenario_line(resolved: pcie._DedicatedConfig) -> str:
             "io_slots scenario: SKIP (LIVE_TEST_DEDICATED_PCIE_DRC_INDEX pins one slot; "
             "the scenario needs two more)"
         )
-    return f"io_slots scenario: two further spare slots {pcie.AUTO_SELECTED_SLOT}"
+    return f"io_slots scenario: two further spare slots {dedicated_pcie.AUTO_SELECTED_SLOT}"
 
 
-def _bare_cec_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _bare_cec_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Predict the bare-cec arm from the predicates the arm itself admits on.
 
     It shares the dedicated arm's configuration, and adds its own two refusals:
@@ -142,7 +143,7 @@ def _bare_cec_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     must be a value the arm recognises. Both are the arm's functions, called
     here after `_check_credentials` has loaded `.env`, as the runner has by then.
     """
-    resolved = pcie._dedicated_config(config)
+    resolved = dedicated_pcie._dedicated_config(config)
     accept_dump = bare_cec._dump_opt_in(config)
     refusals = [
         reason
@@ -172,7 +173,7 @@ def _bare_cec_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
                 "SMS, powered off and restarted, then deleted)"
             ),
             f"profile {resolved.profile_name} io_slots (assigned, then restored)",
-            f"dedicated slot {resolved.drc_index or pcie.AUTO_SELECTED_SLOT}",
+            f"dedicated slot {resolved.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}",
             "platform dump: "
             + ("taken (dumprestart opted in)" if accept_dump else "not taken"),
         ),
@@ -180,7 +181,7 @@ def _bare_cec_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _profiles_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the profiles arm (#627) changes, each restored by the arm itself."""
     return ArmVerdict(
         "profiles",
@@ -208,7 +209,7 @@ def _profiles_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _vios_backup_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _vios_backup_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the vios-backup arm (#1349) changes and removes again."""
     if HMCConfig().ssh_timeout < vios_backup.MIN_SSH_TIMEOUT:
         return ArmVerdict(
@@ -241,7 +242,7 @@ def _vios_backup_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _pcm_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _pcm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the system-wide PCM preferences the pcm arm (#634) toggles and restores."""
     return ArmVerdict(
         "pcm",
@@ -258,11 +259,11 @@ def _pcm_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _lpar_config_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the one partition the lpar-config arm (#1345) creates and deletes again."""
-    arm = pcie._dedicated_config(config)
+    arm = dedicated_pcie._dedicated_config(config)
     dedicated = (
-        f"scratch profile {arm.profile_name}: dedicated slot {arm.drc_index or pcie.AUTO_SELECTED_SLOT}; "
+        f"scratch profile {arm.profile_name}: dedicated slot {arm.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}; "
         "requires unowned/no-profile baseline; assign through hmc_modify_lpar and restore "
         "before SMS, then compare all profiles and slot ownership"
         if arm is not None and arm.system_name == config.system_name
@@ -289,7 +290,7 @@ def _lpar_config_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _lpar_power_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the partitions and the VIOS volume the lpar-power arm (#1346) creates."""
     return ArmVerdict(
         "lpar-power",
@@ -322,7 +323,7 @@ def _lpar_power_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _network_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _network_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the network arm (#629) changes, each reversed by the arm itself."""
     return ArmVerdict(
         "network",
@@ -354,7 +355,7 @@ def _network_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _users_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _users_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the HMC user the users arm (#632) creates and deletes again."""
     return ArmVerdict(
         "users",
@@ -371,7 +372,7 @@ def _users_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _vmedia_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _vmedia_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the vmedia arm (#1347) changes, each removed by the arm itself."""
     return ArmVerdict(
         "vmedia",
@@ -401,7 +402,7 @@ def _vmedia_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _storage_verdict(config: runner.LiveTestConfig) -> ArmVerdict:
+def _storage_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the storage arm (#1348) changes, each removed by the arm itself."""
     volume = f"{storage_lifecycle.DISK_PREFIX}<8 hex>"
     return ArmVerdict(
@@ -448,7 +449,7 @@ _ARM_VERDICTS = {
 }
 
 
-def _generic_verdict(group: str, config: runner.LiveTestConfig) -> ArmVerdict:
+def _generic_verdict(group: str, config: live_config.LiveTestConfig) -> ArmVerdict:
     """The arms whose settings `LiveTestConfig` supplies with defaults.
 
     These have no arm-specific admission predicate to import: `from_env_file`
@@ -466,7 +467,7 @@ def _generic_verdict(group: str, config: runner.LiveTestConfig) -> ArmVerdict:
 
 
 def arm_verdicts(
-    config: runner.LiveTestConfig, group: str | None
+    config: live_config.LiveTestConfig, group: str | None
 ) -> tuple[ArmVerdict, ...]:
     """Predict each selected arm. `None` and `"all"` select every arm."""
     selected = tuple(runner.SUBTASK_GROUPS) if group in (None, "all") else (group,)
@@ -497,7 +498,7 @@ async def _probe_environment(system_name: str) -> str:
 async def _probe_provision_vlan(system_name: str, vlan_id: int) -> str:
     """Report whether ST13/ST14's configured VLAN has a virtual network (#970).
 
-    Asks `_check_vlan_exists`, the predicate `hmc_provision_lpar` refuses on, so
+    Asks `check_vlan_exists`, the predicate `hmc_provision_lpar` refuses on, so
     preflight cannot pass a VLAN the provision rejects. Advisory, like the envelope:
     any failure other than the predicate's own refusal is reported as unknown.
     """
@@ -505,7 +506,7 @@ async def _probe_provision_vlan(system_name: str, vlan_id: int) -> str:
         async with HMCClient(HMCConfig()) as hmc:
             system_uuid = await resolve_system_uuid(hmc, system_name)
             try:
-                await _check_vlan_exists(hmc, system_uuid, vlan_id)
+                await check_vlan_exists(hmc, system_uuid, vlan_id)
             except ValueError:
                 return (
                     f"no virtual network on VLAN {vlan_id} — ST13 and ST14 will fail; "
@@ -516,10 +517,10 @@ async def _probe_provision_vlan(system_name: str, vlan_id: int) -> str:
     return f"{vlan_id} has a virtual network"
 
 
-def _check_configuration() -> tuple[runner.LiveTestConfig | None, str]:
+def _check_configuration() -> tuple[live_config.LiveTestConfig | None, str]:
     """Run the runner's own `.env` validator and report its verdict."""
     try:
-        return runner.LiveTestConfig.from_env_file(), ""
+        return live_config.LiveTestConfig.from_env_file(), ""
     except ValueError as exc:
         return None, str(exc)
 

@@ -72,13 +72,11 @@ def hmc_migrate_lpar(
     async def _go(hmc):
         result = await migrate_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             LpmMigrationRequest(
-                target_system_name_or_uuid,
-                target_profile_name,
-                wait_time,
+                target_system_name_or_uuid, target_profile_name, wait_time
             ),
+            system_name_or_uuid=system_name_or_uuid,
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
@@ -127,14 +125,12 @@ def hmc_migrate_lpar_with_affinity_preflight(
     return with_client(
         lambda hmc: migrate_lpar_with_affinity_preflight(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             LpmMigrationRequest(
-                target_system_name_or_uuid,
-                target_profile_name,
-                wait_time,
+                target_system_name_or_uuid, target_profile_name, wait_time
             ),
             affinity_preflight,
+            system_name_or_uuid=system_name_or_uuid,
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
@@ -183,13 +179,11 @@ def hmc_migrate_validate_lpar(
     async def _go(hmc):
         result = await validate_lpar_migration(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             LpmMigrationRequest(
-                target_system_name_or_uuid,
-                target_profile_name,
-                wait_time,
+                target_system_name_or_uuid, target_profile_name, wait_time
             ),
+            system_name_or_uuid=system_name_or_uuid,
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
@@ -234,8 +228,8 @@ def hmc_migrate_abort_lpar(
     async def _go(hmc):
         result = await abort_lpar_migration(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
@@ -281,8 +275,8 @@ def hmc_migrate_recover_lpar(
     async def _go(hmc):
         result = await recover_lpar_migration(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
@@ -334,7 +328,6 @@ def hmc_remote_restart_lpar(
     async def _go(hmc):
         result = await remote_restart_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             RemoteRestartRequest(
                 operation=operation,
@@ -346,6 +339,7 @@ def hmc_remote_restart_lpar(
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
+            system_name_or_uuid=system_name_or_uuid,
         )
         return result.job
 

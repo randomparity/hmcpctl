@@ -38,7 +38,7 @@ from .client_contracts import (
 from .client_lpars import LparsMixin
 from .client_lpm import LpmMixin
 from .client_network import NetworkMixin
-from .client_parse import _find_all_text, _find_text, _parse_feed
+from .client_parse import _discovery_names, _find_text, _parse_feed
 from .client_pcm import PcmMixin
 from .client_storage import StorageMixin
 from .client_systems import SystemsMixin
@@ -112,7 +112,7 @@ _SEARCH_PARAMETER_CONTAINER_ELEMENT = "SearchParameterSet"
 # One of these per parameter the container holds, and the direct evidence that
 # the type defines something this parse could not name: an empty ParameterName
 # evidences that only on a level still spelling the name element that way
-# (ADR 0144). find_all_text matches the exact local name, so this matches
+# (ADR 0144). Discovery matches exact local names, so this matches
 # neither SearchParameters nor SearchParameterSet.
 _SEARCH_PARAMETER_ELEMENT = "SearchParameter"
 
@@ -385,6 +385,10 @@ class HMCClient(
     TemplatesMixin,
 ):
     """Async context-manager client for one HMC session.
+
+    ``get_uom`` and its delegating resource getters return None for empty
+    successful responses; HTTP 404 and other statuses outside 200/204 raise
+    HMCError. Individual methods document exceptions to this contract.
 
     Usage:
         async with HMCClient(config) as hmc:
@@ -891,6 +895,9 @@ class HMCClient(
     ) -> dict[str, Any] | None:
         """GET /rest/api/uom/{ResourceType}/{uuid} and parse the entry.
 
+        Returns None for an empty HTTP 200 body, HTTP 204, or no parsed entries.
+        HTTP 404 and every other status outside 200/204 raise HMCError.
+
         *group* is percent-encoded before it reaches the query string, on the
         same terms as ``list_uom`` (ADR 0145).
         """
@@ -1096,33 +1103,24 @@ class HMCClient(
             return None, schema_version
         if resp.status_code != 200:
             raise HMCError(f"GET {path} failed", resp.status_code, resp.text)
-        found = _find_all_text(resp.text, f"GET {path}", "Nickname")
-        names = [n for n in found if n]
+        names, container_present = _discovery_names(
+            resp.text,
+            f"GET {path}",
+            "Nickname",
+            _QUICK_PROPERTY_CONTAINER_ELEMENT,
+            _QUICK_PROPERTY_ELEMENT,
+        )
         if names:
             return names, schema_version
-        # The container separates "defines none" from "not this shape at all",
-        # and is only consulted when no name was found. Its presence alone is
-        # tested: it carries no text of its own, so a text filter would reject
-        # the very body this distinguishes.
-        if not _find_all_text(
-            resp.text, f"GET {path}", _QUICK_PROPERTY_CONTAINER_ELEMENT
-        ):
+        # Names remain document-wide; only a nameless response needs a container.
+        if not container_present:
             raise HMCError(
                 f"GET {path} returned no {_QUICK_PROPERTY_CONTAINER_ELEMENT} "
                 "element; expected the quick-property names the type defines",
                 resp.status_code,
                 resp.text,
             )
-        # Container and nothing under it this parse could have named: the type
-        # defines no quick properties, and that is a fact about the type
-        # (ADR 0144). A Nickname whose text is empty, or a QuickProperty
-        # carrying no Nickname at all, is the parse-artefact shape instead --
-        # the container holds properties this parse cannot name -- so it reads
-        # as unknown, like a 204.
-        unnamed = found or _find_all_text(
-            resp.text, f"GET {path}", _QUICK_PROPERTY_ELEMENT
-        )
-        return (None if unnamed else []), schema_version
+        return names, schema_version
 
     async def search_uom(
         self,
@@ -1273,33 +1271,24 @@ class HMCClient(
             return None, schema_version
         if resp.status_code != 200:
             raise HMCError(f"GET {path} failed", resp.status_code, resp.text)
-        found = _find_all_text(resp.text, f"GET {path}", _SEARCH_PARAMETER_NAME_ELEMENT)
-        names = [n for n in found if n]
+        names, container_present = _discovery_names(
+            resp.text,
+            f"GET {path}",
+            _SEARCH_PARAMETER_NAME_ELEMENT,
+            _SEARCH_PARAMETER_CONTAINER_ELEMENT,
+            _SEARCH_PARAMETER_ELEMENT,
+        )
         if names:
             return names, schema_version
-        # The container separates "defines none" from "not this shape at all",
-        # and is only consulted when no name was found. Its presence alone is
-        # tested: it carries no text of its own, so a text filter would reject
-        # the very body this distinguishes.
-        if not _find_all_text(
-            resp.text, f"GET {path}", _SEARCH_PARAMETER_CONTAINER_ELEMENT
-        ):
+        # Names remain document-wide; only a nameless response needs a container.
+        if not container_present:
             raise HMCError(
                 f"GET {path} returned no {_SEARCH_PARAMETER_CONTAINER_ELEMENT} "
                 "element; expected the search parameters the type defines",
                 resp.status_code,
                 resp.text,
             )
-        # Container and nothing under it this parse could have named: the type
-        # defines no search parameters, and that is a fact about the type
-        # (ADR 0144). A ParameterName whose text is empty, or a SearchParameter
-        # carrying no ParameterName at all, is the parse-artefact shape instead
-        # -- the container holds parameters this parse cannot name -- so it
-        # reads as unknown, like a 204.
-        unnamed = found or _find_all_text(
-            resp.text, f"GET {path}", _SEARCH_PARAMETER_ELEMENT
-        )
-        return (None if unnamed else []), schema_version
+        return names, schema_version
 
     async def _defined_search_parameter_names(
         self, resource_type: str
@@ -1547,9 +1536,10 @@ class HMCClient(
         with 400 REST000E to ``Accept: */*`` (issue #1160, api-patterns P4).
 
         When *job_href* is provided (a SELF link from a job entry), its job path
-        is read instead; it must be a ``/rest/api/uom/jobs/{JobID}`` path, which
-        is what lets a handle that stored the entry UUID as *job_id* still read
-        its job. A read-side ``/rest/api/uom/jobs/{JobID}/{uuid}`` SELF
+        is read instead; either ``/rest/api/uom/jobs/{JobID}`` or
+        ``/rest/api/templates/jobs/{JobID}`` is accepted. The supplied SELF link
+        selects the namespace, letting a handle that stored the entry UUID as
+        *job_id* still read its job. A read-side ``/rest/api/uom/jobs/{JobID}/{uuid}`` SELF
         link is addressed by its JobID segment; the HMC refuses the link itself
         (HTTP 400 REST000B) and its trailing UUID changes on every read.
 
@@ -1580,7 +1570,9 @@ class HMCClient(
 
         Terminal states cover the UOM Job and documented web+xml JobResponse
         completion, failure, warning, and cancellation values.
-        Returns the last-seen job entry (terminal or not, after timeout).
+        Return the latest polling result (terminal or not, after timeout),
+        including None if the latest read has no entry. An empty read replaces
+        an earlier entry; this method does not retain stale job state.
 
         When *job_href* is provided it is forwarded to ``get_job_entry`` so polling
         reads that link's jobs path instead of one built from *job_id*.

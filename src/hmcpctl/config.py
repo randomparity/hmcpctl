@@ -244,8 +244,8 @@ class HMCConfig(BaseSettings):
             "(ADR 0092 §4). Off by default: the guard adds an SSH login and extra "
             "REST reads to every call that does not carry an ownership "
             "override, and power is the one mutation class whose inverse is a "
-            "single call. When on, power_lpar derives the owning managed system when "
-            "the selector is omitted and refuses to power a partition another "
+            "single call. When on, LPAR power operations derive the owning managed system when "
+            "the selector is omitted and refuse to power a partition another "
             "agent owns unless the caller passes ownership_override. "
             "(HMC_AUTHORIZE_POWER_OPERATIONS)"
         ),
@@ -286,9 +286,8 @@ class HMCConfig(BaseSettings):
         Validation is unchanged: field validators and the model validator run
         exactly as they do for ``HMCConfig(...)``. Keys naming no field are
         ignored, matching the ``extra="ignore"`` in ``model_config``. A key whose
-        value is ``None`` is applied like any other — a nullable database column
-        arriving as ``None`` is a validation error for every field but
-        ``ssh_key_file`` and ``agent_id``, so omit the key rather than passing
+        value is ``None`` is applied like any other: nullable fields accept it,
+        while non-nullable fields reject it. Omit the key rather than passing
         ``None`` when the intent is "use the default".
 
         ``model_fields_set`` reports the keys *values* supplied, not the full
@@ -601,7 +600,8 @@ def list_profiles_with_default(
     """Return (profile_names, default_profile_or_none) from one TOML read.
 
     Never resolves secrets — safe for diagnostics.
-    Returns ([], None) when the file is absent or path is None.
+    config_path=None selects the normal configuration path via resolve_config_path.
+    Returns ([], None) when the resolved file is absent.
     Raises ConfigError on every read, decode, parse, or structure failure.
     """
     path = _selected_config_path(config_path)
@@ -650,7 +650,8 @@ def list_nicknames(config_path: Path | None = None) -> dict[str, str]:
     """Return the nicknames table as ``dict[str, str]``; empty when absent.
 
     Never resolves secrets - safe for diagnostics and display.
-    Returns ``{}`` when the file is absent or path is None.
+    config_path=None selects the normal configuration path via resolve_config_path.
+    Returns ``{}`` when the resolved file is absent.
     Raises ConfigError on every read, decode, parse, or structure failure.
     """
     path = _selected_config_path(config_path)
@@ -669,7 +670,8 @@ def list_profiles_and_nicknames(
     ``list_profiles()`` plus ``list_nicknames()`` so that the two halves of a
     single decision cannot be taken from two different versions of the file.
 
-    Returns ``([], {})`` when the file is absent or *config_path* is None.
+    config_path=None selects the normal configuration path via resolve_config_path.
+    Returns ``([], {})`` when the resolved file is absent.
     Every other failure is a ConfigError: this feeds ADR 0038's authorization
     decision, whose denial message must interpolate no path and no raw exception
     text, so an unreadable file, a non-UTF-8 one, and a malformed table must all
@@ -683,6 +685,35 @@ def list_profiles_and_nicknames(
     return list(_coerce_profiles(doc.get("profiles"), path)), _coerce_nicknames(
         doc.get("nicknames"), path
     )
+
+
+# Empty connection entries cannot occur in a compiled access-policy grant.
+UNRESOLVED_CONNECTION = ""
+
+
+def resolve_connection_profile(token: object) -> str | None:
+    """Resolve a connection token without loading credentials or application code.
+
+    Return a profile key, None for default/environment, or UNRESOLVED_CONNECTION
+    for an invalid or unknown token. ConfigError means the inventory is unreadable.
+
+    Reject invalid token types before applying HMC_HOST's case-insensitive
+    collapse. An omitted token denotes the late-bound default, independent of
+    HMC_PROFILE/default_profile (ADR 0036). Otherwise profile keys take precedence
+    over nicknames, matching load_profile and preventing shadowing from widening
+    authorization. Resolve both tables from one read (ADR 0038).
+    """
+    if token is not None and not isinstance(token, str):
+        return UNRESOLVED_CONNECTION
+    if env_var_value("HMC_HOST") or not token:
+        return None
+    profiles, nicknames = list_profiles_and_nicknames()
+    if token in profiles:
+        return token
+    target = nicknames.get(token)
+    if target is not None and target in profiles:
+        return target
+    return UNRESOLVED_CONNECTION
 
 
 def env_var_value(name: str) -> str | None:

@@ -120,6 +120,8 @@ class UpdatesMixin:
             },
         )
         if response.status_code not in (200, 201, 202, 204):
+            # Rejections can echo private update inputs; omit the body from both
+            # rendered diagnostics and HMCError.body (as for malformed successes).
             raise HMCError(f"PUT {path} failed", response.status_code)
         if not response.content or not response.text.strip():
             return None

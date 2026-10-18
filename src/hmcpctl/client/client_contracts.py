@@ -146,7 +146,7 @@ class LparsClient(Protocol):
         *,
         uuid_path_arguments: Mapping[str, str],
         **kwargs: Any,
-    ) -> Any: ...
+    ) -> httpx.Response: ...
 
     def _uom_headers(
         self, resource_type: str | None, include_schema_version: bool = True
@@ -265,7 +265,7 @@ class UpdatesClient(Protocol):
         *,
         uuid_path_arguments: Mapping[str, str],
         **kwargs: Any,
-    ) -> Any: ...
+    ) -> httpx.Response: ...
 
 
 class StorageClient(Protocol):
@@ -274,7 +274,9 @@ class StorageClient(Protocol):
     config: HMCConfig
     _rest_base_url: str
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any: ...
+    async def _request(
+        self, method: str, path: str, **kwargs: Any
+    ) -> httpx.Response: ...
 
     async def _request_with_uuid_path_arguments(
         self,
@@ -283,7 +285,7 @@ class StorageClient(Protocol):
         *,
         uuid_path_arguments: Mapping[str, str],
         **kwargs: Any,
-    ) -> Any: ...
+    ) -> httpx.Response: ...
 
     def _uom_headers(
         self, resource_type: str | None, include_schema_version: bool = True

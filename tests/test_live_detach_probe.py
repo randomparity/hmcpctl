@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-import live_test_runner as runner
 import test_live_lpar_power_arm as arm
-from live_test import detach_probe, lpar_power
+from live_test import config as live_config
+from live_test import detach_probe, lpar_power, runner
 from test_live_lpar_power_arm import GROUP, SYSTEM, FakeClient, World
 
 from hmcpctl.errors import HMCError
@@ -94,7 +94,9 @@ def no_waiting(monkeypatch):
 
 def run_probe(world, schemas, output_schemas):
     state = runner.RunState(
-        config=runner.LiveTestConfig(system_name=SYSTEM, vdisk_volume_group_name=GROUP),
+        config=live_config.LiveTestConfig(
+            system_name=SYSTEM, vdisk_volume_group_name=GROUP
+        ),
         group="lpar-power",
         schemas=schemas,
     )
@@ -102,6 +104,65 @@ def run_probe(world, schemas, output_schemas):
         detach_probe.exercise_detach_probe(FakeClient(world, output_schemas), state)
     )
     return state
+
+
+@pytest.mark.parametrize(
+    ("fault", "reason"),
+    [
+        ("wrong-group", "runs only"),
+        ("power-refused", "HMC_AUTHORIZE_POWER_OPERATIONS"),
+        ("no-vios", "exactly one is needed"),
+        ("unreadable-baseline", "baseline did not read"),
+        ("scratch-partition", "live_test_recovery.py"),
+        ("scratch-volume", "live_test_recovery.py"),
+    ],
+)
+def test_detach_probe_refuses_unadmitted_or_stranded_assets_without_writes(
+    monkeypatch,
+    schemas,
+    output_schemas,
+    fault,
+    reason,
+):
+    world = ProbeWorld()
+    if fault == "power-refused":
+        monkeypatch.setattr(lpar_power, "_power_operations_authorized", lambda: False)
+    elif fault == "no-vios":
+        world.overrides["hmc_list_vios"] = lambda _: {
+            "entries": [],
+            "unreadable_systems": [],
+        }
+    elif fault == "unreadable-baseline":
+        world.overrides["hmc_run_command"] = lambda _: HMCError(
+            "baseline unavailable", 500
+        )
+    elif fault == "scratch-partition":
+        world._new(
+            lpar_power.NAME_PREFIX + "deadbeef-p", "foreign-owner", lpar_power.RESOURCES
+        )
+    elif fault == "scratch-volume":
+        world.volumes.add(lpar_power.VOLUME_PREFIX + "deadbeef")
+    before = (
+        dict(world.partitions),
+        set(world.volumes),
+        list(world.mappings),
+        set(world.adapters),
+    )
+    state = runner.RunState(
+        config=live_config.LiveTestConfig(
+            system_name=SYSTEM, vdisk_volume_group_name=GROUP
+        ),
+        group="all" if fault == "wrong-group" else "lpar-power",
+        schemas=schemas,
+    )
+    asyncio.run(
+        detach_probe.exercise_detach_probe(FakeClient(world, output_schemas), state)
+    )
+    assert not (arm.MUTATIONS | {"hmc_map_storage_to_lpar"}).intersection(world.tools())
+    assert (world.partitions, world.volumes, world.mappings, world.adapters) == before
+    assert state.results[-1]["tool"] == "detach probe"
+    assert state.results[-1]["status"] == "SKIP"
+    assert reason in state.results[-1]["note"]
 
 
 @pytest.mark.parametrize("failure", [None, "effect"])

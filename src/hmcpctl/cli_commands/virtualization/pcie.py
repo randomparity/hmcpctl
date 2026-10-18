@@ -73,11 +73,11 @@ def network_assign_dedicated_pcie_slot(
     with_client(
         lambda hmc: assign_dedicated_pcie_slot(
             hmc,
-            system_name,
             lpar_name,
             profile_name,
             drc_index,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name,
         )
     )
 
@@ -93,11 +93,11 @@ def network_unassign_dedicated_pcie_slot(
     with_client(
         lambda hmc: unassign_dedicated_pcie_slot(
             hmc,
-            system_name,
             lpar_name,
             profile_name,
             drc_index,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name,
         )
     )
 
@@ -161,12 +161,12 @@ def network_assign_sriov_logical_port(
     result = with_client(
         lambda hmc: assign_sriov_logical_port(
             hmc,
-            system_name,
             lpar_name,
             InventorySelector(adapter_id, physical_port_id, logical_port_id),
             Decimal(str(capacity_percent)),
             profile_name=profile_name,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name,
         )
     )
     print_json(asdict(result))
@@ -185,11 +185,11 @@ def network_unassign_sriov_logical_port(
     result = with_client(
         lambda hmc: unassign_sriov_logical_port(
             hmc,
-            system_name,
             lpar_name,
             InventorySelector(adapter_id, physical_port_id, logical_port_id),
             profile_name=profile_name,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name,
         )
     )
     print_json(asdict(result))

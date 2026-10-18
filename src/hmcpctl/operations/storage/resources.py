@@ -9,7 +9,7 @@ import os
 import re
 import sys
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -25,18 +25,41 @@ from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_loc
 from ...config import ISO_URL_ALLOWLIST_HELP
 from ...documents.storage import StorageKind
 from ...errors import HMCError
+from ...jobs import JobOutcome, job_identifier, job_outcome
 from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class StorageMapResult:
-    """Authorized LPAR identity, the resulting VIOS storage resource, and where it lives."""
+class StorageMutationResult:
+    """Original storage projection and its interpreted job, without extra HMC requests."""
 
-    lpar_uuid: str
-    resource: dict[str, Any] | None
-    change_location: ChangeLocation
+    raw: Any
+    job: JobOutcome | None = None
+    lpar_uuid: str | None = None
+    change_location: ChangeLocation | None = None
+
+    @classmethod
+    def from_raw(
+        cls,
+        raw: Any,
+        *,
+        lpar_uuid: str | None = None,
+        change_location: ChangeLocation | None = None,
+    ) -> StorageMutationResult:
+        source = raw.get("resource", raw) if isinstance(raw, dict) else None
+        resource = source.get("Resource", source) if isinstance(source, dict) else None
+        entry = (
+            source
+            if isinstance(source, dict) and "Resource" in source
+            else {"Resource": resource}
+        )
+        is_job = isinstance(resource, dict) and (
+            "JobID" in resource or "Status" in resource
+        )
+        job = job_outcome("", entry) if is_job and job_identifier(entry) else None
+        return cls(raw, job, lpar_uuid, change_location)
 
 
 @dataclass(frozen=True)
@@ -139,7 +162,7 @@ def _optional_gib_as_mib(
     return int(mib) if mib == mib.to_integral_value() else float(mib)
 
 
-def _volume_group(entry: Mapping[str, Any]) -> VolumeGroup:
+def volume_group(entry: Mapping[str, Any]) -> VolumeGroup:
     operation = "list_volume_groups"
     resource = _resource(entry, operation)
     uuid = entry.get("UUID")
@@ -174,7 +197,7 @@ def _optical_media(entry: Mapping[str, Any]) -> OpticalMedia:
     )
 
 
-def _storage_mapping(entry: Mapping[str, Any]) -> StorageMapping:
+def storage_mapping(entry: Mapping[str, Any]) -> StorageMapping:
     operation = "list_storage_mappings"
     resource = _resource(entry, operation)
     mapping_id = storage_mapping_id(resource)
@@ -232,7 +255,7 @@ async def list_volume_groups(
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
-    return [_volume_group(entry) for entry in await hmc.list_volume_groups(vios_uuid)]
+    return [volume_group(entry) for entry in await hmc.list_volume_groups(vios_uuid)]
 
 
 async def resolve_volume_group_uuid(hmc: HMCClient, vios_uuid: str, value: str) -> str:
@@ -280,7 +303,7 @@ async def create_volume_group(
     physical_volumes: list[str],
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Create a volume group from the selected physical volumes.
 
     Raises:
@@ -288,12 +311,14 @@ async def create_volume_group(
             be resolved.
         HMCError: If the HMC rejects the creation request or it cannot be completed.
     """
-    return await hmc.create_volume_group(
-        await resolve_vios_uuid(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
-        name,
-        physical_volumes,
+    return StorageMutationResult.from_raw(
+        await hmc.create_volume_group(
+            await resolve_vios_uuid(
+                hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+            ),
+            name,
+            physical_volumes,
+        )
     )
 
 
@@ -305,10 +330,14 @@ async def create_virtual_disk(
     capacity_mib: int,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Create a virtual disk of ``capacity_mib`` in a volume group.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     Raises:
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         ResourceNotFoundError: If the VIOS or optional managed-system selector cannot
             be resolved.
         HMCError: If the HMC rejects the creation request or it cannot be completed.
@@ -317,11 +346,13 @@ async def create_virtual_disk(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
     vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
-    return await hmc.create_virtual_disk(
-        vios_uuid,
-        vg_uuid,
-        name,
-        capacity_mib,
+    return StorageMutationResult.from_raw(
+        await hmc.create_virtual_disk(
+            vios_uuid,
+            vg_uuid,
+            name,
+            capacity_mib,
+        )
     )
 
 
@@ -348,8 +379,10 @@ async def delete_virtual_disk(
     disk_name: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Delete a Virtual Disk from a Volume Group.
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
 
     Validates that the disk is not mapped to any LPAR before deletion.
 
@@ -358,14 +391,18 @@ async def delete_virtual_disk(
         system_name_or_uuid: Optional managed-system name or UUID used to scope
             a VIOS name.
         vios_name_or_uuid: VIOS partition name or UUID.
-        vg_uuid: Volume Group UUID containing the disk.
+        vg_uuid: Volume Group name or UUID identifying the group containing the disk.
         disk_name: Name of the Virtual Disk to delete.
 
     Returns:
-        The parsed HMC response entry from the VolumeGroup update, or ``None``
-        when a successful response contains no resource entry.
+        A mutation result whose raw value is the parsed HMC response entry from
+        the VolumeGroup update, or ``None`` when no resource entry is returned.
 
     Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         HMCError: If the disk is mapped to an LPAR or deletion fails.
     """
     vios_uuid = await resolve_vios_uuid(
@@ -392,7 +429,9 @@ async def delete_virtual_disk(
                     "remove the mapping."
                 )
 
-    return await hmc.delete_virtual_disk(vios_uuid, vg_uuid, disk_name)
+    return StorageMutationResult.from_raw(
+        await hmc.delete_virtual_disk(vios_uuid, vg_uuid, disk_name)
+    )
 
 
 async def map_storage(
@@ -405,7 +444,7 @@ async def map_storage(
     storage_name: str,
     target: str | None = None,
     ownership_override: bool = False,
-) -> StorageMapResult:
+) -> StorageMutationResult:
     """Authorize an LPAR and map VIOS storage to it.
 
     Raises:
@@ -420,15 +459,23 @@ async def map_storage(
     )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.map_storage_to_lpar(
         vios_uuid, kind, storage_name, lpar_uuid, target
     )
-    return StorageMapResult(lpar_uuid, resource, location)
+    return StorageMutationResult.from_raw(
+        {
+            "lpar_uuid": lpar_uuid,
+            "resource": resource,
+            "change_location": asdict(location),
+        },
+        lpar_uuid=lpar_uuid,
+        change_location=location,
+    )
 
 
 async def create_media_repository(
@@ -438,16 +485,28 @@ async def create_media_repository(
     size_mib: int,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
-    """Create a media repository in a VIOS volume group."""
+) -> StorageMutationResult:
+    """Create a media repository in a VIOS volume group.
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
+    """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
     vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
-    return await hmc.create_media_repository(
-        vios_uuid,
-        vg_uuid,
-        size_mib,
+    return StorageMutationResult.from_raw(
+        await hmc.create_media_repository(
+            vios_uuid,
+            vg_uuid,
+            size_mib,
+        )
     )
 
 
@@ -459,17 +518,29 @@ async def create_optical_media(
     size_mib: int,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
-    """Create blank optical media in a VIOS media repository."""
+) -> StorageMutationResult:
+    """Create blank optical media in a VIOS media repository.
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
+    """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
     vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg_uuid)
-    return await hmc.create_optical_media(
-        vios_uuid,
-        vg_uuid,
-        name,
-        size_mib,
+    return StorageMutationResult.from_raw(
+        await hmc.create_optical_media(
+            vios_uuid,
+            vg_uuid,
+            name,
+            size_mib,
+        )
     )
 
 
@@ -494,7 +565,7 @@ async def list_storage_mappings(
             hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         )
     return [
-        _storage_mapping(entry)
+        storage_mapping(entry)
         for entry in await hmc.list_storage_mappings(vios_uuid, lpar_uuid)
     ]
 
@@ -506,7 +577,7 @@ async def detach_storage_mapping(
     *,
     system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
-) -> ChangeLocation:
+) -> StorageMutationResult:
     """Authorize the mapped LPAR, then detach its VirtualSCSIMapping.
 
     ``mapping_id`` is the exact ``<server adapter>/<target device>`` identity
@@ -543,13 +614,13 @@ async def detach_storage_mapping(
         )
     await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
-    return location
+    return StorageMutationResult.from_raw(asdict(location), change_location=location)
 
 
 async def delete_media_repository(
@@ -558,13 +629,19 @@ async def delete_media_repository(
     vg_uuid: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> str:
+) -> StorageMutationResult:
     """Delete the Virtual Media Repository from a Volume Group.
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
 
     Refuses deletion if the repository contains any VirtualOpticalMedia
     entries (ISO images). Delete all media first.
 
     Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         HMCError: If the repository is not empty.
     """
     vios_uuid = await resolve_vios_uuid(
@@ -579,7 +656,7 @@ async def delete_media_repository(
             f"image(s): {names!r}. Delete all images first."
         )
     await hmc.delete_media_repository(vios_uuid, vg_uuid)
-    return vios_uuid
+    return StorageMutationResult.from_raw(vios_uuid)
 
 
 async def delete_optical_media(
@@ -589,13 +666,19 @@ async def delete_optical_media(
     media_name: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any] | None:
+) -> StorageMutationResult:
     """Delete a VirtualOpticalMedia (ISO image) from the media repository.
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
 
     Validates that no optical mapping references the media before deletion.
     Returns an error listing every blocking mapping when the image is in use.
 
     Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
         HMCError: If the media is referenced by any optical mapping.
     """
     vios_uuid = await resolve_vios_uuid(
@@ -622,7 +705,9 @@ async def delete_optical_media(
             "Unmount the media first."
         )
 
-    return await hmc.delete_optical_media(vios_uuid, vg_uuid, media_name)
+    return StorageMutationResult.from_raw(
+        await hmc.delete_optical_media(vios_uuid, vg_uuid, media_name)
+    )
 
 
 async def get_media_repository(
@@ -632,10 +717,21 @@ async def get_media_repository(
     *,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Get the Virtual Media Repository (VMLibrary) from a Volume Group.
+    """Get the VolumeGroup Atom entry containing a Virtual Media Repository.
 
-    Returns the repository with capacity (RepositorySize, in GiB) and optionally
-    embedded VirtualOpticalMedia entries if present.
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
+    The repository is nested at ``Resource.MediaRepositories.VirtualMediaRepository``.
+    Its ``RepositorySize`` is in GiB; optional media entries are nested under
+    ``OpticalMedia.VirtualOpticalMedia`` within the repository. Returns None when
+    no repository-bearing VolumeGroup entry is available.
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
     """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
@@ -654,7 +750,7 @@ def _require_http_url(iso_source: str) -> str:
     """Return an http(s) source; reject controls as ``HMCError``, scheme as ``ValueError``.
 
     This is the first half of ``upload_iso``'s input validation — the host check
-    in ``_require_allowlisted_iso_url`` is the other — and it runs before the
+    in ``require_allowlisted_iso_url`` is the other — and it runs before the
     operation touches the filesystem, the network, or the HMC. ADR 0049
     records why: anything that is not an http(s) URL used to be read as a path on
     the MCP server's own host, so a caller holding a grant for the tool could
@@ -684,7 +780,7 @@ def _require_http_url(iso_source: str) -> str:
 DEFAULT_SCHEME_PORTS = {"http": 80, "https": 443}
 
 
-def _require_allowlisted_iso_url(
+def require_allowlisted_iso_url(
     iso_url: str, allowlist: tuple[tuple[str, int | None], ...]
 ) -> str:
     """Return ``iso_url`` if its host is on the operator's allowlist, else raise.
@@ -754,7 +850,7 @@ async def _download_iso_from_url(url: str) -> tuple[Path, str, int]:
     """Download an ISO file from an HTTP(S) URL with bounds and validation.
 
     The scheme and the host are the caller's responsibility: ``upload_iso``
-    admits only what ``_require_http_url`` and ``_require_allowlisted_iso_url``
+    admits only what ``_require_http_url`` and ``require_allowlisted_iso_url``
     accept, and it is this function's only caller.
 
     **Redirects are not followed.** Following them would send the fetch to a URL
@@ -777,35 +873,36 @@ async def _download_iso_from_url(url: str) -> tuple[Path, str, int]:
         httpx.HTTPStatusError: If HTTP request fails (4xx/5xx).
     """
     timeout = httpx.Timeout(CONNECT_TIMEOUT, read=READ_TIMEOUT)
-    async with (
-        httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=False,
-        ) as client,
-        client.stream("GET", url) as response,
-    ):
-        # Every 3xx, not just httpx's `is_redirect` (which additionally
-        # requires a Location header): a 3xx without one is not a body to
-        # import into a media repository either.
-        if 300 <= response.status_code < 400:
-            raise ValueError(
-                f"iso_source is refused: {url!r} answered with HTTP "
-                f"{response.status_code}, a redirect. The ISO must be served "
-                "at the URL you pass, because a redirect would move the "
-                "download to a host the operator's allowlist never checked. "
-                "Pass the URL the ISO is actually served from."
-            )
-        response.raise_for_status()
+    temp_file: Path | None = None
+    try:
+        async with (
+            httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+            ) as client,
+            client.stream("GET", url) as response,
+        ):
+            # Every 3xx, not just httpx's `is_redirect` (which additionally
+            # requires a Location header): a 3xx without one is not a body to
+            # import into a media repository either.
+            if 300 <= response.status_code < 400:
+                raise ValueError(
+                    f"iso_source is refused: {url!r} answered with HTTP "
+                    f"{response.status_code}, a redirect. The ISO must be served "
+                    "at the URL you pass, because a redirect would move the "
+                    "download to a host the operator's allowlist never checked. "
+                    "Pass the URL the ISO is actually served from."
+                )
+            response.raise_for_status()
 
-        import tempfile
+            import tempfile
 
-        fd, temp_path = tempfile.mkstemp(suffix=".iso", prefix="hmc_upload_")
-        temp_file = Path(temp_path)
+            fd, temp_path = tempfile.mkstemp(suffix=".iso", prefix="hmc_upload_")
+            temp_file = Path(temp_path)
 
-        sha256_hash = hashlib.sha256()
-        downloaded_size = 0
+            sha256_hash = hashlib.sha256()
+            downloaded_size = 0
 
-        try:
             with os.fdopen(fd, "wb") as f:
                 async for chunk in response.aiter_bytes(chunk_size=DEFAULT_CHUNK_SIZE):
                     downloaded_size += len(chunk)
@@ -821,15 +918,16 @@ async def _download_iso_from_url(url: str) -> tuple[Path, str, int]:
             iso_sha256 = sha256_hash.hexdigest()
             return temp_file, iso_sha256, downloaded_size
 
-        except Exception:
-            # Clean up temp file on any error
+    except BaseException:
+        # Ownership transfers only after both HTTP contexts finish closing.
+        if temp_file is not None:
             try:
                 temp_file.unlink(missing_ok=True)
             except OSError:
                 logger.exception(
                     "failed to remove incomplete ISO download %s", temp_file
                 )
-            raise
+        raise
 
 
 async def _aiter_file_chunks(
@@ -856,9 +954,18 @@ async def list_optical_media(
 ) -> list[OpticalMedia]:
     """List Virtual Optical Media in the Virtual Media Repository.
 
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
+
     Returns a list of optical media entries (ISO containers) with their
     name, size in MiB (converted from the HMC's GiB Size), and media type.
     The repository must exist (VMLibrary on the specified Volume Group).
+
+    Raises:
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        ValueError: If the volume-group selector is missing or ambiguous, or
+            its inventory contains incomplete identities.
+        HMCError: If the HMC request fails or returns an invalid resource shape.
     """
     vios_uuid = await resolve_vios_uuid(
         hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
@@ -949,13 +1056,15 @@ async def upload_iso(
     iso_source: str,
     *,
     system_name_or_uuid: str | None = None,
-) -> dict[str, Any]:
+) -> StorageMutationResult:
     """Upload an ISO to a VIOS media repository via the HMC web File API (ADR 0177).
+
+    ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
 
     ``iso_source`` must be an ``http`` or ``https`` URL whose host the operator
     has put on ``iso_url_allowlist`` (``HMC_ISO_URL_ALLOWLIST``), and both
     conditions are checked before any other work happens. **With no allowlist
-    configured every URL is refused** — see ``_require_allowlisted_iso_url`` and
+    configured every URL is refused** — see ``require_allowlisted_iso_url`` and
     ADR 0050. The media name is then validated against a conservative assumed
     grammar (ADR 0177), the volume group must hold a media repository, and a name
     that collides with existing media is refused, all before any transfer begins. The
@@ -967,14 +1076,14 @@ async def upload_iso(
     Args:
         hmc: HMC client instance.
         vios_name_or_uuid: VIOS name or UUID.
-        vg_uuid: Volume Group UUID containing the media repository.
+        vg_uuid: Volume Group name or UUID containing the media repository.
         media_name: Target name for the ISO in the repository.
         iso_source: HTTP(S) URL to download the ISO from.
         system_name_or_uuid: Optional managed-system name or UUID used to scope
             a VIOS name.
 
     Returns:
-        Dict with:
+        Mutation result whose raw dictionary contains:
         - 'status': 'uploaded'
         - 'media_name': Name of the media in the repository.
         - 'media_size_bytes': Size of the downloaded ISO.
@@ -986,17 +1095,21 @@ async def upload_iso(
           mode VIOS ``lsrep`` reports (for example ``rw`` here, ``ro`` there).
 
     Raises:
-        HMCError: For malformed ISO URLs, HMC API errors during the web File
+        ResourceNotFoundError: If the VIOS or optional managed-system selector
+            cannot be resolved.
+        HMCError: For malformed ISO URLs, HTTP download failures (with the
+                  original exception chained), HMC API errors during the web File
                   requests, or a repository that does not list the media after
                   the upload.
         ValueError: If ``iso_source`` is not an http(s) URL, if its host is not
                    on the operator's allowlist (including the unset allowlist,
                    which permits nothing), if the server answers with a
                    redirect, if the download exceeds the size bound, or if the
-                   volume group holds no media repository.
+                   volume group holds no media repository, its selector is missing
+                   or ambiguous, or its inventory contains incomplete identities.
         FileExistsError: If media_name already exists in the repository.
     """
-    iso_url = _require_allowlisted_iso_url(
+    iso_url = require_allowlisted_iso_url(
         _require_http_url(iso_source), hmc.config.iso_url_allowlist_entries
     )
     vios_uuid = await resolve_vios_uuid(
@@ -1033,19 +1146,23 @@ async def upload_iso(
         raise HMCError(
             "ISO download refused: the request URL could not be built."
         ) from exc
+    except httpx.HTTPError as exc:
+        raise HMCError("ISO download failed: HTTP request could not complete.") from exc
 
     try:
         uploaded_media_entry = await _upload_iso_via_web_file(
             hmc, vios_uuid, vg_uuid, media_name, iso_path, file_size
         )
 
-        return {
-            "status": "uploaded",
-            "media_name": media_name,
-            "media_size_bytes": file_size,
-            "source_sha256": iso_sha256,
-            "media": uploaded_media_entry,
-        }
+        return StorageMutationResult.from_raw(
+            {
+                "status": "uploaded",
+                "media_name": media_name,
+                "media_size_bytes": file_size,
+                "source_sha256": iso_sha256,
+                "media": uploaded_media_entry,
+            }
+        )
     finally:
         primary_error = sys.exception()
 
@@ -1095,7 +1212,7 @@ async def mount_optical_media(
     media_name: str,
     target_device: str | None = None,
     ownership_override: bool = False,
-) -> StorageMapResult:
+) -> StorageMutationResult:
     """Create a VirtualSCSIMapping for optical media (mount ISO to LPAR).
 
     Creates a read-only optical mapping from a VirtualOpticalMedia (ISO container)
@@ -1115,15 +1232,23 @@ async def mount_optical_media(
     )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.create_optical_mapping(
         vios_uuid, media_name, lpar_uuid, target_device
     )
-    return StorageMapResult(lpar_uuid, resource, location)
+    return StorageMutationResult.from_raw(
+        {
+            "lpar_uuid": lpar_uuid,
+            "resource": resource,
+            "change_location": asdict(location),
+        },
+        lpar_uuid=lpar_uuid,
+        change_location=location,
+    )
 
 
 async def unmount_optical_media(
@@ -1134,7 +1259,7 @@ async def unmount_optical_media(
     system_name_or_uuid: str | None = None,
     media_name: str,
     ownership_override: bool = False,
-) -> ChangeLocation:
+) -> StorageMutationResult:
     """Remove the VirtualSCSIMapping for an optical device (unmount).
 
     Resolves the LPAR-scoped optical inventory entry whose ``MediaName`` equals
@@ -1173,9 +1298,9 @@ async def unmount_optical_media(
     )
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     matches: list[dict[str, Any]] = []
     for mapping in await hmc.list_optical_mappings(vios_uuid, lpar_uuid):
@@ -1204,4 +1329,4 @@ async def unmount_optical_media(
         raise HMCError("VirtualSCSIMapping has no adapter/target identity")
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
-    return location
+    return StorageMutationResult.from_raw(asdict(location), change_location=location)

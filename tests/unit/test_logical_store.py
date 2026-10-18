@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import fcntl
 import json
 import os
+import sqlite3
+from contextlib import closing
+from typing import get_args
 
 import pytest
 
-from hmcpctl.operations.logical import store
+from hmcpctl.operations.logical import models, store
 from hmcpctl.operations.logical.store import OperationRefused
-from hmcpctl.operations.lpar import workflow_contract
 
 
 def _reason(fn, *args, **kwargs) -> str:
@@ -54,11 +57,12 @@ def _oid(n: int) -> str:
 
 def test_record_fields_are_described():
     for record in (
-        workflow_contract.EffectRecord,
-        workflow_contract.OperationEvent,
-        workflow_contract.OperationRecord,
-        workflow_contract.OperationPage,
+        models.EffectRecord,
+        models.OperationEvent,
+        models.OperationRecord,
+        models.OperationPage,
     ):
+        assert record.__module__ == "hmcpctl.operations.logical.models"
         for item in dataclasses.fields(record):
             assert item.metadata.get("description"), (record.__name__, item.name)
 
@@ -400,7 +404,7 @@ def test_status_without_store_is_empty():
     page = store.operation_status(
         agent_id="agent-a", connection="<default>", host="hmc.test"
     )
-    assert page == workflow_contract.OperationPage((), 50, False, None)
+    assert page == models.OperationPage((), 50, False, None)
     assert not store.state_dir().exists()
 
 
@@ -538,3 +542,192 @@ def test_connection_label_follows_hmc_host_to_the_default(lab_config, monkeypatc
 def test_connection_label_refuses_an_unconfigured_profile(lab_config):
     with pytest.raises(ValueError, match="names no configured connection"):
         store.connection_label("never-configured", tool="t")
+
+
+def test_connection_label_sanitizes_unreadable_configuration(lab_config):
+    from hmcpctl.config import ConfigError, config_dir
+
+    path = config_dir() / "config.toml"
+    path.write_text("[broken", encoding="utf-8")
+    with pytest.raises(
+        ValueError, match="t cannot resolve the configured HMC connection"
+    ) as raised:
+        store.connection_label("lab", tool="t")
+    assert str(path) not in str(raised.value)
+    assert isinstance(raised.value.__cause__, ConfigError)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (field, value)
+        for field in ("state", "outcome", "effect_status", "event_kind")
+        for value in ("private-invalid-value", 0, [], None)
+        if not (field == "outcome" and value is None)
+    ],
+)
+def test_invalid_vocabulary_write_leaves_rows_and_events_unchanged(field, value):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.record_intent(conn, _oid(1), "step", "test.write", "target")
+        before = tuple(conn.execute("SELECT * FROM operations").fetchone())
+        before_effect = tuple(conn.execute("SELECT * FROM effects").fetchone())
+        before_events = conn.execute("SELECT count(*) FROM events").fetchone()[0]
+        with pytest.raises(OperationRefused) as caught:
+            if field == "event_kind":
+                store.add_event(conn, _oid(1), value, {})
+            elif field == "effect_status":
+                store.record_outcome(conn, _oid(1), "step", value, None)
+            else:
+                store.set_state(
+                    conn,
+                    _oid(1),
+                    value if field == "state" else "running",
+                    value if field == "outcome" else None,
+                )
+        assert caught.value.reason == f"invalid_{field}"
+        if isinstance(value, str):
+            assert value not in str(caught.value)
+        assert tuple(conn.execute("SELECT * FROM operations").fetchone()) == before
+        assert tuple(conn.execute("SELECT * FROM effects").fetchone()) == before_effect
+        assert (
+            conn.execute("SELECT count(*) FROM events").fetchone()[0] == before_events
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "reader"),
+    [
+        (field, reader)
+        for field in ("state", "outcome")
+        for reader in ("get", "find", "record", "status")
+    ]
+    + [("effect_status", reader) for reader in ("effects", "record", "status")]
+    + [("event_kind", reader) for reader in ("record", "status")],
+)
+def test_corrupt_vocabulary_never_decodes_as_a_typed_record(field, reader):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.record_intent(conn, _oid(1), "step", "test.write", "target")
+            if field == "event_kind":
+                conn.execute("UPDATE events SET kind = ?", ("private-invalid-value",))
+            elif field == "effect_status":
+                conn.execute(
+                    "UPDATE effects SET status = ?", ("private-invalid-value",)
+                )
+            else:
+                conn.execute(
+                    f"UPDATE operations SET {field} = ?", ("private-invalid-value",)
+                )
+        reads = {
+            "get": lambda: store.get_operation(conn, _oid(1)),
+            "find": lambda: store.find_operation(conn, "agent-a", "r1"),
+            "record": lambda: store.read_record(conn, _oid(1)),
+            "effects": lambda: store.load_effects(conn, _oid(1)),
+            "status": lambda: store.operation_status(
+                agent_id="agent-a", connection="<default>", host="hmc.test"
+            ),
+        }
+        with pytest.raises(OperationRefused) as caught:
+            reads[reader]()
+        assert caught.value.reason == "store_corrupt"
+        assert "private-invalid-value" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("state", "outcome"),
+    [(state, None) for state in get_args(models.OperationState)]
+    + [("terminal", outcome) for outcome in get_args(models.OperationOutcome)],
+)
+def test_every_declared_operation_value_roundtrips(state, outcome):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.set_state(conn, _oid(1), state, outcome)
+        record = store.read_record(conn, _oid(1))
+    assert (record.state, record.outcome) == (state, outcome)
+
+
+@pytest.mark.parametrize("status", get_args(models.EffectStatus))
+def test_every_declared_effect_status_roundtrips(status):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.record_intent(conn, _oid(1), "step", "test.write", "target")
+            store.record_outcome(conn, _oid(1), "step", status, None)
+        assert store.load_effects(conn, _oid(1))["step"].status == status
+
+
+@pytest.mark.parametrize("kind", ["phase", "intent", "outcome"])
+def test_every_declared_event_kind_roundtrips(kind):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            store.add_event(conn, _oid(1), kind, {"step": "probe"})
+        record = store.read_record(conn, _oid(1))
+    assert record.events[-1].kind == kind
+    assert record.events[-1].detail == {"step": "probe"}
+
+
+def test_event_truncation_sentinel_is_not_decoded():
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        with store.write_transaction(conn):
+            for n in range(store.STATUS_EVENTS + 1):
+                store.add_event(conn, _oid(1), "phase", {"phase": f"p{n}"})
+            conn.execute("UPDATE events SET kind = 'old-invalid-kind' WHERE seq = 1")
+        record = store.read_record(conn, _oid(1))
+    assert record.events_truncated is True
+    assert len(record.events) == store.STATUS_EVENTS
+    assert all(event.kind == "phase" for event in record.events)
+
+
+def test_write_transaction_preserves_sqlite_trigger_failure():
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.executescript(
+            "CREATE TABLE example (value INTEGER);"
+            "CREATE TRIGGER abort_insert BEFORE INSERT ON example "
+            "BEGIN SELECT RAISE(ROLLBACK, 'original write failure'); END;"
+        )
+        with (
+            pytest.raises(sqlite3.IntegrityError, match="original write failure"),
+            store.write_transaction(conn),
+        ):
+            conn.execute("INSERT INTO example VALUES (1)")
+        assert not conn.in_transaction
+        assert conn.execute("SELECT * FROM example").fetchall() == []
+
+
+@pytest.mark.parametrize(
+    "primary", [ValueError("write failed"), asyncio.CancelledError()]
+)
+def test_write_transaction_preserves_primary_when_rollback_fails(primary):
+    class RollbackFailure(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "ROLLBACK":
+                raise sqlite3.OperationalError("controlled rollback failure")
+            return super().execute(sql, parameters)
+
+    with closing(sqlite3.connect(":memory:", factory=RollbackFailure)) as conn:
+        with pytest.raises(type(primary)) as caught, store.write_transaction(conn):
+            raise primary
+        assert caught.value is primary
+        assert any("OperationalError" in note for note in primary.__notes__)
+        assert all(
+            "controlled rollback failure" not in note for note in primary.__notes__
+        )
+        conn.rollback()
+
+
+def test_write_transaction_rolls_back_body_failure():
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.execute("CREATE TABLE example (value INTEGER)")
+        primary = ValueError("write failed")
+        with pytest.raises(ValueError) as caught, store.write_transaction(conn):
+            conn.execute("INSERT INTO example VALUES (1)")
+            raise primary
+        assert caught.value is primary
+        assert not conn.in_transaction
+        assert conn.execute("SELECT * FROM example").fetchall() == []

@@ -27,20 +27,20 @@ from fastmcp import Client
 from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, job_outcome
 from hmcpctl.operations.lpar.decommission import _vscsi_detach_inventory
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
-from hmcpctl.operations.storage.resources import _storage_mapping
+from hmcpctl.operations.storage.resources import storage_mapping
 from hmcpctl.ssh.commands import HMC_NO_RESULTS
 from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME
 
-from . import lpar_config, pcie
+from . import dedicated_pcie, lpar_config, storage_lifecycle
 from .bare_cec import _power_operations_authorized
 from .network import listed_vlans
 from .observation import Assertion, CallFailure, judge_create_result
 from .results import entries, resource
 from .results import field as result_field
-from .vmedia import scsi_adapter_listing
+from .storage import scsi_adapter_listing
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 SUBTASK = 41
 GROUP = "lpar-power"
@@ -193,18 +193,6 @@ def _lines(text: str | None) -> frozenset[str] | None:
     return frozenset(line.strip() for line in text.splitlines() if line.strip())
 
 
-def _volume_names(text: str | None) -> frozenset[str] | None:
-    """The volume names in `lsvg -lv` output: the first token below its header."""
-    rows = _lines(text)
-    if rows is None:
-        return None
-    return frozenset(
-        row.split()[0]
-        for row in rows
-        if not row.endswith(":") and not row.startswith("LV NAME")
-    )
-
-
 def _failed_with(status: str, data: object, text: str) -> bool:
     return status == "FAIL" and isinstance(data, CallFailure) and text in data.message
 
@@ -269,7 +257,7 @@ async def _complete_mapping_proof(
     projected: set[tuple[str, ...]] = set()
     foreign: list[str] = []
     for item in records:
-        decoded = _storage_mapping(item)
+        decoded = storage_mapping(item)
         projected.add(
             tuple(
                 str(value or "")
@@ -292,7 +280,9 @@ async def _volumes(client: Client, state: RunState, run: Run) -> frozenset[str] 
         f"viosvrcmd -m {shlex.quote(run.system)} --id {run.vios.partition_id} "
         f"-c 'lsvg -lv {run.vios.group}'"
     )
-    return _volume_names(await lpar_config._cli(client, state, command))
+    return storage_lifecycle.volume_names(
+        await lpar_config._cli(client, state, command)
+    )
 
 
 async def _read_baseline(client: Client, state: RunState, run: Run) -> Baseline | None:
@@ -397,7 +387,7 @@ async def _gone(client: Client, state: RunState, run: Run, name: str) -> bool:
     """Whether the listing names no partition *name*, read twice before believing it."""
     for attempt in range(2):
         if attempt:
-            await asyncio.sleep(pcie._ABSENCE_REREAD_DELAY_S)
+            await asyncio.sleep(dedicated_pcie._ABSENCE_REREAD_DELAY_S)
         listing = await _partition_lines(client, state, run.system)
         if listing is not None and name not in _names(listing):
             return True
@@ -628,7 +618,7 @@ async def _running_cases(client: Client, state: RunState, run: Run) -> None:
         "lpar.power_on",
         "running-reported-without-job",
         st == "PASS"
-        and result_field(data, "already_running") is True
+        and result_field(data, "already_activated") is True
         and result_field(data, "job") is None
         and isinstance(message, str)
         and "boot mode was not applied" in message
@@ -1337,10 +1327,10 @@ def _manual(state: RunState, label: str, text: str) -> None:
     state.record(SUBTASK, label, "FAIL", f"MANUAL RECOVERY REQUIRED: {text}")
 
 
-async def _volume_present(client: Client, state: RunState, run: Run) -> bool:
-    """Whether the run volume is listed; an unreadable listing counts as present."""
+async def _volume_present(client: Client, state: RunState, run: Run) -> bool | None:
+    """Whether the run volume is listed; None preserves an unreadable inventory."""
     volumes = await _volumes(client, state, run)
-    return volumes is None or run.volume in volumes
+    return None if volumes is None else run.volume in volumes
 
 
 async def _teardown_storage(client: Client, state: RunState, run: Run) -> bool:
@@ -1357,7 +1347,17 @@ async def _teardown_storage(client: Client, state: RunState, run: Run) -> bool:
             f"`rmvdev -vtd <device>` for it, before removing the volume.",
         )
         return False
-    if await _volume_present(client, state, run):
+    present = await _volume_present(client, state, run)
+    if present is None:
+        _manual(
+            state,
+            "run volume teardown",
+            f"the volumes in {vios.group!r} could not be read; inspect "
+            f"`viosvrcmd -m {system} --id {vios.partition_id} -c 'lsvg -lv {vios.group}'` "
+            f"before removing {run.volume!r}.",
+        )
+        return False
+    if present:
         st, data = await state.call(
             client,
             "hmc_delete_virtual_disk",
@@ -1367,7 +1367,7 @@ async def _teardown_storage(client: Client, state: RunState, run: Run) -> bool:
             system_name_or_uuid=run.system,
         )
         state.record(SUBTASK, "hmc_delete_virtual_disk (run volume)", st, data)
-    if await _volume_present(client, state, run):
+    if await _volume_present(client, state, run) is not False:
         _manual(
             state,
             "run volume teardown",

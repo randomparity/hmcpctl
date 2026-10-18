@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, get_args
 
 from fastmcp import Client
 
-from hmcpctl.operations.lpar.core import ProcessorCompatibilityMode
+from hmcpctl.operations.lpar.configuration import ProcessorCompatibilityMode
 from hmcpctl.ssh.commands import build_filter, parse_hmc_result_rows
 from hmcpctl.ssh.lpar import validate_lpar_description
 from hmcpctl.ssh.transport import HMCCLIError
@@ -23,7 +23,7 @@ from .observation import (
 from .results import field
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 
 async def exercise_lpar_lifecycle(client: Client, state: RunState) -> None:

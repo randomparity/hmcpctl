@@ -16,7 +16,7 @@ from .observation import Assertion, CallFailure
 from .results import entries, resource
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 #: Every scratch user the users arm creates starts with this, and nothing else
 #: may: recovery reports any listed user carrying it as stranded.

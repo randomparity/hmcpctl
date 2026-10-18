@@ -15,8 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
 import check_capability_inventory as inventory
-import live_test_runner as runner
 import promote_live_observations as promotion
+from live_test import evidence, runner
 
 ROOT = Path(__file__).parents[2]
 
@@ -38,8 +38,17 @@ def candidate(tmp_path):
     git(root, "config", "user.name", "Fixture")
     git(root, "config", "user.email", "fixture@example.test")
     git(root, "switch", "-c", "fixture-candidate")
-    for name in ("promote_live_observations.py", "check_capability_inventory.py"):
-        shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
+    scripts = (
+        "scripts/promote_live_observations.py",
+        "scripts/check_capability_inventory.py",
+        "scripts/live_test_runner.py",
+        "scripts/live_test/runner.py",
+        "scripts/live_test/evidence.py",
+        "scripts/live_test/scenario_validation.py",
+        "scripts/live_test/observation.py",
+    )
+    for name in scripts:
+        shutil.copyfile(ROOT / name, root / name)
     claims = root / "docs/capabilities/releases/v0.0.0.json"
     write_json(
         claims,
@@ -57,8 +66,7 @@ def candidate(tmp_path):
     git(
         root,
         "add",
-        "scripts/promote_live_observations.py",
-        "scripts/check_capability_inventory.py",
+        *scripts,
         str(claims),
     )
     git(root, "commit", "-qm", "Prepare anonymous offline fixture")
@@ -644,10 +652,10 @@ def test_confirmed_gap_matches_fresh_producer_result():
 
 
 def producer_states():
-    from live_test import bare_cec, pcie
+    from live_test import bare_cec, dedicated_pcie
 
     dedicated = runner.RunState()
-    pcie.record_dedicated_listing(
+    dedicated_pcie.record_dedicated_listing(
         dedicated,
         "PASS",
         {
@@ -655,7 +663,7 @@ def producer_states():
             "items": [{"drc_index": "1", "owner_lpar": None}],
         },
     )
-    pcie._record_dedicated_additions(
+    dedicated_pcie._record_dedicated_additions(
         dedicated,
         SimpleNamespace(
             evidence={"assign": (True, True), "reassign": (True, True)},
@@ -746,13 +754,13 @@ def producer_candidate(candidate, request):
     results = []
     for arm, state in producer_states():
         path = root / f"test-results-{arm}.json"
-        run = runner._run_provenance(
+        run = evidence.run_provenance(
             runner.SUBTASK_GROUPS[arm], arm, root, "V1_0", False
         )
         write_json(path, {"run": run, "results": state.results})
-        assert runner._emit_observations(
+        assert evidence.emit_observations(
             state,
-            runner._observations_path(str(path)),
+            evidence.observations_path(str(path)),
             ("V10R3M1060", "POWER10"),
             "V1_0",
             root,
@@ -818,7 +826,7 @@ def test_reject_claimed_uncatalogued_operation(producer_candidate):
 @pytest.mark.parametrize("defect", ["unknown", "malformed", "stale", "mismatched"])
 def test_reject_invalid_incidental_observation(producer_candidate, defect, capsys):
     root, claims, results = producer_candidate
-    sidecar = runner._observations_path(str(results[0]))
+    sidecar = evidence.observations_path(str(results[0]))
     rows = json.loads(sidecar.read_text())
     row = next(row for row in rows if row["operation"] == "command.run")
     if defect == "unknown":
@@ -848,7 +856,7 @@ def test_reject_invalid_incidental_observation(producer_candidate, defect, capsy
 @pytest.mark.parametrize("producer_candidate", ["scenario"], indirect=True)
 def test_reject_st31_relabelled_as_st36_before_branch_creation(producer_candidate):
     root, claims, results = producer_candidate
-    sidecar = runner._observations_path(str(results[0]))
+    sidecar = evidence.observations_path(str(results[0]))
     rows = json.loads(sidecar.read_text())
     observation = next(
         row["observation"]
@@ -871,10 +879,10 @@ def test_reject_st31_relabelled_as_st36_before_branch_creation(producer_candidat
 
 
 def test_accept_actual_st36_and_reject_relabelled_st31():
-    from live_test import pcie
+    from live_test import dedicated_pcie
 
     state = runner.RunState()
-    pcie._record_dedicated_additions(
+    dedicated_pcie._record_dedicated_additions(
         state,
         SimpleNamespace(
             evidence={"io-slots-add": (True, True, True)},

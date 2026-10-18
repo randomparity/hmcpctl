@@ -222,9 +222,9 @@ async def test_public_policy_setter_validates_before_resolution():
     ):
         await set_minimum_affinity_policy(
             hmc,
-            "system",
             "lpar",
-            MinimumAffinityPolicy(80, "invalid"),  # type: ignore[arg-type]
+            MinimumAffinityPolicy(80, "invalid"),
+            system_name_or_uuid="system",
         )
     resolver.assert_not_awaited()
 
@@ -250,7 +250,7 @@ async def test_public_policy_setter_authorizes_before_mutation():
         ),
     ):
         result = await set_minimum_affinity_policy(
-            hmc, "system", "lpar", MinimumAffinityPolicy(80, "warn")
+            hmc, "lpar", MinimumAffinityPolicy(80, "warn"), system_name_or_uuid="system"
         )
     assert result == "changed"
     assert events == ["authorize", "mutate"]
@@ -276,7 +276,9 @@ async def test_shared_policy_operation_resolves_names_and_wraps_result():
         ),
         patch("hmcpctl.operations.affinity.ssh.query_minimum_affinity_policy", query),
     ):
-        result = await get_minimum_affinity_policy(_hmc(), "system", "lpar")
+        result = await get_minimum_affinity_policy(
+            _hmc(), "lpar", system_name_or_uuid="system"
+        )
 
     assert result.capability == "available"
     assert result.system == "resolved-system"
@@ -302,7 +304,7 @@ def test_mcp_policy_adapter_delegates_to_shared_operation():
         actual = server_lpar_config.hmc_get_minimum_affinity_policy("system", "lpar")
 
     assert actual == expected
-    operation.assert_awaited_once_with(ANY, "system", "lpar")
+    operation.assert_awaited_once_with(ANY, "lpar", system_name_or_uuid="system")
 
 
 def test_mcp_registers_minimum_affinity_policy_as_lpar_read():
@@ -381,4 +383,4 @@ def test_cli_policy_json_delegates():
         )
     assert invocation.exit_code == 0, invocation.output
     assert '"min_affinity_score": 100' in invocation.output
-    operation.assert_awaited_once_with(ANY, "system", "lpar")
+    operation.assert_awaited_once_with(ANY, "lpar", system_name_or_uuid="system")

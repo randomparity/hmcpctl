@@ -15,7 +15,7 @@ from .results import entries
 from .results import resource as get_resource
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 
 async def _capture_lpar_properties(client: Client, state: RunState) -> None:
@@ -213,8 +213,7 @@ async def capture_lpar_baseline(client: Client, state: RunState) -> None:
     await _capture_lpar_cli_dump(client, state)
     await _capture_sync_state(client, state)
     if state.group == "round2":
-        # Import locally: the runner also imports this scenario module.
-        import live_test_baseline as baseline
+        from live_test import baseline
 
         captured = state.artifacts.lp3_baseline
         vios_id = state.artifacts.vios_partition_id

@@ -14,6 +14,7 @@ when the REST transport is unreachable.  These tests pin that contract:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncssh
@@ -21,13 +22,15 @@ import httpx
 import pytest
 from conftest import live_fixture, live_process_error, make_config
 
-from hmcpctl.errors import HMCError
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError, HMCTransportError
 from hmcpctl.resource_identity import ResourceNotFoundError
 from hmcpctl.ssh.lpar import resolve_lpar_cli_name, resolve_system_cli_name
 from hmcpctl.ssh.selectors import (
     _lpar_name_from_rest,
     _system_name_from_rest,
     resolve_lpar_name,
+    resolve_ssh_names,
     resolve_system_name,
 )
 from hmcpctl.ssh.transport import HMCCLIError
@@ -402,3 +405,225 @@ async def test_resolve_lpar_cli_name_matches_uuid_case_insensitively():
         name = await resolve_lpar_cli_name(make_config(), lpar_uuid, SYSTEM_NAME)
 
     assert name == LPAR_NAME
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("borrowed", [False, True])
+async def test_pair_uses_one_owned_or_existing_session(borrowed):
+    config = make_config()
+    hmc = MagicMock(spec=HMCClient)
+    hmc.config = config
+    hmc.list_system_summaries = AsyncMock(
+        return_value=[{"UUID": SYSTEM_UUID, "SystemName": SYSTEM_NAME}]
+    )
+    hmc.get_logical_partition = AsyncMock(
+        return_value={"Resource": {"PartitionName": LPAR_NAME}}
+    )
+    with patch("hmcpctl.ssh.selectors.HMCClient", return_value=hmc) as factory:
+        hmc.__aenter__.return_value = hmc
+        assert await resolve_ssh_names(
+            hmc if borrowed else config, SYSTEM_UUID, LPAR_UUID
+        ) == (SYSTEM_NAME, LPAR_NAME)
+    assert factory.call_count == (0 if borrowed else 1)
+    assert hmc.__aenter__.await_count == (0 if borrowed else 1)
+    assert hmc.__aexit__.await_count == (0 if borrowed else 1)
+    hmc.list_system_summaries.assert_awaited_once()
+    hmc.get_logical_partition.assert_awaited_once_with(LPAR_UUID)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("system,lpar", [(None, None), (SYSTEM_NAME, LPAR_NAME)])
+async def test_pair_names_need_no_session(system, lpar):
+    with patch("hmcpctl.ssh.selectors.HMCClient") as factory:
+        assert await resolve_ssh_names(make_config(), system, lpar) == (system, lpar)
+    factory.assert_not_called()
+
+
+def _resolver_client():
+    hmc = MagicMock(spec=HMCClient)
+    hmc.config = make_config()
+    hmc.__aenter__.return_value = hmc
+    hmc.list_system_summaries = AsyncMock(
+        return_value=[{"UUID": SYSTEM_UUID, "SystemName": SYSTEM_NAME}]
+    )
+    hmc.get_logical_partition = AsyncMock(
+        return_value={"Resource": {"PartitionName": LPAR_NAME}}
+    )
+    return hmc
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("system_uuid", [False, True])
+async def test_pair_one_uuid_uses_only_required_lookup(system_uuid):
+    hmc = _resolver_client()
+    with patch("hmcpctl.ssh.selectors.HMCClient", return_value=hmc) as factory:
+        assert await resolve_ssh_names(
+            hmc.config,
+            SYSTEM_UUID if system_uuid else SYSTEM_NAME,
+            LPAR_NAME if system_uuid else LPAR_UUID,
+        ) == (SYSTEM_NAME, LPAR_NAME)
+    factory.assert_called_once_with(hmc.config)
+    assert hmc.list_system_summaries.await_count == int(system_uuid)
+    assert hmc.get_logical_partition.await_count == int(not system_uuid)
+    hmc.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["acquisition", "system", "lpar"])
+async def test_pair_transport_fallback_does_not_repeat_lookups(stage):
+    hmc = _resolver_client()
+    lookup = {
+        "acquisition": hmc.__aenter__,
+        "system": hmc.list_system_summaries,
+        "lpar": hmc.get_logical_partition,
+    }[stage]
+    lookup.side_effect = HMCTransportError("unreachable")
+    with (
+        patch("hmcpctl.ssh.selectors.HMCClient", return_value=hmc) as factory,
+        patch(
+            "hmcpctl.ssh.selectors.resolve_system_cli_name",
+            new_callable=AsyncMock,
+            return_value=SYSTEM_NAME,
+        ) as system_cli,
+        patch(
+            "hmcpctl.ssh.selectors.resolve_lpar_cli_name",
+            new_callable=AsyncMock,
+            return_value=LPAR_NAME,
+        ) as lpar_cli,
+    ):
+        assert await resolve_ssh_names(hmc.config, SYSTEM_UUID, LPAR_UUID) == (
+            SYSTEM_NAME,
+            LPAR_NAME,
+        )
+    factory.assert_called_once_with(hmc.config)
+    assert hmc.list_system_summaries.await_count == int(stage != "acquisition")
+    assert hmc.get_logical_partition.await_count == int(stage != "acquisition")
+    if stage in ("acquisition", "system"):
+        system_cli.assert_awaited_once_with(hmc.config, SYSTEM_UUID)
+    else:
+        system_cli.assert_not_awaited()
+    if stage in ("acquisition", "lpar"):
+        lpar_cli.assert_awaited_once_with(hmc.config, LPAR_UUID, SYSTEM_NAME)
+    else:
+        lpar_cli.assert_not_awaited()
+    assert hmc.__aexit__.await_count == int(stage != "acquisition")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["acquisition", "system", "lpar"])
+@pytest.mark.parametrize(
+    "error", [HMCError("status", 500), ValueError("invalid"), asyncio.CancelledError()]
+)
+async def test_pair_nontransport_errors_propagate_and_close(stage, error):
+    hmc = _resolver_client()
+    lookup = {
+        "acquisition": hmc.__aenter__,
+        "system": hmc.list_system_summaries,
+        "lpar": hmc.get_logical_partition,
+    }[stage]
+    lookup.side_effect = error
+    with (
+        patch("hmcpctl.ssh.selectors.HMCClient", return_value=hmc),
+        patch(
+            "hmcpctl.ssh.transport.asyncssh.connect",
+            side_effect=AssertionError("unexpected SSH fallback"),
+        ) as ssh,
+        pytest.raises(type(error)) as raised,
+    ):
+        await resolve_ssh_names(hmc.config, SYSTEM_UUID, LPAR_UUID)
+    assert raised.value is error
+    ssh.assert_not_called()
+    assert hmc.__aexit__.await_count == int(stage != "acquisition")
+
+
+@pytest.mark.asyncio
+async def test_borrowed_fallback_uses_client_destination_without_closing():
+    hmc = _resolver_client()
+    hmc.config = hmc.config.model_copy(update={"host": "other.example.test"})
+    hmc.get_logical_partition.side_effect = HMCTransportError("unreachable")
+    with (
+        patch("hmcpctl.ssh.selectors.HMCClient") as factory,
+        patch(
+            "hmcpctl.ssh.selectors.resolve_lpar_cli_name",
+            new_callable=AsyncMock,
+            return_value=LPAR_NAME,
+        ) as cli,
+    ):
+        assert await resolve_ssh_names(hmc, SYSTEM_UUID, LPAR_UUID) == (
+            SYSTEM_NAME,
+            LPAR_NAME,
+        )
+    cli.assert_awaited_once_with(hmc.config, LPAR_UUID, SYSTEM_NAME)
+    factory.assert_not_called()
+    hmc.__aenter__.assert_not_awaited()
+    hmc.__aexit__.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [HMCError("status", 500), asyncio.CancelledError()])
+async def test_borrowed_error_does_not_close_client(error):
+    hmc = _resolver_client()
+    hmc.get_logical_partition.side_effect = error
+    with (
+        patch("hmcpctl.ssh.selectors.HMCClient") as factory,
+        patch("hmcpctl.ssh.transport.asyncssh.connect") as ssh,
+        pytest.raises(type(error)) as raised,
+    ):
+        await resolve_ssh_names(hmc, SYSTEM_UUID, LPAR_UUID)
+    assert raised.value is error
+    factory.assert_not_called()
+    ssh.assert_not_called()
+    hmc.__aenter__.assert_not_awaited()
+    hmc.__aexit__.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lookup_fallback_failure_is_not_retried_as_acquisition():
+    hmc = _resolver_client()
+    hmc.get_logical_partition.side_effect = HMCTransportError("REST unavailable")
+    error = HMCTransportError("fallback failed")
+    with (
+        patch("hmcpctl.ssh.selectors.HMCClient", return_value=hmc) as factory,
+        patch(
+            "hmcpctl.ssh.selectors.resolve_system_cli_name", new_callable=AsyncMock
+        ) as system_cli,
+        patch(
+            "hmcpctl.ssh.selectors.resolve_lpar_cli_name",
+            new_callable=AsyncMock,
+            side_effect=error,
+        ) as lpar_cli,
+        pytest.raises(HMCTransportError) as raised,
+    ):
+        await resolve_ssh_names(hmc.config, SYSTEM_UUID, LPAR_UUID)
+    assert raised.value is error
+    factory.assert_called_once_with(hmc.config)
+    system_cli.assert_not_awaited()
+    lpar_cli.assert_awaited_once_with(hmc.config, LPAR_UUID, SYSTEM_NAME)
+    hmc.list_system_summaries.assert_awaited_once()
+    hmc.get_logical_partition.assert_awaited_once()
+    hmc.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lpar", [None, LPAR_NAME, LPAR_UUID])
+async def test_single_lpar_preserves_literal_system_scope(lpar):
+    hmc = _resolver_client()
+    hmc.get_logical_partition.side_effect = HMCTransportError("unreachable")
+    with (
+        patch("hmcpctl.ssh.selectors.HMCClient", return_value=hmc) as factory,
+        patch(
+            "hmcpctl.ssh.selectors.resolve_lpar_cli_name",
+            new_callable=AsyncMock,
+            return_value=LPAR_NAME,
+        ) as cli,
+    ):
+        assert await resolve_lpar_name(hmc.config, lpar, SYSTEM_UUID) == (
+            LPAR_NAME if lpar == LPAR_UUID else lpar
+        )
+    hmc.list_system_summaries.assert_not_awaited()
+    if lpar == LPAR_UUID:
+        factory.assert_called_once_with(hmc.config)
+        cli.assert_awaited_once_with(hmc.config, LPAR_UUID, SYSTEM_UUID)
+    else:
+        factory.assert_not_called()
+        cli.assert_not_awaited()

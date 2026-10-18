@@ -36,13 +36,13 @@ from ..affinity.rest import ProvisionAffinityAssessment, validate_affinity_reque
 from ..inventory.capacity import system_capacity
 from ..storage.resources import (
     VolumeGroup,
-    _require_allowlisted_iso_url,
-    _storage_mapping,
-    _volume_group,
+    require_allowlisted_iso_url,
+    storage_mapping,
+    volume_group,
 )
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
-from .provision import _check_vlan_exists
+from .provision import check_vlan_exists
 
 InstallProfile = Literal["ubuntu-26.04.1", "rocky-9.8"]
 INSTALL_PROFILES: tuple[str, ...] = ("ubuntu-26.04.1", "rocky-9.8")
@@ -824,7 +824,9 @@ class _Evaluator:
             blockers.append(_blocker("insufficient_processors", "capacity", text))
         return figures.free_memory_mib, figures.free_proc_units
 
-    async def _name(self, candidate: _Candidate, blockers: list[PlanBlocker]) -> None:
+    async def _check_name_available(
+        self, candidate: _Candidate, blockers: list[PlanBlocker]
+    ) -> None:
         if self.enumerated and not self._admitted(
             PARTITIONS_TOOL, candidate.uuid, None, blockers, "name"
         ):
@@ -848,7 +850,7 @@ class _Evaluator:
                 _blocker("name_exists", "name", text, target=candidate.uuid)
             )
 
-    async def _vlan(
+    async def _check_vlan_exists(
         self, candidate: _Candidate, spelling: str, blockers: list[PlanBlocker]
     ) -> None:
         if not self._admitted(NETWORKS_TOOL, spelling, None, blockers, "vlan"):
@@ -856,7 +858,7 @@ class _Evaluator:
 
         async def missing() -> str | None:
             try:
-                await _check_vlan_exists(
+                await check_vlan_exists(
                     self.hmc, candidate.uuid, self.request.adapters.port_vlan_id
                 )
             except ValueError as exc:
@@ -925,7 +927,7 @@ class _Evaluator:
         if entries is _FAILED:
             return None
         try:
-            return [(_volume_group(entry), _disk_names(entry)) for entry in entries]
+            return [(volume_group(entry), _disk_names(entry)) for entry in entries]
         except HMCError as exc:
             text = f"{VOLUME_GROUPS_TOOL} returned an unreadable group: {exc}"
             blockers.append(
@@ -995,7 +997,7 @@ class _Evaluator:
             pairs.extend(self._qualifying(vios, groups, reasons))
         return (pairs, reasons) if complete else None
 
-    async def _storage(
+    async def _resolve_storage_placement(
         self, candidate: _Candidate, spelling: str, blockers: list[PlanBlocker]
     ) -> _Pair | None:
         """Resolve exactly one (VIOS, volume group) pair, or add the blocker."""
@@ -1022,7 +1024,7 @@ class _Evaluator:
             return None
         return pairs[0]
 
-    async def _mapping(
+    async def _check_storage_unmapped(
         self, pair: _Pair, spelling: str, blockers: list[PlanBlocker]
     ) -> None:
         vios = pair.vios.uuid
@@ -1040,7 +1042,7 @@ class _Evaluator:
         resource = (detail or {}).get("Resource") or {}
         storage = self.request.storage
         for entry in _items(resource.get("VirtualSCSIMappings"), "VirtualSCSIMapping"):
-            mapping = _storage_mapping(entry)
+            mapping = storage_mapping(entry)
             if (mapping.backing_kind, mapping.backing_name) == (
                 storage.kind,
                 storage.storage_name,
@@ -1091,11 +1093,11 @@ class _Evaluator:
     ) -> _Pair | None:
         spelling = candidate.selector or candidate.uuid
         try:
-            await self._name(candidate, blockers)
-            await self._vlan(candidate, spelling, blockers)
-            pair = await self._storage(candidate, spelling, blockers)
+            await self._check_name_available(candidate, blockers)
+            await self._check_vlan_exists(candidate, spelling, blockers)
+            pair = await self._resolve_storage_placement(candidate, spelling, blockers)
             if pair is not None and self.request.storage.capacity_mib is None:
-                await self._mapping(pair, spelling, blockers)
+                await self._check_storage_unmapped(pair, spelling, blockers)
         except _Stalled:
             return None
         return pair
@@ -1197,7 +1199,7 @@ def _request_blockers(hmc: Any, request: PlanRequest) -> list[PlanBlocker]:
         )
     if install is not None and install.media.url is not None:
         try:
-            _require_allowlisted_iso_url(
+            require_allowlisted_iso_url(
                 install.media.url, hmc.config.iso_url_allowlist_entries
             )
         except (ValueError, HMCError):

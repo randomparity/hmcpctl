@@ -650,7 +650,7 @@ async def sweep_raw(
 
 
 async def sweep(out: Path, context: Context) -> str:
-    from live_test_runner import served_client
+    from live_test.runner import served_client
 
     from hmcpctl.client.client_factory import client_from_env
 

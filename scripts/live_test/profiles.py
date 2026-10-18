@@ -11,7 +11,7 @@ from .observation import Assertion
 from .results import field
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 # ---------------------------------------------------------------------------
 # ST4 — LPAR Properties & Profile Inventory

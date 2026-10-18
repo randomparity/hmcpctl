@@ -20,9 +20,7 @@ from ...operations.affinity.ssh import (
     plan_resource_group_memopt_scores,
     plan_system_memopt_score,
 )
-from ...operations.lpar.core import (
-    ProcessorCompatibilityMode,
-)
+from ...operations.lpar.configuration import ProcessorCompatibilityMode
 from ...ssh.affinity import (
     MemoptLparSelector,
     MemoptResourceGroupSelector,
@@ -39,9 +37,9 @@ from ..output import VerbatimTable, console, print_json, terminal_field, usage_e
 from ..runtime import run_cli_coroutine, ssh_config, with_client
 
 
-def _with_ssh_affinity(operation, *args):
+def _with_ssh_affinity(operation, *args, **kwargs):
     """Run an affinity operation directly against SSH configuration."""
-    return run_cli_coroutine(lambda: operation(ssh_config(), *args))
+    return run_cli_coroutine(lambda: operation(ssh_config(), *args, **kwargs))
 
 
 def _memopt_selectors(
@@ -78,7 +76,9 @@ def lpars_memopt_score(
     as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ) -> None:
     """Get an LPAR's current memory-optimization affinity score."""
-    score = _with_ssh_affinity(get_lpar_memopt_score, system_name, lpar_name)
+    score = _with_ssh_affinity(
+        get_lpar_memopt_score, lpar_name, system_name_or_uuid=system_name
+    )
     if as_json:
         print_json(score)
     else:
@@ -97,7 +97,9 @@ def lpars_get_minimum_affinity_policy(
     as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ) -> None:
     """Get an LPAR's minimum-affinity policy when supported."""
-    policy = _with_ssh_affinity(get_minimum_affinity_policy, system_name, lpar_name)
+    policy = _with_ssh_affinity(
+        get_minimum_affinity_policy, lpar_name, system_name_or_uuid=system_name
+    )
     if as_json:
         print_json(asdict(policy))
         return
@@ -356,10 +358,10 @@ def lpars_set_description(
     result = with_client(
         lambda hmc: set_lpar_ownership_description(
             hmc,
-            system_name,
             lpar_name,
             description,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name,
         )
     )
 
@@ -404,10 +406,10 @@ def lpars_set_msp(
     result = with_client(
         lambda hmc: configure_lpar_msp(
             hmc,
-            system_name,
             lpar_name,
             enabled,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name,
         )
     )
 

@@ -34,14 +34,14 @@ from hmcpctl.ssh.profiles import (
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import leaf_text
 
-from . import pcie
+from . import dedicated_pcie
+from .dedicated_pcie import _ABSENCE_REREAD_DELAY_S, partition_not_found
 from .observation import Assertion, CallFailure, judge_create_result
-from .pcie import _ABSENCE_REREAD_DELAY_S, partition_not_found
 from .results import field as result_field
 from .results import resource
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 SUBTASK = 39
 GROUP = "lpar-config"
@@ -264,7 +264,7 @@ async def _dedicated_admitted(client: Client, state: RunState, system: str) -> b
 async def _select_dedicated(
     client: Client, state: RunState, run: _Run
 ) -> _DedicatedProbe | None:
-    arm = pcie._dedicated_config(state.config)
+    arm = dedicated_pcie._dedicated_config(state.config)
     if arm is None or arm.system_name != run.system:
         state.skip(
             SUBTASK,
@@ -314,7 +314,7 @@ async def _select_dedicated(
     eligible = [
         row
         for row in items
-        if pcie._slot_unowned(row)
+        if dedicated_pcie._slot_unowned(row)
         and (arm.drc_index is None or row.get("drc_index") == arm.drc_index)
         and not any(
             slot.drc_index == row.get("drc_index")
@@ -390,7 +390,7 @@ async def _dedicated_inventory(client: Client, state: RunState, run: _Run) -> bo
     ):
         state.record(SUBTASK, "dedicated inventory shape", "FAIL", data)
         return False
-    return pcie._slot_unowned(matches[0])
+    return dedicated_pcie._slot_unowned(matches[0])
 
 
 def _other_profiles(profiles: _ProfileMap, run: _Run) -> _ProfileMap:
@@ -658,7 +658,7 @@ async def _token_of(
 async def _absent(client: Client, state: RunState, run: _Run, name: str) -> bool:
     """Whether *name* answers HSCL8012, read twice unless the first answer is plain.
 
-    The `pcie.name_absent` rule (#906): an SSH view can lag a REST write, so any
+    The `dedicated_pcie.name_absent` rule (#906): an SSH view can lag a REST write, so any
     answer other than HSCL8012 or a readable description is read once more.
     """
 

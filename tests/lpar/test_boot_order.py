@@ -225,6 +225,13 @@ async def test_set_pending_boot_string_escapes_the_value_once(mock_hmc):
             "no LogicalPartition",
         ),
         ({"entry": "<not-xml"}, "not valid XML"),
+        (
+            {
+                "entry": '<!DOCTYPE entry [<!ENTITY unsafe "value">]>'
+                "<entry>&unsafe;</entry>"
+            },
+            "not valid XML",
+        ),
         ({"get_status": 500}, "failed"),
     ],
 )
@@ -286,7 +293,9 @@ async def test_read_lpar_boot_order_returns_strings_from_the_advanced_group():
         "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR),
     ) as resolve:
-        result = await read_lpar_boot_order(hmc, "system-a", "lpar-a")
+        result = await read_lpar_boot_order(
+            hmc, "lpar-a", system_name_or_uuid="system-a"
+        )
 
     assert result == {
         "lpar_uuid": LPAR,
@@ -308,7 +317,9 @@ async def test_read_lpar_boot_order_reports_empty_fields_as_none():
         "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR),
     ):
-        result = await read_lpar_boot_order(hmc, "system-a", "lpar-a")
+        result = await read_lpar_boot_order(
+            hmc, "lpar-a", system_name_or_uuid="system-a"
+        )
 
     assert result["pending_boot_string"] is None
     assert result["boot_device_list"] is None
@@ -327,7 +338,7 @@ async def test_read_lpar_boot_order_rejects_missing_lpar():
         ),
         pytest.raises(ValueError, match="LPAR 'missing' not found"),
     ):
-        await read_lpar_boot_order(hmc, "system-a", "missing")
+        await read_lpar_boot_order(hmc, "missing", system_name_or_uuid="system-a")
 
 
 @pytest.mark.asyncio
@@ -342,7 +353,9 @@ async def test_set_lpar_boot_order_validates_before_authorizing():
         ),
         pytest.raises(ValueError, match="Invalid boot device path"),
     ):
-        await set_lpar_boot_order(hmc, "system-1", "lpar-1", ["cd", "disk"])
+        await set_lpar_boot_order(
+            hmc, "lpar-1", ["cd", "disk"], system_name_or_uuid="system-1"
+        )
 
     authorize.assert_not_awaited()
     hmc.set_pending_boot_string.assert_not_awaited()
@@ -365,11 +378,19 @@ async def test_set_lpar_boot_order_authorizes_then_writes_the_joined_paths():
         side_effect=authorize,
     ):
         result = await set_lpar_boot_order(
-            hmc, "system-1", "lpar-1", [DISK, LAN], ownership_override=True
+            hmc,
+            "lpar-1",
+            [DISK, LAN],
+            ownership_override=True,
+            system_name_or_uuid="system-1",
         )
 
     assert events == [
-        ("authorize", ("system-1", "lpar-1"), {"ownership_override": True}),
+        (
+            "authorize",
+            ("lpar-1",),
+            {"ownership_override": True, "system_name_or_uuid": "system-1"},
+        ),
         ("write", LPAR, f"{DISK} {LAN}"),
     ]
     assert result == {"Resource": {"UUID": LPAR}}
@@ -386,10 +407,10 @@ async def test_clear_lpar_boot_order_refuses_after_authorization():
         ) as authorize,
         pytest.raises(HMCError, match="REST0126") as exc_info,
     ):
-        await clear_lpar_boot_order(hmc, "system-1", "lpar-1")
+        await clear_lpar_boot_order(hmc, "lpar-1", system_name_or_uuid="system-1")
 
     authorize.assert_awaited_once_with(
-        hmc, "system-1", "lpar-1", ownership_override=False
+        hmc, "lpar-1", ownership_override=False, system_name_or_uuid="system-1"
     )
     assert hmc.mock_calls == []
     assert exc_info.value.status_code is None
@@ -412,7 +433,7 @@ async def test_set_lpar_boot_order_translates_hmc_not_acceptable():
         ),
         pytest.raises(HMCError, match="Not Acceptable") as exc_info,
     ):
-        await set_lpar_boot_order(hmc, "system-1", "lpar-1", [DISK])
+        await set_lpar_boot_order(hmc, "lpar-1", [DISK], system_name_or_uuid="system-1")
 
     assert exc_info.value.status_code == 406
     assert exc_info.value.body == body

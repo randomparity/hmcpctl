@@ -361,6 +361,7 @@ def test_empty_result_reply_is_no_resource_groups():
 
 
 def test_shared_operation_resolves_system_and_defaults_to_all():
+    hmc = _hmc()
     query = AsyncMock(
         return_value=type("Query", (), {"items": [], "unavailable_reason": None})()
     )
@@ -373,10 +374,10 @@ def test_shared_operation_resolves_system_and_defaults_to_all():
             "hmcpctl.operations.affinity.ssh.query_resource_group_memopt_scores", query
         ),
     ):
-        result = asyncio.run(list_resource_group_memopt_scores(_hmc(), "system-uuid"))
+        result = asyncio.run(list_resource_group_memopt_scores(hmc, "system-uuid"))
     assert result.capability == "available"
     assert result.selector == MemoptResourceGroupSelector(all=True)
-    resolve.assert_awaited_once_with(_config(), "system-uuid", None)
+    resolve.assert_awaited_once_with(hmc, "system-uuid", None)
     query.assert_awaited_once_with(
         _config(),
         "resolved-system",

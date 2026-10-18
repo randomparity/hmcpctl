@@ -130,6 +130,7 @@ def metric_links(feed_xml: str) -> list[dict[str, str]]:
     range), never a parse failure.
 
     Raises:
+        ValueError: If an entry has no selected first link with a nonblank href.
         ET.ParseError: If *feed_xml* is malformed — propagated so callers
             surface the failure instead of mistaking it for "no metrics".
     """
@@ -139,16 +140,16 @@ def metric_links(feed_xml: str) -> list[dict[str, str]]:
         link = entry.find(f"{ATOM}link")
         updated = entry.find(f"{ATOM}updated")
         title = entry.find(f"{ATOM}title")
-        if link is not None and link.get("href"):
-            links.append(
-                {
-                    "link": link.get("href") or "",
-                    "updated": (updated.text or "").strip()
-                    if updated is not None
-                    else "",
-                    "title": (title.text or "").strip() if title is not None else "",
-                }
-            )
+        href = link.get("href") if link is not None else None
+        if href is None or not href.strip():
+            raise ValueError("PCM entry requires a first link with a nonblank href")
+        links.append(
+            {
+                "link": href,
+                "updated": (updated.text or "").strip() if updated is not None else "",
+                "title": (title.text or "").strip() if title is not None else "",
+            }
+        )
     return links
 
 

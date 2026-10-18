@@ -223,7 +223,18 @@ def test_pcm_preferences_update_refuses_a_slice_that_loses_its_namespace():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("read", [httpx.Response(204), httpx.Response(200, text="<x>")])
+@pytest.mark.parametrize(
+    "read",
+    [
+        httpx.Response(204),
+        httpx.Response(200, text="<x>"),
+        httpx.Response(
+            200,
+            text='<!DOCTYPE preferences [<!ENTITY unsafe "value">]>'
+            "<preferences>&unsafe;</preferences>",
+        ),
+    ],
+)
 async def test_set_pcm_preferences_unusable_read_posts_nothing(mock_hmc, read):
     """An empty or malformed read is an HMCError naming the GET; nothing is posted."""
     path = (
@@ -304,6 +315,74 @@ def test_metric_links():
     assert len(links) == 2
     assert links[0]["link"].endswith("_1.json")
     assert links[1]["updated"] == "2026-08-07T12:00:30Z"
+
+
+@pytest.mark.parametrize(
+    "selected_link", ["", "<link/>", '<link href=""/>', '<link href="   "/>']
+)
+@pytest.mark.parametrize("mixed", [False, True])
+def test_metric_links_rejects_incomplete_entry(selected_link, mixed):
+    valid = '<entry><link href="/valid.json"/></entry>' if mixed else ""
+    feed = (
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        f'{valid}<entry>{selected_link}<link href="/fallback.json"/></entry></feed>'
+    )
+    # A genuinely absent first link needs no fallback; invalid first links must
+    # not be rescued by the valid second link.
+    if not selected_link:
+        feed = feed.replace('<link href="/fallback.json"/>', "")
+    with pytest.raises(ValueError, match="PCM.*entry.*link.*href"):
+        metric_links(feed)
+
+
+def test_metric_links_preserves_selected_href_and_metadata():
+    feed = """<feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><link rel="alternate" href=" /first.json?x=1&amp;y=2 "/>
+        <link rel="SELF" href="/second.json"/>
+        <updated> 2026-08-07T12:00:00Z </updated><title> first </title></entry>
+      <entry><link href="/last.json"/></entry>
+    </feed>"""
+    assert metric_links(feed) == [
+        {
+            "link": " /first.json?x=1&y=2 ",
+            "updated": "2026-08-07T12:00:00Z",
+            "title": "first",
+        },
+        {"link": "/last.json", "updated": "", "title": ""},
+    ]
+    assert metric_links(EMPTY_FEED) == []
+
+
+@pytest.mark.parametrize(
+    "selected_link", ["", "<link/>", '<link href=""/>', '<link href="   "/>']
+)
+@pytest.mark.parametrize("mixed", [False, True])
+def test_processed_metrics_rejects_incomplete_feed_without_fetch(
+    monkeypatch, mock_hmc, selected_link, mixed
+):
+    _hmc_env(monkeypatch)
+    valid = '<entry><link href="/valid.json"/></entry>' if mixed else ""
+    feed = (
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        f"{valid}<entry>{selected_link}</entry></feed>"
+    )
+    _route_metrics_feed(
+        mock_hmc,
+        "ManagedSystem",
+        "00000000-0000-0000-0000-000000000001",
+        "ProcessedMetrics",
+        text=feed,
+    )
+    document = mock_hmc.get("/valid.json").mock(
+        return_value=httpx.Response(200, json=METRICS_JSON)
+    )
+    with pytest.raises(ValueError, match="PCM.*entry.*link.*href"):
+        hmc_processed_metrics(
+            "ManagedSystem",
+            "00000000-0000-0000-0000-000000000001",
+            "2026-08-07T11:00:00Z",
+        )
+    assert document.call_count == 0
 
 
 def test_metric_links_parse_the_captured_system_feed():

@@ -836,6 +836,24 @@ async def test_max_bytes_bound_truncates_to_a_safe_boundary():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
+async def test_console_system_selector_requires_keyword(monkeypatch):
+    from hmcpctl.operations.lpar import console as lpar_console
+
+    resolve = AsyncMock(side_effect=AssertionError("selector resolution reached"))
+    monkeypatch.setattr(lpar_console, "resolve_system_uuid", resolve)
+    with pytest.raises(TypeError):
+        await lpar_console.capture_lpar_console_by_selector(
+            object(),
+            "aix-db",
+            "system-a",
+            duration_seconds=1,
+            max_bytes=1024,
+            idle_timeout_seconds=1,
+        )
+    resolve.assert_not_awaited()
+
+
 def test_capture_tool_result_carries_contract_fields():
     from hmcpctl.server import TOOL_SECURITY
 
@@ -1794,8 +1812,9 @@ async def test_read_timeout_during_reconnect_keeps_the_gap():
             finish.set()
             reconnect = session._reconnect_task
             assert reconnect is not None
-            while not reconnect.done():
-                await asyncio.sleep(0)
+            async with asyncio.timeout(5):
+                while not reconnect.done():
+                    await asyncio.sleep(0)
             with pytest.raises(RuntimeError):
                 await session.suspend()  # the unread gap comes first
             assert await asyncio.wait_for(session.read(), 5) == KEEPALIVE_GAP
@@ -1926,8 +1945,9 @@ async def test_reader_cancelled_as_reconnect_completes_keeps_the_gap():
             reconnect = session._reconnect_task
             assert reconnect is not None
             finish.set()
-            while not reconnect.done():
-                await asyncio.sleep(0)
+            async with asyncio.timeout(5):
+                while not reconnect.done():
+                    await asyncio.sleep(0)
             reading.cancel()  # the consumer's timeout lands in the same tick
             with pytest.raises(asyncio.CancelledError):
                 await reading

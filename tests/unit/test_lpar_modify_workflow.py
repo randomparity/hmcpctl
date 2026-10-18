@@ -50,11 +50,11 @@ async def test_modify_lpar_returns_rename_when_resource_update_fails(monkeypatch
 
     result = await modify_lpar(
         hmc,
-        "system-1",
         "lpar-1",
         LparResources(desired_memory=8192),
         LparPcieAssignments(),
         new_name="renamed",
+        system_name_or_uuid="system-1",
     )
 
     assert result.workflow_completed is False
@@ -85,10 +85,10 @@ async def test_modify_lpar_propagates_resource_failure_without_partial_state(
     with pytest.raises(HMCError, match="resource update failed"):
         await modify_lpar(
             hmc,
-            "system-1",
             "lpar-1",
             LparResources(desired_memory=8192),
             LparPcieAssignments(),
+            system_name_or_uuid="system-1",
         )
 
 
@@ -107,10 +107,10 @@ async def test_modify_lpar_refuses_memory_above_the_system_bound(monkeypatch):
     with pytest.raises(ValueError, match="exceeds the managed system's configurable"):
         await modify_lpar(
             hmc,
-            "system-1",
             "lpar-1",
             LparResources(desired_memory=8192),
             LparPcieAssignments(),
+            system_name_or_uuid="system-1",
         )
 
     hmc.update_logical_partition.assert_not_awaited()
@@ -144,10 +144,10 @@ async def test_modify_lpar_preserves_steps_when_final_readback_fails(monkeypatch
 
     result = await modify_lpar(
         hmc,
-        "system-1",
         "lpar-1",
         LparResources(),
         LparPcieAssignments(),
+        system_name_or_uuid="system-1",
     )
 
     assert result.workflow_completed is True
@@ -178,10 +178,10 @@ async def test_modify_lpar_warns_when_the_profile_did_not_change(
 
     result = await modify_lpar(
         hmc,
-        None,
         "lpar-1",
         LparResources(desired_memory=3072),
         LparPcieAssignments(),
+        system_name_or_uuid=None,
     )
 
     assert bool(result.warnings) is warned

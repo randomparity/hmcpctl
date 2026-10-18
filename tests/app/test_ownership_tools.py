@@ -173,10 +173,10 @@ def test_create_lpar_applies_validated_sriov_assignment(monkeypatch):
 
     assigned.assert_awaited_once_with(
         ANY,
-        SYSTEM_UUID,
         "test-lpar",
         InventorySelector("1", "2", "3"),
         Decimal(5),
+        system_name_or_uuid=SYSTEM_UUID,
         profile_name="default",
         ownership_override=False,
     )

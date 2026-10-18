@@ -59,9 +59,10 @@ def test_add_vnic_builds_typed_selector(monkeypatch) -> None:
     )
 
     args = operation.await_args.args
-    assert args[1:3] == ("system", "lpar")
-    assert args[3] == VnicBackingSelector("vios1", "2", "1", "0", Decimal("20.25"))
-    assert args[4] == 100
+    assert args[1] == "lpar"
+    assert operation.await_args.kwargs["system_name_or_uuid"] == "system"
+    assert args[2] == VnicBackingSelector("vios1", "2", "1", "0", Decimal("20.25"))
+    assert args[3] == 100
     assert result["slot_num"] == "4"
     assert result["changed"] is True
 
@@ -89,7 +90,10 @@ def test_add_vnic_forwards_ownership_override(monkeypatch) -> None:
         ownership_override=True,
     )
 
-    assert operation.await_args.kwargs == {"ownership_override": True}
+    assert operation.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": "system",
+    }
 
 
 def test_add_vnic_partial_error_retains_serialized_result(monkeypatch) -> None:
@@ -127,8 +131,11 @@ def test_remove_vnic_uses_slot_num(monkeypatch) -> None:
 
     result = hmc_remove_vnic("system", "lpar", slot_num="4")
 
-    assert operation.await_args.args[1:] == ("system", "lpar", "4")
-    assert operation.await_args.kwargs == {"ownership_override": False}
+    assert operation.await_args.args[1:] == ("lpar", "4")
+    assert operation.await_args.kwargs == {
+        "ownership_override": False,
+        "system_name_or_uuid": "system",
+    }
     assert result["operation"] == "remove"
 
 
@@ -147,4 +154,7 @@ def test_remove_vnic_forwards_ownership_override(monkeypatch) -> None:
 
     hmc_remove_vnic("system", "lpar", slot_num="4", ownership_override=True)
 
-    assert operation.await_args.kwargs == {"ownership_override": True}
+    assert operation.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": "system",
+    }

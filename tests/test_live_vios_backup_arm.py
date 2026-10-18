@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import importlib.util
 import inspect
 import json
 import shlex
@@ -18,14 +17,11 @@ import pytest
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 import live_test_recovery as recovery  # noqa: E402
-from live_test import vios_backup  # noqa: E402
-
-_SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-runner = sys.modules.get(_SPEC.name) or importlib.util.module_from_spec(_SPEC)
-if _SPEC.name not in sys.modules:
-    sys.modules[_SPEC.name] = runner
-    _SPEC.loader.exec_module(runner)
+from live_test import config as live_config  # noqa: E402
+from live_test import (  # noqa: E402
+    runner,
+    vios_backup,
+)
 
 SYSTEM = "acmesys9"
 LPAR = "acmesys9-lp3"
@@ -209,7 +205,7 @@ def _state(monkeypatch, vios: FakeVios, group: str | None = "vios-backup"):
     monkeypatch.setattr(vios_backup, "RESTORE_WAIT_SECONDS", 0)
     monkeypatch.setattr(vios_backup, "POLL_SECONDS", 0)
     monkeypatch.setenv("HMC_SSH_TIMEOUT", str(vios_backup.MIN_SSH_TIMEOUT))
-    config = runner.LiveTestConfig(system_name=SYSTEM, lp3_name=LPAR)
+    config = live_config.LiveTestConfig(system_name=SYSTEM, lp3_name=LPAR)
     return runner.RunState(config=config, group=group)
 
 
@@ -583,16 +579,8 @@ def test_every_kept_backup_reads_as_off_baseline_in_recovery(
         recovery.guard_read_only(tool, arguments)
         return vios.answer(tool, arguments)
 
-    async def checks(
-        pcie,
-        partition,
-        inputs,
-        network_inputs=None,
-        users=False,
-        lpar_config=None,
-        lpar_power=None,
-        round2=None,
-    ):
+    async def checks(checks, *, users=False):
+        inputs = dict(checks).get(recovery.check_vios_backup)
         return await recovery.check_vios_backup(read_only, inputs)
 
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)

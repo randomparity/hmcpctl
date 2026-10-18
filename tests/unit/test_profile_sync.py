@@ -238,20 +238,26 @@ def _operations():
     return [
         (
             "add_network_adapter",
-            lambda h: adapters.add_network_adapter(h, None, LPAR_UUID, 1),
+            lambda h: adapters.add_network_adapter(
+                h, LPAR_UUID, 1, system_name_or_uuid=None
+            ),
         ),
         (
             "add_vscsi_adapter",
-            lambda h: adapters.add_vscsi_adapter(h, None, LPAR_UUID, 1, 2),
+            lambda h: adapters.add_vscsi_adapter(
+                h, LPAR_UUID, 1, 2, system_name_or_uuid=None
+            ),
         ),
         (
             "add_vfc_adapter",
-            lambda h: adapters.add_vfc_adapter(h, None, LPAR_UUID, 1, 2),
+            lambda h: adapters.add_vfc_adapter(
+                h, LPAR_UUID, 1, 2, system_name_or_uuid=None
+            ),
         ),
         (
             "delete_adapter",
             lambda h: adapters.delete_adapter(
-                h, None, LPAR_UUID, "ClientNetworkAdapter", "a"
+                h, LPAR_UUID, "ClientNetworkAdapter", "a", system_name_or_uuid=None
             ),
         ),
         (
@@ -344,6 +350,6 @@ async def test_a_failed_partition_read_stops_the_write(monkeypatch):
     hmc.get_logical_partition.side_effect = HMCError("GET partition failed", 500)
 
     with pytest.raises(HMCError):
-        await add_vscsi_adapter(hmc, None, LPAR_UUID, 1, 2)
+        await add_vscsi_adapter(hmc, LPAR_UUID, 1, 2, system_name_or_uuid=None)
 
     hmc.add_vscsi_adapter.assert_not_awaited()

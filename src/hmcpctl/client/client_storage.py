@@ -980,17 +980,11 @@ class StorageMixin:
         we fall back to appending at the end.
         """
         children = list(vg_elem)
-        pvs_tag = f"{{{_UOM_NS}}}PhysicalVolumes"
-        max_lv_tag = f"{{{_UOM_NS}}}MaximumLogicalVolumes"
-
-        def _local(tag: str) -> str:
-            return tag.split("}")[-1]
-
         insert_at = next(
             (
                 i
                 for i, child in enumerate(children)
-                if child.tag == pvs_tag or _local(child.tag) == "PhysicalVolumes"
+                if localname(child.tag) == "PhysicalVolumes"
             ),
             None,
         )
@@ -999,8 +993,7 @@ class StorageMixin:
                 (
                     i + 1
                     for i, child in enumerate(children)
-                    if child.tag == max_lv_tag
-                    or _local(child.tag) == "MaximumLogicalVolumes"
+                    if localname(child.tag) == "MaximumLogicalVolumes"
                 ),
                 None,
             )
@@ -1093,13 +1086,11 @@ class StorageMixin:
         opt_media_tag = f"{{{_UOM_NS}}}OpticalMedia"
         opt_media = vmlib.find(opt_media_tag)
         if opt_media is None:
-            repo_name_tag = f"{{{_UOM_NS}}}RepositoryName"
             repo_name_idx = next(
                 (
                     i
                     for i, c in enumerate(list(vmlib))
-                    if c.tag == repo_name_tag
-                    or c.tag.split("}")[-1] == "RepositoryName"
+                    if localname(c.tag) == "RepositoryName"
                 ),
                 None,
             )
@@ -1213,11 +1204,12 @@ class StorageMixin:
     async def get_media_repository(
         self: StorageClient, vios_uuid: str, vg_uuid: str
     ) -> dict[str, Any] | None:
-        """Get the Virtual Media Repository (VMLibrary) from a Volume Group.
+        """Get the VolumeGroup Atom entry containing a Virtual Media Repository.
 
-        Returns the repository with capacity (RepositorySize, in GiB) and optionally
-        embedded VirtualOpticalMedia entries if present. Returns None if the
-        Volume Group does not exist or has no media repository.
+        The repository is nested at ``Resource.MediaRepositories.VirtualMediaRepository``.
+        Its ``RepositorySize`` is in GiB; optional media entries are nested under
+        ``OpticalMedia.VirtualOpticalMedia`` within the repository. Returns None when
+        no repository-bearing VolumeGroup entry is available.
         """
         path = f"/rest/api/uom/VirtualIOServer/{vios_uuid}/VolumeGroup/{vg_uuid}"
         try:

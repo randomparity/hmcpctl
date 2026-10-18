@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from defusedxml import ElementTree as DET
+from defusedxml.common import DefusedXmlException
 
 from ..errors import HMCError
 from ..xmlutil import localname
@@ -58,11 +59,27 @@ class LparsMixin:
     async def get_logical_partition(
         self: LparsClient, uuid: str
     ) -> dict[str, Any] | None:
+        """Get one LogicalPartition using the ``get_uom`` empty-success/error contract.
+
+        None means an empty successful response or no parsed entries; HTTP 404
+        and other statuses outside 200/204 raise HMCError.
+        """
         return await self.get_uom("LogicalPartition", uuid)
 
     async def find_partition_by_name(
         self: LparsClient, name: str, system_uuid: str | None = None
     ) -> dict[str, Any] | None:
+        """Find an LPAR by exact PartitionName, optionally within one system.
+
+        Returns:
+            The matching entry, or None for confirmed absence in the searched scope.
+            An unscoped miss is confirmed only when every system is readable.
+
+        Raises:
+            ValueError: The name is ambiguous or its candidates cannot be identified.
+            HMCError: A transport/API request fails, or unreadable system inventory
+                prevents confirming an unscoped miss.
+        """
         if system_uuid:
             entries = await self.list_logical_partitions(system_uuid)
             results = [
@@ -181,7 +198,7 @@ class LparsMixin:
         ET.register_namespace("atom", _ATOM_NS)
         try:
             root = DET.fromstring(got.text)
-        except DET.ParseError as exc:
+        except (DET.ParseError, DefusedXmlException) as exc:
             raise HMCError(
                 f"GET {path} response is not valid XML", 200, got.text[:500]
             ) from exc

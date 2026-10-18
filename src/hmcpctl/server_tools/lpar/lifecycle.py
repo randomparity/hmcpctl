@@ -11,17 +11,16 @@ from ...client.core import HMCClient
 from ...documents.lpar import LparResources
 from ...jobs import BootMode, PowerOnKeylock, PowerOnOperationType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
+from ...operations.lpar.activation import (
+    LparPowerOnOutcome,
+    power_off_lpar,
+    power_on_lpar,
+)
 from ...operations.lpar.assignments import (
     LparPcieAssignments,
     LparPcieWorkflowResult,
 )
-from ...operations.lpar.core import (
-    LparPowerOnOutcome,
-    delete_lpar,
-    power_lpar,
-    power_on_lpar,
-    rename_lpar,
-)
+from ...operations.lpar.core import delete_lpar, rename_lpar
 from ...operations.lpar.decommission import DecommissionResult, decommission_lpar
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
 from ...tool_registry import tool_module
@@ -83,11 +82,11 @@ def hmc_modify_lpar(
     return with_client(
         lambda hmc: modify_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             resources,
             assignments,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -118,9 +117,9 @@ def hmc_rename_lpar(
     async def renamed(hmc):
         _, updated = await rename_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             new_name,
+            system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         )
         return updated
@@ -168,10 +167,10 @@ def hmc_dlpar_proc(
     return with_client(
         lambda hmc: set_lpar_processors(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             resources,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -211,10 +210,10 @@ def hmc_dlpar_mem(
     return with_client(
         lambda hmc: set_lpar_memory(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             resources,
             ownership_override=ownership_override,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -257,8 +256,8 @@ def hmc_delete_lpar(
     async def delete_lpar_and_confirm(hmc):
         lpar_uuid = await delete_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         )
         return f"Deleted LPAR {lpar_uuid}"
@@ -320,13 +319,13 @@ def hmc_decommission_lpar(
     return with_client(
         lambda hmc: decommission_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             dry_run=dry_run,
             ownership_override=ownership_override,
             immediate=immediate,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
+            system_name_or_uuid=system_name_or_uuid,
         ),
         profile=profile,
     )
@@ -351,7 +350,7 @@ def hmc_power_on_lpar(
     """Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection.
 
     lpar_name_or_uuid: accepts either a PartitionName or a UUID
-    (find it with hmc_list_lpars). Returns ``already_running``, nullable ``job``,
+    (find it with hmc_list_lpars). Returns ``already_activated``, nullable ``job``,
     and nullable ``message`` fields. A submitted job is in ``job``; check it
     with hmc_get_job. This changes the state of a real partition — confirm the
     target with hmc_get_lpar(lpar_name_or_uuid=...) before calling.
@@ -368,7 +367,7 @@ def hmc_power_on_lpar(
 
     The HMC accepts PowerOn only from the 'not activated' state. If the
     partition is already activated — 'running', 'starting' or 'open firmware' —
-    ``already_running`` is true, ``job`` is null, and ``message`` names the
+    ``already_activated`` is true, ``job`` is null, and ``message`` names the
     state and explains that no job was submitted. Any other state is refused
     with an error naming it, and no job is submitted. Pass force=True to skip
     this check and submit PowerOn unconditionally; the HMC then fails the job
@@ -498,11 +497,10 @@ def hmc_power_off_lpar(
     """
 
     async def power_off_job(hmc: HMCClient) -> dict[str, Any] | None:
-        result = await power_lpar(
+        result = await power_off_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
-            power_on=False,
+            system_name_or_uuid=system_name_or_uuid,
             immediate=immediate,
             wait=wait,
             timeout_seconds=timeout_seconds,
@@ -550,11 +548,10 @@ def hmc_dump_restart_lpar(
     """
 
     async def dump_restart_job(hmc: HMCClient) -> dict[str, Any] | None:
-        result = await power_lpar(
+        result = await power_off_lpar(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
-            power_on=False,
+            system_name_or_uuid=system_name_or_uuid,
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,

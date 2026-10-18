@@ -88,7 +88,13 @@ def _run(action, mode="graceful", *, continuation="none", request_id="r1", **ext
         "hmc_power_lpar", "agent-a", "<default>", "hmc.test", request_id, arguments
     )
     body = power.power_body(action, mode, "sysA", "web1")
-    return engine.submit(request, body, continuation=continuation, wait_seconds=10)
+    return engine.submit(
+        request,
+        body,
+        continuation=continuation,
+        wait_seconds=10,
+        classifiers=power.POWER_CLASSIFIERS,
+    )
 
 
 def _end(record):
@@ -188,7 +194,9 @@ def test_unknown_partition_fails_without_echoing_the_selector(hmc):
         {**ARGS, "action": "start"},
     )
     body = power.power_body("start", "graceful", "sysA", "secret-name")
-    record = engine.submit(request, body, wait_seconds=10)
+    record = engine.submit(
+        request, body, wait_seconds=10, classifiers=power.POWER_CLASSIFIERS
+    )
     assert _end(record) == ("terminal", "failed")
     assert "secret-name" not in record.warnings[0]
     assert "no partition" in record.warnings[0]
@@ -397,7 +405,9 @@ def test_the_guard_is_keyed_by_the_canonical_system_uuid(hmc):
         {**ARGS, "action": "restart", "mode": "immediate"},
     )
     body = power.power_body("restart", "immediate", SYS.upper(), LPAR.upper())
-    record = engine.submit(other, body, wait_seconds=10)
+    record = engine.submit(
+        other, body, wait_seconds=10, classifiers=power.POWER_CLASSIFIERS
+    )
     assert _end(record) == ("terminal", "failed")
     assert "partition_busy" in record.warnings[0]
     assert len(hmc.submits) == 1

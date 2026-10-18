@@ -15,7 +15,7 @@ VG_ENTRY_WITHOUT_REPO = live_fixture("rest-volume-group")["body"]
 
 @pytest.mark.asyncio
 async def test_get_media_repository(mock_hmc):
-    """get_media_repository returns the repository with capacity and media."""
+    """get_media_repository returns a VolumeGroup entry containing capacity and media."""
     route = mock_hmc.get(
         "/rest/api/uom/VirtualIOServer/11111111-1111-1111-1111-111111111111/VolumeGroup/22222222-2222-2222-2222-222222220001"
     ).mock(return_value=httpx.Response(200, text=VG_ENTRY_WITH_REPO))

@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from conftest import live_fixture, live_response, mock_system_summaries
+from fastmcp import Client
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
 from hmcpctl.authorization.dispatch_scope import dispatch_authorizer
@@ -360,7 +361,7 @@ def test_vios_backup_and_restore_schemas_pin_the_supported_contracts():
 
 
 def test_parameter_normalization_contract_is_schema_pinned():
-    from hmcpctl.operations.lpar.core import PROCESSOR_COMPATIBILITY_MODES
+    from hmcpctl.operations.lpar.configuration import PROCESSOR_COMPATIBILITY_MODES
     from hmcpctl.operations.metrics.pcm import PCM_CATEGORIES
     from hmcpctl.operations.partition_state import PARTITION_STATES
 
@@ -646,19 +647,7 @@ def test_wait_for_job_has_one_stable_output_schema():
             "null",
         }
 
-    assert by_name["hmc_get_job"].output_schema == {
-        "properties": {
-            "result": {
-                "anyOf": [
-                    {"additionalProperties": True, "type": "object"},
-                    {"type": "null"},
-                ]
-            }
-        },
-        "required": ["result"],
-        "type": "object",
-        "x-fastmcp-wrap-result": True,
-    }
+    assert by_name["hmc_get_job"].output_schema == schema
 
 
 def test_lpm_recovery_tools_have_standard_wait_contract():
@@ -719,7 +708,10 @@ def test_delete_lpar_refuses_when_active(monkeypatch, mock_hmc):
     assert exc_info.value.status_code == 409
     assert "not activated" in str(exc_info.value)
     assert not delete_route.called
-    assert guard.await_args.kwargs == {"ownership_override": True}
+    assert guard.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": SYSTEM_UUID,
+    }
 
 
 def test_delete_lpar_succeeds_when_powered_off(monkeypatch, mock_hmc):
@@ -733,7 +725,10 @@ def test_delete_lpar_succeeds_when_powered_off(monkeypatch, mock_hmc):
         result = hmc_delete_lpar(SYSTEM_UUID, LPAR_UUID, ownership_override=True)
 
     assert result == f"Deleted LPAR {LPAR_UUID}"
-    assert guard.await_args.kwargs == {"ownership_override": True}
+    assert guard.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": SYSTEM_UUID,
+    }
 
 
 VIOS_UUID = "00000005-ABCD-4EF0-8ABC-000000000005"
@@ -825,26 +820,27 @@ def _affinity_request() -> ProvisionAffinityAssessment:
     )
 
 
-def test_power_on_lpar_already_running_returns_message(monkeypatch, mock_hmc):
-    """The already-running path returns the stable PowerOn outcome."""
+@pytest.mark.parametrize("state", ["running", "starting", "open firmware"])
+def test_power_on_lpar_already_activated_returns_message(monkeypatch, mock_hmc, state):
+    """Every activated state returns the stable PowerOn outcome."""
     from hmcpctl.server_tools.lpar.lifecycle import (
         hmc_power_on_lpar,
     )
 
     _hmc_env(monkeypatch)
-    power_on_route = _mock_power_on_guard(mock_hmc, "running")
+    power_on_route = _mock_power_on_guard(mock_hmc, state)
 
     result = hmc_power_on_lpar(LPAR_UUID)
 
     assert not power_on_route.called
     assert set(asdict(result)) == {
-        "already_running",
+        "already_activated",
         "job",
         "message",
         "affinity_assessment",
         "warnings",
     }
-    assert result.already_running is True
+    assert result.already_activated is True
     assert result.job is None
     assert isinstance(result.message, str)
     assert LPAR_UUID in result.message
@@ -865,13 +861,13 @@ def test_power_on_lpar_not_activated_submits_job(monkeypatch, mock_hmc):
 
     assert power_on_route.called
     assert set(asdict(result)) == {
-        "already_running",
+        "already_activated",
         "job",
         "message",
         "affinity_assessment",
         "warnings",
     }
-    assert result.already_running is False
+    assert result.already_activated is False
     assert result.job["Resource"]["JobID"] == "job-uuid-power-on"
     assert result.message is None
     assert result.affinity_assessment.status == "skipped"
@@ -882,14 +878,14 @@ def test_power_on_lpar_has_one_stable_output_schema():
 
     assert schema["type"] == "object"
     assert set(schema["properties"]) == {
-        "already_running",
+        "already_activated",
         "job",
         "message",
         "affinity_assessment",
         "warnings",
     }
     assert set(schema["required"]) == set(schema["properties"])
-    assert schema["properties"]["already_running"] == {"type": "boolean"}
+    assert schema["properties"]["already_activated"] == {"type": "boolean"}
     assert {variant["type"] for variant in schema["properties"]["job"]["anyOf"]} == {
         "object",
         "null",
@@ -898,6 +894,35 @@ def test_power_on_lpar_has_one_stable_output_schema():
         variant["type"] for variant in schema["properties"]["message"]["anyOf"]
     } == {"string", "null"}
     assert schema["properties"]["warnings"]["type"] == "array"
+
+
+@pytest.mark.parametrize(
+    "state", ["running", "starting", "open firmware", "not activated"]
+)
+def test_power_on_lpar_mcp_wire_uses_activated_marker(monkeypatch, mock_hmc, state):
+    _hmc_env(monkeypatch)
+    route = _mock_power_on_guard(mock_hmc, state)
+
+    async def call():
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            properties = tools["hmc_power_on_lpar"].output_schema["properties"]
+            assert "already_activated" in properties
+            assert "already_running" not in properties
+            result = await client.call_tool(
+                "hmc_power_on_lpar", {"lpar_name_or_uuid": LPAR_UUID}
+            )
+            return result.structured_content
+
+    data = asyncio.run(call())
+    submitted = state == "not activated"
+    assert data["already_activated"] is not submitted
+    assert "already_running" not in data
+    assert route.called is submitted
+    if submitted:
+        assert data["job"]["Resource"]["JobID"] == "job-uuid-power-on"
+    else:
+        assert data["job"] is None
 
 
 def test_power_on_lpar_force_skips_guard(monkeypatch, mock_hmc):
@@ -915,7 +940,7 @@ def test_power_on_lpar_force_skips_guard(monkeypatch, mock_hmc):
     result = hmc_power_on_lpar(LPAR_UUID, force=True)
 
     assert power_on_route.called
-    assert result.already_running is False
+    assert result.already_activated is False
     assert result.job["Resource"]["JobID"] == "job-uuid-power-on"
     assert result.message is None
 
@@ -965,7 +990,7 @@ def test_power_on_lpar_already_running_assessment_does_not_measure(
         affinity_assessment=_affinity_request(),
     )
 
-    assert result.already_running is True
+    assert result.already_activated is True
     assert result.affinity_assessment.measured is False
     assert result.affinity_assessment.status == "skipped"
     assert "already activated" in result.affinity_assessment.reason

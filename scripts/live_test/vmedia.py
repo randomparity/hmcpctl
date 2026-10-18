@@ -32,8 +32,8 @@ from fastmcp import Client
 from hmcpctl.client.client_storage import storage_mapping_id
 from hmcpctl.config import env_var_value
 from hmcpctl.documents.boot import join_boot_device_paths
-from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter
 
+from . import storage
 from .observation import Assertion, CallFailure, ExpectedOutcome
 from .results import entries
 from .results import resource as get_resource
@@ -69,7 +69,8 @@ _DELETE_REFUSED_WHILE_MOUNTED = ExpectedOutcome(
 )
 
 if TYPE_CHECKING:
-    from live_test_runner import LiveTestConfig, RunState
+    from live_test.config import LiveTestConfig
+    from live_test.runner import RunState
 
 
 REPOSITORY_SCENARIO = "st16-repository-read"
@@ -197,24 +198,6 @@ def media_sizes(data: object) -> dict[str, Any] | None:
     return sizes
 
 
-def _mapping_row(entry: object) -> tuple[object, ...] | None:
-    if not isinstance(entry, Mapping):
-        return None
-    return tuple(
-        entry.get(key) for key in ("id", "lpar_uuid", "backing_kind", "backing_name")
-    )
-
-
-def storage_rows(data: object) -> frozenset[tuple[object, ...]] | None:
-    """``hmc_list_storage_mappings`` as comparable rows; None when malformed."""
-    if not isinstance(data, list):
-        return None
-    rows = [_mapping_row(entry) for entry in data]
-    if None in rows:
-        return None
-    return frozenset(row for row in rows if row is not None)
-
-
 def _mapping_identity(mapping: object) -> tuple[str, str] | None:
     """Read the LPAR and media name that address one optical mapping.
 
@@ -232,25 +215,6 @@ def _mapping_identity(mapping: object) -> tuple[str, str] | None:
     if not isinstance(media_name, str) or not media_name or not lpar:
         return None
     return lpar, media_name
-
-
-def scsi_adapter_listing(system_name: str, attribute: str, value: object) -> str:
-    """The vSCSI adapter rows of the partitions the one filter pair selects (#1237)."""
-    return (
-        f"lshwres -r virtualio --rsubtype scsi -m {shlex.quote(system_name)} "
-        f"--level lpar --filter {shlex.quote(build_filter([(attribute, value)]))} "
-        "-F slot_num,remote_lpar_name,remote_slot_num"
-    )
-
-
-def adapter_rows(listing: object) -> frozenset[str] | None:
-    """An adapter listing as a set of lines; None when it is not text."""
-    if not isinstance(listing, str):
-        return None
-    text = listing.strip()
-    if text == HMC_NO_RESULTS:
-        return frozenset()
-    return frozenset(line.strip() for line in text.splitlines() if line.strip())
 
 
 async def _discover_vmedia_prerequisites(client: Client, state: RunState) -> bool:
@@ -564,10 +528,27 @@ class IsoHttpServer:
             http.server.SimpleHTTPRequestHandler,
             directory=str(Path(config.iso_path).parent),
         )
-        self._server = http.server.HTTPServer(
+        startup_decided = threading.Event()
+        serve_allowed = False
+        server = http.server.HTTPServer(
             (config.iso_bind_host, config.iso_http_port), handler
         )
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+        def serve() -> None:
+            startup_decided.wait()
+            if serve_allowed:
+                server.serve_forever()
+
+        try:
+            threading.Thread(target=serve, daemon=True).start()
+        except BaseException:
+            # A native worker may start after Thread.start is interrupted.
+            startup_decided.set()
+            server.server_close()
+            raise
+        self._server = server
+        serve_allowed = True
+        startup_decided.set()
 
     def close(self) -> None:
         """Stop serving and release the listening socket."""
@@ -882,10 +863,10 @@ class _RoundTrip:
                 await self.state.call(
                     self.client,
                     "hmc_run_command",
-                    cmd=scsi_adapter_listing(system, attribute, value),
+                    cmd=storage.scsi_adapter_listing(system, attribute, value),
                 ),
             )
-            parsed = adapter_rows(listing) if st == "PASS" else None
+            parsed = storage.adapter_rows(listing) if st == "PASS" else None
             if parsed is None:
                 return None
             rows.append(parsed)
@@ -899,7 +880,7 @@ class _RoundTrip:
                 self.client, "hmc_list_storage_mappings", vios_name_or_uuid=self.vios
             ),
         )
-        return storage_rows(data) if st == "PASS" else None
+        return storage.storage_rows(data) if st == "PASS" else None
 
     async def repository_size(self, label: str) -> tuple[str, Any, Decimal | None]:
         st, data = self.note(

@@ -16,15 +16,16 @@ from fastmcp import FastMCP
 from ...config import build_config
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
+from ...operations.logical.models import OperationRecord
 from ...operations.logical.store import OperationRefused, connection_label
 from ...operations.lpar.power import (
     DELEGATED,
+    POWER_CLASSIFIERS,
     PowerAction,
     PowerMode,
     check_inputs,
     power_body,
 )
-from ...operations.lpar.workflow_contract import OperationRecord
 from ...tool_registry import (
     Authorize,
     TargetSelector,
@@ -178,6 +179,7 @@ def power_handler(
         return engine.submit(
             request,
             body,
+            classifiers=POWER_CLASSIFIERS,
             continuation=continuation,
             wait_seconds=wait_seconds,
         )

@@ -210,6 +210,41 @@ def test_withheld_section_tools_report_denied(ssh_refcodes: list[str]):
     assert not any(call.startswith(("list_vios", "get_vios")) for call in hmc.calls)
 
 
+@pytest.mark.parametrize(
+    ("section", "specialist", "restriction"),
+    [
+        (
+            "refcodes",
+            "hmc_read_lpar_refcodes",
+            {"targets": {"lpar": ["other"], "managed_system": ["sysA"]}},
+        ),
+        (
+            "resources",
+            "hmc_get_vios_storage_detail",
+            {"targets": {"vios": ["other"], "managed_system": ["sysA"]}},
+        ),
+        ("refcodes", "hmc_read_lpar_refcodes", {"connections": ["other"]}),
+    ],
+)
+def test_denied_section_scope_reports_partial_result_without_specialist_read(
+    section: str,
+    specialist: str,
+    restriction: dict,
+    ssh_refcodes: list[str],
+    records: list[dict],
+):
+    hmc = _HMC()
+    grant = {**_grant(specialist), **restriction}
+    app = _app(_grant(INSPECT, "hmc_get_lpar", "hmc_list_vios"), grant)
+    result = _call(app, hmc, {**_ARGUMENTS, "include": [section]})
+    key = "source" if section == "refcodes" else "storage_source"
+    assert result[section][key]["status"] == "denied"
+    assert result["state"] == "error"
+    assert ssh_refcodes == []
+    assert not any(call.startswith("get_vios_storage_detail") for call in hmc.calls)
+    assert (specialist, "deny") in {(r["tool"], r["decision"]) for r in records}
+
+
 def test_vios_granted_by_uuid_is_read(records: list[dict]):
     app = _app(
         _grant(INSPECT, "hmc_get_lpar", "hmc_list_vios"),
@@ -256,3 +291,30 @@ def test_mcp_inspection_serializes_definitions_without_changing_state(monkeypatc
     assert rows[1]["definition"] is None
     assert rows[1]["definition_source"] is None
     assert result["state"] == "error"
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"), [("true", True), ("false", False), (None, None)]
+)
+def test_processor_mode_wire_name_preserves_three_values(monkeypatch, mode, expected):
+    hmc = _HMC()
+    original = hmc.list_logical_partitions
+
+    async def partitions(uuid):
+        rows = await original(uuid)
+        for row in rows:
+            row["Resource"]["PartitionProcessorConfiguration"] = {
+                "HasDedicatedProcessors": mode,
+                "CurrentDedicatedProcessorConfiguration": {"CurrentProcessors": "2"},
+                "CurrentSharedProcessorConfiguration": {
+                    "CurrentProcessingUnits": "0.5"
+                },
+            }
+        return rows
+
+    monkeypatch.setattr(hmc, "list_logical_partitions", partitions)
+    result = _call(_app(_ALL), hmc, {**_ARGUMENTS, "include": ["resources"]})
+    serialized = result["resources"]
+    assert serialized["has_dedicated_processors"] is expected
+    assert "dedicated_procs" not in serialized
+    assert serialized["current_proc_units"] == (2.0 if expected is True else 0.5)

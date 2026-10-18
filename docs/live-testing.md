@@ -650,7 +650,7 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   is a FAIL and is removed by the teardown's prefix sweep) and a duplicate-name
   create, then: activation to
   SMS through the partition profile, a second PowerOn while activated (it must
-  report `already_running` and submit nothing), a delete while activated (refused),
+  report `already_activated` and submit nothing), a delete while activated (refused),
   a 30 s console capture, a delayed power-off, activation of the current
   configuration to Open Firmware with an explicit operation type and keylock, an
   immediate power-off, `hmc_power_lpar` start, immediate restart, immediate stop,

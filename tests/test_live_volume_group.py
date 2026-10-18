@@ -15,7 +15,8 @@ from fastmcp import Client
 from hmcpctl.config import HMCConfig
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-import live_test_runner as runner
+from live_test import config as live_config
+from live_test import runner
 from live_test import storage_volume_group as vg
 
 PV = "hdisk9"
@@ -159,7 +160,7 @@ class FakeVIOS:
 @pytest.fixture
 def scratch(monkeypatch):
     config = replace(
-        runner.LiveTestConfig(),
+        live_config.LiveTestConfig(),
         system_name="sys-A",
         scratch_pv_name=PV,
         scratch_vg_name=GROUP,
@@ -323,14 +324,14 @@ def test_optin_registry_and_legacy_documents():
     assert runner.SUBTASK_GROUPS["storage"] == [0, 3, 40, 42]
     assert 42 not in runner.SUBTASK_GROUPS["all"]
     assert 42 not in runner.SUBTASK_GROUPS["round2"]
-    old_config = json.loads(json.dumps(asdict(runner.LiveTestConfig())))
+    old_config = json.loads(json.dumps(asdict(live_config.LiveTestConfig())))
     old_config.pop("scratch_pv_name")
     old_config.pop("scratch_vg_name")
-    assert runner._decode_saved_config(old_config) == runner.LiveTestConfig()
-    artifacts = asdict(runner.LiveTestArtifacts(storage_volume_group_name=GROUP))
-    assert runner._decode_artifacts(artifacts).storage_volume_group_name == GROUP
+    assert live_config.decode_saved_config(old_config) == live_config.LiveTestConfig()
+    artifacts = asdict(live_config.LiveTestArtifacts(storage_volume_group_name=GROUP))
+    assert live_config.decode_artifacts(artifacts).storage_volume_group_name == GROUP
     artifacts.pop("storage_volume_group_name")
-    assert runner._decode_artifacts(artifacts).storage_volume_group_name is None
+    assert live_config.decode_artifacts(artifacts).storage_volume_group_name is None
 
 
 @pytest.mark.parametrize("kind", ["config", "artifact"])
@@ -339,12 +340,14 @@ def test_new_saved_fields_remain_strict(kind):
     from dataclasses import asdict
 
     data = (
-        json.loads(json.dumps(asdict(runner.LiveTestConfig())))
+        json.loads(json.dumps(asdict(live_config.LiveTestConfig())))
         if kind == "config"
-        else asdict(runner.LiveTestArtifacts())
+        else asdict(live_config.LiveTestArtifacts())
     )
     decode = (
-        runner._decode_saved_config if kind == "config" else runner._decode_artifacts
+        live_config.decode_saved_config
+        if kind == "config"
+        else live_config.decode_artifacts
     )
     field = "scratch_pv_name" if kind == "config" else "storage_volume_group_name"
     data[field] = 123
@@ -418,7 +421,7 @@ async def test_registered_runner_native_wire_contract(monkeypatch, tmp_path, fau
     """Exercise real dispatch/schema/results/restore logic at the MCP boundary."""
     fake = FakeVIOS()
     config = replace(
-        runner.LiveTestConfig(),
+        live_config.LiveTestConfig(),
         system_name="sys-A",
         scratch_pv_name=PV,
         scratch_vg_name=GROUP,
@@ -431,7 +434,9 @@ async def test_registered_runner_native_wire_contract(monkeypatch, tmp_path, fau
                 "config": asdict(config),
                 "hmc": runner._hmc_identity(hmc),
                 "artifacts": asdict(
-                    runner.LiveTestArtifacts(vios_uuid="vios-A", vios_partition_id=1)
+                    live_config.LiveTestArtifacts(
+                        vios_uuid="vios-A", vios_partition_id=1
+                    )
                 ),
                 "results": [],
             }

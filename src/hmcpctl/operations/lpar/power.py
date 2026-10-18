@@ -29,10 +29,10 @@ from ..logical.engine import (
     OperationContext,
     OperationFailed,
 )
+from ..logical.models import EffectRecord
 from ..logical.store import DEFAULT_CONNECTION
-from .core import ACTIVATED_STATES, submit_power_off
+from .activation import ACTIVATED_STATES, submit_power_off
 from .ownership import resolve_and_authorize_lpar_mutation
-from .workflow_contract import EffectRecord
 
 PowerAction = Literal["start", "stop", "restart"]
 PowerMode = Literal["graceful", "immediate"]
@@ -91,10 +91,10 @@ def _match(entries: list[dict[str, Any]], selector: str) -> list[dict[str, Any]]
     ]
 
 
-async def _resolve(
+async def _resolve_and_authorize_power_target(
     hmc: HMCClient, system: str, lpar: str
 ) -> tuple[str, str, dict[str, Any]]:
-    """Return the system UUID, the partition UUID and its listing entry."""
+    """Resolve the target, enforce configured ownership authorization, and return its entry."""
     try:
         # Lower-cased: the guard key must not depend on the caller's spelling (ADR 0094).
         system_uuid = (await resolve_system_uuid(hmc, system)).lower()
@@ -113,7 +113,10 @@ async def _resolve(
     if hmc.config.authorize_power_operations:
         try:
             await resolve_and_authorize_lpar_mutation(
-                hmc, system_uuid, lpar_uuid, ownership_override=False
+                hmc,
+                lpar_uuid,
+                ownership_override=False,
+                system_name_or_uuid=system_uuid,
             )
         except (HMCError, ValueError, LookupError, PermissionError) as exc:
             # The refusal text names the partition and an override this tool does not
@@ -274,21 +277,25 @@ def power_body(
             if replay:
                 # Replay after the write: re-resolving could turn a transient read
                 # error into a terminal "failed" for a partition already powered.
-                ctx.phase("transitioning")
+                ctx.set_phase("transitioning")
                 lpar_uuid = _lpar_uuid(recorded)
                 system_uuid = (ctx.partition or ("", lpar_uuid))[0]
                 identity = recorded.identity or {}
                 result = _result(action, mode, system_uuid, lpar_uuid, None)
             else:
-                ctx.phase("validating")
-                system_uuid, lpar_uuid, entry = await _resolve(hmc, system, lpar)
+                ctx.set_phase("validating")
+                (
+                    system_uuid,
+                    lpar_uuid,
+                    entry,
+                ) = await _resolve_and_authorize_power_target(hmc, system, lpar)
                 ctx.guard(system_uuid, lpar_uuid)
                 state = _norm((entry.get("Resource") or {}).get("PartitionState"))
                 result = _result(action, mode, system_uuid, lpar_uuid, state)
                 if _precheck(action, mode, lpar_uuid, entry):
                     result["already_in_state"] = True
                     return BodyResult("completed", result)
-                ctx.phase("transitioning")
+                ctx.set_phase("transitioning")
                 identity = await ctx.effect(
                     EFFECT_KEY,
                     EFFECT_KINDS[action],
@@ -341,7 +348,9 @@ async def _classify_power_off(
     )
 
 
-# lpar.restart registers none: a finished cycle and no cycle both read as running, so
+# lpar.restart has none: a finished cycle and no cycle both read as running, so
 # an open restart always pauses for attention (ADR 0199 Decision 4).
-engine.register_classifier(EFFECT_KINDS["start"], _classify_power_on)
-engine.register_classifier(EFFECT_KINDS["stop"], _classify_power_off)
+POWER_CLASSIFIERS: Mapping[str, engine.Classifier] = {
+    EFFECT_KINDS["start"]: _classify_power_on,
+    EFFECT_KINDS["stop"]: _classify_power_off,
+}

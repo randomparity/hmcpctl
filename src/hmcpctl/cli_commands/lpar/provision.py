@@ -81,7 +81,8 @@ def lpars_provision(
     Always validates preconditions first (name uniqueness, VLAN existence, volume-group existence).
     Pass --dry-run to run precondition checks only without creating anything.
     On partial failure the completed steps are reported as "ok", the failed step as "error",
-    and remaining steps as "skipped". No automatic rollback is performed.
+    and remaining steps as "skipped". Incomplete workflows exit with status 1;
+    successful dry runs exit with status 0. No automatic rollback is performed.
     """
     assignments = load_pcie_assignments(pcie_assignments)
     try:
@@ -135,6 +136,8 @@ def lpars_provision(
     )
 
     _render_provision_result(result, name, dry_run, as_json)
+    if not dry_run and not result.workflow_completed:
+        raise typer.Exit(code=1)
 
 
 def _render_provision_result(

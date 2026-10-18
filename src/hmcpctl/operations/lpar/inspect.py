@@ -16,8 +16,13 @@ from ...errors import HMCError, HMCTransportError
 from ...resource_identity import resolve_system_uuid
 from ...ssh.refcodes import list_lpar_refcodes
 from ...ssh.selectors import resolve_ssh_names
-from ..inventory.composite import _container, _processor_figures
-from ..inventory.logical import _float, _int, _text
+from ..inventory.composite import (
+    optional_float,
+    optional_int,
+    optional_text,
+    processor_figures,
+    resource_container,
+)
 from .decommission import collect_storage_records, resolve_target_lpar
 
 Section = Literal["resources", "rmc", "profile_drift", "refcodes"]
@@ -99,7 +104,7 @@ class Resources:
     current_proc_units: float | None
     desired_proc_units: float | None
     desired_vcpus: int | None
-    dedicated_procs: bool | None
+    has_dedicated_processors: bool | None
     storage_source: SectionSource
     vios: list[ViosRead]
     mappings: list[dict[str, str]]
@@ -146,7 +151,7 @@ async def _partition(hmc: Any, system: str, lpar: str) -> tuple[str, dict[str, A
 
 
 def _rmc(resource: dict[str, Any]) -> Rmc:
-    state = _text(resource.get("ResourceMonitoringControlState"))
+    state = optional_text(resource.get("ResourceMonitoringControlState"))
     if not state:
         text = "the partition read carried no RMC state"
         return Rmc(SectionSource("unavailable", BASE_TOOL, text), None)
@@ -161,9 +166,7 @@ async def _refcodes(
         return Refcodes(SectionSource("denied", REFCODES_TOOL, _detail(denial)), [])
 
     async def read() -> list[dict[str, Any]]:
-        system_name, lpar_name = await resolve_ssh_names(
-            hmc.config, system, name or lpar
-        )
+        system_name, lpar_name = await resolve_ssh_names(hmc, system, name or lpar)
         return await list_lpar_refcodes(
             hmc.config, system_name, lpar_name, MAX_REFCODES
         )
@@ -188,7 +191,7 @@ async def _vios_reads(
     unresolved = 0
     stalled = False
     for entry in entries[:MAX_VIOS]:
-        uuid = _text(entry.get("UUID"))
+        uuid = optional_text(entry.get("UUID"))
         if uuid is None or stalled:
             reads.append(
                 ViosRead(uuid, "unavailable", _STALLED if stalled else "no VIOS UUID")
@@ -245,8 +248,8 @@ async def _resources(
     entry: dict[str, Any],
 ) -> Resources:
     resource = entry.get("Resource") or {}
-    memory = _container(resource, "PartitionMemoryConfiguration")
-    processors = _processor_figures(resource)
+    memory = resource_container(resource, "PartitionMemoryConfiguration")
+    processors = processor_figures(resource)
     reads: list[ViosRead] = []
     mappings: list[dict[str, str]] = []
     unresolved = 0
@@ -258,17 +261,17 @@ async def _resources(
         entries, listing = await _read(VIOS_LIST_TOOL, hmc.list_vios(system_uuid))
         entries = entries or []
         extra = len(entries) > MAX_VIOS
-        target = (str(entry["UUID"]), _text(resource.get("PartitionID")))
+        target = (str(entry["UUID"]), optional_text(resource.get("PartitionID")))
         reads, mappings, unresolved = await _vios_reads(
             hmc, admit, system, entries, target
         )
     return Resources(
-        current_memory_mib=_int(memory.get("CurrentMemory")),
-        desired_memory_mib=_int(memory.get("DesiredMemory")),
-        current_proc_units=_float(processors["current_proc_units"]),
-        desired_proc_units=_float(processors["desired_proc_units"]),
-        desired_vcpus=_int(processors["desired_vcpus"]),
-        dedicated_procs=processors["dedicated_procs"],
+        current_memory_mib=optional_int(memory.get("CurrentMemory")),
+        desired_memory_mib=optional_int(memory.get("DesiredMemory")),
+        current_proc_units=optional_float(processors["current_proc_units"]),
+        desired_proc_units=optional_float(processors["desired_proc_units"]),
+        desired_vcpus=optional_int(processors["desired_vcpus"]),
+        has_dedicated_processors=processors["has_dedicated_processors"],
         storage_source=_storage_source(listing, reads, extra),
         vios=reads,
         mappings=mappings,
@@ -304,8 +307,8 @@ async def inspect_lpar(
     system_uuid, entry = await _partition(hmc, system, lpar)
     resource = entry.get("Resource") or {}
     uuid = str(entry["UUID"]).lower()
-    name = _text(resource.get("PartitionName"))
-    state = _text(resource.get("PartitionState"))
+    name = optional_text(resource.get("PartitionName"))
+    state = optional_text(resource.get("PartitionState"))
     rmc = _rmc(resource) if "rmc" in include else None
     return LparInspection(
         connection=connection,
@@ -313,7 +316,7 @@ async def inspect_lpar(
         system_uuid=system_uuid,
         uuid=uuid,
         name=name,
-        partition_id=_int(resource.get("PartitionID")),
+        partition_id=optional_int(resource.get("PartitionID")),
         state=state,
         rmc=rmc,
         resources=(

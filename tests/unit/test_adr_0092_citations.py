@@ -56,12 +56,14 @@ _MUTATOR_PREFIXES = (
     "restore_",
     "set_",
     "synchronize_",
+    "submit_power_on_lpar",
     "unassign_",
     "unmount_",
 )
 _INVENTORY_PATHS = tuple(
     _SOURCE_ROOT / path
     for path in (
+        "operations/lpar/activation.py",
         "operations/lpar/assignments.py",
         "operations/lpar/boot_order.py",
         "operations/lpar/configuration.py",
@@ -120,7 +122,7 @@ _CLASSIFIED_MUTATORS = frozenset(
         "set_lpar_ownership_description",
     }
 )
-_OPERATIONAL_MUTATORS = frozenset({"power_lpar"})
+_OPERATIONAL_MUTATORS = frozenset({"submit_power_on_lpar", "power_off_lpar"})
 _CREATION_MUTATORS = frozenset(
     {"create_and_stamp_lpar", "provision_lpar", "deploy_partition_template"}
 )

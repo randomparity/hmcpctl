@@ -26,13 +26,14 @@ from hmcpctl.jobs import (
     power_on_vios_job,
 )
 from hmcpctl.operations.lpar import decommission
-from hmcpctl.operations.lpar.core import (
+from hmcpctl.operations.lpar.activation import (
     LparPowerResult,
     _unapplied_activation_clause,
     activation_allows_assessment,
-    power_lpar,
+    power_off_lpar,
     power_on_lpar,
     power_on_outcome,
+    submit_power_on_lpar,
 )
 from hmcpctl.operations.partition_state import PARTITION_STATES
 
@@ -328,7 +329,7 @@ async def test_power_off_vios(mock_hmc):
 
 
 # --------------------------------------------------------------------------- #
-# The activation parameters reaching the job document through power_lpar
+# The activation parameters reaching the job document through submit_power_on_lpar
 # --------------------------------------------------------------------------- #
 
 LPAR_UUID = "11111111-1111-1111-1111-111111111111"
@@ -353,19 +354,17 @@ def _power_client() -> AsyncMock:
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_forwards_activation_parameters():
+async def test_power_operation_forwards_activation_parameters():
     """PowerOn carries the caller's profile, boot mode and keylock, never activate."""
     hmc = _power_client()
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        await power_lpar(
+        await submit_power_on_lpar(
             hmc,
-            None,
             LPAR_UUID,
-            power_on=True,
             boot_mode="sms",
             partition_profile_uuid=PROFILE_UUID,
             operation_type="activate",
@@ -380,53 +379,20 @@ async def test_power_lpar_forwards_activation_parameters():
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_forwards_power_off_parameters():
+async def test_power_operation_forwards_power_off_parameters():
     """PowerOff carries the caller's restart flag and shutdown operation."""
     hmc = _power_client()
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=False,
-            restart=True,
-            operation="osshutdown",
-        )
+        await power_off_lpar(hmc, LPAR_UUID, restart=True, operation="osshutdown")
 
     path, document = hmc.submit_job.await_args.args
     assert path.endswith("/do/PowerOff")
     assert _parameter_values(document, "restart") == ["true"]
     assert _parameter_values(document, "operation") == ["osshutdown"]
-
-
-@pytest.mark.asyncio
-async def test_power_lpar_power_on_document_ignores_power_off_parameters():
-    """The PowerOn arm builds a different document and takes none of the three."""
-    hmc = _power_client()
-
-    with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
-        new=AsyncMock(return_value=LPAR_UUID),
-    ):
-        await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=True,
-            force=True,
-            restart=True,
-            operation="dumprestart",
-            allow_dump_restart=True,
-        )
-
-    path, document = hmc.submit_job.await_args.args
-    assert path.endswith("/do/PowerOn")
-    assert _parameter_values(document, "restart") == []
-    assert _parameter_values(document, "operation") == []
 
 
 @pytest.mark.asyncio
@@ -438,17 +404,17 @@ async def test_power_lpar_power_on_document_ignores_power_off_parameters():
         ({"restart": True}, "hmc_dump_restart_lpar"),
     ],
 )
-async def test_power_lpar_refuses_before_any_side_effect(kwargs, expected, caplog):
+async def test_power_operation_refuses_before_any_side_effect(kwargs, expected, caplog):
     """A refused PowerOff reads nothing, submits nothing and audits nothing."""
     hmc = _power_client()
     resolver = AsyncMock(return_value=LPAR_UUID)
 
     with (
-        patch("hmcpctl.operations.lpar.core.resolve_lpar_uuid", new=resolver),
+        patch("hmcpctl.operations.lpar.activation.resolve_lpar_uuid", new=resolver),
         caplog.at_level(logging.INFO),
         pytest.raises(ValueError) as refused,
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=False, **kwargs)
+        await power_off_lpar(hmc, LPAR_UUID, **kwargs)
 
     assert expected in str(refused.value)
     resolver.assert_not_awaited()
@@ -491,16 +457,14 @@ async def test_power_off_records_the_variant_it_sends(
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+            "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
             new=AsyncMock(return_value=LPAR_UUID),
         ),
         caplog.at_level(logging.INFO),
     ):
-        await power_lpar(
+        await power_off_lpar(
             hmc,
-            None,
             "lpar-a",
-            power_on=False,
             immediate=immediate,
             restart=restart,
             operation=operation,
@@ -550,17 +514,15 @@ async def test_power_off_is_recorded_even_when_the_submit_raises(caplog):
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+            "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
             new=AsyncMock(return_value=LPAR_UUID),
         ),
         caplog.at_level(logging.INFO),
         pytest.raises(HMCError),
     ):
-        await power_lpar(
+        await power_off_lpar(
             hmc,
-            None,
             LPAR_UUID,
-            power_on=False,
             operation="dumprestart",
             allow_dump_restart=True,
         )
@@ -578,12 +540,12 @@ async def test_power_on_emits_no_power_off_record(caplog):
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+            "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
             new=AsyncMock(return_value=LPAR_UUID),
         ),
         caplog.at_level(logging.INFO),
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        await submit_power_on_lpar(hmc, LPAR_UUID)
 
     hmc.submit_job.assert_awaited_once()
     assert _audit_records(caplog) == []
@@ -632,38 +594,14 @@ async def test_decommission_power_off_document_is_unchanged(immediate):
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_power_off_document_is_unchanged():
-    """The PowerOff arm builds a different document and takes none of the three."""
-    hmc = _power_client()
-
-    with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
-        new=AsyncMock(return_value=LPAR_UUID),
-    ):
-        await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=False,
-            boot_mode="sms",
-            partition_profile_uuid=PROFILE_UUID,
-            operation_type="activate",
-            keylock="manual",
-        )
-
-    path, document = hmc.submit_job.await_args.args
-    assert path.endswith("/do/PowerOff")
-    for name in ("bootmode", "LogicalPartitionProfile", "OperationType", "keylock"):
-        assert _parameter_values(document, name) == []
-
-
-@pytest.mark.asyncio
 async def test_power_on_lpar_passes_activation_parameters():
     """power_on_lpar hands all three straight to the shared power entry point."""
     hmc = _power_client()
     forwarded = AsyncMock(return_value=LparPowerResult(LPAR_UUID, {"UUID": "job-uuid"}))
 
-    with patch("hmcpctl.operations.lpar.core.power_lpar", new=forwarded):
+    with patch(
+        "hmcpctl.operations.lpar.activation.submit_power_on_lpar", new=forwarded
+    ):
         await power_on_lpar(
             hmc,
             LPAR_UUID,
@@ -680,7 +618,7 @@ async def test_power_on_lpar_passes_activation_parameters():
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_already_running_names_the_dropped_activation_parameters():
+async def test_power_operation_already_running_names_the_dropped_activation_parameters():
     """A running partition drops the activation request, so the message says so.
 
     "Boot this partition into SMS" is usually asked about a running partition,
@@ -691,16 +629,14 @@ async def test_power_lpar_already_running_names_the_dropped_activation_parameter
     hmc.get_quick_property.return_value = "running"
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        requested = await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, boot_mode="sms"
-        )
-        plain = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        requested = await submit_power_on_lpar(hmc, LPAR_UUID, boot_mode="sms")
+        plain = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     hmc.submit_job.assert_not_awaited()
-    assert requested.job["already_running"] is True
+    assert requested.job["already_activated"] is True
     # Only the parameter actually supplied is named, and force=True is not
     # offered: the HMC fails a PowerOn from any activated state (HSCL3681).
     assert "The requested boot mode was not applied" in requested.job["message"]
@@ -739,18 +675,18 @@ HSCL3681_JOB = {
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", _ACTIVE_STATES)
-async def test_power_lpar_already_active_state_submits_no_job(state):
+async def test_power_operation_already_active_state_submits_no_job(state):
     hmc = _power_client()
     hmc.get_quick_property.return_value = state
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        result = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     hmc.submit_job.assert_not_awaited()
-    assert result.job["already_running"] is True
+    assert result.job["already_activated"] is True
     assert state in result.job["message"]
     assert "No PowerOn job was submitted." in result.job["message"]
     assert "force=True" not in result.job["message"]
@@ -761,58 +697,58 @@ async def test_power_lpar_already_active_state_submits_no_job(state):
     ("state", "submitted"),
     [("Running", False), ("Open Firmware", False), ("Not Activated", True)],
 )
-async def test_power_lpar_guard_accepts_the_cli_title_case_rendering(state, submitted):
+async def test_power_operation_guard_accepts_the_cli_title_case_rendering(
+    state, submitted
+):
     """``lssyscfg`` renders states in title case; the guard must not depend on case."""
     hmc = _power_client()
     hmc.get_quick_property.return_value = state
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        result = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     assert hmc.submit_job.await_count == int(submitted)
-    assert result.job.get("already_running", False) is not submitted
+    assert result.job.get("already_activated", False) is not submitted
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", [*_UNSETTLED_STATES, "unrecognized", None])
-async def test_power_lpar_refuses_power_on_outside_not_activated(state):
+async def test_power_operation_refuses_power_on_outside_not_activated(state):
     hmc = _power_client()
     hmc.get_quick_property.return_value = state
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+            "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
             new=AsyncMock(return_value=LPAR_UUID),
         ),
         pytest.raises(HMCError, match=f"current state is {state!r}") as raised,
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        await submit_power_on_lpar(hmc, LPAR_UUID)
 
     assert raised.value.status_code == 409
     hmc.submit_job.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_force_submits_from_open_firmware_and_surfaces_hscl3681():
+async def test_power_operation_force_submits_from_open_firmware_and_surfaces_hscl3681():
     hmc = _power_client()
     hmc.get_quick_property.return_value = "open firmware"
     hmc.wait_for_job_entry.return_value = HSCL3681_JOB
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, force=True, wait=True
-        )
+        result = await submit_power_on_lpar(hmc, LPAR_UUID, force=True, wait=True)
 
     hmc.get_quick_property.assert_not_awaited()
     hmc.submit_job.assert_awaited_once()
     outcome = power_on_outcome(result)
-    assert outcome.already_running is False
+    assert outcome.already_activated is False
     assert outcome.job == HSCL3681_JOB
     assert activation_allows_assessment(result) == (False, HSCL3681.strip())
 
@@ -875,22 +811,16 @@ OTHER_PROFILE_UUID = "00000000-0000-0000-0000-0000000000bb"
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_accepts_a_profile_contained_by_the_target_partition():
+async def test_power_operation_accepts_a_profile_contained_by_the_target_partition():
     """A profile in the partition's own feed reaches the job document."""
     hmc = _power_client()
     hmc.list_child.return_value = [{"UUID": PROFILE_UUID}, {"UUID": OTHER_PROFILE_UUID}]
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=True,
-            partition_profile_uuid=PROFILE_UUID,
-        )
+        await submit_power_on_lpar(hmc, LPAR_UUID, partition_profile_uuid=PROFILE_UUID)
 
     hmc.list_child.assert_awaited_once_with(
         "LogicalPartition", LPAR_UUID, "LogicalPartitionProfile"
@@ -900,7 +830,7 @@ async def test_power_lpar_accepts_a_profile_contained_by_the_target_partition():
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_refuses_a_profile_the_target_partition_does_not_contain():
+async def test_power_operation_refuses_a_profile_the_target_partition_does_not_contain():
     """ADR 0039: the tool declares exhaustive targets, so a foreign profile is refused.
 
     Without this the declared `lpar` selector bounds nothing here: a narrow
@@ -912,18 +842,12 @@ async def test_power_lpar_refuses_a_profile_the_target_partition_does_not_contai
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+            "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
             new=AsyncMock(return_value=LPAR_UUID),
         ),
         pytest.raises(ValueError) as refused,
     ):
-        await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=True,
-            partition_profile_uuid=PROFILE_UUID,
-        )
+        await submit_power_on_lpar(hmc, LPAR_UUID, partition_profile_uuid=PROFILE_UUID)
 
     hmc.submit_job.assert_not_awaited()
     # The rejected value is not echoed, matching the module's other refusals.
@@ -931,22 +855,22 @@ async def test_power_lpar_refuses_a_profile_the_target_partition_does_not_contai
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_reads_no_profile_feed_when_no_profile_is_supplied():
+async def test_power_operation_reads_no_profile_feed_when_no_profile_is_supplied():
     """The containment read costs nothing on the ordinary PowerOn path."""
     hmc = _power_client()
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True, boot_mode="sms")
+        await submit_power_on_lpar(hmc, LPAR_UUID, boot_mode="sms")
 
     hmc.list_child.assert_not_awaited()
     hmc.submit_job.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_power_lpar_matches_a_profile_uuid_case_insensitively():
+async def test_power_operation_matches_a_profile_uuid_case_insensitively():
     """The HMC renders UUIDs lower-case; ``is_uuid`` admits upper-case hex.
 
     Mirrors ``_hosts_partition`` in operations/lpar/ownership.py, the other
@@ -956,15 +880,11 @@ async def test_power_lpar_matches_a_profile_uuid_case_insensitively():
     hmc.list_child.return_value = [{"UUID": PROFILE_UUID.lower()}]
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=True,
-            partition_profile_uuid=PROFILE_UUID.upper(),
+        await submit_power_on_lpar(
+            hmc, LPAR_UUID, partition_profile_uuid=PROFILE_UUID.upper()
         )
 
     # The partition's own spelling reaches the wire, not the caller's: the match
@@ -980,21 +900,21 @@ async def test_power_lpar_matches_a_profile_uuid_case_insensitively():
 @pytest.mark.parametrize(
     "feed", [[], [{"ResourceType": "LogicalPartitionProfile"}], [{"UUID": None}]]
 )
-async def test_power_lpar_distinguishes_a_degraded_profile_feed_from_a_refusal(feed):
+async def test_power_operation_distinguishes_a_degraded_profile_feed_from_a_refusal(
+    feed,
+):
     """An empty or unparsed feed is not evidence the profile is foreign."""
     hmc = _power_client()
     hmc.list_child.return_value = feed
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+            "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
             new=AsyncMock(return_value=LPAR_UUID),
         ),
         pytest.raises(ValueError) as refused,
     ):
-        await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
-        )
+        await submit_power_on_lpar(hmc, LPAR_UUID, partition_profile_uuid=PROFILE_UUID)
 
     hmc.submit_job.assert_not_awaited()
     assert "came back empty" in str(refused.value)
@@ -1009,7 +929,7 @@ async def test_power_lpar_distinguishes_a_degraded_profile_feed_from_a_refusal(f
         ({"keylock": "normal"}, "PowerOn keylock must be one of: manual, norm"),
     ],
 )
-async def test_power_lpar_refuses_an_invalid_activation_value_on_the_already_running_path(
+async def test_power_operation_refuses_an_invalid_activation_value_on_the_already_running_path(
     kwargs, expected
 ):
     """Criterion 2's refusal must not be swallowed by the early return.
@@ -1023,10 +943,10 @@ async def test_power_lpar_refuses_an_invalid_activation_value_on_the_already_run
     resolver = AsyncMock(return_value=LPAR_UUID)
 
     with (
-        patch("hmcpctl.operations.lpar.core.resolve_lpar_uuid", new=resolver),
+        patch("hmcpctl.operations.lpar.activation.resolve_lpar_uuid", new=resolver),
         pytest.raises(ValueError, match=expected),
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=True, **kwargs)
+        await submit_power_on_lpar(hmc, LPAR_UUID, **kwargs)
 
     resolver.assert_not_awaited()
     hmc.get_quick_property.assert_not_awaited()
@@ -1069,11 +989,11 @@ def _profile_power_client(profile_slots: list[str], current: dict) -> AsyncMock:
 
 async def _power_on_with_profile(hmc: AsyncMock) -> LparPowerResult:
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        return await power_lpar(
-            hmc, None, LPAR_UUID, power_on=True, partition_profile_uuid=PROFILE_UUID
+        return await submit_power_on_lpar(
+            hmc, LPAR_UUID, partition_profile_uuid=PROFILE_UUID
         )
 
 
@@ -1122,10 +1042,10 @@ async def test_power_on_without_a_profile_reads_no_adapter_feed():
     hmc = _profile_power_client([], {"VirtualSCSIClientAdapter": ["2"]})
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
-        result = await power_lpar(hmc, None, LPAR_UUID, power_on=True)
+        result = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     assert result.warnings == ()
     hmc.list_adapters.assert_not_awaited()
@@ -1136,7 +1056,7 @@ async def test_power_on_lpar_outcome_carries_the_profile_warnings():
     hmc = _profile_power_client([], {"VirtualSCSIClientAdapter": ["2"]})
 
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         outcome = await power_on_lpar(
@@ -1168,7 +1088,7 @@ async def _waited_power_on(state, job=None, **kwargs):
     hmc.get_quick_property.side_effect = ["not activated", state]
     hmc.wait_for_job_entry.return_value = job or _ok_job()
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         return hmc, await power_on_lpar(hmc, LPAR_UUID, wait=True, **kwargs)
@@ -1189,7 +1109,7 @@ async def test_waited_power_on_completed_ok_but_failed_state_raises(state):
 async def test_waited_power_on_accepts_every_activated_state(state):
     hmc, outcome = await _waited_power_on(state)
 
-    assert outcome.already_running is False
+    assert outcome.already_activated is False
     assert outcome.job == _ok_job()
     assert hmc.get_quick_property.await_count == 2
 
@@ -1207,9 +1127,51 @@ async def test_waited_power_on_failed_job_is_returned_without_a_state_read():
 async def test_unwaited_power_on_reads_no_state_after_submit():
     hmc = _power_client()
     with patch(
-        "hmcpctl.operations.lpar.core.resolve_lpar_uuid",
+        "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         await power_on_lpar(hmc, LPAR_UUID)
 
     assert hmc.get_quick_property.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", [submit_power_on_lpar, power_on_lpar])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"immediate": True},
+        {"restart": True},
+        {"operation": "shutdown"},
+        {"allow_dump_restart": True},
+    ],
+)
+async def test_activation_rejects_shutdown_options_before_side_effects(
+    operation, kwargs
+):
+    hmc = _power_client()
+    with pytest.raises(TypeError):
+        await operation(hmc, LPAR_UUID, **kwargs)
+    hmc.submit_job.assert_not_awaited()
+    hmc.get_quick_property.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"force": True},
+        {"boot_mode": "sms"},
+        {"partition_profile_uuid": "profile"},
+        {"operation_type": "activate"},
+        {"keylock": "norm"},
+    ],
+)
+async def test_shutdown_rejects_activation_options_before_side_effects(kwargs):
+    from hmcpctl.operations.lpar import activation
+
+    hmc = _power_client()
+    with pytest.raises(TypeError):
+        await activation.power_off_lpar(hmc, LPAR_UUID, **kwargs)
+    hmc.submit_job.assert_not_awaited()
+    hmc.get_quick_property.assert_not_awaited()

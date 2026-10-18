@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
+import http.client
+import os
 import shlex
+import socket
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -17,14 +19,12 @@ from hmcpctl import cli
 
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
-from live_test import observation, vmedia  # noqa: E402
-
-_SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-runner = sys.modules.get(_SPEC.name) or importlib.util.module_from_spec(_SPEC)
-if _SPEC.name not in sys.modules:
-    sys.modules[_SPEC.name] = runner
-    _SPEC.loader.exec_module(runner)
+from live_test import config as live_config  # noqa: E402
+from live_test import (  # noqa: E402
+    observation,
+    runner,
+    vmedia,
+)
 
 SYSTEM = "sys-A"
 LPAR = "sys-A-lp3"
@@ -259,7 +259,7 @@ class FakeHMC:
 def arm(monkeypatch, tmp_path):
     """A fresh run state on synthetic names, and the HMC it talks to."""
     config = replace(
-        runner.LiveTestConfig(),
+        live_config.LiveTestConfig(),
         system_name=SYSTEM,
         lp3_name=LPAR,
         iso_path=str(tmp_path / "absent.iso"),
@@ -424,6 +424,66 @@ async def test_st16_creates_only_when_no_group_holds_a_repository(arm):
     assert state.artifacts.vmedia_repo_created
     assert state.artifacts.vmedia_vg_uuid == "vg-cfg-uuid"
     assert state.observations == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restore_fails", [False, True])
+async def test_st17_owned_repository_roundtrip_and_failed_restoration(
+    arm, monkeypatch, restore_fails
+):
+    state, hmc = arm
+    hmc.repository_vg = None
+    hmc.media.clear()
+    hmc.mappings = {DISK_MAPPING}
+    await _run(state, 16)
+    assert state.artifacts.vmedia_repo_created
+    before = hmc.snapshot()
+    hmc.calls.clear()
+    original = hmc.call
+
+    async def call(_state, client, tool, **kwargs):
+        if (
+            restore_fails
+            and tool == "hmc_create_media_repository"
+            and kwargs["size_mib"] == state.config.vmedia_repository_size_mib
+        ):
+            hmc.calls.append((tool, kwargs))
+            return "FAIL", _failure("repository restoration refused")
+        return await original(client, tool, **kwargs)
+
+    monkeypatch.setattr(runner.RunState, "call", call)
+    await _run(state, 17)
+    assert [tool for tool, _ in hmc.calls] == [
+        "hmc_delete_media_repository",
+        "hmc_create_media_repository",
+        "hmc_get_media_repository",
+        "hmc_list_optical_media",
+        "hmc_delete_media_repository",
+        "hmc_get_media_repository",
+        "hmc_create_media_repository",
+    ]
+    assert all(
+        kwargs["vios_name_or_uuid"] == VIOS and kwargs["vg_uuid"] == hmc.configured_vg
+        for _, kwargs in hmc.calls
+    )
+    assert [
+        kwargs["size_mib"]
+        for tool, kwargs in hmc.calls
+        if tool == "hmc_create_media_repository"
+    ] == [
+        state.config.vmedia_short_repository_size_mib,
+        state.config.vmedia_repository_size_mib,
+    ]
+    if restore_fails:
+        assert hmc.repository_vg is None
+        assert not state.artifacts.vmedia_repo_created
+        assert state.artifacts.vmedia_vg_uuid is None
+        assert state.results[-1]["status"] == "FAIL"
+    else:
+        assert hmc.snapshot() == before
+        assert state.artifacts.vmedia_repo_created
+        assert state.artifacts.vmedia_vg_uuid == hmc.configured_vg
+        assert state.results[-1]["status"] == "PASS"
 
 
 @pytest.mark.asyncio
@@ -727,7 +787,7 @@ async def test_st18_uploads_under_a_run_tagged_name_and_removes_it(arm, tmp_path
 
 
 def test_the_iso_name_keeps_the_configured_stem_and_suffix():
-    config = replace(runner.LiveTestConfig(), iso_media_name="boot.media.iso")
+    config = replace(live_config.LiveTestConfig(), iso_media_name="boot.media.iso")
 
     first, second = vmedia.iso_media_name(config), vmedia.iso_media_name(config)
 
@@ -1086,3 +1146,142 @@ def test_every_registered_vmedia_stage_is_covered_here():
     assert {
         runner.SUBTASKS[number] for number in runner.SUBTASK_GROUPS["vmedia"]
     } == covered
+
+
+def test_iso_http_fixture_serves_directory_once_and_releases_socket(
+    tmp_path, monkeypatch
+):
+    for name in list(os.environ):
+        if name.lower() == "hmc_iso_url_allowlist":
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("HMC_ISO_URL_ALLOWLIST", "existing.example.test:80")
+    image = tmp_path / "fixture.iso"
+    image.write_bytes(b"synthetic ISO fixture")
+    config = replace(
+        live_config.LiveTestConfig(),
+        iso_path=str(image),
+        iso_bind_host="127.0.0.1",
+        iso_advertised_host="127.0.0.1",
+        iso_http_port=0,
+    )
+    fixture = vmedia.IsoHttpServer()
+    try:
+        fixture.start(config)
+        first = fixture._server
+        assert first is not None
+        address = first.server_address
+        fixture.start(config)
+        assert fixture._server is first
+        connection = http.client.HTTPConnection(address[0], address[1], timeout=2)
+        try:
+            connection.request("GET", "/fixture.iso")
+            response = connection.getresponse()
+            assert response.status == 200
+            assert response.read() == image.read_bytes()
+        finally:
+            connection.close()
+        assert os.environ["HMC_ISO_URL_ALLOWLIST"].split(",") == [
+            "existing.example.test:80",
+            config.iso_host,
+        ]
+        fixture.close()
+        fixture.close()
+        assert fixture._server is None
+        assert first.socket.fileno() == -1
+        with socket.socket() as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind(address)
+        fixture.start(config)
+        assert fixture._server is not None and fixture._server is not first
+    finally:
+        fixture.close()
+
+
+@pytest.mark.parametrize(
+    ("stage", "error_type"),
+    [
+        ("construct", RuntimeError),
+        ("start", RuntimeError),
+        ("started", RuntimeError),
+        ("late", KeyboardInterrupt),
+        ("start", KeyboardInterrupt),
+        ("construct", MemoryError),
+    ],
+)
+def test_iso_http_fixture_releases_resources_after_thread_start_failure(
+    tmp_path,
+    monkeypatch,
+    stage,
+    error_type,
+):
+    fixture = vmedia.IsoHttpServer()
+    config = replace(
+        live_config.LiveTestConfig(),
+        iso_path=str(tmp_path / "fixture.iso"),
+        iso_bind_host="127.0.0.1",
+        iso_http_port=0,
+    )
+    servers, workers, delayed_starts, serving = [], [], [], []
+    real_server = vmedia.http.server.HTTPServer
+    real_thread = vmedia.threading.Thread
+
+    def server(*args, **kwargs):
+        raw = real_server(*args, **kwargs)
+        servers.append(raw)
+        serve = raw.serve_forever
+
+        def serve_forever():
+            serving.append(raw)
+            serve()
+
+        monkeypatch.setattr(raw, "serve_forever", serve_forever)
+        return raw
+
+    def thread(*args, **kwargs):
+        if stage == "construct":
+            raise error_type("thread startup refused")
+        worker = real_thread(*args, **kwargs)
+        workers.append(worker)
+        start = worker.start
+
+        def fail_start():
+            if stage == "started":
+                start()
+            elif stage == "late":
+                delayed_starts.append(start)
+            raise error_type("thread startup refused")
+
+        monkeypatch.setattr(worker, "start", fail_start)
+        return worker
+
+    monkeypatch.setattr(vmedia, "_allow_iso_host", lambda _config: None)
+    monkeypatch.setattr(vmedia.http.server, "HTTPServer", server)
+    monkeypatch.setattr(vmedia.threading, "Thread", thread)
+    try:
+        with pytest.raises(error_type, match="thread startup refused"):
+            fixture.start(config)
+        for start in delayed_starts:
+            start()
+        assert fixture._server is None
+        for worker in workers:
+            if worker.is_alive():
+                worker.join(timeout=2)
+            assert not worker.is_alive()
+        assert serving == []
+        assert servers and all(raw.socket.fileno() == -1 for raw in servers)
+        fixture.close()
+    finally:
+        # Failed assertions must also release a half-started fixture on the old code.
+        for worker in workers:
+            if worker.is_alive():
+                for raw in serving:
+                    raw.shutdown()
+                worker.join(timeout=2)
+                if worker.is_alive():
+                    for raw in serving:
+                        raw.shutdown()
+                    worker.join(timeout=2)
+                assert not worker.is_alive()
+        for raw in servers:
+            raw.server_close()
+        fixture._server = None

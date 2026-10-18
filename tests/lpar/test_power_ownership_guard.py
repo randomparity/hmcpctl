@@ -1,4 +1,4 @@
-"""ADR 0092 §4: the opt-in ADR 0011 ownership guard on ``power_lpar`` (#371).
+"""ADR 0092 §4: the opt-in ADR 0011 ownership guard on the power operations (#371).
 
 The guard is a configuration switch, so both settings are contract. The
 off-by-default arm asserts the *absence* of work — no SSH connection, no extra
@@ -19,9 +19,9 @@ from hmcpctl.audit import sink as audit_sink
 from hmcpctl.cli import app as cli_app
 from hmcpctl.cli_commands.lpar import lifecycle as cli_lpars
 from hmcpctl.config import HMCConfig
-from hmcpctl.operations.lpar import core as lpar_core
+from hmcpctl.operations.lpar import activation as lpar_activation
 from hmcpctl.operations.lpar import provision as operations_provision
-from hmcpctl.operations.lpar.core import power_lpar
+from hmcpctl.operations.lpar.activation import power_off_lpar, submit_power_on_lpar
 from hmcpctl.server_tools.lpar import lifecycle as server_lpars
 from hmcpctl.ssh.transport import HMCCLIError
 
@@ -103,12 +103,7 @@ async def test_disabled_guard_opens_no_ssh_connection_and_reads_no_ownership() -
     connect = AsyncMock(side_effect=AssertionError("opened an SSH connection"))
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", new=connect):
-        result = await power_lpar(
-            hmc,
-            SYSTEM_UUID,
-            LPAR_UUID,
-            power_on=False,
-        )
+        result = await power_off_lpar(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
 
     assert result.job == {"UUID": "job-uuid"}
     connect.assert_not_called()
@@ -126,7 +121,7 @@ async def test_disabled_guard_powers_a_partition_owned_by_another_agent() -> Non
         "hmcpctl.operations.lpar.ownership.get_lpar_description",
         new=AsyncMock(return_value=OWNED_BY_BOB),
     ) as read:
-        await power_lpar(hmc, None, LPAR_UUID, power_on=False)
+        await power_off_lpar(hmc, LPAR_UUID)
 
     read.assert_not_awaited()
     hmc.submit_job.assert_awaited_once()
@@ -136,32 +131,9 @@ async def test_disabled_guard_powers_a_partition_owned_by_another_agent() -> Non
 async def test_disabled_guard_needs_no_managed_system_selector() -> None:
     hmc = _hmc(authorize=False)
 
-    await power_lpar(hmc, None, LPAR_UUID, power_on=False)
+    await power_off_lpar(hmc, LPAR_UUID)
 
     hmc.submit_job.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("power_on", "operation", "permitted"),
-    [(True, "PowerOn", "PowerOff"), (False, "PowerOff", "PowerOn")],
-)
-async def test_power_operation_must_belong_to_its_closed_set(
-    monkeypatch, power_on, operation, permitted
-) -> None:
-    hmc = _hmc(authorize=False)
-    monkeypatch.setattr(
-        lpar_core,
-        "_LPAR_POWER_OPERATIONS",
-        lpar_core._LPAR_POWER_OPERATIONS - {operation},
-    )
-
-    with pytest.raises(ValueError) as exc_info:
-        await power_lpar(hmc, None, LPAR_UUID, power_on=power_on, force=True)
-
-    assert permitted in str(exc_info.value)
-    assert operation not in str(exc_info.value)
-    hmc.submit_job.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -181,11 +153,10 @@ async def test_enabled_guard_refuses_a_partition_another_agent_owns(caplog) -> N
         caplog.at_level(logging.WARNING),
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
-        await power_lpar(
+        await power_off_lpar(
             hmc,
-            SYSTEM_UUID,
             LPAR_UUID,
-            power_on=False,
+            system_name_or_uuid=SYSTEM_UUID,
             operation="dumprestart",
             allow_dump_restart=True,
         )
@@ -209,12 +180,7 @@ async def test_enabled_guard_powers_a_partition_this_agent_owns() -> None:
         "hmcpctl.operations.lpar.ownership.get_lpar_description",
         new=AsyncMock(return_value=OWNED_BY_ALICE),
     ) as read:
-        result = await power_lpar(
-            hmc,
-            SYSTEM_UUID,
-            LPAR_UUID,
-            power_on=False,
-        )
+        result = await power_off_lpar(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
 
     assert result.job == {"UUID": "job-uuid"}
     read.assert_awaited_once_with(hmc.config, "sys1", "aix1")
@@ -234,12 +200,7 @@ async def test_enabled_guard_runs_before_the_already_running_short_circuit() -> 
         ),
         pytest.raises(PermissionError),
     ):
-        await power_lpar(
-            hmc,
-            SYSTEM_UUID,
-            LPAR_UUID,
-            power_on=True,
-        )
+        await submit_power_on_lpar(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
 
     hmc.get_quick_property.assert_not_awaited()
 
@@ -255,11 +216,10 @@ async def test_ownership_override_submits_the_job_and_is_audited(caplog) -> None
         ) as read,
         caplog.at_level(logging.WARNING),
     ):
-        result = await power_lpar(
+        result = await power_off_lpar(
             hmc,
-            SYSTEM_UUID,
             LPAR_UUID,
-            power_on=False,
+            system_name_or_uuid=SYSTEM_UUID,
             ownership_override=True,
         )
 
@@ -295,12 +255,7 @@ async def test_enabled_guard_fails_closed_when_the_ownership_read_fails() -> Non
         ),
         pytest.raises(HMCCLIError, match="timed out"),
     ):
-        await power_lpar(
-            hmc,
-            SYSTEM_UUID,
-            LPAR_UUID,
-            power_on=False,
-        )
+        await power_off_lpar(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
 
     hmc.submit_job.assert_not_awaited()
 
@@ -323,12 +278,7 @@ async def test_enabled_guard_resolves_the_selector_once_and_scopes_the_lpar() ->
         "hmcpctl.operations.lpar.ownership.get_lpar_description",
         new=AsyncMock(return_value=OWNED_BY_ALICE),
     ):
-        await power_lpar(
-            hmc,
-            "sys1",
-            "aix1",
-            power_on=False,
-        )
+        await power_off_lpar(hmc, "aix1", system_name_or_uuid="sys1")
 
     # One summary read resolves the name to its UUID, one the UUID to the CLI name.
     assert hmc.list_system_summaries.await_count == 2
@@ -344,7 +294,7 @@ async def test_enabled_guard_discovers_the_owning_system_without_a_selector() ->
         "hmcpctl.operations.lpar.ownership.get_lpar_description",
         new=AsyncMock(return_value=OWNED_BY_ALICE),
     ) as read:
-        result = await power_lpar(hmc, None, LPAR_UUID, power_on=False)
+        result = await power_off_lpar(hmc, LPAR_UUID)
 
     assert result.job == {"UUID": "job-uuid"}
     hmc.list_system_summaries.assert_awaited_once()
@@ -362,7 +312,7 @@ async def test_enabled_guard_refuses_a_partition_owned_by_a_discovered_system() 
         ),
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
-        await power_lpar(hmc, None, LPAR_UUID, power_on=False)
+        await power_off_lpar(hmc, LPAR_UUID)
 
     hmc.submit_job.assert_not_awaited()
 
@@ -376,13 +326,7 @@ async def test_override_without_a_selector_skips_the_fleet_walk() -> None:
         "hmcpctl.operations.lpar.ownership.get_lpar_description",
         new=AsyncMock(return_value=OWNED_BY_BOB),
     ) as read:
-        result = await power_lpar(
-            hmc,
-            None,
-            LPAR_UUID,
-            power_on=False,
-            ownership_override=True,
-        )
+        result = await power_off_lpar(hmc, LPAR_UUID, ownership_override=True)
 
     assert result.job == {"UUID": "job-uuid"}
     read.assert_not_awaited()
@@ -402,12 +346,7 @@ async def test_enabled_guard_refuses_a_uuid_paired_with_a_foreign_system() -> No
         ) as read,
         pytest.raises(ValueError, match="does not belong to managed system"),
     ):
-        await power_lpar(
-            hmc,
-            SYSTEM_UUID,
-            LPAR_UUID,
-            power_on=False,
-        )
+        await power_off_lpar(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
 
     read.assert_not_awaited()
     hmc.submit_job.assert_not_awaited()
@@ -424,17 +363,17 @@ async def test_provision_activation_leg_overrides_its_own_stamp() -> None:
     hmc = _hmc(authorize=True)
     operation = AsyncMock(return_value=AsyncMock(job={"UUID": "job-uuid"}))
 
-    with patch.object(operations_provision, "power_lpar", operation):
+    with patch.object(operations_provision, "submit_power_on_lpar", operation):
         await operations_provision._power_on(hmc, "sys1", LPAR_UUID, None)
 
     assert operation.await_args.kwargs["ownership_override"] is True
-    assert operation.await_args.args[1] == "sys1"
+    assert operation.await_args.kwargs["system_name_or_uuid"] == "sys1"
 
 
 @pytest.mark.parametrize(
     ("tool", "operation_module"),
     [
-        (server_lpars.hmc_power_on_lpar, lpar_core),
+        (server_lpars.hmc_power_on_lpar, lpar_activation),
         (server_lpars.hmc_power_off_lpar, server_lpars),
     ],
 )
@@ -444,12 +383,18 @@ def test_power_tools_forward_the_ownership_override(
     hmc = _hmc(authorize=True)
     operation = AsyncMock(return_value=AsyncMock(job={"UUID": "job-uuid"}))
     monkeypatch.setattr("hmcpctl._app.client_from_env", _client_factory(hmc))
-    monkeypatch.setattr(operation_module, "power_lpar", operation)
+    monkeypatch.setattr(
+        operation_module,
+        "submit_power_on_lpar"
+        if operation_module is lpar_activation
+        else "power_off_lpar",
+        operation,
+    )
 
     tool("aix1", system_name_or_uuid="sys1", ownership_override=True)
 
     assert operation.await_args.kwargs["ownership_override"] is True
-    assert operation.await_args.args[1] == "sys1"
+    assert operation.await_args.kwargs["system_name_or_uuid"] == "sys1"
 
 
 @pytest.mark.parametrize(
@@ -460,11 +405,20 @@ def test_power_cli_forwards_the_system_selector_and_override(
     monkeypatch, command, power_on
 ) -> None:
     hmc = _hmc(authorize=True)
-    operation = AsyncMock(return_value=AsyncMock(lpar_uuid=LPAR_UUID, job=None))
+    outcome = (
+        lpar_activation.power_on_outcome(
+            lpar_activation.LparPowerResult(LPAR_UUID, None)
+        )
+        if power_on
+        else AsyncMock(lpar_uuid=LPAR_UUID, job=None)
+    )
+    operation = AsyncMock(return_value=outcome)
     monkeypatch.setattr(
         "hmcpctl.cli_commands.runtime.client", lambda: _factory_for(hmc)
     )
-    monkeypatch.setattr(cli_lpars, "power_lpar", operation)
+    monkeypatch.setattr(
+        cli_lpars, "power_on_lpar" if power_on else "power_off_lpar", operation
+    )
 
     result = CliRunner().invoke(
         cli_app,
@@ -481,5 +435,6 @@ def test_power_cli_forwards_the_system_selector_and_override(
 
     assert result.exit_code == 0, result.output
     assert operation.await_args.kwargs["ownership_override"] is True
-    assert operation.await_args.args[1] == "sys1"
-    assert operation.await_args.kwargs["power_on"] is power_on
+    assert operation.await_args.kwargs["system_name_or_uuid"] == "sys1"
+    assert operation.await_args.args == (hmc, "aix1")
+    operation.assert_awaited_once()

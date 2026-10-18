@@ -65,10 +65,12 @@ def _authorize_lpar_mutations(monkeypatch, mock_hmc):
         )
     )
 
-    async def authorize(hmc, system, lpar, **_kwargs):
+    async def authorize(hmc, lpar, *, system_name_or_uuid=None, **_kwargs):
         from hmcpctl.resource_identity import resolve_lpar_uuid
 
-        return await resolve_lpar_uuid(hmc, lpar, system_name_or_uuid=system)
+        return await resolve_lpar_uuid(
+            hmc, lpar, system_name_or_uuid=system_name_or_uuid
+        )
 
     monkeypatch.setattr(
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
@@ -86,12 +88,13 @@ LPM_RECOVERY_TOOL_CASES = [
     ),
 ]
 LPM_RECOVERY_OPERATION_CASES = [
-    (abort_lpar_migration, "lpar_migrate_abort", (None, LPAR_UUID)),
-    (recover_lpar_migration, "lpar_migrate_recover", (None, LPAR_UUID)),
+    (abort_lpar_migration, "lpar_migrate_abort", (LPAR_UUID,), {}),
+    (recover_lpar_migration, "lpar_migrate_recover", (LPAR_UUID,), {}),
     (
         remote_restart_lpar,
         "lpar_remote_restart",
-        ("source-system", LPAR_UUID, RemoteRestartRequest("restart")),
+        (LPAR_UUID, RemoteRestartRequest("restart")),
+        {"system_name_or_uuid": "source-system"},
     ),
 ]
 
@@ -228,11 +231,11 @@ def test_lpm_recovery_tools_return_explicit_timeout(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("operation", "submit_method", "args"),
+    ("operation", "submit_method", "args", "kwargs"),
     LPM_RECOVERY_OPERATION_CASES,
 )
 async def test_lpm_recovery_operations_return_stable_submission_outcome(
-    operation, submit_method, args
+    operation, submit_method, args, kwargs
 ):
     hmc = AsyncMock()
     hmc.list_system_summaries.return_value = [
@@ -241,7 +244,7 @@ async def test_lpm_recovery_operations_return_stable_submission_outcome(
     hmc.list_logical_partitions.return_value = [{"UUID": LPAR_UUID}]
     setattr(hmc, submit_method, AsyncMock(return_value={"UUID": "job-1"}))
 
-    result = await operation(hmc, *args)
+    result = await operation(hmc, *args, **kwargs)
 
     assert set(asdict(result.job)) == JOB_OUTCOME_KEYS
     assert result.job.job_id == "job-1"
@@ -253,11 +256,11 @@ async def test_lpm_recovery_operations_return_stable_submission_outcome(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("operation", "submit_method", "args"),
+    ("operation", "submit_method", "args", "kwargs"),
     LPM_RECOVERY_OPERATION_CASES,
 )
 async def test_lpm_recovery_operations_wait_for_terminal_outcome(
-    operation, submit_method, args
+    operation, submit_method, args, kwargs
 ):
     submitted = {"UUID": "job-1", "link": "/jobs/job-1"}
     completed = {"Resource": {"JobID": "job-1", "Status": "COMPLETED_OK"}}
@@ -269,7 +272,9 @@ async def test_lpm_recovery_operations_wait_for_terminal_outcome(
     setattr(hmc, submit_method, AsyncMock(return_value=submitted))
     hmc.wait_for_job_entry.return_value = completed
 
-    result = await operation(hmc, *args, wait=True, timeout_seconds=60, poll_interval=2)
+    result = await operation(
+        hmc, *args, **kwargs, wait=True, timeout_seconds=60, poll_interval=2
+    )
 
     assert set(asdict(result.job)) == JOB_OUTCOME_KEYS
     assert result.job.status == "COMPLETED_OK"
@@ -281,11 +286,11 @@ async def test_lpm_recovery_operations_wait_for_terminal_outcome(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("operation", "submit_method", "args"),
+    ("operation", "submit_method", "args", "kwargs"),
     LPM_RECOVERY_OPERATION_CASES,
 )
 async def test_lpm_recovery_operations_surface_terminal_failure(
-    operation, submit_method, args
+    operation, submit_method, args, kwargs
 ):
     submitted = {"UUID": "job-1", "link": "/jobs/job-1"}
     failed = {
@@ -308,7 +313,7 @@ async def test_lpm_recovery_operations_surface_terminal_failure(
     setattr(hmc, submit_method, AsyncMock(return_value=submitted))
     hmc.wait_for_job_entry.return_value = failed
 
-    result = await operation(hmc, *args, wait=True)
+    result = await operation(hmc, *args, **kwargs, wait=True)
 
     assert set(asdict(result.job)) == JOB_OUTCOME_KEYS
     assert result.job.job_id == "job-1"
@@ -320,11 +325,11 @@ async def test_lpm_recovery_operations_surface_terminal_failure(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("operation", "submit_method", "args"),
+    ("operation", "submit_method", "args", "kwargs"),
     LPM_RECOVERY_OPERATION_CASES,
 )
 async def test_lpm_recovery_operations_reject_invalid_active_timing_before_work(
-    operation, submit_method, args
+    operation, submit_method, args, kwargs
 ):
     hmc = AsyncMock()
     hmc.list_system_summaries.return_value = [
@@ -333,7 +338,7 @@ async def test_lpm_recovery_operations_reject_invalid_active_timing_before_work(
     hmc.list_logical_partitions.return_value = [{"UUID": LPAR_UUID}]
 
     with pytest.raises(ValueError, match="timeout_seconds"):
-        await operation(hmc, *args, wait=True, timeout_seconds=-1)
+        await operation(hmc, *args, **kwargs, wait=True, timeout_seconds=-1)
 
     getattr(hmc, submit_method).assert_not_awaited()
 

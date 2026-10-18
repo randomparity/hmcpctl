@@ -15,7 +15,6 @@ from typer._click.globals import get_current_context
 from hmcpctl.client.core import HMCClient
 
 from ...documents.storage import StorageKind, validate_virtual_disk
-from ...jobs import job_outcome
 from ...operations.lpar.profile_sync import ChangeLocation
 from ...operations.lpar.provision import (
     AttachDiskResult,
@@ -23,7 +22,7 @@ from ...operations.lpar.provision import (
     attach_disk_to_lpar,
 )
 from ...operations.storage.resources import (
-    StorageMapResult,
+    StorageMutationResult,
     create_media_repository,
     create_optical_media,
     create_virtual_disk,
@@ -55,6 +54,21 @@ from ..output import (
 from ..runtime import with_client
 
 
+def _quote_storage_token(value: str) -> str:
+    if value.isprintable():
+        return shlex.quote(value)
+    # ANSI-C quotes preserve control characters without emitting terminal controls.
+    escaped = []
+    for char in value:
+        if char in "\\'":
+            escaped.append("\\" + char)
+        elif char.isprintable():
+            escaped.append(char)
+        else:
+            escaped.extend(f"\\x{byte:02x}" for byte in os.fsencode(char))
+    return "$'" + "".join(escaped) + "'"
+
+
 def _confirm_storage(yes: bool, text: str) -> None:
     if yes:
         return
@@ -73,22 +87,9 @@ def _confirm_storage(yes: bool, text: str) -> None:
             options.append(parameter.opts[0])
             if value is not True:
                 options.append(str(value))
-    tokens = []
-    for value in [*options, "--yes", "--", *arguments]:
-        if value.isprintable():
-            tokens.append(shlex.quote(value))
-        else:
-            # ANSI-C quotes preserve control characters without emitting terminal controls.
-            escaped = []
-            for char in value:
-                if char in "\\'":
-                    escaped.append("\\" + char)
-                elif char.isprintable():
-                    escaped.append(char)
-                else:
-                    escaped.extend(f"\\x{byte:02x}" for byte in os.fsencode(char))
-            tokens.append("$'" + "".join(escaped) + "'")
-    invocation = " ".join(tokens)
+    invocation = " ".join(
+        _quote_storage_token(value) for value in [*options, "--yes", "--", *arguments]
+    )
     if sys.stdin is None or not sys.stdin.isatty():
         err_console.print(
             "Error: noninteractive storage mutation requires --yes/-y.\n"
@@ -108,12 +109,13 @@ def _confirm_storage(yes: bool, text: str) -> None:
 
 def _print_mutation(
     summary: dict[str, Any],
-    raw: Any,
+    result: StorageMutationResult,
     selected: InventoryFormat,
     details: bool,
     *,
     location: ChangeLocation | None = None,
 ) -> None:
+    location = result.change_location if location is None else location
     summary = {
         "outcome": "request_succeeded",
         "verification": "final state not verified",
@@ -122,18 +124,23 @@ def _print_mutation(
     if location is not None:
         summary["change_location"] = asdict(location)
         summary["change_location_summary"] = location.summary()
-    source = raw.get("resource", raw) if isinstance(raw, dict) else None
-    resource = source.get("Resource", source) if isinstance(source, dict) else None
-    if isinstance(resource, dict) and resource.get("JobID"):
-        job = job_outcome(summary["operation"], {"Resource": resource})
-        summary.update(job_id=job.job_id, job_status=job.status, error=job.error)
+    job = result.job
+    if job is not None:
+        summary.update(
+            job_id=job.job_id,
+            job_href=job.job_href,
+            job_status=job.status,
+            error=job.error,
+        )
         summary["outcome"] = "completed"
         if job.error:
             summary["outcome"] = "failed"
         elif job.timed_out:
             summary["outcome"] = "submitted"
         summary["verification"] = "returned job status"
-    print_inventory(raw if details else summary, selected, title="Storage result")
+    print_inventory(
+        result.raw if details else summary, selected, title="Storage result"
+    )
     if summary["outcome"] == "failed":
         raise typer.Exit(1)
 
@@ -388,12 +395,12 @@ def storage_attach_disk(
         vg_uuid = await resolve_volume_group_uuid(hmc, vios_uuid, vg)
         return await attach_disk_to_lpar(
             hmc,
-            system,
             lpar,
             ProvisionStorage(vios_uuid, name, vg_uuid=vg_uuid),
             capacity_mib=capacity_mib,
             dry_run=dry_run,
             ownership_override=ownership_override,
+            system_name_or_uuid=system,
         )
 
     result = with_client(_go)
@@ -427,11 +434,8 @@ def storage_attach_disk(
         "warnings": result.warnings,
     }
     for step_summary, step in zip(summary["steps"], result.steps, strict=True):
-        resource = (
-            step.result.get("Resource") if isinstance(step.result, dict) else None
-        )
-        if isinstance(resource, dict) and resource.get("JobID"):
-            job = job_outcome(step.step, step.result)
+        job = step.job
+        if job is not None:
             step_summary.update(
                 job_id=job.job_id, job_status=job.status, error=job.error
             )
@@ -439,7 +443,7 @@ def storage_attach_disk(
         summary["verification"] = "preconditions validated; no mutation"
     _print_mutation(
         summary,
-        raw,
+        StorageMutationResult(raw),
         selected,
         details or selected == InventoryFormat.json,
         location=result.change_location,
@@ -490,7 +494,7 @@ def storage_map(
         f"{terminal_field(vios, err=True)} to LPAR '{terminal_field(lpar, err=True)}'?",
     )
 
-    result: StorageMapResult = with_client(
+    result: StorageMutationResult = with_client(
         lambda hmc: map_storage(
             hmc,
             vios,
@@ -514,7 +518,7 @@ def storage_map(
             "kind": kind,
             "target_device": target,
         },
-        asdict(result),
+        result,
         selected,
         details,
         location=result.change_location,
@@ -867,7 +871,7 @@ def storage_mount_optical_media(
             "lpar_uuid": result.lpar_uuid,
             "target_device": target_device,
         },
-        asdict(result),
+        result,
         selected,
         details,
         location=result.change_location,
@@ -915,7 +919,7 @@ def storage_unmount_optical_media(
         f"? The backing ISO remains available.",
     )
 
-    async def _go(hmc: HMCClient) -> ChangeLocation:
+    async def _go(hmc: HMCClient) -> StorageMutationResult:
         return await unmount_optical_media(
             hmc,
             vios,
@@ -925,7 +929,7 @@ def storage_unmount_optical_media(
             system_name_or_uuid=system,
         )
 
-    location = with_client(_go)
+    result = with_client(_go)
     _print_mutation(
         {
             "operation": "unmount-optical-media",
@@ -935,10 +939,10 @@ def storage_unmount_optical_media(
             "lpar": lpar,
             "backing_storage": "retained",
         },
-        asdict(location),
+        result,
         selected,
         details,
-        location=location,
+        location=result.change_location,
     )
 
 
@@ -1013,7 +1017,7 @@ def storage_detach_mapping(
         f"VirtualDisk) will be preserved.",
     )
 
-    async def _go(hmc: HMCClient) -> ChangeLocation:
+    async def _go(hmc: HMCClient) -> StorageMutationResult:
         return await detach_storage_mapping(
             hmc,
             vios,
@@ -1022,7 +1026,7 @@ def storage_detach_mapping(
             ownership_override=ownership_override,
         )
 
-    location = with_client(_go)
+    result = with_client(_go)
     _print_mutation(
         {
             "operation": "detach-mapping",
@@ -1031,10 +1035,10 @@ def storage_detach_mapping(
             "system": system,
             "backing_storage": "retained",
         },
-        asdict(location),
+        result,
         selected,
         details,
-        location=location,
+        location=result.change_location,
     )
 
 
@@ -1078,7 +1082,7 @@ def storage_upload_iso(
     """
     selected = resolve_inventory_format(as_json or details, format)
 
-    async def _go(hmc: HMCClient) -> dict[str, Any]:
+    async def _go(hmc: HMCClient) -> StorageMutationResult:
         return await upload_iso(
             hmc,
             vios,
@@ -1096,17 +1100,17 @@ def storage_upload_iso(
         "vios": vios,
         "vg": vg,
         "system": system,
-        "outcome": result.get("status", "unknown"),
-        "media_size_bytes": result.get("media_size_bytes"),
-        "source_sha256": result.get("source_sha256"),
+        "outcome": result.raw.get("status", "unknown"),
+        "media_size_bytes": result.raw.get("media_size_bytes"),
+        "source_sha256": result.raw.get("source_sha256"),
         "verification": "repository entry observed"
-        if result.get("status") == "uploaded"
+        if result.raw.get("status") == "uploaded"
         else "final state not verified",
     }
     _print_mutation(
         summary, result, selected, details or selected == InventoryFormat.json
     )
-    if result.get("status") != "uploaded":
+    if result.raw.get("status") != "uploaded":
         raise typer.Exit(1)
 
 

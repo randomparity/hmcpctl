@@ -135,6 +135,13 @@ class SystemsMixin:
     async def get_managed_system(
         self: SystemsClient, uuid: str
     ) -> dict[str, Any] | None:
+        """Get one managed system using the ``get_uom`` response contract.
+
+        None means an empty successful response or no parsed entries. HTTP 404
+        and other statuses outside 200/204 raise HMCError, except the specific
+        HTTP 500 null-hardware-property failure: resolve it by name through
+        quick/All, raising HMCError if that fallback cannot resolve the system.
+        """
         # A direct UUID fetch can 500 over a null hardware property; the
         # observed trigger is an X-HMC-Schema-Version: V1_0 pin (ADR 0138).
         # quick/All supplies the missing name so find_system_by_name (a
@@ -173,7 +180,15 @@ class SystemsMixin:
     async def find_system_by_name(
         self: SystemsClient, name: str
     ) -> dict[str, Any] | None:
-        """Find a managed system by its SystemName (exact match)."""
+        """Find a managed system by exact SystemName.
+
+        Returns:
+            The matching entry, or None when the search confirms absence.
+
+        Raises:
+            ValueError: The name is ambiguous or its candidates cannot be identified.
+            HMCError: A transport/API request fails.
+        """
         results = await self.search_uom("ManagedSystem", "SystemName", name)
         if len(results) > 1:
             ambiguity_candidate_ids(results, "managed-system", name)
@@ -225,7 +240,17 @@ class SystemsMixin:
     async def find_vios_by_name(
         self: SystemsClient, name: str, system_uuid: str | None = None
     ) -> dict[str, Any] | None:
-        """Find a Virtual I/O Server by its PartitionName (exact match)."""
+        """Find a VIOS by exact PartitionName, optionally within one system.
+
+        Returns:
+            The matching entry, or None for confirmed absence in the searched scope.
+            An unscoped miss is confirmed only when every system is readable.
+
+        Raises:
+            ValueError: The name is ambiguous or its candidates cannot be identified.
+            HMCError: A transport/API request fails, or unreadable system inventory
+                prevents confirming an unscoped miss.
+        """
         if system_uuid:
             entries = await self.list_vios(system_uuid)
             results = [
@@ -299,7 +324,10 @@ class SystemsMixin:
         return entries
 
     async def get_vios(self: SystemsClient, vios_uuid: str) -> dict[str, Any] | None:
-        """GET one VIOS entry.
+        """GET one VIOS entry using the ``get_uom`` response contract.
+
+        None means an empty successful response or no parsed entries; HTTP 404
+        and other statuses outside 200/204 raise HMCError.
 
         A VIOS answers only under ``VirtualIOServer``: V10R3 returns 404 for
         ``LogicalPartition/{vios_uuid}`` and its quick properties (#1202).

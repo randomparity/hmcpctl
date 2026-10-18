@@ -8,5 +8,5 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_get_job` | `read` | `job.get` | `job` | `implemented` | `current` | `existing-runtime-guards` | Get one HMC job by JobID, optionally using its submission SELF link. |
+| `hmc_get_job` | `read` | `job.get` | `job` | `implemented` | `current` | `existing-runtime-guards` | Inspect one HMC job and return its normalized outcome and original entry. |
 | `hmc_wait_for_job` | `read` | `job.wait` | `job` | `implemented` | `current` | `existing-runtime-guards` | Poll a job and return its normalized status, timeout, and error outcome. |

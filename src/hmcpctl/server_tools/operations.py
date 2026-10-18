@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from ..config import build_config
-from ..operations.logical.store import connection_label, operation_status
-from ..operations.lpar.workflow_contract import (
+from ..operations.logical.models import (
     OperationOutcome,
     OperationPage,
     OperationState,
 )
+from ..operations.logical.store import connection_label, operation_status
 from ..tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()

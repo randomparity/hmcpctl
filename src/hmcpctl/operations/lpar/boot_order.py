@@ -43,9 +43,7 @@ async def _write_pending_boot_string(
 
 
 async def read_lpar_boot_order(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str
 ) -> dict[str, Any]:
     """Read current, pending, and last-used boot-device state for an LPAR."""
     selector = optional_system_selector(system_name_or_uuid)
@@ -74,19 +72,19 @@ async def read_lpar_boot_order(
 
 async def set_lpar_boot_order(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     devices: list[str],
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> dict[str, Any] | None:
     """Set the pending boot order used on the LPAR's next activation."""
     boot_string = join_boot_device_paths(devices)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
 
     updated = await _write_pending_boot_string(hmc, lpar_uuid, boot_string)
@@ -103,9 +101,9 @@ async def set_lpar_boot_order(
 
 async def clear_lpar_boot_order(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> NoReturn:
     """Refuse to clear the LPAR's pending boot order after authorizing the caller.
@@ -114,8 +112,8 @@ async def clear_lpar_boot_order(
     """
     await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     raise HMCError(_CLEAR_REFUSAL)

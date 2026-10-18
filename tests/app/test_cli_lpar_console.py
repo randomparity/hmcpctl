@@ -7,7 +7,7 @@ import inspect
 import io
 from collections.abc import Callable
 from typing import Self
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 from click import unstyle
@@ -64,8 +64,8 @@ def _capture_side_effect(
     async def _inner(
         _hmc,
         _lpar,
-        _system,
         *,
+        system_name_or_uuid,
         duration_seconds: float,
         max_bytes: int,
         idle_timeout_seconds: float,
@@ -113,7 +113,7 @@ def test_options_reach_the_capture_and_bytes_reach_stdout(client, capture):
     capture.assert_awaited_once_with(
         client,
         "aix-db",
-        "system-a",
+        system_name_or_uuid="system-a",
         duration_seconds=12.5,
         max_bytes=4096,
         idle_timeout_seconds=3.5,
@@ -130,15 +130,9 @@ def test_defaults_match_the_mcp_tool(client, capture):
     assert result.exit_code == 0, result.stderr
     tool = inspect.signature(hmc_capture_lpar_console).parameters
     # Streaming and interrupt handling are CLI-only; compare shared bounds.
-    actual = {
-        k: v
-        for k, v in capture.await_args.kwargs.items()
-        if k not in {"on_chunk", "stop_on_cancel"}
-    }
-    assert actual == {
-        name: tool[name].default
-        for name in ("duration_seconds", "max_bytes", "idle_timeout_seconds")
-    }
+    bounds = ("duration_seconds", "max_bytes", "idle_timeout_seconds")
+    actual = {name: capture.await_args.kwargs[name] for name in bounds}
+    assert actual == {name: tool[name].default for name in bounds}
 
 
 def test_output_file_receives_the_bytes(capture, tmp_path):
@@ -309,8 +303,8 @@ def test_bytes_are_written_as_chunks_arrive_not_after_capture(
     async def _streaming_mock(
         _hmc,
         _lpar,
-        _system,
         *,
+        system_name_or_uuid,
         duration_seconds: float,
         max_bytes: int,
         idle_timeout_seconds: float,
@@ -488,3 +482,60 @@ def test_interrupt_without_capture_proof_reports_write_failure(
     assert result.exit_code == 3
     assert target.exists()
     assert "No space left on device" in result.stderr
+
+
+@pytest.mark.parametrize("adapter", ["cli", "mcp"])
+@pytest.mark.parametrize("selectors", ["names", "uuids"])
+def test_console_adapters_resolve_scoped_identity(monkeypatch, adapter, selectors):
+    from hmcpctl.operations.lpar import console as lpar_console
+
+    system_uuid = "11111111-1111-1111-1111-111111111111"
+    lpar_uuid = "22222222-2222-2222-2222-222222222222"
+    hmc = MagicMock()
+    hmc.list_system_summaries = AsyncMock(
+        return_value=[{"UUID": system_uuid, "SystemName": "system-a"}]
+    )
+    hmc.find_partition_by_name = AsyncMock(return_value={"UUID": lpar_uuid})
+    hmc.list_logical_partitions = AsyncMock(return_value=[{"UUID": lpar_uuid}])
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=hmc)
+    context.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(cli_runtime, "client", lambda: context)
+    monkeypatch.setattr("hmcpctl._app.client_from_env", lambda profile: context)
+    ssh = AsyncMock(return_value=f"{lpar_uuid},aix-db\n")
+    monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", ssh)
+
+    async def capture_bytes(*args, **options):
+        if options["on_chunk"] is not None:
+            options["on_chunk"](DATA)
+        return _capture()
+
+    capture = AsyncMock(side_effect=capture_bytes)
+    monkeypatch.setattr(lpar_console, "capture_lpar_console", capture)
+    system, partition = (
+        ("system-a", "aix-db") if selectors == "names" else (system_uuid, lpar_uuid)
+    )
+    if adapter == "cli":
+        result = RUNNER.invoke(
+            cli.app, ["lpars", "capture-console", partition, "--system", system]
+        )
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout_bytes == DATA
+    else:
+        result = hmc_capture_lpar_console(partition, system)
+        assert (result["system"], result["partition"]) == ("system-a", "aix-db")
+    assert capture.await_args.args == (hmc, "system-a", "aix-db")
+    assert capture.await_args.kwargs["stop_on_cancel"] == (adapter == "cli")
+    if selectors == "names":
+        hmc.find_partition_by_name.assert_awaited_once_with(
+            "aix-db", system_uuid=system_uuid
+        )
+        hmc.list_logical_partitions.assert_not_awaited()
+        ssh.assert_not_awaited()
+    else:
+        hmc.list_logical_partitions.assert_awaited_once_with(system_uuid)
+        hmc.find_partition_by_name.assert_not_awaited()
+        ssh.assert_awaited_once_with(
+            hmc.config, "lssyscfg -r lpar -m system-a -F uuid,name"
+        )
+    context.__aexit__.assert_awaited_once()

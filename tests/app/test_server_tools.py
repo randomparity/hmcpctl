@@ -205,32 +205,38 @@ def test_run_command_passes_cmd_through(monkeypatch):
 
 
 def test_get_job_parses_entry(monkeypatch, mock_hmc):
-    """hmc_get_job returns the parsed job resource dict."""
+    """hmc_get_job returns the normalized outcome with the raw resource."""
     _hmc_env(monkeypatch)
     mock_hmc.get(f"/rest/api/uom/jobs/{RUNNING_JOB_ID}").mock(
         return_value=httpx.Response(200, text=RUNNING_JOB_ENTRY)
     )
     result = hmc_get_job(RUNNING_JOB_ID)
-    assert result["Resource"]["JobID"] == RUNNING_JOB_ID
-    assert result["Resource"]["Status"] == "RUNNING"
+    assert result.job["Resource"]["JobID"] == RUNNING_JOB_ID
+    assert result.job["Resource"]["Status"] == "RUNNING"
 
 
-def test_get_job_empty_returns_none(monkeypatch, mock_hmc):
-    """hmc_get_job returns None when the server returns no content."""
+def test_get_job_empty_returns_missing_outcome(monkeypatch, mock_hmc):
+    """hmc_get_job reports found false when the server returns no content."""
     _hmc_env(monkeypatch)
     mock_hmc.get("/rest/api/uom/jobs/job-uuid-999").mock(
         return_value=httpx.Response(204)
     )
-    assert hmc_get_job("job-uuid-999") is None
+    outcome = hmc_get_job("job-uuid-999")
+    assert outcome.found is False
+    assert outcome.job is None
+    assert outcome.job_href is None
 
 
-def test_get_job_reaped_returns_none(monkeypatch, mock_hmc):
+def test_get_job_reaped_returns_missing_outcome(monkeypatch, mock_hmc):
     """A job the HMC no longer has reads as no job, not as an HMCError (#474)."""
     _hmc_env(monkeypatch)
     mock_hmc.get("/rest/api/uom/jobs/job-uuid-999").mock(
         return_value=live_response("rest-job-not-found")[1]
     )
-    assert hmc_get_job("job-uuid-999") is None
+    outcome = hmc_get_job("job-uuid-999")
+    assert outcome.found is False
+    assert outcome.job is None
+    assert outcome.job_href is None
 
 
 def test_get_job_degraded_hmc_still_raises(monkeypatch, mock_hmc):
@@ -268,7 +274,7 @@ def test_get_job_trims_surrounding_whitespace(monkeypatch, mock_hmc):
     mock_hmc.get(f"/rest/api/uom/jobs/{JOB_ID}").mock(
         return_value=httpx.Response(200, text=JOB_ENTRY)
     )
-    assert hmc_get_job(f"  {JOB_ID}  ")["Resource"]["JobID"] == JOB_ID
+    assert hmc_get_job(f"  {JOB_ID}  ").job_id == JOB_ID
 
 
 def test_lpars_by_name(monkeypatch, mock_hmc):
@@ -311,7 +317,7 @@ def test_power_on_lpar_submits_job(monkeypatch, mock_hmc):
     assert route.called
     body = route.calls.last.request.content.decode()
     assert "PowerOn</OperationName>" in body
-    assert result.already_running is False
+    assert result.already_activated is False
     assert result.job["Resource"]["JobID"] == JOB_ID
     assert result.message is None
 
@@ -588,7 +594,9 @@ def test_rename_lpar_authorizes_and_writes_name(monkeypatch, mock_hmc):
 
     body = route.calls.last.request.content.decode()
     assert "<PartitionName>renamed</PartitionName>" in body
-    guard.assert_awaited_once_with(ANY, SYSTEM_UUID, LPAR_UUID, ownership_override=True)
+    guard.assert_awaited_once_with(
+        ANY, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID, ownership_override=True
+    )
     assert result["Resource"]["PartitionName"] == "renamed"
 
 
@@ -1291,7 +1299,7 @@ def test_get_job_with_href_uses_direct_path(monkeypatch, mock_hmc):
     result = hmc_get_job(entry_uuid_path.rsplit("/", 1)[-1], job_href=_JOB_OP_HREF)
     assert href_route.called
     assert not global_route.called
-    assert result["Resource"]["JobID"] == JOB_ID
+    assert result.job["Resource"]["JobID"] == JOB_ID
 
 
 @pytest.mark.parametrize("tool", [hmc_get_job, hmc_wait_for_job])
@@ -1368,6 +1376,6 @@ def test_power_on_with_wait_polls_the_submission_jobid(monkeypatch, mock_hmc):
     result = hmc_power_on_lpar(LPAR_UUID, wait=True, poll_interval=1)
     assert poll_route.called
     assert not entry_uuid_route.called
-    assert result.already_running is False
+    assert result.already_activated is False
     assert result.job["Resource"]["Status"] == "COMPLETED_OK"
     assert result.message is None

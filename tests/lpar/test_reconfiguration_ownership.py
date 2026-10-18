@@ -58,19 +58,21 @@ Operation = Callable[[AsyncMock], Awaitable[object]]
 CASES: tuple[tuple[str, Operation], ...] = (
     (
         "hmcpctl.operations.virtualization.adapters.resolve_and_authorize_lpar_mutation",
-        lambda hmc: add_network_adapter(hmc, None, LPAR, 100),
+        lambda hmc: add_network_adapter(hmc, LPAR, 100, system_name_or_uuid=None),
     ),
     (
         "hmcpctl.operations.virtualization.adapters.resolve_and_authorize_lpar_mutation",
-        lambda hmc: add_vscsi_adapter(hmc, None, LPAR, 2, 10),
+        lambda hmc: add_vscsi_adapter(hmc, LPAR, 2, 10, system_name_or_uuid=None),
     ),
     (
         "hmcpctl.operations.virtualization.adapters.resolve_and_authorize_lpar_mutation",
-        lambda hmc: add_vfc_adapter(hmc, None, LPAR, 2, 10),
+        lambda hmc: add_vfc_adapter(hmc, LPAR, 2, 10, system_name_or_uuid=None),
     ),
     (
         "hmcpctl.operations.virtualization.adapters.resolve_and_authorize_lpar_mutation",
-        lambda hmc: delete_adapter(hmc, None, LPAR, "ClientNetworkAdapter", "adapter"),
+        lambda hmc: delete_adapter(
+            hmc, LPAR, "ClientNetworkAdapter", "adapter", system_name_or_uuid=None
+        ),
     ),
     (
         "hmcpctl.operations.storage.resources.resolve_and_authorize_lpar_mutation",
@@ -95,30 +97,30 @@ CASES: tuple[tuple[str, Operation], ...] = (
         "hmcpctl.operations.lpar.provision.resolve_and_authorize_lpar_mutation",
         lambda hmc: attach_disk_to_lpar(
             hmc,
-            None,
             LPAR,
             ProvisionStorage(VIOS, "disk1", vg_uuid=VG),
             capacity_mib=1024,
+            system_name_or_uuid=None,
         ),
     ),
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
         lambda hmc: migrate_lpar(
-            hmc, None, LPAR, LpmMigrationRequest("target"), validate_first=False
+            hmc, LPAR, LpmMigrationRequest("target"), validate_first=False
         ),
     ),
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
-        lambda hmc: abort_lpar_migration(hmc, None, LPAR),
+        lambda hmc: abort_lpar_migration(hmc, LPAR),
     ),
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
-        lambda hmc: recover_lpar_migration(hmc, None, LPAR),
+        lambda hmc: recover_lpar_migration(hmc, LPAR),
     ),
     (
         "hmcpctl.operations.lpar.migration.resolve_and_authorize_lpar_mutation",
         lambda hmc: remote_restart_lpar(
-            hmc, "source", LPAR, RemoteRestartRequest("cleanup")
+            hmc, LPAR, RemoteRestartRequest("cleanup"), system_name_or_uuid="source"
         ),
     ),
 )
@@ -349,7 +351,7 @@ async def test_config_operations_reject_foreign_owner_before_ssh_write(
         patch(f"hmcpctl.operations.lpar.configuration.{write_name}", new=write),
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
-        await operation(hmc, SYSTEM_UUID, LPAR, *args)
+        await operation(hmc, LPAR, *args, system_name_or_uuid=SYSTEM_UUID)
 
     write.assert_not_awaited()
 
@@ -376,7 +378,9 @@ async def test_config_operations_override_skips_ownership_read(
         ) as read,
         patch(f"hmcpctl.operations.lpar.configuration.{write_name}", new=write),
     ):
-        await operation(hmc, SYSTEM_UUID, LPAR, *args, ownership_override=True)
+        await operation(
+            hmc, LPAR, *args, system_name_or_uuid=SYSTEM_UUID, ownership_override=True
+        )
 
     read.assert_not_awaited()
     write.assert_awaited_once()
@@ -406,7 +410,7 @@ async def test_configure_lpar_msp_rejects_foreign_vios_owner_before_write(
         patch("hmcpctl.operations.lpar.configuration.set_lpar_msp", new=write),
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
-        await configure_lpar_msp(hmc, SYSTEM_UUID, selector, True)
+        await configure_lpar_msp(hmc, selector, True, system_name_or_uuid=SYSTEM_UUID)
 
     read.assert_awaited_once_with(hmc.config, SYSTEM_NAME, VIOS_NAME)
     write.assert_not_awaited()
@@ -425,7 +429,7 @@ async def test_configure_lpar_msp_writes_unstamped_vios() -> None:
         ),
         patch("hmcpctl.operations.lpar.configuration.set_lpar_msp", new=write),
     ):
-        await configure_lpar_msp(hmc, SYSTEM_UUID, VIOS_NAME, False)
+        await configure_lpar_msp(hmc, VIOS_NAME, False, system_name_or_uuid=SYSTEM_UUID)
 
     write.assert_awaited_once_with(hmc.config, SYSTEM_NAME, VIOS_NAME, False)
 
@@ -444,7 +448,9 @@ async def test_configure_lpar_msp_override_skips_read_and_audits() -> None:
             "hmcpctl.operations.lpar.ownership.audit.record_ownership_override"
         ) as audited,
     ):
-        await configure_lpar_msp(hmc, SYSTEM_UUID, VIOS, True, ownership_override=True)
+        await configure_lpar_msp(
+            hmc, VIOS, True, ownership_override=True, system_name_or_uuid=SYSTEM_UUID
+        )
 
     read.assert_not_awaited()
     write.assert_awaited_once()
@@ -467,7 +473,11 @@ async def test_configure_lpar_msp_refuses_non_vios_before_any_ssh(
         pytest.raises(ResourceNotFoundError, match="lpar_env=vioserver"),
     ):
         await configure_lpar_msp(
-            hmc, SYSTEM_UUID, LPAR, True, ownership_override=override
+            hmc,
+            LPAR,
+            True,
+            ownership_override=override,
+            system_name_or_uuid=SYSTEM_UUID,
         )
 
     hmc.list_vios.assert_awaited_once_with(SYSTEM_UUID)
@@ -535,7 +545,7 @@ async def test_delete_adapter_returns_where_the_deletion_lives(
     }
 
     result = await delete_adapter(
-        hmc, None, LPAR, "ClientNetworkAdapter", "adapter-uuid"
+        hmc, LPAR, "ClientNetworkAdapter", "adapter-uuid", system_name_or_uuid=None
     )
 
     assert result == ChangeLocation("Disabled", "current-configuration")

@@ -215,7 +215,7 @@ names are internal everywhere and are never inventoried.
   `configure_lpar_processor_compatibility`, `synchronize_lpar_profile`.
 - `operations.lpar.core` — exports: `LparCreation`, `LparCreationResult`,
   `LparPowerResult`, `ProcessorCompatibilityMode`, `create_and_stamp_lpar`,
-  `delete_lpar`, `power_lpar`, `rename_lpar`.
+  `delete_lpar`, `submit_power_on_lpar`, `power_off_lpar`, `rename_lpar`.
 - `operations.lpar.decommission` — exports: `DecommissionAdapterRecord`,
   `DecommissionBlastRadius`, `DecommissionResult`, `decommission_lpar`.
 - `operations.lpar.dlpar` — exports: `modify_lpar`, `set_lpar_memory`,

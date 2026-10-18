@@ -30,7 +30,18 @@ async def create_logical_unit(
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
 ) -> dict[str, Any] | None:
-    """Submit logical-unit creation and optionally wait for completion."""
+    """Submit logical-unit creation and optionally poll its job.
+
+    With wait=False, return the raw submission entry, which may be None.
+    With wait=True, return the latest raw polling entry (or None after an
+    empty read). A timeout can return a nonterminal entry. Waiting does not
+    guarantee success: callers must inspect terminal status and error details.
+
+    Invalid logical-unit or device types also raise ValueError.
+    When waiting, negative timeout_seconds or nonpositive poll_interval raise
+    ValueError; a submission without a usable job handle raises HMCError.
+    Submission and polling HMC errors propagate.
+    """
     validate_logical_unit_types(lu_type, device_type)
     validate_wait_timing(wait, timeout_seconds, poll_interval)
     job = await hmc.create_logical_unit(
@@ -53,7 +64,17 @@ async def delete_logical_unit(
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
 ) -> dict[str, Any] | None:
-    """Submit logical-unit deletion and optionally wait for completion."""
+    """Submit logical-unit deletion and optionally poll its job.
+
+    With wait=False, return the raw submission entry, which may be None.
+    With wait=True, return the latest raw polling entry (or None after an
+    empty read). A timeout can return a nonterminal entry. Waiting does not
+    guarantee success: callers must inspect terminal status and error details.
+
+    When waiting, negative timeout_seconds or nonpositive poll_interval raise
+    ValueError; a submission without a usable job handle raises HMCError.
+    Submission and polling HMC errors propagate.
+    """
     validate_wait_timing(wait, timeout_seconds, poll_interval)
     job = await hmc.delete_logical_unit(cluster_uuid, lu_udid)
     return await wait_for_submitted_job(hmc, job, wait, timeout_seconds, poll_interval)

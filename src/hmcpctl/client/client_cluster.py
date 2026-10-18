@@ -20,6 +20,11 @@ class ClusterMixin:
     async def get_cluster(
         self: ClusterClient, cluster_uuid: str
     ) -> dict[str, Any] | None:
+        """Get one Cluster using the ``get_uom`` empty-success/error contract.
+
+        None means an empty successful response or no parsed entries; HTTP 404
+        and other statuses outside 200/204 raise HMCError.
+        """
         return await self.get_uom("Cluster", cluster_uuid)
 
     async def list_shared_storage_pools(self: ClusterClient) -> list[dict[str, Any]]:
@@ -28,6 +33,11 @@ class ClusterMixin:
     async def get_shared_storage_pool(
         self: ClusterClient, ssp_uuid: str
     ) -> dict[str, Any] | None:
+        """Get one SharedStoragePool using the ``get_uom`` empty-success/error contract.
+
+        None means an empty successful response or no parsed entries; HTTP 404
+        and other statuses outside 200/204 raise HMCError.
+        """
         return await self.get_uom("SharedStoragePool", ssp_uuid)
 
     async def create_logical_unit(

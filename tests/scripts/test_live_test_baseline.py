@@ -1,7 +1,11 @@
 """Offline independent-baseline contracts; remote boundaries never reach hardware."""
 
+import ast
 import copy
+import importlib
 import json
+import runpy
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -9,7 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
-import live_test_baseline as baseline
+from live_test import baseline
 
 from hmcpctl.config import HMCConfig
 
@@ -433,3 +437,41 @@ async def test_physical_port_coverage(document, monkeypatch):
     for port in document["tables"]["sriov_physical"]:
         port["curr_eth_logical_ports"] = port["config_logical_ports"] = "0"
     assert baseline.validate(document)["tables"]["sriov_logical"] == []
+
+
+def test_package_ownership_and_executable_dispatch(monkeypatch):
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                'import sys; sys.modules["live_test_baseline"] = None; '
+                "from live_test import baseline; "
+                'assert baseline.main.__module__ == "live_test.baseline"'
+            ),
+        ],
+        cwd=Path(__file__).parents[2] / "scripts",
+        check=True,
+    )
+    owner = baseline
+    wrapper = importlib.import_module("live_test_baseline")
+    assert wrapper.baseline is owner
+    assert not {"TABLES", "capture", "validate", "main"} & vars(wrapper).keys()
+    calls = []
+    monkeypatch.setattr(owner, "main", lambda: calls.append("dispatched") or 7)
+    with pytest.raises(SystemExit) as result:
+        runpy.run_path(str(Path(wrapper.__file__)), run_name="__main__")
+    assert result.value.code == 7
+    assert calls == ["dispatched"]
+
+
+def test_package_consumers_do_not_import_executable():
+    scripts = Path(__file__).parents[2] / "scripts"
+    for path in scripts.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                assert all(
+                    alias.name != "live_test_baseline" for alias in node.names
+                ), path
+            elif isinstance(node, ast.ImportFrom):
+                assert node.module != "live_test_baseline", path

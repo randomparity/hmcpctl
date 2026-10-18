@@ -331,13 +331,17 @@ async def _collect_affinity_observations(
 ) -> _AffinityObservations:
     """Collect the affinity evidence used by a snapshot."""
     return _AffinityObservations(
-        current_lpar=await get_lpar_memopt_score(hmc, system_name, lpar_name),
+        current_lpar=await get_lpar_memopt_score(
+            hmc, lpar_name, system_name_or_uuid=system_name
+        ),
         current_system=await get_system_memopt_score(hmc, system_name),
         predicted_lpars=await plan_lpar_memopt_scores(hmc, system_name),
         predicted_system=await plan_system_memopt_score(hmc, system_name),
         current_groups=await list_resource_group_memopt_scores(hmc, system_name),
         predicted_groups=await plan_resource_group_memopt_scores(hmc, system_name),
-        minimum_policy=await get_minimum_affinity_policy(hmc, system_name, lpar_name),
+        minimum_policy=await get_minimum_affinity_policy(
+            hmc, lpar_name, system_name_or_uuid=system_name
+        ),
     )
 
 

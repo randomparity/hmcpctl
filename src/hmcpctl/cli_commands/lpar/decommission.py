@@ -74,13 +74,13 @@ def lpars_decommission(
     result = with_client(
         lambda hmc: decommission_lpar(
             hmc,
-            system,
             name_or_uuid,
             dry_run=dry_run,
             ownership_override=ownership_override,
             immediate=immediate,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
+            system_name_or_uuid=system,
         )
     )
 

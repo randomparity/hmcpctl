@@ -12,7 +12,7 @@ from unittest.mock import Mock
 import pytest
 import typer.testing
 from click import unstyle
-from test_cli_storage_results import CASES
+from test_cli_storage_results import CASES, operation_result
 from typer.testing import CliRunner
 
 from hmcpctl import cli
@@ -37,7 +37,7 @@ def _args(command, args):
 def test_noninteractive_refusal(
     monkeypatch, command, args, data, target, input_text, flags
 ):
-    call = Mock(return_value=data)
+    call = Mock(return_value=operation_result(data))
     monkeypatch.setattr(storage, "with_client", call)
     result = RUNNER.invoke(cli.app, [*_args(command, args), *flags], input=input_text)
     assert result.exit_code == 2, result.output
@@ -55,7 +55,7 @@ def test_noninteractive_refusal(
 @pytest.mark.parametrize("command,args,data,target", CASES[:-1])
 @pytest.mark.parametrize("flag", ["--yes", "-y"])
 def test_explicit_yes_dispatches(monkeypatch, command, args, data, target, flag):
-    call = Mock(return_value=data)
+    call = Mock(return_value=operation_result(data))
     monkeypatch.setattr(storage, "with_client", call)
     result = RUNNER.invoke(cli.app, [*_args(command, args), flag])
     assert result.exit_code == 0, result.output
@@ -69,7 +69,7 @@ def test_interactive_decline_and_eof(monkeypatch, command, args, data, target, a
     monkeypatch.setattr(
         typer.testing._NamedTextIOWrapper, "isatty", lambda self: self.name == "<stdin>"
     )
-    call = Mock(return_value=data)
+    call = Mock(return_value=operation_result(data))
     monkeypatch.setattr(storage, "with_client", call)
     result = RUNNER.invoke(cli.app, _args(command, args), input=answer)
     assert result.exit_code == 1, result.output
@@ -96,7 +96,7 @@ def test_confirm_removed(monkeypatch, command, args, data, target, force_color):
 
 def test_dry_run_needs_no_consent(monkeypatch):
     command, args, data, _ = CASES[3]
-    call = Mock(return_value=data)
+    call = Mock(return_value=operation_result(data))
     monkeypatch.setattr(storage, "with_client", call)
     result = RUNNER.invoke(cli.app, [*_args(command, args), "--dry-run"])
     assert result.exit_code == 0, result.output
@@ -131,7 +131,7 @@ def test_retry_preserves_hostile_scope_and_target(monkeypatch, terminal, shell, 
         "isatty",
         lambda self: terminal and self.name == "<stderr>",
     )
-    call = Mock(return_value={})
+    call = Mock(return_value=operation_result({}))
     monkeypatch.setattr(storage, "with_client", call)
     result = RUNNER.invoke(
         cli.app,
@@ -172,10 +172,11 @@ SOURCE = """
 import sys
 from hmcpctl import cli
 from hmcpctl.cli_commands.storage import resources
+from hmcpctl.operations.storage.resources import StorageMutationResult
 
 def dispatch(operation):
     print("DISPATCH", file=sys.stderr)
-    return {}
+    return StorageMutationResult({})
 
 resources.with_client = dispatch
 cli.app(["storage", "delete-disk", "vi-test", "--vg", "vg-test", "--name", "disk-test",

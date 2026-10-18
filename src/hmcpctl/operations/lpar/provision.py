@@ -18,7 +18,7 @@ from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_loc
 from ...documents.lpar import LparResources, PartitionType, validate_partition_type
 from ...documents.storage import StorageKind, validate_virtual_disk
 from ...errors import HMCError
-from ...jobs import JobOutcome, job_outcome
+from ...jobs import JobOutcome, job_identifier, job_outcome
 from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
 from ...ssh.affinity import (
     MinimumAffinityPolicy,
@@ -35,18 +35,14 @@ from ..affinity.rest import (
 )
 from ..affinity.ssh import set_minimum_affinity_policy
 from ..storage.resources import create_virtual_disk, resolve_volume_group_uuid
+from .activation import submit_power_on_lpar
 from .assignments import (
     LparPcieAssignments,
     apply_validated_lpar_pcie_assignments,
     assignment_step_names,
     prevalidate_lpar_pcie_assignments,
 )
-from .core import (
-    LparCreation,
-    LparCreationResult,
-    create_and_stamp_lpar,
-    power_lpar,
-)
+from .core import LparCreation, LparCreationResult, create_and_stamp_lpar
 from .workflow_contract import WorkflowStep
 
 
@@ -176,7 +172,9 @@ async def _check_name_unique(hmc, system_uuid: str, name: str) -> None:
         )
 
 
-async def _check_vlan_exists(hmc, system_uuid: str, port_vlan_id: int) -> None:
+async def check_vlan_exists(
+    hmc: HMCClient, system_uuid: str, port_vlan_id: int
+) -> None:
     """Raise ValueError if no VirtualNetwork with *port_vlan_id* exists."""
     networks = await hmc.list_virtual_networks(system_uuid)
     malformed: list[str] = []
@@ -305,11 +303,10 @@ async def _power_on(
     ``docs/authorization-audit.md`` records that the event is not
     human-triggered only.
     """
-    result = await power_lpar(
+    result = await submit_power_on_lpar(
         hmc,
-        system_name_or_uuid,
         lpar_uuid,
-        power_on=True,
+        system_name_or_uuid=system_name_or_uuid,
         force=True,
         wait=assessment is not None,
         timeout_seconds=assessment.timeout_seconds if assessment else 300,
@@ -354,10 +351,10 @@ async def _run_storage_leg(
 
 async def attach_disk_to_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     storage: ProvisionStorage,
     *,
+    system_name_or_uuid: str | None = None,
     capacity_mib: int,
     dry_run: bool = False,
     ownership_override: bool = False,
@@ -383,9 +380,9 @@ async def attach_disk_to_lpar(
 
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
 
     change_location, warnings = await _read_change_location(hmc, lpar_uuid)
@@ -437,7 +434,9 @@ async def _run_policy_leg(
     return await _record_hmc_step(
         steps,
         "minimum_affinity_policy",
-        set_minimum_affinity_policy(hmc, system_name_or_uuid, lpar_name, policy),
+        set_minimum_affinity_policy(
+            hmc, lpar_name, policy, system_name_or_uuid=system_name_or_uuid
+        ),
     )
 
 
@@ -480,11 +479,13 @@ async def _run_power_leg(
             message = result.error or (
                 "PowerOn did not reach a successful terminal status before timeout"
             )
-            steps.append(WorkflowStep("power_on", "error", message))
+            steps.append(WorkflowStep("power_on", "error", message, result))
             return False
-        steps.append(WorkflowStep("power_on", "ok", asdict(result)))
+        steps.append(WorkflowStep("power_on", "ok", asdict(result), result))
     else:
-        steps.append(WorkflowStep("power_on", "ok", result))
+        identifier = job_identifier(result) if result else None
+        job = job_outcome(identifier, result) if identifier else None
+        steps.append(WorkflowStep("power_on", "ok", result, job))
     return True
 
 
@@ -589,10 +590,10 @@ async def _preflight_provision_request(
 
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     if request.minimum_affinity_policy is not None:
-        system_name, _ = await resolve_ssh_names(hmc.config, system_name_or_uuid, None)
+        system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
         await require_minimum_affinity_policy_capability(hmc.config, system_name)
     await _check_name_unique(hmc, system_uuid, request.name)
-    await _check_vlan_exists(hmc, system_uuid, request.adapters.port_vlan_id)
+    await check_vlan_exists(hmc, system_uuid, request.adapters.port_vlan_id)
     if request.storage.vg_uuid is not None:
         await _check_vg_exists(hmc, request.storage.vios_uuid, request.storage.vg_uuid)
     await prevalidate_lpar_pcie_assignments(

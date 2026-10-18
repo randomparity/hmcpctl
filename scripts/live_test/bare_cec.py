@@ -9,7 +9,7 @@ under scenario `st35-bare-cec`.
 
 Design: docs/workflow/specs/2026-09-22-bare-cec-live-arm-design.md. The
 configuration, baseline, fixture-create and cleanup guards are the dedicated
-arm's (`pcie.py`, ADR 0163), so preflight and `live_test_recovery.py` read this
+arm's (`dedicated_pcie.py`, ADR 0163), so preflight and `live_test_recovery.py` read this
 arm exactly as they read that one. Its own rows are numbered 35; the shared
 helpers keep writing rows 29, 30 and 34 with their dedicated-arm wording.
 
@@ -46,12 +46,13 @@ from hmcpctl.ssh.profiles import (
 )
 from hmcpctl.ssh.transport import HMCCLIError
 
-from . import cli, pcie
+from . import cli, dedicated_pcie
 from .metrics import _as_outcome
-from .observation import CLEANUP, Assertion, CallFailure, ExpectedOutcome
+from .observation import Assertion, CallFailure, ExpectedOutcome, grade_assertions
 
 if TYPE_CHECKING:
-    from live_test_runner import LiveTestConfig, RunState
+    from live_test.config import LiveTestConfig
+    from live_test.runner import RunState
 
 _ROW = 35
 _SCENARIO = "st35-bare-cec"
@@ -123,7 +124,7 @@ _OSSHUTDOWN_WITHOUT_RMC = ExpectedOutcome(
 class _Run:
     """What the arm has established, read by the teardown and its deferred rows."""
 
-    fixture: pcie._DedicatedFixture
+    fixture: dedicated_pcie._DedicatedFixture
     accept_dump: bool
     create_attempted: bool = False
     create_ok: bool = False
@@ -145,13 +146,8 @@ def _record_held(
     The lpar-power arm (subtask 41) owns these operations' observations, and the
     catalog keeps one per operation, so this arm's would overwrite it (#1346).
     """
-    if cleanup not in CLEANUP:
-        raise ValueError(f"cleanup disposition is not a known value: {cleanup!r}")
-    unmet = [item.id for item in assertions if not item.holds]
-    if cleanup not in {"passed", "not-required"}:
-        unmet.append(f"cleanup {cleanup}")
-    note = "unmet: " + ", ".join(unmet) if unmet else ""
-    state.record(_ROW, tool, "FAIL" if unmet else "PASS", data, note)
+    status, note = grade_assertions(assertions, cleanup)
+    state.record(_ROW, tool, status, data, note)
 
 
 def _power_operations_authorized() -> bool:
@@ -215,13 +211,13 @@ def _job_assertions(outcome: JobOutcome | None, job_id: str) -> list[Assertion]:
     ]
 
 
-def _identity_matches(fixture: pcie._DedicatedFixture, observed: Any) -> bool:
+def _identity_matches(fixture: dedicated_pcie._DedicatedFixture, observed: Any) -> bool:
     return observed.caller_token == fixture.run_marker and (
         observed.lpar_uuid == fixture.lpar_uuid
     )
 
 
-def _manual_recovery(fixture: pcie._DedicatedFixture, why: str) -> str:
+def _manual_recovery(fixture: dedicated_pcie._DedicatedFixture, why: str) -> str:
     """The recovery for a fixture that may still be active and hold its slot."""
     arm = fixture.config
     system, name = shlex.quote(arm.system_name), shlex.quote(fixture.lpar_name)
@@ -231,7 +227,7 @@ def _manual_recovery(fixture: pcie._DedicatedFixture, why: str) -> str:
         "NOT deleted. Once you have confirmed it is this run's, in order: "
         f"`chsysstate -m {system} -r lpar -n {name} -o shutdown --immed`; once it "
         f"is Not Activated and its profile still lists slot {fixture.drc_index!r}, "
-        f"`{pcie._change_io_slots_command(fixture, add=False)}`; then "
+        f"`{dedicated_pcie._change_io_slots_command(fixture, add=False)}`; then "
         f"`rmsyscfg -r lpar -m {system} -n {name}`."
     )
 
@@ -239,7 +235,7 @@ def _manual_recovery(fixture: pcie._DedicatedFixture, why: str) -> str:
 async def _read_state(
     client: Client,
     state: RunState,
-    fixture: pcie._DedicatedFixture,
+    fixture: dedicated_pcie._DedicatedFixture,
     wanted: frozenset[str],
     attempts: int = _STATE_POLL_ATTEMPTS,
 ) -> str | None:
@@ -261,7 +257,10 @@ async def _read_state(
 
 
 async def _power_on(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture, profile_uuid: str
+    client: Client,
+    state: RunState,
+    fixture: dedicated_pcie._DedicatedFixture,
+    profile_uuid: str,
 ) -> tuple[str, Any, CallFailure | None]:
     """Activate the fixture to SMS against *profile_uuid* and wait; record nothing."""
     st, data = await state.call(
@@ -281,7 +280,7 @@ async def _power_on(
 async def _power_off(
     client: Client,
     state: RunState,
-    fixture: pcie._DedicatedFixture,
+    fixture: dedicated_pcie._DedicatedFixture,
     *,
     immediate: bool,
     restart: bool = False,
@@ -332,7 +331,7 @@ def _record_state(
 
 
 async def _activation_profile_uuid(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture
+    client: Client, state: RunState, fixture: dedicated_pcie._DedicatedFixture
 ) -> str | None:
     """The UUID of the fixture's one profile, which must be the configured one.
 
@@ -392,8 +391,8 @@ async def _assign(client: Client, state: RunState, run: _Run) -> bool:
     )
     state.record(_ROW, "hmc_assign_dedicated_pcie_slot (call)", st, data)
     # Read back whatever the call reported: a lost response has still written.
-    applied = await pcie._read_profile_io_slots(client, state, fixture)
-    run.slot_assigned = applied is not None and pcie._io_slots_contains(
+    applied = await dedicated_pcie._read_profile_io_slots(client, state, fixture)
+    run.slot_assigned = applied is not None and dedicated_pcie._io_slots_contains(
         applied, str(fixture.drc_index)
     )
     if run.slot_assigned:
@@ -409,7 +408,7 @@ async def _assign(client: Client, state: RunState, run: _Run) -> bool:
 
 
 async def _no_profile_activation(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture
+    client: Client, state: RunState, fixture: dedicated_pcie._DedicatedFixture
 ) -> bool:
     """Record what a PowerOn naming no profile does to a fresh partition (L3).
 
@@ -462,7 +461,10 @@ async def _no_profile_activation(
 
 
 async def _activate_to_sms(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture, profile_uuid: str
+    client: Client,
+    state: RunState,
+    fixture: dedicated_pcie._DedicatedFixture,
+    profile_uuid: str,
 ) -> bool:
     st, data, failure = await _power_on(client, state, fixture, profile_uuid)
     job = _power_job(data) if st == "PASS" else None
@@ -514,9 +516,7 @@ async def _inspect_job(client: Client, state: RunState, job_id: str) -> None:
         operation="job.get",
         scenario=_SCENARIO,
         assertions=_job_assertions(
-            job_outcome(
-                job_id, data if st == "PASS" and isinstance(data, dict) else None
-            ),
+            _as_outcome(data) if st == "PASS" else None,
             job_id,
         ),
         cleanup="not-required",
@@ -537,7 +537,7 @@ async def _inspect_job(client: Client, state: RunState, job_id: str) -> None:
 
 
 async def _observe(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture
+    client: Client, state: RunState, fixture: dedicated_pcie._DedicatedFixture
 ) -> None:
     """Read reference codes and capture the console of the activated partition."""
     arm = fixture.config
@@ -608,7 +608,7 @@ async def _observe(
 
 
 async def _power_off_to_not_activated(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture
+    client: Client, state: RunState, fixture: dedicated_pcie._DedicatedFixture
 ) -> bool:
     st, data, failure = await _power_off(client, state, fixture, immediate=True)
     job = _power_job(data) if st == "PASS" else None
@@ -635,7 +635,10 @@ async def _power_off_to_not_activated(
 
 
 async def _reactivate_and_restart(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture, profile_uuid: str
+    client: Client,
+    state: RunState,
+    fixture: dedicated_pcie._DedicatedFixture,
+    profile_uuid: str,
 ) -> bool:
     st, data, failure = await _power_on(client, state, fixture, profile_uuid)
     if not _record_power(state, "hmc_power_on_lpar (re-activate)", st, data, failure):
@@ -659,7 +662,7 @@ async def _reactivate_and_restart(
 
 
 async def _osshutdown_refusal(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture
+    client: Client, state: RunState, fixture: dedicated_pcie._DedicatedFixture
 ) -> bool:
     """Record osshutdown on a partition with no OS and no RMC as the expected refusal."""
     label = "hmc_power_off_lpar (osshutdown)"
@@ -688,7 +691,7 @@ async def _osshutdown_refusal(
 
 
 async def _dump_restart(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture
+    client: Client, state: RunState, fixture: dedicated_pcie._DedicatedFixture
 ) -> bool:
     # The crash is its own tool and grant (ADR 0188), not a hmc_power_off_lpar operation.
     st, data = await state.call(
@@ -712,7 +715,7 @@ async def _run_steps(client: Client, state: RunState, run: _Run) -> None:
     """Steps 1-13 of the spec; any unmet precondition returns to the teardown."""
     fixture = run.fixture
     run.create_attempted = True
-    run.create_ok = await pcie.create_fixture_partition(
+    run.create_ok = await dedicated_pcie.create_fixture_partition(
         client, state, fixture, resources=_RESOURCES
     )
     run.partition_created = fixture.created
@@ -761,7 +764,7 @@ async def _unassign(client: Client, state: RunState, run: _Run) -> bool:
         drc_index=fixture.drc_index,
     )
     # A lost response has still written, so the readback decides.
-    after = await pcie._read_profile_io_slots(client, state, fixture)
+    after = await dedicated_pcie._read_profile_io_slots(client, state, fixture)
     restored = after is not None and after == fixture.baseline_io_slots
     state.record_verified(
         _ROW,
@@ -781,7 +784,7 @@ async def _unassign(client: Client, state: RunState, run: _Run) -> bool:
 
 
 async def _slot_released(
-    client: Client, state: RunState, fixture: pcie._DedicatedFixture
+    client: Client, state: RunState, fixture: dedicated_pcie._DedicatedFixture
 ) -> bool:
     """Whether no partition owns the slot and no profile lists it; unreadable is False."""
     arm = fixture.config
@@ -826,18 +829,18 @@ async def _slot_released(
         rows = parse_profile_io_slot_rows(data)
     except HMCCLIError:
         return False
-    return not pcie._profile_lists_slot(rows, str(fixture.drc_index))
+    return not dedicated_pcie._profile_lists_slot(rows, str(fixture.drc_index))
 
 
 async def _delete(client: Client, state: RunState, run: _Run) -> bool:
     """Guard C, then delete by UUID and judge the delete by readback."""
     fixture = run.fixture
-    final = await pcie._read_dedicated_state(client, state, fixture)
+    final = await dedicated_pcie._read_dedicated_state(client, state, fixture)
     if (
         not _identity_matches(fixture, final)
         or final.profile_io_slots != fixture.baseline_io_slots
     ):
-        await pcie.cleanup_dedicated(client, state, fixture)
+        await dedicated_pcie.cleanup_dedicated(client, state, fixture)
         return False
     st, data = await state.call(
         client,
@@ -845,10 +848,10 @@ async def _delete(client: Client, state: RunState, run: _Run) -> bool:
         system_name_or_uuid=fixture.config.system_name,
         lpar_name_or_uuid=fixture.lpar_uuid,
     )
-    absent = await pcie.name_absent(client, state, fixture)
+    absent = await dedicated_pcie.name_absent(client, state, fixture)
     if not absent:
         state.record(_ROW, "hmc_delete_lpar (call)", st, data)
-        await pcie.cleanup_dedicated(client, state, fixture)
+        await dedicated_pcie.cleanup_dedicated(client, state, fixture)
         return False
     # Gone, whatever the call reported: a lost response has still deleted.
     fixture.created = False
@@ -873,19 +876,19 @@ async def _teardown_fixture(client: Client, state: RunState, run: _Run) -> bool:
     Returns True only when the partition is gone and its slot released. A
     partition this arm cannot prove its own is left untouched with a
     manual-recovery row; drift once it is powered off goes to
-    `pcie.cleanup_dedicated`, whose guards re-decide on live state.
+    `dedicated_pcie.cleanup_dedicated`, whose guards re-decide on live state.
     """
     fixture = run.fixture
     if not run.create_ok:
         # Never activated, so the shared guards' delete precondition holds.
-        await pcie.cleanup_dedicated(client, state, fixture)
+        await dedicated_pcie.cleanup_dedicated(client, state, fixture)
         return False
     # Read twice before concluding a mismatch: a transient read failure reads as
     # a missing token or UUID. The partition may be active here, and the shared
     # guards would unassign and try to delete it without powering it off.
-    observed = await pcie._read_dedicated_state(client, state, fixture)
+    observed = await dedicated_pcie._read_dedicated_state(client, state, fixture)
     if not _identity_matches(fixture, observed):
-        observed = await pcie._read_dedicated_state(client, state, fixture)
+        observed = await dedicated_pcie._read_dedicated_state(client, state, fixture)
     if not _identity_matches(fixture, observed):
         state.record(
             _ROW,
@@ -915,7 +918,7 @@ async def _teardown_fixture(client: Client, state: RunState, run: _Run) -> bool:
                 ),
             )
             return False
-        observed = await pcie._read_dedicated_state(client, state, fixture)
+        observed = await dedicated_pcie._read_dedicated_state(client, state, fixture)
     at_baseline = (
         fixture.baseline_io_slots is not None
         and observed.profile_io_slots == fixture.baseline_io_slots
@@ -927,7 +930,7 @@ async def _teardown_fixture(client: Client, state: RunState, run: _Run) -> bool:
     ):
         # Drift, or a removal that did not restore the baseline: the shared
         # guards re-read and refuse or recover on live state.
-        await pcie.cleanup_dedicated(client, state, fixture)
+        await dedicated_pcie.cleanup_dedicated(client, state, fixture)
         return False
     return await _delete(client, state, run)
 
@@ -1016,7 +1019,7 @@ async def exercise_bare_cec(client: Client, state: RunState) -> None:
             "would hide the first — run the bare-cec group on its own",
         )
         return
-    fixture = await pcie.capture_dedicated_baseline(client, state)
+    fixture = await dedicated_pcie.capture_dedicated_baseline(client, state)
     if fixture is None:
         return
     run = _Run(fixture, accept_dump)

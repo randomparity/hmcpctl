@@ -241,10 +241,12 @@ through both entry points, and that an approved override skips the ownership rea
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
-| `power_lpar` | `operations/lpar/core.py::power_lpar` | guarded when opted in (`operations/lpar/core.py::power_lpar`, via `resolve_and_authorize_lpar_mutation`); §4 | #371 |
+| `submit_power_on_lpar` | `operations/lpar/activation.py::submit_power_on_lpar` | guarded when opted in (`operations/lpar/activation.py::_resolve_power_target`, via `resolve_and_authorize_lpar_mutation`); §4 | #371 |
+| `power_off_lpar` | `operations/lpar/activation.py::power_off_lpar` | guarded when opted in (`operations/lpar/activation.py::_resolve_power_target`, via `resolve_and_authorize_lpar_mutation`); §4 | #371 |
 
-`power_lpar` is the whole class. Both `hmc_power_on_lpar` (`server_tools/lpar/lifecycle.py::hmc_power_on_lpar`)
-and `hmc_power_off_lpar` (`server_tools/lpar/lifecycle.py::hmc_power_off_lpar`) delegate to it, and so does the
+The activation and shutdown operations are the whole class. Both `hmc_power_on_lpar`
+(`server_tools/lpar/lifecycle.py::hmc_power_on_lpar`) and `hmc_power_off_lpar`
+(`server_tools/lpar/lifecycle.py::hmc_power_off_lpar`) delegate to them, and so does the
 CLI, so one decision covers every entry path.
 
 #### 3.4 Standing exemptions
@@ -384,7 +386,7 @@ the SSH command takes. It calls `_resolve_system_name` (`operations/lpar/ownersh
 `_authorize_pcie_profile_request` (`operations/virtualization/pcie.py::_authorize_pcie_profile_request`) already demonstrate.
 
 The two REST reads are the same order of work `power_lpar` already does
-(`resolve_lpar_uuid` and `get_quick_property` inside `operations/lpar/core.py::power_lpar`).
+(`resolve_lpar_uuid` and `get_quick_property` inside `operations/lpar/activation.py::submit_power_on_lpar`).
 **The SSH login is the outlier**, and it is the part of the cost this decision turns
 on.
 

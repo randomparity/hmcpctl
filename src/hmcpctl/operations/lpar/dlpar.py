@@ -43,15 +43,30 @@ _MEMORY_FIELDS = ("min_memory", "desired_memory", "max_memory")
 
 async def modify_lpar(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     resources: LparResources,
     assignments: LparPcieAssignments,
     *,
+    system_name_or_uuid: str | None = None,
     new_name: str | None = None,
     ownership_override: bool = False,
 ) -> LparPcieWorkflowResult:
-    """Authorize and apply rename, resource, and PCIe changes in order."""
+    """Authorize and apply rename, resource, and PCIe changes in order.
+
+    Validation and ownership authorization run before any write. Invalid scope,
+    resource values, or assignments raise ``ValueError``; ownership refusal raises
+    ``PermissionError``. Inventory and transport errors can also propagate.
+
+    A rename failure propagates. A resource-update ``HMCError`` or ``ValueError``
+    also propagates when no rename has succeeded (with actionable write-error
+    translation where available). After a successful rename, that same failure
+    returns an incomplete result retaining the renamed resource, an error step,
+    warnings, and skipped assignment steps. Assignment failures likewise return
+    their completed, failed, and skipped steps. Completed changes are never rolled
+    back: callers must inspect ``workflow_completed`` and ``steps`` before treating
+    a returned result as success. A failed final readback after recorded steps is
+    reported in ``warnings`` without discarding those steps.
+    """
     system_name_or_uuid = optional_system_selector(system_name_or_uuid)
     if (
         assignments != LparPcieAssignments() or new_name is not None
@@ -66,9 +81,9 @@ async def modify_lpar(
 
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     await require_memory_within_selected_system(hmc, system_name_or_uuid, resources)
     resource = None
@@ -168,9 +183,9 @@ async def _apply_dlpar_change(
     """
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
-        system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
     )
     await require_memory_within_selected_system(hmc, system_name_or_uuid, resources)
     try:
@@ -201,10 +216,10 @@ def _require_fields(
 
 async def set_lpar_processors(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     resources: LparResources,
     *,
+    system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
 ) -> dict[str, Any] | None:
     """Authorize and apply a DLPAR processor change to one partition.
@@ -246,10 +261,10 @@ async def set_lpar_processors(
 
 async def set_lpar_memory(
     hmc: HMCClient,
-    system_name_or_uuid: str | None,
     lpar_name_or_uuid: str,
     resources: LparResources,
     *,
+    system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
 ) -> dict[str, Any] | None:
     """Authorize and apply a DLPAR memory change to one partition.

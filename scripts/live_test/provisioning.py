@@ -13,15 +13,15 @@ from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 from hmcpctl.ssh.commands import parse_hmc_result_rows
 from hmcpctl.ssh.transport import HMCCLIError
 
+from .dedicated_pcie import partition_not_found
 from .network import listed_vlans
 from .observation import judge_create_result, plain_data
-from .pcie import partition_not_found
 from .results import resource as get_resource
 from .storage import configured_vg_uuid
 from .storage_lifecycle import LISTING_NAME, volume_listing, volume_names
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 # ---------------------------------------------------------------------------
 # ST13 — Provision Dry Run
@@ -193,7 +193,7 @@ async def _fixture_partition(client: Client, state: RunState, name: str) -> bool
 async def _fixture_disk_unmapped(
     client: Client, state: RunState, fixture: dict[str, str]
 ) -> bool:
-    import live_test_baseline as baseline
+    from live_test import baseline
 
     status, detail = await state.call(
         client,

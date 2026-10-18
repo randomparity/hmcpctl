@@ -7,11 +7,7 @@ from dataclasses import asdict
 import typer
 
 from ...operations.inventory.composite import fetch_lpar_summary
-from ...operations.lpar.core import (
-    get_lpar,
-    get_lpar_state,
-    list_lpars,
-)
+from ...operations.lpar.inventory import get_lpar, get_lpar_state, list_lpars
 from ...operations.partition_state import PartitionState
 from ...resource_identity import ResourceNotFoundError
 from ...ssh.refcodes import MAX_REFCODE_COUNT, list_lpar_refcodes
@@ -43,7 +39,11 @@ def lpars_summary(
     """One-call summary: state, RMC, memory/CPU, OS details, adapter count, description."""
     selected = resolve_inventory_format(as_json, format)
     summary = asdict(
-        with_client(lambda hmc: fetch_lpar_summary(hmc, system, name_or_uuid))
+        with_client(
+            lambda hmc: fetch_lpar_summary(
+                hmc, name_or_uuid, system_name_or_uuid=system
+            )
+        )
     )
     print_inventory(summary, selected, title="LPAR Summary")
 

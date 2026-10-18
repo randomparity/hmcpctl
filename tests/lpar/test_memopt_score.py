@@ -420,3 +420,36 @@ def test_hmc_list_lpar_memopt_scores_empty(monkeypatch, mock_hmc):
         result = hmc_list_lpar_memopt_scores(SYSTEM_UUID)
 
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_operation_uuid_selectors_reuse_borrowed_client():
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.operations.affinity.ssh import get_lpar_memopt_score as operation
+
+    hmc = MagicMock(spec=HMCClient)
+    hmc.config = _config()
+    hmc.list_system_summaries = AsyncMock(
+        return_value=[{"UUID": SYSTEM_UUID, "SystemName": SYSTEM_NAME}]
+    )
+    hmc.get_logical_partition = AsyncMock(
+        return_value={"Resource": {"PartitionName": LPAR_NAME}}
+    )
+    conn = _make_ssh_mock(SCORE_ROW)
+    with (
+        patch(
+            "hmcpctl.ssh.selectors.HMCClient",
+            side_effect=AssertionError("unexpected extra REST session"),
+        ) as factory,
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
+    ):
+        result = await operation(hmc, LPAR_UUID, system_name_or_uuid=SYSTEM_UUID)
+    assert result["lpar_name"] == LPAR_NAME
+    factory.assert_not_called()
+    hmc.__aenter__.assert_not_awaited()
+    hmc.__aexit__.assert_not_awaited()
+    hmc.list_system_summaries.assert_awaited_once()
+    hmc.get_logical_partition.assert_awaited_once_with(LPAR_UUID)
+    assert conn.run.call_args.args[0] == (
+        f"lsmemopt -m {SYSTEM_NAME} -r lpar -o currscore --filter lpar_names={LPAR_NAME}"
+    )
