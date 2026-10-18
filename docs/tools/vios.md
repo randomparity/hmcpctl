@@ -9,12 +9,12 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `hmc_backup_vios` | `mutate` | `vios.backup` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create a named VIOS backup with the supported ``mkviosbk`` command. |
-| `hmc_create_vios` | `mutate` | `vios.create` | `managed_system` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Create a new Virtual IO Server (VIOS) partition on a managed system. |
-| `hmc_delete_vios` | `destructive` | `vios.delete` | `vios` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Delete (destroy) a VIOS partition by name or UUID. |
-| `hmc_get_vios_storage_detail` | `read` | `vios.get` | `vios` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Get storage-detail mappings for one VIOS by partition name or UUID. |
+| `hmc_create_vios` | `mutate` | `vios.create` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | Create a new Virtual IO Server (VIOS) partition on a managed system. |
+| `hmc_delete_vios` | `destructive` | `vios.delete` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Delete (destroy) a VIOS partition by name or UUID. |
+| `hmc_get_vios_storage_detail` | `read` | `vios.get` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Get storage-detail mappings for one VIOS by partition name or UUID. |
 | `hmc_install_vios` | `destructive` | `vios.install` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Install a VIOS onto an existing partition via the HMC ``installios`` CLI. |
 | `hmc_list_vios` | `read` | `vios.list` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List Virtual I/O Servers, optionally filtered by system or state. |
 | `hmc_list_vios_backups` | `read` | `vios.list_backups` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List a VIOS backup catalog with the supported ``lsviosbk`` command. |
-| `hmc_power_off_vios` | `destructive` | `vios.power_off` | `vios` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Power off a VIOS, optionally scoped by system and waiting for completion. |
-| `hmc_power_on_vios` | `mutate` | `vios.power_on` | `vios` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Power on a VIOS, optionally waiting for a normalized job outcome. |
+| `hmc_power_off_vios` | `destructive` | `vios.power_off` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Power off a VIOS, optionally scoped by system and waiting for completion. |
+| `hmc_power_on_vios` | `mutate` | `vios.power_on` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Power on a VIOS, optionally waiting for a normalized job outcome. |
 | `hmc_restore_vios` | `destructive` | `vios.restore` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Restore a catalog entry with the supported ``rstviosbk`` command. |

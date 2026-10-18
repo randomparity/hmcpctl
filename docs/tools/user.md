@@ -12,4 +12,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_delete_user` | `destructive` | `user.delete` | `user` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Permanently delete a UOM UserProfile identified by UUID. |
 | `hmc_get_user` | `read` | `user.get` | `user` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Get a UserProfile by its management-console and profile UUIDs. |
 | `hmc_list_users` | `read` | `user.list` | `console` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List UserProfile children of a management console. |
-| `hmc_modify_user` | `mutate` | `user.modify` | `user` | `partial` | `stale (closure-changed)` | `existing-runtime-guards` | Modify supplied fields of a UOM UserProfile identified by UUID. |
+| `hmc_modify_user` | `mutate` | `user.modify` | `user` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Modify supplied fields of a UOM UserProfile identified by UUID. |

@@ -3144,24 +3144,23 @@
     {
       "operation": "user.modify",
       "implementation": {
-        "state": "partial",
+        "state": "implemented",
         "implemented_scope": [
           {
             "variant": "by-uuid",
             "parameters": []
-          }
-        ],
-        "missing_scope": [
+          },
           {
             "variant": "verify-session-timeout-minutes",
             "parameters": [
               {
                 "name": "verify_session_timeout",
-                "constraint": "an integer number of minutes; unevidenced, because V10R3 refuses the modify body with REST0344 UserProfilePassword (after UserID and AuthenticationType are resent) before applying it"
+                "constraint": "non-negative integer minutes"
               }
             ]
           }
-        ]
+        ],
+        "missing_scope": []
       },
       "evidence": [
         {
@@ -4648,7 +4647,7 @@
     {
       "operation": "provision.lpar",
       "implementation": {
-        "state": "implemented",
+        "state": "partial",
         "implemented_scope": [
           {
             "variant": "virtual-disk-on-vlan",
@@ -4668,7 +4667,7 @@
             "parameters": [
               {
                 "name": "assignments",
-                "constraint": "dedicated, sriov or vnics"
+                "constraint": "sriov or vnics"
               },
               {
                 "name": "system_name_or_uuid",
@@ -4677,7 +4676,17 @@
             ]
           }
         ],
-        "missing_scope": []
+        "missing_scope": [
+          {
+            "variant": "dedicated-assignment",
+            "parameters": [
+              {
+                "name": "assignments.dedicated",
+                "constraint": "refused before provisioning; profile-first activation is owned by issue #1225"
+              }
+            ]
+          }
+        ]
       },
       "evidence": [
         {
@@ -4821,6 +4830,160 @@
         "implemented_scope": [
           {
             "variant": "explicit-five-mode-remote-restart-current-controls",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.create",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "virtual-ioserver-collection-create",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.delete",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "inactive-vios-delete",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.get",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "scoped-vios-storage-detail",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.power_on",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "power-on-job",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.power_off",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "power-off-job",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "permissions.describe",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "effective-permissions",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "tools.search",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "bounded-registry-search",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "tools.invoke",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "authorized-registry-invocation",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "config.list_hosts",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "local-config-inventory",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "operation.status",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "durable-operation-query",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "command.run",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "generic-authorized-command",
             "parameters": []
           }
         ],

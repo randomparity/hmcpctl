@@ -8,4 +8,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_list_configured_hosts` | `read` | `config.list_hosts` | `none` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | List all configured HMC profiles from the platform-native TOML config. |
+| `hmc_list_configured_hosts` | `read` | `config.list_hosts` | `none` | `implemented` | `unevidenced` | `existing-runtime-guards` | List all configured HMC profiles from the platform-native TOML config. |

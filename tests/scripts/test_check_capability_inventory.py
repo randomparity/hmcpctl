@@ -288,11 +288,14 @@ def registered_inventory(tmp_path: Path) -> tuple[inventory.RegistryTool, ...]:
                     "surfaces": list(tool.surfaces),
                     "row_ids": [],
                     "composite_reason": "anonymous fixture operation",
-                    "tests": [],
+                    "tests": ["tests/scripts/test_check_capability_inventory.py"],
                 }
             ],
         },
     )
+    (tmp_path / "tests/scripts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tests/scripts/test_check_capability_inventory.py").touch()
+    _write_maturity(tmp_path, [_operation(tool.operation)])
     return (tool,)
 
 
@@ -1958,12 +1961,14 @@ def claimed_gate(tmp_path, monkeypatch):
                     "surfaces": list(tool.surfaces),
                     "row_ids": [],
                     "composite_reason": "anonymous fixture operation",
-                    "tests": [],
+                    "tests": ["tests/scripts/test_check_capability_inventory.py"],
                 }
                 for tool in registry
             ],
         },
     )
+    (tmp_path / "tests/scripts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tests/scripts/test_check_capability_inventory.py").touch()
     modules = {tool.handler.rsplit(".", 1)[0] for tool in registry}
     _package(
         tmp_path,
@@ -2089,7 +2094,12 @@ def test_claimed_gate_main(
         )
     assert inventory.main(claimed_gate) == expected
     output = capsys.readouterr()
-    if expected:
+    if change == "unrecorded":
+        assert (
+            "ERROR: maturity operation system.get: missing maturity record"
+            in output.err
+        )
+    elif expected:
         assert "ERROR: system.get:" in output.err
         assert (
             "closure-changed" in output.err
@@ -2129,3 +2139,58 @@ def test_claimed_gate_usage(extra, capsys):
         "cannot combine --require-current with --fail-on-stale"
         in capsys.readouterr().err
     )
+
+
+def test_registered_operation_requires_maturity_record():
+    errors: list[str] = []
+
+    inventory._validate_maturity([], {"tools.search"}, errors)
+
+    assert errors == ["maturity operation tools.search: missing maturity record"]
+
+
+def test_registered_operation_requires_automated_test_links(
+    registered_inventory, tmp_path
+):
+    document = inventory.load_json(tmp_path / "operations.json")
+    document["operations"][0]["tests"] = []
+    errors: list[str] = []
+
+    inventory._validate_operations(
+        document["operations"], {}, registered_inventory, tmp_path, errors
+    )
+
+    assert errors == ["operation evidence hmc_list_systems: tests must not be empty"]
+
+
+def test_baseline_scope_distinguishes_fixed_serialization_and_denied_assignment():
+    records = inventory.load_json(ROOT / "docs/capabilities/maturity.json")[
+        "operations"
+    ]
+    by_operation = {record["operation"]: record for record in records}
+    user = by_operation["user.modify"]["implementation"]
+    assert user["state"] == "implemented"
+    assert user["missing_scope"] == []
+    assert "verify-session-timeout-minutes" in {
+        row["variant"] for row in user["implemented_scope"]
+    }
+    provision = by_operation["provision.lpar"]["implementation"]
+    assert provision["state"] == "partial"
+    assert {row["variant"] for row in provision["missing_scope"]} == {
+        "dedicated-assignment"
+    }
+    assert not any(
+        "dedicated" in parameter["constraint"]
+        for row in provision["implemented_scope"]
+        for parameter in row["parameters"]
+    )
+
+
+def test_configured_host_inventory_has_no_hmc_reference_claim():
+    records = inventory.load_json(ROOT / "docs/capabilities/operations.json")[
+        "operations"
+    ]
+    record = next(row for row in records if row["operation"] == "config.list_hosts")
+    assert record["row_ids"] == []
+    assert record["composite_reason"]
+    assert "tests/unit/test_server_hosts.py" in record["tests"]

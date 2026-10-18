@@ -8,4 +8,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_effective_permissions` | `read` | `permissions.describe` | `none` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Report what this MCP server may currently do. |
+| `hmc_effective_permissions` | `read` | `permissions.describe` | `none` | `implemented` | `unevidenced` | `existing-runtime-guards` | Report what this MCP server may currently do. |

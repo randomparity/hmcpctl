@@ -516,6 +516,8 @@ def _validate_operations(
         if not isinstance(tests, list):
             errors.append(f"operation evidence {tool}: tests must be an array")
         else:
+            if not tests:
+                errors.append(f"operation evidence {tool}: tests must not be empty")
             for path_text in tests:
                 path = repo_root / str(path_text)
                 if (
@@ -780,6 +782,8 @@ def _validate_maturity(
             continue
         for observation in evidence:
             _validate_observation(observation, str(operation), evidence_ids, errors)
+    for operation in sorted(set(operation_ids) - seen):
+        errors.append(f"maturity operation {operation}: missing maturity record")
 
 
 @dataclass(frozen=True)
