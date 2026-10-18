@@ -469,6 +469,13 @@ class LiveTestConfig:
         errors = [key for key in cls._CONFIG_FIELDS if not values.get(key)] + duplicates
         if errors:
             raise ValueError("invalid live-test configuration: " + ", ".join(errors))
+        parsed = cls._convert_values(values)
+        cls._validate_values(parsed)
+        return cls(**parsed)
+
+    @classmethod
+    def _convert_values(cls, values: dict[str, str]) -> dict[str, Any]:
+        """Convert file strings to the configuration's numeric and tuple values."""
         try:
             parsed: dict[str, Any] = {
                 field: values[key] for key, field in cls._CONFIG_FIELDS.items()
@@ -508,6 +515,11 @@ class LiveTestConfig:
             )
         except ValueError as exc:
             raise ValueError(f"invalid live-test configuration: {exc}") from exc
+        return parsed
+
+    @classmethod
+    def _validate_values(cls, parsed: dict[str, Any]) -> None:
+        """Reject unsafe identifiers and inconsistent live-test resource limits."""
         # Fields that must be strictly positive (> 0).
         # sriov_physical_port_id is intentionally excluded: physical port IDs
         # are zero-indexed on Power hardware, so port 0 is valid.
@@ -606,7 +618,6 @@ class LiveTestConfig:
             invalid.append("inconsistent resource limits")
         if invalid:
             raise ValueError("invalid live-test configuration: " + ", ".join(invalid))
-        return cls(**parsed)
 
 
 @dataclass
