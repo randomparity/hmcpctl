@@ -2697,3 +2697,25 @@ def test_record_held_judges_cleanup_as_record_verified_does(cleanup: str) -> Non
 
     expected = "PASS" if cleanup in {"passed", "not-required"} else "FAIL"
     assert [args[-3] for args in recorded] == [expected]
+
+
+@pytest.mark.asyncio
+async def test_fixture_text_result_preserves_identity_and_ownership(monkeypatch):
+    holder: dict[str, str] = {}
+    uuid = "11111111-1111-1111-1111-111111111111"
+    responses = _happy_responses(holder, uuid_value=uuid)
+    create = responses["hmc_create_lpar"]
+
+    def text_result(kwargs, index):
+        result = create(kwargs, index)
+        return result if _is_probe(kwargs) else repr(SimpleNamespace(**result))
+
+    responses["hmc_create_lpar"] = text_result
+    state = await _run_arm(monkeypatch, responses, holder)
+
+    stamp = state.row("fixture ownership stamp")
+    baseline = state.row("fixture profile io_slots (baseline)")
+    assert stamp is not None and stamp[2] == "PASS"
+    assert "parsed from response text" in stamp[3]
+    assert baseline is not None and baseline[2] == "PASS"
+    assert uuid in baseline[3]

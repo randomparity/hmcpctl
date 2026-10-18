@@ -2075,6 +2075,32 @@ async def create_dedicated_fixture(
     return await create_fixture_partition(client, state, fixture)
 
 
+def _fixture_creation_identity(
+    data: Any, current_uuid: str | None
+) -> tuple[str | None, Any]:
+    """Read identity claims from a structured result or its text representation.
+
+    These claims do not replace the lifecycle's authoritative ownership checks.
+    Preserve a previously captured UUID when text carries no new identity.
+    """
+    lpar_uuid = current_uuid
+    stamped = None
+    if isinstance(data, dict):
+        body = data.get("lpar")
+        if isinstance(body, dict):
+            lpar_uuid = body.get("UUID") or body.get("uuid")
+        stamped = data.get("ownership_stamped")
+    elif isinstance(data, str):
+        uuid_match = re.search(r"'UUID':\s*'([0-9A-Fa-f-]{36})'", data)
+        if uuid_match and not lpar_uuid:
+            lpar_uuid = uuid_match.group(1)
+        if "ownership_stamped=True" in data:
+            stamped = True
+        elif "ownership_stamped=False" in data:
+            stamped = False
+    return lpar_uuid, stamped
+
+
 async def create_fixture_partition(
     client: Client,
     state: RunState,
@@ -2164,36 +2190,21 @@ async def create_fixture_partition(
         return False
     fixture.created = True
 
-    stamped = None
+    fixture.lpar_uuid, stamped = _fixture_creation_identity(data, fixture.lpar_uuid)
     if isinstance(data, dict):
-        body = data.get("lpar")
-        if isinstance(body, dict):
-            fixture.lpar_uuid = body.get("UUID") or body.get("uuid")
-        stamped = data.get("ownership_stamped")
         state.record(
             30,
             "fixture ownership stamp",
             "PASS" if stamped is True else "FAIL",
             f"ownership_stamped={stamped!r} warnings={data.get('warnings')!r}",
         )
-    elif isinstance(data, str):
-        # The live runner parses the response as text when json.loads fails.
-        # The LparPcieWorkflowResult repr carries ownership_stamped= and UUID=.
-        # Extract both rather than refusing on None alone.
-        uuid_match = re.search(r"'UUID':\s*'([0-9A-Fa-f-]{36})'", data)
-        if uuid_match and not fixture.lpar_uuid:
-            fixture.lpar_uuid = uuid_match.group(1)
-        if "ownership_stamped=True" in data:
-            stamped = True
-        elif "ownership_stamped=False" in data:
-            stamped = False
-        if stamped is not None:
-            state.record(
-                30,
-                "fixture ownership stamp",
-                "PASS" if stamped is True else "FAIL",
-                f"ownership_stamped={stamped!r} (parsed from response text)",
-            )
+    elif isinstance(data, str) and stamped is not None:
+        state.record(
+            30,
+            "fixture ownership stamp",
+            "PASS" if stamped is True else "FAIL",
+            f"ownership_stamped={stamped!r} (parsed from response text)",
+        )
 
     if stamped is not True:
         # When stamped is None the live runner did not parse the response as a
