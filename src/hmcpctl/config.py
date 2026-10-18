@@ -286,9 +286,8 @@ class HMCConfig(BaseSettings):
         Validation is unchanged: field validators and the model validator run
         exactly as they do for ``HMCConfig(...)``. Keys naming no field are
         ignored, matching the ``extra="ignore"`` in ``model_config``. A key whose
-        value is ``None`` is applied like any other — a nullable database column
-        arriving as ``None`` is a validation error for every field but
-        ``ssh_key_file`` and ``agent_id``, so omit the key rather than passing
+        value is ``None`` is applied like any other: nullable fields accept it,
+        while non-nullable fields reject it. Omit the key rather than passing
         ``None`` when the intent is "use the default".
 
         ``model_fields_set`` reports the keys *values* supplied, not the full
