@@ -154,8 +154,9 @@ def submit(
 ) -> OperationRecord:
     """Start, repeat, or continue one logical operation and return its record.
 
-    The caller has already authorized this call (ADR 0189). The call returns within
-    *wait_seconds*; work continues in this process after it returns.
+    The caller has already authorized this call (ADR 0189). After admission,
+    *wait_seconds* bounds waiting for the worker; admission and store access add
+    latency outside that wait. Work continues in this process after it returns.
     Supply the body's live checks again on each continuation. Their mapping is
     copied before admission; omitted kinds retain unknown outcomes (ADR 0236).
     """
