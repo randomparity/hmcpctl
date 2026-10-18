@@ -538,3 +538,16 @@ def test_connection_label_follows_hmc_host_to_the_default(lab_config, monkeypatc
 def test_connection_label_refuses_an_unconfigured_profile(lab_config):
     with pytest.raises(ValueError, match="names no configured connection"):
         store.connection_label("never-configured", tool="t")
+
+
+def test_connection_label_sanitizes_unreadable_configuration(lab_config):
+    from hmcpctl.config import ConfigError, config_dir
+
+    path = config_dir() / "config.toml"
+    path.write_text("[broken", encoding="utf-8")
+    with pytest.raises(
+        ValueError, match="t cannot resolve the configured HMC connection"
+    ) as raised:
+        store.connection_label("lab", tool="t")
+    assert str(path) not in str(raised.value)
+    assert isinstance(raised.value.__cause__, ConfigError)

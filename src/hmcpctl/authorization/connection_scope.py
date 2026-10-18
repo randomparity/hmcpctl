@@ -22,7 +22,7 @@ from typing import Any
 
 from hmcpctl.audit.records import MAX_VALUE_LENGTH
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
-from hmcpctl.config import ConfigError, env_var_value, list_profiles_and_nicknames
+from hmcpctl.config import ConfigError, env_var_value, resolve_connection_profile
 
 
 class ConnectionScopeError(Exception):
@@ -53,67 +53,18 @@ _HMC_HOST_CLAUSE = (
     "evaluated as the {default!r} connection. "
 )
 
-# The value a token that names no configured connection normalizes to. It can
-# never appear in a compiled grant — `access_policy` rejects an empty connection
-# entry — so it always denies, and it denies through the *same* template as a
-# resolvable-but-withheld token. Two distinguishable messages would be a
-# membership oracle over `config.toml`, disclosed through a channel no policy can
-# withhold, one entry after ADR 0037 made that inventory withholdable.
-UNRESOLVED = ""
-
 
 def selected_connection(token: Any, *, tool: str) -> str | None:
-    """The connection ``build_config`` will select for *token*, in policy terms.
+    """Normalize the selected connection and sanitize unreadable-config denials.
 
-    Returns a profile key; ``None`` for the environment/default connection — the
-    value ``access_policy`` compiles ``"<default>"`` to; or :data:`UNRESOLVED`
-    when the token names no configured connection, which no grant can contain
-    and which therefore denies through the ordinary denial message. Raises
-    :class:`ConnectionScopeError` only when the configuration cannot be read at
-    all. *tool* names that error; it is not part of the resolution.
-
-    The four rules mirror ``build_config`` and ``load_profile`` in their order:
-
-    0. a token that is not ``str | None`` names no connection, uninspected and
-       uncoerced;
-    1. ``HMC_HOST`` set and non-empty collapses every token to the environment
-       connection, because ``build_config`` gates its whole TOML branch on it.
-       Read through :func:`config.env_var_value` so selection uses the same
-       case-insensitive environment semantics as configuration loading;
-    2. a falsy token is the default connection. ``HMC_PROFILE`` and
-       ``default_profile`` are deliberately *not* consulted: ADR 0036 fixed
-       ``<default>`` as the denotation of the omitted argument and recorded its
-       late binding as an operator-facing property, and ADR 0038's third
-       rejected alternative records what substituting them would cost;
-    3. otherwise the token is a profile key, or a nickname whose target is one.
-       Profiles are consulted first, as ``load_profile`` consults ``nicknames``
-       only inside ``if name not in profiles:``; reading the nickname table
-       first would resolve a profile key shadowed by a nickname to the wrong
-       connection, which is a fail-open.
+    Configuration owns the selection rules shared with durable operations.
+    Unknown tokens return config.UNRESOLVED_CONNECTION and deny through the
+    ordinary template, preventing a configuration-membership oracle.
     """
-    if token is not None and not isinstance(token, str):
-        return UNRESOLVED
-    if env_var_value("HMC_HOST"):
-        return None
-    if not token:
-        return None
     try:
-        profiles, nicknames = list_profiles_and_nicknames()
+        return resolve_connection_profile(token)
     except ConfigError as error:
-        # One arm, because the reader converts every failure it can meet — an
-        # unresolvable home, an unreadable or non-UTF-8 or unparseable file, a
-        # malformed profiles or nicknames table — into a ConfigError. That total
-        # conversion is the contract this catch depends on, and
-        # tests/unit/test_config.py exercises each of its arms directly.
         raise ConnectionScopeError(_UNREADABLE.format(tool=tool)) from error
-    if token in profiles:
-        return token
-    target = nicknames.get(token)
-    if target is not None and target in profiles:
-        return target
-    # An unknown name and a dangling nickname both make load_profile raise, so
-    # refusing here reaches the same outcome earlier and without the config path.
-    return UNRESOLVED
 
 
 def _clause(argument: str, collapsed: bool) -> str:
@@ -165,7 +116,7 @@ def connection_denial(
     """The error a connection denial raises, from ADR 0038's single template."""
     # Read after the decision and gated on its result, so the clause can only
     # describe a collapse that actually happened: a non-string token normalizes
-    # to UNRESOLVED before rule 1 is reached, and an HMC_HOST that changed
+    # to the unresolved sentinel before host collapse, and an HMC_HOST that changed
     # between the two reads simply yields no clause.
     collapsed = connection is None and bool(env_var_value("HMC_HOST"))
     return ConnectionScopeError(

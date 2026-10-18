@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ...authorization.connection_scope import UNRESOLVED, selected_connection
+from ...config import UNRESOLVED_CONNECTION, ConfigError, resolve_connection_profile
 from ..lpar.workflow_contract import (
     EffectRecord,
     OperationEvent,
@@ -725,8 +725,13 @@ def connection_label(profile: str | None, *, tool: str) -> str:
     ``HMC_HOST`` collapses every profile to ``<default>`` and a nickname resolves to its
     profile key, so records are labelled and filtered by the connection actually used.
     """
-    connection = selected_connection(profile, tool=tool)
-    if connection == UNRESOLVED:
+    try:
+        connection = resolve_connection_profile(profile)
+    except ConfigError as error:
+        raise ValueError(
+            f"{tool} cannot resolve the configured HMC connection"
+        ) from error
+    if connection == UNRESOLVED_CONNECTION:
         raise ValueError(f"{tool}: profile {profile!r} names no configured connection")
     return DEFAULT_CONNECTION if connection is None else connection
 

@@ -685,6 +685,35 @@ def list_profiles_and_nicknames(
     )
 
 
+# Empty connection entries cannot occur in a compiled access-policy grant.
+UNRESOLVED_CONNECTION = ""
+
+
+def resolve_connection_profile(token: object) -> str | None:
+    """Resolve a connection token without loading credentials or application code.
+
+    Return a profile key, None for default/environment, or UNRESOLVED_CONNECTION
+    for an invalid or unknown token. ConfigError means the inventory is unreadable.
+
+    Reject invalid token types before applying HMC_HOST's case-insensitive
+    collapse. An omitted token denotes the late-bound default, independent of
+    HMC_PROFILE/default_profile (ADR 0036). Otherwise profile keys take precedence
+    over nicknames, matching load_profile and preventing shadowing from widening
+    authorization. Resolve both tables from one read (ADR 0038).
+    """
+    if token is not None and not isinstance(token, str):
+        return UNRESOLVED_CONNECTION
+    if env_var_value("HMC_HOST") or not token:
+        return None
+    profiles, nicknames = list_profiles_and_nicknames()
+    if token in profiles:
+        return token
+    target = nicknames.get(token)
+    if target is not None and target in profiles:
+        return target
+    return UNRESOLVED_CONNECTION
+
+
 def env_var_value(name: str) -> str | None:
     """*name*'s value from the environment, matched the way ``HMCConfig`` matches it.
 

@@ -11,13 +11,12 @@ import pytest
 
 from hmcpctl.authorization.access_policy import compile_access_policy
 from hmcpctl.authorization.connection_scope import (
-    UNRESOLVED,
     ConnectionScopeError,
     selected_connection,
 )
 from hmcpctl.authorization.dispatch_scope import dispatch_authorizer
 from hmcpctl.authorization.target_scope import TargetScopeError
-from hmcpctl.config import config_dir
+from hmcpctl.config import UNRESOLVED_CONNECTION, config_dir
 from hmcpctl.tool_registry import ToolSecurity
 
 # `prod` is both a profile key and a nickname targeting `lab`; `load_profile`
@@ -104,13 +103,13 @@ def _policy(*connections: str, tools=("hmc_delete_lpar",), name="test"):
 )
 def test_non_string_token_resolves_to_nothing(config, token):
     """No grant can hold the unresolved sentinel, so it always denies."""
-    assert selected_connection(token, tool="hmc_delete_lpar") == UNRESOLVED
+    assert selected_connection(token, tool="hmc_delete_lpar") == UNRESOLVED_CONNECTION
 
 
 def test_non_string_token_denies_even_under_hmc_host(config, monkeypatch):
     """Rule 0 runs before rule 1, so the collapse cannot launder a bad type."""
     monkeypatch.setenv("HMC_HOST", "env-hmc.example.com")
-    assert selected_connection(7, tool="hmc_delete_lpar") == UNRESOLVED
+    assert selected_connection(7, tool="hmc_delete_lpar") == UNRESOLVED_CONNECTION
     authorize = dispatch_authorizer(_policy("<default>"))
     with pytest.raises(ConnectionScopeError):
         authorize("hmc_delete_lpar", SECURITY, {"profile": 7})
@@ -210,12 +209,17 @@ def test_a_nickname_resolves_to_its_target_profile(config):
 
 
 def test_unknown_token_resolves_to_nothing(config):
-    assert selected_connection("never-configured", tool="hmc_delete_lpar") == UNRESOLVED
+    assert (
+        selected_connection("never-configured", tool="hmc_delete_lpar")
+        == UNRESOLVED_CONNECTION
+    )
 
 
 def test_dangling_nickname_resolves_to_nothing(config):
     """load_profile raises here too; refusing reaches the outcome earlier."""
-    assert selected_connection("dangling", tool="hmc_delete_lpar") == UNRESOLVED
+    assert (
+        selected_connection("dangling", tool="hmc_delete_lpar") == UNRESOLVED_CONNECTION
+    )
 
 
 def test_the_unresolved_sentinel_can_never_appear_in_a_grant(config):
@@ -223,7 +227,7 @@ def test_the_unresolved_sentinel_can_never_appear_in_a_grant(config):
     from hmcpctl.authorization.access_policy import AccessPolicyError
 
     with pytest.raises(AccessPolicyError, match="empty or padded"):
-        _policy(UNRESOLVED)
+        _policy(UNRESOLVED_CONNECTION)
 
 
 @pytest.mark.parametrize(
@@ -268,7 +272,7 @@ def test_an_unreadable_file_denies_without_leaking_the_path(config):
 
 
 def test_named_token_resolves_to_nothing_when_no_config_file_exists(no_config):
-    assert selected_connection("lab", tool="hmc_delete_lpar") == UNRESOLVED
+    assert selected_connection("lab", tool="hmc_delete_lpar") == UNRESOLVED_CONNECTION
 
 
 def test_default_connection_survives_a_missing_config_file(no_config):
