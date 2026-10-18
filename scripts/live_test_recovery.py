@@ -1792,7 +1792,7 @@ def main(argv: list[str] | None = None) -> int:
     artifact_config = document.get("config")
     artifact_system = (
         (
-            artifact_config.get("system_name", "")
+            artifact_config.get("system_name", "") or ""
             if isinstance(artifact_config, dict)
             else ""
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -156,3 +157,36 @@ async def test_wrong_group_cannot_start_artifact_mutation():
     state.call = AsyncMock(return_value=("PASS", listing()))
     await profiles.exercise_backup_artifacts(None, state)
     state.call.assert_not_awaited()
+
+
+def test_null_artifact_system_is_unreadable_in_main(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "results.json"
+    path.write_text(
+        json.dumps(
+            {
+                "run": {
+                    "subtasks": [43],
+                    "group": "profile-artifacts",
+                    "partial": False,
+                },
+                "config": {"system_name": None},
+                "results": [],
+                "artifacts": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    call = AsyncMock()
+
+    async def run_checks(checks, *, users=False):
+        return await recovery.check_run(call, checks, users=users)
+
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "_run_checks", run_checks)
+
+    assert recovery.main(["--results", str(path)]) == 2
+    captured = capsys.readouterr()
+    assert "CLEAN" not in captured.out
+    assert "profile-artifacts managed-system identity" in captured.out
+    assert "NOT confirmed clean" in captured.err
+    call.assert_not_awaited()
