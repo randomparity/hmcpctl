@@ -1222,11 +1222,27 @@ def _install_iso_transport(monkeypatch, handler):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [404, 500, "connect", "read", "stream"])
+@pytest.mark.parametrize(
+    ("failure", "buffer_size"),
+    [
+        (404, None),
+        (500, None),
+        ("connect", None),
+        ("read", None),
+        ("stream", None),
+        ("stream", 128 * 1024),
+    ],
+)
 async def test_upload_iso_normalizes_download_http_errors(
-    monkeypatch, tmp_path, failure
+    monkeypatch, tmp_path, failure, buffer_size
 ):
+    import os
     import tempfile
+
+    if buffer_size is not None:
+        monkeypatch.setattr(
+            os, "fdopen", functools.partial(os.fdopen, buffering=buffer_size)
+        )
 
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     url = f"{ISO_URL}?token=private-source-token"
@@ -1234,6 +1250,15 @@ async def test_upload_iso_normalizes_download_http_errors(
     cause = None
     response = None
     partial_files = []
+    partial_contents = []
+    original_unlink = Path.unlink
+
+    def observe_partial_unlink(path, *args, **kwargs):
+        if path in partial_files:
+            partial_contents.append(path.read_bytes())
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", observe_partial_unlink)
 
     class BrokenDownload(httpx.AsyncByteStream):
         closed = False
@@ -1241,7 +1266,6 @@ async def test_upload_iso_normalizes_download_http_errors(
         async def __aiter__(self):
             yield b"x" * DEFAULT_CHUNK_SIZE
             partial_files.extend(tmp_path.glob("hmc_upload_*.iso"))
-            assert partial_files[0].stat().st_size == DEFAULT_CHUNK_SIZE
             raise cause
 
         async def aclose(self):
@@ -1284,7 +1308,7 @@ async def test_upload_iso_normalizes_download_http_errors(
     hmc._web_file_upload.assert_not_awaited()
     hmc._web_file_delete.assert_not_awaited()
     if failure == "stream":
-        assert partial_files
+        assert partial_contents == [b"x" * DEFAULT_CHUNK_SIZE]
         assert stream.closed
     assert list(tmp_path.iterdir()) == []
 
