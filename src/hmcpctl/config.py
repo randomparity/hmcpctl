@@ -600,7 +600,8 @@ def list_profiles_with_default(
     """Return (profile_names, default_profile_or_none) from one TOML read.
 
     Never resolves secrets — safe for diagnostics.
-    Returns ([], None) when the file is absent or path is None.
+    config_path=None selects the normal configuration path via resolve_config_path.
+    Returns ([], None) when the resolved file is absent.
     Raises ConfigError on every read, decode, parse, or structure failure.
     """
     path = _selected_config_path(config_path)
@@ -649,7 +650,8 @@ def list_nicknames(config_path: Path | None = None) -> dict[str, str]:
     """Return the nicknames table as ``dict[str, str]``; empty when absent.
 
     Never resolves secrets - safe for diagnostics and display.
-    Returns ``{}`` when the file is absent or path is None.
+    config_path=None selects the normal configuration path via resolve_config_path.
+    Returns ``{}`` when the resolved file is absent.
     Raises ConfigError on every read, decode, parse, or structure failure.
     """
     path = _selected_config_path(config_path)
@@ -668,7 +670,8 @@ def list_profiles_and_nicknames(
     ``list_profiles()`` plus ``list_nicknames()`` so that the two halves of a
     single decision cannot be taken from two different versions of the file.
 
-    Returns ``([], {})`` when the file is absent or *config_path* is None.
+    config_path=None selects the normal configuration path via resolve_config_path.
+    Returns ``([], {})`` when the resolved file is absent.
     Every other failure is a ConfigError: this feeds ADR 0038's authorization
     decision, whose denial message must interpolate no path and no raw exception
     text, so an unreadable file, a non-UTF-8 one, and a malformed table must all
