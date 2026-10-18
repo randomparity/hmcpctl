@@ -49,6 +49,65 @@ async def test_processed_lpar_path_is_nested_under_owning_system(mock_hmc):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "suffix"),
+    [
+        ("get_processed_metric_links", "ProcessedMetrics"),
+        ("get_aggregated_metric_links", "AggregatedMetrics"),
+        ("get_ltm_metric_links", "RawMetrics/LongTermMonitor"),
+    ],
+)
+async def test_direct_metric_client_preserves_requested_time_window(
+    mock_hmc, method, suffix
+):
+    start = "2026-08-07T11:00:00Z"
+    end = "2026-08-07T12:00:00Z"
+    route = mock_hmc.get(f"/rest/api/pcm/ManagedSystem/{SYSTEM_UUID}/{suffix}").mock(
+        return_value=httpx.Response(200, text=FEED)
+    )
+    options = {} if method == "get_ltm_metric_links" else {"no_of_samples": 5}
+    async with HMCClient(make_config()) as hmc:
+        assert (
+            await getattr(hmc, method)(
+                "ManagedSystem", SYSTEM_UUID, start, end, **options
+            )
+            == []
+        )
+    assert route.call_count == 1
+    expected = {"StartTS": start, "EndTS": end}
+    if options:
+        expected["NoOfSamples"] = "5"
+    assert dict(route.calls.last.request.url.params) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method", ["get_processed_metric_links", "get_aggregated_metric_links"]
+)
+@pytest.mark.parametrize(
+    ("category", "owner", "message"),
+    [
+        ("LogicalPartition", None, "require the owning"),
+        ("ManagedSystem", SYSTEM_UUID, "valid only for LogicalPartition"),
+    ],
+)
+async def test_direct_metric_client_rejects_inconsistent_owner_before_transport(
+    mock_hmc,
+    method,
+    category,
+    owner,
+    message,
+):
+    async with HMCClient(make_config()) as hmc:
+        before = len(mock_hmc.calls)
+        with pytest.raises(ValueError, match=message):
+            await getattr(hmc, method)(
+                category, LPAR_UUID, "2026-08-07T11:00:00Z", system_uuid=owner
+            )
+        assert len(mock_hmc.calls) == before
+
+
+@pytest.mark.asyncio
 async def test_resolve_pcm_lpar_scopes_name_to_owning_system():
     hmc = AsyncMock()
     hmc.list_system_summaries.return_value = [
