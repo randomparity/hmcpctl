@@ -154,6 +154,7 @@ def _make_ssh_mock(stdout: str = "output\n") -> MagicMock:
     """Return a mock asyncssh connection whose run() returns stdout."""
     result = MagicMock()
     result.stdout = stdout
+    result.stderr = ""
 
     conn = AsyncMock()
     conn.run = AsyncMock(return_value=result)
@@ -450,3 +451,15 @@ async def test_console_connection_sends_keepalives():
         await open_hmc_connection(make_config())
     assert connect.call_args.kwargs["keepalive_interval"] == 15.0
     assert connect.call_args.kwargs["keepalive_count_max"] == 3
+
+
+@pytest.mark.asyncio
+async def test_successful_stderr_is_retained_only_when_requested():
+    connection = _make_ssh_mock("restored\n")
+    connection.run.return_value.stderr = "keystore warning\n"
+    with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=connection):
+        assert await run_hmc_command(make_config(), "rstprofdata") == "restored\n"
+        output = await run_hmc_command(
+            make_config(), "rstprofdata", include_stderr=True
+        )
+    assert output == "restored\n[stderr]\nkeystore warning\n"

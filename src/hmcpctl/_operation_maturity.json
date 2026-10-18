@@ -430,8 +430,22 @@
       "observed_at": "2026-10-06T09:47:30Z"
     },
     {
-      "operation": "lpar_profile.restore",
+      "operation": "lpar_profile.delete_backup",
       "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.list_backups",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.restore",
+      "implementation": "partial",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T09:47:30Z"

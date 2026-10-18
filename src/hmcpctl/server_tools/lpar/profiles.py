@@ -10,6 +10,12 @@ from ...operations.lpar.configuration import (
     restore_system_lpar_profiles,
     synchronize_lpar_profile,
 )
+from ...operations.lpar.profile_artifacts import (
+    BackupProfileDeletion,
+    BackupProfileInventory,
+    delete_backup_profile_artifact,
+    list_backup_profile_artifacts,
+)
 from ...operations.virtualization.pcie import (
     assign_dedicated_pcie_slot,
     unassign_dedicated_pcie_slot,
@@ -19,6 +25,49 @@ from ...tool_registry import tool_module
 
 # destructive because force=True silently overwrites an existing backup file on the HMC
 tool, register_tools, tool_security = tool_module()
+
+
+@tool(
+    effect="read", operation="lpar_profile.list_backups", target_kind="managed_system"
+)
+def hmc_list_backup_lpar_profiles(
+    system_name_or_uuid: str, profile: str | None = None
+) -> BackupProfileInventory:
+    """List HMC-side profile backup artifacts on one managed system.
+
+    Requires HMC 10.3.1061.0 or later and the observed JSON artifact schema.
+    Returns a complete bounded inventory, not local files. A failed, warning or
+    timed-out job has artifacts=null, distinct from a successful empty list.
+    Raw job payloads are omitted; job status, identity and bounded errors remain.
+    """
+    return with_client(
+        lambda hmc: list_backup_profile_artifacts(hmc, system_name_or_uuid),
+        profile=profile,
+    )
+
+
+@tool(
+    effect="destructive",
+    operation="lpar_profile.delete_backup",
+    target_kind="managed_system",
+    exhaustive_targets=False,
+)
+def hmc_delete_backup_lpar_profile(
+    system_name_or_uuid: str, file_name: str, profile: str | None = None
+) -> BackupProfileDeletion:
+    """Delete one exact HMC profile backup name after complete inventory admission.
+
+    Requires destructive all-targets authorization; a basename is not a new
+    containment guarantee. Rejects paths and ambiguous/missing inventories.
+    Reports absent only after a successful job and fresh exact-name readback;
+    present/unknown/not-checked are not clean deletion success. Never retries a
+    mutation or selects another file. Independent writers are not fenced.
+    Retain required recovery backups; no local-file transfer or restore occurs.
+    """
+    return with_client(
+        lambda hmc: delete_backup_profile_artifact(hmc, system_name_or_uuid, file_name),
+        profile=profile,
+    )
 
 
 # Not exhaustive: `file_path` names a file on the HMC's own filesystem, which no
@@ -90,6 +139,7 @@ def hmc_restore_lpar_profiles(
     ownership_override: bool = False,
     *,
     restore_type: ProfileRestoreType,
+    force_keystore: bool = False,
 ) -> str:
     """Restore LPAR profiles from a backup file via the HMC CLI.
 
@@ -124,6 +174,8 @@ def hmc_restore_lpar_profiles(
         profile: optional TOML profile name; when omitted the env-default HMC is used.
         ownership_override: Bypass current and opaque-backup ownership rejection after
             operator approval; emits an audit record covering every profile.
+        force_keystore: Ignore partition-keystore restore errors explicitly; stdout and
+            stderr warnings remain visible. Defaults to False; no ownership bypass.
         restore_type: The HMC restore type, required with no default: 1 restores the
             backup file in full; 2 merges current and backup data, the backup winning
             conflicts; 3 merges them, the current data winning conflicts, and resets
@@ -144,6 +196,7 @@ def hmc_restore_lpar_profiles(
             file_path,
             restore_type,
             ownership_override=ownership_override,
+            force_keystore=force_keystore,
         ),
         profile=profile,
     )

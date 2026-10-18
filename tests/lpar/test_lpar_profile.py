@@ -33,6 +33,7 @@ def _make_ssh_mock(stdout: str = "") -> MagicMock:
     """Return a minimal asyncssh connection mock."""
     result = MagicMock()
     result.stdout = stdout
+    result.stderr = ""
 
     conn = AsyncMock()
     conn.run = AsyncMock(return_value=result)
@@ -339,4 +340,34 @@ def test_restore_type_4_refusal_names_what_it_would_do():
         pytest.raises(ValueError, match=r"Type 4 \(initialize, which deletes every"),
     ):
         asyncio.run(restore_lpar_profiles(make_config(), "sys", "/tmp/p.bak", 4))
+    run.assert_not_awaited()
+
+
+def test_restore_keystore_opt_in_preserves_warning_channel(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    mock_uuid_resolution(mock_hmc, SYSTEM_UUID, SYSTEM_NAME)
+    connection = _make_ssh_mock("restored\n")
+    connection.run.return_value.stderr = "partition keystore warning\n"
+    with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=connection):
+        output = hmc_restore_lpar_profiles(
+            SYSTEM_UUID,
+            "backup-1",
+            system_wide_restore_approved=True,
+            ownership_override=True,
+            restore_type=3,
+            force_keystore=True,
+        )
+    command = connection.run.call_args.args[0]
+    assert command.endswith("-f backup-1 --forcekeystore")
+    assert output == "restored\n[stderr]\npartition keystore warning\n"
+
+
+@pytest.mark.parametrize("file_path", ["", "  "])
+def test_restore_empty_hmc_file_refused_before_ssh(file_path):
+    run = AsyncMock()
+    with (
+        patch("hmcpctl.ssh.profiles.run_hmc_command", run),
+        pytest.raises(ValueError, match="file_path must not be empty"),
+    ):
+        asyncio.run(restore_lpar_profiles(make_config(), "sys", file_path, 1))
     run.assert_not_awaited()

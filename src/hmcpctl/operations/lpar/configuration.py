@@ -67,6 +67,7 @@ async def restore_system_lpar_profiles(
     restore_type: ProfileRestoreType,
     *,
     ownership_override: bool = False,
+    force_keystore: bool = False,
 ) -> str:
     """Authorize and restore every LPAR profile on one managed system."""
     system_name = await _authorize_system_lpar_profile_restore(
@@ -74,7 +75,9 @@ async def restore_system_lpar_profiles(
         system_name_or_uuid,
         ownership_override=ownership_override,
     )
-    return await restore_lpar_profiles(hmc.config, system_name, file_path, restore_type)
+    return await restore_lpar_profiles(
+        hmc.config, system_name, file_path, restore_type, force_keystore=force_keystore
+    )
 
 
 async def synchronize_lpar_profile(

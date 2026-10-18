@@ -130,7 +130,9 @@ async def test_override_skips_inventory_audits_wildcard_and_restores(caplog) -> 
 
     assert result == "restored"
     hmc.list_logical_partitions.assert_not_awaited()
-    write.assert_awaited_once_with(hmc.config, SYSTEM_NAME, "/tmp/profiles.bak", 1)
+    write.assert_awaited_once_with(
+        hmc.config, SYSTEM_NAME, "/tmp/profiles.bak", 1, force_keystore=False
+    )
     records = [json.loads(record.message) for record in caplog.records]
     record = next(
         record for record in records if record["event"] == "ownership-override"
@@ -182,6 +184,7 @@ def test_tool_delegates_restore_and_override_through_managed_client(
         "/tmp/profiles.bak",
         2,
         ownership_override=True,
+        force_keystore=False,
     )
 
 
@@ -211,4 +214,5 @@ def test_existing_positional_profile_cannot_become_ownership_override(
         "/tmp/profiles.bak",
         3,
         ownership_override=False,
+        force_keystore=False,
     )
