@@ -27,11 +27,11 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_list_lpar_ownership` | `read` | `lpar.list_ownership` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Read parsed ownership for every LPAR on a system in one REST call. |
 | `hmc_list_lpars` | `read` | `lpar.list` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List LPARs, optionally filtered by system and state. |
 | `hmc_lpar_summary` | `read` | `lpar.summary` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Return state, resources, OS details, adapters, and description for one LPAR. |
-| `hmc_migrate_abort_lpar` | `destructive` | `lpar.migrate_abort` | `lpar` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Abort an in-progress LPM migration of an LPAR. |
-| `hmc_migrate_lpar` | `mutate` | `lpar.migrate` | `lpar` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Live-migrate (LPM) an LPAR to another managed system. |
-| `hmc_migrate_lpar_with_affinity_preflight` | `mutate` | `lpar.migrate_affinity` | `lpar` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Run explicit affinity preflight before validation-first LPM. |
-| `hmc_migrate_recover_lpar` | `mutate` | `lpar.migrate_recover` | `lpar` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Recover an LPAR after a failed LPM migration. |
-| `hmc_migrate_validate_lpar` | `mutate` | `lpar.migrate_validate` | `lpar` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Validate whether an LPM migration of an LPAR to target_system would succeed. |
+| `hmc_migrate_abort_lpar` | `destructive` | `lpar.migrate_abort` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Abort an in-progress LPM migration of an LPAR. |
+| `hmc_migrate_lpar` | `mutate` | `lpar.migrate` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Live-migrate (LPM) an LPAR to another managed system. |
+| `hmc_migrate_lpar_with_affinity_preflight` | `mutate` | `lpar.migrate_affinity` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Run explicit affinity preflight before validation-first LPM. |
+| `hmc_migrate_recover_lpar` | `mutate` | `lpar.migrate_recover` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Recover an LPAR after a failed LPM migration. |
+| `hmc_migrate_validate_lpar` | `mutate` | `lpar.migrate_validate` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Validate whether an LPM migration of an LPAR to target_system would succeed. |
 | `hmc_modify_lpar` | `mutate` | `lpar.modify` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Modify an LPAR's memory or CPU resource assignment. |
 | `hmc_plan_lpar` | `read` | `lpar.plan` | `console` | `implemented` | `unevidenced` | `existing-runtime-guards` | Plan provisioning an LPAR on one connection: fit, targets, blockers and changes. |
 | `hmc_plan_lpar_memopt_scores` | `read` | `lpar.plan_memopt_scores` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return predicted LPAR affinity scores without applying optimization. |
@@ -39,7 +39,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_power_off_lpar` | `destructive` | `lpar.power_off` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Submit a PowerOff job for a logical partition, optionally restarting it or selecting the shutdown operation. |
 | `hmc_power_on_lpar` | `mutate` | `lpar.power_on` | `lpar` | `partial` | `current` | `existing-runtime-guards` | Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection. |
 | `hmc_read_lpar_refcodes` | `read` | `lpar.list_refcodes` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Read recent partition reference codes with offline POWER9 definitions. |
-| `hmc_remote_restart_lpar` | `destructive` | `lpar.remote_restart` | `lpar` | `unrecorded` | `unrecorded` | `existing-runtime-guards` | Remote-restart a failed LPAR on another managed system. |
+| `hmc_remote_restart_lpar` | `destructive` | `lpar.remote_restart` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Remote-restart a failed LPAR on another managed system. |
 | `hmc_rename_lpar` | `mutate` | `lpar.rename` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Rename one LPAR after enforcing its ownership token. |
 | `hmc_set_lpar_description` | `mutate` | `lpar.set_description` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set an LPAR's CLI-only description after validating printable ASCII. |
 | `hmc_set_lpar_msp` | `mutate` | `lpar.set_msp` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set a VIOS partition's Migratable Service Partition flag. |

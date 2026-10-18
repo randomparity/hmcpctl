@@ -1039,3 +1039,64 @@ merged by hand are lost the next time anyone re-runs the derivation.
 4. Read the diff and run `just live-vocabulary`, as in steps 3 and 4 of
    "Capturing an HMC's vocabulary". A re-derivation can drop rows only an input
    you no longer hold produced; list them in the pull request.
+
+## Migration and remote-restart verification obligations (#631)
+
+The six existing operation variants below have offline contract coverage, but no
+native migration/restart observation. Their catalog evidence arrays remain empty.
+Implementation refers to these current controls, not the complete IBM command/API
+families; missing API options remain with #638/#698. No HMC release, POWER family,
+firmware, license, topology or cross-HMC combination is verified by these tests.
+
+| Operation | Existing scope to exercise | Required postcondition |
+| --- | --- | --- |
+| `lpar.migrate_validate` | Destination selector, optional target profile and wait time; optional job wait | Correct source partition and destination; terminal validation outcome; partition stays on source |
+| `lpar.migrate` | Same destination controls; validation first by default, explicit bypass available | Validation precedes submission unless bypassed; successful partition is on destination and absent from source |
+| `lpar.migrate_affinity` | Caller-supplied source/destination scores, capability and explicit warn/fail; canonical validation first | Rejected preflight submits no validation/migration; admitted preflight retains its outcome beside the migration job |
+| `lpar.migrate_abort` | Owned source partition; optional job wait | Abort job belongs to the selected partition; reconcile actual partition location and migration state |
+| `lpar.migrate_recover` | Owned failed-migration partition; optional job wait | Recovery job belongs to the selected partition; reconcile actual location, state and connectivity |
+| `lpar.remote_restart` | Explicit validate/recover/restart/cleanup/cancel, source system, target name or UUID, restart-only current data and cleanup-only retained devices | Exact source/target/partition identity in the request; mode-specific terminal outcome and independently checked location/state |
+
+These bind the exact reference rows in `docs/capabilities/operations.json` for
+`lpar.migrate_validate`, `lpar.migrate`, `lpar.migrate_affinity`,
+`lpar.migrate_abort`, `lpar.migrate_recover` and `lpar.remote_restart`.
+Both retained REST corpora document partition-scoped Migrate, MigrateValidate,
+MigrateAbort, MigrateRecover and RemoteRestart jobs. The RemoteRestart page lives
+under `managedsystem-jobs`; that directory does not require a managed-system URL.
+Availability still depends on actual HMC/platform capabilities; the references'
+POWER10/POWER11 presence is not a tested version/transport matrix.
+
+A reproducible native attempt requires this ordered procedure:
+
+1. Obtain explicit approval for a source/destination managed-system pair, owned
+   disposable partition, operation/modes, maintenance window and recovery plan.
+   Record HMC builds, firmware, POWER family, mobility/restart licensing, VIOS/RMC,
+   storage/network mappings, ownership token and authorized target scope privately.
+   Cross-HMC transport/authentication must be approved separately when applicable.
+2. Freeze the candidate SHA and confirm the installed/deployed build matches it.
+   Capture independent source/destination partition, state and mapping baselines.
+   Use UUIDs for both systems and the partition so duplicate names cannot select
+   another resource. Keep raw identifiers and results private.
+3. Follow this document's preflight → named arm → recovery sequence, with the
+   applicable arm's configuration and exact mutation boundary approved first.
+   **Current gap:** no registered migration/remote-restart arm dispatches this
+   matrix. Stop at that prerequisite; do not substitute an unrelated arm or an
+   ad-hoc mutating command. This procedure grants no hardware authorization.
+4. An applicable authorized arm must call the existing MCP operations named in
+   the table, retain submitted job IDs/hrefs and assert the listed postconditions
+   using independent reads. Exercise validation before migration and preserve the
+   affinity outcome. Attempt abort only during an observed in-progress migration;
+   a migration that wins the race does not prove abort. Exercise recovery and the
+   restart modes only for the partition states covered by the approved plan.
+5. After success, failure or cancellation, run recovery and compare both endpoint
+   baselines before another attempt. A terminal job is not proof of partition
+   health or successful cleanup. Preserve partial/canceled outcomes and operator
+   recovery requirements; do not infer rollback or automatically resubmit.
+6. Generate filtered evidence with `scripts/live_test_evidence.py` only when an
+   applicable arm supplies asserted observations and recovery proof. Keep the
+   native pair/arm, version/topology and mode obligations open on #631 until then;
+   unrun, skipped or failed outcomes cannot become passing live evidence.
+
+Offline tests simulate unreachable destination resolution, cancellation and partial
+completion without disrupting hardware. They preserve source/job attribution and
+propagate failure details; they do not prove native recovery or destination health.
