@@ -23,8 +23,8 @@ from hmcpctl.ssh.lpar import resolve_lpar_cli_name
 async def capture_lpar_console_by_selector(
     hmc: HMCClient,
     lpar_name_or_uuid: str,
-    system_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     duration_seconds: float,
     max_bytes: int,
     idle_timeout_seconds: float,

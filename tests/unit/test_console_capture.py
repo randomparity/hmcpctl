@@ -836,6 +836,24 @@ async def test_max_bytes_bound_truncates_to_a_safe_boundary():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
+async def test_console_system_selector_requires_keyword(monkeypatch):
+    from hmcpctl.operations.lpar import console as lpar_console
+
+    resolve = AsyncMock(side_effect=AssertionError("selector resolution reached"))
+    monkeypatch.setattr(lpar_console, "resolve_system_uuid", resolve)
+    with pytest.raises(TypeError):
+        await lpar_console.capture_lpar_console_by_selector(
+            object(),
+            "aix-db",
+            "system-a",
+            duration_seconds=1,
+            max_bytes=1024,
+            idle_timeout_seconds=1,
+        )
+    resolve.assert_not_awaited()
+
+
 def test_capture_tool_result_carries_contract_fields():
     from hmcpctl.server import TOOL_SECURITY
 
