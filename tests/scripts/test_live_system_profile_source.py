@@ -763,3 +763,54 @@ async def test_final_journal_save_failure_cannot_leave_a_completed_marker(
     with pytest.raises(ValueError):
         await source.recover(h, p, document)
     assert h.submit_job.await_count == 3
+
+
+@pytest.mark.parametrize("port", [443, 12443])
+def test_cli_pins_validated_port_before_authentication_transport_failure(
+    monkeypatch, tmp_path, port
+):
+    from functools import partial
+
+    import httpx
+    import respx
+
+    from hmcpctl.config import load_profile
+
+    configuration = tmp_path / "config.toml"
+    configuration.write_text(
+        '[profiles.fixture]\nhost="hmc.test"\nuser="fixture"\npassword="p"\nverify_ssl=true\n'
+        + (f"port={port}\n" if port != 443 else "")
+    )
+    monkeypatch.delenv("HMC_PORT", raising=False)
+    monkeypatch.delenv("HMC_HOST", raising=False)
+    monkeypatch.setattr(
+        source, "load_profile", partial(load_profile, config_path=configuration)
+    )
+    binding = packet()
+    binding["context_port"] = port
+    path = tmp_path / "packet.json"
+    path.write_text(json.dumps(binding))
+    raw_digest = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+    with respx.mock(assert_all_called=False) as router:
+        selected = router.put(
+            url__regex=(
+                r"https://hmc\.test/rest/api/web/Logon"
+                if port == 443
+                else r"https://hmc\.test:12443/rest/api/web/Logon"
+            )
+        ).mock(side_effect=httpx.ConnectError("selected transport failed"))
+        other = router.put(
+            url__regex=(
+                r"https://hmc\.test:12443/rest/api/web/Logon"
+                if port == 443
+                else r"https://hmc\.test/rest/api/web/Logon"
+            )
+        ).mock(side_effect=httpx.ConnectError("unapproved credential destination"))
+        assert (
+            source.main(
+                ["preflight", "--packet", str(path), "--packet-sha256", raw_digest]
+            )
+            == 2
+        )
+    assert selected.call_count == 1
+    assert other.call_count == 0

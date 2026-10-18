@@ -544,6 +544,7 @@ def _main(argv: list[str] | None = None) -> int:
             update={"timeout": 20, "ssh_timeout": 15}
         )
         _require_context(config, packet)
+        config = config.model_copy(update={"port": config.port})
         async with HMCClient(config) as hmc:
             async with asyncio.timeout(180):
                 if args.mode == "preflight":
