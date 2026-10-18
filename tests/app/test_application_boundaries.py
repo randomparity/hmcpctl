@@ -106,14 +106,15 @@ def test_create_mcp_returns_independent_complete_applications():
     # adds hmc_search_tools and hmc_invoke_tool, for 159.
     # Issue #1371 retires hmc_install_vios_by_lpar_selector, which could never
     # submit an install (ADR 0203).
+    # #1726 adds bounded artifact listing and destructive exact-name deletion.
     policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
 
     first = create_mcp(policy)
     second = create_mcp(policy)
 
     assert first is not second
-    assert len(asyncio.run(first.list_tools())) == 162
-    assert len(asyncio.run(second.list_tools())) == 162
+    assert len(asyncio.run(first.list_tools())) == 164
+    assert len(asyncio.run(second.list_tools())) == 164
 
 
 def test_operations_do_not_import_application_modules():

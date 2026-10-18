@@ -98,3 +98,15 @@ The other partial or refused variants remain explicit in maturity.json. They may
 verification baseline as honest restrictions, but continue to block full implementation of their
 reference capability. The baseline accepts evidence accounting, not full-reference completion or
 native fitness. No known failing required behavior is converted into an unavailable-environment gap.
+
+## Backup artifact extension (#1726)
+
+The four assigned REST backup/list/delete/restore rows retain all 78 source units.
+Backup file/force and restore types 1–3 reuse the existing SSH implementation.
+`forceKeyStore` maps to explicit `force_keystore` with stdout/stderr warnings
+preserved. Initialization/type 4 remains refused; restore maturity is partial
+with `initialize-type4-denied` recorded as missing native behavior, not dropped
+from the denominator. Dedicated list/delete use the documented managed-system
+jobs and exact HMC file names. `rmprofdata` stays allocated to #698. New artifact
+operations have no native implementation observations; source-format capture
+does not promote them. See ADR 0244 and the artifact-only live scenario.

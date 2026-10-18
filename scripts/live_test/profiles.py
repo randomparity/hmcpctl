@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from fastmcp import Client
+
+from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES
 
 from .observation import Assertion
 from .results import field
@@ -384,3 +387,97 @@ async def inventory_lpar_profiles(client: Client, state: RunState) -> None:
     await _score_reads(client, state)
     await _plan_reads(client, state)
     await _capability_reads(client, state)
+
+
+ARTIFACT_GROUP = "profile-artifacts"
+ARTIFACT_PREFIX = "hmcpctl-live-prof-"
+_ARTIFACT_SCENARIO = "st43-profile-artifacts"
+
+
+def backup_artifact_names(data: object) -> set[str] | None:
+    """A complete clean artifact inventory, or None rather than a false empty set."""
+    rows = field(data, "artifacts")
+    if field(field(data, "job"), "status") not in SUCCESSFUL_JOB_STATUSES:
+        return None
+    if not isinstance(rows, (list, tuple)):
+        return None
+    names: set[str] = set()
+    for row in rows:
+        name = field(row, "file_name")
+        if not isinstance(name, str) or not name or name in names:
+            return None
+        names.add(name)
+    return names
+
+
+async def exercise_backup_artifacts(client: Client, state: RunState) -> None:
+    """Exercise one disposable artifact only under its explicit named-arm grant."""
+    if state.group != ARTIFACT_GROUP:
+        state.skip(43, "hmc_backup_lpar_profiles", "requires the profile-artifacts arm")
+        return
+    suffix_length = state.config.profile_artifact_suffix_hex_length
+    if type(suffix_length) is not int or suffix_length not in (12, 16):
+        raise ValueError("profile artifact suffix length must be 12 or 16")
+    system = state.config.system_name
+    status, before = await state.call(
+        client, "hmc_list_backup_lpar_profiles", system_name_or_uuid=system
+    )
+    names = backup_artifact_names(before) if status == "PASS" else None
+    if names is None or any(name.startswith(ARTIFACT_PREFIX) for name in names):
+        state.record(
+            43,
+            "hmc_list_backup_lpar_profiles",
+            "FAIL",
+            before,
+            "complete clean scratch-prefix baseline required; no backup created",
+        )
+        return
+    name = ARTIFACT_PREFIX + secrets.token_hex(suffix_length // 2)
+    status, data = await state.call(
+        client,
+        "hmc_backup_lpar_profiles",
+        system_name_or_uuid=system,
+        file_path=name,
+        force=False,
+    )
+    state.record(
+        43,
+        "hmc_backup_lpar_profiles",
+        status,
+        data,
+        "scratch creation only; no restore",
+    )
+    if status != "PASS":
+        return
+    status, listing = await state.call(
+        client, "hmc_list_backup_lpar_profiles", system_name_or_uuid=system
+    )
+    names = backup_artifact_names(listing) if status == "PASS" else None
+    listed = names is not None and name in names
+    state.record_verified(
+        43,
+        "hmc_list_backup_lpar_profiles",
+        operation="lpar_profile.list_backups",
+        scenario=_ARTIFACT_SCENARIO,
+        assertions=[Assertion("scratch-listed-exactly", listed)],
+        cleanup="not-required",
+        data=listing,
+    )
+    if not listed:
+        return
+    status, deletion = await state.call(
+        client,
+        "hmc_delete_backup_lpar_profile",
+        system_name_or_uuid=system,
+        file_name=name,
+    )
+    absent = status == "PASS" and field(deletion, "postcondition") == "absent"
+    state.record_verified(
+        43,
+        "hmc_delete_backup_lpar_profile",
+        operation="lpar_profile.delete_backup",
+        scenario=_ARTIFACT_SCENARIO,
+        assertions=[Assertion("scratch-absence-read-back", absent)],
+        cleanup="passed" if absent else "failed",
+        data=deletion,
+    )

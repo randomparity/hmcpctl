@@ -80,6 +80,7 @@ from live_test.dedicated_pcie import (
     partition_not_found,
     select_profile_io_slots,
 )
+from live_test.profiles import ARTIFACT_PREFIX, backup_artifact_names
 from live_test.results import entries
 from live_test.storage import scsi_adapter_listing
 from live_test.users import profile_rows, scratch_users
@@ -101,6 +102,7 @@ from hmcpctl.ssh.transport import HMCCLIError
 _READ_ONLY_TOOLS = frozenset(
     {
         "hmc_list_dedicated_pcie_slots",
+        "hmc_list_backup_lpar_profiles",
         "hmc_get_lpar_description",
         "hmc_get_lpar_proc_compat",
         "hmc_get_lpar_state",
@@ -158,6 +160,7 @@ _WITNESSED_SUBTASKS = (
     | _STORAGE_SUBTASKS
     | {
         _USERS_SUBTASK,
+        43,
         24,
         25,
         vios_backup.SUBTASK,
@@ -1616,6 +1619,27 @@ async def check_round2(call, inputs: Round2Inputs) -> list[Finding]:
     return findings
 
 
+async def check_profile_artifacts(call, system_name: str) -> list[Finding]:
+    """Independently list reserved-prefix residue without deleting or restoring."""
+    if not isinstance(system_name, str) or not system_name.strip():
+        raise StateUnreadable("the profile-artifacts managed-system identity")
+    status, listing = await call(
+        "hmc_list_backup_lpar_profiles", system_name_or_uuid=system_name
+    )
+    names = backup_artifact_names(listing) if status == "PASS" else None
+    if names is None:
+        raise StateUnreadable("the complete profile-backup inventory")
+    return [
+        Finding(
+            f"profile backup {name}",
+            "an artifact-arm scratch backup remains; no automatic cleanup attempted",
+            "inspect the retained run and selected system, then explicitly delete only the exact disposable backup after operator approval",
+        )
+        for name in sorted(names)
+        if name.startswith(ARTIFACT_PREFIX)
+    ]
+
+
 async def check_run(
     call,
     checks: tuple[tuple[Callable[..., Awaitable[list[Finding]]], object], ...],
@@ -1765,6 +1789,12 @@ def main(argv: list[str] | None = None) -> int:
     lpar_config_inputs = lpar_config_inputs_from_document(document, subtasks)
     lpar_power_inputs = lpar_power_inputs_from_document(document, subtasks)
 
+    artifact_system = None
+    if 43 in subtasks:
+        artifact_config = document.get("config")
+        artifact_system = ""
+        if isinstance(artifact_config, dict):
+            artifact_system = artifact_config.get("system_name") or ""
     checks = tuple(
         (checker, inputs)
         for checker, inputs in (
@@ -1775,6 +1805,7 @@ def main(argv: list[str] | None = None) -> int:
             (check_lpar_config, lpar_config_inputs),
             (check_lpar_power, lpar_power_inputs),
             (check_round2, round2_inputs),
+            (check_profile_artifacts, artifact_system),
         )
         if inputs is not None
     )

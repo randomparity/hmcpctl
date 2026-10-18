@@ -225,9 +225,21 @@ def test_job_outcome_ignores_an_undocumented_exception_element() -> None:
     )
 
 
-@pytest.mark.parametrize("names", [("result", "ErrorData"), ("ErrorData", "result")])
+@pytest.mark.parametrize(
+    "names",
+    [
+        ("result", "ErrorData"),
+        ("ErrorData", "result"),
+        ("result", "errorData"),
+        ("errorData", "result"),
+    ],
+)
 def test_job_outcome_prefers_error_data_regardless_of_parameter_order(names) -> None:
-    values = {"result": "ordinary output", "ErrorData": "failure text"}
+    values = {
+        "result": "ordinary output",
+        "ErrorData": "failure text",
+        "errorData": "failure text",
+    }
     job = {
         "Resource": {
             "Status": "COMPLETED_WITH_ERROR",

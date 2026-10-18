@@ -296,12 +296,15 @@ async def restore_lpar_profiles(
     system_name: str,
     file_path: str,
     restore_type: ProfileRestoreType,
+    *,
+    force_keystore: bool = False,
 ) -> str:
     """Restore LPAR profiles from *file_path* on *system_name* via SSH.
 
     Runs ``rstprofdata -m <system_name> -l <restore_type> -f <file_path>`` and
     returns the raw command output. *file_path* must already exist on the HMC
-    filesystem. *restore_type* is the HMC's mandatory restore type:
+    filesystem. `force_keystore=True` appends `--forcekeystore`; successful stderr
+    warnings are returned alongside stdout. *restore_type* is the mandatory type:
 
     - ``1``: full restore from the backup file.
     - ``2``: merge the current and backup profile data; on a conflict the
@@ -319,14 +322,17 @@ async def restore_lpar_profiles(
             "with the current data winning. Type 4 (initialize, which deletes "
             "every partition) is not offered."
         )
-    # NOTE: no empty file_path guard here; see backup_lpar_profiles for the
-    # guard pattern. A blank path produces an opaque HMC error rather than a
-    # clear ValueError — tracked as a follow-on improvement.
+    if not isinstance(force_keystore, bool):
+        raise TypeError("force_keystore must be a boolean")
+    if not file_path or not file_path.strip():
+        raise ValueError("file_path must not be empty")
     cmd = (
         f"rstprofdata -m {shlex.quote(system_name)} -l {restore_type} "
         f"-f {shlex.quote(file_path)}"
     )
-    return await run_hmc_command(config, cmd)
+    if force_keystore:
+        cmd += " --forcekeystore"
+    return await run_hmc_command(config, cmd, include_stderr=True)
 
 
 # The ``sync_curr_profile`` partition setting's documented values (chsyscfg).

@@ -1301,7 +1301,7 @@
     {
       "operation": "lpar_profile.restore",
       "implementation": {
-        "state": "implemented",
+        "state": "partial",
         "implemented_scope": [
           {
             "variant": "full-restore",
@@ -1314,9 +1314,18 @@
           {
             "variant": "merge-current-wins",
             "parameters": []
+          },
+          {
+            "variant": "force-keystore-with-warnings",
+            "parameters": []
           }
         ],
-        "missing_scope": []
+        "missing_scope": [
+          {
+            "variant": "initialize-type4-denied",
+            "parameters": []
+          }
+        ]
       },
       "evidence": [
         {
@@ -4984,6 +4993,34 @@
         "implemented_scope": [
           {
             "variant": "generic-authorized-command",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar_profile.list_backups",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "complete-artifact-inventory",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar_profile.delete_backup",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "exact-name-delete-readback",
             "parameters": []
           }
         ],

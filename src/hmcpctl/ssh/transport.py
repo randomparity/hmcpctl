@@ -50,8 +50,10 @@ def _connect_kwargs(config: HMCConfig) -> dict[str, Any]:
     return connect_kwargs
 
 
-async def run_hmc_command(config: HMCConfig, cmd: str) -> str:
-    """Execute one HMC CLI command over SSH and return its stdout."""
+async def run_hmc_command(
+    config: HMCConfig, cmd: str, *, include_stderr: bool = False
+) -> str:
+    """Execute one command, optionally retaining labeled successful stderr."""
     connect_kwargs = _connect_kwargs(config)
     try:
         async with asyncio.timeout(config.ssh_timeout):
@@ -59,7 +61,16 @@ async def run_hmc_command(config: HMCConfig, cmd: str) -> str:
                 result = await connection.run(
                     cmd, check=True, timeout=config.ssh_timeout
                 )
-                return _command_stdout(result.stdout)
+                stdout = _command_stdout(result.stdout)
+                stderr = _command_stdout(result.stderr) if include_stderr else ""
+                if stderr:
+                    return (
+                        stdout
+                        + ("" if not stdout or stdout.endswith("\n") else "\n")
+                        + "[stderr]\n"
+                        + stderr
+                    )
+                return stdout
     except TimeoutError as exc:
         raise _command_timeout_error(config, cmd) from exc
     except (OSError, ValueError) as exc:

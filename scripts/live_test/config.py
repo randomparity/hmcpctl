@@ -32,6 +32,7 @@ class LiveTestConfig:
     vdisk_name: str = "lt609-disk"
     scratch_pv_name: str = ""
     scratch_vg_name: str = ""
+    profile_artifact_suffix_hex_length: int = 16
     scratch_create_desired_memory_mib: int = 1536
     scratch_create_max_memory_mib: int = 3072
     scratch_create_desired_vcpus: int = 3
@@ -154,6 +155,7 @@ class LiveTestConfig:
         "LIVE_TEST_DEDICATED_PCIE_PROFILE_NAME": "dedicated_pcie_profile_name",
         "LIVE_TEST_DEDICATED_PCIE_DRC_INDEX": "dedicated_pcie_drc_index",
         "LIVE_TEST_ACCEPT_PLATFORM_DUMP": "accept_platform_dump",
+        "LIVE_TEST_PROFILE_ARTIFACT_SUFFIX_HEX_LENGTH": "profile_artifact_suffix_hex_length",
     }
 
     #: Settings a release stopped reading. A `.env` still carrying one loads, with
@@ -215,6 +217,13 @@ class LiveTestConfig:
                     if key in values
                 }
             )
+            suffix_key = "LIVE_TEST_PROFILE_ARTIFACT_SUFFIX_HEX_LENGTH"
+            if suffix_key in values:
+                if values[suffix_key] not in ("12", "16"):
+                    raise ValueError(f"{suffix_key} must be 12 or 16")
+                parsed[cls._OPTIONAL_CONFIG_FIELDS[suffix_key]] = int(
+                    values[suffix_key]
+                )
             for key in cls._CONFIG_FIELDS:
                 if key == "LIVE_TEST_SRIOV_LOGICAL_PORT_ID":
                     continue  # the HMC reports hex ids such as 2700400a
@@ -452,6 +461,7 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
     # ST42 settings are optional and disabled in older results documents.
     parsed.setdefault("scratch_pv_name", "")
     parsed.setdefault("scratch_vg_name", "")
+    parsed.setdefault("profile_artifact_suffix_hex_length", 16)
     if set(parsed) != set(expected):
         raise ValueError("results config fields do not match LiveTestConfig")
     protected = parsed["protected_lpar_names"]
@@ -467,6 +477,10 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
             expected_value
         ):
             raise TypeError(f"results config {name} has the wrong JSON type")
+    if parsed["profile_artifact_suffix_hex_length"] not in (12, 16):
+        raise ValueError(
+            "results config profile_artifact_suffix_hex_length must be 12 or 16"
+        )
     return LiveTestConfig(**parsed)
 
 

@@ -48,6 +48,7 @@ from live_test import (
     dedicated_pcie,
     lpar_config,
     lpar_power,
+    profiles,
     runner,
     storage_lifecycle,
     storage_volume_group,
@@ -434,10 +435,26 @@ def _storage_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _profile_artifacts_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    suffix_length = config.profile_artifact_suffix_hex_length
+    name_shape = f"{profiles.ARTIFACT_PREFIX}<{suffix_length} hex digits>"
+    name_length = len(profiles.ARTIFACT_PREFIX) + suffix_length
+    return ArmVerdict(
+        "profile-artifacts",
+        True,
+        "requires HMC 10.3.1061.0+ and a complete clean inventory before creation",
+        (
+            f"managed system {config.system_name}: one unpredictable {name_shape} ({name_length} characters) backup created without overwrite, listed and deleted; no restore or partition mutation",
+        ),
+        config.system_name,
+    )
+
+
 _ARM_VERDICTS = {
     "dedicated": _dedicated_verdict,
     "bare-cec": _bare_cec_verdict,
     "profiles": _profiles_verdict,
+    "profile-artifacts": _profile_artifacts_verdict,
     "pcm": _pcm_verdict,
     "vios-backup": _vios_backup_verdict,
     "network": _network_verdict,

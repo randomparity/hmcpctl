@@ -2,12 +2,14 @@
 
 # `lpar_profile` tools
 
-3 tools in the `lpar_profile` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+5 tools in the `lpar_profile` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `hmc_backup_lpar_profiles` | `destructive` | `lpar_profile.backup` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Backup all LPAR profiles on a Power system via the HMC CLI. |
-| `hmc_restore_lpar_profiles` | `destructive` | `lpar_profile.restore` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Restore LPAR profiles from a backup file via the HMC CLI. |
+| `hmc_delete_backup_lpar_profile` | `destructive` | `lpar_profile.delete_backup` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | Delete one exact HMC profile backup name after complete inventory admission. |
+| `hmc_list_backup_lpar_profiles` | `read` | `lpar_profile.list_backups` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | List HMC-side profile backup artifacts on one managed system. |
+| `hmc_restore_lpar_profiles` | `destructive` | `lpar_profile.restore` | `managed_system` | `partial` | `stale (closure-changed)` | `existing-runtime-guards` | Restore LPAR profiles from a backup file via the HMC CLI. |
 | `hmc_sync_lpar_profile` | `destructive` | `lpar_profile.sync` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set an LPAR's profile-synchronization setting (``sync_curr_profile``). |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 import typer
@@ -12,6 +13,10 @@ from ...operations.lpar.boot_order import (
     clear_lpar_boot_order,
     read_lpar_boot_order,
     set_lpar_boot_order,
+)
+from ...operations.lpar.profile_artifacts import (
+    delete_backup_profile_artifact,
+    list_backup_profile_artifacts,
 )
 from ..output import console, print_json, terminal_field
 from ..runtime import with_client
@@ -128,8 +133,35 @@ def lpars_clear_boot_order(
     )
 
 
+def lpars_list_profile_backups(
+    system_name: str = typer.Argument(..., help="Managed system name or UUID"),
+) -> None:
+    """List bounded HMC-side profile backups, preserving failed-job outcomes."""
+    result = with_client(lambda hmc: list_backup_profile_artifacts(hmc, system_name))
+    print_json(asdict(result))
+    if result.artifacts is None:
+        raise typer.Exit(code=1)
+
+
+def lpars_delete_profile_backup(
+    system_name: str = typer.Argument(..., help="Managed system name or UUID"),
+    file_name: str = typer.Argument(
+        ..., help="Exact HMC backup name, never a local path"
+    ),
+) -> None:
+    """Delete exactly one listed backup and report its fresh absence readback."""
+    result = with_client(
+        lambda hmc: delete_backup_profile_artifact(hmc, system_name, file_name)
+    )
+    print_json(asdict(result))
+    if result.postcondition != "absent":
+        raise typer.Exit(code=1)
+
+
 def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
+    group.command("list-profile-backups")(lpars_list_profile_backups)
+    group.command("delete-profile-backup")(lpars_delete_profile_backup)
     group.command("read-boot-order")(lpars_read_boot_order)
     group.command("set-boot-order")(lpars_set_boot_order)
     group.command("clear-boot-order")(lpars_clear_boot_order)

@@ -139,7 +139,7 @@ def _result_message(resource: dict[str, Any]) -> str | None:
         name = parameter.get("ParameterName") if isinstance(parameter, dict) else None
         value = parameter.get("ParameterValue") if isinstance(parameter, dict) else None
         if (
-            name in {"result", "detailedStatus", "ErrorData"}
+            name in {"result", "detailedStatus", "ErrorData", "errorData"}
             and isinstance(value, str)
             and value.strip()
             and name not in messages
@@ -148,7 +148,7 @@ def _result_message(resource: dict[str, Any]) -> str | None:
     return next(
         (
             messages[name]
-            for name in ("ErrorData", "detailedStatus", "result")
+            for name in ("ErrorData", "errorData", "detailedStatus", "result")
             if name in messages
         ),
         None,

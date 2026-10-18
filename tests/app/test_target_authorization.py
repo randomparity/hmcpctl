@@ -900,3 +900,56 @@ def test_swapping_two_selector_values_between_their_kinds_denies():
     ]
     with pytest.raises(TargetScopeError):
         _authorize(grants, "hmc_delete_lpar", _delete(system="victim", lpar="sys-1"))
+
+
+def test_profile_backup_delete_requires_all_targets_before_io(monkeypatch):
+    opened: list[str] = []
+    _seal_every_outbound_path(monkeypatch, opened)
+    application = create_mcp(
+        _policy(
+            [
+                {
+                    "effects": ["destructive"],
+                    "connections": ["lab"],
+                    "targets": {"managed_system": ["sys-1"]},
+                }
+            ]
+        )
+    )
+    with pytest.raises(ToolError, match="all-targets"):
+        _call(
+            application,
+            "hmc_delete_backup_lpar_profile",
+            {
+                "system_name_or_uuid": "sys-1",
+                "file_name": "backup-1",
+                "profile": "lab",
+            },
+        )
+    assert opened == []
+
+
+def test_profile_backup_list_denies_cross_system_before_io(monkeypatch):
+    opened: list[str] = []
+    _seal_every_outbound_path(monkeypatch, opened)
+    application = create_mcp(
+        _policy(
+            [
+                {
+                    "tools": ["hmc_list_backup_lpar_profiles"],
+                    "connections": ["lab"],
+                    "targets": {"managed_system": ["sys-1"]},
+                }
+            ]
+        )
+    )
+    with pytest.raises(ToolError, match="not permitted"):
+        _call(
+            application,
+            "hmc_list_backup_lpar_profiles",
+            {
+                "system_name_or_uuid": "sys-2",
+                "profile": "lab",
+            },
+        )
+    assert opened == []
