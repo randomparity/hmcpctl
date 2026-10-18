@@ -234,3 +234,32 @@ async def test_missing_delete_poll_retains_handle_without_retry():
     assert result.postcondition == "not-checked"
     assert result.job.job_href == "/rest/api/uom/jobs/stable-job"
     assert hmc.submit_job.await_count == 2
+
+
+@pytest.mark.parametrize("error_name", ["ErrorData", "errorData"])
+@pytest.mark.parametrize(
+    "message",
+    ["REST019C: backup-1 is not valid for option file", "x" * 10_000],
+    ids=["diagnostic", "bounded"],
+)
+async def test_failed_delete_preserves_bounded_error_data_without_retry(
+    error_name, message
+):
+    failed = job(
+        status="COMPLETED_WITH_ERROR",
+        Results={
+            "JobParameter": {"ParameterName": error_name, "ParameterValue": message}
+        },
+    )
+    hmc = client(job([artifact()]), failed)
+    result = await delete_backup_profile_artifact(hmc, SYSTEM, "backup-1")
+    assert result.postcondition == "not-checked"
+    assert result.job.job is None
+    assert result.job.error is not None
+    assert len(result.job.error) <= 2048
+    if len(message) <= 2048:
+        assert result.job.error == message
+    else:
+        assert result.job.error.endswith(" [truncated]")
+        assert message.startswith(result.job.error.removesuffix(" [truncated]"))
+    assert hmc.submit_job.await_count == 2
