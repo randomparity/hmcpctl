@@ -19,6 +19,7 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 - Profile backup artifacts have bounded CLI/MCP listing and exact-name deletion
   with fresh readback. Restore adds explicit keystore-error handling while retaining
   warning output, existing ownership/audit and initialization denial (#1726).
+  Failed jobs also retain the HMC's lowercase `errorData` diagnostic spelling.
 
 - Existing-code baseline reconciles all registered operation maturity and automated-test
   links, retaining explicit native gaps and historical failures without promotion (#635).

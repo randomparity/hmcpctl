@@ -1,10 +1,10 @@
 # Backup-profile artifacts — proposed complete contract
 
-Status: operator-approved contract (2026-10-18), pending independent design review.
+Status: operator-approved contract (2026-10-18); native-derived diagnostic amendment approved.
 Approval: “Approve #1726 contract”, call_b49de860eff2499198d8e0d1fbb04d1f item 0.
 Optional root-assigned
 ADR reservation: `docs/adr/0244-backup-profile-artifact-contract.md=0244`; see [ADR 0244](../../adr/0244-backup-profile-artifact-contract.md).
-Issue #1726 / q1726-ea651892; full-spec lane; fixed M denominator 250.
+Issue #1726; full-spec lane; fixed M denominator 250.
 The four allocated REST rows and all 78 source units remain in scope. Existing
 backup/overwrite and restore types 1–3 are reused. #638/#698 keep their allocations.
 The approved additional exclusion-owner map is empty. No hardware mutations granted.
@@ -27,7 +27,8 @@ option forwarding stays in `ssh/profiles.py` and `operations/lpar/configuration.
    usable job identity. Job ID/href/status strings over 4,096 UTF-8 bytes fail
    explicitly; diagnostic/readback detail is capped at 2,048 characters with an
    explicit `[truncated]` suffix. Raw extra HMC fields are not returned. The shared
-   job API is unchanged. An empty tuple means a proven
+   job API signatures and models are unchanged. Shared diagnostics recognize the
+   observed `errorData` spelling alongside existing `ErrorData`. An empty tuple means a proven
    empty list; `None` never means empty. `backup_time` is opaque source text.
    The successful job's lowercase `result` parameter is a JSON array containing
    `BackupFileName` and `BackupTime` strings. Reject missing/duplicate result
@@ -67,6 +68,16 @@ option forwarding stays in `ssh/profiles.py` and `operations/lpar/configuration.
    source units remain explicitly dispositioned as restricted existing behavior;
    keeping that boundary needs no new waiver. No new acknowledgement escape hatch.
 
+4. Operator approval “approval to prepare the shorter-name probe and a new review
+   phase” authorizes one optional closed live setting:
+   `LIVE_TEST_PROFILE_ARTIFACT_SUFFIX_HEX_LENGTH=12|16`, default 16 unchanged.
+   The existing named arm uses that many unpredictable suffix hex digits with
+   the same reserved prefix. Convert the optional value strictly; reject other
+   setting values and invalid direct configuration before calls. Saved results
+   retain an integer; older results default to 16 and malformed types/values fail.
+   Preflight declares the chosen shape/length. No new script/group, arbitrary
+   filename, product deletion fallback or hardware grant is added.
+
 ## Source and accepted boundaries
 
 A read-only source job on HMC Version 11 Release 2 Service Pack 1120 completed
@@ -76,6 +87,15 @@ fields; names were distinct bare names. Its own job was cleaned up. No backup,
 restore or artifact-delete operation was run. This is source-format evidence,
 not candidate native verification, and does not establish every server's schema.
 The source client revision was 10905eaaa79628d68bb79ce720a2bb6a7006906b.
+
+A later candidate run at cfbdb5aee9f67132050f4b2aaca05e9d4aceb326 created and
+listed its 34-character scratch backup, but the documented REST deletion returned
+`COMPLETED_WITH_ERROR`/`errorData`/`REST019C` invalid file. Read-only job inspection
+confirmed exact system/operation/file identity and an unpadded request. Separately
+authorized CLI recovery restored the original five inventory entries/timestamps.
+The backend rejection cause is unestablished; the 30-character diagnostic option
+tests length while preserving prefix/character classes, not a claimed maximum.
+Neither consumed effect grant authorizes another run or a new candidate.
 
 Both P10/P11 list references require HMC 10.3.1061.0 or later and specify operation
 `ListBackupProfileData`, group `ManagedSystem`, PUT and no parameters. Existing
@@ -142,7 +162,8 @@ automatic native promotion. Final candidate requires `just verify` and pinned
 `scripts/live_profile_artifacts.py`, runner subtask43, existing `profiles.py`,
 matching preflight and independent read-only recovery. It requires a complete
 clean inventory without its reserved scratch prefix, creates one unpredictable
-`hmcpctl-live-prof-<16hex>` bare-name backup without overwrite, proves listing,
+`hmcpctl-live-prof-<16hex>` bare-name backup by default (12 hex digits only for
+an explicitly authorized diagnostic configuration) without overwrite, proves listing,
 and deletes only that exact scratch artifact once. An ambiguous create/delete
 never triggers a retry or restore; recovery reports residue without deleting.
 The broad existing profiles/st10 restore arm is not this proof. Negative restore

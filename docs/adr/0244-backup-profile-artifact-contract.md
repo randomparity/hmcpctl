@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-18), operator-approved #1726 contract; implementation pending.
+Accepted (2026-10-18), operator-approved #1726 contract; native verification remains open.
 
 ## Context
 
@@ -23,6 +23,12 @@ Reuse existing backup/restore transports and audited restore admission. Add the
 explicit default-false keystore flag while preserving both SSH output channels;
 keep initialization/type 4 denied and account for it as restricted behavior.
 
+The operator-approved diagnostic amendment keeps the existing named artifact arm
+and its default 16-hex suffix. An optional closed 12-or-16-hex setting permits one
+separately authorized shorter-name experiment; strict input validation and default
+16 for older saved results preserve configuration/recovery contracts. Preflight
+states the selected shape. This adds no deletion fallback or live authority.
+
 ## Consequences
 
 CLI/MCP gain dedicated artifact list/delete discovery. Inventory overflow or
@@ -32,6 +38,10 @@ restore follows uncertainty. Native maturity does not advance from source captur
 
 ## Considered & rejected
 
+- **Infer a filename limit or silently shorten the default.** verified: the
+  named arm at cfbdb5aee9f67132050f4b2aaca05e9d4aceb326 on V11R2 SP1120
+  exited 1 after REST019C rejected one 34-character name; this establishes no
+  maximum. The closed optional probe leaves that hypothesis explicit.
 - **Duplicate backup/restore with REST wrappers.** judgment: existing equivalent
   behavior meets #1726; a second transport adds maintenance without capability.
 - **Parse a guessed delimiter format.** verified: both P10/P11 list references

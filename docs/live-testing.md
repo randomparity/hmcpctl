@@ -1126,6 +1126,22 @@ asserts its exact listed name and asks the dedicated delete operation to remove
 only that name. The operation checks a complete pre-list and successful-job fresh
 absence readback. The scratch file is disposable and is never used for restore.
 
+The optional `.env` setting `LIVE_TEST_PROFILE_ARTIFACT_SUFFIX_HEX_LENGTH` accepts
+only `12` or `16`; it defaults to `16` and ignores exported values. The default
+name has 34 characters. An explicitly approved diagnostic run may select `12`
+for a 30-character name with the same prefix and character classes. Preflight
+prints the selected shape and length; saved results record the integer setting.
+Older saved results without the setting retain the default of 16. Both lengths
+use the same collision refusal, exact-name REST deletion and prefix recovery.
+
+A V11R2 SP1120 attempt at `cfbdb5aee9f67132050f4b2aaca05e9d4aceb326`
+created and listed its 34-character scratch backup, but the REST delete job
+rejected its exact unpadded `file` value with `REST019C`. Separately authorized
+CLI cleanup restored the original inventory. The rejection's cause remains
+unestablished; the shorter option tests a hypothesis and is not a filename-limit
+fix or evidence of a universal maximum. Each further attempt requires its own
+exact-candidate grant. No SSH deletion fallback or cleanup retry is added.
+
 An uncertain create, failed list or inconclusive deletion is a failed attempt,
 not permission to retry or remove another file. Run independent recovery after
 success, failure or interruption. It re-lists the selected system and reports

@@ -415,6 +415,9 @@ async def exercise_backup_artifacts(client: Client, state: RunState) -> None:
     if state.group != ARTIFACT_GROUP:
         state.skip(43, "hmc_backup_lpar_profiles", "requires the profile-artifacts arm")
         return
+    suffix_length = state.config.profile_artifact_suffix_hex_length
+    if type(suffix_length) is not int or suffix_length not in (12, 16):
+        raise ValueError("profile artifact suffix length must be 12 or 16")
     system = state.config.system_name
     status, before = await state.call(
         client, "hmc_list_backup_lpar_profiles", system_name_or_uuid=system
@@ -429,7 +432,7 @@ async def exercise_backup_artifacts(client: Client, state: RunState) -> None:
             "complete clean scratch-prefix baseline required; no backup created",
         )
         return
-    name = ARTIFACT_PREFIX + secrets.token_hex(8)
+    name = ARTIFACT_PREFIX + secrets.token_hex(suffix_length // 2)
     status, data = await state.call(
         client,
         "hmc_backup_lpar_profiles",
