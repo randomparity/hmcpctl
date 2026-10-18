@@ -1580,7 +1580,9 @@ class HMCClient(
 
         Terminal states cover the UOM Job and documented web+xml JobResponse
         completion, failure, warning, and cancellation values.
-        Returns the last-seen job entry (terminal or not, after timeout).
+        Return the latest polling result (terminal or not, after timeout),
+        including None if the latest read has no entry. An empty read replaces
+        an earlier entry; this method does not retain stale job state.
 
         When *job_href* is provided it is forwarded to ``get_job_entry`` so polling
         reads that link's jobs path instead of one built from *job_id*.
