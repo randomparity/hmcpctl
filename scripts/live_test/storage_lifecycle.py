@@ -35,9 +35,8 @@ from .storage import (
 )
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
-
     from live_test.config import LiveTestConfig
+    from live_test.runner import RunState
 
 SUBTASK = 40
 GROUP = "storage"

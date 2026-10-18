@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from contextlib import asynccontextmanager
@@ -20,15 +19,11 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
-from live_test import lpar_config  # noqa: E402
+from live_test import (  # noqa: E402
+    lpar_config,
+    runner,
+)
 from live_test.observation import CallFailure  # noqa: E402
-
-_SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-runner = sys.modules.get(_SPEC.name) or importlib.util.module_from_spec(_SPEC)
-if _SPEC.name not in sys.modules:
-    sys.modules[_SPEC.name] = runner
-    _SPEC.loader.exec_module(runner)
 
 SYSTEM = "sys-A"
 OTHER = "lpar-A"

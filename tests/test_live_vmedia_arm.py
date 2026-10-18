@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import http.client
-import importlib.util
 import os
 import shlex
 import socket
@@ -21,14 +20,11 @@ from hmcpctl import cli
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
-from live_test import observation, vmedia  # noqa: E402
-
-_SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-runner = sys.modules.get(_SPEC.name) or importlib.util.module_from_spec(_SPEC)
-if _SPEC.name not in sys.modules:
-    sys.modules[_SPEC.name] = runner
-    _SPEC.loader.exec_module(runner)
+from live_test import (  # noqa: E402
+    observation,
+    runner,
+    vmedia,
+)
 
 SYSTEM = "sys-A"
 LPAR = "sys-A-lp3"

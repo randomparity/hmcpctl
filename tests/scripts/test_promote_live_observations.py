@@ -15,8 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
 import check_capability_inventory as inventory
-import live_test_runner as runner
 import promote_live_observations as promotion
+from live_test import runner
 
 ROOT = Path(__file__).parents[2]
 
@@ -38,8 +38,14 @@ def candidate(tmp_path):
     git(root, "config", "user.name", "Fixture")
     git(root, "config", "user.email", "fixture@example.test")
     git(root, "switch", "-c", "fixture-candidate")
-    for name in ("promote_live_observations.py", "check_capability_inventory.py"):
-        shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
+    scripts = (
+        "scripts/promote_live_observations.py",
+        "scripts/check_capability_inventory.py",
+        "scripts/live_test_runner.py",
+        "scripts/live_test/runner.py",
+    )
+    for name in scripts:
+        shutil.copyfile(ROOT / name, root / name)
     claims = root / "docs/capabilities/releases/v0.0.0.json"
     write_json(
         claims,
@@ -57,8 +63,7 @@ def candidate(tmp_path):
     git(
         root,
         "add",
-        "scripts/promote_live_observations.py",
-        "scripts/check_capability_inventory.py",
+        *scripts,
         str(claims),
     )
     git(root, "commit", "-qm", "Prepare anonymous offline fixture")

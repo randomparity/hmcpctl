@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import dataclasses
 import hashlib
-import importlib.util
 import json
 import os
 import re
@@ -88,11 +87,7 @@ LIVE_WORKFLOW_MODULES = (
     vmedia,
 )
 
-_SPEC = importlib.util.spec_from_file_location("hmc_live_test_runner", _RUNNER_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-runner = importlib.util.module_from_spec(_SPEC)
-sys.modules[_SPEC.name] = runner
-_SPEC.loader.exec_module(runner)
+from live_test import runner  # noqa: E402
 
 
 class _FakeClient:
@@ -4965,7 +4960,7 @@ async def test_affinity_live_paths_use_only_current_and_calcscore_commands(monke
 
 
 def test_live_runner_contains_no_executable_optmem_command():
-    source = _RUNNER_PATH.read_text(encoding="utf-8")
+    source = Path(runner.__file__).read_text(encoding="utf-8")
     assert re.search(r"(?<![\w-])optmem(?![\w-])", source) is None
 
 
@@ -5440,7 +5435,8 @@ async def test_every_dispatched_argument_matches_the_served_schema():
     }
     # The runner itself dispatches nothing today; covering it keeps a dispatch
     # added there from being the one the guard never reads.
-    sources[_RUNNER_PATH.name] = _RUNNER_PATH.read_text(encoding="utf-8")
+    runner_source = Path(runner.__file__)
+    sources[runner_source.name] = runner_source.read_text(encoding="utf-8")
 
     problems, checked, total = _dispatch_argument_report(sources, schemas)
 
@@ -8349,7 +8345,7 @@ from dataclasses import asdict
 
 class NoExecutionPackages(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'live_test_runner', 'fastmcp', 'mcp'}:
+        if fullname == 'live_test.runner' or fullname.split('.')[0] in {'fastmcp', 'mcp'}:
             raise ModuleNotFoundError(fullname)
 
 sys.path.insert(0, sys.argv[1])
@@ -8374,3 +8370,41 @@ assert decoded == artifacts
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_live_runner_package_owns_state_and_dispatch():
+    from live_test import runner as owner
+
+    assert owner.RunState.__module__ == "live_test.runner"
+    assert owner._run_from_arguments.__module__ == "live_test.runner"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_exit", "message"),
+    [
+        (["--help"], 0, "usage:"),
+        (["--group", "not-an-arm"], 2, "invalid choice"),
+        (["--results-file", "evidence.json"], 1, "git does not ignore"),
+    ],
+)
+def test_executable_delegates_prebootstrap_refusals(
+    monkeypatch, capsys, arguments, expected_exit, message
+):
+    import runpy
+
+    from live_test import runner as owner
+
+    monkeypatch.setattr(
+        owner, "_bootstrap_config", lambda: pytest.fail("entered credential bootstrap")
+    )
+    monkeypatch.setattr(owner, "_read_environment", lambda: None)
+    monkeypatch.setattr(
+        owner.LiveTestConfig, "from_env_file", lambda: owner.LiveTestConfig()
+    )
+    monkeypatch.setattr(owner, "_destination_is_ignored", lambda _path: False)
+    monkeypatch.setattr(sys, "argv", [str(_RUNNER_PATH), *arguments])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(_RUNNER_PATH), run_name="__main__")
+    assert exit_info.value.code == expected_exit
+    output = capsys.readouterr()
+    assert message in output.out + output.err

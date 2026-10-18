@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import live_test_runner
+from live_test import runner
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CAPABILITIES = _REPO_ROOT / "docs" / "capabilities"
@@ -315,7 +315,7 @@ def build_report(
             exercised.add(by_tool[dispatch.tool])
             mismatches += [
                 f"dispatch-mismatch: {dispatch.site} {problem}"
-                for problem in live_test_runner._dispatch_problems(
+                for problem in runner._dispatch_problems(
                     dispatch.tool, dispatch.arguments, schemas
                 )
             ]
@@ -367,8 +367,8 @@ def exit_status(lines: Iterable[str], *, fail_on_dispatch: bool) -> int:
 
 async def served_schemas() -> dict[str, dict[str, Any]]:
     """The input schema each tool serves, through the live runner's own composition."""
-    async with live_test_runner.served_client() as client:
-        return await live_test_runner.served_schemas(client)
+    async with runner.served_client() as client:
+        return await runner.served_schemas(client)
 
 
 def scenario_scans() -> list[Scan]:
@@ -387,7 +387,7 @@ def scenario_roots() -> set[tuple[str, str]]:
     """The ``(module, function)`` pair of every ``SUBTASKS`` entry."""
     return {
         (task.__module__.rsplit(".", 1)[-1], task.__name__)
-        for task in live_test_runner.SUBTASKS.values()
+        for task in runner.SUBTASKS.values()
     }
 
 

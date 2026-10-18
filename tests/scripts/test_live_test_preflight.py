@@ -16,8 +16,8 @@ import pytest
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_preflight as preflight  # noqa: E402
-import live_test_runner as runner  # noqa: E402
 from live_test import config as live_config  # noqa: E402
+from live_test import runner  # noqa: E402
 
 
 def _env_text(**overrides: str) -> str:

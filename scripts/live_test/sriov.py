@@ -21,7 +21,7 @@ from .observation import (
 )
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 
 _SRIOV_SCENARIO = "st23-sriov-logical-port"

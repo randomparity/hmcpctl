@@ -69,9 +69,8 @@ _DELETE_REFUSED_WHILE_MOUNTED = ExpectedOutcome(
 )
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
-
     from live_test.config import LiveTestConfig
+    from live_test.runner import RunState
 
 
 REPOSITORY_SCENARIO = "st16-repository-read"

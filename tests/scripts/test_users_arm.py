@@ -15,8 +15,10 @@ from hmcpctl.client.client_parse import _parse_feed
 
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
-import live_test_runner as runner  # noqa: E402
-from live_test import users  # noqa: E402
+from live_test import (  # noqa: E402
+    runner,
+    users,
+)
 from live_test.observation import classify_failure  # noqa: E402
 
 CONSOLE = "00000002-abcd-4ef0-8abc-000000000002"

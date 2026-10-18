@@ -43,12 +43,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import live_test_runner as runner
 from live_test import (
     bare_cec,
     dedicated_pcie,
     lpar_config,
     lpar_power,
+    runner,
     storage_lifecycle,
     storage_volume_group,
     users,

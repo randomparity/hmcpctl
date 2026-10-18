@@ -14,7 +14,8 @@ from .storage_lifecycle import volume_names
 
 if TYPE_CHECKING:
     from fastmcp import Client
-    from live_test_runner import RunState
+
+    from live_test.runner import RunState
 
 SUBTASK = 42
 SCENARIO = "st42-scratch-volume-group"

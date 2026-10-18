@@ -85,7 +85,7 @@ _ACTIVE = False
 def destination_is_ignored(path: Path) -> bool:
     """Report whether Git would let *path* be committed from where it is written.
 
-    Same rule as `scripts/live_test_runner.py`: exit 1 from `git check-ignore -q`
+    Same rule as `live_test.runner`: exit 1 from `git check-ignore -q`
     means an unignored path inside a repository; exit 0 (ignored) and anything
     else (no repository, or outside one) leave nothing committable.
     """

@@ -15,8 +15,8 @@ from fastmcp import Client
 from hmcpctl.config import HMCConfig
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-import live_test_runner as runner
 from live_test import config as live_config
+from live_test import runner
 from live_test import storage_volume_group as vg
 
 PV = "hdisk9"

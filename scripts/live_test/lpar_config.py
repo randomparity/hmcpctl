@@ -41,7 +41,7 @@ from .results import field as result_field
 from .results import resource
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 SUBTASK = 39
 GROUP = "lpar-config"

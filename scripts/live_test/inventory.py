@@ -15,7 +15,7 @@ from .results import entries
 from .results import resource as get_resource
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 
 async def _capture_lpar_properties(client: Client, state: RunState) -> None:

@@ -14,7 +14,7 @@ from .results import entries, field
 from .results import resource as get_resource
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 # hmc_list_systems lists from quick/All (#1501), so it succeeds even where the raw
 # feed 500s (ADR 0138). ST1 reads the raw feed through

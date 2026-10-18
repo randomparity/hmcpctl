@@ -64,12 +64,12 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import live_test_baseline as independent_baseline
-import live_test_runner as runner
 from live_test import config as live_config
 from live_test import (
     lpar_config,
     lpar_power,
     network,
+    runner,
     storage_lifecycle,
     storage_volume_group,
     vios_backup,

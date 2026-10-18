@@ -10,14 +10,14 @@ import pytest
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_storage as wrapper  # noqa: E402
-import live_test_runner  # noqa: E402
+from live_test import runner  # noqa: E402
 
 
 def test_dispatches_its_own_group_through_the_argument_entry_point(monkeypatch):
     """Not `main`: that skips the credential bootstrap and the results naming."""
     seen = []
     monkeypatch.setattr(
-        live_test_runner,
+        runner,
         "_run_from_arguments",
         lambda argv: seen.append(argv) or 0,
     )
@@ -27,13 +27,13 @@ def test_dispatches_its_own_group_through_the_argument_entry_point(monkeypatch):
 
 
 def test_relays_the_runners_exit_status(monkeypatch):
-    monkeypatch.setattr(live_test_runner, "_run_from_arguments", lambda _argv: 3)
+    monkeypatch.setattr(runner, "_run_from_arguments", lambda _argv: 3)
 
     assert wrapper.main([]) == 3
 
 
 def test_its_group_is_one_the_runner_knows():
-    assert wrapper.GROUP in live_test_runner.SUBTASK_GROUPS
+    assert wrapper.GROUP in runner.SUBTASK_GROUPS
 
 
 def test_help_explains_itself_instead_of_starting_a_run(monkeypatch, capsys):
@@ -42,7 +42,7 @@ def test_help_explains_itself_instead_of_starting_a_run(monkeypatch, capsys):
     def forbidden(_argv):
         raise AssertionError("--help started a live run")
 
-    monkeypatch.setattr(live_test_runner, "_run_from_arguments", forbidden)
+    monkeypatch.setattr(runner, "_run_from_arguments", forbidden)
 
     with pytest.raises(SystemExit) as exit_info:
         wrapper.main(["--help"])
@@ -55,7 +55,7 @@ def test_an_unknown_option_is_rejected_before_any_run(monkeypatch):
     def forbidden(_argv):
         raise AssertionError("ran despite an unknown option")
 
-    monkeypatch.setattr(live_test_runner, "_run_from_arguments", forbidden)
+    monkeypatch.setattr(runner, "_run_from_arguments", forbidden)
 
     with pytest.raises(SystemExit) as exit_info:
         wrapper.main(["--results-file", "x.json"])

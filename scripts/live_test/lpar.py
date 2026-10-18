@@ -23,7 +23,7 @@ from .observation import (
 from .results import field
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 
 async def exercise_lpar_lifecycle(client: Client, state: RunState) -> None:

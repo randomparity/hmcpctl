@@ -21,7 +21,7 @@ from .storage import configured_vg_uuid
 from .storage_lifecycle import LISTING_NAME, volume_listing, volume_names
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 # ---------------------------------------------------------------------------
 # ST13 — Provision Dry Run

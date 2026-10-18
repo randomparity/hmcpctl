@@ -13,7 +13,7 @@ from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, JobOutcome, job_outcome
 from .observation import Assertion, ExpectedOutcome
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 
 def _pcm_authority(operation: str) -> ExpectedOutcome:

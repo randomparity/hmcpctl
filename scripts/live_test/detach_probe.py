@@ -19,7 +19,7 @@ from .results import resource
 from .storage import scsi_adapter_listing
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 _KEYS = ("id", "lpar_uuid", "backing_kind", "backing_name")
 
 

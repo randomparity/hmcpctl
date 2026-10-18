@@ -10,8 +10,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
-import live_test_runner as runner
-from live_test import cli
+from live_test import cli, runner
 from live_test.observation import Assertion
 
 from hmcpctl.config import HMCConfig

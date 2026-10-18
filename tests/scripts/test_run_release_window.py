@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
-import live_test_runner as runner
 from live_test import config as live_config
+from live_test import runner
 
 ROOT = Path(__file__).parents[2]
 
@@ -34,13 +34,20 @@ def window(tmp_path):
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     git(root, "switch", "-c", "fixture-window")
-    for name in ("cli.py", "config.py"):
+    for name in ("cli.py", "config.py", "runner.py"):
         shutil.copyfile(
             ROOT / "scripts/live_test" / name, root / "scripts/live_test" / name
         )
-    script = ROOT / "scripts/run_release_window.py"
-    if script.exists():
-        shutil.copyfile(script, root / "scripts/run_release_window.py")
+    for name in (
+        "run_release_window.py",
+        "check_capability_inventory.py",
+        "promote_live_observations.py",
+        "live_test_runner.py",
+        "live_test_preflight.py",
+        "live_test_recovery.py",
+        "live_round2.py",
+    ):
+        shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
     for name in (
         "live_test_baseline.py",
         "live_test_preflight.py",
@@ -156,7 +163,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import check_capability_inventory as inventory
 import live_test_baseline as baseline
-import live_test_runner as runner
+from live_test import runner
 
 def run(phase):
     root = Path.cwd()

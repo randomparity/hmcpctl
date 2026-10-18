@@ -36,7 +36,7 @@ from .results import entries
 from .results import resource as get_resource
 
 if TYPE_CHECKING:
-    from live_test_runner import RunState
+    from live_test.runner import RunState
 
 SUBTASK = 37
 GROUP = "vios-backup"
