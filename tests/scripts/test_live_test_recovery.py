@@ -26,8 +26,9 @@ from hmcpctl.client.client_storage import mapping_lpar_uuid, storage_mapping_id
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_recovery as recovery  # noqa: E402
-from live_test import storage_lifecycle, vmedia  # noqa: E402
+from live_test import storage_lifecycle  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
+from live_test.storage import scsi_adapter_listing  # noqa: E402
 
 _MARKER = "pcie-deadbeef"
 _SYSTEM = "sys-R1"
@@ -664,7 +665,7 @@ def test_the_vmedia_adapter_listings_pass_the_read_only_guard():
     for attribute, value in (("lpar_ids", _VIOS_ID), ("lpar_names", _TEST_LPAR)):
         recovery.guard_read_only(
             "hmc_run_command",
-            {"cmd": vmedia.scsi_adapter_listing(_TEST_SYSTEM, attribute, value)},
+            {"cmd": scsi_adapter_listing(_TEST_SYSTEM, attribute, value)},
         )
 
 

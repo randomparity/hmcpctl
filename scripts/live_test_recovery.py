@@ -81,12 +81,12 @@ from live_test.dedicated_pcie import (
     select_profile_io_slots,
 )
 from live_test.results import entries
+from live_test.storage import scsi_adapter_listing
 from live_test.users import profile_rows, scratch_users
 from live_test.vmedia import (
     _BOOT_BASELINE_STEP,
     _mapping_identity,
     is_run_media_name,
-    scsi_adapter_listing,
 )
 
 from hmcpctl.config import HMCConfig

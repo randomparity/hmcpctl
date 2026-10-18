@@ -16,7 +16,7 @@ from hmcpctl.ssh.commands import HMC_NO_RESULTS
 from . import lpar_power as power
 from .observation import CallFailure, judge_create_result
 from .results import resource
-from .vmedia import scsi_adapter_listing
+from .storage import scsi_adapter_listing
 
 if TYPE_CHECKING:
     from live_test_runner import RunState

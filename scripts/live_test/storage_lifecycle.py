@@ -26,8 +26,13 @@ from fastmcp import Client
 
 from .observation import Assertion, CallFailure
 from .results import field
-from .storage import resolve_configured_volume_group, vios_command
-from .vmedia import adapter_rows, scsi_adapter_listing, storage_rows
+from .storage import (
+    adapter_rows,
+    resolve_configured_volume_group,
+    scsi_adapter_listing,
+    storage_rows,
+    vios_command,
+)
 
 if TYPE_CHECKING:
     from live_test_runner import RunState

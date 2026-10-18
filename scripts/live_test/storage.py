@@ -15,12 +15,52 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client
 
+from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter
+
 from .observation import Assertion, CallFailure
 from .results import entries
 from .results import resource as get_resource
 
 if TYPE_CHECKING:
     from live_test_runner import RunState
+
+
+def _mapping_row(entry: object) -> tuple[object, ...] | None:
+    if not isinstance(entry, Mapping):
+        return None
+    return tuple(
+        entry.get(key) for key in ("id", "lpar_uuid", "backing_kind", "backing_name")
+    )
+
+
+def storage_rows(data: object) -> frozenset[tuple[object, ...]] | None:
+    """``hmc_list_storage_mappings`` as comparable rows; None when malformed."""
+    if not isinstance(data, list):
+        return None
+    rows = [_mapping_row(entry) for entry in data]
+    if None in rows:
+        return None
+    return frozenset(row for row in rows if row is not None)
+
+
+def scsi_adapter_listing(system_name: str, attribute: str, value: object) -> str:
+    """The vSCSI adapter rows of the partitions the one filter pair selects (#1237)."""
+    return (
+        f"lshwres -r virtualio --rsubtype scsi -m {shlex.quote(system_name)} "
+        f"--level lpar --filter {shlex.quote(build_filter([(attribute, value)]))} "
+        "-F slot_num,remote_lpar_name,remote_slot_num"
+    )
+
+
+def adapter_rows(listing: object) -> frozenset[str] | None:
+    """An adapter listing as a set of lines; None when it is not text."""
+    if not isinstance(listing, str):
+        return None
+    text = listing.strip()
+    if text == HMC_NO_RESULTS:
+        return frozenset()
+    return frozenset(line.strip() for line in text.splitlines() if line.strip())
+
 
 # ---------------------------------------------------------------------------
 # ST3 — Storage & SSP Inventory

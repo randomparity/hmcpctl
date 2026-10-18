@@ -37,7 +37,7 @@ from .network import listed_vlans
 from .observation import Assertion, CallFailure, judge_create_result
 from .results import entries, resource
 from .results import field as result_field
-from .vmedia import scsi_adapter_listing
+from .storage import scsi_adapter_listing
 
 if TYPE_CHECKING:
     from live_test_runner import RunState
