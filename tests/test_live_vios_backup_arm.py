@@ -579,16 +579,8 @@ def test_every_kept_backup_reads_as_off_baseline_in_recovery(
         recovery.guard_read_only(tool, arguments)
         return vios.answer(tool, arguments)
 
-    async def checks(
-        pcie,
-        partition,
-        inputs,
-        network_inputs=None,
-        users=False,
-        lpar_config=None,
-        lpar_power=None,
-        round2=None,
-    ):
+    async def checks(checks, *, users=False):
+        inputs = dict(checks).get(recovery.check_vios_backup)
         return await recovery.check_vios_backup(read_only, inputs)
 
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
