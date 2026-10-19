@@ -1005,3 +1005,82 @@ async def test_parse_feed_parent_reaches_public_lifecycle(system_profiles, neste
         h, S, "scratch", exclusive_writer_window=True
     )
     assert result.state == "completed" and result.postcondition == "verified"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    ["create", "update", "delete", "activate", "validate", "validate-and-activate"],
+)
+@pytest.mark.parametrize("drift", ["profile", "member"])
+async def test_public_mutations_refuse_fresh_association_drift(
+    system_profiles, operation, drift
+):
+    h, member, profile, ssh = system_profiles
+    second_id = "66666666-6666-4666-8666-666666666666"
+    second = deepcopy(member)
+    second["UUID"] = second_id
+    second["Resource"].update(PartitionID="2", PartitionName="member-b")
+    h.list_logical_partitions.side_effect = lambda _: deepcopy([member, second])
+    alternate = deepcopy(profile)
+    alternate["UUID"] = "44444444-4444-4444-8444-444444444444"
+    alternate["Resource"]["ProfileName"] = "alternate"
+
+    async def profiles(kind, uuid, child):
+        if uuid == L:
+            return deepcopy([profile, alternate])
+        p = deepcopy(profile)
+        p["UUID"] = "77777777-7777-4777-8777-777777777777"
+        p["Resource"]["AssociatedPartition"]["href"] = (
+            f"https://hmc.test/rest/api/uom/LogicalPartition/{uuid}"
+        )
+        return [p]
+
+    h.list_child.side_effect = profiles
+    reads = 0
+    effects = []
+
+    async def command(_config, cmd, **kwargs):
+        nonlocal reads
+        if cmd.startswith(("chsysstate", "rmsyscfg")):
+            effects.append(cmd)
+            return ""
+        if "name:lpar_ids" in cmd:
+            reads += 1
+            association = (
+                "1:base"
+                if reads == 1
+                else "1:alternate"
+                if drift == "profile"
+                else "2:base"
+            )
+            return f"name:lpar_ids:profile_names\nscratch:{association}\n"
+        if "-F name:lpar_id:curr_profile" in cmd:
+            return "name:lpar_id:curr_profile\nmember-a:1:\n"
+        return "name\nscratch\n"
+
+    ssh.side_effect = command
+    h.submit_job = AsyncMock(return_value=terminal())
+    h.wait_for_job_entry = AsyncMock(return_value=terminal())
+    with pytest.raises(ValueError, match="admission changed"):
+        if operation == "create":
+            await ops.create_system_profile(
+                h,
+                S,
+                "new",
+                [ops.SystemProfilePair(partition=L, profile=P)],
+                exclusive_writer_window=True,
+            )
+        elif operation == "update":
+            await ops.update_system_profile(
+                h, S, "scratch", new_name="renamed", exclusive_writer_window=True
+            )
+        elif operation == "delete":
+            await ops.delete_system_profile(
+                h, S, "scratch", exclusive_writer_window=True
+            )
+        else:
+            await ops.activate_system_profile(
+                h, S, "scratch", action=operation, exclusive_writer_window=True
+            )
+    assert reads == 2 and not effects and h.submit_job.await_count == 0

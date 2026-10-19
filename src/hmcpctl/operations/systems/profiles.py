@@ -127,6 +127,7 @@ class _Phase:
     cli_name: str
     entries: dict[str, dict]
     namespace: tuple[str, ...]
+    records: tuple[SystemProfileRecord, ...] = ()
 
 
 def _profile_parent(
@@ -329,7 +330,9 @@ async def _inventory(hmc: HMCClient, system: str):
     after = await _observe(hmc, system)
     if _stable(before) != _stable(after):
         raise ValueError("system-profile observation changed between fresh phases")
-    return after, _records(raw, after)
+    records = _records(raw, after)
+    after.records = tuple(sorted(records, key=lambda record: record.name))
+    return after, records
 
 
 def _command_failure(exc: BaseException) -> CommandStatus:
@@ -483,7 +486,7 @@ async def _admit(
 
 async def _refresh(hmc, before: _Phase):
     after, records = await _inventory(hmc, before.system_uuid)
-    if _stable(before) != _stable(after):
+    if _stable(before) != _stable(after) or before.records != after.records:
         raise ValueError("system-profile admission changed before effect")
     return after, records
 
