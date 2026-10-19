@@ -4,6 +4,8 @@
 
 Accepted (2026-10-02), issue #1293.
 
+> **Partially superseded by [0248](0248-unscoped-lpar-listing-reads-quick-all.md)** (2026-10-19): decision 2, for unscoped `list_lpars` only.
+
 ## Context
 
 Unscoped `hmc_list_lpars`, `hmc_list_vios` and `hmc_list_lpar_ownership` read the HMC-wide
