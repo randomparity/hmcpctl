@@ -92,9 +92,13 @@ async def namespace(hmc: HMCClient, packet: dict) -> list[str]:
     command = (
         f"lssyscfg -r sysprof -m {shlex.quote(_system_name(packet))} -F name --header"
     )
-    raw = await run_hmc_command(hmc.config, command)
+    raw = await run_hmc_command(hmc.config, command, include_stderr=True)
     if len(raw.encode()) > LIMIT:
         raise ValueError("source namespace exceeds capture bound")
+    if "[stderr]" in raw.splitlines():
+        raise ValueError(
+            "source namespace has stderr diagnostics; no accepted evidence"
+        )
     if raw.strip() == "No results were found.":
         return []
     try:

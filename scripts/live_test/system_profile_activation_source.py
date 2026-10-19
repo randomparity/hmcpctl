@@ -768,7 +768,7 @@ async def facts(hmc, packet, document):
     for rec in document["fixtures"]:
         e = next(e for e in current["partitions"] if e["UUID"] == rec["uuid"])
         command = f"lssyscfg -r lpar -m {shlex.quote(system)} --filter {shlex.quote(build_filter([('lpar_ids', _text(e['Resource']['PartitionID']))]))} -F name:lpar_id:curr_profile --header"
-        raw = await run_hmc_command(hmc.config, command)
+        raw = await run_hmc_command(hmc.config, command, include_stderr=True)
         if len(raw.encode()) > source.LIMIT:
             raise ValueError("independent CLI observation exceeds bound")
         rows = parse_hmc_delimited_rows(raw, ("name", "lpar_id", "curr_profile"), ":")

@@ -1555,3 +1555,98 @@ async def test_unknown_new_fixture_power_prevents_initial_stamp(
 def test_unknown_power_cannot_be_treated_as_inactive(state):
     with pytest.raises(ValueError, match="known fixture power"):
         arm._runtime_limits({"PartitionState": state})
+
+
+@pytest.fixture
+def stderr_boundary(monkeypatch):
+    """Mock only asyncssh's connection/result; execute the real transport formatter."""
+    from unittest.mock import MagicMock
+
+    from hmcpctl.ssh import transport as native_transport
+
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    connection.__aexit__.return_value = False
+    monkeypatch.setattr(
+        native_transport.asyncssh, "connect", MagicMock(return_value=connection)
+    )
+
+    async def execute(config, command, stdout, **kwargs):
+        connection.run.return_value = SimpleNamespace(
+            stdout=stdout, stderr="observation may be incomplete\n"
+        )
+        return await native_transport.run_hmc_command(
+            config.model_copy(update={"password": "p"}), command, **kwargs
+        )
+
+    return execute
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stdout", ["No results were found.", "name\nknown-scratch\n"])
+async def test_namespace_real_stderr_cannot_be_names_or_empty_inventory(
+    packet, hardware, stderr_boundary, monkeypatch, stdout
+):
+    h, _state = hardware
+
+    async def transport(config, command, **kwargs):
+        return await stderr_boundary(config, command, stdout, **kwargs)
+
+    monkeypatch.setattr(arm.source, "run_hmc_command", transport)
+    with pytest.raises(ValueError):
+        await arm.source.namespace(h, arm._source_packet(arm.binding(packet)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read", ["namespace", "facts"])
+async def test_remaining_read_stderr_stops_capture_and_partial_recovery(
+    packet, hardware, tmp_path, stderr_boundary, monkeypatch, read
+):
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    module = arm.source if read == "namespace" else arm
+    original = module.run_hmc_command
+
+    async def transport(config, command, **kwargs):
+        stdout = await original(config, command, **kwargs)
+        if read == "facts" and "-F name:lpar_id:curr_profile" not in command:
+            return stdout
+        return await stderr_boundary(config, command, stdout, **kwargs)
+
+    monkeypatch.setattr(module, "run_hmc_command", transport)
+    with pytest.raises(ValueError):
+        await capture_in(h, packet, tmp_path)
+    h.delete_logical_partition.assert_not_awaited()
+    if read == "namespace":
+        arm.create_lpar_via_cli.assert_not_awaited()
+        arm.stamp_lpar_ownership.assert_not_awaited()
+        h.submit_job.assert_not_awaited()
+        assert not (tmp_path / "capture" / "results.json").exists()
+    else:
+        document = json.loads((tmp_path / "capture" / "results.json").read_text())
+        assert "calibration" not in document
+        assert all(j["operation"] == "CreateSystemProfile" for j in document["jobs"])
+        assert len(state["sysprofiles"]) == 1 and len(state["members"]) == 3
+        # An independently restored native boundary cannot upgrade the failed journal.
+        state["members"] = {L: state["members"][L]}
+        state["sysprofiles"].clear()
+        with pytest.raises(ValueError, match="incomplete or contradictory"):
+            await arm.recover(h, packet, document)
+
+
+@pytest.mark.asyncio
+async def test_namespace_real_stderr_refuses_independent_clean_recovery(
+    packet, hardware, tmp_path, stderr_boundary, monkeypatch
+):
+    h, _state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    document = await capture_in(h, packet, tmp_path)
+    original = arm.source.run_hmc_command
+
+    async def transport(config, command, **kwargs):
+        stdout = await original(config, command, **kwargs)
+        return await stderr_boundary(config, command, stdout, **kwargs)
+
+    monkeypatch.setattr(arm.source, "run_hmc_command", transport)
+    with pytest.raises(ValueError):
+        await arm.recover(h, packet, document)
