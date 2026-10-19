@@ -7,7 +7,7 @@ from typing import Any
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.partition_state import PARTITION_STATES, PartitionState
-from hmcpctl.operations.systems.fleet import FleetListing, read_fleet
+from hmcpctl.operations.systems.fleet import FleetListing, read_fleet_quick_all
 
 from ...resource_identity import (
     is_uuid,
@@ -24,8 +24,10 @@ async def list_lpars(
 ) -> FleetListing:
     """List LPARs, optionally scoped to one system and partition state.
 
-    Without a system, each operating managed system is read in turn and the
-    others are named in ``unreadable_systems`` (ADR 0197).
+    Without a system, partitions come from one LogicalPartition/quick/All read
+    when every managed system is operating or powered off; otherwise each
+    operating system is read in turn and the others are named in
+    ``unreadable_systems`` (ADR 0197, ADR 0248).
     """
     if state is not None and state not in PARTITION_STATES:
         allowed = ", ".join(sorted(PARTITION_STATES))
@@ -39,7 +41,9 @@ async def list_lpars(
     listing = (
         FleetListing(await hmc.list_logical_partitions(system_uuid))
         if system_uuid is not None
-        else await read_fleet(hmc, hmc.list_logical_partitions, "LPARs")
+        else await read_fleet_quick_all(
+            hmc, "LogicalPartition", hmc.list_logical_partitions, "LPARs"
+        )
     )
     if state is None:
         return listing
