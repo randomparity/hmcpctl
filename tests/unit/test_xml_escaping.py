@@ -621,6 +621,9 @@ def test_valid_input_is_unchanged_by_escaping():
 def test_variadic_tuple_annotation_probes_strings_and_refuses_unknown_shapes():
     assert _carries_string(tuple[str, ...])
     assert _sample(tuple[str, ...], tainted=True) == (PAYLOAD,)
+    assert _carries_string(tuple[str, ...] | None)
+    assert _sample(tuple[str, ...] | None, tainted=True) == (PAYLOAD,)
+    assert _sample(list[tuple[str, ...]], tainted=True) == [(PAYLOAD,)]
     assert not _carries_string(tuple[int, ...])
     assert _sample(tuple[int, ...], tainted=False) == (4,)
     for annotation in (tuple[str, int], tuple[str], set[str], Any):

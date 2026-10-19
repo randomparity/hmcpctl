@@ -43,3 +43,23 @@ def test_reference_requests_refuse_bad_pairs(partitions, profiles):
         requests.update_system_profile_job(
             "x", partition_names=partitions, profile_names=profiles
         )
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_paired_tuple_names_round_trip_xml_metacharacters(operation):
+    payload = '<member attr="x">&</member>'
+    if operation == "create":
+        document = requests.create_system_profile_job("scratch", (payload,), (payload,))
+    else:
+        document = requests.update_system_profile_job(
+            "scratch",
+            partition_names=(payload,),
+            profile_names=(payload,),
+        )
+    parsed = parameters(document)
+    assert (
+        parsed["logicalPartitionNames"]
+        == parsed["logicalPartitionProfileNames"]
+        == payload
+    )
+    assert not ET.fromstring(document).findall(".//member")
