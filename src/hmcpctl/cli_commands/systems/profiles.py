@@ -18,7 +18,7 @@ from ...operations.systems.profiles import (
     list_system_profiles,
     update_system_profile,
 )
-from ..output import console, print_json
+from ..output import console, print_json, terminal_field
 from ..runtime import with_client
 
 
@@ -36,7 +36,7 @@ def _show(result: SystemProfileInventory | SystemProfileOutcome, as_json: bool) 
     if as_json:
         print_json(data)
     else:
-        console.print(data, markup=False)
+        console.print(terminal_field(data), markup=False)
     state = (
         result.command_status
         if isinstance(result, SystemProfileInventory)
