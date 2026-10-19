@@ -136,6 +136,20 @@ async def test_trailing_whitespace_secret_echoed_at_detail_end_is_redacted(
 
 
 @pytest.mark.asyncio
+async def test_overlapping_secrets_leave_no_fragment():
+    conn = _conn(_process_error(stderr="echo XYZW and ZW"))
+    with (
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
+        pytest.raises(HMCCLIError) as exc_info,
+    ):
+        await run_hmc_command(make_config(), "x -v XYZW", secrets=["XYZ", "ZW"])
+
+    message = str(exc_info.value)
+    assert "W" not in message.replace("<redacted>", "")
+    assert message.endswith(f"echo {REDACTED} and {REDACTED}")
+
+
+@pytest.mark.asyncio
 async def test_secret_with_single_quote_is_redacted_in_quoted_record():
     record = shlex.quote(f"name=op,passwd={SECRET}")
     conn = _conn(_process_error(command=f"chhmcusr -i {record}"))

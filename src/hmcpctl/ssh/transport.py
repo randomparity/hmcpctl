@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Collection, Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -140,9 +141,22 @@ def _redact(text: str, secrets: tuple[str, ...]) -> str:
     forms = {
         form for value in values for form in (value, value.replace("'", "'\"'\"'"))
     }
-    for form in sorted(forms, key=len, reverse=True):
-        text = text.replace(form, REDACTED)
-    return text
+    # Every occurrence, overlapping ones included, merged into spans: replacing
+    # forms one at a time would cut an overlapping secret and leave a fragment.
+    spans = sorted(
+        (match.start(), match.start() + len(form))
+        for form in forms
+        for match in re.finditer(f"(?={re.escape(form)})", text)
+    )
+    parts: list[str] = []
+    end = 0
+    for start, stop in spans:
+        if start > end:
+            parts += [text[end:start], REDACTED]
+        elif not parts:
+            parts.append(REDACTED)
+        end = max(end, stop)
+    return "".join(parts) + text[end:]
 
 
 class _RedactingFilter(logging.Filter):
