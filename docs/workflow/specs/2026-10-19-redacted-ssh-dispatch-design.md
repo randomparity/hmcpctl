@@ -34,9 +34,11 @@ One keyword on the existing dispatch, one on the existing record builder. No new
    block exits, so it has `__cause__ is None` and `__context__ is None`.
 6. Redaction (`_redact(text, secrets)`): for each secret and its stripped value (the builders
    `strip()` remote detail, cutting a whitespace-bounded secret echoed at its edge), the forms
-   are the value and the value with `'` replaced by `'"'"'` (its spelling inside a POSIX single-quoted word, which
-   is what `shlex.quote` produces for the value alone or inside a larger quoted record).
-   All forms, longest first, are replaced by the module constant `REDACTED = "<redacted>"`.
+   are the value and the value with `'` replaced by `'"'"'` (its spelling inside a POSIX
+   single-quoted word, which is what `shlex.quote` produces for the value alone or inside a
+   larger quoted record).
+   Every occurrence of every form, overlapping occurrences merged into one span, is replaced
+   by the module constant `REDACTED = "<redacted>"`.
 
 `run_hmc_cli` and `open_hmc_connection` are unchanged (console path excluded by charter).
 

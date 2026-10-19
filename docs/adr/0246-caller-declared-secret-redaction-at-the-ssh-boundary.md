@@ -25,7 +25,8 @@ unchanged and redacts every declared value from every diagnostic it produces.
   same exception chain. Existing callers do not change.
 - With `secrets` non-empty, redaction replaces the raw value, its stripped value, and the
   spelling of each inside a POSIX single-quoted shell word (`'` written `'"'"'`, as
-  `shlex.quote` emits), longest first, with `<redacted>`. It is applied to the command **before** the error builders render it with
+  `shlex.quote` emits) — every occurrence, overlapping ones merged — with `<redacted>`. It is
+  applied to the command **before** the error builders render it with
   `!r` — repr escapes quotes, backslashes and control characters, so redacting the rendered
   message alone misses them — and again to the finished message, which covers remote
   stdout/stderr and asyncssh text. The resulting `HMCCLIError` is raised with no `__cause__`
