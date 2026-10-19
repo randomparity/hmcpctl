@@ -1273,3 +1273,41 @@ async def test_public_delete_allows_whole_inventory_row_permutation(system_profi
     )
     assert result.state == "completed" and result.postcondition == "verified"
     assert sum(c.args[1].startswith("rmsyscfg") for c in ssh.await_args_list) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unreadable", ["contained-profile", "terminal-job"])
+async def test_public_posteffect_unreadable_resource_retains_handle(
+    system_profiles, unreadable
+):
+    h, _, profile, ssh = system_profiles
+    effected = False
+
+    async def command(_config, cmd, **kwargs):
+        return (
+            "name:lpar_ids:profile_names\nscratch:1:base\n"
+            + ("new:1:base\n" if effected else "")
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n" + ("new\n" if effected else "")
+        )
+
+    async def wait(*args, **kwargs):
+        nonlocal effected
+        effected = True
+        if unreadable == "contained-profile":
+            profile["Resource"] = None
+            return terminal()
+        return {"Resource": None, "link": "/rest/api/uom/jobs/job-1"}
+
+    ssh.side_effect = command
+    h.submit_job = AsyncMock(return_value=terminal("NOT_STARTED"))
+    h.wait_for_job_entry = AsyncMock(side_effect=wait)
+    result = await ops.create_system_profile(
+        h,
+        S,
+        "new",
+        [ops.SystemProfilePair(partition=L, profile=P)],
+        exclusive_writer_window=True,
+    )
+    assert result.state == "uncertain" and result.postcondition == "unverified"
+    assert result.job.job_id == "job-1" and h.submit_job.await_count == 1

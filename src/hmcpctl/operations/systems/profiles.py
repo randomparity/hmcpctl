@@ -242,6 +242,8 @@ async def _observe(hmc: HMCClient, system: str) -> _Phase:
             profile_names: set[str] = set()
             profile_ids: set[str] = set()
             for profile in profiles:
+                if not isinstance(profile["Resource"], dict):
+                    raise TypeError("native contained profile resource is malformed")
                 pname = _name(_text(profile["Resource"].get("ProfileName")))
                 pid = profile["UUID"]
                 if not is_uuid(pid) or pname in profile_names or pid in profile_ids:
