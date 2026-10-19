@@ -1122,6 +1122,54 @@ class HMCClient(
             )
         return names, schema_version
 
+    async def list_quick_all(
+        self,
+        resource_type: str,
+        *,
+        parent_type: str | None = None,
+        parent_uuid: str | None = None,
+    ) -> list[Any]:
+        """GET ``.../{resource_type}/quick/All``: one JSON array for a listing.
+
+        The child form takes *parent_type* and *parent_uuid*, both or neither.
+        Sends ``Accept: */*`` and returns the items unvalidated (ADR 0245).
+        """
+        _reject_unknown_uom_type("resource_type", resource_type)
+        uuid_path_arguments: dict[str, str] = {}
+        if parent_type is not None and parent_uuid is not None:
+            _reject_unknown_uom_type("parent_type", parent_type)
+            path = (
+                f"/rest/api/uom/{parent_type}/{parent_uuid}/{resource_type}/quick/All"
+            )
+            uuid_path_arguments["parent_uuid"] = parent_uuid
+        elif parent_type is None and parent_uuid is None:
+            path = f"/rest/api/uom/{resource_type}/quick/All"
+        else:
+            raise ValueError("parent_type and parent_uuid must be given together")
+        resp = await self._request_with_uuid_path_arguments(
+            "GET",
+            path,
+            uuid_path_arguments=uuid_path_arguments,
+            headers={"Accept": "*/*"},
+        )
+        if resp.status_code != 200:
+            raise HMCError(f"GET {path} failed", resp.status_code, resp.text)
+        try:
+            items = resp.json()
+        except ValueError as exc:
+            raise HMCError(
+                f"GET {path} returned invalid JSON: {str(exc)[:500]}"
+            ) from exc
+        except RecursionError as exc:
+            raise HMCError(
+                f"GET {path} returned invalid JSON: document nesting is too deep"
+            ) from exc
+        if not isinstance(items, list):
+            raise HMCError(
+                f"GET {path} returned a JSON {type(items).__name__}; expected an array"
+            )
+        return items
+
     async def search_uom(
         self,
         resource_type: str,

@@ -16,6 +16,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `HMCClient.list_quick_all` fetches `/rest/api/uom/{Type}/quick/All`, or the
+  `ManagedSystem/{uuid}/{Child}/quick/All` child form, as one JSON array. No caller
+  uses it yet (#244).
+
 - Profile backup artifacts have bounded CLI/MCP listing and exact-name deletion
   with fresh readback. Restore adds explicit keystore-error handling while retaining
   warning output, existing ownership/audit and initialization denial (#1726).

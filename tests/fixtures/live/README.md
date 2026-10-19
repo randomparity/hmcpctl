@@ -71,6 +71,12 @@ export: the type, model and serial `_summary_mtms` parses from quick/All (`#2`) 
 `ManagedSystem` feed read in the same session (`#4`, not committed). The entry's `WWPNPrefix` was
 zeroed by hand before #1639; the exporter now writes `<REDACTED-DEVID>` there.
 
+`rest-lpar-quick-all`, `rest-vios-quick-all` and `rest-ms-lpar-quick-all` (`capture` prefix
+`2026-10-19-q244/`) come from an operator-authorized read-only window for #244 on the #1161 V10R3
+HMC: `LogicalPartition/quick/All`, `VirtualIOServer/quick/All` and the child form
+`ManagedSystem/{uuid}/LogicalPartition/quick/All`, each trimmed to one or two items. Their token map
+is their own, as for the exports above; never join them to other fixtures by token.
+
 ## Format
 
 Every file is a JSON object with these keys:
