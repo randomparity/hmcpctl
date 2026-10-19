@@ -222,3 +222,66 @@ async def test_inventory_bounds_contained_feed(system_profiles):
     h, _, profile, _ = system_profiles
     profile["Resource"]["large"] = "x" * (5 * 1024 * 1024)
     assert (await ops.list_system_profiles(h, S)).records is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "window",
+        "foreign",
+        "missing-description",
+        "duplicate",
+        "missing-profile",
+        "collision",
+    ],
+)
+async def test_all_members_preflight_refusal(system_profiles, fault):
+    h, member, _, _ = system_profiles
+    pairs = [ops.SystemProfilePair(partition="member-a", profile="base")]
+    kwargs = {"exclusive_writer_window": True}
+    name = "new"
+    if fault == "window":
+        kwargs["exclusive_writer_window"] = False
+    elif fault == "foreign":
+        member["Resource"]["Description"] = "[hmcpctl owner:other created:2026-10-19]"
+    elif fault == "missing-description":
+        del member["Resource"]["Description"]
+    elif fault == "duplicate":
+        pairs *= 2
+    elif fault == "missing-profile":
+        pairs = [ops.SystemProfilePair(partition=L, profile="absent")]
+    elif fault == "collision":
+        name = "scratch"
+    with pytest.raises((ValueError, PermissionError)):
+        await ops._admit(h, S, name, action="create", members=pairs, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_all_members_update_union(system_profiles):
+    h, member, _, _ = system_profiles
+    member["Resource"]["Description"] = ""
+    phase, old, desired = await ops._admit(
+        h,
+        S,
+        "scratch",
+        action="update",
+        new_name="renamed",
+        exclusive_writer_window=True,
+    )
+    assert (
+        phase.system_uuid == S and old.name == "scratch" and desired.name == "renamed"
+    )
+    assert desired.members == old.members
+    member["Resource"]["Description"] = "[hmcpctl owner:other created:2026-10-19]"
+    with pytest.raises(PermissionError):
+        await ops._admit(h, S, "scratch", action="delete", exclusive_writer_window=True)
+
+
+@pytest.mark.asyncio
+async def test_refreshes_before_effect(system_profiles):
+    h, member, _, _ = system_profiles
+    phase, _, _ = await ops._admit(h, S, "scratch", action="validate")
+    member["Resource"]["PartitionState"] = "running"
+    with pytest.raises(ValueError, match="changed"):
+        await ops._refresh(h, phase)

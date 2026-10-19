@@ -344,3 +344,105 @@ async def list_system_profiles(
     return SystemProfileInventory(
         system, records, "ssh-command", None, "completed", None
     )
+
+
+def _resolve_pairs(phase: _Phase, pairs) -> tuple[SystemProfileMember, ...]:
+    if not pairs:
+        raise ValueError("nonempty member pairs required")
+    result = []
+    seen = set()
+    for pair in pairs:
+        pair = SystemProfilePair.model_validate(pair.model_dump())
+        matches = [
+            (u, e)
+            for u, e in phase.entries.items()
+            if pair.partition in (u, _text(e["entry"]["Resource"]["PartitionName"]))
+        ]
+        if len(matches) != 1 or matches[0][0] in seen:
+            raise ValueError("unique contained partition selector required")
+        uuid, entry = matches[0]
+        profiles = [
+            p
+            for p in entry["profiles"]
+            if pair.profile in (p["UUID"], _text(p["Resource"]["ProfileName"]))
+        ]
+        if len(profiles) != 1:
+            raise ValueError("unique contained profile selector required")
+        profile = profiles[0]
+        r = entry["entry"]["Resource"]
+        result.append(
+            SystemProfileMember(
+                entry["kind"],
+                uuid,
+                int(_text(r["PartitionID"])),
+                _text(r["PartitionName"]),
+                profile["UUID"],
+                _text(profile["Resource"]["ProfileName"]),
+            )
+        )
+        seen.add(uuid)
+    return tuple(result)
+
+
+async def _admit(
+    hmc,
+    system,
+    name,
+    *,
+    action,
+    members=None,
+    new_name=None,
+    exclusive_writer_window=False,
+    ownership_override=False,
+):
+    from ..lpar.ownership import authorize_lpar_ownership_description
+
+    _name(name)
+    if action != "validate" and exclusive_writer_window is not True:
+        raise ValueError("exclusive_writer_window=true required through reconciliation")
+    if not isinstance(ownership_override, bool):
+        raise TypeError("ownership_override must be boolean")
+    phase, records = await _inventory(hmc, system)
+    old = next((r for r in records if r.name == name), None)
+    if action == "create":
+        if old:
+            raise ValueError("system-profile name collision")
+    elif old is None:
+        raise ValueError("system profile is missing")
+    if action == "update" and new_name is None and members is None:
+        raise ValueError("update requires replacement members or new name")
+    target = _name(new_name) if new_name is not None else name
+    if target != name and target in phase.namespace:
+        raise ValueError("system-profile rename collision")
+    selected = (
+        _resolve_pairs(phase, members)
+        if members is not None
+        else old.members
+        if old
+        else ()
+    )
+    if not selected:
+        raise ValueError("nonempty member pairs required")
+    union = {
+        m.partition_uuid: m for m in (*(() if old is None else old.members), *selected)
+    }
+    for uuid, member in union.items():
+        resource = phase.entries[uuid]["entry"]["Resource"]
+        if "Description" not in resource:
+            raise ValueError("authoritative member ownership metadata is missing")
+        authorize_lpar_ownership_description(
+            hmc,
+            phase.cli_name,
+            member.partition_name,
+            _text(resource["Description"]),
+            operation="lpar-mutation",
+            ownership_override=ownership_override,
+        )
+    return phase, old, SystemProfileRecord(target, selected)
+
+
+async def _refresh(hmc, before: _Phase):
+    after, records = await _inventory(hmc, before.system_uuid)
+    if _stable(before) != _stable(after):
+        raise ValueError("system-profile admission changed before effect")
+    return after, records
