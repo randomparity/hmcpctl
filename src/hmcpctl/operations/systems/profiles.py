@@ -131,6 +131,12 @@ def _profile_parent(
     profile: dict, parent: str, system: str, hmc: HMCClient, kind: str
 ) -> None:
     href = profile["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"]
+    if (
+        not isinstance(href, str)
+        or not href.isprintable()
+        or any(c.isspace() for c in href)
+    ):
+        raise ValueError("native profile link contains invalid characters")
     u = urlsplit(href)
     paths = {
         f"/rest/api/uom/{kind}/{parent}",
@@ -484,7 +490,14 @@ def _job_identity(hmc, job, expected=None):
         raise ValueError("submission and terminal JobID disagree")
     path = f"/rest/api/uom/jobs/{ident}"
     if job.get("link") is not None:
-        u = urlsplit(job["link"])
+        link = job["link"]
+        if (
+            not isinstance(link, str)
+            or not link.isprintable()
+            or any(c.isspace() for c in link)
+        ):
+            raise ValueError("native job SELF link contains invalid characters")
+        u = urlsplit(link)
         if (
             u.scheme not in ("", "https")
             or u.username
@@ -493,8 +506,8 @@ def _job_identity(hmc, job, expected=None):
             or u.fragment
             or u.hostname is not None
             and u.hostname != hmc.config.host
-            or u.port is not None
-            and u.port != hmc.config.port
+            or u.scheme == "https"
+            and (u.hostname != hmc.config.host or (u.port or 443) != hmc.config.port)
             or canonical_job_path(u.path) != path
         ):
             raise ValueError("native job SELF destination/identity differs")
@@ -544,6 +557,12 @@ def _associated(hmc, resource, member):
     href = raw.get("href") or raw.get("link", {}).get("@attrs", {}).get("href")
     if not href:
         return None
+    if (
+        not isinstance(href, str)
+        or not href.isprintable()
+        or any(c.isspace() for c in href)
+    ):
+        raise ValueError("native profile link contains invalid characters")
     u = urlsplit(href)
     ident = u.path.rsplit("/", 1)[-1]
     paths = {

@@ -757,3 +757,46 @@ async def test_job_and_member_outcomes_public_activation(system_profiles, case):
         else "uncertain"
     )
     assert h.submit_job.await_count == 1 and result.job.job_id == "job-1"
+
+
+@pytest.mark.asyncio
+async def test_preflight_refusal_unprintable_parent_link(system_profiles):
+    h, _, profile, _ = system_profiles
+    profile["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"] = (
+        f"https://hmc.test/rest/api/uom/LogicalPartition/\n{L}"
+    )
+    result = await ops.list_system_profiles(h, S)
+    assert result.records is None and result.command_status == "uncertain"
+
+
+def test_job_and_member_outcomes_unprintable_self(system_profiles):
+    h, _, _, _ = system_profiles
+    job = terminal()
+    job["link"] = "/rest/api/uom/jobs/\njob-1"
+    with pytest.raises(ValueError):
+        ops._job_facts(h, job, "job-1")
+
+
+def test_job_and_member_outcomes_unprintable_association(system_profiles):
+    h, _, _, _ = system_profiles
+    member = ops.SystemProfileMember("LogicalPartition", L, 1, "member-a", P, "base")
+    before = activation_fact("not activated", "", 0)
+    before["resource"].pop("AssociatedPartitionProfile")
+    after = activation_fact("running", "base", 1024)
+    after["resource"]["AssociatedPartitionProfile"]["href"] = (
+        f"https://hmc.test/rest/api/uom/LogicalPartition/{L}/LogicalPartitionProfile/\n{P}"
+    )
+    assert ops._new_witness(h, member, before, after) is False
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["https:/rest/api/uom/jobs/job-1", "https://hmc.test/rest/api/uom/jobs/job-1"],
+)
+def test_job_and_member_outcomes_require_exact_origin(system_profiles, href):
+    h, _, _, _ = system_profiles
+    h.config = h.config.model_copy(update={"port": 12443})
+    job = terminal()
+    job["link"] = href
+    with pytest.raises(ValueError):
+        ops._job_facts(h, job, "job-1")
