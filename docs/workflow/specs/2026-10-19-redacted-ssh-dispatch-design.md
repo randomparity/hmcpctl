@@ -32,8 +32,9 @@ One keyword on the existing dispatch, one on the existing record builder. No new
 5. An `HMCCLIError` raised by the body is caught, its `str()` redacted again (covering remote
    stdout/stderr and asyncssh text), and a new `HMCCLIError` raised **after** the `except`
    block exits, so it has `__cause__ is None` and `__context__ is None`.
-6. Redaction (`_redact(text, secrets)`): for each secret, the forms are the raw value and the
-   value with `'` replaced by `'"'"'` (its spelling inside a POSIX single-quoted word, which
+6. Redaction (`_redact(text, secrets)`): for each secret and its stripped value (the builders
+   `strip()` remote detail, cutting a whitespace-bounded secret echoed at its edge), the forms
+   are the value and the value with `'` replaced by `'"'"'` (its spelling inside a POSIX single-quoted word, which
    is what `shlex.quote` produces for the value alone or inside a larger quoted record).
    All forms, longest first, are replaced by the module constant `REDACTED = "<redacted>"`.
 
