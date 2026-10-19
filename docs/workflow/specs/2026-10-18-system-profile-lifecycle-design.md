@@ -1,9 +1,10 @@
 # System-profile lifecycle — issue #1725
 
-Proposed full design; product build waits for the single scope audit after the bounded design
-review. Current charter: WORK:SCOPE6258196210, claim q1725-d647765d/attempt1, campaign
+Proposed revised full design; product build waits for root-owned scope-audit disposition. Current charter: WORK:SCOPE6273154252, claim q1725-d647765d/attempt1, campaign
 822f9065dedb-622a646c-5bde-4f6a-b9e1-d78c64703a58. That complete charter, not this target,
-authorizes the five-row lifecycle. “Approve both revised contracts”
+authorizes the five-row lifecycle. Direct user “approve” also approves the exact157-line
+three-contract proposal SHA f3fe736017cea9742f5299c76f8d178020f3d012b0628ac38c81419da8e55b98;
+that decision replaces the superseded backend/classifier/response contracts below, not the scope. “Approve both revised contracts”
 (call_c202111f34f34b6bb0db4158db909334 item0) approves fixed CLI deletion and bounded association
 admission; the earlier child-allocation and writer-window approvals remain recorded there.
 
@@ -40,25 +41,24 @@ pages prescribe systemProfileName. CLI sysprof deletion is independently documen
  docs/refs/hmc-commands-p10/commands/rmsyscfg.md:17–31,57–59 and the POWER11 equivalent.
 The Get pages supply no nonempty output example. Do not copy untracked reference prose.
 
-A separately approved source capture at5dfcf61f/HMC11.2.SP1120 observed successful Create/Get:
-Get result was one JSON-array object with string SystemProfileName, PartitionNames, PartitionIds,
-PartitionProfileNames, with two comma-separated member positions matching the distinct request.
-Raw result hash 5ae61fd48eef1d05fc4f5bfc806c2562c060d19babafc13e07858981693ca95e; capture hash dda500dd38c84bb8dbea41d7cf4b674634544323efb150082c316f3da381d0d5.
-REST Delete FAILED_TO_START: "Parameter 'systemProfileName' is not allowed for this Job."
-Its read-only template declared no parameters. No alternate parameter/REST retry was inferred.
-Separately approved documented CLI cleanup returned success; runner exit1 retained its after-read
-transport failure. Separate independent reconciliation proved original complete namespace/member
-baseline restored, scratch absent. Original capture remains FAILED/partial; failed job retained;
-root reconciled/released coordination. All effect grants consumed. Source is not product proof.
-Earlier empty Get at10905eaaa/HMC10.3.1060 failed despite code0 (terminal hash
-0116ea368a7a9ed4747435d246a200b45fae6e4d4860d5e2ba5636328b868147).
+Historical REST Delete rejected its documented parameter; Get failed despite code0 or returned
+nonempty ErrorData; validation returned COMPLETED_WITH_WARNINGS. None is silently called success.
+Approved product routes: REST Create/Update/activation-only; ALWAYS fixed documented SSH whole
+inventory, delete, validation and combined validation/activation. Choose BEFORE effects; no fallback,
+REST Get/test=true attempt, alternate parameter, backend flag or row transfer. Prove unique current
+CLI MTMS for the authorized UUID and quote operands. Command outcomes never fabricate job facts.
+POWER10/11 lssyscfg.md:17–35,110–117 grounds sysprof listing/delimiters; chsysstate.md:82–84,135–136,
+229–240 grounds --test, combined -o on --test and --continue; its92–98 mode restriction remains.
 
-Approved route: REST Create/Get/Update/Activate; ALWAYS one fixed documented SSH sysprof deletion
-through existing transport, chosen BEFORE effects. No REST-then-SSH fallback, alternate parameter,
-backend selector, row transfer or silent release exclusion. Delete requires SSH connectivity/
-privileges and a proven unique CLI identity for the already authorized system UUID (documented
-MTMS form if needed); ambiguous names refuse. Quote both operands, fix resource=sysprof.
-Command outcomes have no fabricated JobID/status. These choices are recorded in Proposed ADR0243.
+Source calibration at a33e2626 observed strict complete activation and both negative variants:
+N1 failed with unchanged mixed state; N2 failed while A changed witness1024->requested base512,
+B retained witness1024. Profile names/contained UUIDs and actual memory corroborated transitions.
+Private raw journal hash637da6cf731292afb54a473dbf85103cca57bb65facfa4c4cfcb7a25228a08a1;
+manifest hashdb7a0b41532cbc873fc191df16d9e78b162faf6c03016bb008f0d1d04864c39e.
+Overall source capture remains FAIL2 (two negative FAIL rows), independent recovery0 restored the
+complete original baseline; root released coordination. Policy stays deliberate; failed jobs retained.
+One regular/sharedCPU/dedicated-memory context does not establish universal application semantics,
+other shapes/releases, product paths or combined CLI test+continue success. No automatic maturity.
 
 ## Interfaces and consumer contract
 
@@ -72,13 +72,13 @@ SystemProfileMember(resource_type: str, partition_uuid: str, partition_id: int,
                     partition_name: str, profile_uuid: str, profile_name: str)
 SystemProfileRecord(name: str, members: tuple[SystemProfileMember, ...])
 SystemProfileInventory(system_uuid: str, records: tuple[SystemProfileRecord, ...] | None,
-                       source: Literal['ssh-empty', 'rest-job'], job: JobOutcome | None,
+                       source: Literal['ssh-command'], job: JobOutcome | None,
+                       command_status: Literal['completed', 'failed', 'uncertain'],
                        error: str | None)
 MemberObservation(member: SystemProfileMember, before_state: str | None,
                   after_state: str | None, observed_profile_name: str | None,
                   observed_profile_uuid: str | None,
-                  classification: Literal['unchanged', 'changed-to-running',
-                                          'still-not-running', 'unavailable'],
+                  classification: Literal['changed', 'unchanged', 'unavailable'],
                   error: str | None)
 SystemProfileOutcome(system_uuid: str, name: str,
                      action: Literal['create', 'update', 'delete', 'validate',
@@ -132,27 +132,28 @@ profile-update/profile-delete/profile-activate. Required arguments SYSTEM NAME (
 --name for list lookup; --new-name and repeated --member JSON objects for create/update;
 --action/--continue-on-error for activation; approved --exclusive-writer-window and existing
 --ownership-override for mutations, --json for structured output. Pair JSON uses exact two keys.
-No wait/force/backend/retry flag. REST polling uses300/5defaults unless called programmatically.
+No wait/force/backend/retry flag. timeout_seconds bounds the whole call including CLI; poll_interval affects REST polling only,
+never inventing CLI polling. Defaults remain300/5.
 Both consumers serialize the SAME dataclass fields. CLI exits0 only completed+verified metadata or
-successful validate; failed =>1; uncertain/unverified activation =>2. Job completion and member
+successful validate; failed =>1; uncertain/unverified activation =>2. Native job/command facts and member
 observations remain visible even when exit is nonzero. MCP returns the typed outcome, not a string.
 Register the new module in server_tools/catalog.py and cli.py; keep existing groups/entries intact.
 
 ## Inventory, authorization and freshness
 
-Parse ONLY bounded observed JSON array items with four exact required string fields; reject
-missing/duplicate keys, invalid types/JSON, duplicate row names, oversized/deep output. Additional
-unexpected fields do not authorize anything. For each row require nonzero equal member-column
-cardinality, unique positive decimal PartitionIds, exact current PartitionID/name/UUID binding in
-the selected system, and unique contained profile name/UUID. Source IDs are NOT UUIDs. Existing
-snapshots/operations.py reads PartitionID. No undocumented CSV quoting/backslash parser: delimiter-
-bearing/ambiguous input/output fails the entire inventory under the approved exclusion.
-
-Apply the item validator to bounded multiple rows; this is structural inference, not observed
-multirow native proof. Compare complete unique profile-name sets with strict independent name-only
-namespace. A canonical empty namespace may return source='ssh-empty', records=(), job=None without
-the known-failing empty Get. Failed/warning/nonterminal Get or code0+ErrorData gives records=None;
-never treat invalid/truncated/missing rows as empty. Public lookup still validates the whole set.
+ALWAYS execute `lssyscfg -r sysprof -m <quoted-bound-MTMS> -F name:lpar_ids:profile_names --header`
+through run_hmc_command(include_stderr=True), without a name filter. Bound5MiB; reject [stderr]
+BEFORE canonical empty sentinel or strict existing delimiter parsing. Reject missing/duplicate/extra
+columns, duplicate row names, malformed rows/IDs, empty membership, unequal cardinality, duplicate
+partition IDs, ambiguous delimiters or incomplete output; never truncate/filter. Bind ordered
+ID/profile positions to current positive unique PartitionID/name/UUID and unique contained profile
+UUID in BOTH regular/VIOS feeds. Compare the complete independent name namespace. Fresh separate
+before/after observation phases must agree on current identity/profiles; drift invalidates WHOLE
+inventory. Name lookup occurs afterward. Existing undocumented-encoding exclusion remains unchanged.
+Inventory job=None always. Valid native exit0/no stderr plus complete binding gives records=tuple
+(possibly empty), command_status=completed. Known native nonzero gives records=None/failed/bounded
+error. Exit0 with diagnostics/malformed/contradictory data, timeout or ambiguous connection/termination
+gives records=None/uncertain; never empty. No English diagnostic parser or fabricated REST success.
 
 Read selected-system LogicalPartition and VirtualIOServer feeds via existing list_logical_partitions
 and list_vios. Resolve each member's corresponding contained LogicalPartitionProfile child feed
@@ -181,23 +182,25 @@ Metadata transport wrappers alone are omitted. An A->B->C changing-feed test mus
 
 ## Dispatch and outcomes
 
-Fixed XML requests use jobs/requests.py and existing build_job_request(operation, 'ManagedSystem',
+For REST paths, fixed XML requests use jobs/requests.py and existing build_job_request(operation, 'ManagedSystem',
 parameters), HMCClient.submit_job and wait_for_submitted_job(..., True, timeout_seconds, poll_interval).
 Validate coherent Resource.JobID/SELF before polling and terminal identity before trusting results;
 contradiction =>uncertain, no different job or generic-client contract change. Keep known handle.
 No automatic job deletion/replay/rollback. Missing/warning/failed status, absent/nonzero returnCode
 or ErrorData cannot be success. Preserve result/detailedStatus separately and boundedly.
 
-| action | operation | test | continue | window |
-| --- | --- | --- | --- | --- |
-| validate | omitted | true | false | omitted |
-| activate | on | false | false or true | required |
-| validate-and-activate | on | true | false or true | required |
+| action | fixed route/parameters | window |
+| --- | --- | --- |
+| validate | SSH chsysstate -m MTMS -r sysprof -n NAME --test | omitted |
+| activate | REST systemProfile=NAME, operation=on, test=false, continue=false/true | required |
+| validate-and-activate | ONE SSH chsysstate -m MTMS -r sysprof -n NAME -o on --test; --continue iff requested | required |
 
-systemProfile always names the selected record; validate+continue=true is refused. Boolean native
-values are lowercase strings. CLI chsysstate source135–136 grounds validate/continue semantics;
-its92–98 mode restriction is not bypassed. Known unsupported version/capability refuses; native
-unsupported-mode failure remains failed, never silently converted to another route.
+Quote only exact bound MTMS/name. validate+continue=true refuses. Reuse existing SSH transport with
+include_stderr=True: normal return proves native exit0; any [stderr] makes outcome uncertain.
+HMCCLIError caused by ProcessError with known nonzero exit is failed; timeout/signal/connection
+without definite outcome is uncertain. Preserve bounded native detail; never parse error text for
+numeric codes. No English stdout success parser, second command, replay or implicit route change.
+Known unsupported version/capability/controller mode refuses; native unsupported failure stays failed.
 
 For create/update/delete, state=completed requires backend success AND exact desired namespace/
 association plus unchanged member profiles/power/defaults/ownership. Success with unavailable
@@ -207,22 +210,37 @@ SSH has job=None/return_code=None and actual command_status; REST has command_st
 normalized JobOutcome. Timeout/interruption returns uncertain with the known handle/command fact;
 it does not cancel work or release coordination. No fire-and-forget path.
 
-For validate, completed means successful validation JOB, postcondition=not-applicable, no activated
-claim. Activation returns each member's before/after state, available LastActivatedProfile or
-associated-profile observation and read error. Classify unchanged/changed-to-running/still-not-
-running/unavailable; already-running is not newly activated. These observations do not alone prove
-requested-profile application. activation_execution separates the published complete/partial
-criterion from application proof: complete requires successful terminal plus ALL members freshly
-running; partial requires a fully readable mix of running/not-running members; failed requires a
-failed terminal without that mixed effect; otherwise unknown (including any unavailable member).
-Metadata/validate use None. Already-running is reported unchanged, never newly activated. Preserve
-terminal/result/continued-failure diagnostics separately; no unsupported per-member stdout parser.
-Requested-profile application stays postcondition=unverified and successful activating jobs return
-state=uncertain; failed terminal stays state=failed. Complete execution is not proven application.
-Tests must assert both classifications; native application proof remains unmet/partial maturity.
-Caller retains returned outcome/known handle and coordination while reconciling with existing
-hmc_get_job/hmc_wait_for_job, fresh hmc_list_system_profiles and member/profile reads. No persistence
-service or new resume API. Later reconciliation is a new observation, not a rewritten result.
+For validate, completed requires CLIexit0/no stderr AND independent unchanged member/profile/
+namespace/power observations; postcondition=not-applicable, no activation claim. Combined command
+stays ONE command, backend=ssh-command/job=None/return_code=None; activation-only uses actual REST
+job facts. Any definite failed backend stays state=failed even if effects occurred. Timeout or
+ambiguity retains coordination/known facts; no cancellation guarantee or automatic cleanup.
+
+Member classification is raw state equality: changed if readable before!=after, unchanged if equal,
+unavailable without a reliable pair. Firmware->running is not a new power-on or guest-OS proof.
+Profile/resource witnesses are independent internal observations, not these state labels.
+A NEW requested activation witness requires before INACTIVE with absent/DIFFERENT prior activation
+identity, after requested CLIcurr_profile AND LastActivatedProfile AND exact contained associated
+profile UUID, stable activated state (running/open firmware), and coherent available actual CPU/
+memory facts. Distinct configured memory transitions require corroborating actual Current/Runtime
+Memory, never saved DesiredMemory alone. Starting/unknown/contradiction refuses a positive witness.
+Before-already-matching/stale profiles cannot be newly attributed. Other shapes/releases need
+source-backed equivalent witnesses; missing proof stays unknown, no dropped member/new exclusion.
+Coherent memory does not prove EVERY saved field or universal REST-field semantics.
+
+| Evidence | activation_execution / state / postcondition |
+| --- | --- |
+| Strict successful backend AND ALL members new-witnessed | complete / completed / verified bounded requested-profile activation |
+| Failed backend, >=1 new-witnessed AND >=1 fully read still DIFFERENT requested identity with coherent contrary resources | partial / failed / drifted |
+| Failed backend, zero new witnesses, independently unchanged mixed baseline | failed / failed / unverified |
+| Stale before-match, unavailable/contradictory/transition/uncalibrated witness | unknown / uncertain (definite native failure stays failed) / unverified |
+| Failed backend but all appear witnessed, or successful backend with incomplete witness | unknown; preserve failed/uncertain / unverified |
+
+Metadata/validate use activation_execution=None. Preserve bounded result/detailedStatus separately;
+no invented per-member English stderr parser. Existing job/inventory/member reads support later
+caller reconciliation as a NEW observation, never rewritten failure. No persistence/resume API.
+Tests must include complete, N1 unchanged mixed, N2 partial, stale-before-match, missing/contradictory
+and uncalibrated shapes. Native product-path/equivalent-route evidence remains unmet/partial maturity.
 
 ## Failure model
 
@@ -257,7 +275,9 @@ severity4(E1)/5(E2–E6); the full plan names cases/commands/forbidden effects f
 The ignored full plan defines exact files, interfaces, task tests/red signals and focused commands;
 source unit binding covers all152 through both reference-contract fixtures and operation manifests.
 Run controlled guard faults, focused adjoining tests, final just verify+ pinned all-files prek,
-branch/security review and exact-head CI. No automatic maturity promotion from unit/source proof.
+root-authorized code review and exact-head CI; no further security reviews (explicit prohibition). No automatic maturity promotion from unit/source proof. ADR0212/#620 scopes live evidence to an
+authorized release/ad-hoc window, not a merge gate; operations stay unevidenced until passing proof.
+This does not waive AGENTS applicable end-to-end proof or authorize hardware/unrun criteria.
 The plan's PRODUCT system-profiles arm is separate from SOURCE-only system-profile-source. It
 requires NEW exact native authority, normal ownership/all-targets authorization and any existing
 audited override explicitly covered by that future grant; source UNOWNED-reference permission is

@@ -3,8 +3,9 @@
 ## Status
 
 Proposed, #1725. Exact path/number reserved and published under q1725-d647765d before creation.
-WORK:SCOPE6258196210 records the approved child allocation, writer-window and revised backend/
-association contracts. Full design review and scope audit precede implementation/ADR acceptance.
+WORK:SCOPE6273154252 records the approved child allocation, writer-window and revised backend/
+association contracts. Direct “approve” of proposalSHAf3fe736017cea9742f5299c76f8d178020f3d012b0628ac38c81419da8e55b98
+updates the contracts below; revised scope audit precedes implementation/ADR acceptance.
 The [full design](../workflow/specs/2026-10-18-system-profile-lifecycle-design.md) owns detailed
 interfaces, source hashes, failure/threat models and the exact152-unit allocation.
 
@@ -13,7 +14,7 @@ interfaces, source hashes, failure/threat models and the exact152-unit allocatio
 System-profile actions reach multiple contained partition/profile pairs. No documented job
 precondition fences independent writers. A source Get failed despite CLI code0; another captured
 one two-member JSON row. Native Delete rejected its documented parameter, whereas separately
-approved documented CLI cleanup succeeded. Source capture remains failed/partial; independent
+approved documented CLI cleanup succeeded. The historical source capture failed/partial; later source calibration remains FAIL2. Independent
 cleanup state restoration is a different fact. No source grant approves product effects.
 
 ## Decision
@@ -26,25 +27,30 @@ union on update. Reread immediately before effects and independently afterward. 
 feed only WITHIN ONE observation phase; the next phase must perform a new transport read.
 Timeout/interruption retains uncertainty and coordination, never cancellation/replay/rollback.
 
-Use fixed REST Create/Get/Update/Activate and ALWAYS documented fixed SSH sysprof deletion, chosen
-before effects. No REST fallback/retry/backend flag. Prove unique system CLI identity and quote
-exact operands. Report command success/failure/uncertainty separately from post-read state, without
-inventing a JobID/status. Preserve the same distinction for job/code/member observations.
+Use REST Create/Update/activation-only; ALWAYS fixed documented SSH whole inventory, deletion,
+validation and ONE combined validation/activation command. Choose BEFORE effects; no REST Get/
+test=true attempt, fallback/retry/backend flag. Prove unique CLI MTMS and quote operands. Existing
+transport includes stderr; exit0 diagnostics are uncertain, known nonzero failed, ambiguous outcome
+uncertain. Never fabricate job facts or waive native warnings/ErrorData.
 
-Use the bounded observed JSON parallel columns. Require equal cardinality, current PartitionID/
-name/UUID agreement and unique contained profile binding; validate the WHOLE inventory. Never
-truncate/filter members, invent escaping or treat malformed data as empty. Multirow item reuse is
-structural inference requiring tests/native proof. The approved exclusion-owner pairs are:
+Whole CLI name:lpar_ids:profile_names rows require equal cardinality, positive unique current IDs/
+name/UUID and contained profile binding, complete independent namespace and separate fresh phases.
+Reject invalid/ambiguous output WHOLE; never truncate/filter or invent escaping. Source supports
+bounded multiple rows, not universal encodings. The approved exclusion-owner pairs are:
 
 - Independent-writer fencing — operator coordination.
 - Automatic replay/rollback after uncertain effects — caller reconciliation.
 - Structurally unencodable or undocumented association encodings — operator-managed pending
   authoritative encoding support.
 
-Activation returns per-member before/after state, available profile evidence and read errors;
-running alone cannot establish requested-profile application. Job completion, validation and
-complete/partial/failed/unknown execution classification and unverified application remain distinct.
-No invented partial-result parser; no new exclusion or complete application proof is claimed.
+Activation retains raw states/profile evidence and strict backend facts. Raw changed/unchanged/
+unavailable labels do not classify profile application. Complete requires strict backend success
+AND every member newly witnessed on requested contained profile; partial requires failed backend,
+at least one new witness and another demonstrably different requested identity/resources. Failed
+unchanged mixed state is not partial. Prior-matching, missing/contradictory/uncalibrated evidence
+stays unknown; no universal field-application inference or new exclusion. Spec owns exact rules.
+The source complete/N1/N2 observations calibrate these cases, not all member/resource/release shapes;
+source capture stays FAIL2, independent restoration/window release are separate facts.
 
 ## Consequences
 
