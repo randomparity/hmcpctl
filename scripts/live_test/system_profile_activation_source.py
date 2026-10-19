@@ -384,10 +384,15 @@ def _profile_parent(profile, uuid, b):
 
 def _runtime_limits(resource):
     memory = resource.get("PartitionMemoryConfiguration", {})
+    running = _text(resource.get("PartitionState")).lower() == "running"
+    if running and any(key not in memory for key in ("CurrentMemory", "RuntimeMemory")):
+        raise ValueError(
+            "actual running fixture memory observations missing; uncertainty STOP"
+        )
     for key in ("CurrentMemory", "RuntimeMemory"):
         if key in memory and not 0 <= int(_text(memory[key])) <= 1024:
             raise ValueError("actual fixture memory exceeds the fixed ceiling")
-    if _text(resource.get("PartitionState")).lower() == "running":
+    if running:
         p = resource["PartitionProcessorConfiguration"]
         shared = p["CurrentSharedProcessorConfiguration"]
         if (
@@ -862,7 +867,11 @@ async def capture(hmc, packet, directory):
             "application_semantics": "UNPROVEN; calibration facts only",
         }
         source.save(directory, document)
-        if document["calibration"]["consistent"] and packet["negative_cases"]:
+        if not document["calibration"]["consistent"]:
+            raise ValueError(
+                "calibration incomplete or contradictory; uncertainty STOP before later effects"
+            )
+        if packet["negative_cases"]:
             await _negative_cases(hmc, packet, document, directory)
         document["teardown_before"] = await facts(hmc, packet, document)
         source.save(directory, document)
@@ -971,6 +980,8 @@ def _completed_effects(packet, document):
     consistency = calibrated(
         document["calibration"]["before"], document["calibration"]["after"]
     )
+    if not consistency:
+        raise ValueError("uncertain calibration cannot form a completed journal")
     if consistency is not document["calibration"]["consistent"]:
         raise ValueError("calibration facts contradict their recorded consistency")
     if bool(cases) != (packet["negative_cases"] and consistency) or len(cases) > 2:
@@ -1023,15 +1034,38 @@ def _completed_effects(packet, document):
     ]
     if [j.get("operation") for j in document["jobs"]] != operations:
         raise ValueError("journal jobs do not match all dispatched effects")
-    negatives = [
-        j for j in document["jobs"] if j.get("id") in {c["job_id"] for c in cases}
+    negative_requests = {
+        build_job_request(operation, "ManagedSystem", params)
+        for stage, (operation, params) in REQUESTS.items()
+        if stage in {"negative-false", "negative-true"}
+    }
+    job_effects = [
+        e
+        for e in expected
+        if e[0]
+        in {
+            "CreateSystemProfile",
+            "GetSystemProfiles",
+            "ActivateSystemProfile",
+            "PowerOff",
+        }
     ]
+    negatives = [
+        j
+        for j, effect in zip(document["jobs"], job_effects, strict=True)
+        if effect[2] in negative_requests
+    ]
+    if [j["id"] for j in negatives] != [case["job_id"] for case in cases]:
+        raise ValueError(
+            "negative job identities do not match their exact finite stages"
+        )
     if len(negatives) != len(cases) or any(
         j["operation"] != "ActivateSystemProfile" for j in negatives
     ):
         raise ValueError("negative observations lost their own job identities")
     if document.get("results") != _result_rows(document):
         raise ValueError("calibration/native negative results were rewritten")
+    return {j["id"] for j in negatives}
 
 
 def _result_rows(document):
@@ -1082,7 +1116,7 @@ async def recover(hmc, packet, document):
         )
     if datetime.fromisoformat(run["finished"]).tzinfo is None:
         raise ValueError("completion time has no timezone")
-    _completed_effects(packet, document)
+    negative_ids = _completed_effects(packet, document)
     names = [e["Resource"]["PartitionName"] for e in before.get("partitions", [])]
     if (
         set(names) & set(NAMES)
@@ -1112,6 +1146,8 @@ async def recover(hmc, packet, document):
             source._successful_record(record, sp)
             if record.get("own_job_deleted") is not True:
                 raise ValueError("successful own job not cleaned")
+        elif record["id"] not in negative_ids or record.get("own_job_deleted"):
+            raise ValueError("required job failed or failed negative was deleted")
         handles.append(pair)
     if not handles or len(set(handles)) != len(handles):
         raise ValueError("journal jobs are missing or duplicated")

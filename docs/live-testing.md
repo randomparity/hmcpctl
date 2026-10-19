@@ -1296,7 +1296,9 @@ Both complete-path members must be shut down before validation/activation. Memor
 current/runtime observations. Job terminal facts, `LastActivatedProfile`, associated-profile UUID,
 CLI `curr_profile`, actual memory/CPU and power facts are captured separately. Consistent calibration
 is **not** universal proof of requested-profile application or complete activation. Unknown or
-contradictory facts stop further negative experiments; no power-only classifier exists.
+contradictory facts stop all later effects, including teardown, and retain manual reconciliation;
+no power-only classifier exists. Running fixtures require both actual memory observations; inactive
+pre-activation fixtures may legitimately omit runtime memory.
 
 `negative_cases: true` selects two closed optional source experiments: fixture B remains running,
 fixture A is stopped, and an ordered B/A record requests their distinct baseline profiles. This
@@ -1312,7 +1314,8 @@ A private atomic journal records intent before effects, created identities, comp
 effect/job sequence and raw observations. Reused or inconsistent job handles, nonterminal outcome,
 interruption, drift, unconfirmed ownership or unknown power stops writes and retains coordination.
 Own successful jobs are removed only after saving strict identity-consistent terminal/code success;
-failed negative jobs remain. Teardown is limited to known-owned new fixtures after known outcomes:
+failed jobs are permitted only at the exact optional negative stages and remain undeleted.
+Every required stage must have confirmed strict success and own-job removal. Teardown is limited to known-owned new fixtures after known outcomes:
 freshly verify scratch associations before fixed CLI sysprof deletion, stop only the new fixtures,
 then delete only their same authorized UUIDs. There is no exception-driven rollback or name-only
 cleanup. A timeout is not cancellation or permission to release coordination.

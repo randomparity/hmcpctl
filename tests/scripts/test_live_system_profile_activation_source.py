@@ -1011,3 +1011,92 @@ def test_recovery_observes_even_when_journal_is_unreadable(
     assert json.loads((output / "results.json").read_text())["read_only"] is True
     h.submit_job.assert_not_awaited()
     h.delete_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "missing", ["CurrentMemory", "RuntimeMemory", "contradictory-profile"]
+)
+async def test_incomplete_calibration_stops_before_any_later_effect(
+    packet, hardware, tmp_path, missing
+):
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original_wait = h.wait_for_job_entry.side_effect
+
+    async def wait(identity, **kwargs):
+        result = await original_wait(identity, **kwargs)
+        job = state["jobs"][identity]
+        if (
+            job["operation"] == "ActivateSystemProfile"
+            and job["parameters"].get("operation") == "on"
+        ):
+            for entry in state["members"].values():
+                if entry["Resource"]["PartitionName"] in arm.NAMES:
+                    if missing == "contradictory-profile":
+                        entry["Resource"]["LastActivatedProfile"] = "contradiction"
+                    else:
+                        entry["Resource"]["PartitionMemoryConfiguration"].pop(missing)
+        return result
+
+    h.wait_for_job_entry.side_effect = wait
+    with pytest.raises(ValueError):
+        await capture_in(h, packet, tmp_path)
+    assert len(state["members"]) == 3 and len(state["sysprofiles"]) == 1
+    assert not any(j["operation"] == "PowerOff" for j in state["jobs"].values())
+    h.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tamper", ["create-failed", "validate-failed", "stop-failed", "deleted-negative"]
+)
+async def test_required_job_failure_or_deleted_negative_never_clean(
+    packet, hardware, tmp_path, tamper
+):
+    h, _state = hardware
+    packet["negative_cases"] = True
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    if tamper == "deleted-negative":
+        record = next(
+            j
+            for j in doc["jobs"]
+            if j["terminal"]["Resource"]["Status"] == "FAILED_BEFORE_COMPLETION"
+        )
+        record["own_job_deleted"] = True
+    else:
+        if tamper == "create-failed":
+            record = doc["jobs"][0]
+        elif tamper == "stop-failed":
+            record = next(j for j in doc["jobs"] if j["operation"] == "PowerOff")
+        else:
+            record = next(
+                j for j in doc["jobs"] if j["operation"] == "ActivateSystemProfile"
+            )
+        record["terminal"]["Resource"]["Status"] = "FAILED_TO_START"
+    with pytest.raises(ValueError):
+        await arm.recover(h, packet, doc)
+
+
+def test_inactive_fixture_can_omit_runtime_memory_before_activation():
+    arm._runtime_limits(
+        {"PartitionState": "not activated", "PartitionMemoryConfiguration": {}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_false_calibration_cannot_forge_completed_clean(
+    packet, hardware, tmp_path
+):
+    h, _state = hardware
+    packet["negative_cases"] = False
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    doc["calibration"]["after"][0]["partition"]["Resource"]["LastActivatedProfile"] = (
+        "contradiction"
+    )
+    doc["calibration"]["consistent"] = False
+    doc["results"] = arm._result_rows(doc)
+    with pytest.raises(ValueError):
+        await arm.recover(h, packet, doc)
