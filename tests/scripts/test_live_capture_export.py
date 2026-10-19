@@ -2683,10 +2683,17 @@ def test_free_text_rules_after_a_long_backslash_run_do_not_backtrack() -> None:
         pattern = pattern.replace(export._LEAK_START, r"(?<![\w\\])")
         pattern = pattern.replace(r"(?<=\\u)", "(?!)")
         pattern = pattern.replace(r"(?<!\\)(?:\\\\)++u", "(?!)")
+        # A start the baseline keeps is measured against itself, so an edited start
+        # must fail here rather than pass at a ratio of 1.
+        assert pattern != rule.pattern
         for _, _, zeroed in export._MAC_FORMS:
             pattern = pattern.replace(f"(?!{zeroed})", "")
         baseline = re.compile(pattern, rule.flags)
-        assert _cost_ratio(rule, baseline, lambda match: match.group(0), body) < 10
+        # Legitimate ratios measure about 4 for the scrub rules and 6 for the leak
+        # backstops, whose baselines reduce the prefix to `(?!)`, on Python 3.14; one
+        # passed 10 under parallel CI. A run read from every backslash costs over 400
+        # times the baseline, so 50 separates the two with room on both sides.
+        assert _cost_ratio(rule, baseline, lambda match: match.group(0), body) < 50
 
 
 @pytest.mark.parametrize(

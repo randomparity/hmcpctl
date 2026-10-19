@@ -224,6 +224,13 @@ argument names the served input schema rejects. It exits 0; `--fail-on-dispatch`
 on an unregistered, mismatched or unreadable dispatch. `just scenario-gap`
 runs it with that flag as a `static` member, so a dispatch finding fails `just verify`.
 
+Declared scenario definitions (ADR 0247) live in
+`scripts/live_test/scenario_definitions.json`, validated by `scripts/live_test/definitions.py`:
+one `st100-<operation slug>` definition per operation, its read-only or mutating class, and
+arguments in which every target identity is a `{"target": "<kind>"}` placeholder. The report
+checks each definition's arguments against the served schema (`definition-mismatch:`) and
+counts defined operations; a definition never counts as exercised, and nothing runs one.
+
 The catalog records no runtime eligibility. `existing-runtime-guards` neither grants
 nor revokes admission: authorization, ownership, validation, capability, and safety
 guards continue to control runtime behavior. Validate the catalog and its joins with

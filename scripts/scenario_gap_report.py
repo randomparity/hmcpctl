@@ -6,8 +6,9 @@ Usage:
 
 Joins ``docs/capabilities/operations.json`` and ``rows.json`` to the scenario
 functions the runner's ``SUBTASKS`` registry reaches, names the dispatches of
-functions it no longer reaches, and checks each registered dispatch against the
-input schema the composed MCP application serves. Offline
+functions it no longer reaches, and checks each registered dispatch, and each
+declared scenario definition (ADR 0247), against the input schema the composed
+MCP application serves. Offline
 and read-only: no HMC credential is needed and nothing is written.
 """
 
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from live_test import definitions as scenario_definitions
 from live_test import runner
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +33,12 @@ _PACKAGE = "live_test"
 _SCENARIO_PACKAGE = _REPO_ROOT / "scripts" / _PACKAGE
 # Keyword arguments `RunState.call` consumes itself; they never reach the tool.
 _RUNNER_KEYWORDS = frozenset({"expected", "reuse_gaps"})
-_DISPATCH_PREFIXES = ("unregistered:", "dispatch-mismatch:", "unreadable:")
+_DISPATCH_PREFIXES = (
+    "unregistered:",
+    "dispatch-mismatch:",
+    "definition-mismatch:",
+    "unreadable:",
+)
 
 
 @dataclass(frozen=True)
@@ -279,16 +286,50 @@ def registered_definitions(
     return reached
 
 
+def _definition_findings(
+    definitions: Iterable[scenario_definitions.ScenarioDefinition],
+    known: set[str],
+    schemas: Mapping[str, Mapping[str, Any]],
+) -> tuple[set[str], list[str], list[str]]:
+    """The defined ledger operations, unregistered lines and mismatch lines."""
+    defined: set[str] = set()
+    unregistered: list[str] = []
+    mismatches: list[str] = []
+    for definition in definitions:
+        if definition.operation not in known:
+            unregistered.append(
+                f"unregistered: definition {definition.scenario} "
+                f"operation {definition.operation}"
+            )
+            continue
+        defined.add(definition.operation)
+        values = {
+            name: runner.UNRESOLVED_ARGUMENT
+            if isinstance(value, scenario_definitions.Placeholder)
+            else value
+            for name, value in definition.arguments.items()
+        }
+        mismatches += [
+            f"definition-mismatch: {definition.scenario} {problem}"
+            for problem in runner._dispatch_problems(definition.tool, values, schemas)
+        ]
+    return defined, unregistered, mismatches
+
+
 def build_report(
     scans: Sequence[Scan],
     roots: Iterable[tuple[str, str]],
     operations: Sequence[Mapping[str, Any]],
     row_ids: Iterable[str],
     schemas: Mapping[str, Mapping[str, Any]],
+    *,
+    definitions: Sequence[scenario_definitions.ScenarioDefinition] = (),
+    definition_errors: Iterable[str] = (),
 ) -> list[str]:
     """Every finding as one prefixed line, followed by one ``summary:`` line.
 
     ``roots`` are the ``(module, function)`` pairs the ``SUBTASKS`` registry names.
+    ``definition_errors`` are why the definitions registry could not be loaded.
     """
     by_tool = {entry["tool"]: entry["operation"] for entry in operations}
     known = {entry["operation"] for entry in operations}
@@ -297,7 +338,7 @@ def build_report(
     departed: list[str] = []
     unregistered: list[str] = []
     mismatches: list[str] = []
-    unreadable: list[str] = []
+    unreadable = [f"unreadable: {item}" for item in definition_errors]
     for scan in scans:
         unreadable += [f"unreadable: {item}" for item in scan.unreadable]
         for dispatch in scan.dispatches:
@@ -331,6 +372,10 @@ def build_report(
                 unregistered.append(
                     f"unregistered: {record.site} operation {record.operation}"
                 )
+    defined, unregistered_definitions, definition_mismatches = _definition_findings(
+        definitions, known, schemas
+    )
+    unregistered += unregistered_definitions
     covered_rows = {
         row
         for entry in operations
@@ -345,7 +390,9 @@ def build_report(
         f"operations {len(known) - len(uncovered_operations)}/{len(known)} "
         f"exercised; rows {len(all_rows) - len(uncovered_rows)}/{len(all_rows)} "
         f"exercised; {len(departed)} departed; {len(unregistered)} unregistered; "
-        f"{len(mismatches)} dispatch mismatches; {len(unreadable)} unreadable"
+        f"{len(mismatches)} dispatch mismatches; {len(unreadable)} unreadable; "
+        f"{len(definitions)} definitions; operations {len(defined)}/{len(known)} "
+        f"defined; {len(definition_mismatches)} definition mismatches"
     )
     return [
         *(f"uncovered-operation: {name}" for name in uncovered_operations),
@@ -353,6 +400,7 @@ def build_report(
         *departed,
         *unregistered,
         *mismatches,
+        *definition_mismatches,
         *unreadable,
         summary,
     ]
@@ -391,6 +439,17 @@ def scenario_roots() -> set[tuple[str, str]]:
     }
 
 
+def registered_definitions_or_errors() -> tuple[
+    tuple[scenario_definitions.ScenarioDefinition, ...], tuple[str, ...]
+]:
+    """The declared definitions, or why the registry file could not be loaded."""
+    try:
+        return scenario_definitions.read_definitions(), ()
+    except scenario_definitions.DefinitionError as error:
+        label = scenario_definitions.DEFINITIONS_PATH.relative_to(_REPO_ROOT)
+        return (), (f"{label} {error}",)
+
+
 def _load(name: str, key: str) -> list[Any]:
     document = json.loads((_CAPABILITIES / name).read_text(encoding="utf-8"))
     return document[key]
@@ -401,15 +460,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--fail-on-dispatch",
         action="store_true",
-        help="exit 1 when a dispatch is unregistered, mismatched, or unreadable",
+        help="exit 1 when a dispatch or definition is unregistered, mismatched, "
+        "or unreadable",
     )
     arguments = parser.parse_args(argv)
+    definitions, definition_errors = registered_definitions_or_errors()
     lines = build_report(
         scenario_scans(),
         scenario_roots(),
         _load("operations.json", "operations"),
         (row["id"] for row in _load("rows.json", "rows")),
         asyncio.run(served_schemas()),
+        definitions=definitions,
+        definition_errors=definition_errors,
     )
     print("\n".join(lines))
     return exit_status(lines, fail_on_dispatch=arguments.fail_on_dispatch)
