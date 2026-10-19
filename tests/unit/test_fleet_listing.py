@@ -8,11 +8,12 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import live_fixture
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTransportError
 from hmcpctl.operations.systems.fleet import (
     FleetListing,
     UnreadableSystem,
     read_fleet,
+    read_fleet_quick_all,
 )
 
 R1_UUID = "11111111-1111-1111-1111-111111111111"
@@ -254,3 +255,147 @@ async def test_fleet_retains_parent_without_mutation_or_extra_reads():
     assert read.await_count == 2
     hmc.list_system_summaries.assert_awaited_once_with()
     assert len(hmc.mock_calls) == 1
+
+
+QUICK_SYSTEM = "00000002-abcd-4ef0-8abc-000000000002"
+QUICK_ITEMS = json.loads(live_fixture("rest-lpar-quick-all")["body"])
+
+
+def _bulk_hmc(systems, answer):
+    """One summary read only: the bulk path and its fallback share it (ADR 0248)."""
+    hmc = _hmc(systems)
+    if isinstance(answer, Exception):
+        hmc.list_quick_all.side_effect = answer
+    else:
+        hmc.list_quick_all.return_value = answer
+    return hmc
+
+
+@pytest.mark.asyncio
+async def test_bulk_read_projects_each_item():
+    hmc = _bulk_hmc(
+        [
+            _system(QUICK_SYSTEM.upper(), "sys-R1", "operating"),
+            _system(E2_UUID, "sys-E2", "Power Off"),
+        ],
+        QUICK_ITEMS,
+    )
+    read = _reader({})
+
+    listing = await read_fleet_quick_all(hmc, "LogicalPartition", read, "LPARs")
+
+    hmc.list_system_summaries.assert_awaited_once_with()
+    hmc.list_quick_all.assert_awaited_once_with("LogicalPartition")
+    read.assert_not_awaited()
+    assert listing == FleetListing(
+        [
+            {
+                "UUID": item["UUID"],
+                "title": None,
+                "link": None,
+                "ResourceType": "LogicalPartition",
+                "Resource": item,
+                "ManagedSystem": {"UUID": QUICK_SYSTEM.upper(), "SystemName": "sys-R1"},
+            }
+            for item in QUICK_ITEMS
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_bulk_entry_falls_back_to_href_and_item_name():
+    hmc = _bulk_hmc([_system(E2_UUID, "sys-E2", "operating")], QUICK_ITEMS[:1])
+
+    listing = await read_fleet_quick_all(hmc, "LogicalPartition", _reader({}), "LPARs")
+
+    assert listing.entries[0]["ManagedSystem"] == {
+        "UUID": QUICK_SYSTEM,
+        "SystemName": QUICK_ITEMS[0]["SystemName"],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "first",
+    [
+        _system(R1_UUID, "sys-R1", "no connection"),
+        _system(R1_UUID, "sys-R1", "standby"),
+        _system(None, "sys-R1", "operating"),
+    ],
+)
+async def test_gate_reads_per_system_when_a_system_is_not_ready(first):
+    hmc = _bulk_hmc([first, _system(E2_UUID, "sys-E2", "operating")], QUICK_ITEMS)
+    read = _reader({E2_UUID: [{"UUID": "lpar-1"}]})
+
+    listing = await read_fleet_quick_all(hmc, "LogicalPartition", read, "LPARs")
+
+    hmc.list_system_summaries.assert_awaited_once_with()
+    hmc.list_quick_all.assert_not_awaited()
+    read.assert_awaited_once_with(E2_UUID)
+    assert [entry["UUID"] for entry in listing.entries] == ["lpar-1"]
+    assert len(listing.unreadable_systems) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_empty_fleet_sends_no_bulk_request():
+    hmc = _bulk_hmc([], QUICK_ITEMS)
+
+    listing = await read_fleet_quick_all(hmc, "LogicalPartition", _reader({}), "LPARs")
+
+    assert listing == FleetListing([])
+    hmc.list_quick_all.assert_not_awaited()
+
+
+def _with(**changes):
+    return [{**QUICK_ITEMS[0], **changes}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("answer", "cause"),
+    [
+        (HMCError("GET failed", 404, "<Message>secret-host</Message>"), "HTTP 404"),
+        (HMCError("GET failed", 500, "internal"), "HTTP 500"),
+        (HMCTransportError("GET timed out at secret-host"), "HMCTransportError"),
+        (["not an object"], "unplaceable item"),
+        (_with(UUID="not-a-uuid"), "unplaceable item"),
+        (_with(AssociatedManagedSystem=None), "unplaceable item"),
+        (_with(AssociatedManagedSystem=7), "unplaceable item"),
+        (
+            _with(AssociatedManagedSystem="https://h/rest/api/uom/LogicalPartition/x"),
+            "unplaceable item",
+        ),
+        (
+            _with(AssociatedManagedSystem="https://h/rest/api/uom/ManagedSystem/nope"),
+            "unplaceable item",
+        ),
+    ],
+)
+async def test_unplaceable_bulk_answer_falls_back(answer, cause, caplog):
+    hmc = _bulk_hmc([_system(E2_UUID, "sys-E2", "operating")], answer)
+    read = _reader({E2_UUID: [{"UUID": "lpar-1"}]})
+
+    listing = await read_fleet_quick_all(hmc, "LogicalPartition", read, "LPARs")
+
+    hmc.list_system_summaries.assert_awaited_once_with()
+    hmc.list_quick_all.assert_awaited_once()
+    read.assert_awaited_once_with(E2_UUID)
+    assert listing == FleetListing(
+        [{"UUID": "lpar-1", "ManagedSystem": {"UUID": E2_UUID, "SystemName": "sys-E2"}}]
+    )
+    [record] = caplog.records
+    assert record.levelname == "WARNING"
+    message = record.getMessage()
+    assert cause in message and "reading each managed system" in message
+    assert "secret-host" not in message
+
+
+@pytest.mark.asyncio
+async def test_bulk_read_refuses_more_than_the_discovery_limit():
+    hmc = _bulk_hmc(
+        [_system(E2_UUID, f"sys-{n}", "operating") for n in range(101)], QUICK_ITEMS
+    )
+
+    with pytest.raises(ValueError, match="supply managed-system scope"):
+        await read_fleet_quick_all(hmc, "LogicalPartition", _reader({}), "LPARs")
+    hmc.list_quick_all.assert_not_awaited()

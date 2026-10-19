@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,6 +12,11 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.discovery_limits import MAX_PARENT_DISCOVERY_SYSTEMS
 from hmcpctl.errors import HMCError
 from hmcpctl.resource_identity import is_uuid
+
+_logger = logging.getLogger(__name__)
+
+#: Managed-system states for which LogicalPartition/quick/All was seen to answer (ADR 0248).
+_QUICK_ALL_STATES = frozenset({"operating", "power off"})
 
 
 @dataclass(frozen=True)
@@ -135,11 +141,23 @@ async def read_fleet(
     does the full ManagedSystem feed, so the systems come from quick/All (#1309).
     """
     systems = await hmc.list_system_summaries()
+    _refuse_oversized(systems, resources)
+    return await _read_each_system(hmc, systems, read_system)
+
+
+def _refuse_oversized(systems: list[Any], resources: str) -> None:
     if len(systems) > MAX_PARENT_DISCOVERY_SYSTEMS:
         raise ValueError(
             f"Cannot list {resources} across managed systems: discovery exceeds "
             f"{MAX_PARENT_DISCOVERY_SYSTEMS} managed systems; supply managed-system scope"
         )
+
+
+async def _read_each_system(
+    hmc: HMCClient,
+    systems: list[Any],
+    read_system: Callable[[str], Awaitable[list[dict[str, Any]]]],
+) -> FleetListing:
     entries: list[dict[str, Any]] = []
     unreadable: list[UnreadableSystem] = []
     for system in systems:
@@ -164,3 +182,92 @@ async def read_fleet(
                     raise
         unreadable.append(skipped)
     return FleetListing(entries, unreadable)
+
+
+def _quick_all_ready(summary: object) -> bool:
+    fields = summary if isinstance(summary, dict) else {}
+    uuid, state = fields.get("UUID"), fields.get("State")
+    return (
+        isinstance(uuid, str)
+        and is_uuid(uuid)
+        and isinstance(state, str)
+        and state.strip().lower() in _QUICK_ALL_STATES
+    )
+
+
+def _quick_all_entry(
+    item: object, systems: list[Any], resource_type: str
+) -> dict[str, Any] | None:
+    """*item* in the parsed-entry envelope; None when it cannot be placed."""
+    fields = item if isinstance(item, dict) else {}
+    uuid, href = fields.get("UUID"), fields.get("AssociatedManagedSystem")
+    _, marker, system_uuid = (
+        href.rpartition("/ManagedSystem/") if isinstance(href, str) else ("", "", "")
+    )
+    if not (
+        isinstance(uuid, str) and is_uuid(uuid) and marker and is_uuid(system_uuid)
+    ):
+        return None
+    summary = summary_for(systems, system_uuid)
+    return {
+        "UUID": uuid,
+        "title": None,
+        "link": None,
+        "ResourceType": resource_type,
+        "Resource": fields,
+        "ManagedSystem": {
+            "UUID": summary.get("UUID", system_uuid),
+            "SystemName": summary.get("SystemName", fields.get("SystemName")),
+        },
+    }
+
+
+async def _read_quick_all(
+    hmc: HMCClient, systems: list[Any], resource_type: str
+) -> FleetListing | None:
+    """The bulk listing, or None after logging why it cannot be used.
+
+    The warning names only the failure's class or HTTP status: an HMC message
+    would reach a terminal unsanitized (ADR 0248).
+    """
+    try:
+        items = await hmc.list_quick_all(resource_type)
+    except HMCError as exc:
+        cause = (
+            f"HTTP {exc.status_code}"
+            if exc.status_code is not None
+            else type(exc).__name__
+        )
+    else:
+        entries = [_quick_all_entry(item, systems, resource_type) for item in items]
+        if None not in entries:
+            return FleetListing([entry for entry in entries if entry is not None])
+        cause = "unplaceable item"
+    _logger.warning(
+        "%s/quick/All unusable (%s); reading each managed system instead",
+        resource_type,
+        cause,
+    )
+    return None
+
+
+async def read_fleet_quick_all(
+    hmc: HMCClient,
+    resource_type: str,
+    read_system: Callable[[str], Awaitable[list[dict[str, Any]]]],
+    resources: str,
+) -> FleetListing:
+    """One ``{resource_type}/quick/All`` read when the fleet allows it (ADR 0248).
+
+    Every system must be ``operating`` or ``power off``, the states that read
+    was seen to answer for. Otherwise, or when that read fails or returns an
+    item it cannot place, each system is read as :func:`read_fleet` does, from
+    the same summaries.
+    """
+    systems = await hmc.list_system_summaries()
+    _refuse_oversized(systems, resources)
+    if systems and all(_quick_all_ready(summary) for summary in systems):
+        listing = await _read_quick_all(hmc, systems, resource_type)
+        if listing is not None:
+            return listing
+    return await _read_each_system(hmc, systems, read_system)
