@@ -19,17 +19,20 @@ runner change, scenario migration, maturity record or live run (#1093, #620, ope
   reads the file and calls it. `ScenarioDefinition` is a frozen dataclass of `scenario`,
   `operation`, `tool`, `read_only`, `arguments` (a mapping in which a placeholder is a
   `Placeholder(kind)`) and `expected`. Any violation of ADR 0247 raises
-  `DefinitionError` naming the definition index and the field; a non-object, missing or
-  extra key, wrong type, unknown operation, class/effect disagreement, bad placeholder,
-  literal for a `REQUIRED_TARGET_ARGUMENTS` name, malformed or duplicate scenario ID, or
-  unsupported `format_version` or `expected`.
+  `DefinitionError` naming the definition index and the field: a non-object, missing or
+  extra key, wrong type, unknown operation, class/effect disagreement, a scenario other
+  than `st100-<slug>` or a duplicate, a literal for a top-level selector argument, a
+  placeholder of the wrong kind or on a non-selector argument, a supplied connection or
+  nested-selector container argument, or an unsupported `format_version` or `expected`.
 - **Gap report**: `main` reads the registry; a `DefinitionError` or unreadable file
   becomes one `unreadable: <path> <message>` line. `build_report` takes the definitions;
   for each it calls the runner's `_dispatch_problems(tool, values, schemas)` with
   placeholders replaced by `UNRESOLVED_ARGUMENT`, and emits
   `definition-mismatch: <scenario> <problem>` per problem, added to the
-  `--fail-on-dispatch` prefixes. The summary gains `N definitions` and
-  `operations D/K defined`.
+  `--fail-on-dispatch` prefixes. A definition whose operation is not in `operations.json`
+  is `unregistered: definition <scenario> operation <operation>` and is not checked
+  further. The summary gains `N definitions` and `operations D/K defined`, where K is
+  the ledger's operation count and D the distinct defined operations among them.
 
 ## Acceptance
 
@@ -39,7 +42,9 @@ runner change, scenario migration, maturity record or live run (#1093, #620, ope
    with a placeholder and a literal load.
 3. A definition whose arguments the served schema rejects yields `definition-mismatch:`
    and exit 1 under `--fail-on-dispatch`; a malformed registry yields `unreadable:`.
-4. No hand-written scenario literal under `scripts/live_test/` uses `st100-`.
+4. No hand-written scenario literal under `scripts/live_test/` uses `st100-`, `100` is not
+   a `SUBTASKS` key, and the slug is injective over every registered operation.
+5. Scanning `definitions.py` adds no dispatch, verified or unreadable entry to the report.
 
 ### Failure model
 
