@@ -94,9 +94,20 @@ async def snapshot(hmc_config, config):
         return json.loads(encoded)
 
 
+def _ordered_records(records):
+    if not isinstance(records, list) or any(
+        not isinstance(row, dict) or not isinstance(row.get("name"), str)
+        for row in records
+    ):
+        raise ValueError("system-profile records are malformed")
+    if len({row["name"] for row in records}) != len(records):
+        raise ValueError("system-profile records contain duplicate names")
+    return sorted(records, key=lambda row: row["name"])
+
+
 def expected_snapshot(before, owned):
     expected = deepcopy(before)
-    records = {r["name"]: r for r in before["records"]}
+    records = {r["name"]: r for r in _ordered_records(before["records"])}
     records.update(
         {name: {"name": name, "members": members} for name, members in owned.items()}
     )
@@ -206,7 +217,7 @@ def validate_finished(artifacts, config):
         or listing.get("job") is not None
         or listing.get("command_status") != "completed"
         or listing.get("error") is not None
-        or listing.get("records") != expected_records
+        or _ordered_records(listing.get("records")) != expected_records
     ):
         raise ValueError(
             "system-profile whole-list reader proof is missing or contradictory"
@@ -327,7 +338,7 @@ async def exercise_system_profiles(client: Client, state: RunState) -> None:
                 and listing.get("system_uuid") == system
                 and listing.get("job") is None
                 and listing.get("error") is None
-                and listing.get("records")
+                and _ordered_records(listing.get("records"))
                 == expected_snapshot(working, owned)["records"]
             )
             state.record_verified(

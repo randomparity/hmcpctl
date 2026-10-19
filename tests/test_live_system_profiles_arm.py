@@ -75,7 +75,7 @@ def outcome(action, name, number):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", [None, "checkpoint", "failed", "drift"])
+@pytest.mark.parametrize("fault", [None, "reverse", "checkpoint", "failed", "drift"])
 async def test_system_profiles_arm(monkeypatch, fault):
     state = runner.RunState(config=config(), group=arm.GROUP, hmc_config=object())
     current = snapshot()
@@ -100,7 +100,11 @@ async def test_system_profiles_arm(monkeypatch, fault):
                 "job": None,
                 "command_status": "completed",
                 "error": None,
-                "records": deepcopy(current["records"]),
+                "records": deepcopy(
+                    list(reversed(current["records"]))
+                    if fault == "reverse"
+                    else current["records"]
+                ),
             }
         assert saved[-1].system_profile_phase.startswith("pending:")
         calls.append(tool)
@@ -152,7 +156,20 @@ async def test_system_profiles_arm(monkeypatch, fault):
         assert (
             await arm.reconcile(object(), state.config, state.artifacts) == snapshot()
         )
-        for fault_name in ("route", "system", "job", "phase", "listing", "baseline"):
+        permuted = deepcopy(state.artifacts)
+        permuted.system_profile_baseline["listing"]["records"].reverse()
+        arm.validate_finished(permuted, state.config)
+        for fault_name in (
+            "route",
+            "system",
+            "job",
+            "phase",
+            "listing",
+            "baseline",
+            "duplicate",
+            "missing",
+            "pair-order",
+        ):
             bad = deepcopy(state.artifacts)
             if fault_name == "route":
                 bad.system_profile_jobs[0]["outcome"]["backend"] = "ssh-command"
@@ -166,6 +183,18 @@ async def test_system_profiles_arm(monkeypatch, fault):
                 bad.system_profile_phase = "pending:delete-d"
             elif fault_name == "listing":
                 bad.system_profile_baseline["listing"]["records"] = []
+            elif fault_name == "duplicate":
+                rows = bad.system_profile_baseline["listing"]["records"]
+                rows[1] = deepcopy(rows[0])
+            elif fault_name == "missing":
+                bad.system_profile_baseline["listing"]["records"].pop()
+            elif fault_name == "pair-order":
+                row = next(
+                    r
+                    for r in bad.system_profile_baseline["listing"]["records"]
+                    if len(r["members"]) == 2
+                )
+                row["members"].reverse()
             else:
                 bad.system_profile_baseline["before"]["stable"][1] = "foreign"
             with pytest.raises(ValueError):
