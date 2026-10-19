@@ -2129,3 +2129,98 @@ async def test_mixed_counter_decrease_stops_before_later_writes(
     assert doc["run"]["partial"] is True and len(doc["negative_cases"]) == 1
     with pytest.raises(ValueError):
         await arm.recover(h, packet, doc)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("counter", ["malformed", "0", None])
+async def test_known_state_change_invalid_fresh_counter_stops_teardown(
+    packet, hardware, tmp_path, counter
+):
+    h, state = hardware
+    packet["negative_cases"] = True
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original_wait = h.wait_for_job_entry.side_effect
+    original_partitions = h.list_logical_partitions.side_effect
+    after_n1_reads = 0
+    n1_finished = False
+
+    async def wait(identity, **kwargs):
+        nonlocal n1_finished
+        result = await original_wait(identity, **kwargs)
+        job = state["jobs"][identity]
+        if (
+            job["parameters"].get("systemProfile") == arm.SYSTEM_PROFILES[1]
+            and job["parameters"].get("continue") == "false"
+        ):
+            n1_finished = True
+            next(
+                e
+                for e in state["members"].values()
+                if e["Resource"]["PartitionName"] == arm.NAMES[1]
+            )["Resource"]["PartitionState"] = "open firmware"
+        return result
+
+    async def partitions(system):
+        nonlocal after_n1_reads
+        if n1_finished:
+            after_n1_reads += 1
+            if after_n1_reads == 2:
+                resource = next(
+                    e
+                    for e in state["members"].values()
+                    if e["Resource"]["PartitionName"] == arm.NAMES[1]
+                )["Resource"]
+                if counter is None:
+                    resource.pop("Uptime")
+                else:
+                    resource["Uptime"]["text"] = counter
+        return await original_partitions(system)
+
+    h.wait_for_job_entry.side_effect = wait
+    h.list_logical_partitions.side_effect = partitions
+    with pytest.raises(ValueError, match="uptime"):
+        await capture_in(h, packet, tmp_path)
+    assert len(state["jobs"]) == 5
+    assert len(state["sysprofiles"]) == 2
+    assert not any(c.startswith("rmsyscfg") for c in state["commands"])
+    h.delete_logical_partition.assert_not_awaited()
+    doc = json.loads((tmp_path / "capture/results.json").read_text())
+    assert doc["run"]["partial"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("counter", ["malformed", "0", None])
+async def test_one_negative_invalid_first_counter_refuses_recovery(
+    packet, hardware, tmp_path, counter
+):
+    h, state = hardware
+    packet["negative_cases"] = True
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = h.wait_for_job_entry.side_effect
+
+    async def wait(identity, **kwargs):
+        result = await original(identity, **kwargs)
+        job = state["jobs"][identity]
+        if (
+            job["parameters"].get("systemProfile") == arm.SYSTEM_PROFILES[1]
+            and job["parameters"].get("continue") == "false"
+        ):
+            next(
+                e
+                for e in state["members"].values()
+                if e["Resource"]["PartitionName"] == arm.NAMES[1]
+            )["Resource"]["PartitionState"] = "open firmware"
+        return result
+
+    h.wait_for_job_entry.side_effect = wait
+    doc = json.loads(json.dumps(await capture_in(h, packet, tmp_path)))
+    assert len(doc["negative_cases"]) == 1
+    resource = doc["negative_cases"][0]["after"][1]["partition"]["Resource"]
+    if counter is None:
+        resource.pop("Uptime")
+    else:
+        resource["Uptime"]["text"] = counter
+    mutations = (len(state["jobs"]), h.delete_logical_partition.await_count)
+    with pytest.raises(ValueError, match="uptime"):
+        await arm.recover(h, packet, doc)
+    assert (len(state["jobs"]), h.delete_logical_partition.await_count) == mutations

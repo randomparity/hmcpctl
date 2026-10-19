@@ -1079,11 +1079,13 @@ async def _negative_cases(hmc, packet, document, directory):
         if continuation:
             admission = await facts(hmc, packet, document)
             first = document["negative_cases"][0]
-            if not _same_fixture_facts(
+            first_unchanged = _same_fixture_facts(
                 first["before"], first["after"], document["fixtures"]
-            ) or not _same_fixture_facts(
+            )
+            next_unchanged = _same_fixture_facts(
                 first["after"], admission, document["fixtures"]
-            ):
+            )
+            if not (first_unchanged and next_unchanged):
                 break
         record = await _job(
             hmc,
@@ -1170,13 +1172,17 @@ def _completed_effects(packet, document):
             if type(case["continue"]) is not bool or case["continue"] != bool(index):
                 raise ValueError("negative variants duplicated or reordered")
             job("negative-true" if index else "negative-false")
-        if len(cases) == 2 and (
-            not _same_fixture_facts(cases[0]["before"], cases[0]["after"], fixtures)
-            or not _same_fixture_facts(cases[0]["after"], cases[1]["before"], fixtures)
-        ):
-            raise ValueError(
-                "continuation experiment had no unchanged independent baseline"
+        first_unchanged = _same_fixture_facts(
+            cases[0]["before"], cases[0]["after"], fixtures
+        )
+        if len(cases) == 2:
+            next_unchanged = _same_fixture_facts(
+                cases[0]["after"], cases[1]["before"], fixtures
             )
+            if not (first_unchanged and next_unchanged):
+                raise ValueError(
+                    "continuation experiment had no unchanged independent baseline"
+                )
     remaining = list(SYSTEM_PROFILES[: 2 if cases else 1])
     for name in tuple(remaining):
         reads.append((len(expected), list(remaining)))
