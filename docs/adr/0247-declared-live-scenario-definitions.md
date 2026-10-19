@@ -45,6 +45,9 @@ on an explicit, per-run operator selection, never by default or as part of a gro
 The hand-written `SUBTASKS` registry is unchanged and coexists; no scenario migrates.
 The empty registry keeps `just scenario-gap --fail-on-dispatch` green. Definitions record
 no maturity and promote nothing.
+An operation whose served schema requires a nested selector's container (today
+`lpar.plan` and `lpar.provision`, through `storage`) has no valid v1 definition; a
+generator reports it as needing a hand-written scenario rather than emitting one.
 
 ## Considered & rejected
 - **Python definitions in a module.** judgment: a generator would have to emit and format
