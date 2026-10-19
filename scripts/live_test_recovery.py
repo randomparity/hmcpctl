@@ -1756,9 +1756,34 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("test-results-dedicated.json"),
         help="the run's results document (default: %(default)s)",
     )
-    parser.add_argument("--source-packet", type=Path)
+    source_packets = parser.add_mutually_exclusive_group()
+    source_packets.add_argument("--source-packet", type=Path)
+    source_packets.add_argument("--activation-source-packet", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.activation_source_packet:
+        from live_test import system_profile_activation_source
+
+        if not args.packet_sha256 or not args.output:
+            parser.error(
+                "activation source recovery requires packet digest and private output"
+            )
+        return system_profile_activation_source.main(
+            [
+                "recover",
+                "--packet",
+                str(args.activation_source_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+                "--output",
+                str(args.output),
+            ]
+        )
+    if args.output:
+        parser.error("--output requires --activation-source-packet")
     if args.source_packet:
         from live_test import system_profile_source
 

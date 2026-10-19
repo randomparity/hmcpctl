@@ -1227,3 +1227,110 @@ identities and harness digest. CLI failures return a sanitized summary without a
 traceback; raw failure details are retained only in an owned private capture journal. The evidence renderer's
 allowlist excludes raw native fields; source capture does not create maturity observations or
 substitute for a final deployed product test. No native run is authorized by these instructions.
+
+## New-owned-fixture system-profile activation calibration
+
+The `system-profile-activation-source` arm is a bounded source investigation, separate from
+metadata-only capture and the product lifecycle. It is never included in `all`, `round2` or
+any default arm. It creates exactly two new owned regular AIX/Linux fixtures, four contained
+profiles (one baseline and one witness per fixture), and at most two scratch system profiles.
+It attaches no disks, network, storage or physical IO. Each fixture has dedicated memory,
+shared **capped** CPU, one virtual CPU, 0.05 processing units and at most 1024 MiB memory.
+The aggregate ceilings are two virtual CPUs, 0.10 processing units and 2048 MiB memory.
+
+Current investigation authority and the immutable target binding are private. All future campaign
+hardware tests are restricted to the operator-selected isolated test context; previous-context
+packets are historical evidence and cannot authorize another run. A separate explicit fixture
+lifecycle/activation/stop/cleanup grant is required; source flags, documentation and successful
+preflight do not provide permission. The existing reference-only grant cannot be reused.
+No existing partition, profile, description, power state, ownership, storage or network is changed.
+Failed jobs from previous investigations remain retained. The earlier metadata source capture
+failed at its documented REST Delete request; separate cleanup restored its baseline. That failed
+capture is not a passing native procedure or activation proof, and its consumed grant cannot be replayed.
+
+The private mode 0600 effect packet has exactly `binding_json`, `grant`, `owner`, `caller_token`,
+`negative_cases`, `tested_commit`, `tested_tree` and `baseline_sha256`. `binding_json` contains the
+byte-exact separately reviewed restricted-target binding, whose digest is pinned in this source
+arm. The configured profile/effective endpoint/port/user/owner must agree before authentication;
+ambient host overrides are refused and the already validated port is made explicit to prevent
+legacy port fallback. `tested_commit` and `tested_tree` must name the exact clean deployed checkout.
+`owner` is its existing configured agent identity, never an ownership override.
+
+Prepare the packet outside the checkout with `baseline_sha256: null` for the first read-only
+preflight. It returns `results.json` containing `observed`. Bind the canonical SHA-256 of its
+`partitions` and `namespace` fields (using the repository source `digest` convention) into the
+final packet's `baseline_sha256`, and independently review its exact bytes/digest/effects.
+Re-run the same preflight with that final packet; changed baseline or capacity refuses effects.
+Fresh private directories must not already exist:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py \
+  --group system-profile-activation-source --packet "$PACKET" \
+  --packet-sha256 "$PACKET_SHA256" --output "$PRIVATE/preflight"
+```
+
+Preflight reads only the bound target's identity/state/capacity, partition/profile inventory and
+system-profile namespace. It checks documented resource shape, available capacity, unique identities
+and absent reserved names. Invalid, ambiguous or unreadable data refuses admission. It neither
+creates a job nor infers that native role permissions allow execution.
+
+Only after focused offline faults, exact-candidate full verification and pinned hooks, independent
+source/security review, isolated deployment and actual preflight have passed, and the orchestrator
+has verified the concrete effect packet against the explicit grant:
+
+```sh
+uv run --no-sync python scripts/live_system_profile_activation_source.py capture \
+  --packet "$PACKET" --packet-sha256 "$PACKET_SHA256" --output "$PRIVATE/capture" \
+  --grant-packet-sha256 "$PACKET_SHA256" --exclusive-writer-window
+```
+
+Creation uses one preselected existing CLI transport with every resource field explicit; no
+`all_resources=1`, retry or backend fallback. The initial ownership stamp applies only to the
+just-created UUID. A missing/mismatched stamp stops all later writes. Every profile/power/delete
+operation freshly verifies the same UUID/name/owner/caller, contained profile fingerprints,
+resource ceilings and unrelated baseline through the existing ownership authorizer, unconditionally.
+The source arm does not turn an ownership-enforcement setting into an execution grant.
+
+Both complete-path members must be shut down before validation/activation. Memory changes from
+512MiB baseline to 1024 MiB witness profiles; saved desired memory is never substituted for independent
+current/runtime observations. Job terminal facts, `LastActivatedProfile`, associated-profile UUID,
+CLI `curr_profile`, actual memory/CPU and power facts are captured separately. Consistent calibration
+is **not** universal proof of requested-profile application or complete activation. Unknown or
+contradictory facts stop further negative experiments; no power-only classifier exists.
+
+`negative_cases: true` selects two closed optional source experiments: fixture B remains running,
+fixture A is stopped, and an ordered B/A record requests their distinct baseline profiles. This
+intentionally violates the normal shutdown prerequisite. The once-only no-continue case may fail,
+skip or succeed; no outcome is predeclared partial activation. The distinct once-only continue case
+runs only if independent observations show the first case left the exact original mixed baseline.
+It is not an automatic retry. Both cases preserve raw diagnostics and leave partial-effect attribution
+unproven pending analysis. Their actual native failed terminal statuses remain FAIL evidence rows
+and a nonzero capture exit, even after independently proven baseline restoration. No resource exhaustion, shared IO or
+missing-profile fault is introduced.
+
+A private atomic journal records intent before effects, created identities, complete finite request/
+effect/job sequence and raw observations. Reused or inconsistent job handles, nonterminal outcome,
+interruption, drift, unconfirmed ownership or unknown power stops writes and retains coordination.
+Own successful jobs are removed only after saving strict identity-consistent terminal/code success;
+failed negative jobs remain. Teardown is limited to known-owned new fixtures after known outcomes:
+freshly verify scratch associations before fixed CLI sysprof deletion, stop only the new fixtures,
+then delete only their same authorized UUIDs. There is no exception-driven rollback or name-only
+cleanup. A timeout is not cancellation or permission to release coordination.
+
+Run independent **read-only** recovery on every outcome, including interruption or apparent success:
+
+```sh
+uv run --no-sync python scripts/live_test_recovery.py \
+  --activation-source-packet "$PACKET" --packet-sha256 "$PACKET_SHA256" \
+  --results "$PRIVATE/capture/results.json" --output "$PRIVATE/recovery"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/capture/results.json"
+```
+
+Recovery records fresh inventory even for an incomplete journal. CLEAN requires the packet-bound
+original namespace/member baseline, absence of all fixtures and scratch names, and a coherent
+completed finite effect/job record; a forged partial flag cannot establish completion. It submits
+or deletes no job and cannot upgrade a failed/unproven capture. Raw packet/journals/schema and
+member identifiers remain private; the standard evidence renderer stamps the tested commit and
+exports only allowlisted structural fields. No native evidence or maturity promotion follows from
+mocked-boundary tests, preparation or this document. Product scope-audit activation finding remains
+open until source-backed analysis resolves it.

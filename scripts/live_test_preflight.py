@@ -583,7 +583,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--group",
-        choices=(*runner.SUBTASK_GROUPS, "system-profile-source"),
+        choices=(
+            *runner.SUBTASK_GROUPS,
+            "system-profile-source",
+            "system-profile-activation-source",
+        ),
         help="predict one arm instead of every arm",
     )
     parser.add_argument(
@@ -598,7 +602,34 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--packet", type=Path)
     parser.add_argument("--packet-sha256")
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.group == "system-profile-activation-source":
+        from live_test import system_profile_activation_source
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "activation source preflight requires packet, digest, private output and live read-only checks"
+            )
+        return system_profile_activation_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
+    if args.output:
+        parser.error("--output requires --group system-profile-activation-source")
     if args.group == "system-profile-source":
         from live_test import system_profile_source
 
