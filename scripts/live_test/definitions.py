@@ -16,7 +16,7 @@ from typing import Any
 from hmcpctl.server import TOOL_SECURITY
 from hmcpctl.tool_registry import ToolSecurity
 
-from .observation import OPERATION_ID, SCENARIO_ID
+from .observation import OPERATION_ID
 
 DEFINITIONS_PATH = Path(__file__).with_name("scenario_definitions.json")
 FORMAT_VERSION = 1
@@ -99,7 +99,7 @@ def _definition(
         raise DefinitionError(f"operation {operation} is not a registered tool's")
     tool, security = tools[operation]
     expected_id = scenario_id(operation)
-    if raw["scenario"] != expected_id or not SCENARIO_ID.fullmatch(expected_id):
+    if raw["scenario"] != expected_id:
         raise DefinitionError(f"scenario must be {expected_id}")
     declared = raw["class"]
     if not isinstance(declared, str) or declared not in _CLASSES:
