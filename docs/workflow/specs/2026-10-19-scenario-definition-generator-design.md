@@ -41,16 +41,16 @@ No change to `definitions.py`, the gap report, the runner, `SUBTASKS`, or maturi
 ## Success
 1. Running the generator writes a registry `definitions.read_definitions()` accepts, holding
    exactly the operations ADR 0249's rule derives, sorted by operation.
-2. Each ledger operation with no definition — `lpar.plan` and `lpar.provision` among them —
-   prints one `hand-written:` line with its reason.
-3. For mutating operations, an optional argument outside the target selectors, connection
-   argument and named run controls yields hand-written.
+2. Each ledger operation with no definition prints one `hand-written:` line with its reason;
+   `lpar.plan` and `provision.lpar` print the nested-container reason.
+3. For mutating operations, an argument outside the target selectors, connection argument
+   and `ownership_override` yields hand-written.
 4. A stale committed registry fails `just test`; `just scenario-gap` stays green.
 
 ## Validation
 - S1 Mode: focused-test — `test_committed_registry_is_fresh` (red: committed file empty).
 - S2 Mode: focused-test — synthetic cases for non-target, container and unregistered
   reasons; `test_nested_container_operations_are_hand_written` over the live registry.
-- S3 Mode: focused-test — synthetic mutating cases, controls-only vs a behaviour argument.
+- S3 Mode: focused-test — synthetic mutating cases, targets and `ownership_override` only vs `wait`.
 - S4 Mode: focused-test — S1's test; `just scenario-gap` exit 0.
 - `main` writing `--output` and printing the summary: focused-test `test_main_writes_output`.
