@@ -15,8 +15,8 @@ ROOT = Path(__file__).parents[1]
 TOOL_PINS = {
     "detect-secrets==1.5.0",
     "prek==0.5.5",
-    "ruff==0.16.10",
-    "ty==0.0.85",
+    "ruff==0.17.0",
+    "ty==0.0.86",
     "zizmor==1.30.1",
 }
 TY_INCLUDE = ["src/hmcpctl", "scripts"]
@@ -39,6 +39,13 @@ RUFF_EXTEND_SELECT = {
     "F405",
     "F406",
     "F722",
+    "DTZ001",
+    "DTZ005",
+    "DTZ006",
+    "DTZ007",
+    "DTZ011",
+    "DTZ012",
+    "DTZ901",
 }
 RUFF_PER_FILE_IGNORE_MODULES = {
     "tests/unit/test_audit.py",
