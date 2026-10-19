@@ -50,7 +50,8 @@ runner change, scenario migration, maturity record or live run (#1093, #620, ope
 
 - Actors: an operator, agent or the #1093 generator writing the registry; CI reading it.
 - Invariants: offline and read-only; a mutating definition is never executable by default
-  (nothing executes definitions); committed definitions carry no lab target identity.
+  (nothing executes definitions); no committed target-selector or connection argument
+  carries a lab identity. Other literals are reviewed like any committed data.
 - Accepted failure classes: the registry is validated against the composed tool registry,
   not against a lab, so a definition can be well-formed and still fail live.
 - Covered elsewhere: execution and its operator opt-in (future); generation (#1093).
