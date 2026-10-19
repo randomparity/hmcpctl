@@ -130,6 +130,13 @@ class _Phase:
     records: tuple[SystemProfileRecord, ...] = ()
 
 
+class _RestInterrupted(Exception):
+    def __init__(self, job: JobOutcome | None, code: str | None):
+        super().__init__("interrupted; caller reconciliation required")
+        self.job = job
+        self.return_code = code
+
+
 def _profile_parent(
     profile: dict, parent: str, system: str, hmc: HMCClient, kind: str
 ) -> None:
@@ -720,13 +727,14 @@ async def _rest(hmc, system, operation, document, timeout, poll):
             state = "failed" if outcome.status in FAILED_JOB_STATUSES else "uncertain"
             return state, outcome, code, warnings, str(exc)
         return "completed", outcome, code, warnings, None
+    except asyncio.CancelledError as exc:
+        raise _RestInterrupted(outcome, code) from exc
     except (
         HMCError,
         ValueError,
         TypeError,
         KeyError,
         TimeoutError,
-        asyncio.CancelledError,
     ) as exc:
         return "uncertain", outcome, code, (), str(exc)[:2048]
 
@@ -853,6 +861,7 @@ async def _metadata(
                     command_status,
                 )
     except (
+        _RestInterrupted,
         HMCError,
         ValueError,
         TypeError,
@@ -862,6 +871,8 @@ async def _metadata(
     ) as exc:
         if not attempted:
             raise
+        if isinstance(exc, _RestInterrupted):
+            job, code = exc.job, exc.return_code
         error = str(exc)[:2048] or "interrupted; reconcile known effects before replay"
         if state != "failed":
             state = "uncertain"
@@ -1198,6 +1209,7 @@ async def activate_system_profile(
                 if state == "completed" and execution != "complete":
                     state = "uncertain"
     except (
+        _RestInterrupted,
         HMCError,
         ValueError,
         TypeError,
@@ -1207,6 +1219,8 @@ async def activate_system_profile(
     ) as exc:
         if not attempted:
             raise
+        if isinstance(exc, _RestInterrupted):
+            job, code = exc.job, exc.return_code
         error = str(exc)[:2048] or "interrupted; caller reconciliation required"
         if state != "failed":
             state = "uncertain"

@@ -1186,3 +1186,61 @@ def test_parse_feed_associated_profile_and_conflicting_references(system_profile
             },
             SimpleNamespace(resource_type="LogicalPartition", partition_uuid=L),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "activate"])
+@pytest.mark.parametrize("interruption", ["deadline", "cancel"])
+async def test_public_rest_interruption_stops_reconciliation_reads(
+    system_profiles, operation, interruption
+):
+    import asyncio
+
+    h, _, _, ssh = system_profiles
+    begun = asyncio.Event()
+    interrupted = False
+    post_reads = []
+
+    async def wait(*args, **kwargs):
+        nonlocal interrupted
+        begun.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            interrupted = True
+
+    async def command(_config, cmd, **kwargs):
+        if interrupted:
+            post_reads.append(cmd)
+            await asyncio.sleep(0.05)
+        if "-F name:lpar_id:curr_profile" in cmd:
+            return "name:lpar_id:curr_profile\nmember-a:1:\n"
+        return (
+            "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+
+    ssh.side_effect = command
+    h.submit_job = AsyncMock(return_value=terminal("NOT_STARTED"))
+    h.wait_for_job_entry = AsyncMock(side_effect=wait)
+    args = {
+        "exclusive_writer_window": True,
+        "timeout_seconds": 1 if interruption == "deadline" else 30,
+        "poll_interval": 1,
+    }
+    call = (
+        ops.create_system_profile(
+            h, S, "new", [ops.SystemProfilePair(partition=L, profile=P)], **args
+        )
+        if operation == "create"
+        else ops.activate_system_profile(h, S, "scratch", **args)
+    )
+    task = asyncio.create_task(call)
+    await asyncio.wait_for(begun.wait(), 5)
+    if interruption == "cancel":
+        task.cancel()
+    result = await task
+    assert result.state == "uncertain" and result.job.job_id == "job-1"
+    assert result.postcondition == "unverified" and h.submit_job.await_count == 1
+    assert interrupted and post_reads == []
