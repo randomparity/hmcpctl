@@ -32,6 +32,13 @@ def hmc_list_system_profiles(
     Uses the fixed SSH inventory route and current contained profile identities.
     Invalid or unreadable whole inventory returns records=null, never empty success.
     profile selects the configured HMC connection; it is not a member profile.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        name: Exact system-profile name.
+        timeout_seconds: Positive overall operation deadline in seconds; timeout requires reconciliation before replay.
+        poll_interval: Positive native job polling interval in seconds, bounded by the deadline.
+        profile: Optional configured HMC connection profile; distinct from every contained member profile.
     """
     return with_client(
         lambda hmc: list_system_profiles(
@@ -66,6 +73,16 @@ def hmc_create_system_profile(
     Requires all-targets authorization and every member's normal ownership policy.
     exclusive_writer_window attests caller coordination through terminal reconciliation;
     it does not fence other writers. No replay or rollback follows an uncertain result.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        name: Exact system-profile name.
+        members: Explicit partition/profile selector pairs; each profile must be contained by its partition.
+        exclusive_writer_window: Attest caller coordination over affected members and namespace through terminal reconciliation.
+        ownership_override: Use existing audited ownership override; cannot waive missing identity or containment.
+        timeout_seconds: Positive overall operation deadline in seconds; timeout requires reconciliation before replay.
+        poll_interval: Positive native job polling interval in seconds, bounded by the deadline.
+        profile: Optional configured HMC connection profile; distinct from every contained member profile.
     """
     return with_client(
         lambda hmc: create_system_profile(
@@ -103,6 +120,17 @@ def hmc_update_system_profile(
 
     Requires caller coordination and current contained profile evidence. An ownership
     override follows existing audited policy and cannot waive missing evidence.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        name: Exact system-profile name.
+        new_name: Optional collision-free replacement name; omitted keeps the current name.
+        members: Explicit partition/profile selector pairs; each profile must be contained by its partition.
+        exclusive_writer_window: Attest caller coordination over affected members and namespace through terminal reconciliation.
+        ownership_override: Use existing audited ownership override; cannot waive missing identity or containment.
+        timeout_seconds: Positive overall operation deadline in seconds; timeout requires reconciliation before replay.
+        poll_interval: Positive native job polling interval in seconds, bounded by the deadline.
+        profile: Optional configured HMC connection profile; distinct from every contained member profile.
     """
     return with_client(
         lambda hmc: update_system_profile(
@@ -137,6 +165,13 @@ def hmc_delete_system_profile(
 
     Every current member is authorized before one command. Independent readback
     cannot turn a failed or uncertain command into successful deletion. No fallback.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        name: Exact system-profile name.
+        exclusive_writer_window: Attest caller coordination over affected members and namespace through terminal reconciliation.
+        ownership_override: Use existing audited ownership override; cannot waive missing identity or containment.
+        profile: Optional configured HMC connection profile; distinct from every contained member profile.
     """
     return with_client(
         lambda hmc: delete_system_profile(
@@ -173,6 +208,17 @@ def hmc_activate_system_profile(
     writer assertion; activating actions require it through reconciliation. Continuation
     is activation-only. Unknown application evidence remains unknown, including stale
     before-matching profiles. Completion is no universal saved-field or guest-boot proof.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        name: Exact system-profile name.
+        action: validate, activate, or validate-and-activate; validation-only does not activate members.
+        continue_on_error: Activation-only continuation after a member failure; never automatic retry.
+        exclusive_writer_window: Attest caller coordination over affected members and namespace through terminal reconciliation.
+        ownership_override: Use existing audited ownership override; cannot waive missing identity or containment.
+        timeout_seconds: Positive overall operation deadline in seconds; timeout requires reconciliation before replay.
+        poll_interval: Positive native job polling interval in seconds, bounded by the deadline.
+        profile: Optional configured HMC connection profile; distinct from every contained member profile.
     """
     return with_client(
         lambda hmc: activate_system_profile(

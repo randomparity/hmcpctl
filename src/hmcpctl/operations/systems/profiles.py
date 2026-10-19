@@ -13,7 +13,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import asyncssh
-from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from ...client.core import HMCClient
 from ...errors import HMCError
@@ -54,8 +54,10 @@ class SystemProfilePair(BaseModel):
     """A contained partition/profile selector pair, never connection configuration."""
 
     model_config = ConfigDict(extra="forbid")
-    partition: StrictStr
-    profile: StrictStr
+    partition: StrictStr = Field(description="Exact partition name or UUID.")
+    profile: StrictStr = Field(
+        description="Exact contained profile name or UUID; not an HMC connection."
+    )
 
     @field_validator("partition", "profile")
     @classmethod
