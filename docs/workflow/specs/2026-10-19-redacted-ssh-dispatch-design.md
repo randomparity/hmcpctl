@@ -43,7 +43,8 @@ One keyword on the existing dispatch, one on the existing record builder. No new
 **Record builder.** `build_attribute_record(pairs, *, quoted=(), surface="-i", secret=())`.
 `secret` names attributes; `_validated_value` gains `redact: bool = False`, and when set every
 refusal message renders the value as `<redacted>` instead of `{text!r}`. Attribute name,
-character and reason are unchanged. The credential warning in the docstring is replaced by a
+character and reason are unchanged. A bare `str` for `secret` is a `TypeError`, checked first.
+The credential warning in the docstring is replaced by a
 pointer to `secret=`.
 
 **Parsers.** No change. `parse_hmc_delimited_rows`, `parse_hmc_result_rows` and
