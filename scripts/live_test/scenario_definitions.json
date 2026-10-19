@@ -1,4 +1,754 @@
 {
   "format_version": 1,
-  "definitions": []
+  "definitions": [
+    {
+      "scenario": "st100-adapter-list",
+      "operation": "adapter.list",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-boot-order-clear",
+      "operation": "boot_order.clear",
+      "class": "mutating",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-boot-order-read",
+      "operation": "boot_order.read",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-capacity-report",
+      "operation": "capacity.report",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-cluster-get-pool",
+      "operation": "cluster.get_pool",
+      "class": "read-only",
+      "arguments": {
+        "ssp_uuid": {
+          "target": "shared_storage_pool"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-cluster-list",
+      "operation": "cluster.list",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-cluster-list-pools",
+      "operation": "cluster.list_pools",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-config-list-hosts",
+      "operation": "config.list_hosts",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-console-info",
+      "operation": "console.info",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-health-fleet",
+      "operation": "health.fleet",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-inventory-logical",
+      "operation": "inventory.logical",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-io-slot-list",
+      "operation": "io_slot.list",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-job-get",
+      "operation": "job.get",
+      "class": "read-only",
+      "arguments": {
+        "job_id": {
+          "target": "job"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-job-wait",
+      "operation": "job.wait",
+      "class": "read-only",
+      "arguments": {
+        "job_id": {
+          "target": "job"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-delete",
+      "operation": "lpar.delete",
+      "class": "mutating",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get",
+      "operation": "lpar.get",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get-description",
+      "operation": "lpar.get_description",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get-memopt-score",
+      "operation": "lpar.get_memopt_score",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get-minimum-affinity-policy",
+      "operation": "lpar.get_minimum_affinity_policy",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get-msp",
+      "operation": "lpar.get_msp",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get-proc-compat",
+      "operation": "lpar.get_proc_compat",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get-state",
+      "operation": "lpar.get_state",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-inspect",
+      "operation": "lpar.inspect",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-list",
+      "operation": "lpar.list",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-list-memopt-scores",
+      "operation": "lpar.list_memopt_scores",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-list-ownership",
+      "operation": "lpar.list_ownership",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-list-refcodes",
+      "operation": "lpar.list_refcodes",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-plan-memopt-scores",
+      "operation": "lpar.plan_memopt_scores",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-summary",
+      "operation": "lpar.summary",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-profile-list-backups",
+      "operation": "lpar_profile.list_backups",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-media-list-mappings",
+      "operation": "media.list_mappings",
+      "class": "read-only",
+      "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-memory-pool-list",
+      "operation": "memory_pool.list",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-memory-pool-remove",
+      "operation": "memory_pool.remove",
+      "class": "mutating",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-network-list-bridges",
+      "operation": "network.list_bridges",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-network-list-fc-ports",
+      "operation": "network.list_fc_ports",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-network-list-networks",
+      "operation": "network.list_networks",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-network-list-sea",
+      "operation": "network.list_sea",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-network-list-switches",
+      "operation": "network.list_switches",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-operation-status",
+      "operation": "operation.status",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-pcie-list-dedicated-slots",
+      "operation": "pcie.list_dedicated_slots",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-pcie-list-sriov-adapters",
+      "operation": "pcie.list_sriov_adapters",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-pcie-list-sriov-logical-ports",
+      "operation": "pcie.list_sriov_logical_ports",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-pcie-list-sriov-physical-ports",
+      "operation": "pcie.list_sriov_physical_ports",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-permissions-describe",
+      "operation": "permissions.describe",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-remote-access-get",
+      "operation": "remote_access.get",
+      "class": "read-only",
+      "arguments": {
+        "console_uuid": {
+          "target": "console"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-resource-group-list-memopt-scores",
+      "operation": "resource_group.list_memopt_scores",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-resource-group-plan-memopt-scores",
+      "operation": "resource_group.plan_memopt_scores",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-resource-role-list",
+      "operation": "resource_role.list",
+      "class": "read-only",
+      "arguments": {
+        "console_uuid": {
+          "target": "console"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-storage-list-mappings",
+      "operation": "storage.list_mappings",
+      "class": "read-only",
+      "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-storage-list-volume-groups",
+      "operation": "storage.list_volume_groups",
+      "class": "read-only",
+      "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-system-get",
+      "operation": "system.get",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-system-get-memopt-score",
+      "operation": "system.get_memopt_score",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-system-get-proc-compat-modes",
+      "operation": "system.get_proc_compat_modes",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-system-list",
+      "operation": "system.list",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-system-plan-memopt-score",
+      "operation": "system.plan_memopt_score",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-system-summary",
+      "operation": "system.summary",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-task-role-list",
+      "operation": "task_role.list",
+      "class": "read-only",
+      "arguments": {
+        "console_uuid": {
+          "target": "console"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-template-get",
+      "operation": "template.get",
+      "class": "read-only",
+      "arguments": {
+        "template_uuid": {
+          "target": "template"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-template-list",
+      "operation": "template.list",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-tools-search",
+      "operation": "tools.search",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-user-delete",
+      "operation": "user.delete",
+      "class": "mutating",
+      "arguments": {
+        "console_uuid": {
+          "target": "console"
+        },
+        "user_profile_uuid": {
+          "target": "user"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-user-get",
+      "operation": "user.get",
+      "class": "read-only",
+      "arguments": {
+        "console_uuid": {
+          "target": "console"
+        },
+        "user_profile_uuid": {
+          "target": "user"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-user-list",
+      "operation": "user.list",
+      "class": "read-only",
+      "arguments": {
+        "console_uuid": {
+          "target": "console"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-delete",
+      "operation": "vios.delete",
+      "class": "mutating",
+      "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-get",
+      "operation": "vios.get",
+      "class": "read-only",
+      "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-list",
+      "operation": "vios.list",
+      "class": "read-only",
+      "arguments": {},
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-list-backups",
+      "operation": "vios.list_backups",
+      "class": "read-only",
+      "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-label-list-fc-ports",
+      "operation": "vios_label.list_fc_ports",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-label-list-vfc-groups",
+      "operation": "vios_label.list_vfc_groups",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vnic-list",
+      "operation": "vnic.list",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    }
+  ]
 }
