@@ -29,7 +29,11 @@ from hmcpctl.operations.lpar.ownership import (
     parse_lpar_ownership_caller_token,
 )
 from hmcpctl.resource_identity import is_uuid
-from hmcpctl.ssh.commands import build_attribute_record, parse_hmc_delimited_rows
+from hmcpctl.ssh.commands import (
+    build_attribute_record,
+    build_filter,
+    parse_hmc_delimited_rows,
+)
 from hmcpctl.ssh.lpar import create_lpar_via_cli, stamp_lpar_ownership
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import render_mtms
@@ -726,7 +730,7 @@ async def facts(hmc, packet, document):
     system = _cli_name(binding(packet))
     for rec in document["fixtures"]:
         e = next(e for e in current["partitions"] if e["UUID"] == rec["uuid"])
-        command = f"lssyscfg -r lpar -m {shlex.quote(system)} --filter {shlex.quote('lpar_ids=' + _text(e['Resource']['PartitionID']))} -F name:lpar_id:curr_profile --header"
+        command = f"lssyscfg -r lpar -m {shlex.quote(system)} --filter {shlex.quote(build_filter([('lpar_ids', _text(e['Resource']['PartitionID']))]))} -F name:lpar_id:curr_profile --header"
         raw = await run_hmc_command(hmc.config, command)
         if len(raw.encode()) > source.LIMIT:
             raise ValueError("independent CLI observation exceeds bound")

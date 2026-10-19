@@ -822,6 +822,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
 
     assert by_label["-i"] == {
         "create_lpar_via_cli",
+        "profile_command",
         "create_vios_vfc_group_label",
         "fc_port_label_round_trip",
         "remove_vios_fc_port_label",
@@ -841,6 +842,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "add_vnic_backing",
     }
     assert by_label["--filter"] == {
+        "facts",
         "scsi_adapter_listing",
         "list_sriov_physical_port_rows",
         "list_sriov_configured_logical_port_rows",
