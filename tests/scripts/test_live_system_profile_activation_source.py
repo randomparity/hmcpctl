@@ -280,7 +280,7 @@ def hardware(packet, monkeypatch):
         e["Resource"]["Description"] = desc
         return desc
 
-    async def ssh(config, command):
+    async def ssh(config, command, *, include_stderr=False):
         state["commands"].append(command)
         args = shlex.split(command)
         if args[:3] == ["lssyscfg", "-r", "sysprof"]:
@@ -1322,8 +1322,8 @@ async def test_cli_inventory_failure_stops_all_later_effects(
     packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
     original = arm.run_hmc_command
 
-    async def transport(config, command):
-        result = await original(config, command)
+    async def transport(config, command, **kwargs):
+        result = await original(config, command, **kwargs)
         if "-F name:lpar_ids:profile_names" in command:
             if fault == "drift":
                 state["members"][L]["Resource"]["Description"] = "changed"
@@ -1416,3 +1416,42 @@ async def test_recovery_rejects_forged_duplicate_current_partition_ids(
         proof["raw"] = "\n".join(lines) + "\n"
     with pytest.raises(ValueError, match="unique current PartitionID"):
         await arm.recover(h, packet, document)
+
+
+@pytest.mark.asyncio
+async def test_inventory_success_stderr_stops_before_proof_or_later_effects(
+    packet, hardware, tmp_path, monkeypatch
+):
+    from unittest.mock import MagicMock
+
+    from hmcpctl.ssh import transport as native_transport
+
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = arm.run_hmc_command
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    connection.__aexit__.return_value = False
+    monkeypatch.setattr(
+        native_transport.asyncssh, "connect", MagicMock(return_value=connection)
+    )
+
+    async def dispatch(config, command, **kwargs):
+        stdout = await original(config, command)
+        if "-F name:lpar_ids:profile_names" not in command:
+            return stdout
+        connection.run.return_value = SimpleNamespace(
+            stdout=stdout, stderr="inventory may be incomplete\n"
+        )
+        return await native_transport.run_hmc_command(
+            config.model_copy(update={"password": "p"}), command, **kwargs
+        )
+
+    monkeypatch.setattr(arm, "run_hmc_command", dispatch)
+    with pytest.raises(ValueError):
+        await capture_in(h, packet, tmp_path)
+    doc = json.loads((tmp_path / "capture" / "results.json").read_text())
+    assert doc["inventory_reads"] == []
+    assert all(j["operation"] == "CreateSystemProfile" for j in doc["jobs"])
+    assert len(state["members"]) == 3 and len(state["sysprofiles"]) == 1
+    h.delete_logical_partition.assert_not_awaited()

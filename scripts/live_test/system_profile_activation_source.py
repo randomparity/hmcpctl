@@ -730,7 +730,7 @@ async def _inventory(hmc, packet, document, directory):
         f"lssyscfg -r sysprof -m {shlex.quote(_cli_name(binding(packet)))} "
         "-F name:lpar_ids:profile_names --header"
     )
-    raw = await run_hmc_command(hmc.config, command)
+    raw = await run_hmc_command(hmc.config, command, include_stderr=True)
     rows = _inventory_rows(raw)
     fresh = await guard(hmc, packet, document)
     _check_inventory(rows, fresh, document, document["system_profiles"])
