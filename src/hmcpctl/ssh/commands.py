@@ -167,6 +167,9 @@ def build_attribute_record(
         seen.add(attribute)
     quotable = frozenset(quoted)
     secret_names = frozenset(secret)
+    if unknown := sorted(secret_names - seen):
+        # A misspelled secret name would leave the real credential unredacted.
+        raise ValueError(f"secret names attributes not in the record: {unknown}")
     parts = []
     for index, (attribute, value) in enumerate(pairs):
         text = _validated_value(

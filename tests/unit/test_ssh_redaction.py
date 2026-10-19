@@ -249,6 +249,59 @@ def test_bare_string_secret_names_rejected():
         build_attribute_record([("passwd", "top,x")], secret=names)
 
 
+def test_secret_name_absent_from_record_rejected():
+    with pytest.raises(ValueError, match=r"\['password'\]"):
+        build_attribute_record([("passwd", "top,x")], secret={"password"})
+
+
+@pytest.mark.asyncio
+async def test_loopback_exec_failure_redacts_error_and_asyncssh_log(
+    monkeypatch, caplog
+):
+    """A real asyncssh peer: its own exec-path log record and echoed stderr."""
+
+    class Server(asyncssh.SSHServer):
+        def begin_auth(self, username):
+            return True
+
+        def password_auth_supported(self):
+            return True
+
+        def validate_password(self, username, password):
+            return True
+
+    def process_handler(process):
+        process.stderr.write(f"HSCL1234 rejected: {process.command}\n")
+        process.exit(1)
+
+    async with asyncssh.create_server(
+        Server,
+        "127.0.0.1",
+        0,
+        server_host_keys=[asyncssh.generate_private_key("ssh-ed25519")],
+        process_factory=process_handler,
+    ) as listener:
+        connect = asyncssh.connect
+        monkeypatch.setattr(
+            asyncssh,
+            "connect",
+            lambda **kwargs: connect(port=listener.get_port(), config=None, **kwargs),
+        )
+        config = make_config(host="127.0.0.1", ssh_verify_host_key=False, ssh_timeout=5)
+        with (
+            caplog.at_level(logging.INFO, logger="asyncssh"),
+            pytest.raises(HMCCLIError) as exc_info,
+        ):
+            await run_hmc_command(config, CMD, secrets=[SECRET])
+
+    _assert_no_secret(str(exc_info.value))
+    assert "HSCL1234 rejected" in str(exc_info.value)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("Command:" in message for message in messages)
+    for message in messages:
+        _assert_no_secret(message)
+
+
 def test_non_secret_attribute_refusal_still_quotes_value():
     with pytest.raises(HMCCLIError, match="'op,x'"):
         build_attribute_record([("name", "op,x"), ("passwd", "p")], secret={"passwd"})
