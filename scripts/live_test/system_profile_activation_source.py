@@ -410,7 +410,10 @@ def _profile_parent(profile, uuid, b):
 
 def _runtime_limits(resource):
     memory = resource.get("PartitionMemoryConfiguration", {})
-    running = _text(resource.get("PartitionState")).lower() == "running"
+    state = _text(resource.get("PartitionState")).lower()
+    if state not in {"running", "not activated"}:
+        raise ValueError("known fixture power state required; uncertainty STOP")
+    running = state == "running"
     if running and any(key not in memory for key in ("CurrentMemory", "RuntimeMemory")):
         raise ValueError(
             "actual running fixture memory observations missing; uncertainty STOP"
@@ -522,6 +525,7 @@ async def _create_fixture(hmc, packet, document, directory, index):
         raise ValueError("created baseline profile is not exact")
     _profile_parent(entry["profiles"][0], entry["UUID"], b)
     _safe_profile(entry["profiles"][0], 512)
+    _runtime_limits(entry["Resource"])
     partition_id = _text(entry["Resource"].get("PartitionID"))
     if not re.fullmatch(r"[1-9][0-9]*", partition_id):
         raise ValueError("created fixture lacks a positive contained PartitionID")

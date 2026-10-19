@@ -1455,3 +1455,103 @@ async def test_inventory_success_stderr_stops_before_proof_or_later_effects(
     assert all(j["operation"] == "CreateSystemProfile" for j in doc["jobs"])
     assert len(state["members"]) == 3 and len(state["sysprofiles"]) == 1
     h.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("negative", [False, True])
+async def test_unknown_power_read_proof_never_recovers_clean(
+    packet, hardware, tmp_path, negative
+):
+    h, _state = hardware
+    packet["negative_cases"] = negative
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    fixture = doc["fixtures"][0]["uuid"]
+    entry = next(
+        e
+        for e in doc["inventory_reads"][0]["observed"]["partitions"]
+        if e["UUID"] == fixture
+    )
+    entry["Resource"]["PartitionState"] = "Starting"
+    with pytest.raises(ValueError, match="known fixture power"):
+        await arm.recover(h, packet, doc)
+
+
+@pytest.mark.asyncio
+async def test_unknown_power_predelete_observation_stops_every_later_mutation(
+    packet, hardware, tmp_path, monkeypatch
+):
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = arm.run_hmc_command
+    admission = []
+    reads = 0
+
+    def mutation_log():
+        return (
+            tuple(
+                c for c in state["commands"] if c.startswith(("mksyscfg", "rmsyscfg"))
+            ),
+            arm.create_lpar_via_cli.await_count,
+            arm.stamp_lpar_ownership.await_count,
+            h.submit_job.await_count,
+            h.delete_job.await_count,
+            h.delete_logical_partition.await_count,
+        )
+
+    async def transport(config, command, **kwargs):
+        nonlocal reads
+        result = await original(config, command, **kwargs)
+        if "-F name:lpar_ids:profile_names" in command:
+            reads += 1
+            if reads == 2:
+                entry = next(
+                    e
+                    for e in state["members"].values()
+                    if e["Resource"]["PartitionName"] == arm.NAMES[0]
+                )
+                entry["Resource"]["PartitionState"] = "Starting"
+                admission.append(mutation_log())
+        return result
+
+    monkeypatch.setattr(arm, "run_hmc_command", transport)
+    with pytest.raises(ValueError):
+        await capture_in(h, packet, tmp_path)
+    assert admission and bool(mutation_log() == admission[0]), (
+        "mutation after unknown observation"
+    )
+    doc = json.loads((tmp_path / "capture" / "results.json").read_text())
+    assert len(doc["inventory_reads"]) == 1
+    assert len(state["sysprofiles"]) == 1 and len(state["members"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_unknown_new_fixture_power_prevents_initial_stamp(
+    packet, hardware, tmp_path, monkeypatch
+):
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = arm.create_lpar_via_cli
+
+    async def create(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        next(
+            e
+            for e in state["members"].values()
+            if e["Resource"]["PartitionName"] == arm.NAMES[0]
+        )["Resource"]["PartitionState"] = "Starting"
+        return result
+
+    monkeypatch.setattr(arm, "create_lpar_via_cli", AsyncMock(side_effect=create))
+    with pytest.raises(ValueError):
+        await capture_in(h, packet, tmp_path)
+    arm.stamp_lpar_ownership.assert_not_awaited()
+    h.submit_job.assert_not_awaited()
+    h.delete_logical_partition.assert_not_awaited()
+    assert len(state["members"]) == 2
+
+
+@pytest.mark.parametrize("state", [None, "", "Starting", "unknown"])
+def test_unknown_power_cannot_be_treated_as_inactive(state):
+    with pytest.raises(ValueError, match="known fixture power"):
+        arm._runtime_limits({"PartitionState": state})
