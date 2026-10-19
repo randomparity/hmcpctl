@@ -1084,3 +1084,46 @@ async def test_public_mutations_refuse_fresh_association_drift(
                 h, S, "scratch", action=operation, exclusive_writer_window=True
             )
     assert reads == 2 and not effects and h.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_public_activation_retains_job_when_requested_profile_disappears(
+    system_profiles, failed
+):
+    h, _, profile, ssh = system_profiles
+    changed = False
+
+    async def command(_config, cmd, **kwargs):
+        if "-F name:lpar_id:curr_profile" in cmd:
+            return "name:lpar_id:curr_profile\nmember-a:1:\n"
+        return (
+            f"name:lpar_ids:profile_names\nscratch:1:{'alternate' if changed else 'base'}\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+
+    async def wait(*args, **kwargs):
+        nonlocal changed
+        changed = True
+        profile["UUID"] = "44444444-4444-4444-8444-444444444444"
+        profile["Resource"]["ProfileName"] = "alternate"
+        return terminal(
+            "FAILED_BEFORE_COMPLETION" if failed else "COMPLETED_OK",
+            "1" if failed else "0",
+        )
+
+    ssh.side_effect = command
+    h.submit_job = AsyncMock(return_value=terminal("NOT_STARTED"))
+    h.wait_for_job_entry = AsyncMock(side_effect=wait)
+    result = await ops.activate_system_profile(
+        h, S, "scratch", exclusive_writer_window=True
+    )
+    assert result.job.job_id == "job-1" and h.submit_job.await_count == 1
+    assert result.state == ("failed" if failed else "uncertain")
+    assert result.return_code == ("1" if failed else "0")
+    assert (
+        result.activation_execution == "unknown"
+        and result.postcondition == "unverified"
+    )
+    assert "requested contained profile" in result.error

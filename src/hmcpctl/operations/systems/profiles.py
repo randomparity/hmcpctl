@@ -968,8 +968,12 @@ async def _facts(hmc, phase, members):
         actual = _associated(hmc, resource, member)
         profiles = [p for p in entry["profiles"] if p["UUID"] == actual]
         requested = next(
-            p for p in entry["profiles"] if p["UUID"] == member.profile_uuid
+            (p for p in entry["profiles"] if p["UUID"] == member.profile_uuid), None
         )
+        if requested is None:
+            raise ValueError(
+                "requested contained profile is unavailable during readback"
+            )
         result[member.partition_uuid] = {
             "resource": deepcopy(
                 {k: v for k, v in resource.items() if k not in {"Metadata", "Uptime"}}
