@@ -181,3 +181,12 @@ them by hand, apart from an allowlist entry's `reason` (the #1561 `sources`
 correction above is the one exception). To add a new capture to
 a pair that already has a vocabulary, follow that page's "Adding a capture to an
 existing pair": add the raw file to the pair's export inputs and re-derive.
+
+`vocabulary/v10r3-8375-42a-system-profiles.json` is a CLI-only derivation for #1725,
+from four actual whole system-profile reads recorded during the authorized source
+calibration on HMC V10R3 SP1060 managing an 8375-42A. The fixed command was
+reconstructed from the immutable producing source revision and bound MTMS; stdout
+is the saved native `inventory_reads` output. No name-only raw response was
+invented. Existing tokenizer/vocabulary exporter produced the artifact; enum
+input contributes no REST values. `../system_profiles/provenance.txt` retains
+public integrity hashes. This is SOURCE command vocabulary, not product evidence.

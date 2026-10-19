@@ -528,3 +528,13 @@ async def read_lpar_profile_record(
             f"received {len(records)}"
         )
     return records[0]
+
+
+async def list_system_profile_records(config: HMCConfig, system_cli_name: str) -> str:
+    """Read the entire system-profile association inventory, retaining diagnostics."""
+    return await run_hmc_command(
+        config,
+        f"lssyscfg -r sysprof -m {shlex.quote(system_cli_name)} "
+        "-F name:lpar_ids:profile_names --header",
+        include_stderr=True,
+    )

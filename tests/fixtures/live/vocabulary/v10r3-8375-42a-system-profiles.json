@@ -1,0 +1,30 @@
+{
+ "firmware": "v10r3-8375-42a-system-profiles",
+ "sources": [
+  "2026-10-19 authorized SOURCE calibration, HMC V10R3 SP1060 managing 8375-42A; producing a33e2626; four saved inventory_reads reconstructed with fixed immutable source request and actual raw stdout. CLI-only evidence, not product proof; full hashes in system_profiles/provenance.txt."
+ ],
+ "rest": {
+  "endpoints": [],
+  "errors": [],
+  "values": {},
+  "element_enums": {}
+ },
+ "cli": {
+  "commands": [
+   {
+    "command": "lssyscfg -r sysprof -m {} -F name:lpar_ids:profile_names --header",
+    "exit_status": [
+     0
+    ],
+    "codes": [],
+    "outputs": [],
+    "error_streams": []
+   }
+  ],
+  "values": {
+   "lssyscfg -r sysprof :: name:lpar_ids:profile_names": [
+    "<text>"
+   ]
+  }
+ }
+}

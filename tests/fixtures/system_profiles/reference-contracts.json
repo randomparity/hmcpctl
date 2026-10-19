@@ -1,0 +1,19 @@
+{
+  "provenance": "Constructed identities and membership using native-observed three-column and multirow shape; not a verbatim capture or product-native proof.",
+  "columns": [
+    "name",
+    "lpar_ids",
+    "profile_names"
+  ],
+  "routes": {
+    "create": "rest-job",
+    "list": "ssh-command",
+    "update": "rest-job",
+    "delete": "ssh-command",
+    "validate": "ssh-command",
+    "activate": "rest-job",
+    "validate-and-activate": "ssh-command"
+  },
+  "native_rest_get_delete_validation_verified": false,
+  "provenance_file": "provenance.txt"
+}

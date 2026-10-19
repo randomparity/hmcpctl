@@ -1,0 +1,3 @@
+name:lpar_ids:profile_names
+scratch:1:base
+second:1:base
