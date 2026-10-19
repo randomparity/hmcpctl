@@ -1,0 +1,45 @@
+"""Fixed managed-system system-profile request contracts."""
+
+import xml.etree.ElementTree as ET
+
+import pytest
+
+from hmcpctl.jobs import requests
+
+
+def parameters(document):
+    root = ET.fromstring(document)
+    return {
+        p.find("{*}ParameterName").text: p.find("{*}ParameterValue").text
+        for p in root.findall(".//{*}JobParameter")
+    }
+
+
+def test_reference_requests():
+    assert parameters(
+        requests.create_system_profile_job("a&b", ("one",), ("base",))
+    ) == {
+        "systemProfileName": "a&b",
+        "logicalPartitionNames": "one",
+        "logicalPartitionProfileNames": "base",
+    }
+    assert parameters(requests.update_system_profile_job("old", "new")) == {
+        "systemProfileName": "old",
+        "systemProfileNewName": "new",
+    }
+    assert parameters(requests.activate_system_profile_job("x", True)) == {
+        "systemProfile": "x",
+        "operation": "on",
+        "test": "false",
+        "continue": "true",
+    }
+
+
+@pytest.mark.parametrize(
+    "partitions,profiles", [((), ()), (("a",), ()), (None, ("b",))]
+)
+def test_reference_requests_refuse_bad_pairs(partitions, profiles):
+    with pytest.raises(ValueError):
+        requests.update_system_profile_job(
+            "x", partition_names=partitions, profile_names=profiles
+        )

@@ -446,3 +446,147 @@ async def _refresh(hmc, before: _Phase):
     if _stable(before) != _stable(after):
         raise ValueError("system-profile admission changed before effect")
     return after, records
+
+
+def _job_identity(hmc, job, expected=None):
+    from ...jobs import canonical_job_path
+
+    ident = job["Resource"]["JobID"]
+    if not isinstance(ident, str) or not re.fullmatch(
+        r"[A-Za-z0-9_:-][A-Za-z0-9_.:-]*", ident
+    ):
+        raise ValueError("stable native JobID required")
+    if expected is not None and ident != expected:
+        raise ValueError("submission and terminal JobID disagree")
+    path = f"/rest/api/uom/jobs/{ident}"
+    if job.get("link") is not None:
+        u = urlsplit(job["link"])
+        if (
+            u.scheme not in ("", "https")
+            or u.username
+            or u.password
+            or u.query
+            or u.fragment
+            or u.hostname is not None
+            and u.hostname != hmc.config.host
+            or u.port is not None
+            and u.port != hmc.config.port
+            or canonical_job_path(u.path) != path
+        ):
+            raise ValueError("native job SELF destination/identity differs")
+    return ident
+
+
+def _job_values(job):
+    raw = job["Resource"].get("Results", {}).get("JobParameter", [])
+    raw = [raw] if isinstance(raw, dict) else raw
+    if not isinstance(raw, list):
+        raise TypeError("native job results are malformed")
+    values = {}
+    for p in raw:
+        key = _text(p["ParameterName"])
+        if not key or key in values:
+            raise ValueError("duplicate or missing native result parameter")
+        values[key] = _text(p.get("ParameterValue"))
+    _bounded(json.dumps(values))
+    return values
+
+
+def _job_facts(hmc, job, expected):
+    _job_identity(hmc, job, expected)
+    values = _job_values(job)
+    if (
+        job["Resource"].get("Status") != "COMPLETED_OK"
+        or values.get("returnCode") != "0"
+        or values.get("ErrorData")
+        or values.get("errorData")
+    ):
+        raise ValueError("native job lacks definite strict success")
+    return values
+
+
+def _optional_profile(value):
+    if (
+        isinstance(value, dict)
+        and "text" not in value
+        and set(value) <= {"@attrs", "ksv", "kxe", "kb"}
+    ):
+        return ""
+    return _text(value)
+
+
+def _associated(hmc, resource):
+    raw = resource.get("AssociatedPartitionProfile", {})
+    href = raw.get("href") or raw.get("link", {}).get("@attrs", {}).get("href")
+    if not href:
+        return None
+    u = urlsplit(href)
+    prefix = "/rest/api/uom/LogicalPartitionProfile/"
+    if (
+        u.scheme != "https"
+        or u.hostname != hmc.config.host
+        or (u.port or 443) != hmc.config.port
+        or u.username
+        or u.password
+        or u.query
+        or u.fragment
+        or not u.path.startswith(prefix)
+        or not is_uuid(u.path[len(prefix) :])
+    ):
+        raise ValueError("current associated-profile destination is ambiguous")
+    return u.path[len(prefix) :]
+
+
+def _coherent_resources(fact):
+    from decimal import Decimal
+
+    r, profile = fact["resource"], fact["profile"]
+    memory, cpu = (
+        r["PartitionMemoryConfiguration"],
+        r["PartitionProcessorConfiguration"],
+    )
+    pm, pc = profile["ProfileMemory"], profile["ProcessorAttributes"]
+    current, desired = (
+        cpu["CurrentSharedProcessorConfiguration"],
+        pc["SharedProcessorConfiguration"],
+    )
+    units, expected = (
+        Decimal(_text(current["CurrentProcessingUnits"])),
+        Decimal(_text(desired["DesiredProcessingUnits"])),
+    )
+    return (
+        memory["SharedMemoryEnabled"] == pm["ActiveMemorySharingEnabled"] == "false"
+        and cpu["CurrentHasDedicatedProcessors"]
+        == pc["HasDedicatedProcessors"]
+        == "false"
+        and cpu["CurrentSharingMode"] == pc["SharingMode"] == "capped"
+        and int(_text(current["AllocatedVirtualProcessors"]))
+        == int(_text(desired["DesiredVirtualProcessors"]))
+        > 0
+        and units.is_finite()
+        and expected.is_finite()
+        and units == expected > 0
+        and int(_text(memory["CurrentMemory"])) == int(_text(pm["DesiredMemory"])) > 0
+        and 0 < int(_text(memory["RuntimeMemory"])) <= int(_text(pm["DesiredMemory"]))
+    )
+
+
+def _new_witness(hmc, member, before, after):
+    try:
+        old, new = before["resource"], after["resource"]
+        return (
+            member.resource_type == "LogicalPartition"
+            and _text(old["PartitionState"]).lower() == "not activated"
+            and _optional_profile(old.get("LastActivatedProfile"))
+            != member.profile_name
+            and before["cli_profile"] != member.profile_name
+            and _associated(hmc, old) != member.profile_uuid
+            and _text(new["PartitionState"]).lower() in {"running", "open firmware"}
+            and _optional_profile(new.get("LastActivatedProfile"))
+            == after["cli_profile"]
+            == member.profile_name
+            and _associated(hmc, new) == member.profile_uuid
+            and _coherent_resources(after)
+        )
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return False

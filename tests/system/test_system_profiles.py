@@ -285,3 +285,101 @@ async def test_refreshes_before_effect(system_profiles):
     member["Resource"]["PartitionState"] = "running"
     with pytest.raises(ValueError, match="changed"):
         await ops._refresh(h, phase)
+
+
+def terminal(status="COMPLETED_OK", code="0", job_id="job-1", error=""):
+    return {
+        "Resource": {
+            "JobID": job_id,
+            "Status": status,
+            "Results": {
+                "JobParameter": [
+                    {"ParameterName": "returnCode", "ParameterValue": code},
+                    {"ParameterName": "ErrorData", "ParameterValue": error},
+                ]
+            },
+        },
+        "link": f"/rest/api/uom/jobs/{job_id}",
+    }
+
+
+@pytest.mark.parametrize(
+    "fault", ["foreign-link", "wrong-id", "warning", "missing-code", "error"]
+)
+def test_job_and_member_outcomes_refuse_false_success(system_profiles, fault):
+    h, _, _, _ = system_profiles
+    job = terminal()
+    if fault == "foreign-link":
+        job["link"] = "https://foreign.test/rest/api/uom/jobs/job-1"
+    if fault == "wrong-id":
+        job["Resource"]["JobID"] = "other"
+    if fault == "warning":
+        job["Resource"]["Status"] = "COMPLETED_WITH_WARNINGS"
+    if fault == "missing-code":
+        job["Resource"]["Results"]["JobParameter"] = []
+    if fault == "error":
+        job["Resource"]["Results"]["JobParameter"][1]["ParameterValue"] = "diagnostic"
+    with pytest.raises(ValueError):
+        ops._job_facts(h, job, "job-1")
+
+
+def activation_fact(state, profile, memory, uuid=P):
+    return {
+        "resource": {
+            "PartitionState": state,
+            "LastActivatedProfile": profile,
+            "AssociatedPartitionProfile": {
+                "href": f"https://hmc.test/rest/api/uom/LogicalPartitionProfile/{uuid}"
+            },
+            "PartitionMemoryConfiguration": {
+                "SharedMemoryEnabled": "false",
+                "CurrentMemory": str(memory),
+                "RuntimeMemory": str(memory),
+            },
+            "PartitionProcessorConfiguration": {
+                "CurrentHasDedicatedProcessors": "false",
+                "CurrentSharingMode": "capped",
+                "CurrentSharedProcessorConfiguration": {
+                    "AllocatedVirtualProcessors": "1",
+                    "CurrentProcessingUnits": "0.05",
+                },
+            },
+        },
+        "cli_profile": profile,
+        "profile": {
+            "ProfileMemory": {
+                "DesiredMemory": "1024",
+                "ActiveMemorySharingEnabled": "false",
+            },
+            "ProcessorAttributes": {
+                "HasDedicatedProcessors": "false",
+                "SharingMode": "capped",
+                "SharedProcessorConfiguration": {
+                    "DesiredVirtualProcessors": "1",
+                    "DesiredProcessingUnits": "0.05",
+                },
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "fault", [None, "stale", "starting", "memory", "profile", "missing"]
+)
+def test_job_and_member_outcomes_witness(system_profiles, fault):
+    h, _, _, _ = system_profiles
+    member = ops.SystemProfileMember("LogicalPartition", L, 1, "member-a", P, "base")
+    before = activation_fact("not activated", "", 0)
+    before["resource"].pop("AssociatedPartitionProfile")
+    after = activation_fact("open firmware", "base", 1024)
+    if fault == "stale":
+        before["cli_profile"] = "base"
+    if fault == "starting":
+        after["resource"]["PartitionState"] = "Starting"
+    if fault == "memory":
+        after["resource"]["PartitionMemoryConfiguration"]["CurrentMemory"] = "512"
+    if fault == "profile":
+        after["resource"]["LastActivatedProfile"] = "other"
+    if fault == "missing":
+        del after["resource"]["PartitionMemoryConfiguration"]["RuntimeMemory"]
+    assert ops._new_witness(h, member, before, after) is (fault is None)
