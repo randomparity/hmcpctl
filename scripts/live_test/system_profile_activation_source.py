@@ -60,10 +60,6 @@ CREATE_PARAMETERS = tuple(
 REQUESTS = {
     "create-complete": ("CreateSystemProfile", CREATE_PARAMETERS[0]),
     "create-mixed": ("CreateSystemProfile", CREATE_PARAMETERS[1]),
-    "validate": (
-        "ActivateSystemProfile",
-        {"systemProfile": SYSTEM_PROFILES[0], "test": "true", "continue": "false"},
-    ),
     "activate": (
         "ActivateSystemProfile",
         {
@@ -654,7 +650,7 @@ async def _finish_job(
 
 async def _job(hmc, packet, document, directory, stage):
     if stage not in REQUESTS:
-        raise ValueError("only seven fixed calibration request variants allowed")
+        raise ValueError("only fixed calibration request variants allowed")
     operation, parameters = REQUESTS[stage]
     negative = stage in {"negative-false", "negative-true"}
     await guard(hmc, packet, document)
@@ -784,6 +780,90 @@ async def facts(hmc, packet, document):
     return observed
 
 
+def _validation_command(packet):
+    return (
+        f"chsysstate -m {shlex.quote(_cli_name(binding(packet)))} "
+        f"-r sysprof -n {shlex.quote(SYSTEM_PROFILES[0])} --test"
+    )
+
+
+def _check_validation(packet, document, proof):
+    if (
+        proof.get("effect_count") != 7
+        or proof.get("command") != _validation_command(packet)
+        or type(proof.get("exit")) is not int
+        or proof["exit"] != 0
+        or not isinstance(proof.get("raw"), str)
+        or len(proof["raw"].encode()) > source.LIMIT
+        or "[stderr]" in proof["raw"].splitlines()
+        or proof["before_facts"] != proof["after_facts"]
+        or proof["before"] != proof["after"]
+    ):
+        raise ValueError(
+            "fixed validation command proof is incomplete or contradictory"
+        )
+    for phase in ("before", "after"):
+        observed = proof[phase]
+        _check_inventory(
+            _inventory_rows(document["inventory_reads"][0]["raw"]),
+            observed,
+            document,
+            [SYSTEM_PROFILES[0]],
+        )
+        expected = [
+            next(e for e in observed["partitions"] if e["UUID"] == r["uuid"])
+            for r in document["fixtures"]
+        ]
+        facts = proof[phase + "_facts"]
+        if (
+            len(facts) != 2
+            or [f["partition"] for f in facts] != expected
+            or any(not isinstance(f["cli_current_profile"], str) for f in facts)
+            or any(
+                _text(e["Resource"].get("PartitionState")).lower() != "not activated"
+                for e in expected
+            )
+        ):
+            raise ValueError(
+                "validation facts do not bind the inactive current fixtures"
+            )
+
+
+async def _validate(hmc, packet, document, directory):
+    if document["validation_commands"]:
+        raise ValueError("only one fixed validation command permitted")
+    proof = {
+        "effect_count": len(document["effects"]),
+        "command": _validation_command(packet),
+    }
+    proof["before"] = await guard(hmc, packet, document)
+    proof["before_facts"] = await facts(hmc, packet, document)
+    if any(
+        _text(f["partition"]["Resource"].get("PartitionState")).lower()
+        != "not activated"
+        for f in proof["before_facts"]
+    ):
+        raise ValueError("complete-path members must both be shut down")
+    if [f["partition"] for f in proof["before_facts"]] != [
+        next(e for e in proof["before"]["partitions"] if e["UUID"] == r["uuid"])
+        for r in document["fixtures"]
+    ]:
+        raise ValueError("validation admission observations changed")
+    _intent(document, directory, "validate-scratch-system-profile", SYSTEM_PROFILES[0])
+    document["validation_commands"].append(proof)
+    source.save(directory, document)
+    proof["raw"] = await run_hmc_command(
+        hmc.config, proof["command"], include_stderr=True
+    )
+    proof["exit"] = 0  # The existing transport raises on a nonzero native exit.
+    source.save(directory, document)
+    proof["after_facts"] = await facts(hmc, packet, document)
+    proof["after"] = await guard(hmc, packet, document)
+    _check_validation(packet, document, proof)
+    _settled(document, directory)
+    return proof["before_facts"]
+
+
 def calibrated(before: list, after: list) -> bool:
     """Consistency of experimental facts, explicitly NOT an application classifier."""
     for index, (old, new) in enumerate(zip(before, after, strict=True)):
@@ -864,6 +944,7 @@ async def capture(hmc, packet, directory):
         "system_profile_members": {},
         "jobs": [],
         "inventory_reads": [],
+        "validation_commands": [],
         "effects": [],
         "run": {
             "group": GROUP,
@@ -890,16 +971,7 @@ async def capture(hmc, packet, directory):
             await _create_fixture(hmc, packet, document, directory, i)
             await _create_profile(hmc, packet, document, directory, i)
         await _system_profile(hmc, packet, document, directory, 0)
-        initial = await facts(hmc, packet, document)
-        if any(
-            _text(e["partition"]["Resource"].get("PartitionState")).lower()
-            != "not activated"
-            for e in initial
-        ):
-            raise ValueError("complete-path members must both be shut down")
-        await _job(hmc, packet, document, directory, "validate")
-        if await facts(hmc, packet, document) != initial:
-            raise ValueError("validation changed fixture baseline")
+        initial = await _validate(hmc, packet, document, directory)
         await _job(hmc, packet, document, directory, "activate")
         after = await facts(hmc, packet, document)
         document["calibration"] = {
@@ -1018,7 +1090,7 @@ def _completed_effects(packet, document):
         reads.append((len(expected), list(SYSTEM_PROFILES[: index + 1])))
 
     create(0)
-    job("validate")
+    expected.append(("validate-scratch-system-profile", SYSTEM_PROFILES[0], None))
     job("activate")
     cases = document.get("negative_cases", [])
     consistency = calibrated(
@@ -1169,8 +1241,13 @@ async def recover(hmc, packet, document):
     if datetime.fromisoformat(run["finished"]).tzinfo is None:
         raise ValueError("completion time has no timezone")
     negative_ids = _completed_effects(packet, document)
-    for proof in document["inventory_reads"]:
-        observed = proof["observed"]
+    validations = document.get("validation_commands", [])
+    if len(validations) != 1:
+        raise ValueError("exactly one validation command proof required")
+    _check_validation(packet, document, validations[0])
+    observations = [proof["observed"] for proof in document["inventory_reads"]]
+    observations.extend(validations[0][phase] for phase in ("before", "after"))
+    for observed in observations:
         _require_stay_on(observed)
         known = {r["uuid"]: r for r in document["fixtures"]}
         if [e for e in observed["partitions"] if e["UUID"] not in known] != before[

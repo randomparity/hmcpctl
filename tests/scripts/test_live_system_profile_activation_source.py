@@ -325,6 +325,18 @@ def hardware(packet, monkeypatch):
                 profile(v["name"], uid(), e["UUID"], int(v["desired_mem"]))
             )
             return ""
+        if args[0] == "chsysstate":
+            assert args == [
+                "chsysstate",
+                "-m",
+                arm._cli_name(arm.binding(packet)),
+                "-r",
+                "sysprof",
+                "-n",
+                arm.SYSTEM_PROFILES[0],
+                "--test",
+            ]
+            return "System Profile Validation warnings:\n"
         if args[:3] == ["rmsyscfg", "-r", "sysprof"]:
             del state["sysprofiles"][args[-1]]
             return ""
@@ -460,7 +472,7 @@ async def test_complete_fixture_calibration_and_independent_recovery(
     assert doc["calibration"]["application_semantics"].startswith("UNPROVEN")
     assert len(state["members"]) == 1 and not state["sysprofiles"]
     assert doc["run"]["partial"] is False
-    assert len(doc["jobs"]) <= 9
+    assert len(doc["jobs"]) <= 8
     assert len(doc["inventory_reads"]) == (4 if negative else 2)
     assert all(j["operation"] != "GetSystemProfiles" for j in doc["jobs"])
     await arm.recover(h, packet, doc)
@@ -968,7 +980,7 @@ async def test_real_logon_failure_never_falls_back_to_another_port(
 @pytest.mark.asyncio
 async def test_unapproved_job_stage_has_no_effect(packet, hardware, tmp_path):
     h, _state = hardware
-    with pytest.raises(ValueError, match="seven fixed"):
+    with pytest.raises(ValueError, match="fixed calibration"):
         await arm._job(h, packet, {}, tmp_path, "arbitrary-operation")
     h.get_uom.assert_not_awaited()
     h.submit_job.assert_not_awaited()
@@ -1068,7 +1080,7 @@ async def test_incomplete_calibration_stops_before_any_later_effect(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "tamper", ["create-failed", "validate-failed", "stop-failed", "deleted-negative"]
+    "tamper", ["create-failed", "activate-failed", "stop-failed", "deleted-negative"]
 )
 async def test_required_job_failure_or_deleted_negative_never_clean(
     packet, hardware, tmp_path, tamper
@@ -1648,5 +1660,168 @@ async def test_namespace_real_stderr_refuses_independent_clean_recovery(
         return await stderr_boundary(config, command, stdout, **kwargs)
 
     monkeypatch.setattr(arm.source, "run_hmc_command", transport)
+    with pytest.raises(ValueError):
+        await arm.recover(h, packet, document)
+
+
+@pytest.mark.asyncio
+async def test_fixed_cli_validation_contract(packet, hardware, tmp_path):
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    assert len(doc["validation_commands"]) == 1
+    proof = doc["validation_commands"][0]
+    assert proof["effect_count"] == 7 and proof["exit"] == 0
+    assert proof["before_facts"] == proof["after_facts"]
+    assert proof["before"] == proof["after"]
+    assert proof["command"].endswith(" --test") and " -o " not in proof["command"]
+    assert all(j["parameters"].get("test") != "true" for j in state["jobs"].values())
+    assert len(doc["jobs"]) <= 8
+    await arm.recover(h, packet, doc)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing",
+        "duplicate",
+        "position",
+        "command",
+        "stderr",
+        "exit",
+        "owner",
+        "policy",
+        "baseline",
+        "facts",
+        "identity",
+        "id",
+    ],
+)
+async def test_validation_proof_forgery_refuses_clean(
+    packet, hardware, tmp_path, fault
+):
+    import copy
+
+    h, _state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    proofs = doc["validation_commands"]
+    proof = proofs[0]
+    if fault == "missing":
+        proofs.clear()
+    elif fault == "duplicate":
+        proofs.append(copy.deepcopy(proof))
+    elif fault == "position":
+        proof["effect_count"] += 1
+    elif fault == "command":
+        proof["command"] += " -o on"
+    elif fault == "stderr":
+        proof["raw"] += "[stderr]\nwarning\n"
+    elif fault == "exit":
+        proof["exit"] = 1
+    elif fault == "owner":
+        proof["before"]["partitions"][-1]["Resource"]["Description"] = "foreign"
+    elif fault == "policy":
+        proof["before"]["system_auto_off"] = "true"
+    elif fault == "baseline":
+        proof["before"]["partitions"][0]["Resource"]["PartitionState"] = "running"
+    elif fault == "facts":
+        proof["after_facts"][0]["cli_current_profile"] = "foreign"
+    elif fault == "identity":
+        proof["before_facts"][0]["partition"]["UUID"] = L
+    elif fault == "id":
+        proof["before"]["partitions"][-1]["Resource"]["PartitionID"] = "0"
+    if fault in {"owner", "policy", "baseline", "id"}:
+        # Keep both phase snapshots/facts coherent to exercise actual normal guard replay.
+        proof["after"] = copy.deepcopy(proof["before"])
+        for phase in ("before", "after"):
+            for fact, record in zip(
+                proof[phase + "_facts"], doc["fixtures"], strict=True
+            ):
+                fact["partition"] = copy.deepcopy(
+                    next(
+                        e
+                        for e in proof[phase]["partitions"]
+                        if e["UUID"] == record["uuid"]
+                    )
+                )
+    with pytest.raises((ValueError, PermissionError)):
+        await arm.recover(h, packet, doc)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["stderr", "nonzero", "facts-drift"])
+async def test_validation_real_transport_refuses_later_effects(
+    packet, hardware, monkeypatch, tmp_path, fault
+):
+    import copy
+    from unittest.mock import MagicMock
+
+    import asyncssh
+
+    from hmcpctl.ssh import transport as native_transport
+
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = arm.run_hmc_command
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    connection.__aexit__.return_value = False
+    monkeypatch.setattr(
+        native_transport.asyncssh, "connect", MagicMock(return_value=connection)
+    )
+    at_boundary = None
+
+    async def dispatch(config, command, **kwargs):
+        nonlocal at_boundary
+        if not command.startswith("chsysstate "):
+            return await original(config, command, **kwargs)
+        at_boundary = copy.deepcopy(state)
+        if fault == "nonzero":
+            connection.run.side_effect = asyncssh.ProcessError(
+                env=None,
+                command=command,
+                subsystem=None,
+                exit_status=1,
+                exit_signal=None,
+                returncode=1,
+                stdout="",
+                stderr="validation refused",
+            )
+        else:
+            connection.run.return_value = SimpleNamespace(
+                stdout="System Profile Validation warnings:\n",
+                stderr="warning\n" if fault == "stderr" else "",
+            )
+        if fault == "facts-drift":
+            next(
+                e
+                for e in state["members"].values()
+                if e["Resource"]["PartitionName"] == arm.NAMES[0]
+            )["Resource"]["LastActivatedProfile"] = "changed"
+            at_boundary = copy.deepcopy(state)
+        return await native_transport.run_hmc_command(
+            config.model_copy(update={"password": "p"}), command, **kwargs
+        )
+
+    monkeypatch.setattr(arm, "run_hmc_command", dispatch)
+    from hmcpctl.errors import HMCError
+
+    with pytest.raises(HMCError if fault == "nonzero" else ValueError):
+        await capture_in(h, packet, tmp_path)
+    connection.run.assert_awaited_once()
+    assert at_boundary is not None
+    assert {k: v for k, v in state.items() if k != "commands"} == {
+        k: v for k, v in at_boundary.items() if k != "commands"
+    }
+    assert all(
+        c.startswith("lssyscfg ")
+        for c in state["commands"][len(at_boundary["commands"]) :]
+    )
+    assert all(j["operation"] == "CreateSystemProfile" for j in state["jobs"].values())
+    h.delete_logical_partition.assert_not_awaited()
+    document = json.loads((tmp_path / "capture" / "results.json").read_text())
+    assert document["run"]["partial"] is True and "calibration" not in document
     with pytest.raises(ValueError):
         await arm.recover(h, packet, document)

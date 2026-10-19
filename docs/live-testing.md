@@ -1327,10 +1327,20 @@ extra diagnostics, stale IDs or incomplete associations stop later effects. Powe
 remain phase appropriate; later mixed/teardown reads can include running new fixtures.
 
 The finite journal retains each bounded raw read, its effect position and complete fresh observation;
-recovery verifies the exact read sequence and associations. The maximum domain-job count is nine,
-with no GetSystemProfiles submissions or automatic fallback. Historical REST Get evidence with
+recovery verifies the exact read sequence and associations. The maximum domain-job count is eight,
+with no GetSystemProfiles or validation REST submissions or automatic fallback. Historical REST Get evidence with
 ambiguous ErrorData and its retained job remain unresolved; this CLI experiment does not prove
 product REST Get support or requested-profile activation. No product maturity follows from it.
+
+Required source validation uses exactly one fixed CLI command:
+`chsysstate -m <bound-system> -r sysprof -n <exact-scratch> --test` (no `-o` or continuation).
+The existing transport must return native exit0 and no stderr marker; bounded stdout is retained
+without an English success classifier. Fresh normal guards and independent facts must be unchanged
+before/after. A single fixed-position command proof stores raw output, exact command and complete
+phase observations/facts; recovery rechecks normal ownership/current identities/contained profiles,
+original baseline, namespace, safe policy, inactive state and unique current IDs. Missing, duplicate,
+reordered or contradictory proofs refuse CLEAN. Historical REST validation warnings and their retained
+job remain unresolved; this source-only backend does not change product job status semantics.
 
 A private atomic journal records intent before effects, created identities, complete finite request/
 effect/job sequence and raw observations. Reused or inconsistent job handles, nonterminal outcome,
