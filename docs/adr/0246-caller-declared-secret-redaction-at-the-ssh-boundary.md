@@ -22,13 +22,17 @@ unchanged and redacts every declared value from every diagnostic it produces.
   collection of non-empty strings; an empty string is a `ValueError` before any connection.
 - With `secrets` empty the function is byte-for-byte today's: same command, same messages,
   same exception chain. Existing callers do not change.
-- With `secrets` non-empty, a translated `HMCCLIError` is re-raised as a new `HMCCLIError`
-  whose message has each declared value replaced by `<redacted>`, raised with no `__cause__`
-  and no `__context__`, so no rendering of the exception reaches the asyncssh exception.
-  Replacement covers the raw value and its form inside a POSIX single-quoted shell word
-  (`'` written `'"'"'`), longest first. Remote text keeps its HSCL code and wording.
+- With `secrets` non-empty, redaction replaces the raw value and its spelling inside a POSIX
+  single-quoted shell word (`'` written `'"'"'`, as `shlex.quote` emits), longest first, with
+  `<redacted>`. It is applied to the command **before** the error builders render it with
+  `!r` — repr escapes quotes, backslashes and control characters, so redacting the rendered
+  message alone misses them — and again to the finished message, which covers remote
+  stdout/stderr and asyncssh text. The resulting `HMCCLIError` is raised with no `__cause__`
+  and no `__context__`, so no rendering reaches the asyncssh exception. Remote text keeps its
+  HSCL code and wording.
 - While a secret-bearing command runs, a filter on the `asyncssh` logger replaces the declared
-  values in every record's rendered message.
+  values in each record's rendered message at asyncssh's default debug level, the only level
+  this package runs (it never calls `asyncssh.set_debug_level`).
 - `build_attribute_record(..., secret=())` names attributes whose refused value is rendered
   `<redacted>`; the attribute name, the offending character and the reason stay.
 
@@ -36,7 +40,10 @@ unchanged and redacts every declared value from every diagnostic it produces.
 - A secret-bearing operation must declare its values; an undeclared secret is not redacted.
   Review of each credential-bearing child checks its declaration.
 - Redaction matches text, so a remote echo that transforms the value (truncation, case
-  change, re-encoding) is not recognised, and a short secret over-redacts unrelated text.
+  change, re-encoding) is not recognised, a command that spells a secret other than raw or
+  `shlex.quote`d is not recognised, and a short secret over-redacts unrelated text.
+- At asyncssh debug level 3 the library appends hex packet dumps to its records; the filter
+  does not parse them. A caller that raises the level accepts that.
 - Losing the exception chain on the secret path removes the asyncssh exception from
   tracebacks; the message keeps the termination status and remote text.
 - `transport.py` and `commands.py` sit in every SSH operation's import closure, so their
@@ -46,8 +53,9 @@ unchanged and redacts every declared value from every diagnostic it produces.
 - **Caller-supplied display string.** judgment: leaves the remote stdout/stderr echo and the
   chained exception unredacted, which is where the HMC repeats a refused value.
 - **Drop remote output entirely on the secret path.** judgment: removes the HMC's own refusal
-  text, the actionable part of a failure, to defend against transformed echoes the HMC CLI is
-  not known to produce.
+  text, the actionable part of a failure. Whether the HMC echoes a credential transformed is
+  unobserved — no credential-bearing refusal has been captured yet — so the first credential
+  child's live run checks the echo form and can reopen this.
 - **Separate `run_hmc_secret_command` function.** judgment: a second dispatch path for one
   keyword's worth of behaviour; callers and tests would have to keep two in agreement.
 - **Answer the HMC's password prompt instead of passing the value.** verified: the reference

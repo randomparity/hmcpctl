@@ -25,10 +25,14 @@ One keyword on the existing dispatch, one on the existing record builder. No new
    `logging.getLogger("asyncssh")` and removes it in `finally`. The filter replaces the
    declared values in `record.getMessage()`, stores the result in `record.msg`, sets
    `record.args = ()`, and returns `True`.
-4. An `HMCCLIError` raised by the body is caught, its `str()` redacted, and a new
-   `HMCCLIError` raised **after** the `except` block exits, so the new error has
-   `__cause__ is None` and `__context__ is None`.
-5. Redaction (`_redact(text, secrets)`): for each secret, the forms are the raw value and the
+4. The body receives a display command, `_redact(cmd, declared)`, and passes it — not
+   `cmd` — to `_command_timeout_error`, `_command_connection_error` and `_process_error`, the
+   builders that render it with `!r`. Repr escapes `'`, `\` and control characters, so
+   redacting only the rendered message would miss them. `connection.run` still gets `cmd`.
+5. An `HMCCLIError` raised by the body is caught, its `str()` redacted again (covering remote
+   stdout/stderr and asyncssh text), and a new `HMCCLIError` raised **after** the `except`
+   block exits, so it has `__cause__ is None` and `__context__ is None`.
+6. Redaction (`_redact(text, secrets)`): for each secret, the forms are the raw value and the
    value with `'` replaced by `'"'"'` (its spelling inside a POSIX single-quoted word, which
    is what `shlex.quote` produces for the value alone or inside a larger quoted record).
    All forms, longest first, are replaced by the module constant `REDACTED = "<redacted>"`.
@@ -49,14 +53,15 @@ which quotes a field value; tests pin that over output containing a secret.
 
 1. For each failure class — timeout (connect and run), `OSError`/`ValueError` connection,
    `asyncssh.ProcessError` (exit status and signal, secret in stdout and in stderr) and
-   `asyncssh.Error` — a secret-bearing call raises `HMCCLIError` where neither `str(error)`
+   `asyncssh.Error` — and for secrets containing `'` and `\`, a secret-bearing call raises `HMCCLIError` where neither `str(error)`
    nor `"".join(traceback.format_exception(error))` contains any declared secret, and
    `__cause__`/`__context__` are `None`.
 2. Those messages keep the non-secret context: the failure class wording, termination
    status, HSCL code, and the non-secret parts of the command.
 3. The command passed to `connection.run` is the caller's `cmd`, unmodified.
 4. A record emitted on the `asyncssh` logger during a secret-bearing call renders without the
-   secret; the filter is removed afterwards, including after a failure.
+   secret at asyncssh's default debug level; the filter is removed afterwards, including
+   after a failure.
 5. Parse failures over output containing a secret do not include it.
 6. `build_attribute_record(..., secret={"passwd"})` refusing a `passwd` value names
    `passwd` and the character but not the value; non-secret attributes still quote theirs.
@@ -70,16 +75,21 @@ which quotes a field value; tests pin that over output containing a secret.
 - The HMC as a remote peer whose stdout/stderr is untrusted text (ADR 0042).
 
 **Invariants and assets at stake**
-- Declared secret values never appear in an `HMCCLIError` message, its rendered traceback,
-  or an `asyncssh` log record produced during the call.
+- Declared secret values, spelled raw or `shlex.quote`d in the command, do not appear in an
+  `HMCCLIError` the call raises, its rendered traceback, or an `asyncssh` log record produced
+  during the call at asyncssh's default debug level.
 - Non-secret callers' commands, messages and exception chains are unchanged.
 
 **Accepted failure classes**
 - A secret the caller did not declare is not redacted — the declaration is the contract;
   each credential-bearing child's review checks it.
 - A remote echo that transforms the value (truncated, re-cased, re-encoded) is not matched;
-  no HMC refusal recorded in this repository shows a transformed echo, and dropping
-  remote text would remove the actionable HSCL message (ADR 0246, rejected alternative).
+  an unverified assumption — no credential-bearing HMC refusal has been captured — that the
+  first credential child's live run checks; dropping remote text would remove the actionable
+  HSCL message (ADR 0246).
+- A secret spelled in the command other than raw or `shlex.quote`d is not matched.
+- asyncssh debug level 3 packet hex dumps are not redacted; this package never raises the
+  level (`rg set_debug_level src/` is empty).
 - Over-redaction of unrelated text equal to a short secret; bounded to readability.
 - Exceptions other than the four translated classes (e.g. `CancelledError`) propagate
   unchanged; none carries the command text.
@@ -129,12 +139,13 @@ procedure, read-only, for the release window or an authorized ad-hoc window
 ([live-testing](../../live-testing.md) preflight and recovery apply), on a build whose
 commit matches the deployed revision:
 
-1. Prerequisites: a configured read-only HMC profile; a canary `C = "w22-canary-<random>"`.
+1. Prerequisites: a configured read-only HMC profile; a canary containing a quote and a
+   backslash, `C = "w22'canary\<random>"`; for step 3, a host with no sshd on port 22.
 2. Process failure: `run_hmc_command(cfg, f"lssyscfg -r sys -m {shlex.quote(C)} -F name",
    secrets=[C])`; expect `HMCCLIError`; assert `C` absent from `str(err)` and from
    `traceback.format_exception(err)`, and an `HSCL` code present.
-3. Connection failure: same call with a config whose host refuses port 22 (e.g. a reserved
-   documentation address); assert `C` absent.
+3. Connection failure: same call with `host="127.0.0.1"` on a machine with no sshd listening;
+   assert the message says `connection failed` and `C` is absent.
 4. Timeout: same call with `ssh_timeout=0.001`; assert `C` absent.
 5. Run with `logging.getLogger("asyncssh").setLevel(logging.INFO)` and a capturing handler;
    assert no captured record contains `C`.
