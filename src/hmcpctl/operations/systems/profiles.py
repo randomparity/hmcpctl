@@ -201,6 +201,8 @@ async def _observe(hmc: HMCClient, system: str) -> _Phase:
         for e in feed:
             uuid = e["UUID"]
             r = e["Resource"]
+            if not isinstance(r, dict):
+                raise TypeError("native partition resource is malformed")
             value = _text(r.get("PartitionID"))
             if (
                 not is_uuid(uuid)
@@ -519,7 +521,10 @@ def _job_identity(hmc, job, expected=None):
 
 
 def _job_values(job):
-    raw = job["Resource"].get("Results", {}).get("JobParameter", [])
+    results = job["Resource"].get("Results", {})
+    if not isinstance(results, dict):
+        raise TypeError("native job results are malformed")
+    raw = results.get("JobParameter", [])
     raw = [raw] if isinstance(raw, dict) else raw
     if not isinstance(raw, list):
         raise TypeError("native job results are malformed")
@@ -558,8 +563,16 @@ def _optional_profile(value):
 
 def _associated(hmc, resource, member):
     raw = resource.get("AssociatedPartitionProfile", {})
-    href = raw.get("href") or raw.get("link", {}).get("@attrs", {}).get("href")
-    if not href:
+    if not isinstance(raw, dict):
+        raise TypeError("native profile association is malformed")
+    if "href" in raw:
+        href = raw["href"]
+    elif "link" in raw:
+        link = raw["link"]
+        if not isinstance(link, dict) or not isinstance(link.get("@attrs"), dict):
+            raise TypeError("native profile association link is malformed")
+        href = link["@attrs"].get("href")
+    else:
         return None
     if (
         not isinstance(href, str)

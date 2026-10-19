@@ -822,3 +822,35 @@ def test_job_and_member_outcomes_identity_bound(system_profiles):
     h, _, _, _ = system_profiles
     with pytest.raises(ValueError):
         ops._job_facts(h, terminal(job_id="a" * 4097), "a" * 4097)
+
+
+@pytest.mark.asyncio
+async def test_inventory_malformed_resource_is_uncertain(system_profiles):
+    h, member, _, _ = system_profiles
+    member["Resource"] = None
+    result = await ops.list_system_profiles(h, S)
+    assert result.records is None and result.command_status == "uncertain"
+
+
+@pytest.mark.asyncio
+async def test_job_malformed_results_preserves_known_handle(
+    system_profiles, monkeypatch
+):
+    h, _, _, _ = system_profiles
+    h.submit_job = AsyncMock(return_value=terminal())
+    malformed = terminal()
+    malformed["Resource"]["Results"] = []
+    monkeypatch.setattr(
+        "hmcpctl.jobs.wait_for_submitted_job", AsyncMock(return_value=malformed)
+    )
+    state, job, *_ = await ops._rest(
+        h, S, "CreateSystemProfile", "<JobRequest/>", 30, 1
+    )
+    assert state == "uncertain" and job.job_id == "job-1"
+
+
+@pytest.mark.parametrize("raw", [None, [], {"link": []}, {"href": 0}])
+def test_malformed_association_is_not_absence(system_profiles, raw):
+    h, _, _, _ = system_profiles
+    with pytest.raises((TypeError, ValueError)):
+        ops._associated(h, {"AssociatedPartitionProfile": raw}, SimpleNamespace())
