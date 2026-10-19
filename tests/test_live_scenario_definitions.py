@@ -88,7 +88,12 @@ def test_valid_read_only_and_mutating_definitions_load():
 
 
 def test_the_committed_registry_loads_against_the_served_registry():
-    assert definitions.read_definitions() == ()
+    loaded = definitions.read_definitions()
+
+    assert loaded
+    assert all(
+        item.scenario == definitions.scenario_id(item.operation) for item in loaded
+    )
 
 
 @pytest.mark.parametrize(
