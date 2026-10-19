@@ -26,13 +26,12 @@ system: 16 requests and about 20 s on the #244 V10R3 HMC, against one
 
 In: `operations/systems/fleet.py` (new `read_fleet_quick_all`, a shared size check),
 `operations/lpar/inventory.py` (unscoped branch), the `hmc_list_lpars` docstring, the
-`lpar list` help text, regenerated `docs/tools/`, tests, `CHANGELOG.md`, ADR 0248.
+`lpar list` help text, the unscoped-entry paragraph of `docs/cli.md` (operator-approved
+2026-10-19), regenerated `docs/tools/`, tests, `CHANGELOG.md`, ADR 0248.
 
 Out, with owners: VIOS and `list_lpar_ownership` migration (#1731 follow-up); raw quick/All
 MCP/CLI exposure (#1732); other-firmware and `No Connection` captures (#1733, #1290); internal
-`hmc.list_*` callers and `list_system_summaries` delegation (operator). `docs/cli.md` lines
-380–385 describe unscoped entries as unaltered documents; it is outside the frozen surface, so
-its one-sentence correction is an operator decision at design review.
+`hmc.list_*` callers and `list_system_summaries` delegation (operator).
 
 Ownership: `fleet.py` owns fleet-wide partition reads, so the bulk read extends it there with
 `read_fleet` as its fallback; `list_lpars` swaps one call. No caller moves and no path becomes
@@ -76,7 +75,7 @@ other firmware and `No Connection` bulk captures (#1733, #1290).
 5. `state` filters bulk entries on `Resource.PartitionState`; more than 100 summaries is refused
    before any bulk request.
 6. Scoped `list_lpars` and `list_vios` send the same requests as before.
-7. The `hmc_list_lpars` docstring and `lpar list --help` name both entry shapes and the null
+7. The `hmc_list_lpars` docstring, `lpar list --help` and `docs/cli.md` name both entry shapes and the null
    `title` marker; `docs/tools/` regenerated; CHANGELOG entry; `just verify` and prek pass.
 
 ## Validation
