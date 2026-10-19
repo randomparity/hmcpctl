@@ -1127,3 +1127,62 @@ async def test_public_activation_retains_job_when_requested_profile_disappears(
         and result.postcondition == "unverified"
     )
     assert "requested contained profile" in result.error
+
+
+@pytest.mark.parametrize("surface", ["parent", "job", "associated"])
+def test_native_reference_explicit_zero_port_is_not_default(system_profiles, surface):
+    h, _, profile, _ = system_profiles
+    with pytest.raises(ValueError):
+        if surface == "parent":
+            profile["Resource"]["AssociatedPartition"]["href"] = (
+                f"https://hmc.test:0/rest/api/uom/LogicalPartition/{L}"
+            )
+            ops._profile_parent(profile, L, S, h, "LogicalPartition")
+        elif surface == "job":
+            job = terminal()
+            job["link"] = "https://hmc.test:0/rest/api/uom/jobs/job-1"
+            ops._job_identity(h, job, "job-1")
+        else:
+            ops._associated(
+                h,
+                {
+                    "AssociatedPartitionProfile": {
+                        "href": f"https://hmc.test:0/rest/api/uom/LogicalPartition/{L}/LogicalPartitionProfile/{P}"
+                    }
+                },
+                SimpleNamespace(resource_type="LogicalPartition", partition_uuid=L),
+            )
+
+
+def test_parse_feed_associated_profile_and_conflicting_references(system_profiles):
+    from hmcpctl.xmlutil import parse_feed
+
+    h, _, profile, _ = system_profiles
+    href = f"https://hmc.test/rest/api/uom/LogicalPartition/{L}/LogicalPartitionProfile/{P}"
+    feed = parse_feed(
+        f'<LogicalPartition><AssociatedPartitionProfile><link href="{href}" rel="related"/></AssociatedPartitionProfile></LogicalPartition>'
+    )
+    assert (
+        ops._associated(
+            h,
+            feed[0]["Resource"],
+            SimpleNamespace(resource_type="LogicalPartition", partition_uuid=L),
+        )
+        == P
+    )
+    profile["Resource"]["AssociatedPartition"]["link"] = {
+        "href": "https://foreign.test/rest/api/uom/LogicalPartition/other"
+    }
+    with pytest.raises(ValueError, match="conflicting"):
+        ops._profile_parent(profile, L, S, h, "LogicalPartition")
+    with pytest.raises(ValueError, match="conflicting"):
+        ops._associated(
+            h,
+            {
+                "AssociatedPartitionProfile": {
+                    "href": href,
+                    "link": {"href": "https://foreign.test/other"},
+                }
+            },
+            SimpleNamespace(resource_type="LogicalPartition", partition_uuid=L),
+        )

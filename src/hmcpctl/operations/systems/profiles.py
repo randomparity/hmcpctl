@@ -136,10 +136,14 @@ def _profile_parent(
     association = profile["Resource"]["AssociatedPartition"]
     if not isinstance(association, dict):
         raise TypeError("native profile parent is malformed")
-    reference = association if "href" in association else association.get("link")
-    if not isinstance(reference, dict):
-        raise TypeError("native profile parent reference is missing")
-    href = reference.get("href")
+    href = association.get("href")
+    if "link" in association:
+        link = association["link"]
+        if not isinstance(link, dict):
+            raise TypeError("native profile parent reference is malformed")
+        if "href" in association and href != link.get("href"):
+            raise ValueError("native profile parent references are conflicting")
+        href = link.get("href")
     if (
         not isinstance(href, str)
         or not href.isprintable()
@@ -154,7 +158,7 @@ def _profile_parent(
     if (
         u.scheme != "https"
         or u.hostname != hmc.config.host
-        or (u.port or 443) != hmc.config.port
+        or (443 if u.port is None else u.port) != hmc.config.port
         or u.username
         or u.password
         or u.query
@@ -524,7 +528,10 @@ def _job_identity(hmc, job, expected=None):
             or u.hostname is not None
             and u.hostname != hmc.config.host
             or u.scheme == "https"
-            and (u.hostname != hmc.config.host or (u.port or 443) != hmc.config.port)
+            and (
+                u.hostname != hmc.config.host
+                or (443 if u.port is None else u.port) != hmc.config.port
+            )
             or canonical_job_path(u.path) != path
         ):
             raise ValueError("native job SELF destination/identity differs")
@@ -576,14 +583,15 @@ def _associated(hmc, resource, member):
     raw = resource.get("AssociatedPartitionProfile", {})
     if not isinstance(raw, dict):
         raise TypeError("native profile association is malformed")
-    if "href" in raw:
-        href = raw["href"]
-    elif "link" in raw:
+    href = raw.get("href")
+    if "link" in raw:
         link = raw["link"]
-        if not isinstance(link, dict) or not isinstance(link.get("@attrs"), dict):
+        if not isinstance(link, dict):
             raise TypeError("native profile association link is malformed")
-        href = link["@attrs"].get("href")
-    else:
+        if "href" in raw and href != link.get("href"):
+            raise ValueError("native profile association references are conflicting")
+        href = link.get("href")
+    elif "href" not in raw:
         return None
     if (
         not isinstance(href, str)
@@ -600,7 +608,7 @@ def _associated(hmc, resource, member):
     if (
         u.scheme != "https"
         or u.hostname != hmc.config.host
-        or (u.port or 443) != hmc.config.port
+        or (443 if u.port is None else u.port) != hmc.config.port
         or u.username
         or u.password
         or u.query
