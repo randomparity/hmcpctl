@@ -261,6 +261,10 @@ def hardware(packet, monkeypatch):
                 "PartitionState": "not activated",
                 "Description": "",
                 "LastActivatedProfile": "",
+                "Uptime": {
+                    "@attrs": {"group": "Advanced", "ksv": "V1_15_0"},
+                    "text": "0",
+                },
                 "PartitionMemoryConfiguration": {
                     "CurrentMemory": "512",
                     "RuntimeMemory": "0",
@@ -381,6 +385,7 @@ def hardware(packet, monkeypatch):
         }
         e["Resource"].update(
             PartitionState="running",
+            Uptime={"@attrs": {"group": "Advanced", "ksv": "V1_15_0"}, "text": "60"},
             LastActivatedProfile=name,
             AssociatedPartitionProfile={
                 "href": f"/rest/api/uom/LogicalPartition/{e['UUID']}/LogicalPartitionProfile/{p['UUID']}"
@@ -413,8 +418,8 @@ def hardware(packet, monkeypatch):
                     for e in state["members"].values()
                     if e["Resource"]["PartitionName"] == name
                 )
-                # Constructed native failure model only; actual already-running behavior is UNKNOWN.
-                if e["Resource"]["PartitionState"] == "running":
+                # Constructed native failure model only; actual already-powered behavior is UNKNOWN.
+                if e["Resource"]["PartitionState"] in {"running", "open firmware"}:
                     status, code = "FAILED_BEFORE_COMPLETION", "1"
                     if p["continue"] == "false":
                         break
@@ -427,6 +432,7 @@ def hardware(packet, monkeypatch):
             state["members"][job["target"]]["Resource"]["PartitionMemoryConfiguration"][
                 "RuntimeMemory"
             ] = "0"
+            state["members"][job["target"]]["Resource"]["Uptime"]["text"] = "0"
         return {
             "Resource": {
                 "JobID": identity,
@@ -1851,3 +1857,275 @@ async def test_serialized_validation_baseline_must_equal_calibration(
             )
     with pytest.raises(ValueError, match="validation baseline.*calibration"):
         await arm.recover(h, packet, document)
+
+
+@pytest.fixture
+def firmware_hardware(hardware):
+    h, state = hardware
+    original_wait = h.wait_for_job_entry.side_effect
+    original_feed = h.list_logical_partitions.side_effect
+
+    async def wait(identity, **kwargs):
+        result = await original_wait(identity, **kwargs)
+        for entry in state["members"].values():
+            if entry["Resource"]["PartitionState"] == "running":
+                entry["Resource"]["PartitionState"] = "open firmware"
+        return result
+
+    async def feed(*args):
+        for entry in state["members"].values():
+            resource = entry["Resource"]
+            if resource["PartitionState"] == "open firmware":
+                resource["Uptime"]["text"] = str(int(resource["Uptime"]["text"]) + 1)
+        return await original_feed(*args)
+
+    h.wait_for_job_entry.side_effect = wait
+    h.list_logical_partitions.side_effect = feed
+    return h, state
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("negative", [False, True])
+async def test_native_shaped_firmware_capture_and_raw_counter_recovery(
+    packet, firmware_hardware, tmp_path, negative
+):
+    h, state = firmware_hardware
+    packet["negative_cases"] = negative
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    assert {
+        f["partition"]["Resource"]["PartitionState"]
+        for f in doc["calibration"]["after"]
+    } == {"open firmware"}
+    assert doc["run"]["partial"] is False and len(state["members"]) == 1
+    assert len(doc["jobs"]) <= 8
+    await arm.recover(h, packet, json.loads(json.dumps(doc)))
+    if negative:
+        assert len(doc["negative_cases"]) == 2
+        first, second = doc["negative_cases"]
+        old = first["after"][1]["partition"]["Resource"]["Uptime"]["text"]
+        fresh = second["before"][1]["partition"]["Resource"]["Uptime"]["text"]
+        assert int(fresh) > int(old)
+        assert second["before"] != first["before"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["CurrentMemory", "RuntimeMemory", "cpu", "overcap"])
+async def test_firmware_missing_actual_resources_stops_later_effects(
+    packet, firmware_hardware, monkeypatch, tmp_path, fault
+):
+    h, state = firmware_hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = h.wait_for_job_entry.side_effect
+
+    async def wait(identity, **kwargs):
+        result = await original(identity, **kwargs)
+        if state["jobs"][identity]["operation"] == "ActivateSystemProfile":
+            entry = next(
+                e
+                for e in state["members"].values()
+                if e["Resource"]["PartitionName"] == arm.NAMES[0]
+            )
+            if fault == "cpu":
+                entry["Resource"]["PartitionProcessorConfiguration"].pop(
+                    "CurrentSharedProcessorConfiguration"
+                )
+            elif fault == "overcap":
+                entry["Resource"]["PartitionMemoryConfiguration"]["CurrentMemory"] = (
+                    "2048"
+                )
+            else:
+                entry["Resource"]["PartitionMemoryConfiguration"].pop(fault)
+        return result
+
+    h.wait_for_job_entry.side_effect = wait
+    with pytest.raises((ValueError, KeyError)):
+        await capture_in(h, packet, tmp_path)
+    assert len(state["jobs"]) == 2
+    h.delete_logical_partition.assert_not_awaited()
+    doc = json.loads((tmp_path / "capture/results.json").read_text())
+    assert doc["run"]["partial"] is True and "calibration" not in doc
+    with pytest.raises(ValueError):
+        await arm.recover(h, packet, doc)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "advance",
+        "decrease",
+        "missing",
+        "malformed",
+        "overflow",
+        "attrs",
+        "otherfact",
+        "statechange",
+        "unknown",
+        "identity",
+    ],
+)
+async def test_only_new_powered_uptime_can_preserve_mixed_baseline(
+    packet, hardware, tmp_path, fault
+):
+    import copy
+
+    h, _state = hardware
+    packet["negative_cases"] = True
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    old = doc["negative_cases"][0]["before"]
+    current = copy.deepcopy(old)
+    resource = current[1]["partition"]["Resource"]
+    if fault == "advance":
+        resource["Uptime"]["text"] = str(int(resource["Uptime"]["text"]) + 10)
+    elif fault == "decrease":
+        resource["Uptime"]["text"] = "0"
+    elif fault == "missing":
+        resource.pop("Uptime")
+    elif fault == "malformed":
+        resource["Uptime"]["text"] = "1.5"
+    elif fault == "overflow":
+        resource["Uptime"]["text"] = str(2**63)
+    elif fault == "attrs":
+        resource["Uptime"]["@attrs"]["extra"] = "unexpected"
+    elif fault == "otherfact":
+        current[1]["cli_current_profile"] = "different"
+    elif fault == "statechange":
+        resource["PartitionState"] = "open firmware"
+    elif fault == "unknown":
+        resource["PartitionState"] = "Starting"
+    elif fault == "identity":
+        current[1]["partition"]["UUID"] = L
+    preserved = copy.deepcopy(old)
+    if fault in {"advance", "otherfact", "statechange"}:
+        assert arm._same_fixture_facts(old, current, doc["fixtures"]) is (
+            fault == "advance"
+        )
+    else:
+        with pytest.raises(ValueError):
+            arm._same_fixture_facts(old, current, doc["fixtures"])
+    assert old == preserved
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "counter-decrease",
+        "fresh-counter-regression",
+        "attrs",
+        "missing-memory",
+        "owner",
+        "initial-mixed",
+        "original-uptime",
+        "inactive-validation",
+    ],
+)
+async def test_serialized_firmware_proofs_preserve_resources_and_counter_chain(
+    packet, firmware_hardware, tmp_path, fault
+):
+    h, _state = firmware_hardware
+    packet["negative_cases"] = True
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = json.loads(json.dumps(await capture_in(h, packet, tmp_path)))
+    first, second = doc["negative_cases"]
+    if fault == "counter-decrease":
+        first["after"][1]["partition"]["Resource"]["Uptime"]["text"] = "0"
+    elif fault == "fresh-counter-regression":
+        second["before"][1]["partition"]["Resource"]["Uptime"]["text"] = first[
+            "before"
+        ][1]["partition"]["Resource"]["Uptime"]["text"]
+    elif fault == "attrs":
+        second["before"][1]["partition"]["Resource"]["Uptime"]["@attrs"]["extra"] = (
+            "changed"
+        )
+    elif fault == "missing-memory":
+        doc["teardown_before"][1]["partition"]["Resource"][
+            "PartitionMemoryConfiguration"
+        ].pop("CurrentMemory")
+    elif fault == "owner":
+        first["after"][1]["partition"]["Resource"]["Description"] = "foreign"
+    elif fault == "initial-mixed":
+        first["before"][0]["partition"]["Resource"]["PartitionState"] = "open firmware"
+    elif fault == "original-uptime":
+        doc["before"]["partitions"][0]["Resource"]["Uptime"] = {"text": "1"}
+    elif fault == "inactive-validation":
+        doc["validation_commands"][0]["after_facts"][0]["partition"]["Resource"][
+            "Uptime"
+        ]["text"] = "1"
+    with pytest.raises((ValueError, PermissionError, KeyError)):
+        await arm.recover(h, packet, doc)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial_state", ["running", "open firmware"])
+async def test_known_raw_power_change_skips_n2(
+    packet, request, tmp_path, initial_state
+):
+    h, state = request.getfixturevalue(
+        "hardware" if initial_state == "running" else "firmware_hardware"
+    )
+    packet["negative_cases"] = True
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = h.wait_for_job_entry.side_effect
+    target = "open firmware" if initial_state == "running" else "running"
+
+    async def wait(identity, **kwargs):
+        result = await original(identity, **kwargs)
+        job = state["jobs"][identity]
+        if (
+            job["parameters"].get("systemProfile") == arm.SYSTEM_PROFILES[1]
+            and job["parameters"].get("continue") == "false"
+        ):
+            next(
+                e
+                for e in state["members"].values()
+                if e["Resource"]["PartitionName"] == arm.NAMES[1]
+            )["Resource"]["PartitionState"] = target
+        return result
+
+    h.wait_for_job_entry.side_effect = wait
+    doc = await capture_in(h, packet, tmp_path)
+    assert len(doc["negative_cases"]) == 1
+    case = doc["negative_cases"][0]
+    assert case["before"][1]["partition"]["Resource"]["PartitionState"] == initial_state
+    assert case["after"][1]["partition"]["Resource"]["PartitionState"] == target
+    assert not any(
+        j["parameters"].get("continue") == "true" for j in state["jobs"].values()
+    )
+    await arm.recover(h, packet, json.loads(json.dumps(doc)))
+
+
+@pytest.mark.asyncio
+async def test_mixed_counter_decrease_stops_before_later_writes(
+    packet, firmware_hardware, tmp_path
+):
+    h, state = firmware_hardware
+    packet["negative_cases"] = True
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = h.wait_for_job_entry.side_effect
+
+    async def wait(identity, **kwargs):
+        result = await original(identity, **kwargs)
+        job = state["jobs"][identity]
+        if (
+            job["parameters"].get("systemProfile") == arm.SYSTEM_PROFILES[1]
+            and job["parameters"].get("continue") == "false"
+        ):
+            next(
+                e
+                for e in state["members"].values()
+                if e["Resource"]["PartitionName"] == arm.NAMES[1]
+            )["Resource"]["Uptime"]["text"] = "0"
+        return result
+
+    h.wait_for_job_entry.side_effect = wait
+    with pytest.raises(ValueError, match="counter decreased"):
+        await capture_in(h, packet, tmp_path)
+    assert len(state["jobs"]) == 5
+    h.delete_logical_partition.assert_not_awaited()
+    doc = json.loads((tmp_path / "capture/results.json").read_text())
+    assert doc["run"]["partial"] is True and len(doc["negative_cases"]) == 1
+    with pytest.raises(ValueError):
+        await arm.recover(h, packet, doc)

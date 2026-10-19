@@ -1324,7 +1324,10 @@ At most four whole-inventory reads replace GetSystemProfiles jobs: after each sc
 before each scratch delete. Unique complete rows, ordered ID/profile pairs and current owned
 UUID/name/ID/contained-profile bindings must agree with fresh observations. Unknown encodings,
 extra diagnostics, stale IDs or incomplete associations stop later effects. Power/resource checks
-remain phase appropriate; later mixed/teardown reads can include running new fixtures.
+remain phase appropriate; running and open firmware are distinct known powered states, with the
+same actual memory/CPU checks. Starting and unknown/transitional states stop later writes.
+Mixed/teardown reads and normal immediate-stop requests use that same stable subset; raw firmware
+state is never rewritten as running or treated as guest-OS boot proof.
 
 The finite journal retains each bounded raw read, its effect position and complete fresh observation;
 recovery verifies the exact read sequence and associations. The maximum domain-job count is eight,
@@ -1341,6 +1344,14 @@ phase observations/facts; recovery rechecks normal ownership/current identities/
 original baseline, namespace, safe policy, inactive state and unique current IDs. Missing, duplicate,
 reordered or contradictory proofs refuse CLEAN. Historical REST validation warnings and their retained
 job remain unresolved; this source-only backend does not change product job status semantics.
+
+Optional N2 requires N1 to leave the same known mixed baseline. Only a newly created fixture's
+powered `Uptime.text` may increase: bounded nonnegative native long, unchanged attributes and every
+other fact exact. Preserve raw observations and store N2's fresh admission facts; recovery checks
+both monotonic links from N1 before to after to N2 before. A running/open-firmware state change
+skips N2, while missing/malformed/decreased counters or unknown facts refuse progression. Original
+member baselines and inactive validation proofs remain exact, including uptime. Saved powered
+facts retain the same normal ownership/profile/resource checks as live observations.
 
 A private atomic journal records intent before effects, created identities, complete finite request/
 effect/job sequence and raw observations. Reused or inconsistent job handles, nonterminal outcome,

@@ -14,6 +14,7 @@ import shlex
 import stat
 import subprocess
 import sys
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_config_document, load_profile
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.jobs import TERMINAL_JOB_STATUSES, build_job_request
-from hmcpctl.operations.lpar.activation import submit_power_off
+from hmcpctl.operations.lpar.activation import ACTIVATED_STATES, submit_power_off
 from hmcpctl.operations.lpar.ownership import (
     authorize_lpar_ownership_description,
     parse_lpar_ownership_caller_token,
@@ -41,6 +42,7 @@ from hmcpctl.xmlutil import render_mtms
 from . import system_profile_source as source
 
 GROUP = "system-profile-activation-source"
+STABLE_POWERED_STATES = ACTIVATED_STATES & {"running", "open firmware"}
 # Public integrity digest of the private immutable target packet, not a credential.
 BINDING_SHA256 = "4c727c9ee2f4f9d0534b1023fdac5d3df50e5d1c40b9fa3f8307156eb492838c"  # pragma: allowlist secret
 NAMES = tuple(f"hmcpctl-q1725-d647765d-{suffix}" for suffix in ("a", "b"))
@@ -407,17 +409,17 @@ def _profile_parent(profile, uuid, b):
 def _runtime_limits(resource):
     memory = resource.get("PartitionMemoryConfiguration", {})
     state = _text(resource.get("PartitionState")).lower()
-    if state not in {"running", "not activated"}:
+    if state not in STABLE_POWERED_STATES | {"not activated"}:
         raise ValueError("known fixture power state required; uncertainty STOP")
-    running = state == "running"
-    if running and any(key not in memory for key in ("CurrentMemory", "RuntimeMemory")):
+    powered = state in STABLE_POWERED_STATES
+    if powered and any(key not in memory for key in ("CurrentMemory", "RuntimeMemory")):
         raise ValueError(
-            "actual running fixture memory observations missing; uncertainty STOP"
+            "actual powered fixture memory observations missing; uncertainty STOP"
         )
     for key in ("CurrentMemory", "RuntimeMemory"):
         if key in memory and not 0 <= int(_text(memory[key])) <= 1024:
             raise ValueError("actual fixture memory exceeds the fixed ceiling")
-    if running:
+    if powered:
         p = resource["PartitionProcessorConfiguration"]
         shared = p["CurrentSharedProcessorConfiguration"]
         if (
@@ -868,6 +870,7 @@ def calibrated(before: list, after: list) -> bool:
     """Consistency of experimental facts, explicitly NOT an application classifier."""
     for index, (old, new) in enumerate(zip(before, after, strict=True)):
         a, z = old["partition"]["Resource"], new["partition"]["Resource"]
+        _runtime_limits(z)
         profile = next(
             p
             for p in new["partition"]["profiles"]
@@ -880,7 +883,7 @@ def calibrated(before: list, after: list) -> bool:
             or _text(z.get("LastActivatedProfile")) != WITNESS[index]
             or new["cli_current_profile"] != WITNESS[index]
             or not link.endswith("/" + profile["UUID"])
-            or _text(z.get("PartitionState")).lower() != "running"
+            or _text(z.get("PartitionState")).lower() not in STABLE_POWERED_STATES
             or _text(memory.get("CurrentMemory")) != "1024"
             or not 0 < int(_text(memory.get("RuntimeMemory")) or "0") <= 1024
         ):
@@ -895,7 +898,7 @@ async def _stop(hmc, packet, document, directory, index):
     state = _text(e["Resource"].get("PartitionState")).lower()
     if state == "not activated":
         return
-    if state != "running":
+    if state not in STABLE_POWERED_STATES:
         raise ValueError("fixture power is not known terminal; no teardown writes")
     _intent(document, directory, "PowerOff", record["uuid"])
     submitted = await submit_power_off(
@@ -991,7 +994,7 @@ async def capture(hmc, packet, directory):
         source.save(directory, document)
         if any(
             _text(e["partition"]["Resource"].get("PartitionState")).lower()
-            not in {"running", "not activated"}
+            not in STABLE_POWERED_STATES | {"not activated"}
             for e in document["teardown_before"]
         ):
             raise ValueError("fixture power observation unknown; stop before teardown")
@@ -1018,6 +1021,47 @@ async def capture(hmc, packet, directory):
         raise
 
 
+def _same_fixture_facts(before, after, fixtures):
+    if len(before) != 2 or len(after) != 2 or len(fixtures) != 2:
+        raise ValueError("exact two created fixture facts required")
+    compared = deepcopy(before)
+    same_states = True
+    for old, new, copy_old, record in zip(
+        before, after, compared, fixtures, strict=True
+    ):
+        resources = [fact["partition"]["Resource"] for fact in (old, new)]
+        if any(fact["partition"]["UUID"] != record["uuid"] for fact in (old, new)):
+            raise ValueError("mixed facts are not bound to the created UUIDs")
+        for resource in resources:
+            _runtime_limits(resource)
+        states = [
+            _text(resource.get("PartitionState")).lower() for resource in resources
+        ]
+        same_states &= states[0] == states[1]
+        if all(state in STABLE_POWERED_STATES for state in states):
+            uptimes = [resource.get("Uptime") for resource in resources]
+            for value in uptimes:
+                if (
+                    not isinstance(value, dict)
+                    or set(value) != {"@attrs", "text"}
+                    or not isinstance(value["@attrs"], dict)
+                    or not isinstance(value["text"], str)
+                    or not re.fullmatch(r"[0-9]{1,19}", value["text"])
+                    or int(value["text"]) > 2**63 - 1
+                ):
+                    raise ValueError(
+                        "bounded nonnegative native fixture uptime required"
+                    )
+            if uptimes[0]["@attrs"] != uptimes[1]["@attrs"] or int(
+                uptimes[1]["text"]
+            ) < int(uptimes[0]["text"]):
+                raise ValueError(
+                    "powered fixture uptime shape changed or counter decreased"
+                )
+            copy_old["partition"]["Resource"]["Uptime"]["text"] = uptimes[1]["text"]
+    return same_states and compared == after
+
+
 async def _negative_cases(hmc, packet, document, directory):
     await _stop(hmc, packet, document, directory, 0)
     await _system_profile(hmc, packet, document, directory, 1)
@@ -1025,15 +1069,22 @@ async def _negative_cases(hmc, packet, document, directory):
     states = [
         _text(e["partition"]["Resource"].get("PartitionState")).lower() for e in before
     ]
-    if states != ["not activated", "running"]:
+    if states[0] != "not activated" or states[1] not in STABLE_POWERED_STATES:
         raise ValueError(
             "negative experiment lacks the exact known mixed fixture state"
         )
     document["negative_cases"] = []
     for continuation in (False, True):
-        # N2 exists only if N1 independently left the EXACT same known baseline.
-        if continuation and await facts(hmc, packet, document) != before:
-            break
+        admission = before
+        if continuation:
+            admission = await facts(hmc, packet, document)
+            first = document["negative_cases"][0]
+            if not _same_fixture_facts(
+                first["before"], first["after"], document["fixtures"]
+            ) or not _same_fixture_facts(
+                first["after"], admission, document["fixtures"]
+            ):
+                break
         record = await _job(
             hmc,
             packet,
@@ -1045,7 +1096,7 @@ async def _negative_cases(hmc, packet, document, directory):
         document["negative_cases"].append(
             {
                 "continue": continuation,
-                "before": before,
+                "before": admission,
                 "after": observed,
                 "job_id": record["id"],
                 "partial_activation": "UNPROVEN; inspect attributable evidence",
@@ -1103,6 +1154,16 @@ def _completed_effects(packet, document):
     if bool(cases) != (packet["negative_cases"] and consistency) or len(cases) > 2:
         raise ValueError("negative case sequence contradicts the exact packet")
     if cases:
+        mixed = [
+            _text(f["partition"]["Resource"].get("PartitionState")).lower()
+            for f in cases[0]["before"]
+        ]
+        if (
+            len(mixed) != 2
+            or mixed[0] != "not activated"
+            or mixed[1] not in STABLE_POWERED_STATES
+        ):
+            raise ValueError("recorded negative admission lacks the known mixed state")
         expected.append(("PowerOff", uuids[0], None))
         create(1)
         for index, case in enumerate(cases):
@@ -1110,8 +1171,8 @@ def _completed_effects(packet, document):
                 raise ValueError("negative variants duplicated or reordered")
             job("negative-true" if index else "negative-false")
         if len(cases) == 2 and (
-            cases[0]["before"] != cases[0]["after"]
-            or cases[1]["before"] != cases[0]["before"]
+            not _same_fixture_facts(cases[0]["before"], cases[0]["after"], fixtures)
+            or not _same_fixture_facts(cases[0]["after"], cases[1]["before"], fixtures)
         ):
             raise ValueError(
                 "continuation experiment had no unchanged independent baseline"
@@ -1128,7 +1189,7 @@ def _completed_effects(packet, document):
         if fact["partition"]["UUID"] != uuid:
             raise ValueError("teardown target changed")
         state = _text(fact["partition"]["Resource"]["PartitionState"]).lower()
-        if state == "running":
+        if state in STABLE_POWERED_STATES:
             expected.append(("PowerOff", uuid, None))
         elif state != "not activated":
             raise ValueError("teardown power was unknown")
@@ -1261,6 +1322,21 @@ async def recover(hmc, packet, document):
         for entry in observed["partitions"]:
             if entry["UUID"] in known:
                 _owned(hmc, packet, entry, known[entry["UUID"]])
+    fact_sets = [
+        document["calibration"]["before"],
+        document["calibration"]["after"],
+        document["teardown_before"],
+    ]
+    fact_sets.extend(
+        case[phase]
+        for case in document.get("negative_cases", [])
+        for phase in ("before", "after")
+    )
+    for facts_set in fact_sets:
+        if len(facts_set) != 2:
+            raise ValueError("complete created fixture facts missing")
+        for fact, record in zip(facts_set, document["fixtures"], strict=True):
+            _owned(hmc, packet, fact["partition"], record)
     names = [e["Resource"]["PartitionName"] for e in before.get("partitions", [])]
     if (
         set(names) & set(NAMES)
