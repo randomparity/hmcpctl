@@ -129,9 +129,16 @@ def _validated_secrets(secrets: Collection[str]) -> tuple[str, ...]:
 
 
 def _redact(text: str, secrets: tuple[str, ...]) -> str:
-    """Replace each secret in *text*, raw or as spelled inside a single-quoted word."""
+    """Replace each secret in *text*, raw or as spelled inside a single-quoted word.
+
+    A secret's stripped value is matched too: the error builders ``strip()`` the
+    remote detail, which cuts a whitespace-bounded secret echoed at its edge.
+    """
+    values = {
+        value for secret in secrets for value in (secret, secret.strip()) if value
+    }
     forms = {
-        form for secret in secrets for form in (secret, secret.replace("'", "'\"'\"'"))
+        form for value in values for form in (value, value.replace("'", "'\"'\"'"))
     }
     for form in sorted(forms, key=len, reverse=True):
         text = text.replace(form, REDACTED)

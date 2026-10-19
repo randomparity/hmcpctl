@@ -162,6 +162,10 @@ def build_attribute_record(
             )
         seen.add(attribute)
     quotable = frozenset(quoted)
+    if isinstance(secret, str):
+        raise TypeError(
+            "secret must be a collection of attribute names, not one string"
+        )
     secret_names = frozenset(secret)
     parts = []
     for index, (attribute, value) in enumerate(pairs):

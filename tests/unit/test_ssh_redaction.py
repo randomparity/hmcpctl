@@ -118,6 +118,24 @@ async def test_secret_failure_is_redacted(case):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("secret", ["hunter2pass ", "hunter2pass\n"])
+async def test_trailing_whitespace_secret_echoed_at_detail_end_is_redacted(
+    secret, stream
+):
+    # The builders strip() the detail, cutting the secret's trailing whitespace.
+    conn = _conn(_process_error(**{stream: f"HSCL1234 {secret}"}))
+    with (
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
+        pytest.raises(HMCCLIError) as exc_info,
+    ):
+        await run_hmc_command(make_config(), "chhmcusr -u op", secrets=[secret])
+
+    assert "hunter2pass" not in str(exc_info.value)
+    assert "HSCL1234" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_secret_with_single_quote_is_redacted_in_quoted_record():
     record = shlex.quote(f"name=op,passwd={SECRET}")
     conn = _conn(_process_error(command=f"chhmcusr -i {record}"))
@@ -134,10 +152,14 @@ async def test_secret_with_single_quote_is_redacted_in_quoted_record():
 @pytest.mark.asyncio
 async def test_asyncssh_log_record_is_redacted_and_filter_removed(caplog):
     library_log = logging.getLogger("asyncssh")
+    # The adapter chain asyncssh's channel logs its exec command through (channel.py).
+    channel_log = asyncssh.logging.logger.get_child(context="conn=0").get_child(
+        context="chan=0"
+    )
 
     def run(*_args, **_kwargs):
-        library_log.info("  Command: %s", CMD)
-        library_log.info("%d", CMD)  # arguments that do not format
+        channel_log.info("  Command: %s", CMD)
+        channel_log.info("%d", CMD)  # arguments that do not format
         raise _process_error()
 
     conn = _conn(run)
@@ -219,6 +241,12 @@ def test_secret_attribute_refusal_omits_value(character):
     assert REDACTED in message
     assert "pw-" not in message
     assert "655" not in message
+
+
+def test_bare_string_secret_names_rejected():
+    with pytest.raises(TypeError, match="secret must be"):
+        names = "passwd"  # pragma: allowlist secret - an attribute name
+        build_attribute_record([("passwd", "top,x")], secret=names)
 
 
 def test_non_secret_attribute_refusal_still_quotes_value():
