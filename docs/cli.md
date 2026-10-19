@@ -378,9 +378,13 @@ JSON additionally retains `unreadable_systems`. Health and summary warnings go t
 stderr even when selecting JSON.
 
 Unscoped LPAR/VIOS results add `ManagedSystem: {"UUID": ..., "SystemName": ...}`
-to each entry. This metadata comes from the parent inventory already fetched,
-without an extra request per row, and does not alter `Resource`. State filtering
-retains it. Scoped listings keep their prior JSON entries; their parent columns
+to each entry, from the parent inventory already fetched, without an extra request
+per row. When every managed system is `operating` or `power off`, unscoped LPAR
+entries come from one bulk summary read: their `title` and `link` are null and
+`Resource` holds the partition summary (`RMCState`, numeric `PartitionID`, no
+nested configuration) rather than the full document (ADR 0248). If that read
+fails, a warning on stderr names its HTTP status or failure class and the
+per-system read answers instead. State filtering retains both. Scoped listings keep their prior JSON entries; their parent columns
 are missing when the entry lacks this metadata. `systems health` uses categories
 `systems`, `vios`, `lpars`; system rows have missing parent/RMC cells.
 
