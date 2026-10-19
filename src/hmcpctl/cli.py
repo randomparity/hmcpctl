@@ -90,6 +90,7 @@ from .cli_commands.storage import cluster
 from .cli_commands.storage import resources as storage
 from .cli_commands.systems import core as systems
 from .cli_commands.systems import memory_pools
+from .cli_commands.systems import profiles as system_profiles
 from .cli_commands.vios import core as vios
 from .cli_commands.vios import labels as vios_labels
 from .cli_commands.virtualization import adapters, network, pcie, vnic
@@ -123,6 +124,7 @@ def _register_commands() -> None:
         (snapshot, snapshot_app),
         (storage, storage_app),
         (systems, systems_app),
+        (system_profiles, systems_app),
         (templates, templates_app),
         (vnic, network_app),
         (vios, vios_app),

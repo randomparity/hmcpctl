@@ -6,15 +6,15 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **165** tools are registered.
-- **164** are exposed by a default deployment.
+- **170** tools are registered.
+- **169** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
-| `destructive` | 34 |
-| `mutate` | 51 |
-| `read` | 79 |
+| `destructive` | 36 |
+| `mutate` | 53 |
+| `read` | 80 |
 
 ## Maturity vocabulary
 
@@ -58,6 +58,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `sriov` | 3 | [sriov.md](sriov.md) |
 | `storage` | 8 | [storage.md](storage.md) |
 | `system` | 9 | [system.md](system.md) |
+| `system_profile` | 5 | [system_profile.md](system_profile.md) |
 | `task_role` | 1 | [task_role.md](task_role.md) |
 | `template` | 3 | [template.md](template.md) |
 | `tools` | 2 | [tools.md](tools.md) |
@@ -76,6 +77,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 
 | Tool | Effect | Page |
 | --- | --- | --- |
+| `hmc_activate_system_profile` | `destructive` | [system_profile.md](system_profile.md) |
 | `hmc_add_network_adapter` | `mutate` | [adapter.md](adapter.md) |
 | `hmc_add_vfc_adapter` | `mutate` | [adapter.md](adapter.md) |
 | `hmc_add_vnic` | `mutate` | [vnic.md](vnic.md) |
@@ -95,6 +97,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_create_lpar` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_create_media_repository` | `mutate` | [media.md](media.md) |
 | `hmc_create_optical_media` | `mutate` | [media.md](media.md) |
+| `hmc_create_system_profile` | `mutate` | [system_profile.md](system_profile.md) |
 | `hmc_create_user` | `mutate` | [user.md](user.md) |
 | `hmc_create_vios` | `mutate` | [vios.md](vios.md) |
 | `hmc_create_vios_vfc_group_label` | `mutate` | [vios_label.md](vios_label.md) |
@@ -108,6 +111,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_delete_lpar` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_delete_media_repository` | `destructive` | [media.md](media.md) |
 | `hmc_delete_optical_media` | `destructive` | [media.md](media.md) |
+| `hmc_delete_system_profile` | `destructive` | [system_profile.md](system_profile.md) |
 | `hmc_delete_user` | `destructive` | [user.md](user.md) |
 | `hmc_delete_vios` | `destructive` | [vios.md](vios.md) |
 | `hmc_delete_virtual_disk` | `destructive` | [storage.md](storage.md) |
@@ -167,6 +171,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_list_sriov_logical_ports` | `read` | [pcie.md](pcie.md) |
 | `hmc_list_sriov_physical_ports` | `read` | [pcie.md](pcie.md) |
 | `hmc_list_storage_mappings` | `read` | [storage.md](storage.md) |
+| `hmc_list_system_profiles` | `read` | [system_profile.md](system_profile.md) |
 | `hmc_list_systems` | `read` | [system.md](system.md) |
 | `hmc_list_task_roles` | `read` | [task_role.md](task_role.md) |
 | `hmc_list_users` | `read` | [user.md](user.md) |
@@ -236,6 +241,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_unmount_optical_media` | `destructive` | [media.md](media.md) |
 | `hmc_update_console_software` | `destructive` | [update.md](update.md) |
 | `hmc_update_firmware` | `destructive` | [update.md](update.md) |
+| `hmc_update_system_profile` | `mutate` | [system_profile.md](system_profile.md) |
 | `hmc_update_vios_vfc_group_label` | `mutate` | [vios_label.md](vios_label.md) |
 | `hmc_upload_iso` | `mutate` | [media.md](media.md) |
 | `hmc_vios_update` | `destructive` | [update.md](update.md) |

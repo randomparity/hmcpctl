@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import shlex
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from typing import Literal
@@ -801,7 +802,7 @@ async def create_system_profile(
     hmc: HMCClient,
     system_name_or_uuid: str,
     name: str,
-    members,
+    members: Sequence[SystemProfilePair],
     *,
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
@@ -828,7 +829,7 @@ async def update_system_profile(
     name: str,
     *,
     new_name: str | None = None,
-    members=None,
+    members: Sequence[SystemProfilePair] | None = None,
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
     timeout_seconds: int = 300,

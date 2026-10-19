@@ -40,6 +40,7 @@ from hmcpctl.server_tools.permissions import EFFECTIVE_PERMISSIONS_SECURITY
 from hmcpctl.server_tools.storage import resources as storage
 from hmcpctl.server_tools.systems import core as systems
 from hmcpctl.server_tools.systems import health
+from hmcpctl.server_tools.systems import profiles as system_profiles
 from hmcpctl.server_tools.systems import resources as system_resources
 from hmcpctl.server_tools.templates import core as templates
 from hmcpctl.server_tools.users import core as users
@@ -50,6 +51,7 @@ from hmcpctl.tool_registry import ToolSecurity, build_tool_security
 
 TOOL_MODULES = (
     systems,
+    system_profiles,
     capacity,
     jobs,
     health,

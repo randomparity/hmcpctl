@@ -906,6 +906,41 @@
       "observed_at": "2026-10-06T12:35:03Z"
     },
     {
+      "operation": "system_profile.activate",
+      "implementation": "partial",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.create",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.delete",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.list",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.update",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "task_role.list",
       "implementation": "implemented",
       "verification": "stale",
