@@ -232,9 +232,9 @@ checks each definition's arguments against the served schema (`definition-mismat
 counts defined operations; a definition never counts as exercised, and nothing runs one.
 `just scenario-definitions` regenerates the registry from `operations.json` and the served
 schemas (ADR 0249): an operation is defined only when every required argument is a target,
-and a mutating one only when it declares nothing else but `ownership_override`. It prints
-every other operation as needing a hand-written scenario; the suite fails when the
-committed registry is stale.
+and a mutating one only when every other argument it declares is a target selector, the
+connection argument or `ownership_override`. It prints every other operation as needing a
+hand-written scenario; the suite fails when the committed registry is stale.
 
 The catalog records no runtime eligibility. `existing-runtime-guards` neither grants
 nor revokes admission: authorization, ownership, validation, capability, and safety
