@@ -73,10 +73,13 @@ exclude = ["*.md"]
 # Ruff 0.16 dropped these eighteen rules from its defaults. They were enforced here
 # under 0.15.22, and ten existing `# noqa: E402` directives in tests/ depend on E402
 # staying enabled -- without this list they become RUF100 findings whose only fix is
-# deleting documented suppressions. See ADR 0114.
+# deleting documented suppressions. Ruff 0.17 dropped the seven DTZ rules on the
+# last line the same way; eight `# noqa: DTZ001`/`DTZ011` directives depend on
+# them. See ADR 0114.
 extend-select = [
     "E401", "E402", "E701", "E702", "E703", "E711", "E712", "E713", "E714",
     "E721", "E731", "E741", "E742", "E743", "F403", "F405", "F406", "F722",
+    "DTZ001", "DTZ005", "DTZ006", "DTZ007", "DTZ011", "DTZ012", "DTZ901",
 ]
 
 [tool.ruff.lint.flake8-bugbear]
