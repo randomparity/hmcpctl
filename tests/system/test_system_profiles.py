@@ -899,3 +899,76 @@ async def test_public_update_variants(system_profiles, rename, replace):
     document = h.submit_job.await_args.args[1]
     assert ("alternate" in document) is replace
     assert ("renamed" in document) is rename
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change_phase", ["before-effect", "after-effect"])
+async def test_refreshes_contained_profile_public_mutation(
+    system_profiles, change_phase
+):
+    h, _, profile, ssh = system_profiles
+    events = []
+    changed = False
+    reads = 0
+
+    async def profiles(*args):
+        nonlocal reads
+        reads += 1
+        events.append(f"profile-read-{reads}")
+        observed = deepcopy(profile)
+        observed["Resource"]["Description"] = (
+            "B"
+            if change_phase == "before-effect" and reads >= 3
+            else "C"
+            if change_phase == "after-effect" and changed
+            else "A"
+        )
+        return [observed]
+
+    async def command(_config, cmd, **kwargs):
+        return (
+            "name:lpar_ids:profile_names\nscratch:1:base\n"
+            + ("new:1:base\n" if changed else "")
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n" + ("new\n" if changed else "")
+        )
+
+    async def submit(*args):
+        events.append("effect")
+        return terminal("NOT_STARTED")
+
+    async def wait(*args, **kwargs):
+        nonlocal changed
+        changed = True
+        return terminal()
+
+    h.list_child.side_effect = profiles
+    ssh.side_effect = command
+    h.submit_job = AsyncMock(side_effect=submit)
+    h.wait_for_job_entry = AsyncMock(side_effect=wait)
+    if change_phase == "before-effect":
+        with pytest.raises(ValueError, match="admission changed"):
+            await ops.create_system_profile(
+                h,
+                S,
+                "new",
+                [ops.SystemProfilePair(partition=L, profile=P)],
+                exclusive_writer_window=True,
+            )
+        assert h.submit_job.await_count == 0
+        assert events == [f"profile-read-{n}" for n in range(1, 5)]
+    else:
+        result = await ops.create_system_profile(
+            h,
+            S,
+            "new",
+            [ops.SystemProfilePair(partition=L, profile=P)],
+            exclusive_writer_window=True,
+        )
+        assert h.submit_job.await_count == 1
+        assert events == [f"profile-read-{n}" for n in range(1, 5)] + ["effect"] + [
+            "profile-read-5",
+            "profile-read-6",
+        ]
+        assert result.state == "uncertain" and result.postcondition == "drifted"
+        assert result.job.job_id == "job-1"
