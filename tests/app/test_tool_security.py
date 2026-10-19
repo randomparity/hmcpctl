@@ -436,6 +436,8 @@ DESTRUCTIVE_NAME_PREFIXES = (
 # instead of reporting a count that moved.
 DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
     {
+        # System-profile activation can power every contained member.
+        "hmc_activate_system_profile",
         "hmc_backup_lpar_profiles",
         "hmc_dump_restart_lpar",
         # ADR 0189: classed by the most severe tool it can reach.
@@ -1254,6 +1256,11 @@ _NOT_EXHAUSTIVE = frozenset(
         "hmc_snapshot_inspect",
         "hmc_snapshot_assess_affinity",
         "hmc_run_command",
+        # System selectors cannot enumerate the system-profile member union.
+        "hmc_create_system_profile",
+        "hmc_update_system_profile",
+        "hmc_delete_system_profile",
+        "hmc_activate_system_profile",
         # Selectors, but they do not name every resource the call acts on.
         "hmc_backup_lpar_profiles",
         "hmc_delete_backup_lpar_profile",
@@ -1304,6 +1311,10 @@ def test_every_selector_less_tool_is_unbounded_and_no_other_is_by_accident():
         name for name, s in TOOL_SECURITY.items() if not s.targets
     }
     assert declared == {
+        "hmc_create_system_profile",
+        "hmc_update_system_profile",
+        "hmc_delete_system_profile",
+        "hmc_activate_system_profile",
         "hmc_add_vfc_adapter",
         "hmc_add_vscsi_adapter",
         "hmc_backup_lpar_profiles",
