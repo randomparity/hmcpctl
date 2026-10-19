@@ -843,6 +843,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
     }
     assert by_label["--filter"] == {
         "facts",
+        "_facts",
         "scsi_adapter_listing",
         "list_sriov_physical_port_rows",
         "list_sriov_configured_logical_port_rows",

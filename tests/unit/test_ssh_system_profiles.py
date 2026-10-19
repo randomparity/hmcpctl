@@ -26,3 +26,46 @@ async def test_inventory_argv(monkeypatch):
         "--header",
     ]
     assert command.await_args.kwargs == {"include_stderr": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "activate,continuation", [(False, False), (True, False), (True, True)]
+)
+async def test_validation_argv(monkeypatch, activate, continuation):
+    command = AsyncMock(return_value="")
+    monkeypatch.setattr(profiles, "run_hmc_command", command)
+    await profiles.validate_system_profile_record(
+        HMCConfig.from_mapping({}),
+        "system; x",
+        "name; x",
+        activate=activate,
+        continue_on_error=continuation,
+    )
+    expected = ["chsysstate", "-m", "system; x", "-r", "sysprof", "-n", "name; x"]
+    if activate:
+        expected += ["-o", "on"]
+    expected += ["--test"]
+    if continuation:
+        expected += ["--continue"]
+    assert shlex.split(command.await_args.args[1]) == expected
+    assert command.await_args.kwargs == {"include_stderr": True}
+
+
+@pytest.mark.asyncio
+async def test_delete_argv(monkeypatch):
+    command = AsyncMock(return_value="")
+    monkeypatch.setattr(profiles, "run_hmc_command", command)
+    await profiles.delete_system_profile_record(
+        HMCConfig.from_mapping({}), "system; x", "name; x"
+    )
+    assert shlex.split(command.await_args.args[1]) == [
+        "rmsyscfg",
+        "-r",
+        "sysprof",
+        "-m",
+        "system; x",
+        "-n",
+        "name; x",
+    ]
+    assert command.await_args.kwargs == {"include_stderr": True}

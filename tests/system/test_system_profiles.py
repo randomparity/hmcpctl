@@ -329,7 +329,7 @@ def activation_fact(state, profile, memory, uuid=P):
             "PartitionState": state,
             "LastActivatedProfile": profile,
             "AssociatedPartitionProfile": {
-                "href": f"https://hmc.test/rest/api/uom/LogicalPartitionProfile/{uuid}"
+                "href": f"https://hmc.test/rest/api/uom/LogicalPartition/{L}/LogicalPartitionProfile/{uuid}"
             },
             "PartitionMemoryConfiguration": {
                 "SharedMemoryEnabled": "false",
@@ -383,3 +383,187 @@ def test_job_and_member_outcomes_witness(system_profiles, fault):
     if fault == "missing":
         del after["resource"]["PartitionMemoryConfiguration"]["RuntimeMemory"]
     assert ops._new_witness(h, member, before, after) is (fault is None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [None, "failed", "timeout", "wrong-job"])
+async def test_create_outcomes_one_effect(system_profiles, failure):
+    h, _, _, ssh = system_profiles
+    created = False
+
+    async def command(_config, cmd, **kwargs):
+        if "name:lpar_ids" in cmd:
+            return "name:lpar_ids:profile_names\n" + ("new:1:base\n" if created else "")
+        return "name\n" + ("new\n" if created else "")
+
+    async def submit(path, xml):
+        nonlocal created
+        assert path == f"/rest/api/uom/ManagedSystem/{S}/do/CreateSystemProfile"
+        created = True
+        if failure == "timeout":
+            raise TimeoutError("unknown submission")
+        return terminal(job_id="job-1")
+
+    h.submit_job = AsyncMock(side_effect=submit)
+    h.wait_for_job_entry = AsyncMock(
+        return_value=terminal(
+            status="FAILED_TO_START" if failure == "failed" else "COMPLETED_OK",
+            job_id="other" if failure == "wrong-job" else "job-1",
+        )
+    )
+    ssh.side_effect = command
+    result = await ops.create_system_profile(
+        h,
+        S,
+        "new",
+        [ops.SystemProfilePair(partition=L, profile=P)],
+        exclusive_writer_window=True,
+    )
+    assert h.submit_job.await_count == 1
+    assert result.state == (
+        "completed"
+        if failure is None
+        else "failed"
+        if failure == "failed"
+        else "uncertain"
+    )
+    assert result.postcondition == ("verified" if failure is None else "unverified")
+    assert result.job is not None if failure != "timeout" else result.job is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "diagnostic", "nonzero", "drift"])
+async def test_delete_outcomes(system_profiles, fault):
+    import asyncssh
+
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    h, member, _, ssh = system_profiles
+    deleted = False
+
+    async def command(_config, cmd, **kwargs):
+        nonlocal deleted
+        if cmd.startswith("rmsyscfg"):
+            deleted = True
+            if fault == "diagnostic":
+                return "\n[stderr]\ndiagnostic"
+            if fault == "nonzero":
+                try:
+                    raise asyncssh.ProcessError(None, None, None, 1, None, 1, "", "")
+                except asyncssh.ProcessError as exc:
+                    raise HMCCLIError("failed") from exc
+            if fault == "drift":
+                member["Resource"]["Description"] = "changed"
+            return ""
+        return (
+            "No results were found.\n"
+            if deleted
+            else "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+
+    ssh.side_effect = command
+    result = await ops.delete_system_profile(
+        h, S, "scratch", exclusive_writer_window=True
+    )
+    assert sum(c.args[1].startswith("rmsyscfg") for c in ssh.await_args_list) == 1
+    assert result.job is None and result.return_code is None
+    assert result.state == (
+        "completed"
+        if fault is None
+        else "failed"
+        if fault == "nonzero"
+        else "uncertain"
+    )
+    assert result.command_status == (
+        "completed"
+        if fault in (None, "drift")
+        else "failed"
+        if fault == "nonzero"
+        else "uncertain"
+    )
+
+
+@pytest.mark.parametrize(
+    "backend,case,expected",
+    [
+        ("completed", "new", "complete"),
+        ("failed", "new", "unknown"),
+        ("failed", "mixed", "partial"),
+        ("failed", "unchanged", "failed"),
+        ("completed", "missing", "unknown"),
+    ],
+)
+def test_job_and_member_outcomes_aggregate(system_profiles, backend, case, expected):
+    h, _, _, _ = system_profiles
+    m = ops.SystemProfileMember("LogicalPartition", L, 1, "member-a", P, "base")
+    before = activation_fact("not activated", "", 0)
+    before["resource"].pop("AssociatedPartitionProfile")
+    after = activation_fact("running", "base", 1024)
+    old = {"a": before, "b": activation_fact("open firmware", "other", 1024)}
+    other = deepcopy(old["b"])
+    other["profile"]["ProfileMemory"]["DesiredMemory"] = "1024"
+    other["profile"]["ProfileName"] = "other"
+    other["requested_profile"] = {"ProfileMemory": {"DesiredMemory": "512"}}
+    other["profile_uuid"] = "44444444-4444-4444-8444-444444444444"
+    other["resource"]["AssociatedPartitionProfile"]["href"] = (
+        "https://hmc.test/rest/api/uom/LogicalPartitionProfile/44444444-4444-4444-8444-444444444444"
+    )
+    new = {"a": after, "b": other}
+    members = (
+        m,
+        ops.SystemProfileMember(
+            "LogicalPartition",
+            "55555555-5555-4555-8555-555555555555",
+            2,
+            "b",
+            P,
+            "base",
+        ),
+    )
+    old = {members[0].partition_uuid: old["a"], members[1].partition_uuid: old["b"]}
+    new = {members[0].partition_uuid: new["a"], members[1].partition_uuid: new["b"]}
+    if case == "new":
+        members = members[:1]
+    if case == "unchanged":
+        new = deepcopy(old)
+    if case == "missing":
+        new = {}
+    assert ops._activation_execution(h, members, old, new, backend) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("diagnostic", [False, True])
+async def test_validation_outcomes(system_profiles, diagnostic):
+    h, _, _, ssh = system_profiles
+
+    async def command(_config, cmd, **kwargs):
+        if cmd.startswith("chsysstate"):
+            import shlex
+
+            assert shlex.split(cmd) == [
+                "chsysstate",
+                "-m",
+                "9009-42A*TEST",
+                "-r",
+                "sysprof",
+                "-n",
+                "scratch",
+                "--test",
+            ]
+            return "native result" + ("\n[stderr]\ndiagnostic" if diagnostic else "")
+        if "-F name:lpar_id:curr_profile" in cmd:
+            return "name:lpar_id:curr_profile\nmember-a:1:\n"
+        return (
+            "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+
+    ssh.side_effect = command
+    result = await ops.activate_system_profile(h, S, "scratch", action="validate")
+    assert result.state == ("uncertain" if diagnostic else "completed")
+    assert result.job is None and result.activation_execution is None
+    assert result.postcondition == ("unverified" if diagnostic else "not-applicable")
+    assert sum(c.args[1].startswith("chsysstate") for c in ssh.await_args_list) == 1

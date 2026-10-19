@@ -538,3 +538,36 @@ async def list_system_profile_records(config: HMCConfig, system_cli_name: str) -
         "-F name:lpar_ids:profile_names --header",
         include_stderr=True,
     )
+
+
+async def delete_system_profile_record(
+    config: HMCConfig, system_cli_name: str, name: str
+) -> str:
+    """Delete exactly one system profile through the selected documented route."""
+    return await run_hmc_command(
+        config,
+        f"rmsyscfg -r sysprof -m {shlex.quote(system_cli_name)} -n {shlex.quote(name)}",
+        include_stderr=True,
+    )
+
+
+async def validate_system_profile_record(
+    config: HMCConfig,
+    system_cli_name: str,
+    name: str,
+    *,
+    activate: bool = False,
+    continue_on_error: bool = False,
+) -> str:
+    """Execute one fixed validation or combined validation/activation command."""
+    if not isinstance(activate, bool) or not isinstance(continue_on_error, bool):
+        raise TypeError("activation and continuation must be boolean")
+    if continue_on_error and not activate:
+        raise ValueError("continue requires activation")
+    command = f"chsysstate -m {shlex.quote(system_cli_name)} -r sysprof -n {shlex.quote(name)}"
+    if activate:
+        command += " -o on"
+    command += " --test"
+    if continue_on_error:
+        command += " --continue"
+    return await run_hmc_command(config, command, include_stderr=True)
