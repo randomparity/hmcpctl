@@ -1825,3 +1825,29 @@ async def test_validation_real_transport_refuses_later_effects(
     assert document["run"]["partial"] is True and "calibration" not in document
     with pytest.raises(ValueError):
         await arm.recover(h, packet, document)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("negative", [False, True])
+@pytest.mark.parametrize("fault", ["uuid", "memory", "cli-fact"])
+async def test_serialized_validation_baseline_must_equal_calibration(
+    packet, hardware, tmp_path, negative, fault
+):
+    h, _state = hardware
+    packet["negative_cases"] = negative
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    document = json.loads(json.dumps(await capture_in(h, packet, tmp_path)))
+    await arm.recover(h, packet, document)
+    if fault == "uuid":
+        document["calibration"]["before"][0]["partition"]["UUID"] = L
+    elif fault == "memory":
+        document["calibration"]["before"][0]["partition"]["Resource"][
+            "PartitionMemoryConfiguration"
+        ]["CurrentMemory"] = "999999"
+    else:
+        for phase in ("before_facts", "after_facts"):
+            document["validation_commands"][0][phase][0]["cli_current_profile"] = (
+                "foreign"
+            )
+    with pytest.raises(ValueError, match="validation baseline.*calibration"):
+        await arm.recover(h, packet, document)

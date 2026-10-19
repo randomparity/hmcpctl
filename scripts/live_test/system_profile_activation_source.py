@@ -1245,6 +1245,8 @@ async def recover(hmc, packet, document):
     if len(validations) != 1:
         raise ValueError("exactly one validation command proof required")
     _check_validation(packet, document, validations[0])
+    if document["calibration"]["before"] != validations[0]["before_facts"]:
+        raise ValueError("validation baseline contradicts calibration baseline")
     observations = [proof["observed"] for proof in document["inventory_reads"]]
     observations.extend(validations[0][phase] for phase in ("before", "after"))
     for observed in observations:
