@@ -1381,3 +1381,59 @@ member identifiers remain private; the standard evidence renderer stamps the tes
 exports only allowlisted structural fields. No native evidence or maturity promotion follows from
 mocked-boundary tests, preparation or this document. Product scope-audit activation finding remains
 open until source-backed analysis resolves it.
+
+### Product system-profile lifecycle arm
+
+The named `system-profiles` arm exercises the product CLI/MCP domain contract. It is
+separate from the source-calibration arms and does not inherit their target or fixture
+permissions. Use the repository live-testing procedure for applicable native hardware proofs.
+A new scoped operator grant must name the selected system, every existing member/profile,
+any ownership override, and any activation/resource effects before execution. Configuration
+flags are assertions, not an HMC grant or a fence against independent writers.
+
+Add these optional settings to the existing complete private live-test configuration:
+
+```dotenv
+LIVE_TEST_SYSTEM_PROFILE_MEMBERS_JSON=[{"partition":"<member-A>","profile":"<contained-profile-A>"},{"partition":"<member-B>","profile":"<contained-profile-B>"}]
+LIVE_TEST_SYSTEM_PROFILE_WRITER_WINDOW=true
+LIVE_TEST_SYSTEM_PROFILE_ACTIVATION_ACTION=none
+LIVE_TEST_SYSTEM_PROFILE_CONTINUE_ON_ERROR=false
+LIVE_TEST_SYSTEM_PROFILE_OWNERSHIP_OVERRIDE=false
+```
+
+The default metadata scenario creates two unpredictable system profiles, lists both through
+the product reader, performs rename-only, replacement-only and combined updates, then deletes
+only its two current names. Four candidate names must be absent before the first effect.
+Every member follows normal ownership policy; missing evidence, collision, drift or an unknown
+outcome stops later writes. The arm persists the exact pending stage before each effect through
+the runner's existing private recovery sidecar. An unwritable checkpoint prevents dispatch.
+It creates no partition, storage, network, ownership stamp or automatic power-off operation.
+
+`validate` selects the fixed CLI test route. `activate` selects REST activation-only;
+`validate-and-activate` selects one fixed combined CLI command. Activating variants require a
+separate explicit power/resource grant and caller coordination through known terminal
+reconciliation. A complete witness needs inactive members with absent/different prior profiles,
+new matching CLI/last-activated/contained-profile identities, and coherent actual resources.
+An already-matching baseline or an uncalibrated resource shape remains unknown. No universal
+saved-field application or guest-boot proof is claimed. Unknown/failed activation leaves its
+names and handles for manual reconciliation; there is no automatic retry, fallback or rollback.
+Known activation effects remain separate from the immutable original baseline; recovery cannot
+call a changed power/resource baseline clean. Native jobs are retained, including failures.
+
+After exact deployed HEAD/import/locked-input checks and a new scoped grant, use a fresh private
+results path outside the checkout:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group system-profiles
+uv run --no-sync python scripts/live_system_profiles.py --results-file "$PRIVATE/test-results-system-profiles.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$PRIVATE/test-results-system-profiles.json"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/test-results-system-profiles.json"
+```
+
+Preflight performs read-only complete inventory/member/profile/ownership admission. Its
+`--skip-hardware` variant establishes configuration only. Independent recovery always rereads
+current state and requires both original-baseline equality and the complete finite terminal
+sequence. Missing stages, retained residue, partial execution or unreadable evidence are not
+CLEAN. Run it after every outcome, including interruption. Preserve raw results privately;
+only the standard evidence renderer filters them for public use. Product native proof has not
+run merely because the offline arm tests or historical source calibration passed.

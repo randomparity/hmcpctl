@@ -22,7 +22,7 @@ from ...resource_identity import is_uuid, resolve_system_uuid
 from ...ssh.commands import parse_hmc_delimited_rows
 from ...ssh.profiles import list_system_profile_records
 from ...ssh.transport import run_hmc_command
-from ...xmlutil import leaf_text, render_mtms
+from ...xmlutil import console_version, leaf_text, render_mtms
 
 LIMIT = 5 * 1024 * 1024
 CommandStatus = Literal["completed", "failed", "uncertain"]
@@ -39,7 +39,11 @@ def _text(value: object) -> str:
 
 
 def _name(value: str) -> str:
-    if not value.strip() or any(c in value for c in '\x00\n\r,:"\\'):
+    if (
+        len(value.encode()) > LIMIT
+        or not value.strip()
+        or any(c in value for c in '\x00\n\r,:"\\')
+    ):
         raise ValueError(
             "nonblank, unambiguously encodable system-profile/member name required"
         )
@@ -235,6 +239,8 @@ def _stable(phase: _Phase) -> tuple:
                     "PartitionState",
                     "Description",
                     "DefaultProfileName",
+                    "LastActivatedProfile",
+                    "AssociatedPartitionProfile",
                     "PartitionMemoryConfiguration",
                     "PartitionProcessorConfiguration",
                 )
@@ -409,6 +415,17 @@ async def _admit(
         raise ValueError("exclusive_writer_window=true required through reconciliation")
     if not isinstance(ownership_override, bool):
         raise TypeError("ownership_override must be boolean")
+    if action in {"create", "update", "activate"}:
+        console = await hmc.get_console_info()
+        version = (
+            console_version(console.get("Resource", {}))
+            if isinstance(console, dict)
+            else None
+        )
+        if version is None or version < (10, 3, 1060):
+            raise ValueError(
+                "system-profile REST jobs require proven HMC 10.3.1060 or later"
+            )
     phase, records = await _inventory(hmc, system)
     old = next((r for r in records if r.name == name), None)
     if action == "create":
@@ -609,6 +626,7 @@ async def _rest(hmc, system, operation, document, timeout, poll):
     outcome = None
     code = None
     try:
+        _bounded(document)
         submission = await hmc.submit_job(
             f"/rest/api/uom/ManagedSystem/{system}/do/{operation}", document
         )
@@ -623,11 +641,19 @@ async def _rest(hmc, system, operation, document, timeout, poll):
             ident, None, True, None, None, True, f"/rest/api/uom/jobs/{ident}"
         )
         _job_identity(hmc, submission, ident)
-        outcome = replace(job_outcome(ident, submission), job=None)
+        outcome = replace(
+            job_outcome(ident, submission),
+            job=None,
+            job_href=f"/rest/api/uom/jobs/{ident}",
+        )
         terminal = await wait_for_submitted_job(hmc, submission, True, timeout, poll)
         _job_identity(hmc, terminal, ident)
         _bounded(json.dumps(terminal))
-        outcome = replace(job_outcome(ident, terminal), job=None)
+        outcome = replace(
+            job_outcome(ident, terminal),
+            job=None,
+            job_href=f"/rest/api/uom/jobs/{ident}",
+        )
         values = _job_values(terminal)
         code = values.get("returnCode")
         warnings = tuple(
@@ -964,6 +990,8 @@ def _activation_invariants(before, after, members):
         for member in members:
             resource = phase.entries[member.partition_uuid]["entry"]["Resource"]
             for key in (
+                "LastActivatedProfile",
+                "AssociatedPartitionProfile",
                 "PartitionState",
                 "PartitionMemoryConfiguration",
                 "PartitionProcessorConfiguration",

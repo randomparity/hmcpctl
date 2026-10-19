@@ -44,6 +44,17 @@ def system_profiles(monkeypatch):
         config=HMCConfig.from_mapping(
             {"host": "hmc.test", "user": "test", "agent_id": "test"}
         ),
+        get_console_info=AsyncMock(
+            return_value={
+                "Resource": {
+                    "VersionInfo": {
+                        "Version": "10",
+                        "Release": "3",
+                        "ServicePackName": "1060",
+                    }
+                }
+            }
+        ),
         get_managed_system=AsyncMock(
             return_value={
                 "UUID": S,
@@ -567,3 +578,182 @@ async def test_validation_outcomes(system_profiles, diagnostic):
     assert result.job is None and result.activation_execution is None
     assert result.postcondition == ("unverified" if diagnostic else "not-applicable")
     assert sum(c.args[1].startswith("chsysstate") for c in ssh.await_args_list) == 1
+
+
+@pytest.mark.asyncio
+async def test_preflight_refusal_unsupported_release(system_profiles):
+    h, _, _, _ = system_profiles
+    h.get_console_info = AsyncMock(
+        return_value={
+            "Resource": {
+                "VersionInfo": {
+                    "Version": "10",
+                    "Release": "2",
+                    "ServicePackName": "1040",
+                }
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="10.3.1060"):
+        await ops._admit(
+            h,
+            S,
+            "new",
+            action="create",
+            members=[ops.SystemProfilePair(partition=L, profile=P)],
+            exclusive_writer_window=True,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", ["namespace", "membership", "delete"])
+async def test_delete_real_transport_diagnostics(system_profiles, monkeypatch, site):
+    from hmcpctl.ssh import transport
+
+    h, _, _, _ = system_profiles
+    h.config = h.config.model_copy(update={"password": "synthetic-test-password"})
+    deleted = False
+    mutations = []
+
+    async def run(cmd, **kwargs):
+        nonlocal deleted
+        assert kwargs["check"] is True
+        if cmd.startswith("rmsyscfg"):
+            mutations.append(cmd)
+            deleted = True
+            return SimpleNamespace(
+                stdout="", stderr="diagnostic" if site == "delete" else ""
+            )
+        whole = "name:lpar_ids" in cmd
+        raw = (
+            "No results were found."
+            if deleted
+            else "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if whole
+            else "name\nscratch\n"
+        )
+        diagnostic = site == ("membership" if whole else "namespace")
+        return SimpleNamespace(stdout=raw, stderr="diagnostic" if diagnostic else "")
+
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    connection.run.side_effect = run
+    monkeypatch.setattr(transport.asyncssh, "connect", lambda **_: connection)
+    monkeypatch.setattr(ops, "run_hmc_command", transport.run_hmc_command)
+    monkeypatch.setattr(
+        "hmcpctl.ssh.profiles.run_hmc_command", transport.run_hmc_command
+    )
+    if site != "delete":
+        with pytest.raises(ValueError):
+            await ops.delete_system_profile(
+                h, S, "scratch", exclusive_writer_window=True
+            )
+        assert mutations == []
+    else:
+        result = await ops.delete_system_profile(
+            h, S, "scratch", exclusive_writer_window=True
+        )
+        assert result.state == result.command_status == "uncertain"
+        assert len(mutations) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign", ["old", "new"])
+async def test_all_members_old_new_union(system_profiles, foreign):
+    h, member, profile, _ = system_profiles
+    second_uuid = "66666666-6666-4666-8666-666666666666"
+    second = deepcopy(member)
+    second["UUID"] = second_uuid
+    second["Resource"].update(PartitionName="member-b", PartitionID="2")
+    target = member if foreign == "old" else second
+    target["Resource"]["Description"] = "[hmcpctl owner:foreign created:2026-10-19]"
+    h.list_logical_partitions.side_effect = lambda _: deepcopy([member, second])
+
+    async def profiles(kind, uuid, child):
+        p = deepcopy(profile)
+        if uuid == second_uuid:
+            p["UUID"] = "77777777-7777-4777-8777-777777777777"
+        p["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"] = (
+            f"https://hmc.test/rest/api/uom/LogicalPartition/{uuid}"
+        )
+        return [p]
+
+    h.list_child.side_effect = profiles
+    with pytest.raises(PermissionError):
+        await ops._admit(
+            h,
+            S,
+            "scratch",
+            action="update",
+            members=[ops.SystemProfilePair(partition=second_uuid, profile="base")],
+            exclusive_writer_window=True,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case", ["complete", "stale", "missing-memory", "failed-unchanged"]
+)
+async def test_job_and_member_outcomes_public_activation(system_profiles, case):
+    h, member, profile, ssh = system_profiles
+    profile["Resource"].update(activation_fact("running", "base", 1024)["profile"])
+    original = deepcopy(member["Resource"])
+    member["Resource"]["LastActivatedProfile"] = {"ksv": "V1_0"}
+    if case == "stale":
+        member["Resource"]["LastActivatedProfile"] = "base"
+        member["Resource"]["AssociatedPartitionProfile"] = activation_fact(
+            "running", "base", 1024
+        )["resource"]["AssociatedPartitionProfile"]
+    activated = False
+
+    async def command(_config, cmd, **kwargs):
+        if "-F name:lpar_id:curr_profile" in cmd:
+            return (
+                "name:lpar_id:curr_profile\nmember-a:1:"
+                + ("base" if activated or case == "stale" else "")
+                + "\n"
+            )
+        return (
+            "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+
+    async def wait(*args, **kwargs):
+        nonlocal activated
+        if case != "failed-unchanged":
+            activated = True
+            member["Resource"] = {
+                **original,
+                **activation_fact("open firmware", "base", 1024)["resource"],
+            }
+            if case == "missing-memory":
+                del member["Resource"]["PartitionMemoryConfiguration"]["RuntimeMemory"]
+        return terminal(
+            "FAILED_BEFORE_COMPLETION"
+            if case == "failed-unchanged"
+            else "COMPLETED_OK",
+            "1" if case == "failed-unchanged" else "0",
+        )
+
+    ssh.side_effect = command
+    h.submit_job = AsyncMock(return_value=terminal("NOT_STARTED"))
+    h.wait_for_job_entry = AsyncMock(side_effect=wait)
+    result = await ops.activate_system_profile(
+        h, S, "scratch", exclusive_writer_window=True
+    )
+    assert result.activation_execution == (
+        "complete"
+        if case == "complete"
+        else "failed"
+        if case == "failed-unchanged"
+        else "unknown"
+    )
+    assert result.state == (
+        "completed"
+        if case == "complete"
+        else "failed"
+        if case == "failed-unchanged"
+        else "uncertain"
+    )
+    assert h.submit_job.await_count == 1 and result.job.job_id == "job-1"

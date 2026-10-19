@@ -52,6 +52,7 @@ from live_test import (
     runner,
     storage_lifecycle,
     storage_volume_group,
+    system_profiles,
     users,
     vios_backup,
     vmedia,
@@ -60,6 +61,7 @@ from live_test import config as live_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, env_var_value
+from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.provision import check_vlan_exists
 from hmcpctl.operations.virtualization.pcie import (
     require_admitted_environment,
@@ -450,11 +452,28 @@ def _profile_artifacts_verdict(config: live_config.LiveTestConfig) -> ArmVerdict
     )
 
 
+def _system_profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        system_profiles.configured(config)
+    except (ValueError, TypeError) as exc:
+        return ArmVerdict("system-profiles", False, str(exc), (), config.system_name)
+    return ArmVerdict(
+        "system-profiles",
+        True,
+        "explicit normal-owned pairs and caller coordination required; source permissions do not apply",
+        (
+            "four unpredictable system-profile names; seven metadata effects; optional explicitly granted validation/activation; no automatic power cleanup or rollback",
+        ),
+        config.system_name,
+    )
+
+
 _ARM_VERDICTS = {
     "dedicated": _dedicated_verdict,
     "bare-cec": _bare_cec_verdict,
     "profiles": _profiles_verdict,
     "profile-artifacts": _profile_artifacts_verdict,
+    "system-profiles": _system_profiles_verdict,
     "pcm": _pcm_verdict,
     "vios-backup": _vios_backup_verdict,
     "network": _network_verdict,
@@ -674,6 +693,34 @@ def main(argv: list[str] | None = None) -> int:
                 config.system_name,
             ),
         )
+
+    if args.group == "system-profiles":
+        if config is None or not credentials_ok or not verdicts[0].runnable:
+            print(
+                "system-profiles preflight refused: configuration, credentials or explicit scope missing"
+            )
+            return 1
+        if args.skip_hardware:
+            print(
+                "system-profiles configuration only: native admission NOT established"
+            )
+            return 0
+        try:
+            asyncio.run(system_profiles.preflight(HMCConfig(), config))
+        except (
+            HMCError,
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            TimeoutError,
+        ) as exc:
+            print(f"system-profiles native preflight refused: {type(exc).__name__}")
+            return 2
+        print(
+            "system-profiles read-only admission passed; no effects or live authority granted"
+        )
+        return 0
 
     envelopes: dict[str, str] = {}
     provision_vlan: str | None = None

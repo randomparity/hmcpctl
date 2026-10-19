@@ -33,6 +33,11 @@ class LiveTestConfig:
     scratch_pv_name: str = ""
     scratch_vg_name: str = ""
     profile_artifact_suffix_hex_length: int = 16
+    system_profile_members_json: str = ""
+    system_profile_writer_window: bool = False
+    system_profile_activation_action: str = "none"
+    system_profile_continue_on_error: bool = False
+    system_profile_ownership_override: bool = False
     scratch_create_desired_memory_mib: int = 1536
     scratch_create_max_memory_mib: int = 3072
     scratch_create_desired_vcpus: int = 3
@@ -148,6 +153,11 @@ class LiveTestConfig:
     #: export cannot redirect an arm that creates and deletes partitions
     #: (ADR 0115).
     _OPTIONAL_CONFIG_FIELDS: ClassVar[dict[str, str]] = {
+        "LIVE_TEST_SYSTEM_PROFILE_MEMBERS_JSON": "system_profile_members_json",
+        "LIVE_TEST_SYSTEM_PROFILE_WRITER_WINDOW": "system_profile_writer_window",
+        "LIVE_TEST_SYSTEM_PROFILE_ACTIVATION_ACTION": "system_profile_activation_action",
+        "LIVE_TEST_SYSTEM_PROFILE_CONTINUE_ON_ERROR": "system_profile_continue_on_error",
+        "LIVE_TEST_SYSTEM_PROFILE_OWNERSHIP_OVERRIDE": "system_profile_ownership_override",
         "LIVE_TEST_SCRATCH_PV_NAME": "scratch_pv_name",
         "LIVE_TEST_SCRATCH_VG_NAME": "scratch_vg_name",
         "LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME": "dedicated_pcie_system_name",
@@ -217,6 +227,15 @@ class LiveTestConfig:
                     if key in values
                 }
             )
+            for field_name in (
+                "system_profile_writer_window",
+                "system_profile_continue_on_error",
+                "system_profile_ownership_override",
+            ):
+                if field_name in parsed:
+                    if parsed[field_name] not in ("true", "false"):
+                        raise ValueError(f"{field_name} requires true or false")
+                    parsed[field_name] = parsed[field_name] == "true"
             suffix_key = "LIVE_TEST_PROFILE_ARTIFACT_SUFFIX_HEX_LENGTH"
             if suffix_key in values:
                 if values[suffix_key] not in ("12", "16"):
@@ -361,6 +380,10 @@ class LiveTestConfig:
 class LiveTestArtifacts:
     """Mutable discoveries and recovery state owned by one live-test invocation."""
 
+    system_profile_names: list[str] = field(default_factory=list)
+    system_profile_baseline: dict = field(default_factory=dict)
+    system_profile_phase: str | None = None
+    system_profile_jobs: list[dict] = field(default_factory=list)
     system_uuid: str | None = None
     lp3_uuid: str | None = None
     scratch_uuid: str | None = None
@@ -418,6 +441,7 @@ _VMEDIA_REPOSITORY_ARTIFACTS = ("vmedia_vg_uuid", "vmedia_blank_name")
 
 _ARTIFACT_NULLABLE_STRINGS = frozenset(
     {
+        "system_profile_phase",
         "system_uuid",
         "lp3_uuid",
         "scratch_uuid",
@@ -462,6 +486,14 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
     parsed.setdefault("scratch_pv_name", "")
     parsed.setdefault("scratch_vg_name", "")
     parsed.setdefault("profile_artifact_suffix_hex_length", 16)
+    for name in (
+        "system_profile_members_json",
+        "system_profile_writer_window",
+        "system_profile_activation_action",
+        "system_profile_continue_on_error",
+        "system_profile_ownership_override",
+    ):
+        parsed.setdefault(name, expected[name])
     if set(parsed) != set(expected):
         raise ValueError("results config fields do not match LiveTestConfig")
     protected = parsed["protected_lpar_names"]
@@ -503,6 +535,23 @@ def decode_artifacts(value: Any) -> LiveTestArtifacts:
     # before the vmedia arm tracked its repository and medium (#1347).
     for name in (*_VIOS_BACKUP_ARTIFACTS, *_VMEDIA_REPOSITORY_ARTIFACTS):
         parsed.setdefault(name, None)
+    for name, default in (
+        ("system_profile_names", []),
+        ("system_profile_baseline", {}),
+        ("system_profile_phase", None),
+        ("system_profile_jobs", []),
+    ):
+        parsed.setdefault(name, default)
+    if not isinstance(parsed["system_profile_names"], list) or not all(
+        isinstance(n, str) for n in parsed["system_profile_names"]
+    ):
+        raise TypeError("system-profile names must be a string array")
+    if (
+        not isinstance(parsed["system_profile_baseline"], dict)
+        or not isinstance(parsed["system_profile_jobs"], list)
+        or not all(isinstance(j, dict) for j in parsed["system_profile_jobs"])
+    ):
+        raise TypeError("system-profile baseline/jobs are malformed")
     if set(parsed) != expected_fields:
         raise ValueError("results artifact fields do not match LiveTestArtifacts")
     for name in _ARTIFACT_NULLABLE_STRINGS:

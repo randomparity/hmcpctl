@@ -1809,6 +1809,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: cannot read {args.results}: {error}", file=sys.stderr)
         return 2
 
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "system-profiles"
+    ):
+        from live_test import system_profiles
+
+        if not runner._bootstrap_config():
+            print(
+                "system-profiles recovery unreadable: credentials unavailable",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            asyncio.run(system_profiles.recover_document(HMCConfig(), document))
+        except Exception as exc:  # noqa: BLE001 — any unreadable/partial evidence must refuse CLEAN
+            print(
+                f"system-profiles recovery unconfirmed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: system-profile original baseline and finite terminal sequence confirmed"
+        )
+        return 0
+
     subtasks = dispatched_subtasks(document)
     if subtasks is None:
         print(

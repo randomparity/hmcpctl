@@ -2292,3 +2292,22 @@ async def test_selected_checker_uses_actual_read_only_wrapper(monkeypatch):
     with pytest.raises(recovery.MutatingCallRefused):
         await recovery._run_checks(((checker, value),))
     assert calls == [("hmc_get_console_info", {})]
+
+
+def test_system_profiles_recovery(tmp_path, monkeypatch, capsys):
+    from unittest.mock import AsyncMock
+
+    from live_test import system_profiles
+
+    path = tmp_path / "results.json"
+    path.write_text(
+        json.dumps(
+            {"run": {"group": "system-profiles", "subtasks": [44], "partial": True}}
+        )
+    )
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    check = AsyncMock(side_effect=ValueError("partial native run"))
+    monkeypatch.setattr(system_profiles, "recover_document", check)
+    assert recovery.main(["--results", str(path)]) == 2
+    assert "CLEAN" not in capsys.readouterr().out
+    check.assert_awaited_once()
