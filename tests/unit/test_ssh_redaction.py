@@ -1,0 +1,226 @@
+"""Caller-declared secret redaction at the SSH dispatch boundary (ADR 0246).
+
+Every diagnostic a secret-bearing ``run_hmc_command`` produces — the translated
+error, its traceback, and the ``asyncssh`` log records emitted during the call —
+must omit the declared values while keeping the non-secret context actionable.
+asyncssh is mocked as in ``test_ssh.py``.
+"""
+
+from __future__ import annotations
+
+import logging
+import shlex
+import traceback
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import asyncssh
+import pytest
+from conftest import make_config
+
+from hmcpctl.ssh.commands import (
+    _parse_lshwres_output,
+    build_attribute_record,
+    parse_hmc_result_rows,
+)
+from hmcpctl.ssh.transport import REDACTED, HMCCLIError, run_hmc_command
+
+# An apostrophe and a backslash: repr() escapes both, and shlex.quote rewrites the first.
+SECRET = "s3cr'et\\655"  # pragma: allowlist secret - redaction fixture
+# Fragments either side of the backslash; "655" alone also matches the worktree path.
+FRAGMENTS = ("s3cr", "\\655")
+CMD = f"chhmcusr -u op -t passwd -v {shlex.quote(SECRET)}"
+
+
+def _conn(run_side_effect=None) -> AsyncMock:
+    result = MagicMock()
+    result.stdout = ""
+    result.stderr = ""
+    conn = AsyncMock()
+    conn.run = AsyncMock(return_value=result, side_effect=run_side_effect)
+    conn.__aenter__ = AsyncMock(return_value=conn)
+    conn.__aexit__ = AsyncMock(return_value=False)
+    return conn
+
+
+def _process_error(**overrides) -> asyncssh.ProcessError:
+    fields = {
+        "env": {},
+        "command": CMD,
+        "subsystem": None,
+        "exit_status": 1,
+        "exit_signal": None,
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "",
+    }
+    fields.update(overrides)
+    return asyncssh.ProcessError(**fields)
+
+
+def _assert_no_secret(text: str) -> None:
+    for fragment in FRAGMENTS:
+        assert fragment not in text
+
+
+# (connect side effect, run side effect, text the message must keep)
+_FAILURES = {
+    "connect-timeout": (TimeoutError("timed out"), None, "timed out after 300s"),
+    "run-timeout": (None, TimeoutError("timed out"), "timed out after 300s"),
+    "connection-refused": (
+        ConnectionRefusedError(f"refused {SECRET}"),
+        None,
+        "connection failed",
+    ),
+    "invalid-value": (ValueError(f"bad {SECRET}"), None, "connection failed"),
+    "exit-status-stdout-echo": (
+        None,
+        _process_error(stdout=f"HSCL0001 The password {SECRET} is invalid"),
+        "HSCL0001",
+    ),
+    "signal-stderr-echo": (
+        None,
+        _process_error(
+            exit_status=None, exit_signal="TERM", returncode=-15, stderr=SECRET
+        ),
+        "signal TERM",
+    ),
+    "asyncssh-error": (
+        asyncssh.Error(asyncssh.DISC_BY_APPLICATION, f"refused {SECRET}"),
+        None,
+        "SSH command failed",
+    ),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", list(_FAILURES))
+async def test_secret_failure_is_redacted(case):
+    connect_effect, run_effect, kept = _FAILURES[case]
+    conn = _conn(run_effect)
+    connect = (
+        patch("hmcpctl.ssh.transport.asyncssh.connect", side_effect=connect_effect)
+        if connect_effect is not None
+        else patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn)
+    )
+    with connect, pytest.raises(HMCCLIError) as exc_info:
+        await run_hmc_command(make_config(), CMD, secrets=[SECRET])
+
+    error = exc_info.value
+    _assert_no_secret(str(error))
+    _assert_no_secret("".join(traceback.format_exception(error)))
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert kept in str(error)
+    if run_effect is not None:
+        conn.run.assert_called_once_with(CMD, check=True, timeout=300.0)
+        assert "chhmcusr -u op -t passwd -v" in str(error)
+        assert REDACTED in str(error)
+
+
+@pytest.mark.asyncio
+async def test_secret_with_single_quote_is_redacted_in_quoted_record():
+    record = shlex.quote(f"name=op,passwd={SECRET}")
+    conn = _conn(_process_error(command=f"chhmcusr -i {record}"))
+    with (
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
+        pytest.raises(HMCCLIError) as exc_info,
+    ):
+        await run_hmc_command(make_config(), f"chhmcusr -i {record}", secrets=[SECRET])
+
+    _assert_no_secret(str(exc_info.value))
+    assert "name=op,passwd=" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_asyncssh_log_record_is_redacted_and_filter_removed(caplog):
+    library_log = logging.getLogger("asyncssh")
+
+    def run(*_args, **_kwargs):
+        library_log.info("  Command: %s", CMD)
+        library_log.info("%d", CMD)  # arguments that do not format
+        raise _process_error()
+
+    conn = _conn(run)
+    with (
+        caplog.at_level(logging.INFO, logger="asyncssh"),
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
+        pytest.raises(HMCCLIError),
+    ):
+        await run_hmc_command(make_config(), CMD, secrets=[SECRET])
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("Command:" in message for message in messages)
+    for message in messages:
+        _assert_no_secret(message)
+    assert library_log.filters == []
+
+
+@pytest.mark.asyncio
+async def test_secret_success_returns_output_and_removes_filter():
+    conn = _conn()
+    conn.run.return_value.stdout = "done\n"
+    with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn):
+        assert await run_hmc_command(make_config(), CMD, secrets=[SECRET]) == "done\n"
+
+    conn.run.assert_called_once_with(CMD, check=True, timeout=300.0)
+    assert logging.getLogger("asyncssh").filters == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("secrets", "error"),
+    [([""], ValueError), ("abc", TypeError)],
+    ids=["empty", "bare-str"],
+)
+async def test_invalid_secrets_rejected_before_connect(secrets, error):
+    with (
+        patch("hmcpctl.ssh.transport.asyncssh.connect") as connect,
+        pytest.raises(error, match="secrets must be"),
+    ):
+        await run_hmc_command(make_config(), CMD, secrets=secrets)
+    connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_no_secrets_keeps_cause():
+    conn = _conn(_process_error())
+    with (
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
+        pytest.raises(HMCCLIError) as exc_info,
+    ):
+        await run_hmc_command(make_config(), CMD)
+
+    assert isinstance(exc_info.value.__cause__, asyncssh.ProcessError)
+    assert repr(CMD) in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "parse",
+    [
+        lambda: parse_hmc_result_rows(f"name,pw\n{SECRET}\n", ["name", "pw"], "op"),
+        lambda: parse_hmc_result_rows(f"pw\n{SECRET}\n", ["name", "pw"], "op"),
+        lambda: _parse_lshwres_output(f'name=a,"pw={SECRET}'),
+    ],
+    ids=["column-count", "header-mismatch", "unclosed-quote"],
+)
+def test_parse_failures_do_not_echo_secret_output(parse):
+    with pytest.raises(HMCCLIError) as exc_info:
+        parse()
+    _assert_no_secret(str(exc_info.value))
+
+
+@pytest.mark.parametrize("character", [",", "=", '"', "\n"])
+def test_secret_attribute_refusal_omits_value(character):
+    value = f"pw-{character}655"
+    with pytest.raises(HMCCLIError) as exc_info:
+        build_attribute_record([("name", "op"), ("passwd", value)], secret={"passwd"})
+    message = str(exc_info.value)
+    assert "'passwd'" in message
+    assert REDACTED in message
+    assert "pw-" not in message
+    assert "655" not in message
+
+
+def test_non_secret_attribute_refusal_still_quotes_value():
+    with pytest.raises(HMCCLIError, match="'op,x'"):
+        build_attribute_record([("name", "op,x"), ("passwd", "p")], secret={"passwd"})

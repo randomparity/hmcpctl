@@ -16,6 +16,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- SSH dispatch accepts the secret values a command carries and redacts them from
+  timeout, connection, process-failure and SSH-library log text; `-i` record refusals
+  can omit a secret attribute's value. No operation uses it yet (#655).
+
 - `HMCClient.list_quick_all` fetches `/rest/api/uom/{Type}/quick/All`, or the
   `ManagedSystem/{uuid}/{Child}/quick/All` child form, as one JSON array. No caller
   uses it yet (#244).

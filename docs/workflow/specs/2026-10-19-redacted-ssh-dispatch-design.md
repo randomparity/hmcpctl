@@ -19,7 +19,7 @@ One keyword on the existing dispatch, one on the existing record builder. No new
 
 1. Validate `secrets` first: any empty string raises `ValueError("secrets must be non-empty
    strings; an empty secret would redact every position of the diagnostic")`. A bare `str`
-   passed as the collection is also a `ValueError` (it would be iterated as characters).
+   passed as the collection is a `TypeError` (it would be iterated as characters).
 2. With no secrets, the body runs exactly as today.
 3. With secrets, the existing body runs inside a context that adds a `logging.Filter` to
    `logging.getLogger("asyncssh")` and removes it in `finally`. The filter replaces the
