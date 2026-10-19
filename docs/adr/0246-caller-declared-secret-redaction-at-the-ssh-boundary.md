@@ -44,6 +44,9 @@ unchanged and redacts every declared value from every diagnostic it produces.
 - Redaction matches text, so a remote echo that transforms the value (truncation, case
   change, re-encoding) is not recognised, a command that spells a secret other than raw or
   `shlex.quote`d is not recognised, and a short secret over-redacts unrelated text.
+- The log arm depends on asyncssh logging the exec command on the `asyncssh` logger itself,
+  as 2.24.1 does; a loopback test drives the real exec path, so the locked version is checked,
+  and a library consumer on another asyncssh release in the allowed range should re-verify.
 - At asyncssh debug level 3 the library appends hex packet dumps to its records; the filter
   does not parse them. A caller that raises the level accepts that.
 - Losing the exception chain on the secret path removes the asyncssh exception from
