@@ -389,7 +389,11 @@ def _safe_profile(profile: dict, desired: int) -> None:
 def _profile_parent(profile, uuid, b):
     link = urlsplit(profile["Resource"].get("AssociatedPartition", {}).get("href", ""))
     if (
-        link.path != f"/rest/api/uom/LogicalPartition/{uuid}"
+        link.path
+        not in {
+            f"/rest/api/uom/LogicalPartition/{uuid}",
+            f"/rest/api/uom/ManagedSystem/{b['system_uuid']}/LogicalPartition/{uuid}",
+        }
         or link.query
         or link.fragment
         or link.username

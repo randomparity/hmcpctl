@@ -1199,3 +1199,58 @@ def test_system_policy_is_part_of_exact_preflight_baseline():
     assert arm._baseline_digest(before) != arm._baseline_digest(
         {**before, "system_auto_off": "true"}
     )
+
+
+@pytest.mark.asyncio
+async def test_native_nested_partition_parent_survives_fixture_creation(
+    packet, hardware, tmp_path, monkeypatch
+):
+    """Native contained profiles can identify their parent through the bound system."""
+    h, _state = hardware
+    original = profile
+
+    def nested_profile(name, uuid, parent, desired=512):
+        value = original(name, uuid, parent, desired)
+        value["Resource"]["AssociatedPartition"]["href"] = (
+            f"https://hmc.test:443/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{parent}"
+        )
+        return value
+
+    monkeypatch.setattr(sys.modules[__name__], "profile", nested_profile)
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    document = await capture_in(h, packet, tmp_path)
+    assert document["phase"] == "known-fixtures-removed"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/rest/api/uom/LogicalPartition/{L}",
+        f"/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}",
+    ],
+)
+def test_closed_partition_parent_paths(packet, path):
+    value = profile("base", P, L)
+    value["Resource"]["AssociatedPartition"]["href"] = path
+    arm._profile_parent(value, L, arm.binding(packet))
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        f"/rest/api/uom/ManagedSystem/{P}/LogicalPartition/{L}",
+        f"/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{P}",
+        f"https://foreign.test/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}",
+        f"https://hmc.test:12443/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}",
+        f"http://hmc.test/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}",
+        f"https://user@hmc.test/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}",
+        f"/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}?extra=1",
+        f"/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}#extra",
+        f"/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}/extra",
+    ],
+)
+def test_partition_parent_rejects_other_target_or_endpoint(packet, href):
+    value = profile("base", P, L)
+    value["Resource"]["AssociatedPartition"]["href"] = href
+    with pytest.raises(ValueError, match="parent UUID/context"):
+        arm._profile_parent(value, L, arm.binding(packet))
