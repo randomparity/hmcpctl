@@ -1300,7 +1300,7 @@ def test_cli_inventory_rejects_malformed_or_unbound_whole_rows(raw):
         rows = arm._inventory_rows(raw)
         arm._check_inventory(
             rows,
-            {"namespace": [arm.SYSTEM_PROFILES[0]]},
+            {"namespace": [arm.SYSTEM_PROFILES[0]], "partitions": []},
             document,
             [arm.SYSTEM_PROFILES[0]],
         )
@@ -1308,7 +1308,7 @@ def test_cli_inventory_rejects_malformed_or_unbound_whole_rows(raw):
 
 def test_cli_inventory_empty_and_bounds():
     assert arm._inventory_rows("No results were found.") == []
-    arm._check_inventory([], {"namespace": []}, {}, [])
+    arm._check_inventory([], {"namespace": [], "partitions": []}, {}, [])
     with pytest.raises(ValueError, match="unbounded"):
         arm._inventory_rows("x" * (arm.source.LIMIT + 1))
 
@@ -1394,3 +1394,25 @@ async def test_fifth_inventory_read_refuses_before_transport(
     with pytest.raises(ValueError, match="read budget"):
         await arm._inventory(h, packet, {"inventory_reads": [{}, {}, {}, {}]}, tmp_path)
     assert len(state["commands"]) == before
+
+
+@pytest.mark.asyncio
+async def test_recovery_rejects_forged_duplicate_current_partition_ids(
+    packet, hardware, tmp_path
+):
+    h, _state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    document = await capture_in(h, packet, tmp_path)
+    first, second = document["fixtures"]
+    second["partition_id"] = first["partition_id"]
+    for proof in document["inventory_reads"]:
+        entry = next(
+            e for e in proof["observed"]["partitions"] if e["UUID"] == second["uuid"]
+        )
+        entry["Resource"]["PartitionID"] = first["partition_id"]
+        lines = proof["raw"].splitlines()
+        name, _ids, profiles = lines[1].split(":")
+        lines[1] = f"{name}:{first['partition_id']},{first['partition_id']}:{profiles}"
+        proof["raw"] = "\n".join(lines) + "\n"
+    with pytest.raises(ValueError, match="unique current PartitionID"):
+        await arm.recover(h, packet, document)

@@ -676,6 +676,11 @@ def _inventory_rows(raw):
 
 
 def _check_inventory(rows, fresh, document, names):
+    ids = [_text(e["Resource"].get("PartitionID")) for e in fresh["partitions"]]
+    if any(not re.fullmatch(r"[1-9][0-9]*", value) for value in ids) or len(
+        set(ids)
+    ) != len(ids):
+        raise ValueError("unique current PartitionID binding required")
     if sorted(r["name"] for r in rows) != sorted(names) or fresh["namespace"] != sorted(
         names
     ):
