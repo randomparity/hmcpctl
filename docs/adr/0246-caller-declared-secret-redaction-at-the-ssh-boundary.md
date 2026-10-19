@@ -10,7 +10,8 @@ the command it ran: a timeout and a connection failure quote `cmd`, a non-zero e
 asyncssh exception, whose `command`, `stdout` and `stderr` attributes repeat the same text.
 asyncssh also logs every command at INFO on the `asyncssh` logger
 (`asyncssh/channel.py:1250`, asyncssh 2.24.1 as locked).
-The `-i` record builder quotes a refused value back. None of this matters while no command
+The `-i` record builder quotes a refused value back, and ADR 0045 records the resulting
+instruction not to route a credential attribute through it unredacted. None of this matters while no command
 carries a secret; the credential-bearing children of #620 (#673–#677, #682, #689, #695) will
 send passwords, activation codes and key material through this seam.
 
