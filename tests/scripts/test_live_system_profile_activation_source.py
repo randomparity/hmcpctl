@@ -219,6 +219,9 @@ def hardware(packet, monkeypatch):
     system = json.loads(packet["binding_json"])["selected_inventory"]
     system["Resource"].update(
         State="operating",
+        AssociatedIPLConfiguration={
+            "PowerOffWhenLastLogicalPartitionIsShutdown": "false"
+        },
         AssociatedSystemMemoryConfiguration={
             "CurrentAvailableSystemMemory": "4096",
             "CurrentLogicalMemoryBlockSize": "16",
@@ -965,11 +968,17 @@ async def test_unapproved_job_stage_has_no_effect(packet, hardware, tmp_path):
     h.submit_job.assert_not_awaited()
 
 
+@pytest.mark.parametrize("policy", ["false", "true", None])
 def test_recovery_observes_even_when_journal_is_unreadable(
-    packet, hardware, tmp_path, monkeypatch
+    packet, hardware, tmp_path, monkeypatch, policy
 ):
     h, _state = hardware
     h.__aenter__.return_value = h
+    ipl = h.get_uom.return_value["Resource"]["AssociatedIPLConfiguration"]
+    if policy is None:
+        ipl.clear()
+    else:
+        ipl["PowerOffWhenLastLogicalPartitionIsShutdown"] = policy
     monkeypatch.setattr(arm, "HMCClient", lambda _: h)
     monkeypatch.setattr(arm, "load_profile", lambda _: h.config)
     monkeypatch.setattr(
@@ -1008,7 +1017,11 @@ def test_recovery_observes_even_when_journal_is_unreadable(
         == 2
     )
     assert h.get_uom.await_count == 1
-    assert json.loads((output / "results.json").read_text())["read_only"] is True
+    result = json.loads((output / "results.json").read_text())
+    assert result["read_only"] is True
+    assert result["observed"]["system_auto_off"] == policy
+    assert result["system_policy_safe"] is (policy == "false")
+    assert h.list_child.await_count == 1
     h.submit_job.assert_not_awaited()
     h.delete_job.assert_not_awaited()
 
@@ -1100,3 +1113,89 @@ async def test_false_calibration_cannot_forge_completed_clean(
     doc["results"] = arm._result_rows(doc)
     with pytest.raises(ValueError):
         await arm.recover(h, packet, doc)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["true", None, "invalid", False])
+async def test_unsafe_or_missing_system_auto_off_refuses_preflight(
+    packet, hardware, value
+):
+    h, _state = hardware
+    policy = h.get_uom.return_value["Resource"]["AssociatedIPLConfiguration"]
+    if value is None:
+        policy.clear()
+    else:
+        policy["PowerOffWhenLastLogicalPartitionIsShutdown"] = value
+    with pytest.raises(ValueError, match="policy"):
+        await arm.preflight(h, packet)
+    arm.create_lpar_via_cli.assert_not_awaited()
+    h.submit_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["before-first-effect", "after-create"])
+async def test_system_policy_drift_after_preflight_stops_later_effects(
+    packet, hardware, tmp_path, stage
+):
+    import copy
+
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    system = h.get_uom.return_value
+    if stage == "before-first-effect":
+        count = 0
+
+        async def get(*args):
+            nonlocal count
+            count += 1
+            result = copy.deepcopy(system)
+            if count >= 3:
+                result["Resource"]["AssociatedIPLConfiguration"][
+                    "PowerOffWhenLastLogicalPartitionIsShutdown"
+                ] = "true"
+            return result
+
+        h.get_uom.side_effect = get
+    else:
+        original = arm.create_lpar_via_cli.side_effect
+
+        async def create(*args, **kwargs):
+            result = await original(*args, **kwargs)
+            system["Resource"]["AssociatedIPLConfiguration"][
+                "PowerOffWhenLastLogicalPartitionIsShutdown"
+            ] = "true"
+            return result
+
+        arm.create_lpar_via_cli.side_effect = create
+    with pytest.raises(ValueError, match="policy"):
+        await capture_in(h, packet, tmp_path)
+    assert arm.create_lpar_via_cli.await_count == (
+        0 if stage == "before-first-effect" else 1
+    )
+    arm.stamp_lpar_ownership.assert_not_awaited()
+    h.submit_job.assert_not_awaited()
+    h.delete_logical_partition.assert_not_awaited()
+    assert len(state["members"]) == (1 if stage == "before-first-effect" else 2)
+
+
+@pytest.mark.asyncio
+async def test_unsafe_policy_recovery_still_reads_complete_actual_inventory(
+    packet, hardware, tmp_path
+):
+    h, _state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    doc = await capture_in(h, packet, tmp_path)
+    previous = h.list_child.await_count
+    h.get_uom.return_value["Resource"]["AssociatedIPLConfiguration"][
+        "PowerOffWhenLastLogicalPartitionIsShutdown"
+    ] = "true"
+    with pytest.raises(ValueError, match="policy"):
+        await arm.recover(h, packet, doc)
+    assert h.list_child.await_count > previous
+
+
+def test_system_policy_is_part_of_exact_preflight_baseline():
+    before = {"partitions": [], "namespace": [], "system_auto_off": "false"}
+    assert arm._baseline_digest(before) != arm._baseline_digest(
+        {**before, "system_auto_off": "true"}
+    )

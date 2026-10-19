@@ -220,8 +220,8 @@ def _source_packet(b: dict) -> dict:
     }
 
 
-async def observe(hmc: HMCClient, packet: dict) -> dict:
-    """New transport observations every time; no effects or cross-phase cache."""
+async def _observe(hmc: HMCClient, packet: dict) -> dict:
+    """Collect actual inventory even when recovery must report unsafe policy."""
     b = binding(packet)
     source._require_context(hmc.config, _source_packet(b))
     system = await hmc.get_uom("ManagedSystem", b["system_uuid"])
@@ -273,7 +273,11 @@ async def observe(hmc: HMCClient, packet: dict) -> dict:
                 ),
             }
         )
+    ipl = r.get("AssociatedIPLConfiguration")
     return {
+        "system_auto_off": ipl.get("PowerOffWhenLastLogicalPartitionIsShutdown")
+        if isinstance(ipl, dict)
+        else None,
         "partitions": sorted(partitions, key=lambda e: e["UUID"]),
         "namespace": await source.namespace(hmc, _source_packet(b)),
         "capacity": source._stable(
@@ -286,6 +290,19 @@ async def observe(hmc: HMCClient, packet: dict) -> dict:
             }
         ),
     }
+
+
+def _require_stay_on(observed: dict) -> None:
+    if observed.get("system_auto_off") != "false":
+        raise ValueError(
+            "system auto-off policy is unsafe or unproven; no later effects/CLEAN"
+        )
+
+
+async def observe(hmc: HMCClient, packet: dict) -> dict:
+    observed = await _observe(hmc, packet)
+    _require_stay_on(observed)
+    return observed
 
 
 def _capacity(observed: dict) -> None:
@@ -328,7 +345,9 @@ async def preflight(hmc: HMCClient, packet: dict) -> dict:
 
 
 def _baseline_digest(observed):
-    return source.digest({k: observed[k] for k in ("partitions", "namespace")})
+    return source.digest(
+        {k: observed[k] for k in ("partitions", "namespace", "system_auto_off")}
+    )
 
 
 def _safe_profile(profile: dict, desired: int) -> None:
@@ -1097,7 +1116,8 @@ def _result_rows(document):
 
 async def recover(hmc, packet, document):
     """Observe even partial journals; CLEAN requires coherent completion AND baseline."""
-    current = await observe(hmc, packet)
+    current = await _observe(hmc, packet)
+    _require_stay_on(current)
     run = document.get("run", {})
     before = document.get("before", {})
     if (
@@ -1224,9 +1244,15 @@ def _main(argv=None):
                     source.save(output, {"read_only": True, "observed": observed})
                 elif args.mode == "recover":
                     # Observe first even when the retained journal is missing or unreadable.
+                    current = await _observe(hmc, packet)
                     source.save(
                         output,
-                        {"read_only": True, "observed": await observe(hmc, packet)},
+                        {
+                            "read_only": True,
+                            "observed": current,
+                            "system_policy_safe": current.get("system_auto_off")
+                            == "false",
+                        },
                     )
                     document = _read(args.results)
                     await recover(hmc, packet, document)

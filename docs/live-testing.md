@@ -1258,7 +1258,7 @@ legacy port fallback. `tested_commit` and `tested_tree` must name the exact clea
 
 Prepare the packet outside the checkout with `baseline_sha256: null` for the first read-only
 preflight. It returns `results.json` containing `observed`. Bind the canonical SHA-256 of its
-`partitions` and `namespace` fields (using the repository source `digest` convention) into the
+`partitions`, `namespace` and `system_auto_off` fields (using the repository source `digest` convention) into the
 final packet's `baseline_sha256`, and independently review its exact bytes/digest/effects.
 Re-run the same preflight with that final packet; changed baseline or capacity refuses effects.
 Fresh private directories must not already exist:
@@ -1273,6 +1273,14 @@ Preflight reads only the bound target's identity/state/capacity, partition/profi
 system-profile namespace. It checks documented resource shape, available capacity, unique identities
 and absent reserved names. Invalid, ambiguous or unreadable data refuses admission. It neither
 creates a job nor infers that native role permissions allow execution.
+
+Every mutation-facing observation requires explicit native
+`AssociatedIPLConfiguration.PowerOffWhenLastLogicalPartitionIsShutdown=false`. True, missing or
+invalid policy refuses effects: stopping the final fixture must not power off the managed system.
+The arm never changes that system policy. A separately authorized operator policy decision and
+source-backed preparation are required if the restricted target currently enables automatic power-off.
+The admitted writer interval includes preserving this one system policy and the new fixture/profile/
+scratch namespaces; it does not claim exclusivity over unrelated existing partitions or actors.
 
 Only after focused offline faults, exact-candidate full verification and pinned hooks, independent
 source/security review, isolated deployment and actual preflight have passed, and the orchestrator
@@ -1332,7 +1340,8 @@ uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/capture/results.
 Recovery records fresh inventory even for an incomplete journal. CLEAN requires the packet-bound
 original namespace/member baseline, absence of all fixtures and scratch names, and a coherent
 completed finite effect/job record; a forged partial flag cannot establish completion. It submits
-or deletes no job and cannot upgrade a failed/unproven capture. Raw packet/journals/schema and
+or deletes no job and cannot upgrade a failed/unproven capture. It records full fresh inventory and
+explicit policy safety even when current policy is unsafe; unsafe policy refuses CLEAN after the read. Raw packet/journals/schema and
 member identifiers remain private; the standard evidence renderer stamps the tested commit and
 exports only allowlisted structural fields. No native evidence or maturity promotion follows from
 mocked-boundary tests, preparation or this document. Product scope-audit activation finding remains
