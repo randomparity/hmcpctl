@@ -195,6 +195,16 @@ def test_read_definitions_reports_unreadable_and_invalid_files(tmp_path):
     ):
         definitions.read_definitions(duplicated, SECURITY)
 
+    undecodable = tmp_path / "undecodable.json"
+    undecodable.write_bytes(b"\xff\xfe{")
+    with pytest.raises(definitions.DefinitionError, match="not UTF-8"):
+        definitions.read_definitions(undecodable, SECURITY)
+
+    deep = tmp_path / "deep.json"
+    deep.write_text("[" * 100_000, encoding="utf-8")
+    with pytest.raises(definitions.DefinitionError, match="invalid JSON"):
+        definitions.read_definitions(deep, SECURITY)
+
     valid = tmp_path / "valid.json"
     valid.write_text(json.dumps(_document(READ)), encoding="utf-8")
     assert [d.scenario for d in definitions.read_definitions(valid, SECURITY)] == [

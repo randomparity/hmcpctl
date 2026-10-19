@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import dataclasses
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -406,3 +408,47 @@ def test_the_definitions_module_adds_nothing_to_the_scan():
     scan = report.scan_source(path.read_text(encoding="utf-8"), "d.py", "definitions")
 
     assert (scan.dispatches, scan.verified, scan.unreadable) == ((), (), ())
+
+
+def test_real_definitions_pass_the_served_schema(tmp_path):
+    registry = tmp_path / "definitions.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "definitions": [
+                    {
+                        "scenario": "st100-lpar-get",
+                        "operation": "lpar.get",
+                        "class": "read-only",
+                        "arguments": {"lpar_name_or_uuid": {"target": "lpar"}},
+                        "expected": "success",
+                    },
+                    {
+                        "scenario": "st100-user-get",
+                        "operation": "user.get",
+                        "class": "read-only",
+                        "arguments": {
+                            "console_uuid": {"target": "console"},
+                            "user_profile_uuid": {"target": "user"},
+                        },
+                        "expected": "success",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = definitions.read_definitions(registry)
+
+    lines = report.build_report(
+        [],
+        set(),
+        report._load("operations.json", "operations"),
+        [],
+        asyncio.run(report.served_schemas()),
+        definitions=loaded,
+    )
+
+    assert not [line for line in lines if line.startswith(report._DISPATCH_PREFIXES)]
+    assert re.search(r"; 2 definitions; operations 2/\d+ defined; ", lines[-1])

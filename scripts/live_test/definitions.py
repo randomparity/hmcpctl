@@ -169,10 +169,14 @@ def read_definitions(
         text = path.read_text(encoding="utf-8")
     except OSError as error:
         raise DefinitionError(f"cannot read the registry: {error.strerror}") from None
+    except UnicodeDecodeError:
+        raise DefinitionError("the registry is not UTF-8") from None
     try:
         document = json.loads(text, object_pairs_hook=_unique_keys)
     except json.JSONDecodeError as error:
         raise DefinitionError(
             f"invalid JSON: {error.msg} at line {error.lineno}"
         ) from None
+    except RecursionError:
+        raise DefinitionError("invalid JSON: nested too deeply") from None
     return load_definitions(document, security)
