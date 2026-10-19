@@ -1244,3 +1244,32 @@ async def test_public_rest_interruption_stops_reconciliation_reads(
     assert result.state == "uncertain" and result.job.job_id == "job-1"
     assert result.postcondition == "unverified" and h.submit_job.await_count == 1
     assert interrupted and post_reads == []
+
+
+@pytest.mark.asyncio
+async def test_public_delete_allows_whole_inventory_row_permutation(system_profiles):
+    h, _, _, ssh = system_profiles
+    reads = 0
+    deleted = False
+
+    async def command(_config, cmd, **kwargs):
+        nonlocal reads, deleted
+        if cmd.startswith("rmsyscfg"):
+            deleted = True
+            return ""
+        if "name:lpar_ids" in cmd:
+            reads += 1
+            rows = (
+                ["scratch:1:base", "other:1:base"] if not deleted else ["other:1:base"]
+            )
+            if reads > 1:
+                rows.reverse()
+            return "name:lpar_ids:profile_names\n" + "\n".join(rows) + "\n"
+        return "name\nother\n" + ("" if deleted else "scratch\n")
+
+    ssh.side_effect = command
+    result = await ops.delete_system_profile(
+        h, S, "scratch", exclusive_writer_window=True
+    )
+    assert result.state == "completed" and result.postcondition == "verified"
+    assert sum(c.args[1].startswith("rmsyscfg") for c in ssh.await_args_list) == 1
