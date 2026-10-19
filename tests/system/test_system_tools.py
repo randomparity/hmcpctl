@@ -12,6 +12,7 @@ import pytest
 from conftest import (
     captured_lpar_entry,
     captured_system_entry,
+    live_response,
     mock_system_summaries,
 )
 
@@ -297,6 +298,39 @@ def test_lpars_no_arg_reads_each_operating_system(monkeypatch, mock_hmc):
     assert [e["Resource"]["PartitionName"] for e in result.entries] == ["aix1"]
     assert result.unreadable_systems == SKIPPED
     assert not any(route.called for route in fleet_wide)
+
+
+def _bulk_fleet(mock_hmc):
+    """One operating system; returns the summary and per-system LPAR feed routes."""
+    summaries = mock_system_summaries(mock_hmc, (SYSTEM_UUID, "sys-E2", "operating"))
+    path, response = live_response("rest-lpar-quick-all")
+    mock_hmc.get(path).mock(return_value=response)
+    per_system = mock_hmc.get(
+        f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition"
+    ).mock(return_value=httpx.Response(504))
+    return summaries, per_system
+
+
+def test_lpars_no_arg_reads_one_bulk_listing(monkeypatch, mock_hmc):
+    """hmc_list_lpars() on an all-operating fleet reads LogicalPartition/quick/All once."""
+    _hmc_env(monkeypatch)
+    summaries, per_system = _bulk_fleet(mock_hmc)
+    result = hmc_list_lpars()
+    assert summaries.call_count == 1 and not per_system.called
+    assert [e["Resource"]["PartitionName"] for e in result.entries] == [
+        "sys-R1-lp1",
+        "sys-R1-lp2",
+    ]
+    assert all(e["title"] is None for e in result.entries)
+    assert result.unreadable_systems == []
+
+
+def test_lpars_state_filter_on_the_bulk_listing(monkeypatch, mock_hmc):
+    """hmc_list_lpars(state=...) filters bulk entries on PartitionState."""
+    _hmc_env(monkeypatch)
+    _bulk_fleet(mock_hmc)
+    result = hmc_list_lpars(state="running")
+    assert [e["Resource"]["PartitionName"] for e in result.entries] == ["sys-R1-lp2"]
 
 
 def test_lpars_system_uuid_scopes(monkeypatch, mock_hmc):

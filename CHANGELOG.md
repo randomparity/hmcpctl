@@ -65,6 +65,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Changed
 
+- **Breaking:** unscoped `hmc_list_lpars` and `lpar list --json` read one
+  `LogicalPartition/quick/All` request when every managed system is `operating` or
+  `power off`. Those entries have null `title`/`link` and carry the partition summary as
+  `Resource` (`RMCState`, numeric `PartitionID`, no nested configuration), and powered-off
+  systems' partitions are listed. Other fleets keep the per-system read, as does a failed
+  bulk read, which warns with its HTTP status or failure class (ADR 0248, #1731).
+
 - The HTTP 500 "Nested path contains null property" errors from a managed-system read by UUID
   and from the management-console read now name an `X-HMC-Schema-Version` pin as the likely
   cause and tell the operator to unset `HMC_SCHEMA_VERSION`, instead of advising a firmware

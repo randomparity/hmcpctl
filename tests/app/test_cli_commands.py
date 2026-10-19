@@ -285,6 +285,23 @@ class FakeHMC:
         self._record("list_logical_partitions", system_uuid)
         return [self.lpar]
 
+    async def list_quick_all(self, resource_type):
+        """The LPAR as LogicalPartition/quick/All summarizes it (ADR 0248)."""
+        self._record("list_quick_all", resource_type)
+        resource = dict(self.lpar["Resource"])
+        rmc = resource.pop("ResourceMonitoringControlState", None)
+        return [
+            {
+                **resource,
+                "RMCState": rmc,
+                "UUID": self.lpar["UUID"],
+                "SystemName": self.system["Resource"].get("SystemName"),
+                "AssociatedManagedSystem": (
+                    f"https://hmc.test/rest/api/uom/ManagedSystem/{self.system['UUID']}"
+                ),
+            }
+        ]
+
     async def search_uom(self, resource_type, property_name, value):
         self._record("search_uom", resource_type, property_name, value)
         return [self.lpar]
@@ -944,9 +961,10 @@ def test_lpars_list_table(fake_hmc):
     assert result.exit_code == 0
     assert LPAR_NAME in result.stdout
     assert "running" in result.stdout
+    assert "active" in result.stdout
     assert fake_hmc.calls == [
         ("list_system_summaries", (), {}),
-        ("list_logical_partitions", (SYSTEM_UUID,), {}),
+        ("list_quick_all", ("LogicalPartition",), {}),
     ]
 
 
@@ -959,7 +977,7 @@ def test_lpars_list_json(fake_hmc):
     assert payload["unreadable_systems"] == []
     assert fake_hmc.calls == [
         ("list_system_summaries", (), {}),
-        ("list_logical_partitions", (SYSTEM_UUID,), {}),
+        ("list_quick_all", ("LogicalPartition",), {}),
     ]
 
 
@@ -968,10 +986,10 @@ def test_lpars_list_state_filter(fake_hmc):
 
     assert result.exit_code == 0
     assert LPAR_NAME in result.stdout
-    # The partition feed, filtered locally: V10R3 cannot search a state (#1202).
+    # The bulk listing, filtered locally: V10R3 cannot search a state (#1202).
     assert fake_hmc.calls == [
         ("list_system_summaries", (), {}),
-        ("list_logical_partitions", (SYSTEM_UUID,), {}),
+        ("list_quick_all", ("LogicalPartition",), {}),
     ]
 
 
@@ -3433,7 +3451,7 @@ def test_storage_upload_iso_json(fake_hmc, monkeypatch):
 
 
 def test_client_error_reports_and_exits_1(fake_hmc):
-    fake_hmc.fail_on = "list_logical_partitions"
+    fake_hmc.fail_on = "list_system_summaries"
     result = RUNNER.invoke(cli.app, ["lpars", "list"])
 
     assert result.exit_code == 1
