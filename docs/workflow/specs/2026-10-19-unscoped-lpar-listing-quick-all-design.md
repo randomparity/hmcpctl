@@ -64,12 +64,13 @@ other firmware and `No Connection` bulk captures (#1733, #1290).
 1. With every summary `operating` or `power off` and a placeable bulk answer, unscoped
    `list_lpars` reads summaries once and the bulk listing once, returns one entry per item in
    the shape of ADR 0248 d.3, and `unreadable_systems == []`.
-2. A summary in any other state, or without a UUID, makes the call read exactly as ADR 0197
-   with no bulk request; existing tests with a `no connection` system pass unchanged.
+2. An empty fleet, or a summary in any other state or without a UUID, makes the call read as
+   ADR 0197 with no bulk request and one summary read; existing tests with a `no connection` system pass unchanged.
 3. Each of: a bulk `HMCError` (HTTP 404, HTTP 500, `HMCTransportError`), a non-object item, an
    item `UUID` that is not a UUID, and an `AssociatedManagedSystem` that is null, not a
-   string, lacks `/ManagedSystem/`, or does not end in a UUID, logs one warning and produces
-   the ADR 0197 result.
+   string, lacks `/ManagedSystem/`, or does not end in a UUID, logs one warning naming only the
+   resource type and HTTP status or failure class (never HMC text) and produces the ADR 0197
+   result without re-reading the summaries.
 4. `ManagedSystem` uses the summary's `UUID` spelling and `SystemName` when the href matches a
    summary case-insensitively; otherwise the href UUID and the item's `SystemName`.
 5. `state` filters bulk entries on `Resource.PartitionState`; more than 100 summaries is refused

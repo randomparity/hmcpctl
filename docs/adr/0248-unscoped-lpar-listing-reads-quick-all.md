@@ -1,7 +1,7 @@
 # ADR 0248: The unscoped LPAR listing reads `LogicalPartition/quick/All` when the fleet allows it
 
 ## Status
-Proposed (2026-10-19), issue #1731. Partially supersedes decision 2 of
+Accepted (2026-10-19), issue #1731. Partially supersedes decision 2 of
 [ADR 0197](0197-unscoped-listings-name-unreadable-systems.md) for unscoped `list_lpars` only.
 
 ## Context
@@ -21,11 +21,12 @@ than V10R3 has been probed (#1733).
 
 ## Decision
 1. **Gate.** After the existing `ManagedSystem/quick/All` read and 100-system refusal,
-   unscoped `list_lpars` reads `LogicalPartition/quick/All` only when every system summary has
-   a UUID and a `State` of `operating` or `power off` (trimmed, case-insensitive): the states
+   unscoped `list_lpars` reads `LogicalPartition/quick/All` only when there is at least one
+   system and every summary has a UUID and a `State` of `operating` or `power off` (trimmed, case-insensitive): the states
    the #244 probe saw answer. Otherwise it reads as ADR 0197 decides.
 2. **Fallback.** Any `HMCError` from the bulk read, or an item that cannot be placed (below),
-   logs one warning naming the cause and reads as ADR 0197 decides; that path raises its own
+   logs one warning naming the resource type and HTTP status or failure class, never HMC
+   text, and reads as ADR 0197 decides from the summaries already read; that path raises its own
    errors, so a failure never becomes a partial success.
 3. **Entry shape.** Each item becomes an entry in the existing envelope: `UUID` (the item's),
    `ResourceType: "LogicalPartition"`, `title` and `link` null, `Resource` the item verbatim,
