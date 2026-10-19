@@ -1186,6 +1186,113 @@ async def test_quick_all_system_names_recursion_error_raises_hmc_error(
     assert isinstance(exc_info.value.__cause__, RecursionError)
 
 
+@pytest.mark.parametrize(
+    "fixture_name, resource_type, kwargs",
+    [
+        ("rest-lpar-quick-all", "LogicalPartition", {}),
+        ("rest-vios-quick-all", "VirtualIOServer", {}),
+        (
+            "rest-ms-lpar-quick-all",
+            "LogicalPartition",
+            {
+                "parent_type": "ManagedSystem",
+                "parent_uuid": "00000005-abcd-4ef0-8abc-000000000005",
+            },
+        ),
+    ],
+    ids=["lpar", "vios", "child-of-system"],
+)
+@pytest.mark.asyncio
+async def test_list_quick_all_returns_the_captured_array(
+    mock_hmc, fixture_name, resource_type, kwargs
+):
+    path, response = live_response(fixture_name)
+    route = mock_hmc.get(path).mock(return_value=response)
+    async with HMCClient(make_config()) as hmc:
+        items = await hmc.list_quick_all(resource_type, **kwargs)
+    assert items == json.loads(live_fixture(fixture_name)["body"])
+    assert len(items) >= 1
+    assert route.call_count == 1
+    assert route.calls.last.request.headers["accept"] == "*/*"
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_empty_array_returns_empty_list(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, text="[]")
+    )
+    async with HMCClient(make_config()) as hmc:
+        assert await hmc.list_quick_all("LogicalPartition") == []
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_non_200_raises_hmc_error_with_status_and_path(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(400, text="bad")
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError) as exc_info:
+            await hmc.list_quick_all("LogicalPartition")
+    assert exc_info.value.status_code == 400
+    assert "/rest/api/uom/LogicalPartition/quick/All" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_invalid_json_raises_hmc_error(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, text="{")
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="returned invalid JSON") as exc_info:
+            await hmc.list_quick_all("LogicalPartition")
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_non_array_json_raises_hmc_error(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, json={"a": 1})
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="returned a JSON dict; expected an array"):
+            await hmc.list_quick_all("LogicalPartition")
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_recursion_error_raises_hmc_error(mock_hmc, monkeypatch):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, text="[]")
+    )
+
+    def raise_recursion_error(_response):
+        raise RecursionError
+
+    monkeypatch.setattr(httpx.Response, "json", raise_recursion_error)
+
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError) as exc_info:
+            await hmc.list_quick_all("LogicalPartition")
+
+    assert "returned invalid JSON: document nesting is too deep" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, RecursionError)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"parent_type": "ManagedSystem"},
+        {"parent_uuid": "00000005-abcd-4ef0-8abc-000000000005"},
+    ],
+    ids=["type-only", "uuid-only"],
+)
+@pytest.mark.asyncio
+async def test_list_quick_all_requires_both_parent_arguments(mock_hmc, kwargs):
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(ValueError, match="must be given together"):
+            await hmc.list_quick_all("LogicalPartition", **kwargs)
+    assert [c for c in mock_hmc.calls if c.request.method == "GET"] == []
+
+
 CREATED_LPAR = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <entry xmlns="http://www.w3.org/2005/Atom">
   <id>urn:uuid:new-33333333-3333-3333-3333-333333333333</id>

@@ -443,6 +443,27 @@ def test_a_uuid_only_path_argument_is_refused_before_transport():
     assert sent == []
 
 
+def test_list_quick_all_refuses_a_non_uuid_parent_before_transport():
+    client = _client()
+    sent: list[str] = []
+
+    def _forbidden(*args, **kwargs):
+        sent.append("request")
+        raise AssertionError("a refused UUID reached the transport")
+
+    client._http.build_request = _forbidden  # type: ignore[method-assign]
+
+    with pytest.raises(ValueError, match="parent_uuid must be a UUID"):
+        asyncio.run(
+            client.list_quick_all(
+                "LogicalPartition",
+                parent_type="ManagedSystem",
+                parent_uuid="not-a-uuid",
+            )
+        )
+    assert sent == []
+
+
 def test_canonical_mixed_case_uuid_path_arguments_reach_the_request_boundary():
     client = _client()
     requested: list[tuple[str, str]] = []
@@ -821,6 +842,12 @@ _TYPE_SEGMENT_CALLS = (
     ("list_quick_properties", (RETARGET,), {}),
     (
         "list_quick_properties",
+        ("LogicalPartition",),
+        {"parent_type": RETARGET, "parent_uuid": UUID_A},
+    ),
+    ("list_quick_all", (RETARGET,), {}),
+    (
+        "list_quick_all",
         ("LogicalPartition",),
         {"parent_type": RETARGET, "parent_uuid": UUID_A},
     ),
