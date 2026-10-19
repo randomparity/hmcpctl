@@ -15,7 +15,7 @@ The artifacts use format version 1:
   Each row preserves its POWER10/POWER11 presence. Coverage-child rows map to
   concrete children of epic #620. A missing page in either snapshot records only that delta;
   it does not claim that an HMC release lacks the capability.
-- `operations.json` reconciles all 165 registered MCP operations to reference
+- `operations.json` reconciles all 170 registered MCP operations to reference
   families or explains a repository-specific composite. It records the current
   handler signature, registered surface and relevant test paths. These links do
   not claim that a test passed or that hardware verification exists.
@@ -49,6 +49,11 @@ The [existing-code baseline](baseline.md) reconciles the supported operation set
 native procedures, prerequisites and remaining obligations. The inventory gate requires
 a maturity record and nonempty automated-test links for each registered operation;
 this does not claim complete reference coverage or native verification.
+
+System-profile operations retain all five assigned rows and 152 source-unit bindings.
+Their approved equivalent CLI routes do not establish the unresolved REST inventory,
+delete or validation transports. Parent coverage-child accounting remains unchanged;
+operation implementation and unevidenced maturity records do not close that accounting.
 
 ## Maturity and evidence catalog
 

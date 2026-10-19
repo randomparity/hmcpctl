@@ -854,3 +854,48 @@ def test_malformed_association_is_not_absence(system_profiles, raw):
     h, _, _, _ = system_profiles
     with pytest.raises((TypeError, ValueError)):
         ops._associated(h, {"AssociatedPartitionProfile": raw}, SimpleNamespace())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rename,replace", [(True, False), (False, True), (True, True)])
+async def test_public_update_variants(system_profiles, rename, replace):
+    h, _, profile, ssh = system_profiles
+    other = deepcopy(profile)
+    other["UUID"] = "44444444-4444-4444-8444-444444444444"
+    other["Resource"]["ProfileName"] = "alternate"
+    h.list_child.side_effect = lambda *_: deepcopy([profile, other])
+    changed = False
+
+    async def command(_config, cmd, **kwargs):
+        name = "renamed" if changed and rename else "scratch"
+        pname = "alternate" if changed and replace else "base"
+        return (
+            f"name:lpar_ids:profile_names\n{name}:1:{pname}\n"
+            if "name:lpar_ids" in cmd
+            else f"name\n{name}\n"
+        )
+
+    async def wait(*args, **kwargs):
+        nonlocal changed
+        changed = True
+        return terminal()
+
+    ssh.side_effect = command
+    h.submit_job = AsyncMock(return_value=terminal("NOT_STARTED"))
+    h.wait_for_job_entry = AsyncMock(side_effect=wait)
+    result = await ops.update_system_profile(
+        h,
+        S,
+        "scratch",
+        new_name="renamed" if rename else None,
+        members=[ops.SystemProfilePair(partition=L, profile=other["UUID"])]
+        if replace
+        else None,
+        exclusive_writer_window=True,
+    )
+    assert result.state == "completed" and result.postcondition == "verified"
+    assert result.name == ("renamed" if rename else "scratch")
+    assert h.submit_job.await_count == 1
+    document = h.submit_job.await_args.args[1]
+    assert ("alternate" in document) is replace
+    assert ("renamed" in document) is rename
