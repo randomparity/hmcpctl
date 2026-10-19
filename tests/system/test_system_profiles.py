@@ -800,3 +800,25 @@ def test_job_and_member_outcomes_require_exact_origin(system_profiles, href):
     job["link"] = href
     with pytest.raises(ValueError):
         ops._job_facts(h, job, "job-1")
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "//hmc.test:12443/rest/api/uom/jobs/job-1",
+        "//hmc.test:443/rest/api/uom/jobs/job-1",
+    ],
+)
+def test_job_and_member_outcomes_no_network_relative_origin(system_profiles, href):
+    h, _, _, _ = system_profiles
+    h.config = h.config.model_copy(update={"port": 12443})
+    job = terminal()
+    job["link"] = href
+    with pytest.raises(ValueError):
+        ops._job_facts(h, job, "job-1")
+
+
+def test_job_and_member_outcomes_identity_bound(system_profiles):
+    h, _, _, _ = system_profiles
+    with pytest.raises(ValueError):
+        ops._job_facts(h, terminal(job_id="a" * 4097), "a" * 4097)

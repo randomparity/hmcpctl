@@ -482,8 +482,10 @@ def _job_identity(hmc, job, expected=None):
     from ...jobs import canonical_job_path
 
     ident = job["Resource"]["JobID"]
-    if not isinstance(ident, str) or not re.fullmatch(
-        r"[A-Za-z0-9_:-][A-Za-z0-9_.:-]*", ident
+    if (
+        not isinstance(ident, str)
+        or len(ident) > 4096
+        or not re.fullmatch(r"[A-Za-z0-9_:-][A-Za-z0-9_.:-]*", ident)
     ):
         raise ValueError("stable native JobID required")
     if expected is not None and ident != expected:
@@ -500,6 +502,8 @@ def _job_identity(hmc, job, expected=None):
         u = urlsplit(link)
         if (
             u.scheme not in ("", "https")
+            or bool(u.netloc)
+            and u.scheme != "https"
             or u.username
             or u.password
             or u.query
