@@ -148,14 +148,17 @@ def _redact(text: str, secrets: tuple[str, ...]) -> str:
         for form in forms
         for match in re.finditer(f"(?={re.escape(form)})", text)
     )
+    merged: list[list[int]] = []
+    for start, stop in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], stop)
+        else:
+            merged.append([start, stop])
     parts: list[str] = []
     end = 0
-    for start, stop in spans:
-        if start > end:
-            parts += [text[end:start], REDACTED]
-        elif not parts:
-            parts.append(REDACTED)
-        end = max(end, stop)
+    for start, stop in merged:
+        parts += [text[end:start], REDACTED]
+        end = stop
     return "".join(parts) + text[end:]
 
 
