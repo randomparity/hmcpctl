@@ -32,11 +32,7 @@ def system_profiles(monkeypatch):
         "Resource": {
             "ProfileName": "base",
             "AssociatedPartition": {
-                "link": {
-                    "@attrs": {
-                        "href": f"https://hmc.test/rest/api/uom/LogicalPartition/{L}"
-                    }
-                }
+                "href": f"https://hmc.test/rest/api/uom/LogicalPartition/{L}"
             },
         },
     }
@@ -147,7 +143,7 @@ async def test_inventory_binding_current_identity(system_profiles, fault):
     if fault == "uuid":
         member["UUID"] = "invalid"
     if fault == "parent":
-        profile["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"] = (
+        profile["Resource"]["AssociatedPartition"]["href"] = (
             f"https://foreign.test/rest/api/uom/LogicalPartition/{L}"
         )
     if fault == "missing-profile":
@@ -206,7 +202,7 @@ async def test_inventory_binding_multirow_and_vios(system_profiles):
     h.list_logical_partitions.return_value = []
     h.list_logical_partitions.side_effect = None
     h.list_vios.return_value = [member]
-    profile["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"] = (
+    profile["Resource"]["AssociatedPartition"]["href"] = (
         f"https://hmc.test/rest/api/uom/ManagedSystem/{S}/VirtualIOServer/{L}"
     )
 
@@ -673,7 +669,7 @@ async def test_all_members_old_new_union(system_profiles, foreign):
         p = deepcopy(profile)
         if uuid == second_uuid:
             p["UUID"] = "77777777-7777-4777-8777-777777777777"
-        p["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"] = (
+        p["Resource"]["AssociatedPartition"]["href"] = (
             f"https://hmc.test/rest/api/uom/LogicalPartition/{uuid}"
         )
         return [p]
@@ -762,7 +758,7 @@ async def test_job_and_member_outcomes_public_activation(system_profiles, case):
 @pytest.mark.asyncio
 async def test_preflight_refusal_unprintable_parent_link(system_profiles):
     h, _, profile, _ = system_profiles
-    profile["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"] = (
+    profile["Resource"]["AssociatedPartition"]["href"] = (
         f"https://hmc.test/rest/api/uom/LogicalPartition/\n{L}"
     )
     result = await ops.list_system_profiles(h, S)
@@ -972,3 +968,40 @@ async def test_refreshes_contained_profile_public_mutation(
         ]
         assert result.state == "uncertain" and result.postcondition == "drifted"
         assert result.job.job_id == "job-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nested", [False, True])
+async def test_parse_feed_parent_reaches_public_lifecycle(system_profiles, nested):
+    from hmcpctl.xmlutil import parse_feed
+
+    h, _, _, ssh = system_profiles
+    href = f"https://hmc.test/rest/api/uom/ManagedSystem/{S}/LogicalPartition/{L}"
+    association = f'<link href="{href}" rel="related"/>' if nested else ""
+    attrs = "" if nested else f' href="{href}" rel="related"'
+    feed = parse_feed(
+        f'<entry xmlns="http://www.w3.org/2005/Atom"><id>urn:uuid:{P}</id><content><LogicalPartitionProfile xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"><ProfileName>base</ProfileName><AssociatedPartition{attrs}>{association}</AssociatedPartition></LogicalPartitionProfile></content></entry>'
+    )
+    h.list_child.side_effect = lambda *_: deepcopy(feed)
+    deleted = False
+
+    async def command(_config, cmd, **kwargs):
+        nonlocal deleted
+        if cmd.startswith("rmsyscfg"):
+            deleted = True
+            return ""
+        return (
+            "No results were found.\n"
+            if deleted
+            else "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+
+    ssh.side_effect = command
+    inventory = await ops.list_system_profiles(h, S)
+    assert inventory.command_status == "completed"
+    result = await ops.delete_system_profile(
+        h, S, "scratch", exclusive_writer_window=True
+    )
+    assert result.state == "completed" and result.postcondition == "verified"

@@ -251,11 +251,7 @@ async def test_system_profiles_snapshot_normal_policy(monkeypatch, foreign):
                 "Resource": {
                     "ProfileName": "base",
                     "AssociatedPartition": {
-                        "link": {
-                            "@attrs": {
-                                "href": f"https://hmc.test/rest/api/uom/LogicalPartition/{uuid}"
-                            }
-                        }
+                        "href": f"https://hmc.test/rest/api/uom/LogicalPartition/{uuid}"
                     },
                 },
             }

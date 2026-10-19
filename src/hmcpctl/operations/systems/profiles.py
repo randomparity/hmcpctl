@@ -132,7 +132,13 @@ class _Phase:
 def _profile_parent(
     profile: dict, parent: str, system: str, hmc: HMCClient, kind: str
 ) -> None:
-    href = profile["Resource"]["AssociatedPartition"]["link"]["@attrs"]["href"]
+    association = profile["Resource"]["AssociatedPartition"]
+    if not isinstance(association, dict):
+        raise TypeError("native profile parent is malformed")
+    reference = association if "href" in association else association.get("link")
+    if not isinstance(reference, dict):
+        raise TypeError("native profile parent reference is missing")
+    href = reference.get("href")
     if (
         not isinstance(href, str)
         or not href.isprintable()
