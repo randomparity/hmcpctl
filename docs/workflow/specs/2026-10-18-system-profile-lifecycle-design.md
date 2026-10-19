@@ -1,353 +1,268 @@
 # System-profile lifecycle — issue #1725
 
-Proposed full product design after the source-capture/cleanup checkpoint. The writer-window,
-fixed CLI delete and bounded association/encoding contracts are operator-approved as recorded
-below. Full design review and scope audit still precede product implementation.
-Scope: `q1725-d647765d`, campaign `822f9065dedb-622a646c-5bde-4f6a-b9e1-d78c64703a58`.
+Proposed full design; product build waits for the single scope audit after the bounded design
+review. Current charter: WORK:SCOPE6258196210, claim q1725-d647765d/attempt1, campaign
+822f9065dedb-622a646c-5bde-4f6a-b9e1-d78c64703a58. That complete charter, not this target,
+authorizes the five-row lifecycle. “Approve both revised contracts”
+(call_c202111f34f34b6bb0db4158db909334 item0) approves fixed CLI deletion and bounded association
+admission; the earlier child-allocation and writer-window approvals remain recorded there.
 
-## Problem, scope and authority
-
-System profiles associate multiple partitions with their contained partition profiles and may
-validate/activate those associations. They are not partition profiles, backup files or saved
-current configurations. Implement create, read/list, update/rename, delete and activation through
-owning operations and supported CLI/MCP presentations; no public raw job/command interface.
-The exact published scope and its exclusion-owner set were re-read at this checkpoint:
-WORK:SCOPE6258196210 and issue #1725. “Approve all three child scopes”
-(`call_b9d1a2d0e8f142d2b58841ddf72a20d5`, item0) remains unchanged.
-
-Every mode, parameter and source unit of these five `docs/capabilities/rows.json` IDs stays in
-#1725. The prefix is `rest:jobs/managedsystem-jobs/`; no row transfer or deletion is proposed.
-The inventory is152source units, not the fixed M design denominator250 changed lines.
-
-| Row suffix | Modes | Parameters | Source units | Proposed semantic coverage |
-| --- | ---: | ---: | ---: | --- |
-| activatesystemprofile_managedsystem-job | 10 | 24 | 34 | systemProfile; operation=on; test; continue; validate-only, activate and validate-then-activate, continuation variants |
-| createsystemprofile_managedsystem-job | 10 | 22 | 32 | systemProfileName and complete logicalPartitionNames/logicalPartitionProfileNames pairs |
-| deletesystemprofile_managedsystem-job | 10 | 18 | 28 | systemProfileName through the approved fixed documented CLI equivalent; truthful command outcome |
-| getsystemprofiles_managedsystem-job | 10 | 14 | 24 | parameterless complete inventory; bounded result/returnCode/detailedStatus; missing/get-by-name and empty cases |
-| updatesystemprofile_managedsystem-job | 10 | 24 | 34 | systemProfileName, optional systemProfileNewName and paired complete replacement arrays; rename-only, membership-only and both |
-
-The reference JSON/XML request examples describe the same finite operations. Normalize their
-semantics into the existing XML request builder; do not add a selectable raw encoding/proxy.
-Transport representation, response fields and version statements remain covered by contract
-fixtures/traceability; equivalent deletion must be recorded as such, never called a REST pass.
-#638 retains borrowed LPAR SaveCurrentConfig; #698 retains VIOS/rmprofdata. ADR0118's six-name
-facade stays exact. No dependencies, new authorization framework, scaffolding, automatic
-maturity promotion. The encoding exclusion below is adopted only under the later explicit
-operator decision. Approved pairs are: independent-writer fencing —
-operator coordination; automatic replay/rollback — caller reconciliation; structurally
-unencodable or undocumented association encodings — operator-managed pending authoritative
-encoding support. “Approve both revised contracts” (`call_c202111f34f34b6bb0db4158db909334`,
-item0) approves the backend and bounded association contracts plus that exact additional pair.
-
-## Global Constraints
+## Scope and Global Constraints
 
 Python>=3.11; existing HMC REST/SSH clients, Typer/FastMCP and pytest; no new dependencies.
-The REST job floor is HMC10.3.1060.0; a version alone does not prove every operation's capability.
-No project architecture is declared. Host Darwin arm64/Python3.11.15, CI amd64/Python3.11–3.14
-and native managed-hardware proof are separate facts. Preserve ADR0118's six-name facade,
-#638/#698 ownership and all five rows/152source units. All three approved exclusion-owner pairs
-apply exactly as recorded in WORK:SCOPE6258196210. No generic proxy, automatic replay/rollback,
-backend selector or automatic maturity promotion. No current native effects are authorized.
+REST job floor HMC10.3.1060.0; version alone does not prove operation capability.
+Host Darwin arm64/Python3.11.15 and CI amd64/Python3.11–3.14 are separate from native proof.
+Preserve ADR0118's six-name facade and #638/#698 ownership; no generic proxy or backend selector.
+No automatic replay, rollback, maturity promotion or current native effects. Fixed M denominator250.
 
-## Source evidence and limits
+All modes/parameters/source units of these exact `rest:jobs/managedsystem-jobs/` rows remain #1725:
 
-Independent POWER10 and POWER11 REST snapshots define these five jobs from HMC10.3.1060.0:
-`docs/refs/hmc-rest-api-p10/jobs/managedsystem-jobs/` topics042,047,050,053,074;
-POWER11 topics042,047,050,054,077. The two Get pages define output as CLI stdout without a
-nonempty example. Both Delete pages require `systemProfileName`. CLI references independently
-specify `rmsyscfg -r sysprof`, exact system/name operands and system-profile-only removal:
-`docs/refs/hmc-commands-p10/commands/rmsyscfg.md:17`–31,57–59 and the POWER11 equivalent.
-These local references are source citations, not copied reference prose.
+| Row suffix | Modes/parameters/units | Contract |
+| --- | --- | --- |
+| activatesystemprofile_managedsystem-job | 10/24/34 | systemProfile, operation, test, continue; action table below |
+| createsystemprofile_managedsystem-job | 10/22/32 | systemProfileName, logicalPartitionNames, logicalPartitionProfileNames |
+| deletesystemprofile_managedsystem-job | 10/18/28 | systemProfileName via fixed documented CLI equivalent, not a REST pass |
+| getsystemprofiles_managedsystem-job | 10/14/24 | no request parameters; complete result/code/diagnostics, empty and name lookup |
+| updatesystemprofile_managedsystem-job | 10/24/34 | systemProfileName, systemProfileNewName, paired replacement arrays |
 
-Earlier empty-source captures are retained as failed/empty observations, not list success:
-read-only Get returned FAILED_BEFORE_COMPLETION with returnCode0 and ErrorData; five bounded
-alternate-system CLI inventories were canonical empty. Their source revision10905eaaa was not
-candidate proof. A later exact-source preparation revision
-`5dfcf61f457351757cf2cb9ef532d664a097d4c4` (tree
-`0e1337d457c0cb1f16fd62b93f23d6f306cc4388`) passed canonical verify578.60s and pinned hooks40.47s,
-was isolated-deployed with matching manifests, and ran one separately approved scratch capture.
-This is source-probe evidence, not product or activation proof.
+Total152 is allocation inventory, not design denominator. JSON/XML reference examples normalize
+into existing XML job builders; no public raw encoding/request option. The three approved pairs:
+independent-writer fencing — operator coordination; automatic replay/rollback after uncertain
+effects — caller reconciliation; structurally unencodable or undocumented association encodings
+— operator-managed pending authoritative encoding support. Unsupported encoding invalidates the
+WHOLE inventory; operator-managed does not mean skipped members or permission bypass.
 
-On HMC11.2.SP1120, Create and Get completed successfully. Get's result was a JSON array with one
-object containing string fields SystemProfileName, PartitionNames, PartitionIds and
-PartitionProfileNames. The last three had two comma-separated positions; the selected partition
-names and distinguishable profile names matched request order. Raw identifiers remain private.
-Observed data does not establish quoting/escaping, empty members, multiple rows, another release
-or numeric-ID-to-UUID binding. Those distinctions are addressed by the approved admission rules
-and explicit tests/native prerequisites below, not by claiming broader native proof.
+## Evidence and backend decision
 
-Delete failed to start with `Parameter 'systemProfileName' is not allowed for this Job.`
-A read-only native Delete template named the operation but supplied no JobParameter declarations.
-No alternate parameter or REST retry was inferred. The separately approved single documented
-CLI scratch deletion returned success. Its runner exited1 on a subsequent after-read transport
-error; a separate independent read-only witness then proved original complete member/profile/
-power/ownership and namespace baselines restored, scratch absent. Original capture remains
-FAILED/partial and failed own job retained; this does not become a passing lifecycle scenario.
-Root reconciled that known command outcome plus independent baseline and released coordination.
-All source capture/cleanup grants are consumed and authorize no further native effects.
+Independent REST sources: POWER10 jobs topics042/047/050/053/074; POWER11 topics042/047/050/054/077,
+under docs/refs/hmc-rest-api-p10/jobs/managedsystem-jobs/ and its POWER11 equivalent. Both Delete
+pages prescribe systemProfileName. CLI sysprof deletion is independently documented at
+ docs/refs/hmc-commands-p10/commands/rmsyscfg.md:17–31,57–59 and the POWER11 equivalent.
+The Get pages supply no nonempty output example. Do not copy untracked reference prose.
 
-Public-safe hashes: raw Get result `5ae61fd48eef1d05fc4f5bfc806c2562c060d19babafc13e07858981693ca95e`; original private capture
-`dda500dd38c84bb8dbea41d7cf4b674634544323efb150082c316f3da381d0d5`; native Delete template
-`b981686452dd6927d1d43e5e6eeff29902c1c26211c9a08316d17e24e57b7a3f`;
-independent cleanup reconciliation `eb361a29c44eec427587483ffa6aae38515b31f702d44b521a7268d915d87987`.
+A separately approved source capture at5dfcf61f/HMC11.2.SP1120 observed successful Create/Get:
+Get result was one JSON-array object with string SystemProfileName, PartitionNames, PartitionIds,
+PartitionProfileNames, with two comma-separated member positions matching the distinct request.
+Raw result hash 5ae61fd48eef1d05fc4f5bfc806c2562c060d19babafc13e07858981693ca95e; capture hash dda500dd38c84bb8dbea41d7cf4b674634544323efb150082c316f3da381d0d5.
+REST Delete FAILED_TO_START: "Parameter 'systemProfileName' is not allowed for this Job."
+Its read-only template declared no parameters. No alternate parameter/REST retry was inferred.
+Separately approved documented CLI cleanup returned success; runner exit1 retained its after-read
+transport failure. Separate independent reconciliation proved original complete namespace/member
+baseline restored, scratch absent. Original capture remains FAILED/partial; failed job retained;
+root reconciled/released coordination. All effect grants consumed. Source is not product proof.
+Earlier empty Get at10905eaaa/HMC10.3.1060 failed despite code0 (terminal hash
+0116ea368a7a9ed4747435d246a200b45fae6e4d4860d5e2ba5636328b868147).
 
-## Approved backend contract
+Approved route: REST Create/Get/Update/Activate; ALWAYS one fixed documented SSH sysprof deletion
+through existing transport, chosen BEFORE effects. No REST-then-SSH fallback, alternate parameter,
+backend selector, row transfer or silent release exclusion. Delete requires SSH connectivity/
+privileges and a proven unique CLI identity for the already authorized system UUID (documented
+MTMS form if needed); ambiguous names refuse. Quote both operands, fix resource=sysprof.
+Command outcomes have no fabricated JobID/status. These choices are recorded in Proposed ADR0243.
 
-Approved: Create/Get/Update/Activate use fixed existing REST job transport; delete always uses
-one fixed documented `rmsyscfg -r sysprof -m <bound-system> -n <exact-profile>` through existing
-SSH transport. It is a deliberate backend choice before effects, never automatic fallback after
-a REST attempt. No backend selector, retry switch or new public permission flag is proposed.
-The issue permits documented equivalents, but the prior product draft described five job results;
-the command-versus-job distinction is explicitly approved by the later operator decision.
+## Interfaces and consumer contract
 
-For delete, resolve a unique CLI identity for the already authorized managed-system UUID. Use
-existing identity evidence and documented MTMS form when necessary; a duplicate/unproven system
-name must refuse before SSH mutation rather than target a different system. Quote both operands,
-fix resource=sysprof, and expose no arbitrary flags or command text. Profile names come from the
-complete authorized association inventory, not a loosely matched namespace string.
+New owner src/hmcpctl/operations/systems/profiles.py defines these pre-release types; no facade exports.
+SystemProfilePair is a pydantic BaseModel with extra='forbid' and exactly nonblank string fields
+partition and profile (partition selector and its contained-profile selector, not HMC connection).
+The following frozen dataclasses serialize with dataclasses.asdict; tuple fields become JSON arrays:
 
-Delete retains all-targets grant, ownership of EVERY existing member, writer-window attestation,
-immediate complete rereads and post-read reconciliation. Its result records SSH command
-success/failure/uncertainty separately from observed absence and member preservation. It has no
-fabricated JobID or terminal REST status. SSH timeout/interruption preserves uncertainty and
-caller coordination; it cannot trigger another command or release the interval. Successful SSH
-exit alone is insufficient: absence plus unchanged full member baseline must be read independently.
-A failed first read remains a failed observation even if a later explicit reconciliation succeeds.
-Product REST jobs keep submission/terminal status/CLI diagnostics separate. Require coherent
-submission Resource.JobID/SELF and terminal identity for these fixed operations before trusting
-inventory or effects; contradictory/foreign handles yield uncertainty, never a different operation
-or automatic replay. Preserve the shared generic client compatibility contract unchanged.
-Use existing outcome patterns, not a new general execution-result framework.
+```python
+SystemProfileMember(resource_type: str, partition_uuid: str, partition_id: int,
+                    partition_name: str, profile_uuid: str, profile_name: str)
+SystemProfileRecord(name: str, members: tuple[SystemProfileMember, ...])
+SystemProfileInventory(system_uuid: str, records: tuple[SystemProfileRecord, ...] | None,
+                       source: Literal['ssh-empty', 'rest-job'], job: JobOutcome | None,
+                       error: str | None)
+MemberObservation(member: SystemProfileMember, before_state: str | None,
+                  after_state: str | None, observed_profile_name: str | None,
+                  observed_profile_uuid: str | None,
+                  classification: Literal['unchanged', 'changed-to-running',
+                                          'still-not-running', 'unavailable'],
+                  error: str | None)
+SystemProfileOutcome(system_uuid: str, name: str,
+                     action: Literal['create', 'update', 'delete', 'validate',
+                                     'activate', 'validate-and-activate'],
+                     backend: Literal['rest-job', 'ssh-command'],
+                     state: Literal['completed', 'failed', 'uncertain'],
+                     job: JobOutcome | None, return_code: str | None,
+                     command_status: Literal['completed', 'failed', 'uncertain'] | None,
+                     activation_execution: Literal['complete', 'partial', 'failed', 'unknown'] | None,
+                     postcondition: Literal['verified', 'drifted', 'unverified', 'not-applicable'],
+                     members: tuple[MemberObservation, ...], warnings: tuple[str, ...],
+                     error: str | None)
+```
 
-Alternatives: REST-only with the documented parameter is source-aligned but demonstrably fails
-on the observed backend, so it cannot be described as working deletion there. Guessing another
-parameter has no source authority. Trying REST then SSH is rejected: it adds an effect after a
-failed/uncertain attempt and violates the no-replay contract. Moving the Delete row to another
-issue or silently excluding this release is not proposed. Capability evidence must explicitly
-name the equivalent backend and actual source proof; no maturity advance follows.
+records=None means WHOLE inventory unavailable; () means independently proven empty. A name
+filter applies only after whole-inventory validation; a missing requested name raises ValueError.
+Pre-effect invalid input/containment raises ValueError; policy denial PermissionError; unavailable
+prechecks HMCError. No mutating request is sent. After submission/effect attempt, return an outcome
+with known job/command facts and bounded error/warnings rather than discard uncertainty/handles.
+All strings/results are bounded5MiB overall, diagnostics2048characters; do not truncate an inventory.
 
-## Owning components, interfaces and data flow
+Exact async domain signatures (HMCClient, Sequence and JobOutcome are existing/imported types):
 
-Extend existing jobs/requests and client transport; place system-profile operations under
-`operations/systems/`, presentation modules under existing systems CLI/MCP groups, and one fixed
-SSH helper in the existing profiles owner under the approved backend contract. Direct dependencies
-are resource identity, existing member ownership, bounded jobs, SSH transport and evidence docs.
-No ownership migration or six-name facade export. Do not reuse #1724's unapproved save/delete
-proposals or #638/#698 operations as implementation authority.
+```python
+list_system_profiles(hmc, system_name_or_uuid: str, *, name: str | None = None,
+                     timeout_seconds: int = 300, poll_interval: int = 5) -> SystemProfileInventory
+create_system_profile(hmc, system_name_or_uuid: str, name: str,
+                      members: Sequence[SystemProfilePair], *, exclusive_writer_window: bool = False,
+                      ownership_override: bool = False, timeout_seconds: int = 300,
+                      poll_interval: int = 5) -> SystemProfileOutcome
+update_system_profile(hmc, system_name_or_uuid: str, name: str, *, new_name: str | None = None,
+                      members: Sequence[SystemProfilePair] | None = None,
+                      exclusive_writer_window: bool = False, ownership_override: bool = False,
+                      timeout_seconds: int = 300, poll_interval: int = 5) -> SystemProfileOutcome
+delete_system_profile(hmc, system_name_or_uuid: str, name: str, *,
+                      exclusive_writer_window: bool = False,
+                      ownership_override: bool = False) -> SystemProfileOutcome
+activate_system_profile(hmc, system_name_or_uuid: str, name: str, *,
+                        action: Literal['validate', 'activate', 'validate-and-activate'] = 'activate',
+                        continue_on_error: bool = False, exclusive_writer_window: bool = False,
+                        ownership_override: bool = False, timeout_seconds: int = 300,
+                        poll_interval: int = 5) -> SystemProfileOutcome
+```
 
-Five domain entry points share a complete system-profile inventory and contained-member resolver.
-Create/update accept explicit partition-selector/profile-selector pairs; never public independent
-unpaired arrays. Resolve selected connection/system, each contained partition, and each profile
-through that partition's profile feed before serializing parallel native names. Reject blank,
-duplicate, ambiguous/missing, cross-system and structurally unencodable pair values before effects.
-Update may rename-only, replace all members only, or both; no implicit union/incremental mutation.
-At least one change is required; both native membership arrays must be present together with equal
-positive cardinality. Detect missing source name and rename collision from complete inventory.
-Use selected profile identities, not names alone, in the immediate compare.
+MCP consumers in server_tools/systems/profiles.py expose hmc_create_system_profile,
+hmc_list_system_profiles, hmc_update_system_profile, hmc_delete_system_profile,
+hmc_activate_system_profile. Drop hmc from domain signatures and append profile: str|None=None
+for configured connection; pair inputs are list[SystemProfilePair]. No arbitrary parameter dict.
+CLI consumers in cli_commands/systems/profiles.py register systems profile-create/profile-list/
+profile-update/profile-delete/profile-activate. Required arguments SYSTEM NAME (list: SYSTEM only),
+--name for list lookup; --new-name and repeated --member JSON objects for create/update;
+--action/--continue-on-error for activation; approved --exclusive-writer-window and existing
+--ownership-override for mutations, --json for structured output. Pair JSON uses exact two keys.
+No wait/force/backend/retry flag. REST polling uses300/5defaults unless called programmatically.
+Both consumers serialize the SAME dataclass fields. CLI exits0 only completed+verified metadata or
+successful validate; failed =>1; uncertain/unverified activation =>2. Job completion and member
+observations remain visible even when exit is nonzero. MCP returns the typed outcome, not a string.
+Register the new module in server_tools/catalog.py and cli.py; keep existing groups/entries intact.
 
-MCP mutations require existing all-targets grants because scalar selector metadata cannot
-exhaustively declare dynamically discovered members. Authorize the connection/system and EACH
-member under existing ownership rules, using only their already supported audited override where
-permitted. Create checks new members; update checks old/new union; delete/activate check the entire
-existing set. Validate-only still requires complete authorization/containment but omits the writer
-attestation because it is observational. Discovery failure, partial inventory or one unauthorized
-member refuses the entire mutation before submission; never silently filter a profile's members.
+## Inventory, authorization and freshness
 
-## Approved bounded association contract
+Parse ONLY bounded observed JSON array items with four exact required string fields; reject
+missing/duplicate keys, invalid types/JSON, duplicate row names, oversized/deep output. Additional
+unexpected fields do not authorize anything. For each row require nonzero equal member-column
+cardinality, unique positive decimal PartitionIds, exact current PartitionID/name/UUID binding in
+the selected system, and unique contained profile name/UUID. Source IDs are NOT UUIDs. Existing
+snapshots/operations.py reads PartitionID. No undocumented CSV quoting/backslash parser: delimiter-
+bearing/ambiguous input/output fails the entire inventory under the approved exclusion.
 
-Use bounded exact-successful Get results; failed/warning/nonterminal jobs or code0 with ErrorData
-are not valid inventory. Before Get, a strict independent name-only CLI inventory may establish a
-canonical empty namespace and return an empty observation without submitting the known-broken
-empty Get job. Preserve that read backend/provenance and no atomic-snapshot promise. For nonempty
-namespace require successful Get and equality of the complete unique system-profile name sets.
-An empty Get array inconsistent with namespace, omitted records or duplicate names is not empty.
+Apply the item validator to bounded multiple rows; this is structural inference, not observed
+multirow native proof. Compare complete unique profile-name sets with strict independent name-only
+namespace. A canonical empty namespace may return source='ssh-empty', records=(), job=None without
+the known-failing empty Get. Failed/warning/nonterminal Get or code0+ErrorData gives records=None;
+never treat invalid/truncated/missing rows as empty. Public lookup still validates the whole set.
 
-The approved bounded representation is the observed JSON-array/object shape, not a permissive
-CSV/result guesser. Require the four exact string fields; reject duplicate JSON keys, malformed
-JSON/types, blank/duplicate profile names, oversized/deep/unbounded data, and missing columns.
-Apply the same item validator to each bounded array element; multirow support is a structural
-inference to be tested, not a native observation claimed here. Preserve complete inventory only
-when every record passes; no partial catalog can authorize an old-member mutation.
+Read selected-system LogicalPartition and VirtualIOServer feeds via existing list_logical_partitions
+and list_vios. Resolve each member's corresponding contained LogicalPartitionProfile child feed
+with existing list_child(parent_type, uuid, child_type); missing/unsupported evidence refuses the
+whole inventory, never filters a member kind. #698's VIOS operations are not transferred.
+Resolve caller pairs within those current feeds; reject duplicate partitions/missing/ambiguous/
+cross-system selectors and empty/unencodable names. Preserve source pair association, not an
+invented partition-activation order. Update permits rename-only, replacement-only or both; require
+at least one change, paired arrays together and collision/missing-name checks on complete inventory.
 
-Parse PartitionIds as unique positive decimal IDs with one comma separator per member; require
-all three member columns to have equal nonzero cardinality. Match each position against the
-current selected-system partition feed: PartitionID, exact PartitionName and canonical UUID must
-identify the same unique partition. Existing `snapshots/operations.py:383` and partition inventory
-readers establish PartitionID as a separate resource property, not a UUID. Each profile name must
-identify exactly one contained profile in that matched partition. The regular AIX/Linux source
-references do not narrow product membership: never silently omit another native member kind.
-Use its authoritative contained identity/profile source and the same existing ownership policy;
-missing evidence invalidates the whole inventory. #698's separate VIOS operation ownership stays intact. A name/ID disagreement, absent
-ID, stale UUID, duplicate partition or profile-containment failure refuses the whole record.
-Do not zip truncated columns, match globally by profile name, or infer identity from position alone.
+All mutations require existing MCP all-targets grants (exhaustive_targets=False) plus connection/
+system policy and EVERY member's existing ownership check. Create checks new set; update old/new
+union; delete/activation old set. Reuse authorize_lpar_ownership_description on freshly read
+ownership metadata, including existing audited override only; no source-reference grant or stamp.
+A missing authoritative ownership/profile read still refuses; override cannot waive complete data.
+Validate-only performs containment/authorization but omits writer attestation.
 
-No undocumented quoting/backslash escaping is invented. Delimiter-bearing or structurally
-ambiguous names/output refuse with an actionable unsupported-association-encoding diagnostic,
-not an empty list, changed membership or permission bypass. Current input serialization likewise
-cannot safely encode such names through the documented parallel comma lists. To avoid claiming
-support for every native-valid name, the operator approved this exact additional exclusion-owner pair:
-**structurally unencodable or undocumented association encodings — operator-managed pending
-authoritative encoding support**. It is approved by `call_c202111f34f34b6bb0db4158db909334`, item0. The operator manages such profiles
-outside this surface pending authoritative encoding support; the implementation cannot skip them,
-filter members or switch parser/backend automatically. One unsupported record invalidates the
-WHOLE inventory for list/get and all membership-dependent mutations. Full five-row allocation
-stays with #1725; this support boundary and honest partial maturity are recorded in current WORK:SCOPE6258196210. Tests must distinguish observed simple strings, structurally repeated
-rows, invalid escaped/delimited forms and unsupported format from absent capability.
+The approved exclusive_writer_window=False flag gates create/update/delete and any activating
+action. Caller coordinates namespace/membership, names, contained profile content/ownership and
+power from BEFORE preflight through known terminal reconciliation. It is not fencing/lease/lock.
+Observation phases are initial discovery, immediate pre-effect compare, and independent post-read.
+Each phase creates its OWN local feed cache; reuse only within that phase. The next phase ALWAYS
+re-reads current feeds/ownership/namespace; never share a cache across phases or trust an old ETag.
+Compare stable full profile Resources/identity/name/defaults/ownership/power before effects;
+Metadata transport wrappers alone are omitted. An A->B->C changing-feed test must observe B/C.
 
-## Approved writer-window contract and proposed result observations
+## Dispatch and outcomes
 
-No documented conditional-write parameter or ETag precondition exists on these jobs.
-Approved contract: require a caller-attested exclusive writer window for create/update/delete
-and activation. The window covers system-profile namespace/membership and member partition names,
-profile identity/content and power operations from preflight until terminal reconciliation.
-It is operator coordination, not a lock, lease, fencing guarantee or rollback mechanism.
-Re-read the profile namespace, complete association and contained member profiles immediately
-before submission; reject changed input. This catches observed changes but does not close TOCTOU.
-A local process lock cannot exclude the HMC UI, CLI or other clients and is not proposed.
-Operator decision “Approve #1725 writer-window contract”, async
-`call_0b65189f319d4a9f96e1330bed7509c7` item 0, approves this exact contract only:
+Fixed XML requests use jobs/requests.py and existing build_job_request(operation, 'ManagedSystem',
+parameters), HMCClient.submit_job and wait_for_submitted_job(..., True, timeout_seconds, poll_interval).
+Validate coherent Resource.JobID/SELF before polling and terminal identity before trusting results;
+contradiction =>uncertain, no different job or generic-client contract change. Keep known handle.
+No automatic job deletion/replay/rollback. Missing/warning/failed status, absent/nonzero returnCode
+or ErrorData cannot be success. Preserve result/detailedStatus separately and boundedly.
 
-- Add `exclusive_writer_window: bool = False` to create/update/delete/activation domain and
-  presentation entry points; reject false before a mutating domain job. List/get and
-  validate-only do not require this attestation and make no atomic-snapshot guarantee.
-- The caller coordinates the HMC UI, CLI, automation and other writers over the chosen managed
-  system's profile namespace and exact old/new member names/profile content/power actions.
-  This is an explicit caller responsibility, not a service-provided lock or lease.
-- The interval begins before inventory/ownership preflight and continues through known
-  terminal job status and post-read reconciliation. Capture complete old/new association and
-  contained profile identities, authorize the member union, then re-read immediately before
-  submission. Observed changes refuse submission; post-submission drift reports uncertainty.
-- Mutations perform bounded polling using existing timeout/poll controls; no separate
-  fire-and-forget mode is proposed. Timeout, missing job, interrupted client or transport
-  ambiguity returns/preserves the known job handle and observed effects. The caller must keep
-  coordination until that job and state are reconciled; timeout does not mean cancellation.
-- No automatic retry, automatic rollback, implicit force, or claim of distributed fencing.
-  Another invocation requires fresh discovery/authorization under a newly confirmed interval.
-  Documented continuation controls member-error handling within that invocation; it is not
-  an automatically replayed job or an authorization token for a prior failed invocation.
-- Terminal success, return code and independent per-member observations remain separate facts.
-  An observation unavailable or insufficient to prove requested-profile activation remains
-  explicitly unverified. Approval grants no live effects or association-evidence waiver. Independent-writer fencing is
-  owned by operator coordination; automatic replay/rollback is replaced by caller reconciliation.
+| action | operation | test | continue | window |
+| --- | --- | --- | --- | --- |
+| validate | omitted | true | false | omitted |
+| activate | on | false | false or true | required |
+| validate-and-activate | on | true | false or true | required |
 
-## Activation observations and bounded outcomes
+systemProfile always names the selected record; validate+continue=true is refused. Boolean native
+values are lowercase strings. CLI chsysstate source135–136 grounds validate/continue semantics;
+its92–98 mode restriction is not bypassed. Known unsupported version/capability refuses; native
+unsupported-mode failure remains failed, never silently converted to another route.
 
-Expose a closed action vocabulary validate-only, activate and validate-then-activate; continuation
-is allowed only when activation is requested. Map these to documented systemProfile/operation/
-test/continue combinations without arbitrary parameters. Source `chsysstate.md:135`–136 supplies
-validation/continuation semantics; the REST continuation wording does not authorize replay.
-Both CLI snapshots additionally forbid sysprof activation in PowerVM management-controller mode
-(`chsysstate.md:92`–98). Reject a provably unsupported release/advertised capability before
-submission. Do not invent a controller-mode property or claim that version/template presence
-proves activation support: native unsupported-mode refusal remains a distinct failed job, with
-no successful activation claim or automatic alternate route. Do not assume REST can bypass that
-restriction. Source a reliable mode/capability precheck if the implementation promises one.
-Native activation has not been run.
+For create/update/delete, state=completed requires backend success AND exact desired namespace/
+association plus unchanged member profiles/power/defaults/ownership. Success with unavailable
+readback =>state=uncertain/postcondition=unverified; observed mismatch =>uncertain/drifted. Failed
+terminal/command =>failed, even code0 or apparently desired state; no old failure is rewritten.
+SSH has job=None/return_code=None and actual command_status; REST has command_status=None and
+normalized JobOutcome. Timeout/interruption returns uncertain with the known handle/command fact;
+it does not cancel work or release coordination. No fire-and-forget path.
 
-Keep submission, timeout, failed/warning/successful terminal job, validation and member effects
-distinct. For every member return requested contained profile identity, before/after state,
-available associated/last-activated profile evidence and read errors. Classify unchanged,
-changed-to-running, still-not-running or unavailable; none alone proves requested-profile
-application. Already-running members are not newly activated. Aggregate terminal success and
-per-member observations are separate facts; incomplete postconditions mean effects unverified,
-not complete activation. No invented partial-result parser or automatic rollback. Preserve known
-job handles and bounded diagnostics after timeout/interruption for explicit reconciliation.
-
-Create/update postconditions require exact requested name/association inventory and unchanged
-contained member profiles/power/defaults/ownership. Rename must remove the old name and create
-only the new name; replacement must match the complete requested pairs. Delete postconditions
-require exact absence and unchanged remaining inventory/member baselines. Any drift/read failure
-is uncertainty, never a reason to retry. For jobs, terminal status, returnCode, result and
-detailedStatus remain independent; missing/failed status with code0 is not success.
+For validate, completed means successful validation JOB, postcondition=not-applicable, no activated
+claim. Activation returns each member's before/after state, available LastActivatedProfile or
+associated-profile observation and read error. Classify unchanged/changed-to-running/still-not-
+running/unavailable; already-running is not newly activated. These observations do not alone prove
+requested-profile application. activation_execution separates the published complete/partial
+criterion from application proof: complete requires successful terminal plus ALL members freshly
+running; partial requires a fully readable mix of running/not-running members; failed requires a
+failed terminal without that mixed effect; otherwise unknown (including any unavailable member).
+Metadata/validate use None. Already-running is reported unchanged, never newly activated. Preserve
+terminal/result/continued-failure diagnostics separately; no unsupported per-member stdout parser.
+Requested-profile application stays postcondition=unverified and successful activating jobs return
+state=uncertain; failed terminal stays state=failed. Complete execution is not proven application.
+Tests must assert both classifications; native application proof remains unmet/partial maturity.
+Caller retains returned outcome/known handle and coordination while reconciling with existing
+hmc_get_job/hmc_wait_for_job, fresh hmc_list_system_profiles and member/profile reads. No persistence
+service or new resume API. Later reconciliation is a new observation, not a rewritten result.
 
 ## Failure model
 
-- Actors and deployments: authenticated CLI/MCP callers on supported HMC contexts; HMC responses;
-  independent administrators honoring the coordinated interval; local Darwin arm64 and CI amd64
-  Python3.11–3.14 verify different hosts, neither supplies native managed-hardware proof.
-- Invariants/assets: unique contained member association and ownership; unrelated profile state;
-  member availability; complete inventories; bounded private data and truthful backend outcomes.
-- Accepted failures: independent-writer fencing is operator coordination; replay/rollback after
-  uncertainty is caller reconciliation; structurally unencodable/undocumented association encoding
-  is operator-managed pending authoritative support. Unknown records invalidate the WHOLE inventory.
-- Covered elsewhere: existing transport/TLS/authentication and dispatch audit; partition-profile
-  lifecycle #1724; borrowed SaveCurrentConfig #638; VIOS/rmprofdata #698. None waives member checks.
+- Actors/deployments: authenticated CLI/MCP operators, selected HMC data and independent admins;
+  supported HMC contexts, local/CI hosts above. Operator controls local configuration/credentials.
+- Assets/invariants: contained association/ownership, unrelated profiles, member availability,
+  complete bounded inventory, private diagnostics and truthful backend/member outcomes.
+- Accepted classes: the THREE exact approved owner-managed pairs above; none waives fresh reads,
+  authorization or filtering prohibition. No distributed fencing/automatic recovery is promised.
+- Covered elsewhere: transport/TLS/auth/audit existing owners; #1724 partition profiles; #638/#698.
 
 ## Threat model and MCP evaluation
 
-Added boundaries: pair/action inputs into fixed requests, HMC strings into association identity,
-dynamic member sets into all-targets ownership, and job/command outcomes into presentations.
-Existing dispatch, transport, jobs and SSH boundaries are widened only for these finite actions.
-Authenticated callers and HMC output are untrusted at admission; local configuration is operator
-controlled, and independent administrators are trusted only to honor the approved writer interval.
-Pair/action input is controlled by closed values and XML escaping; response-to-identity by strict
-whole-inventory validation; member-to-policy by existing all-targets/ownership checks; SSH
-destination by proven target binding and quoting; output by bounded diagnostics/private export.
-Immediate rereads and explicit uncertainty govern observed drift. Fencing/replay/unsupported
-encoding are the approved owner-managed classes; existing transport security stays with its owner. No generic proxy,
-new permissive authentication policy or general execution framework.
+Added boundaries: pairs/actions->fixed requests (closed values, XML/shell quoting); HMC output->
+identity (strict whole-inventory/current-field checks); dynamic members->policy (existing all-targets
+and each-member ownership); outcomes->CLI/MCP/evidence (same bounded schema, private export whitelist).
+Existing client/jobs/SSH boundaries widen only to these finite actions. Untrusted authenticated
+callers and malformed/stale HMC data are admitted only through those checks; independent admins
+are trusted only to honor coordination. Existing transport security is unchanged.
 
-AI-SPEC: an authenticated MCP caller requests one finite system-profile action using selected
-connection/system, explicit profile/pairs/action and existing policy options. Output is bounded
-inventory or truthful backend/member outcomes from current contained HMC observations and approved
-source contracts. No inferred grants, filtered unauthorized members, arbitrary commands, invented
-success or automatic replay. Invalid/unknown evidence refuses before effects or reports uncertainty
-afterward. Existing request/SSH/job/discovery deadlines plus a5MiB result limit bound work; cache
-contained feeds per invocation rather than multiply fan-out. No LLM call/cost or model judge added.
-Success is deterministic admission, exact fixed dispatch and honest observation, tested in CI.
+AI-SPEC: MCP caller supplies finite selectors/pairs/action, receives bounded inventory or truthful
+backend/member facts from selected current HMC observations and approved sources. Disallow inferred
+grants, arbitrary commands, filtered members, invented success and automatic replay. Invalid input
+refuses before effects; ambiguity afterward reports uncertainty. Bound5MiB/result and existing
+request/SSH/discovery/job deadlines; no LLM call/cost. Deterministic tests, not a model judge, gate:
+SP-E1 valid fixed action; E2 one unauthorized member; E3 stale/encoded association; E4 code0 failed
+job/partial/readback; E5 injection/oversize/deadline; E6 private evidence export. All are blocking,
+severity4(E1)/5(E2–E6); the full plan names cases/commands/forbidden effects for each.
 
-| Case | Setup/input and severity | Required / forbidden traits | Gate |
-| --- | --- | --- | --- |
-| SP-E1 | Valid two-member fixture, unique names/profiles; severity4 | Exact fixed action/pairs; no unrelated target or proxy | block |
-| SP-E2 | One foreign/unresolved old/new member; severity5 | Entire operation refused before effects; no filtered subset | block |
-| SP-E3 | Stale ID/name/profile, duplicate/missing columns or unsupported encoding; severity5 | Whole inventory refused; no empty-success or fallback parser | block |
-| SP-E4 | Failed job with code0, partial activation, command/readback failure; severity5 | Distinct failure/uncertainty and handles; no complete-activation claim/replay | block |
-| SP-E5 | Oversized/deep data, bounded fan-out/deadline, hostile shell/XML names; severity5 | Bounded refusal and fixed escaped destinations; no extra effects | block |
-| SP-E6 | Public evidence export from private source records; severity5 | Allowlisted structure/hashes only; no native identifiers/raw diagnostics | block |
+## Validation and native prerequisites
 
-Constructed fixtures cover invalid/multirow forms and are labeled constructed; sourced simple
-Get fixtures cover the observed shape. Existing authorization, dispatch, evidence and integration
-tests measure these traits; no uncalibrated LLM evaluation substitutes for assertions.
-
-## Validation and reproducible native prerequisites
-
-Before build: the backend/result and encoding/support guarantees are explicitly approved. Complete
-design review over this spec, Proposed ADR0243 and the ignored full plan, then the scope audit. Product review budgets remain0;
-SOURCE branch2/security3 history is retained separately, not reused as product approval.
-No product scaffold or implementation begins at this checkpoint.
-
-Offline proof must cover every row/mode/parameter/source unit, both independent snapshots,
-all three update forms, every valid validation/activation/continuation combination, empty/missing/
-collision/release/controller-mode cases, malformed/oversized/multirow/duplicate/delimited output,
-ID/name/UUID/contained-profile disagreement, all old/new ownership failures, observed concurrency,
-timeout/interruption and partial/unverified member outcomes. Test fixed CLI delete argv/quoting,
-no REST attempt/fallback, no fabricated job status, command success plus failed readback, and
-independent later reconciliation without changing the earlier failure. Controlled faults must
-show new high-risk guard tests bite. Update discovery/generated docs/changelog and evidence-scoped
-capability bindings, without automatic maturity. Shipping requires focused tests, canonical
-just verify and pinned all-files prek at exact product HEAD, followed by CI's declared targets.
-
-Use the repository live-testing procedure for applicable native hardware proofs. A final product
-scenario needs a separate exact effect/target authorization, deployed HEAD/tree/manifests,
-registered named preflight/arm/recovery, complete original namespace and member profiles/power/
-ownership, coordinated writer interval and independently checked cleanup/recovery. Exercise at
-least two system-profile records to prove multirow inventory, distinct members/profiles and all
-approved metadata forms. Validation/activation and any controlled partial-failure arm require
-separate exact power/resource/maintenance authority; they are not included in source grants.
-Native not-run/failed/unverified cases stay explicit. Source capture is not product proof.
-
-## Remaining gates and evidence
-
-1. The writer-window and two revised contracts are approved under their exact recorded decisions;
-   current complete WORK:SCOPE6258196210 includes all three exclusion-owner pairs. No further
-   architecture question is presumed pending, and no new native effects are authorized.
-2. Complete one full spellcraft design review over spec/ADR/ignored plan, fix defensible findings,
-   run relevant checks/commit durable docs, and pass oathbind against the current approved scope.
-   Product design/branch/security budgets were0 before dispatch; source history stays separate.
-3. Implement and verify the full allocation only after that audit. Multirow, Update/activation/
-   validation/continuation, other-release/source encoding and final product native behavior remain
-   evidence gaps covered by explicit tests/scenarios, not passing claims or maturity promotion.
-
-Optional consumed reservation remains `docs/adr/0243-system-profile-job-contract.md=0243`,
-published under exact claim before creation. No migration/version change or ADR index assigned.
+The ignored full plan defines exact files, interfaces, task tests/red signals and focused commands;
+source unit binding covers all152 through both reference-contract fixtures and operation manifests.
+Run controlled guard faults, focused adjoining tests, final just verify+ pinned all-files prek,
+branch/security review and exact-head CI. No automatic maturity promotion from unit/source proof.
+The plan's PRODUCT system-profiles arm is separate from SOURCE-only system-profile-source. It
+requires NEW exact native authority, normal ownership/all-targets authorization and any existing
+audited override explicitly covered by that future grant; source UNOWNED-reference permission is
+not reused. Metadata scenario creates two unique records, lists multiple rows, exercises all update
+forms and fixed delete, preserving original complete baselines. Validation/activation/continue and
+controlled partial-failure effects need separate power/maintenance scope. Recovery runs every
+outcome; partial/unreadable/not-run never passes. Original source failed job remains retained.
+Use the repository live-testing procedure for applicable native hardware proofs.
