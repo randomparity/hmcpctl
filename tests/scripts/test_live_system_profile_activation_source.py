@@ -284,6 +284,29 @@ def hardware(packet, monkeypatch):
         state["commands"].append(command)
         args = shlex.split(command)
         if args[:3] == ["lssyscfg", "-r", "sysprof"]:
+            if args[args.index("-F") + 1] == "name:lpar_ids:profile_names":
+                rows = ["name:lpar_ids:profile_names"]
+                for name, members in sorted(state["sysprofiles"].items()):
+                    ids = [
+                        next(
+                            e["Resource"]["PartitionID"]
+                            for e in state["members"].values()
+                            if e["Resource"]["PartitionName"] == n
+                        )
+                        for n, _ in members
+                    ]
+                    rows.append(
+                        name
+                        + ":"
+                        + ",".join(ids)
+                        + ":"
+                        + ",".join(p for _, p in members)
+                    )
+                return (
+                    "\n".join(rows) + "\n"
+                    if state["sysprofiles"]
+                    else "No results were found."
+                )
             return (
                 "name\n" + "".join(n + "\n" for n in sorted(state["sysprofiles"]))
                 if state["sysprofiles"]
@@ -371,26 +394,6 @@ def hardware(packet, monkeypatch):
                     strict=True,
                 )
             )
-        elif op == "GetSystemProfiles":
-            rows = []
-            for name, members in state["sysprofiles"].items():
-                ids = [
-                    next(
-                        e["Resource"]["PartitionID"]
-                        for e in state["members"].values()
-                        if e["Resource"]["PartitionName"] == n
-                    )
-                    for n, _ in members
-                ]
-                rows.append(
-                    {
-                        "SystemProfileName": name,
-                        "PartitionNames": ",".join(n for n, _ in members),
-                        "PartitionIds": ",".join(ids),
-                        "PartitionProfileNames": ",".join(n for _, n in members),
-                    }
-                )
-            result = json.dumps(rows)
         elif op == "ActivateSystemProfile" and p.get("operation") == "on":
             for name, prof in state["sysprofiles"][p["systemProfile"]]:
                 e = next(
@@ -457,6 +460,9 @@ async def test_complete_fixture_calibration_and_independent_recovery(
     assert doc["calibration"]["application_semantics"].startswith("UNPROVEN")
     assert len(state["members"]) == 1 and not state["sysprofiles"]
     assert doc["run"]["partial"] is False
+    assert len(doc["jobs"]) <= 9
+    assert len(doc["inventory_reads"]) == (4 if negative else 2)
+    assert all(j["operation"] != "GetSystemProfiles" for j in doc["jobs"])
     await arm.recover(h, packet, doc)
     if negative:
         assert [c["continue"] for c in doc["negative_cases"]] == [False, True]
@@ -1254,3 +1260,137 @@ def test_partition_parent_rejects_other_target_or_endpoint(packet, href):
     value["Resource"]["AssociatedPartition"]["href"] = href
     with pytest.raises(ValueError, match="parent UUID/context"):
         arm._profile_parent(value, L, arm.binding(packet))
+
+
+@pytest.mark.asyncio
+async def test_cli_source_inventory_removes_get_jobs_and_binds_read_proofs(
+    packet, hardware, tmp_path
+):
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    document = await capture_in(h, packet, tmp_path)
+    assert all(j["operation"] != "GetSystemProfiles" for j in document["jobs"])
+    assert len(document["jobs"]) <= 9
+    assert len(document["inventory_reads"]) == 2
+    assert all(
+        "name:lpar_ids:profile_names --header" in c
+        for c in state["commands"]
+        if "-F name:lpar_ids" in c
+    )
+    await arm.recover(h, packet, document)
+    document["inventory_reads"].reverse()
+    with pytest.raises(ValueError, match="read proofs"):
+        await arm.recover(h, packet, document)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "name:lpar_ids:profile_names\nwrong:2,3:a,b\n",
+        "name:lpar_ids:profile_names\n",
+        "name:lpar_ids:profile_names\na:2,3:a,b\na:2,3:a,b\n",
+        'name:lpar_ids:profile_names\n"unterminated\n',
+        "name:lpar_ids:profile_names\na:2:a,b:extra\n",
+        "diagnostic\n",
+    ],
+)
+def test_cli_inventory_rejects_malformed_or_unbound_whole_rows(raw):
+    document = {"fixtures": [], "before": {"namespace": []}}
+    with pytest.raises((ValueError, IndexError)):
+        rows = arm._inventory_rows(raw)
+        arm._check_inventory(
+            rows,
+            {"namespace": [arm.SYSTEM_PROFILES[0]]},
+            document,
+            [arm.SYSTEM_PROFILES[0]],
+        )
+
+
+def test_cli_inventory_empty_and_bounds():
+    assert arm._inventory_rows("No results were found.") == []
+    arm._check_inventory([], {"namespace": []}, {}, [])
+    with pytest.raises(ValueError, match="unbounded"):
+        arm._inventory_rows("x" * (arm.source.LIMIT + 1))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["ids", "profile", "cardinality", "extra", "drift"])
+async def test_cli_inventory_failure_stops_all_later_effects(
+    packet, hardware, tmp_path, monkeypatch, fault
+):
+    h, state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    original = arm.run_hmc_command
+
+    async def transport(config, command):
+        result = await original(config, command)
+        if "-F name:lpar_ids:profile_names" in command:
+            if fault == "drift":
+                state["members"][L]["Resource"]["Description"] = "changed"
+            else:
+                lines = result.splitlines()
+                name, ids, profiles = lines[1].split(":")
+                if fault == "ids":
+                    ids = "99,100"
+                if fault == "profile":
+                    profiles = "foreign,other"
+                if fault == "cardinality":
+                    ids = ids.split(",")[0]
+                if fault == "extra":
+                    lines.append("foreign:99:unknown")
+                lines[1] = f"{name}:{ids}:{profiles}"
+                result = "\n".join(lines) + "\n"
+        return result
+
+    monkeypatch.setattr(arm, "run_hmc_command", transport)
+    with pytest.raises(ValueError):
+        await capture_in(h, packet, tmp_path)
+    assert len(state["members"]) == 3 and len(state["sysprofiles"]) == 1
+    assert all(j["operation"] == "CreateSystemProfile" for j in state["jobs"].values())
+    h.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault", ["missing", "raw", "original", "owner", "policy", "profile"]
+)
+async def test_recovery_refuses_inconsistent_cli_read_proof(
+    packet, hardware, tmp_path, fault
+):
+    h, _state = hardware
+    packet["baseline_sha256"] = arm._baseline_digest(await arm.preflight(h, packet))
+    document = await capture_in(h, packet, tmp_path)
+    proof = document["inventory_reads"][0]
+    if fault == "missing":
+        document["inventory_reads"].pop()
+    elif fault == "raw":
+        proof["raw"] = "No results were found."
+    elif fault == "policy":
+        proof["observed"]["system_auto_off"] = "true"
+    elif fault == "original":
+        next(e for e in proof["observed"]["partitions"] if e["UUID"] == L)["Resource"][
+            "Description"
+        ] = "changed"
+    else:
+        entry = next(
+            e
+            for e in proof["observed"]["partitions"]
+            if e["UUID"] == document["fixtures"][0]["uuid"]
+        )
+        if fault == "owner":
+            entry["Resource"]["Description"] = "foreign"
+        else:
+            entry["profiles"][0]["UUID"] = P
+    with pytest.raises((ValueError, PermissionError)):
+        await arm.recover(h, packet, document)
+
+
+@pytest.mark.asyncio
+async def test_fifth_inventory_read_refuses_before_transport(
+    packet, hardware, tmp_path
+):
+    h, state = hardware
+    before = len(state["commands"])
+    with pytest.raises(ValueError, match="read budget"):
+        await arm._inventory(h, packet, {"inventory_reads": [{}, {}, {}, {}]}, tmp_path)
+    assert len(state["commands"]) == before

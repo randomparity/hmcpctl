@@ -60,7 +60,6 @@ CREATE_PARAMETERS = tuple(
 REQUESTS = {
     "create-complete": ("CreateSystemProfile", CREATE_PARAMETERS[0]),
     "create-mixed": ("CreateSystemProfile", CREATE_PARAMETERS[1]),
-    "get": ("GetSystemProfiles", {}),
     "validate": (
         "ActivateSystemProfile",
         {"systemProfile": SYSTEM_PROFILES[0], "test": "true", "continue": "false"},
@@ -668,66 +667,72 @@ async def _job(hmc, packet, document, directory, stage):
     )
 
 
-def _exact_rows(raw: str) -> list:
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ValueError("duplicate inventory key")
-            result[key] = value
-        return result
-
+def _inventory_rows(raw):
     if not isinstance(raw, str) or len(raw.encode()) > source.LIMIT:
-        raise ValueError("unbounded native inventory")
-    rows = json.loads(raw, object_pairs_hook=pairs)
-    fields = {
-        "SystemProfileName",
-        "PartitionNames",
-        "PartitionIds",
-        "PartitionProfileNames",
-    }
-    if (
-        not isinstance(rows, list)
-        or any(
-            not isinstance(r, dict)
-            or set(r) != fields
-            or any(not isinstance(v, str) for v in r.values())
-            for r in rows
-        )
-        or len({r["SystemProfileName"] for r in rows}) != len(rows)
+        raise ValueError("unbounded system-profile inventory")
+    if raw.strip() == "No results were found.":
+        return []
+    return parse_hmc_delimited_rows(raw, ("name", "lpar_ids", "profile_names"), ":")
+
+
+def _check_inventory(rows, fresh, document, names):
+    if sorted(r["name"] for r in rows) != sorted(names) or fresh["namespace"] != sorted(
+        names
     ):
-        raise ValueError("unsupported whole inventory shape; no cleanup by name alone")
-    return rows
+        raise ValueError("whole system-profile namespace differs")
+    if len({r["name"] for r in rows}) != len(rows):
+        raise ValueError("duplicate system-profile row")
+    for row in rows:
+        index = SYSTEM_PROFILES.index(row["name"])
+        expected = []
+        for fixture_index, profile_name in PROFILE_PAIRS[index]:
+            record = document["fixtures"][fixture_index]
+            entry = next(e for e in fresh["partitions"] if e["UUID"] == record["uuid"])
+            if entry["Resource"]["PartitionName"] != record["name"]:
+                raise ValueError("current member name binding differs")
+            profiles = [
+                p
+                for p in entry["profiles"]
+                if p["Resource"]["ProfileName"] == profile_name
+            ]
+            recorded = [
+                p
+                for p in record["profiles"]
+                if p["Resource"]["ProfileName"] == profile_name
+            ]
+            if len(profiles) != 1 or profiles != recorded:
+                raise ValueError("contained profile binding differs")
+            expected.append((_text(entry["Resource"]["PartitionID"]), profile_name))
+        if (
+            list(
+                zip(
+                    row["lpar_ids"].split(","),
+                    row["profile_names"].split(","),
+                    strict=True,
+                )
+            )
+            != expected
+        ):
+            raise ValueError("scratch association/order changed; no subsequent effects")
 
 
 async def _inventory(hmc, packet, document, directory):
-    job = await _job(hmc, packet, document, directory, "get")
-    rows = _exact_rows(job["values"].get("result"))
+    reads = document["inventory_reads"]
+    if len(reads) >= 4:
+        raise ValueError("finite inventory read budget exceeded")
+    await guard(hmc, packet, document)
+    command = (
+        f"lssyscfg -r sysprof -m {shlex.quote(_cli_name(binding(packet)))} "
+        "-F name:lpar_ids:profile_names --header"
+    )
+    raw = await run_hmc_command(hmc.config, command)
+    rows = _inventory_rows(raw)
     fresh = await guard(hmc, packet, document)
-    if sorted(r["SystemProfileName"] for r in rows) != fresh["namespace"]:
-        raise ValueError("native inventory is incomplete")
-    for name, expected in document["system_profile_members"].items():
-        selected = [r for r in rows if r["SystemProfileName"] == name]
-        if len(selected) != 1:
-            raise ValueError("known scratch record missing")
-        row = selected[0]
-        observed = list(
-            zip(
-                row["PartitionNames"].split(","),
-                row["PartitionIds"].split(","),
-                row["PartitionProfileNames"].split(","),
-                strict=True,
-            )
-        )
-        members = []
-        for fixture_index, profile_name in expected:
-            rec = document["fixtures"][fixture_index]
-            e = next(e for e in fresh["partitions"] if e["UUID"] == rec["uuid"])
-            members.append(
-                (rec["name"], _text(e["Resource"].get("PartitionID")), profile_name)
-            )
-        if observed != members:
-            raise ValueError("scratch association/order changed; no subsequent effects")
+    _check_inventory(rows, fresh, document, document["system_profiles"])
+    reads.append(
+        {"effect_count": len(document["effects"]), "raw": raw, "observed": fresh}
+    )
+    source.save(directory, document)
     return fresh
 
 
@@ -849,6 +854,7 @@ async def capture(hmc, packet, directory):
         "system_profiles": [],
         "system_profile_members": {},
         "jobs": [],
+        "inventory_reads": [],
         "effects": [],
         "run": {
             "group": GROUP,
@@ -996,9 +1002,11 @@ def _completed_effects(packet, document):
             (operation, system, build_job_request(operation, "ManagedSystem", params))
         )
 
+    reads = []
+
     def create(index):
         job("create-complete" if index == 0 else "create-mixed")
-        job("get")
+        reads.append((len(expected), list(SYSTEM_PROFILES[: index + 1])))
 
     create(0)
     job("validate")
@@ -1027,8 +1035,10 @@ def _completed_effects(packet, document):
             raise ValueError(
                 "continuation experiment had no unchanged independent baseline"
             )
-    for name in SYSTEM_PROFILES[: 2 if cases else 1]:
-        job("get")
+    remaining = list(SYSTEM_PROFILES[: 2 if cases else 1])
+    for name in tuple(remaining):
+        reads.append((len(expected), list(remaining)))
+        remaining.remove(name)
         expected.append(("delete-scratch-system-profile", name, None))
     teardown = document["teardown_before"]
     if len(teardown) != 2:
@@ -1046,6 +1056,13 @@ def _completed_effects(packet, document):
         (e.get("stage"), e.get("target"), e.get("request_xml"))
         for e in document["effects"]
     ]
+    proofs = document.get("inventory_reads", [])
+    if [p.get("effect_count") for p in proofs] != [count for count, _ in reads]:
+        raise ValueError("inventory read proofs missing, duplicated or reordered")
+    for proof, (_, names) in zip(proofs, reads, strict=True):
+        _check_inventory(
+            _inventory_rows(proof["raw"]), proof["observed"], document, names
+        )
     if actual != expected:
         raise ValueError("journal is not the complete finite effect sequence")
     operations = [
@@ -1054,7 +1071,6 @@ def _completed_effects(packet, document):
         if stage
         in {
             "CreateSystemProfile",
-            "GetSystemProfiles",
             "ActivateSystemProfile",
             "PowerOff",
         }
@@ -1072,7 +1088,6 @@ def _completed_effects(packet, document):
         if e[0]
         in {
             "CreateSystemProfile",
-            "GetSystemProfiles",
             "ActivateSystemProfile",
             "PowerOff",
         }
@@ -1145,6 +1160,19 @@ async def recover(hmc, packet, document):
     if datetime.fromisoformat(run["finished"]).tzinfo is None:
         raise ValueError("completion time has no timezone")
     negative_ids = _completed_effects(packet, document)
+    for proof in document["inventory_reads"]:
+        observed = proof["observed"]
+        _require_stay_on(observed)
+        known = {r["uuid"]: r for r in document["fixtures"]}
+        if [e for e in observed["partitions"] if e["UUID"] not in known] != before[
+            "partitions"
+        ]:
+            raise ValueError("inventory proof original baseline differs")
+        if len(observed["partitions"]) != len(before["partitions"]) + 2:
+            raise ValueError("inventory proof fixture identities missing")
+        for entry in observed["partitions"]:
+            if entry["UUID"] in known:
+                _owned(hmc, packet, entry, known[entry["UUID"]])
     names = [e["Resource"]["PartitionName"] for e in before.get("partitions", [])]
     if (
         set(names) & set(NAMES)

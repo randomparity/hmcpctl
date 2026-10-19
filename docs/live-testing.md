@@ -1318,12 +1318,26 @@ unproven pending analysis. Their actual native failed terminal statuses remain F
 and a nonzero capture exit, even after independently proven baseline restoration. No resource exhaustion, shared IO or
 missing-profile fault is introduced.
 
+This source arm always reads system-profile membership through the existing audited fixed CLI
+`lssyscfg -r sysprof -m <bound-system> -F name:lpar_ids:profile_names --header`.
+At most four whole-inventory reads replace GetSystemProfiles jobs: after each scratch create and
+before each scratch delete. Unique complete rows, ordered ID/profile pairs and current owned
+UUID/name/ID/contained-profile bindings must agree with fresh observations. Unknown encodings,
+extra diagnostics, stale IDs or incomplete associations stop later effects. Power/resource checks
+remain phase appropriate; later mixed/teardown reads can include running new fixtures.
+
+The finite journal retains each bounded raw read, its effect position and complete fresh observation;
+recovery verifies the exact read sequence and associations. The maximum domain-job count is nine,
+with no GetSystemProfiles submissions or automatic fallback. Historical REST Get evidence with
+ambiguous ErrorData and its retained job remain unresolved; this CLI experiment does not prove
+product REST Get support or requested-profile activation. No product maturity follows from it.
+
 A private atomic journal records intent before effects, created identities, complete finite request/
 effect/job sequence and raw observations. Reused or inconsistent job handles, nonterminal outcome,
 interruption, drift, unconfirmed ownership or unknown power stops writes and retains coordination.
 Own successful jobs are removed only after saving strict identity-consistent terminal/code success;
 failed jobs are permitted only at the exact optional negative stages and remain undeleted.
-Every required stage must have confirmed strict success and own-job removal. Teardown is limited to known-owned new fixtures after known outcomes:
+Every required job stage must have confirmed strict success and own-job removal. Teardown is limited to known-owned new fixtures after known outcomes:
 freshly verify scratch associations before fixed CLI sysprof deletion, stop only the new fixtures,
 then delete only their same authorized UUIDs. There is no exception-driven rollback or name-only
 cleanup. A timeout is not cancellation or permission to release coordination.
@@ -1339,7 +1353,7 @@ uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/capture/results.
 
 Recovery records fresh inventory even for an incomplete journal. CLEAN requires the packet-bound
 original namespace/member baseline, absence of all fixtures and scratch names, and a coherent
-completed finite effect/job record; a forged partial flag cannot establish completion. It submits
+completed finite effect/job/read-proof record; a forged partial flag cannot establish completion. It submits
 or deletes no job and cannot upgrade a failed/unproven capture. It records full fresh inventory and
 explicit policy safety even when current policy is unsafe; unsafe policy refuses CLEAN after the read. Raw packet/journals/schema and
 member identifiers remain private; the standard evidence renderer stamps the tested commit and
