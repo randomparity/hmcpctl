@@ -33,10 +33,8 @@ sys.modules[MODULE_SPEC.name] = gen_tool_reference
 MODULE_SPEC.loader.exec_module(gen_tool_reference)
 
 COMMITTED = ROOT / "docs" / "tools"
-# Absolute, not relative: the sdist ships README.md as the PyPI long description and
-# does not ship docs/, so a relative link dangles for every reader who arrives from
-# the package page rather than from GitHub.
-README_POINTER = "https://github.com/randomparity/hmcpctl/blob/main/docs/tools/index.md"
+# Relative, so it opens the tool reference of the revision being read (ADR 0251).
+README_POINTER = "](docs/tools/index.md)"
 
 SECURITY = {
     "hmc_alpha": ToolSecurity(

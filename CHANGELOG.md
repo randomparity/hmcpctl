@@ -4,7 +4,9 @@ All notable user-facing changes to this project are recorded in this file. The f
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): changes collect under
 `[Unreleased]` in its usual categories until a release is cut. Each release's entry keeps those
 itemized changes and adds a scope statement, a **Verified** section naming the operations
-verified live for it, and a **Known issues** section. The entry is also the GitHub release body.
+verified live for it, and a **Known issues** section, in the order set out under
+[Docs and changelog](docs/development.md#docs-and-changelog). The entry is also the GitHub
+release body.
 
 0.1.0 is the exception. As the first release it has no itemized changes: nothing shipped before
 it, and its pre-release development history is in the git history, not in this file.
@@ -182,6 +184,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 - Creating an HMC user without a description no longer fails with REST0344 on V10R3: the create
   now describes the user as `HMC User`, the HMC's own default (#1414). Modifying a user without a
   description still leaves it unchanged.
+- `hmc_read_lpar_refcodes` no longer describes an unknown partition as believed to return an
+  empty list: the HMC refuses it with `HSCL8012` and the tool raises, as the live probe showed
+  (#1475).
 
 ## [0.1.0] - 2026-10-12
 
