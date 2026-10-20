@@ -2761,6 +2761,32 @@ def test_authorized_keys_element_is_redacted_whole() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "encode", [str, json.dumps, _json_twice], ids=["raw", "json", "json-twice"]
+)
+def test_authorized_keys_container_keeps_its_indentation(encode: Any) -> None:
+    """V11R2 nests the key in `<AuthorizedKey>`; only indentation is the parent's text.
+
+    The scrub rule wrote a token over the indentation before the first child, and the
+    backstop reported the indentation before the closing tag, refusing the export.
+    """
+    key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB root@hmcbox7"
+    body = encode(
+        '<ManagementConsole><AuthorizedKeysValue kb="CUD">\n        <Metadata>'
+        f"<Atom/></Metadata>\n        <AuthorizedKey>{key}</AuthorizedKey>\n    "
+        "</AuthorizedKeysValue></ManagementConsole>"
+    )
+    tok = export.Tokenizer({}, set())
+    scrubbed = tok.tokenize(body)
+    assert scrubbed is not None
+    assert "AAAAB3" not in scrubbed
+    assert (
+        scrubbed.replace(scrubbed.split("<AuthorizedKey>")[1].split("</")[0], key)
+        == body
+    )
+    assert tok.leaks(scrubbed) == []
+
+
 def test_ssh_key_comment_stops_at_a_tag() -> None:
     body = "<Keys><Key>ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB root@hmcbox7</Key></Keys>"
     corpus = export.tokenize_records(_records(_rest("/k2", body)))

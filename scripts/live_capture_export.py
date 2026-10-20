@@ -257,6 +257,11 @@ def _key_value_leak(start: str, key: str, kept: str = "") -> re.Pattern[str]:
     )
 
 
+#: Element text that is only XML whitespace, raw or as `json.dumps` escapes at any depth:
+#: the indentation of a container element such as V11R2's `<AuthorizedKeysValue>`.
+_INDENT = r"(?:[ \t\r\n]|\\++[nrt])*+"
+
+
 def _element_rule(
     element: str, value: str, keep: str | None = None
 ) -> tuple[re.Pattern[str], str]:
@@ -267,7 +272,9 @@ def _element_rule(
     """
     kept = rf"(?!(?:{keep})<)" if keep else ""
     return (
-        re.compile(rf"(<(?>{_NS_PREFIX}{element}\b)(?>{_TAG_TAIL})){kept}[^<]+"),
+        re.compile(
+            rf"(<(?>{_NS_PREFIX}{element}\b)(?>{_TAG_TAIL})){kept}(?!{_INDENT}<)[^<]+"
+        ),
         rf"\g<1>{value}",
     )
 
@@ -299,7 +306,12 @@ def _element_leak(element: str, value: str, keep: str | None = None) -> re.Patte
         if keep
         else ""
     )
-    return re.compile(rf"{kept}(?:(?<![^<>])(?!{written}<)[^<>]++|\]\]>){closing}")
+    # Indentation between child elements identifies nothing; after `]]>` it is reported,
+    # so CDATA cannot hide behind it (#1590).
+    indent = rf"(?<!\]\]>){_INDENT}<"
+    return re.compile(
+        rf"{kept}(?:(?<![^<>])(?!{written}<)(?!{indent})[^<>]++|\]\]>){closing}"
+    )
 
 
 #: The JSON escapes a value can follow: `\\`, `\n` or `\u00e9`. A lookbehind must be
