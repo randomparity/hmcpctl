@@ -417,10 +417,10 @@ def set_audit_level(level: int) -> None:
     (#270), so the NOTSET-default rule there sees an explicit choice and keeps
     it. Permits and ``tls-fingerprint-verified`` are recorded at ``INFO`` and
     everything else at ``WARNING``, so ``WARNING`` drops those two and ``ERROR``
-    silences the stream; an
-    explicit ``INFO`` is indistinguishable from the default. The level must be
-    resolved to its integer before it reaches here -- the CLI validates the
-    name, and a Python-API caller has ``logging`` already.
+    silences the stream; an explicit ``INFO`` is indistinguishable from the
+    default. The level must be resolved to its integer before it reaches here
+    -- the CLI validates the name, and a Python-API caller has ``logging``
+    already.
     """
     logging.getLogger(AUDIT_LOGGER_NAME).setLevel(level)
 
