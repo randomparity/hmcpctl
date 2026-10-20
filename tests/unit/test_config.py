@@ -1329,12 +1329,18 @@ LEAKY_ENVIRONMENT = {
 }
 
 
+#: A well-formed fingerprint; the validator refuses a ``leak-`` string.
+_ENV_FINGERPRINT = ":".join(["AB"] * 32)
+
+
 def _non_default_env_value(field_name: str, field_info) -> str:
     """A valid, non-default environment string for *field_name*.
 
     Derived from the declared annotation rather than listed per field, so a new
     setting is polluted by the tests below without editing them.
     """
+    if field_name == "cert_fingerprint":
+        return _ENV_FINGERPRINT
     annotation = field_info.annotation
     if annotation is bool:
         return "true"
@@ -1428,6 +1434,7 @@ def test_from_mapping_applies_every_supplied_key():
         "ssh_verify_host_key": False,
         "verify_ssl": True,
         "ca_bundle": "/ca/bundle.pem",
+        "cert_fingerprint": ":".join(["CD"] * 32),
         "trust_system_store": False,
         "timeout": 15.0,
         "upload_timeout": 450.0,
@@ -1726,6 +1733,8 @@ def test_every_field_takes_a_case_variant_export_over_the_profile(
 
 def _toml_literal(field_name: str, field_info) -> str:
     """A TOML literal for *field_name* that differs from its env-side value."""
+    if field_name == "cert_fingerprint":
+        return '"' + ":".join(["CD"] * 32) + '"'
     annotation = field_info.annotation
     if annotation is bool:
         return "false"  # _non_default_env_value yields "true"
@@ -1738,6 +1747,8 @@ def _toml_literal(field_name: str, field_info) -> str:
 
 def _expected_env_value(field_name: str, field_info):
     """``_non_default_env_value`` as the model parses it."""
+    if field_name == "cert_fingerprint":
+        return _ENV_FINGERPRINT
     annotation = field_info.annotation
     if annotation is bool:
         return True
@@ -1922,3 +1933,47 @@ def test_env_var_value_survives_a_concurrent_environment_mutation():
         for key in list(os.environ):
             if key.startswith("HMCTEST_CHURN_"):
                 del os.environ[key]
+
+
+# ---------------------------------------------------------------------------
+# TLS certificate fingerprint (#1614, ADR 0224)
+# ---------------------------------------------------------------------------
+
+_FINGERPRINT = ":".join(f"{i:02X}" for i in range(32))
+
+
+@pytest.mark.parametrize("value", [_FINGERPRINT, _FINGERPRINT.lower()])
+def test_cert_fingerprint_accepts_colon_hex_either_case(value):
+    cfg = HMCConfig.from_mapping({"cert_fingerprint": value})
+
+    assert cfg.cert_fingerprint == _FINGERPRINT
+
+
+def test_cert_fingerprint_empty_is_unset():
+    assert HMCConfig.from_mapping({"cert_fingerprint": ""}).cert_fingerprint is None
+    assert HMCConfig.from_mapping({}).cert_fingerprint is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        _FINGERPRINT.replace(":", ""),
+        ":".join(["AB"] * 31),
+        ":".join(["AB"] * 31 + ["GG"]),
+        f"sha256 Fingerprint={_FINGERPRINT}",
+    ],
+    ids=["bare-hex", "31-pairs", "non-hex", "openssl-prefix"],
+)
+def test_cert_fingerprint_rejects_malformed_without_echo(value):
+    with pytest.raises(ValidationError) as caught:
+        HMCConfig.from_mapping({"cert_fingerprint": value})
+
+    message = str(caught.value)
+    assert "32 colon-separated hex pairs" in message
+    assert "openssl x509" in message
+    assert value not in message
+
+
+def test_cert_fingerprint_is_validated_when_verify_ssl_is_false():
+    with pytest.raises(ValidationError):
+        HMCConfig.from_mapping({"verify_ssl": False, "cert_fingerprint": "nope"})

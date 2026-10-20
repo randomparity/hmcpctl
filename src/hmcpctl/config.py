@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import threading
 import tomllib
@@ -55,6 +56,9 @@ _reported_memento_override = False
 #: across the flag check and update; logging is outside it, so a slow handler cannot
 #: block a config being built on another thread.
 _override_report_lock = threading.Lock()
+
+#: A SHA-256 digest as ``openssl x509 -fingerprint -sha256`` prints it after ``=``.
+_CERT_FINGERPRINT = re.compile(r"[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){31}")
 
 
 def validate_agent_id(agent_id: str) -> None:
@@ -177,6 +181,16 @@ class HMCConfig(BaseSettings):
             "TLS connection (HMC_CA_BUNDLE). When set and verify_ssl is true, this path "
             "is passed directly to the HTTP client and takes precedence over SSL_CERT_FILE, "
             "SSL_CERT_DIR, and HMC_TRUST_SYSTEM_STORE. Ignored when verify_ssl is false."
+        ),
+    )
+    cert_fingerprint: str | None = Field(
+        default=None,
+        description=(
+            "SHA-256 fingerprint of the HMC's leaf certificate as colon-separated hex "
+            "(HMC_CERT_FINGERPRINT). When set and verify_ssl is true, the connection is "
+            "trusted only if the presented certificate matches; takes precedence over "
+            "SSL_CERT_FILE, SSL_CERT_DIR and HMC_TRUST_SYSTEM_STORE, and yields to "
+            "HMC_CA_BUNDLE. Ignored when verify_ssl is false."
         ),
     )
     trust_system_store: bool = Field(
@@ -369,6 +383,19 @@ class HMCConfig(BaseSettings):
         if v is not None and v != "":
             validate_agent_id(v)
         return v
+
+    @field_validator("cert_fingerprint")
+    @classmethod
+    def _validate_cert_fingerprint(cls, v: str | None) -> str | None:
+        if not v:
+            return None
+        if not _CERT_FINGERPRINT.fullmatch(v):
+            raise ValueError(
+                "cert_fingerprint must be a SHA-256 digest written as 32 colon-separated "
+                "hex pairs (AA:BB:...), as printed after '=' by "
+                "`openssl x509 -noout -fingerprint -sha256`"
+            )
+        return v.upper()
 
     @model_validator(mode="after")
     def _warn_audit_memento_override(self) -> HMCConfig:

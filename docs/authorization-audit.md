@@ -427,6 +427,29 @@ It carries no `policy`, `decision`, `reason`, `targets`, or `attribution`. Build
 client is not an access-policy decision, and it happens on the CLI and Python API paths
 too, where there is no policy to name.
 
+### `event: "tls-fingerprint-verified"`
+
+Emitted once per TLS handshake that `HMC_CERT_FINGERPRINT` trusted: the HMC was
+authenticated by an operator-supplied SHA-256 digest of its certificate rather than by a
+certificate authority ([ADR 0224](adr/0224-cert-fingerprint-and-verify-ssl-default-migration.md)).
+`INFO`, like a permit, so `--audit-level WARNING` drops it.
+
+```json
+{"time":"2026-10-19T18:00:00+00:00","event":"tls-fingerprint-verified","host":"hmc-a.example","fingerprint":"3A:7F:00:C2:94:11:5E:D8:6B:20:AF:43:9C:E1:07:B5:68:FD:12:4A:8E:D3:5C:90:21:B7:6F:E4:0A:93:C8:1D"}
+```
+
+`host` is `HMCConfig.host`. `fingerprint` is the digest the HMC presented, which equals the
+configured one, in upper-case colon form. A handshake whose digest does not match produces
+no record: the request fails with an error naming both digests, and nothing is sent to that
+peer.
+
+**One record per TLS connection**, not per request or per client. httpx reuses a connection
+for sequential requests, so a CLI command usually adds one record. Concurrent requests open
+further connections, and each adds its own.
+
+It carries no `policy`, `decision`, `reason`, `targets`, or `attribution`, for the same
+reason as `tls-verification-disabled`.
+
 ### `event: "records-dropped"`
 
 Emitted by the sink itself, not by a decision, when lines were lost since the previous
@@ -498,8 +521,8 @@ than the value's authority everywhere.
 
 ## Routing, levels, and silencing
 
-Records go to the `hmcpctl.audit` logger. A permit is `INFO`; everything else the
-logger emits is `WARNING`.
+Records go to the `hmcpctl.audit` logger. A permit and `tls-fingerprint-verified` are
+`INFO`; everything else the logger emits is `WARNING`.
 
 Importing `hmcpctl.audit` does not change logging state: `propagate` stays `True`
 until `install_audit_sink()` runs, and only `hmcpctl serve` calls it. On the serve path
@@ -522,8 +545,8 @@ defers to a handler that is already there and will not add a second.
 > for the same reason.
 
 > To set the level from the command line, pass `--audit-level LEVEL` to `hmcpctl serve`:
-> `DEBUG` and `INFO` keep everything the logger emits, `WARNING` drops permits and keeps
-> the rest, and `ERROR` or `CRITICAL` silences the stream. Read `WARNING` as a volume floor
+> `DEBUG` and `INFO` keep everything the logger emits, `WARNING` drops permits and
+> `tls-fingerprint-verified` and keeps the rest, and `ERROR` or `CRITICAL` silences the stream. Read `WARNING` as a volume floor
 > rather than a quiet
 > setting: on a server left at the insecure `HMC_VERIFY_SSL` default it still carries one
 > TLS record per tool call, which the deduplication advice above applies to. The

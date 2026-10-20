@@ -500,6 +500,7 @@ def test_events_matches_the_literal_and_every_emitter_uses_it():
         "ownership-override",
         "power-ownership-guard",
         "records-dropped",
+        "tls-fingerprint-verified",
         "tls-verification-disabled",
     }
 
@@ -525,6 +526,9 @@ def test_events_matches_the_literal_and_every_emitter_uses_it():
     emitted.add(_one(lines)["event"])
     lines = _capture()
     audit.record_tls_verification_disabled(host="hmc.test", source="field-default")
+    emitted.add(_one(lines)["event"])
+    lines = _capture()
+    audit.record_tls_fingerprint_verified(host="hmc.test", fingerprint="AB:CD")
     emitted.add(_one(lines)["event"])
     lines = _capture()
     audit.record_install_attempted(
@@ -800,6 +804,18 @@ def test_the_tls_record_carries_host_and_source():
     assert record["event"] == "tls-verification-disabled"
     assert record["host"] == "hmc.test"
     assert record["source"] == "field-default"
+
+
+def test_the_fingerprint_record_carries_host_and_fingerprint():
+    """#1614. A handshake trusted by an operator-supplied digest, not by a CA."""
+    fingerprint = ":".join(["AB"] * 32)
+    lines = _capture()
+    audit.record_tls_fingerprint_verified(host="hmc.test", fingerprint=fingerprint)
+    record = _one(lines)
+    assert list(record) == ["time", "event", "host", "fingerprint"]
+    assert record["event"] == "tls-fingerprint-verified"
+    assert record["host"] == "hmc.test"
+    assert record["fingerprint"] == fingerprint
 
 
 def test_an_empty_tls_host_renders_empty_and_is_bounded():

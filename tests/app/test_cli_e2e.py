@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import secrets
 import shlex
 import ssl
@@ -33,6 +34,7 @@ from conftest import live_fixture
 from typer.testing import CliRunner
 
 from hmcpctl import cli
+from hmcpctl.audit.sink import AUDIT_LOGGER_NAME
 
 RUNNER = CliRunner()
 
@@ -361,6 +363,68 @@ def test_requests_ca_bundle_alone_does_not_trust_e2e(mock_hmc, monkeypatch):
 
     assert result.exit_code != 0
     assert "CERTIFICATE_VERIFY_FAILED" in result.output
+
+
+# Fingerprint trust (#1614, ADR 0224): the pin alone trusts the self-signed mock,
+# and a wrong pin refuses it before any request reaches it.
+
+
+def _fingerprint(certificate_path: str) -> str:
+    der = ssl.PEM_cert_to_DER_cert(Path(certificate_path).read_text())
+    digest = hashlib.sha256(der).hexdigest().upper()
+    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
+
+
+def _pinned_systems_list(server, certificate_path, monkeypatch, fingerprint):
+    """Run ``systems list`` trusting only *fingerprint*; return the result and records."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    env = _env(server.server_address[1], certificate_path)
+    del env["SSL_CERT_FILE"]
+    env["HMC_TRUST_SYSTEM_STORE"] = "false"
+    records: list[dict] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(json.loads(record.getMessage()))
+
+    logger = logging.getLogger(AUDIT_LOGGER_NAME)
+    logger.addHandler(_Collect())
+    logger.setLevel(logging.INFO)
+    result = RUNNER.invoke(
+        cli.app, ["--cert-fingerprint", fingerprint, "systems", "list"], env=env
+    )
+    return result, [r for r in records if r["event"] == "tls-fingerprint-verified"]
+
+
+def test_cert_fingerprint_match_e2e(mock_hmc, monkeypatch):
+    server, certificate_path = mock_hmc
+    fingerprint = _fingerprint(certificate_path)
+
+    result, verified = _pinned_systems_list(
+        server, certificate_path, monkeypatch, fingerprint.lower()
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "server1" in result.stdout
+    assert len(verified) == 1
+    assert verified[0]["host"] == "127.0.0.1"
+    assert verified[0]["fingerprint"] == fingerprint
+
+
+def test_cert_fingerprint_mismatch_e2e(mock_hmc, monkeypatch):
+    server, certificate_path = mock_hmc
+    wrong = ":".join(["00"] * 32)
+
+    result, verified = _pinned_systems_list(
+        server, certificate_path, monkeypatch, wrong
+    )
+
+    assert result.exit_code != 0
+    assert "HMC_CERT_FINGERPRINT" in result.output
+    assert _fingerprint(certificate_path) in result.output
+    assert server.request_log == []
+    assert verified == []
 
 
 def test_unterminated_pem_bundle_fails_to_load_e2e(mock_hmc, tmp_path):

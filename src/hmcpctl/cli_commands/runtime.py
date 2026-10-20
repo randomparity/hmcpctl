@@ -34,6 +34,7 @@ class GlobalOpts:
     verify_ssl: bool | None = None
     trust_system_store: bool | None = None
     ca_bundle: str | None = None
+    cert_fingerprint: str | None = None
     profile: str | None = None
     command_line_options: frozenset[str] = frozenset()
 
@@ -60,6 +61,7 @@ def client() -> HMCClient:
             verify_ssl=options.verify_ssl,
             trust_system_store=options.trust_system_store,
             ca_bundle=options.ca_bundle,
+            cert_fingerprint=options.cert_fingerprint,
         )
     )
 
@@ -75,6 +77,7 @@ def ssh_config() -> HMCConfig:
         verify_ssl=options.verify_ssl,
         trust_system_store=options.trust_system_store,
         ca_bundle=options.ca_bundle,
+        cert_fingerprint=options.cert_fingerprint,
     )
 
 

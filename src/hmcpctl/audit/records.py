@@ -78,6 +78,7 @@ Event = Literal[
     "ownership-override",
     "power-ownership-guard",
     "records-dropped",
+    "tls-fingerprint-verified",
     "tls-verification-disabled",
 ]
 
@@ -438,6 +439,21 @@ def record_tls_verification_disabled(*, host: str, source: str) -> None:
         }
 
     emit(_DENY_LEVEL, build)
+
+
+def record_tls_fingerprint_verified(*, host: str, fingerprint: str) -> None:
+    """Emit one record per TLS handshake trusted by ``cert_fingerprint`` (ADR 0224)."""
+
+    def build() -> dict[str, Any]:
+        event: Event = "tls-fingerprint-verified"
+        return {
+            "time": datetime.now(UTC).isoformat(),
+            "event": event,
+            "host": _bounded_audit_text(host),
+            "fingerprint": _bounded_audit_text(fingerprint),
+        }
+
+    emit(_ALLOW_LEVEL, build)
 
 
 def record_power_ownership_guard(

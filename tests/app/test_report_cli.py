@@ -78,7 +78,14 @@ SURVEY = FleetSurvey(
 
 @pytest.fixture
 def configured(monkeypatch):
-    for name in ("HMC_HOST", "HMC_USER", "HMC_PASSWORD", "HMC_PORT", "HMC_VERIFY_SSL"):
+    for name in (
+        "HMC_HOST",
+        "HMC_USER",
+        "HMC_PASSWORD",
+        "HMC_PORT",
+        "HMC_VERIFY_SSL",
+        "HMC_CERT_FINGERPRINT",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("HMC_PROFILE", raising=False)
     names = ["hmc-a", "hmc-b", "hmc-c"]
@@ -276,6 +283,7 @@ def test_unknown_profile_is_a_usage_error(configured, tmp_path) -> None:
         ("HMC_PASSWORD", "secret"),
         ("HMC_PORT", "12443"),
         ("HMC_VERIFY_SSL", "false"),
+        ("HMC_CERT_FINGERPRINT", ":".join(["AB"] * 32)),
     ],
 )
 def test_exported_connection_override_is_refused(
