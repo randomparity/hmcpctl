@@ -1,0 +1,1040 @@
+{
+ "firmware": "V10R3",
+ "types": {
+  "AIXCapability.Enum": [
+   "Active",
+   "Inactive",
+   "Unavailable"
+  ],
+  "AddressBroadcastPerformancePolicy.Enum": [
+   "Chip Affinity",
+   "No Affinity",
+   "Node Affinity",
+   "Unknown"
+  ],
+  "AllowInactiveSourceStorageVios.Enum": [
+   "Disabled",
+   "Enabled"
+  ],
+  "BootMode.Enum": [
+   "Diagnostic with Default Boot List",
+   "Diagnostic with Stored Boot List",
+   "Normal",
+   "Open Firmware OK Prompt",
+   "System Management Services",
+   "Unknown"
+  ],
+  "CageType.Enum": [
+   "BPA",
+   "Disk Enclosure",
+   "Fans",
+   "IO",
+   "None",
+   "System"
+  ],
+  "CapacityOnDemandOnOffState.Enum": [
+   "StateAvailable",
+   "StateNotAvailable",
+   "Running",
+   "UnreturnedResources",
+   "CodeNotEntered"
+  ],
+  "ConfigurationState.Enum": [
+   "Configured",
+   "UnConfigured",
+   "InvalidConfiguration"
+  ],
+  "ConnectionSpeed.Enum": [
+   "auto",
+   "E10Mbps",
+   "E100Mbps",
+   "E1Gbps",
+   "E10Gbps",
+   "unknown"
+  ],
+  "CurrentProfileSync.Enum": [
+   "Disabled",
+   "On",
+   "Suspended",
+   "Unknown"
+  ],
+  "DetailedState.Enum": [
+   "Dump In Progress",
+   "Failed Authentication",
+   "Incomplete",
+   "None",
+   "Open Firmware",
+   "Optimizing Memory",
+   "Other",
+   "Password Update Required",
+   "Performing Hardware Discovery",
+   "Recovery",
+   "Service Processor Failover",
+   "Stressed",
+   "Terminated",
+   "Unknown",
+   "Version Mismatch",
+   "Remote Restarting",
+   "Remote Restarted"
+  ],
+  "DeviceState.Enum": [
+   "active",
+   "defined",
+   "inactive",
+   "missingBackingDevice",
+   "Unknown"
+  ],
+  "DeviceType.Enum": [
+   "logical",
+   "physical",
+   "Unknown"
+  ],
+  "DuplexMode.Enum": [
+   "auto",
+   "half",
+   "full",
+   "unknown"
+  ],
+  "EnergyManagementModeType.Enum": [
+   "Disable",
+   "Static",
+   "Power_Saving",
+   "Balanced_Perf",
+   "Dynamic_Favor_Power",
+   "Dynamic_Favor_Performance",
+   "Dynamic_Performance",
+   "Fixed_Maximum_Frequency",
+   "Maximum_Performance",
+   "Power_Saving_Mode_Transitioning",
+   "Unknown"
+  ],
+  "EnvironmentSize.Enum": [
+   "custom",
+   "large",
+   "medium",
+   "small",
+   "Unknown"
+  ],
+  "EthernetAdapterType.Enum": [
+   "HEALogicalPort",
+   "LinkAggregationAdapter",
+   "PhysicalEthernetAdapter",
+   "SRIOVEthernetLogicalPort"
+  ],
+  "EthernetFrameSize.Enum": [
+   "Non-Jumbo 1500 Byte",
+   "Jumbo 9000 Byte",
+   "unknown"
+  ],
+  "EventType.Enum": [
+   "INVALID_URI",
+   "CACHE_CLEARED",
+   "MISSING_EVENTS",
+   "ADD_URI",
+   "MODIFY_URI",
+   "DELETE_URI",
+   "REBUILD_COMPLETE",
+   "NEW_CLIENT",
+   "HIDDEN_URI",
+   "VISIBLE_URI"
+  ],
+  "FailureGroupState.Enum": [
+   "Online",
+   "Offline",
+   "Degraded",
+   "Unknown"
+  ],
+  "FrameState.Enum": [
+   "failed authentication",
+   "incomplete",
+   "no connection",
+   "pending authentication - password updates required",
+   "pending frame number",
+   "standby/not available",
+   "standby/standby",
+   "standby/starting",
+   "starting/unknown",
+   "Unknown"
+  ],
+  "FspmOsIplMode.Enum": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "Unavailable"
+  ],
+  "FullSystemPartitionIPLMode.Enum": [
+   "TODO"
+  ],
+  "FunctionalState.Enum": [
+   "Functional",
+   "NonFunctional",
+   "Unknown"
+  ],
+  "GroupColor.Enum": [
+   "Red",
+   "Blue",
+   "Green",
+   "Grey",
+   "Yellow",
+   "Orange",
+   "Pink",
+   "Purple",
+   "Cyan"
+  ],
+  "HMC.Enum": [
+   "HMC"
+  ],
+  "HighAvailabilityMode.Enum": [
+   "auto",
+   "disabled",
+   "standby"
+  ],
+  "HostChannelAdapterCableType.Enum": [
+   "Cable",
+   "Fiber"
+  ],
+  "HostEthernetAdapterLogicalPortState.Enum": [
+   "Available",
+   "Unavailable",
+   "Unknown"
+  ],
+  "HostEthernetAdapterPhysicalPortType.Enum": [
+   "E1Gbps",
+   "E10Gbps",
+   "Unknown"
+  ],
+  "IBMIRestrictedIOModeSRIOVLogicalPortAssignmentCapability.Enum": [
+   "true",
+   "false",
+   "Unavailable"
+  ],
+  "IOAdapterType.Enum": [
+   "HostEthernetAdapter",
+   "physicalEthernetAdpter",
+   "physical_FiberCnnel",
+   "physical_FiberCnnel_OverEthernetAdapter",
+   "physicalopticaldrive",
+   "physicalcontroller",
+   "physicalSASController",
+   "physicalSCSIAdapter",
+   "SRIOV_Adapter"
+  ],
+  "IPInterfaceState.Enum": [
+   "Active",
+   "Inactive",
+   "Disconnected"
+  ],
+  "IPLSource.Enum": [
+   "a",
+   "b",
+   "c",
+   "d",
+   "Unknown"
+  ],
+  "IPLSpeed.Enum": [
+   "Extreme",
+   "Fast",
+   "Hyper",
+   "No Override",
+   "Slow"
+  ],
+  "InactiveProfileMigrationPolicy.Enum": [
+   "LastActivatedProfile",
+   "PartitionConfiguration"
+  ],
+  "InstallationType.Enum": [
+   "DVD",
+   "Image",
+   "NIM"
+  ],
+  "InternetProtocol.Enum": [
+   "static",
+   "dhcp",
+   "ipv6dhcp",
+   "slaac",
+   "Unknown"
+  ],
+  "IsRequired.Enum": [
+   "NotRequired",
+   "RequiredAllTheTime",
+   "RequiredAtLPARBoot",
+   "Unknown"
+  ],
+  "KeylockPosition.Enum": [
+   "manual",
+   "normal",
+   "unknown"
+  ],
+  "LinkAggregationHashMode.Enum": [
+   "default",
+   "dst_port",
+   "src_dst_port",
+   "src_port"
+  ],
+  "LinkAggregationMode.Enum": [
+   "ieee8023ad",
+   "round_robin",
+   "standard"
+  ],
+  "LogicalHostEthernetAdapterCapability.Enum": [
+   "Base Minimum",
+   "Dedicated",
+   "Defined Resource Amounts",
+   "High",
+   "Low",
+   "Medium",
+   "Unknown"
+  ],
+  "LogicalPartitionEnvironment.Enum": [
+   "AIX/Linux",
+   "OS400",
+   "Virtual IO Server",
+   "Shark",
+   "Ostype_rpa_io_server",
+   "Unknown"
+  ],
+  "LogicalPartitionProcessorCompatibilityMode.Enum": [
+   "default",
+   "POWER5",
+   "POWER6",
+   "POWER6_Plus",
+   "POWER6_Plus_Enhanced",
+   "POWER6_Enhanced",
+   "POWER7",
+   "POWER7_Plus",
+   "POWER7_Enhanced",
+   "POWER7_Plus_Enhanced",
+   "POWER8",
+   "POWER8_Enhanced",
+   "POWER9",
+   "POWER9_Base",
+   "POWER9_Enhanced",
+   "POWER10",
+   "Unknown"
+  ],
+  "LogicalPartitionProcessorSharingMode.Enum": [
+   "keep idle procs",
+   "sre idle proces",
+   "sre idle procs active",
+   "sre idle procs always",
+   "capped",
+   "uncapped",
+   "Unknown"
+  ],
+  "LogicalPartitionState.Enum": [
+   "error",
+   "not activated",
+   "not available",
+   "open firmware",
+   "running",
+   "shutting down",
+   "starting",
+   "migrating not active",
+   "migrating running",
+   "hardware discovery",
+   "suspended",
+   "suspending",
+   "resuming",
+   "Unknown"
+  ],
+  "LogicalUnitMigrationState.Enum": [
+   "Successful",
+   "Inprogress",
+   "Failed",
+   "SuccessfulInRecursive",
+   "InprogressInRecursive",
+   "FailedInRecursive",
+   "Unknown"
+  ],
+  "LogicalUnitType.Enum": [
+   "VirtualIO_Disk",
+   "VirtualIO_Hibernation",
+   "VirtualIO_Image",
+   "VirtualIO_Active_Memory_Sharing"
+  ],
+  "MajorBootType.Enum": [
+   "Power On",
+   "Reboot",
+   "Unknown"
+  ],
+  "ManagedFrameCapability.Enum": [
+   "TODO"
+  ],
+  "ManagedFrameState.Enum": [
+   "BPA (H System)",
+   "BPA (IH System)",
+   "BPA (IO-Only Frame)",
+   "CUoD Click to Accept",
+   "Error",
+   "Error-Dump in progress",
+   "Error-Terminated",
+   "Failed Authentication",
+   "Incomplete",
+   "No Connection",
+   "On Demand Recovery",
+   "Operating",
+   "Pending Authentication - Password Updates Required",
+   "Pending Frame Number",
+   "PMU - Hitachi SRX",
+   "Power Off",
+   "Power Off In Progress",
+   "Rack Standby/Not Available",
+   "Rack Standby/Rack Standby",
+   "Rack Standby/Starting",
+   "Recovery",
+   "Running",
+   "Service processor static failover error",
+   "Standby",
+   "Standby/Not Available",
+   "Standby/Standby",
+   "Standby/Starting",
+   "Starting/Unknown",
+   "Version Mismatch"
+  ],
+  "ManagedFrameType.Enum": [
+   "HE BPA",
+   "IH BPA",
+   "IO Only",
+   "PMU-Hitachi SRX",
+   "Unknown"
+  ],
+  "MasterConsoleConnectionStatus.Enum": [
+   "Connected",
+   "Not Connected",
+   "Reauthentication Required",
+   "Version Mismatch",
+   "Unavailable",
+   "Unknown"
+  ],
+  "MediaSpeed.Enum": [
+   "E10_Full_Duplex",
+   "E10_Half_Duplex",
+   "E100_Full_Duplex",
+   "E100_Half_Duplex",
+   "E1000_Full_Duplex",
+   "E10000_Full_Duplex",
+   "Auto_Negotiation"
+  ],
+  "MemoryDefragStatus.Enum": [
+   "Not_In_Progress",
+   "In_Progress",
+   "Cancelled",
+   "Timeout",
+   "Cancelling",
+   "No_Solution",
+   "Error",
+   "Partial_Success",
+   "No_Change",
+   "Insufficient_Free_Logical_Memory_Blocks",
+   "Partial_Mirroring_Not_Supported"
+  ],
+  "MemoryMirroringMode.Enum": [
+   "none",
+   "system firmware only"
+  ],
+  "MemoryMirroringState.Enum": [
+   "Off",
+   "Full",
+   "Partial",
+   "Unknown"
+  ],
+  "MigrationStorageViosDataStatus.Enum": [
+   "Valid",
+   "Update_Failed",
+   "Update_Pending",
+   "No_Data"
+  ],
+  "MultiCoreScalingValue.Enum": [
+   "1",
+   "2",
+   "4",
+   "8",
+   "16"
+  ],
+  "NetworkInterface.Enum": [
+   "eth0",
+   "eth1",
+   "Unknown"
+  ],
+  "NodeState.Enum": [
+   "Up",
+   "Down",
+   "Unknown"
+  ],
+  "OperatingSystemType.Enum": [
+   "AIX/Linux",
+   "AIX",
+   "Linux",
+   "VIOS",
+   "IBM i"
+  ],
+  "PSPUsage.Enum": [
+   "First_PSP_Is_Primary",
+   "Second_PSP_Primary",
+   "First_PSP_Primary_Second_PSP_Secondary",
+   "Second_PSP_Primary_First_PSP_Secondary"
+  ],
+  "PartitionBootMode.Enum": [
+   "Normal",
+   "Diagnostic_With_Default_Boot_List",
+   "Diagnostic_With_Stored_Boot_List",
+   "Open_Firmware",
+   "System_Management_Services",
+   "Unavailable",
+   "Default",
+   "Unknown"
+  ],
+  "PartitionMigrationState.Enum": [
+   "Not_Migrating",
+   "Migration_Starting",
+   "Migration_Waiting",
+   "Migration_Dispatch_In_Progress",
+   "Migration_Dispatched",
+   "Migration_Waiting_For_Retry",
+   "Migration_Stopped",
+   "Migration_In_Progress",
+   "Migration_Failed",
+   "Migration_Complete"
+  ],
+  "PartitionPowerManagementMode.Enum": [
+   "None",
+   "Nominal",
+   "Dyanmic_Power_Save_Maximum_Performance",
+   "Dynamic_Power_Save"
+  ],
+  "PartitionRemoteRestart.Enum": [
+   "Invalid",
+   "Remote_Restartable",
+   "Source_Remote_Restarting",
+   "Destination_Remote_Restarting",
+   "Remote_Restarted",
+   "Profile_Restored",
+   "Reserved_Storage_Device_Update_Failed",
+   "Forced_Source_Side_Restart",
+   "Source_Side_Cleanup_Failed",
+   "Reserved_Storage_Device_Update_Failed_With_Override",
+   "Remote_Restartable_Suspended",
+   "Local_Update_Failed",
+   "Partial_Update",
+   "Stale_Data",
+   "Local_Data_Valid",
+   "Out_Of_Space",
+   "Local_Data_Invalid",
+   "Destination_Remote_Restarted",
+   "Source_Remote_Restarting_Suspended",
+   "Local_Storage_Update_Failed",
+   "Page_Device_Update_Override",
+   "Local_Data_Update_Pending"
+  ],
+  "PhysicalVolumeReservePolicy.Enum": [
+   "ClusterReserve",
+   "ExclusivePersistent",
+   "NoReserve",
+   "SCSI-2",
+   "SharedPersistent",
+   "SinglePath"
+  ],
+  "PhysicalVolumeState.Enum": [
+   "active",
+   "missing",
+   "removed",
+   "varied off"
+  ],
+  "PhysicalVolumeUsage.Enum": [
+   "HiddenDisk",
+   "Ams",
+   "Disk",
+   "Hibernation",
+   "Image",
+   "OpticalImage",
+   "OpticalImageIm",
+   "Repo",
+   "Unused",
+   "Vg",
+   "Vscsi",
+   "Vss_Pool"
+  ],
+  "PowerEnterprisePoolComplianceState.Enum": [
+   "ApproachingOutOfCompliancePool",
+   "ApproachingOutOfComplianceServer",
+   "InCompliance",
+   "OutOfCompliance",
+   "Unavailable"
+  ],
+  "PowerOnOption.Enum": [
+   "autostart",
+   "standby",
+   "Unknown"
+  ],
+  "PowerOnSide.Enum": [
+   "permanent",
+   "temporary",
+   "Unknown"
+  ],
+  "PowerOnSource.Enum": [
+   "OperatorPanel",
+   "SystemManagementConsole",
+   "OtherManagementTool",
+   "ASMMenu",
+   "ManagementModule",
+   "ModemPowerOn",
+   "TimedPowerOn",
+   "Other",
+   "Auto-PowerRestart"
+  ],
+  "PowerOnSpeed.Enum": [
+   "fast",
+   "slow",
+   "normal",
+   "maintenance",
+   "Unknown"
+  ],
+  "PowerOnSpeedOverride.Enum": [
+   "fast",
+   "none",
+   "slow",
+   "Unknown"
+  ],
+  "PowerOnStartPolicy.Enum": [
+   "autorecovery",
+   "autostart",
+   "userinit",
+   "Unknown"
+  ],
+  "PrimaryState.Enum": [
+   "Aborted",
+   "Active",
+   "Deploying",
+   "Inactive",
+   "In Error",
+   "Not Available",
+   "Relocating",
+   "Resetting",
+   "Shutting Down",
+   "Standby",
+   "Started",
+   "Starting",
+   "Stopped",
+   "Stopping",
+   "Suspended",
+   "Suspending",
+   "Unknown",
+   "Waiting for Input"
+  ],
+  "ProcessorMode.Enum": [
+   "cap",
+   "uncap",
+   "uncapWeight",
+   "Unknown"
+  ],
+  "ProfileType.Enum": [
+   "FULL_SYSTEM_LPAR_PROFILE_TYPE",
+   "REG_LPAR_PROFILE_TYPE",
+   "Other",
+   "Unknown"
+  ],
+  "ProgressState.Enum": [
+   "Hibernate Completing",
+   "Hibernate Preparing",
+   "Hibernate Saving HMC Data",
+   "Hibernate Saving Partition Data",
+   "Hibernate Validating",
+   "Resume Completing",
+   "Resume Preparing",
+   "Resume Reading HMC Data",
+   "Resume Reading Partition Data",
+   "Resume Restoring Partition Data",
+   "Resume Validating",
+   "Unknown"
+  ],
+  "RMCState.Enum": [
+   "active",
+   "inactive",
+   "none",
+   "unknown"
+  ],
+  "Redundancy.Enum": [
+   "ALL",
+   "NONE"
+  ],
+  "RemoteRestartJobOperation.Enum": [
+   "Validate",
+   "RemoteRestart",
+   "Recover"
+  ],
+  "ResourceMonitoringControlState.Enum": [
+   "active",
+   "inactive",
+   "none",
+   "unknown",
+   "busy"
+  ],
+  "ResourceSharingMode.Enum": [
+   "dedicated",
+   "shared"
+  ],
+  "SCSIReservePolicyAlgorithm.Enum": [
+   "Failover",
+   "Round_Robin",
+   "Load_Balance",
+   "Adaptive",
+   "CLAROpt",
+   "LeastBlocks",
+   "LeastIO",
+   "StreamIO",
+   "SymmOpt",
+   "Unknown"
+  ],
+  "SPFailoverState.Enum": [
+   "notReady",
+   "ready",
+   "unknown"
+  ],
+  "SRIOVAdapterCapabilities.Enum": [
+   "VirtualInterfaceCapable",
+   "NonVirtualInterfaceCapable",
+   "NonVirtualInterfaceSharingCapable"
+  ],
+  "SRIOVAdapterMode.Enum": [
+   "Sriov",
+   "Dedicated",
+   "ForceDedicated",
+   "unknown"
+  ],
+  "SRIOVAdapterPersonalities.Enum": [
+   "NoQoSSupport",
+   "SingleSettingQoSSupport",
+   "Unknown"
+  ],
+  "SRIOVAdapterState.Enum": [
+   "Initializing",
+   "NotConfigured",
+   "PoweredOff",
+   "PoweringOff",
+   "Running",
+   "Dumping",
+   "Failed",
+   "Missing",
+   "PCIEIDMismatch",
+   "IncompatibleConfig"
+  ],
+  "SRIOVAdapterStatus.Enum": [
+   "NotConfigured",
+   "Initializing",
+   "Running",
+   "PoweringOff",
+   "PoweredOff",
+   "Dumping",
+   "Failed",
+   "Missing",
+   "PCIE ID Mismatch"
+  ],
+  "SRIOVBackupDeviceType.Enum": [
+   "veth",
+   "vnic"
+  ],
+  "SRIOVConnectionSpeed.Enum": [
+   "E100Gbps",
+   "E100Mbps",
+   "E10Gbps",
+   "E10Mbps",
+   "E1Gbps",
+   "E40Gbps",
+   "E25Gbps",
+   "E50Gbps",
+   "Auto",
+   "Unknown"
+  ],
+  "SRIOVFunctionalStatus.Enum": [
+   "Functional",
+   "NonFunctional",
+   "Unknown"
+  ],
+  "SRIOVLogicalPortCommonAttributes.Enum": [
+   "TODO"
+  ],
+  "SRIOVLogicalPortOption.Enum": [
+   "PromiscousMode",
+   "DiagnosticMode",
+   "MACRestricted",
+   "AdjunctBased",
+   "DestructiveDebugMode",
+   "HugeDMAWindow",
+   "PreviligedStatisticsCollection",
+   "AssignedToVIOSPartition"
+  ],
+  "SRIOVLogicalPortType.Enum": [
+   "Ethernet",
+   "FCoE",
+   "FiberChannel",
+   "RoCE",
+   "Unconfigured"
+  ],
+  "SRIOVPersonality.Enum": [
+   "NO_CAPACITY_SUPPORTED",
+   "MIN_CAPACITY",
+   "MAX_MIN_CAPACITY",
+   "UNKNOWN"
+  ],
+  "SRIOVPhysicalPortMTU.Enum": [
+   "E_1500",
+   "E_9000",
+   "Unknown"
+  ],
+  "SRIOVPhysicalPortOptions.Enum": [
+   "autoDuplex",
+   "externalLoopBack",
+   "fullDuplex",
+   "halfDuplex",
+   "internalLoopBack",
+   "linkUp",
+   "promiscousMode",
+   "receiveFlowControl",
+   "transmitFlowControl",
+   "Veb",
+   "Vepa",
+   "PriorityFlowControl"
+  ],
+  "SRIOVPhysicalPortType.Enum": [
+   "Cna",
+   "Ethernet",
+   "FiberChannel",
+   "RoCE",
+   "Unknown"
+  ],
+  "SRIOVPortCapability.Enum": [
+   "Veb",
+   "Vepa",
+   "Pvid",
+   "IEEE8021Q_Priority",
+   "PriorityACL",
+   "Mac Vlan ACL Restriction",
+   "Clear Physical Port Stat",
+   "Clear Logical Port Stat",
+   "PORT_VF_CONFIGURATION_OPTION",
+   "PORT_VLAN_RESTRICTION_NOT_ALLOWED_WITH_PVID_SET",
+   "Enable VF Options",
+   "unknown"
+  ],
+  "SelectionType.Enum": [
+   "auto",
+   "manual",
+   "Unknown"
+  ],
+  "ServiceProcessorFailoverState.Enum": [
+   "Not Ready",
+   "Ready",
+   "unavailable",
+   "unsupported"
+  ],
+  "ServiceProcessorSide.Enum": [
+   "Permanent",
+   "Temporary",
+   "Both",
+   "Unknown"
+  ],
+  "SharedEthernetAdapterHighAvailabilityMode.Enum": [
+   "disabled",
+   "auto",
+   "standby",
+   "sharing"
+  ],
+  "SharedEthernetAdapterQualityOfServiceMode.Enum": [
+   "disabled",
+   "strict",
+   "loose"
+  ],
+  "StorageDeviceState.Enum": [
+   "Active",
+   "Inactive",
+   "Missing_Backing_Device",
+   "Defined",
+   "Error",
+   "Unknown"
+  ],
+  "StorageDeviceType.Enum": [
+   "Logical",
+   "Phys",
+   "Ssplu",
+   "Unknown"
+  ],
+  "StorageVolumeType.Enum": [
+   "PhysicalVolume",
+   "LogicalUnit"
+  ],
+  "SupportedMACRestrictions.Enum": [
+   "ALLOW_ALL_OS_DEFINED",
+   "DENY_ALL_OS_DEFINED",
+   "SPECIFY_ALLOWABLE_OS_DEFINED"
+  ],
+  "SupportedVLANRestrictions.Enum": [
+   "ALLOW_ALL",
+   "DENY_VLAN_TAGGED",
+   "ALLOW_SPECIFIED"
+  ],
+  "SystemPartitionProcessorLimit.Enum": [
+   "max",
+   "E24",
+   "E32",
+   "E128"
+  ],
+  "SystemState.Enum": [
+   "error",
+   "error - dump in progress",
+   "error - terminated",
+   "failed authentication",
+   "incomplete",
+   "initializing",
+   "no connection",
+   "on demand recovery",
+   "operating",
+   "pending authentication - password updates required",
+   "power off",
+   "power off in progress",
+   "recovery",
+   "standby",
+   "version mismatch",
+   "service processor failover",
+   "unknown"
+  ],
+  "SystemType.Enum": [
+   "fsp",
+   "bmc",
+   "ebmc",
+   "unknown"
+  ],
+  "TemplateFormat.Enum": [
+   "csv"
+  ],
+  "TemplateLocation.Enum": [
+   "file",
+   "url"
+  ],
+  "TemplateType.Enum": [
+   "system",
+   "virtual machine"
+  ],
+  "TierMirrorState.Enum": [
+   "NotMirrored",
+   "Synchronized",
+   "Degraded",
+   "Unknown"
+  ],
+  "TierType.Enum": [
+   "RestrictedSystemTier",
+   "UnrestrictedSystemTier",
+   "UserTier",
+   "Unknown"
+  ],
+  "TurboCoreSupport.Enum": [
+   "Reserved",
+   "Turbocore_Capable",
+   "Not_Enough_Nodes",
+   "Not_All_Processors_Are_Turbocore_Capable",
+   "Unknown"
+  ],
+  "VNICBackingDevicePortUsage.Enum": [
+   "NOT_VNIC",
+   "DEDICATED_VNIC",
+   "SHARED_VNIC"
+  ],
+  "VirtualAdapterConnectionRole.Enum": [
+   "client",
+   "server",
+   "Unknown"
+  ],
+  "VirtualAdapterRole.Enum": [
+   "client",
+   "server"
+  ],
+  "VirtualIOAdapterType.Enum": [
+   "Server",
+   "Client",
+   "Unknown"
+  ],
+  "VirtualIOConfigurationState.Enum": [
+   "complete",
+   "notConfigured",
+   "partial"
+  ],
+  "VirtualNICBackingDeviceAction.Enum": [
+   "NO_ACTION",
+   "ADD_BD",
+   "DELETE_BD",
+   "CHANGE_PRIORITY_OF_BD",
+   "RESET_BD",
+   "CLEAR_BD_ERRORS",
+   "FORCE_FAIL_OVER_ON_BD",
+   "ADD_BD_ALLOW_NET_DISRUPT"
+  ],
+  "VirtualNICBackingDeviceStatus.Enum": [
+   "OPERATIONAL",
+   "POWERED_OFF",
+   "LINK_DOWN",
+   "NETWORK_ERROR",
+   "UNRESPONSIVE",
+   "ADAPTER_ERROR",
+   "UNKNOWN"
+  ],
+  "VirtualNICBackingDeviceType.Enum": [
+   "SRIOV"
+  ],
+  "VirtualNICMode.Enum": [
+   "DEDICATED",
+   "SHARED"
+  ],
+  "VirtualNetworkAvailabilityMode.Enum": [
+   "disabled",
+   "failover",
+   "loadBalanced"
+  ],
+  "VirtualOpticalMediaType.Enum": [
+   "DEV",
+   "ISO",
+   "BLANK"
+  ],
+  "VirtualStationInterfaceType.Enum": [
+   "Pre-Associate",
+   "Pre-Associate_With_Resource_Reservation",
+   "Associate",
+   "De-Associate",
+   "Vsi_Manager_Id",
+   "Organizationally_Defined_TLV"
+  ],
+  "VirtualSwitchMode.Enum": [
+   "Veb",
+   "Vepa",
+   "Unknown"
+  ],
+  "VirtualSwitchModes.Enum": [
+   "VEB",
+   "VEPA"
+  ],
+  "VitalProductDataStale.Enum": [
+   "NoVPD",
+   "ValidVPD",
+   "StaleVPD",
+   "Unknown"
+  ],
+  "WWPNLoggedInBy.Enum": [
+   "Unknown",
+   "None",
+   "Client",
+   "VirtualIO_Server"
+  ],
+  "WWPNStatus.Enum": [
+   "Unknown",
+   "LoggedIn",
+   "LoggedOut"
+  ]
+ },
+ "elements": {
+  "DesignatedIPLSource": "IPLSource.Enum",
+  "IBMiRestrictedIOModeSRIOVLogicalPortAssignmentCapable": "IBMIRestrictedIOModeSRIOVLogicalPortAssignmentCapability.Enum",
+  "MigrationState": "PartitionMigrationState.Enum",
+  "MigrationStorageViosDataStatus": "MigrationStorageViosDataStatus.Enum",
+  "PowerManagementMode": "PartitionPowerManagementMode.Enum",
+  "RemoteRestartState": "PartitionRemoteRestart.Enum"
+ }
+}
