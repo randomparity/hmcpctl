@@ -26,6 +26,7 @@ def _run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("UV_PROJECT_ENVIRONMENT", None)
     environment.pop("VIRTUAL_ENV", None)
+    environment["SETUPTOOLS_SCM_PRETEND_VERSION_FOR_HMCPCTL"] = "0.0.1.dev42"
     return subprocess.run(
         args,
         cwd=cwd,
@@ -51,8 +52,9 @@ def _clean_project(project: Path) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
-    # The build reads no Git state (ADR 0033), so the fixture needs no commit. It
-    # still needs a repository: `just setup` runs `prek install`, which requires one.
+    # No commit, so no hook runs (#237); `_run` supplies the version through the
+    # pretend variable (ADR 0250). The fixture still needs a repository: `just setup`
+    # runs `prek install`, which requires one.
     # The repository-local hooks path keeps that install working on machines whose
     # global config sets core.hooksPath, which prek otherwise refuses to install over.
     for command in (
@@ -80,6 +82,11 @@ def built_project(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]
         cwd=project,
     )
     assert result.returncode == 0, result.stderr
+    # A commit-less repository would build `0.1.dev0+d<date>`; the pretend variable
+    # set by `_run` pins the version instead (ADR 0250).
+    assert [path.name for path in artifacts.glob("*.whl")] == [
+        "hmcpctl-0.0.1.dev42-py3-none-any.whl"
+    ]
     return artifacts, project
 
 
