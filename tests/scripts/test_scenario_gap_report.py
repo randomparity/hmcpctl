@@ -333,6 +333,17 @@ def test_report_over_the_repository_is_clean_and_summarised(capsys):
     assert not [line for line in out if line.startswith(report._DISPATCH_PREFIXES)]
 
 
+def test_system_profiles_dispatch(capsys):
+    assert report.main(["--fail-on-dispatch"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    for operation in ("create", "list", "update", "delete", "activate"):
+        assert f"uncovered-operation: system_profile.{operation}" not in lines
+    assert not any(
+        line.startswith("unreadable: scripts/live_test/system_profiles.py")
+        for line in lines
+    )
+
+
 def _definition(**arguments):
     return definitions.ScenarioDefinition(
         "st100-lpar-get", "lpar.get", "hmc_get_lpar", True, arguments, "success"

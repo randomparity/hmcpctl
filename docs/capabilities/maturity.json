@@ -5027,6 +5027,81 @@
         "missing_scope": []
       },
       "evidence": []
+    },
+    {
+      "operation": "system_profile.create",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "explicit-contained-member-create",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "system_profile.list",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "fixed-cli-whole-inventory",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "system_profile.update",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "rename-and-membership-replacement",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "system_profile.delete",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "fixed-cli-exact-delete",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "system_profile.activate",
+      "implementation": {
+        "state": "partial",
+        "implemented_scope": [
+          {
+            "variant": "fixed-cli-validation-and-bounded-activation-witnesses",
+            "parameters": []
+          }
+        ],
+        "missing_scope": [
+          {
+            "variant": "uncalibrated-resource-shape-activation-witness",
+            "parameters": []
+          }
+        ]
+      },
+      "evidence": []
     }
   ]
 }

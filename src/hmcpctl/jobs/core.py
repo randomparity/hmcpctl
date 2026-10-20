@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from ..errors import HMCError
+from ..xmlutil import leaf_text
 
 DEFAULT_JOB_TIMEOUT_SECONDS = 300
 DEFAULT_JOB_POLL_INTERVAL = 5
@@ -136,10 +137,19 @@ def _result_message(resource: dict[str, Any]) -> str | None:
         parameters = [parameters]
     messages = {}
     for parameter in parameters if isinstance(parameters, list) else []:
-        name = parameter.get("ParameterName") if isinstance(parameter, dict) else None
-        value = parameter.get("ParameterValue") if isinstance(parameter, dict) else None
+        name = (
+            leaf_text(parameter.get("ParameterName"))
+            if isinstance(parameter, dict)
+            else None
+        )
+        value = (
+            leaf_text(parameter.get("ParameterValue"))
+            if isinstance(parameter, dict)
+            else None
+        )
         if (
-            name in {"result", "detailedStatus", "ErrorData", "errorData"}
+            isinstance(name, str)
+            and name in {"result", "detailedStatus", "ErrorData", "errorData"}
             and isinstance(value, str)
             and value.strip()
             and name not in messages

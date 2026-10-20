@@ -52,6 +52,7 @@ from live_test import (
     runner,
     storage_lifecycle,
     storage_volume_group,
+    system_profiles,
     users,
     vios_backup,
     vmedia,
@@ -60,6 +61,7 @@ from live_test import config as live_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, env_var_value
+from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.provision import check_vlan_exists
 from hmcpctl.operations.virtualization.pcie import (
     require_admitted_environment,
@@ -450,11 +452,28 @@ def _profile_artifacts_verdict(config: live_config.LiveTestConfig) -> ArmVerdict
     )
 
 
+def _system_profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        system_profiles.configured(config)
+    except (ValueError, TypeError) as exc:
+        return ArmVerdict("system-profiles", False, str(exc), (), config.system_name)
+    return ArmVerdict(
+        "system-profiles",
+        True,
+        "explicit normal-owned pairs and caller coordination required; source permissions do not apply",
+        (
+            "four unpredictable system-profile names; seven metadata effects; optional explicitly granted validation/activation; no automatic power cleanup or rollback",
+        ),
+        config.system_name,
+    )
+
+
 _ARM_VERDICTS = {
     "dedicated": _dedicated_verdict,
     "bare-cec": _bare_cec_verdict,
     "profiles": _profiles_verdict,
     "profile-artifacts": _profile_artifacts_verdict,
+    "system-profiles": _system_profiles_verdict,
     "pcm": _pcm_verdict,
     "vios-backup": _vios_backup_verdict,
     "network": _network_verdict,
@@ -583,7 +602,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--group",
-        choices=tuple(runner.SUBTASK_GROUPS),
+        choices=(
+            *runner.SUBTASK_GROUPS,
+            "system-profile-source",
+            "system-profile-activation-source",
+        ),
         help="predict one arm instead of every arm",
     )
     parser.add_argument(
@@ -596,7 +619,59 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="predict only the bounded ST41 mapping/RMC investigation",
     )
+    parser.add_argument("--packet", type=Path)
+    parser.add_argument("--packet-sha256")
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.group == "system-profile-activation-source":
+        from live_test import system_profile_activation_source
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "activation source preflight requires packet, digest, private output and live read-only checks"
+            )
+        return system_profile_activation_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
+    if args.output:
+        parser.error("--output requires --group system-profile-activation-source")
+    if args.group == "system-profile-source":
+        from live_test import system_profile_source
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "system-profile-source requires packet, digest and live read-only checks"
+            )
+        return system_profile_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+            ]
+        )
+    if args.packet or args.packet_sha256:
+        parser.error("source packet arguments require --group system-profile-source")
     if args.detach_probe and args.group != "lpar-power":
         parser.error("--detach-probe requires --group lpar-power")
 
@@ -618,6 +693,34 @@ def main(argv: list[str] | None = None) -> int:
                 config.system_name,
             ),
         )
+
+    if args.group == "system-profiles":
+        if config is None or not credentials_ok or not verdicts[0].runnable:
+            print(
+                "system-profiles preflight refused: configuration, credentials or explicit scope missing"
+            )
+            return 1
+        if args.skip_hardware:
+            print(
+                "system-profiles configuration only: native admission NOT established"
+            )
+            return 0
+        try:
+            asyncio.run(system_profiles.preflight(HMCConfig(), config))
+        except (
+            HMCError,
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            TimeoutError,
+        ) as exc:
+            print(f"system-profiles native preflight refused: {type(exc).__name__}")
+            return 2
+        print(
+            "system-profiles read-only admission passed; no effects or live authority granted"
+        )
+        return 0
 
     envelopes: dict[str, str] = {}
     provision_vlan: str | None = None

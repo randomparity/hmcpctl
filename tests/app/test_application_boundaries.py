@@ -113,8 +113,9 @@ def test_create_mcp_returns_independent_complete_applications():
     second = create_mcp(policy)
 
     assert first is not second
-    assert len(asyncio.run(first.list_tools())) == 164
-    assert len(asyncio.run(second.list_tools())) == 164
+    # #1725 adds five system-profile operations through the existing policy boundary.
+    assert len(asyncio.run(first.list_tools())) == 169
+    assert len(asyncio.run(second.list_tools())) == 169
 
 
 def test_operations_do_not_import_application_modules():

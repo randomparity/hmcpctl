@@ -17,8 +17,9 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-With no selection every subtask runs, 0 through 43: there is none from 26 to 36,
-which are other arms' row ids, and 9, 11, 37, 38, 39, 40, 41 and 42 SKIP outside their
+Registered subtasks span 0 through 44; 26 to 36 are other arms' row ids.
+With no selection the original subtasks through 43 run; 44 requires its named group.
+Subtasks 9, 11, 37, 38, 39, 40, 41 and 42 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power` groups. A bare
 number runs that one subtask; `--group NAME` runs one arm. Results go to `test-results-<group>.json`, or `test-results-round2.json`
@@ -55,7 +56,7 @@ import inspect
 import json
 import os
 import re
-from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
@@ -115,6 +116,7 @@ from live_test.sriov import exercise_sriov_assignment
 from live_test.storage import inventory_storage
 from live_test.storage_lifecycle import exercise_disk_lifecycle
 from live_test.storage_volume_group import exercise_volume_group
+from live_test.system_profiles import exercise_system_profiles
 from live_test.users import exercise_users, inventory_users
 from live_test.vios_backup import exercise_vios_backup
 from live_test.vmedia import (
@@ -435,6 +437,7 @@ class RunState:
     # The `--group` this run was dispatched with; a system-wide step gates on it.
     group: str | None = None
     hmc_config: HMCConfig | None = None
+    checkpoint: Callable[[], None] | None = None
 
     async def call(
         self,
@@ -672,6 +675,7 @@ SUBTASKS = {
     41: exercise_lpar_power,
     42: exercise_volume_group,
     43: exercise_backup_artifacts,
+    44: exercise_system_profiles,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -697,6 +701,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "bare-cec": [25],
     "profiles": [0, 4, 10, 15],
     "profile-artifacts": [43],
+    "system-profiles": [44],
     "users": [11],
     # ST9 runs only here: its round trips need the operator's network authorization.
     "network": [2, 9],
@@ -973,7 +978,7 @@ async def main(
             print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
             return 1
     else:
-        tasks = sorted(SUBTASKS.keys())
+        tasks = sorted(n for n in SUBTASKS if n != 44)
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]
@@ -1011,6 +1016,8 @@ async def main(
                 default=str,
             ),
         )
+
+    state.checkpoint = lambda: write_results(partial=True)
 
     try:
         async with served_client() as client:

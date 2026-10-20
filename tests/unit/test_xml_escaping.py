@@ -138,7 +138,7 @@ def _carries_string(annotation: Any) -> bool:
     """Whether a caller can put a free-form string into this annotation.
 
     Refuses to answer for an annotation it does not model, rather than saying
-    "no". A shape this cannot classify — ``tuple[str, ...]``, ``set[str]``,
+    "no". A shape this cannot classify — fixed-length tuples, ``set[str]``,
     ``Any`` — is one whose strings the harness would never probe, so guessing
     here is how a vulnerable builder would pass CI. Raising makes it a
     collection error instead.
@@ -152,6 +152,12 @@ def _carries_string(annotation: Any) -> bool:
         return False
     if annotation in _SCALAR_ANNOTATIONS:
         return annotation is str
+    if (
+        origin is tuple
+        and len(get_args(annotation)) == 2
+        and get_args(annotation)[1] is Ellipsis
+    ):
+        return _carries_string(get_args(annotation)[0])
     if origin in (list, dict):
         return any(_carries_string(arg) for arg in get_args(annotation))
     if dataclasses.is_dataclass(annotation) or _is_typed_dict(annotation):
@@ -179,6 +185,12 @@ def _sample(annotation: Any, *, tainted: bool) -> Any:
         return 4
     if annotation is float:
         return 1.0
+    if (
+        origin is tuple
+        and len(get_args(annotation)) == 2
+        and get_args(annotation)[1] is Ellipsis
+    ):
+        return (_sample(get_args(annotation)[0], tainted=tainted),)
     if origin is list:
         (item,) = get_args(annotation)
         return [_sample(item, tainted=tainted)]
@@ -604,3 +616,18 @@ def test_valid_input_is_unchanged_by_escaping():
         '<ParameterValue kb="CUR" kxe="false">false</ParameterValue>'
         in jobs.power_on_lpar_job()
     )
+
+
+def test_variadic_tuple_annotation_probes_strings_and_refuses_unknown_shapes():
+    assert _carries_string(tuple[str, ...])
+    assert _sample(tuple[str, ...], tainted=True) == (PAYLOAD,)
+    assert _carries_string(tuple[str, ...] | None)
+    assert _sample(tuple[str, ...] | None, tainted=True) == (PAYLOAD,)
+    assert _sample(list[tuple[str, ...]], tainted=True) == [(PAYLOAD,)]
+    assert not _carries_string(tuple[int, ...])
+    assert _sample(tuple[int, ...], tainted=False) == (4,)
+    for annotation in (tuple[str, int], tuple[str], set[str], Any):
+        with pytest.raises(UnsupportedAnnotation):
+            _carries_string(annotation)
+        with pytest.raises(UnsupportedAnnotation):
+            _sample(annotation, tainted=True)

@@ -18,6 +18,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- System-profile CLI and MCP operations bind complete membership, authorize every
+  member, and reconcile create, rename/replacement, delete, validation and activation
+  outcomes. Activation exposes bounded profile witnesses and explicit uncertainty;
+  native product verification remains unrun (#1725).
+
+
 - `HMC_CERT_FINGERPRINT` (TOML `cert_fingerprint`, `--cert-fingerprint`) trusts an HMC whose
   certificate has the given SHA-256 fingerprint, so a self-signed HMC can be verified without
   a CA bundle. It takes effect with `HMC_VERIFY_SSL=true`, yields only to `HMC_CA_BUNDLE`, and

@@ -1,0 +1,6 @@
+SOURCE calibration producing revision a33e26263ddeb4371350884aef53272db47952d8
+Immutable raw journal SHA256 637da6cf731292afb54a473dbf85103cca57bb65facfa4c4cfcb7a25228a08a1
+The public digests are integrity identifiers, not credentials.
+The source arm recorded four whole sysprof CLI reads; command reconstruction uses its immutable fixed request and actual recorded stdout.
+The generated CLI-only vocabulary uses existing exporter/tokenizer; no new hardware query and no product-native verification.
+Constructed inventory fixture identities and membership are substitutions, not verbatim HMC observations.

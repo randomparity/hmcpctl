@@ -8641,3 +8641,29 @@ def test_validation_and_evidence_have_direct_owners():
         for node in tree.body:
             if isinstance(node, ast.ImportFrom):
                 assert node.module not in {"live_test.runner", "live_test_runner"}
+
+
+@pytest.mark.asyncio
+async def test_system_profiles_checkpoint_precedes_effect(monkeypatch, tmp_path):
+    _isolate_runner(monkeypatch)
+    destination = tmp_path / "product-results.json"
+    effects = []
+
+    async def step(_client, state):
+        state.artifacts.system_profile_phase = "pending:create-a"
+        state.checkpoint()
+        saved = json.loads(destination.read_text())
+        assert saved["run"]["partial"] is True
+        assert saved["artifacts"]["system_profile_phase"] == "pending:create-a"
+        effects.append("effect-boundary")
+        raise RuntimeError("interrupted after dispatch")
+
+    monkeypatch.setattr(runner, "SUBTASKS", {44: step})
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await runner.main(
+            group="system-profiles",
+            results_path=str(destination),
+            config=live_config.LiveTestConfig(),
+        )
+    assert effects == ["effect-boundary"]
+    assert json.loads(destination.read_text())["run"]["partial"] is True

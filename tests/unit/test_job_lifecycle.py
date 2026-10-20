@@ -324,3 +324,35 @@ def test_validate_wait_timing_rejects_invalid_values(
 
 def test_validate_wait_timing_ignores_unused_values() -> None:
     validate_wait_timing(False, -1, -1)
+
+
+@pytest.mark.parametrize(
+    "status", ["FAILED_BEFORE_COMPLETION", "COMPLETED_WITH_ERROR", "FAILED_TO_START"]
+)
+@pytest.mark.parametrize(
+    "shape", ["attributes", "mapping", "list", "scalar", "missing"]
+)
+def test_job_outcome_native_diagnostic_shapes_preserve_failure(status, shape):
+    from hmcpctl.xmlutil import parse_feed
+
+    job = parse_feed(
+        '<entry xmlns="http://www.w3.org/2005/Atom"><id>urn:uuid:job-1</id>'
+        f"<content><JobResponse><JobID>job-1</JobID><Status>{status}</Status>"
+        '<Results><JobParameter><ParameterName ksv="V1_0">ErrorData</ParameterName>'
+        '<ParameterValue ksv="V1_0">native failure</ParameterValue>'
+        "</JobParameter></Results></JobResponse></content></entry>"
+    )[0]
+    parameter = job["Resource"]["Results"]["JobParameter"]
+    if shape != "attributes":
+        parameter["ParameterName"] = {
+            "mapping": {"unexpected": "value"},
+            "list": ["ErrorData"],
+            "scalar": 1,
+            "missing": None,
+        }[shape]
+    outcome = job_outcome("job-1", job)
+    assert outcome.status == status and outcome.timed_out is False
+    assert outcome.job_id == "job-1" and outcome.job is job
+    assert outcome.error == (
+        "native failure" if shape == "attributes" else f"Job ended with status {status}"
+    )

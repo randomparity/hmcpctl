@@ -386,3 +386,62 @@ def deploy_partition_template_job(
             "TemplateUuid": draft_template_uuid,
         },
     )
+
+
+def update_system_profile_job(
+    name: str,
+    new_name: str | None = None,
+    partition_names: tuple[str, ...] | None = None,
+    profile_names: tuple[str, ...] | None = None,
+) -> str:
+    """Build the fixed documented update; optional membership arrays stay paired."""
+    parameters = {"systemProfileName": name}
+    if new_name is not None:
+        parameters["systemProfileNewName"] = new_name
+    if partition_names is not None or profile_names is not None:
+        if (
+            not partition_names
+            or not profile_names
+            or len(partition_names) != len(profile_names)
+        ):
+            raise ValueError(
+                "nonempty equal-cardinality partition/profile names required"
+            )
+        parameters["logicalPartitionNames"] = ",".join(partition_names)
+        parameters["logicalPartitionProfileNames"] = ",".join(profile_names)
+    if len(parameters) == 1:
+        raise ValueError("system-profile update requires a change")
+    return build_job_request("UpdateSystemProfile", "ManagedSystem", parameters)
+
+
+def create_system_profile_job(
+    name: str, partition_names: tuple[str, ...], profile_names: tuple[str, ...]
+) -> str:
+    """Build paired names for one system profile; no save-current shortcut."""
+    if not partition_names or len(partition_names) != len(profile_names):
+        raise ValueError("nonempty equal-cardinality partition/profile names required")
+    return build_job_request(
+        "CreateSystemProfile",
+        "ManagedSystem",
+        {
+            "systemProfileName": name,
+            "logicalPartitionNames": ",".join(partition_names),
+            "logicalPartitionProfileNames": ",".join(profile_names),
+        },
+    )
+
+
+def activate_system_profile_job(name: str, continue_on_error: bool = False) -> str:
+    """Activation-only REST request; validation uses the selected fixed CLI route."""
+    if not isinstance(continue_on_error, bool):
+        raise TypeError("continue_on_error must be boolean")
+    return build_job_request(
+        "ActivateSystemProfile",
+        "ManagedSystem",
+        {
+            "systemProfile": name,
+            "operation": "on",
+            "test": "false",
+            "continue": str(continue_on_error).lower(),
+        },
+    )

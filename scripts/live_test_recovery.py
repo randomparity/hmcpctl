@@ -1757,13 +1757,84 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("test-results-dedicated.json"),
         help="the run's results document (default: %(default)s)",
     )
+    source_packets = parser.add_mutually_exclusive_group()
+    source_packets.add_argument("--source-packet", type=Path)
+    source_packets.add_argument("--activation-source-packet", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.activation_source_packet:
+        from live_test import system_profile_activation_source
+
+        if not args.packet_sha256 or not args.output:
+            parser.error(
+                "activation source recovery requires packet digest and private output"
+            )
+        return system_profile_activation_source.main(
+            [
+                "recover",
+                "--packet",
+                str(args.activation_source_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+                "--output",
+                str(args.output),
+            ]
+        )
+    if args.output:
+        parser.error("--output requires --activation-source-packet")
+    if args.source_packet:
+        from live_test import system_profile_source
+
+        if not args.packet_sha256:
+            parser.error("source recovery requires --packet-sha256")
+        return system_profile_source.main(
+            [
+                "recover",
+                "--packet",
+                str(args.source_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+            ]
+        )
+    if args.packet_sha256:
+        parser.error("--packet-sha256 requires --source-packet")
 
     try:
         document = json.loads(args.results.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         print(f"ERROR: cannot read {args.results}: {error}", file=sys.stderr)
         return 2
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "system-profiles"
+    ):
+        from live_test import system_profiles
+
+        if not runner._bootstrap_config():
+            print(
+                "system-profiles recovery unreadable: credentials unavailable",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            asyncio.run(system_profiles.recover_document(HMCConfig(), document))
+        except Exception as exc:  # noqa: BLE001 — any unreadable/partial evidence must refuse CLEAN
+            print(
+                f"system-profiles recovery unconfirmed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: system-profile original baseline and finite terminal sequence confirmed"
+        )
+        return 0
 
     subtasks = dispatched_subtasks(document)
     if subtasks is None:

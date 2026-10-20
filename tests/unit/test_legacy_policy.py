@@ -325,10 +325,11 @@ def test_uom_user_replacement_reduces_unboundable_tool_count():
     # added hmc_inventory, #1221 hmc_plan_lpar, #1223 hmc_power_lpar and #1224
     # hmc_inspect_lpar, each one more connection-bearing.
     # #1726 adds one connection-bearing all-targets artifact deletion tool.
-    assert len(unboundable) == 33
-    assert len(connection_bearing) == 26
+    # #1725 adds four connection-bearing all-targets system-profile mutations.
+    assert len(unboundable) == 37
+    assert len(connection_bearing) == 30
     assert len(connectionless) == 7
-    assert len(all_nonexhaustive) == 34
+    assert len(all_nonexhaustive) == 38
 
 
 # ---------------------------------------------------------------------------

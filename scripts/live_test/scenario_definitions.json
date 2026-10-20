@@ -600,6 +600,17 @@
       "expected": "success"
     },
     {
+      "scenario": "st100-system-profile-list",
+      "operation": "system_profile.list",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
       "scenario": "st100-task-role-list",
       "operation": "task_role.list",
       "class": "read-only",

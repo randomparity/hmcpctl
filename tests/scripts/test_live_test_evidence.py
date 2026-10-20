@@ -319,3 +319,25 @@ def test_a_complete_or_older_run_renders_as_before(tmp_path, capsys, partial):
     assert "PARTIAL" not in output
     assert "Subtasks dispatched: `[24]`" in output
     assert "Finished: `2026-09-21T10:00:00+00:00`" in output
+
+
+def test_system_profiles_private_filtered():
+    document = _document()
+    document["run"]["group"] = "system-profiles"
+    document["run"]["subtasks"] = [44]
+    document["artifacts"] = {
+        "system_profile_baseline": {"private": _SENTINEL},
+        "system_profile_jobs": [{"private": _SENTINEL}],
+    }
+    document["config"] = {"system_profile_members_json": _SENTINEL}
+    document["results"] = [
+        {
+            "subtask": 44,
+            "tool": "hmc_create_system_profile",
+            "status": "PASS",
+            "data": _SENTINEL,
+        }
+    ]
+    rendered = evidence.render(document)
+    assert rendered is not None and _SENTINEL not in rendered
+    assert "hmc_create_system_profile" in rendered

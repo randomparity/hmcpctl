@@ -1155,3 +1155,285 @@ The evidence generator stamps the actual tested commit and filters identifiers.
 Keep raw results private. Not-run/skipped/failed is not passing live evidence,
 and no artifact operation is promoted merely because its source-format read
 was captured. No native run is authorized by this procedure's presence.
+
+
+## Metadata-only system-profile source capture
+
+This narrowly selected source arm captures the unknown GetSystemProfiles association response.
+It is not the system-profile product lifecycle or passing activation evidence. It references
+exactly two existing regular AIX/Linux partitions and their differently named contained
+profiles without changing their profiles, power, descriptions, ownership or defaults. Only
+one unique scratch **system profile** is created, read and deleted. There is no Update,
+activation, validation, restore, arbitrary command or generic job parameter surface.
+
+A private immutable candidate packet binds the configured connection, host, managed system,
+two partition/profile identities, names, power and ownership observations, and reserved scratch
+name. Its SHA-256 is pinned by the operator. Existing unowned reference targets need explicit
+source-only approval; the arm does not stamp them or bypass product ownership policy.
+The flags below are operator assertions, not credentials or proof of permission. Obtain and
+record the exact native grant before capture; interface approval alone is insufficient.
+
+On the isolated, exact deployed source-probe revision, use private paths outside the checkout:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group system-profile-source \
+  --packet "$PACKET" --packet-sha256 "$PACKET_SHA256"
+```
+
+Preflight resolves and checks the effective pinned host/port before client construction or
+authentication, then only reads the exact contained references and name-only namespace.
+It rejects changed bindings, profile association, power/ownership observations or scratch-name
+collision. It does not load a fallback default scenario or infer an execution grant.
+Only after the operator approves the exact targets/effects, source revision and cleanup:
+
+```sh
+uv run --no-sync python scripts/live_system_profile_source.py capture \
+  --packet "$PACKET" --packet-sha256 "$PACKET_SHA256" --output "$PRIVATE_NEW_DIRECTORY" \
+  --grant-packet-sha256 "$PACKET_SHA256" --references-approved --exclusive-writer-window
+```
+
+The coordinated writer interval begins before preflight and continues through terminal job and
+cleanup reconciliation. The arm checks complete member-profile/name/power/ownership baselines
+and scratch absence again immediately before Create. A bounded private atomic journal records
+partial execution before submission, submission identity and terminal results separately.
+Failed/warning/nonterminal status, nonzero return code, interruption, ambiguity or drift stops
+further domain writes; there is no replay or automatic rollback. Retain the journal and job
+handles for manual reconciliation. A timeout does not cancel the job or release coordination.
+Only definite scratch creation followed by unchanged member baselines and exactly the expected
+namespace permits one Delete. Get's raw unknown membership grammar is never cleanup authority.
+The stable submission JobID, canonical UOM SELF path and terminal JobID/path must agree;
+contradictions or reused effective handles stop before polling/cleanup. The shared generic
+client compatibility policy is unchanged. Own successful jobs are removed only after saving
+their identity-consistent terminal results. Files have private permissions;
+raw captures must remain private and outside the checkout.
+
+After every attempt, including an apparently successful one, run the independent read-only witness:
+
+```sh
+uv run --no-sync python scripts/live_test_recovery.py \
+  --source-packet "$PACKET" --packet-sha256 "$PACKET_SHA256" \
+  --results "$PRIVATE_NEW_DIRECTORY/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE_NEW_DIRECTORY/results.json"
+```
+
+Recovery requires a coherent completed group/phase/timestamp and exactly three ordered,
+successful, identity-consistent, cleaned own-job records; a false partial flag alone proves
+nothing. Scratch must be absent in both the purported original and independently read namespace.
+Recovery submits or deletes no job and changes no hardware. It independently compares the
+pinned namespace and complete member-profile baselines, and refuses partial runs or changed
+packet bindings. A failed/unreadable witness is not clean. The source journal records the exact
+revision anchored to the source checkout, the renderer-compatible `tree_clean` flag, packet
+identities and harness digest. CLI failures return a sanitized summary without a native
+traceback; raw failure details are retained only in an owned private capture journal. The evidence renderer's
+allowlist excludes raw native fields; source capture does not create maturity observations or
+substitute for a final deployed product test. No native run is authorized by these instructions.
+
+## New-owned-fixture system-profile activation calibration
+
+The `system-profile-activation-source` arm is a bounded source investigation, separate from
+metadata-only capture and the product lifecycle. It is never included in `all`, `round2` or
+any default arm. It creates exactly two new owned regular AIX/Linux fixtures, four contained
+profiles (one baseline and one witness per fixture), and at most two scratch system profiles.
+It attaches no disks, network, storage or physical IO. Each fixture has dedicated memory,
+shared **capped** CPU, one virtual CPU, 0.05 processing units and at most 1024 MiB memory.
+The aggregate ceilings are two virtual CPUs, 0.10 processing units and 2048 MiB memory.
+
+Current investigation authority and the immutable target binding are private. All future campaign
+hardware tests are restricted to the operator-selected isolated test context; previous-context
+packets are historical evidence and cannot authorize another run. A separate explicit fixture
+lifecycle/activation/stop/cleanup grant is required; source flags, documentation and successful
+preflight do not provide permission. The existing reference-only grant cannot be reused.
+No existing partition, profile, description, power state, ownership, storage or network is changed.
+Failed jobs from previous investigations remain retained. The earlier metadata source capture
+failed at its documented REST Delete request; separate cleanup restored its baseline. That failed
+capture is not a passing native procedure or activation proof, and its consumed grant cannot be replayed.
+
+The private mode 0600 effect packet has exactly `binding_json`, `grant`, `owner`, `caller_token`,
+`negative_cases`, `tested_commit`, `tested_tree` and `baseline_sha256`. `binding_json` contains the
+byte-exact separately reviewed restricted-target binding, whose digest is pinned in this source
+arm. The configured profile/effective endpoint/port/user/owner must agree before authentication;
+ambient host overrides are refused and the already validated port is made explicit to prevent
+legacy port fallback. `tested_commit` and `tested_tree` must name the exact clean deployed checkout.
+`owner` is its existing configured agent identity, never an ownership override.
+
+Prepare the packet outside the checkout with `baseline_sha256: null` for the first read-only
+preflight. It returns `results.json` containing `observed`. Bind the canonical SHA-256 of its
+`partitions`, `namespace` and `system_auto_off` fields (using the repository source `digest` convention) into the
+final packet's `baseline_sha256`, and independently review its exact bytes/digest/effects.
+Re-run the same preflight with that final packet; changed baseline or capacity refuses effects.
+Fresh private directories must not already exist:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py \
+  --group system-profile-activation-source --packet "$PACKET" \
+  --packet-sha256 "$PACKET_SHA256" --output "$PRIVATE/preflight"
+```
+
+Preflight reads only the bound target's identity/state/capacity, partition/profile inventory and
+system-profile namespace. It checks documented resource shape, available capacity, unique identities
+and absent reserved names. Invalid, ambiguous or unreadable data refuses admission. It neither
+creates a job nor infers that native role permissions allow execution.
+
+Every mutation-facing observation requires explicit native
+`AssociatedIPLConfiguration.PowerOffWhenLastLogicalPartitionIsShutdown=false`. True, missing or
+invalid policy refuses effects: stopping the final fixture must not power off the managed system.
+The arm never changes that system policy. A separately authorized operator policy decision and
+source-backed preparation are required if the restricted target currently enables automatic power-off.
+The admitted writer interval includes preserving this one system policy and the new fixture/profile/
+scratch namespaces; it does not claim exclusivity over unrelated existing partitions or actors.
+
+Only after focused offline faults, exact-candidate full verification and pinned hooks, independent
+source/security review, isolated deployment and actual preflight have passed, and the orchestrator
+has verified the concrete effect packet against the explicit grant:
+
+```sh
+uv run --no-sync python scripts/live_system_profile_activation_source.py capture \
+  --packet "$PACKET" --packet-sha256 "$PACKET_SHA256" --output "$PRIVATE/capture" \
+  --grant-packet-sha256 "$PACKET_SHA256" --exclusive-writer-window
+```
+
+Creation uses one preselected existing CLI transport with every resource field explicit; no
+`all_resources=1`, retry or backend fallback. The initial ownership stamp applies only to the
+just-created UUID. A missing/mismatched stamp stops all later writes. Every profile/power/delete
+operation freshly verifies the same UUID/name/owner/caller, contained profile fingerprints,
+resource ceilings and unrelated baseline through the existing ownership authorizer, unconditionally.
+The source arm does not turn an ownership-enforcement setting into an execution grant.
+
+Both complete-path members must be shut down before validation/activation. Memory changes from
+512MiB baseline to 1024 MiB witness profiles; saved desired memory is never substituted for independent
+current/runtime observations. Job terminal facts, `LastActivatedProfile`, associated-profile UUID,
+CLI `curr_profile`, actual memory/CPU and power facts are captured separately. Consistent calibration
+is **not** universal proof of requested-profile application or complete activation. Unknown or
+contradictory facts stop all later effects, including teardown, and retain manual reconciliation;
+no power-only classifier exists. Running fixtures require both actual memory observations; inactive
+pre-activation fixtures may legitimately omit runtime memory.
+
+`negative_cases: true` selects two closed optional source experiments: fixture B remains running,
+fixture A is stopped, and an ordered B/A record requests their distinct baseline profiles. This
+intentionally violates the normal shutdown prerequisite. The once-only no-continue case may fail,
+skip or succeed; no outcome is predeclared partial activation. The distinct once-only continue case
+runs only if independent observations show the first case left the exact original mixed baseline.
+It is not an automatic retry. Both cases preserve raw diagnostics and leave partial-effect attribution
+unproven pending analysis. Their actual native failed terminal statuses remain FAIL evidence rows
+and a nonzero capture exit, even after independently proven baseline restoration. No resource exhaustion, shared IO or
+missing-profile fault is introduced.
+
+This source arm always reads system-profile membership through the existing audited fixed CLI
+`lssyscfg -r sysprof -m <bound-system> -F name:lpar_ids:profile_names --header`.
+At most four whole-inventory reads replace GetSystemProfiles jobs: after each scratch create and
+before each scratch delete. Unique complete rows, ordered ID/profile pairs and current owned
+UUID/name/ID/contained-profile bindings must agree with fresh observations. Unknown encodings,
+extra diagnostics, stale IDs or incomplete associations stop later effects. Power/resource checks
+remain phase appropriate; running and open firmware are distinct known powered states, with the
+same actual memory/CPU checks. Starting and unknown/transitional states stop later writes.
+Mixed/teardown reads and normal immediate-stop requests use that same stable subset; raw firmware
+state is never rewritten as running or treated as guest-OS boot proof.
+
+The finite journal retains each bounded raw read, its effect position and complete fresh observation;
+recovery verifies the exact read sequence and associations. The maximum domain-job count is eight,
+with no GetSystemProfiles or validation REST submissions or automatic fallback. Historical REST Get evidence with
+ambiguous ErrorData and its retained job remain unresolved; this CLI experiment does not prove
+product REST Get support or requested-profile activation. No product maturity follows from it.
+
+Required source validation uses exactly one fixed CLI command:
+`chsysstate -m <bound-system> -r sysprof -n <exact-scratch> --test` (no `-o` or continuation).
+The existing transport must return native exit0 and no stderr marker; bounded stdout is retained
+without an English success classifier. Fresh normal guards and independent facts must be unchanged
+before/after. A single fixed-position command proof stores raw output, exact command and complete
+phase observations/facts; recovery rechecks normal ownership/current identities/contained profiles,
+original baseline, namespace, safe policy, inactive state and unique current IDs. Missing, duplicate,
+reordered or contradictory proofs refuse CLEAN. Historical REST validation warnings and their retained
+job remain unresolved; this source-only backend does not change product job status semantics.
+
+Optional N2 requires N1 to leave the same known mixed baseline. Only a newly created fixture's
+powered `Uptime.text` may increase: bounded nonnegative native long, unchanged attributes and every
+other fact exact. Preserve raw observations and store N2's fresh admission facts; recovery checks
+both monotonic links from N1 before to after to N2 before. A running/open-firmware state change
+skips N2, while missing/malformed/decreased counters or unknown facts refuse progression. Original
+member baselines and inactive validation proofs remain exact, including uptime. Saved powered
+facts retain the same normal ownership/profile/resource checks as live observations.
+
+A private atomic journal records intent before effects, created identities, complete finite request/
+effect/job sequence and raw observations. Reused or inconsistent job handles, nonterminal outcome,
+interruption, drift, unconfirmed ownership or unknown power stops writes and retains coordination.
+Own successful jobs are removed only after saving strict identity-consistent terminal/code success;
+failed jobs are permitted only at the exact optional negative stages and remain undeleted.
+Every required job stage must have confirmed strict success and own-job removal. Teardown is limited to known-owned new fixtures after known outcomes:
+freshly verify scratch associations before fixed CLI sysprof deletion, stop only the new fixtures,
+then delete only their same authorized UUIDs. There is no exception-driven rollback or name-only
+cleanup. A timeout is not cancellation or permission to release coordination.
+
+Run independent **read-only** recovery on every outcome, including interruption or apparent success:
+
+```sh
+uv run --no-sync python scripts/live_test_recovery.py \
+  --activation-source-packet "$PACKET" --packet-sha256 "$PACKET_SHA256" \
+  --results "$PRIVATE/capture/results.json" --output "$PRIVATE/recovery"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/capture/results.json"
+```
+
+Recovery records fresh inventory even for an incomplete journal. CLEAN requires the packet-bound
+original namespace/member baseline, absence of all fixtures and scratch names, and a coherent
+completed finite effect/job/read-proof record; a forged partial flag cannot establish completion. It submits
+or deletes no job and cannot upgrade a failed/unproven capture. It records full fresh inventory and
+explicit policy safety even when current policy is unsafe; unsafe policy refuses CLEAN after the read. Raw packet/journals/schema and
+member identifiers remain private; the standard evidence renderer stamps the tested commit and
+exports only allowlisted structural fields. No native evidence or maturity promotion follows from
+mocked-boundary tests, preparation or this document. Product scope-audit activation finding remains
+open until source-backed analysis resolves it.
+
+### Product system-profile lifecycle arm
+
+The named `system-profiles` arm exercises the product CLI/MCP domain contract. It is
+separate from the source-calibration arms and does not inherit their target or fixture
+permissions. Use the repository live-testing procedure for applicable native hardware proofs.
+A new scoped operator grant must name the selected system, every existing member/profile,
+any ownership override, and any activation/resource effects before execution. Configuration
+flags are assertions, not an HMC grant or a fence against independent writers.
+
+Add these optional settings to the existing complete private live-test configuration:
+
+```dotenv
+LIVE_TEST_SYSTEM_PROFILE_MEMBERS_JSON=[{"partition":"<member-A>","profile":"<contained-profile-A>"},{"partition":"<member-B>","profile":"<contained-profile-B>"}]
+LIVE_TEST_SYSTEM_PROFILE_WRITER_WINDOW=true
+LIVE_TEST_SYSTEM_PROFILE_ACTIVATION_ACTION=none
+LIVE_TEST_SYSTEM_PROFILE_CONTINUE_ON_ERROR=false
+LIVE_TEST_SYSTEM_PROFILE_OWNERSHIP_OVERRIDE=false
+```
+
+The default metadata scenario creates two unpredictable system profiles, lists both through
+the product reader, performs rename-only, replacement-only and combined updates, then deletes
+only its two current names. Four candidate names must be absent before the first effect.
+Every member follows normal ownership policy; missing evidence, collision, drift or an unknown
+outcome stops later writes. The arm persists the exact pending stage before each effect through
+the runner's existing private recovery sidecar. An unwritable checkpoint prevents dispatch.
+It creates no partition, storage, network, ownership stamp or automatic power-off operation.
+
+`validate` selects the fixed CLI test route. `activate` selects REST activation-only;
+`validate-and-activate` selects one fixed combined CLI command. Activating variants require a
+separate explicit power/resource grant and caller coordination through known terminal
+reconciliation. A complete witness needs inactive members with absent/different prior profiles,
+new matching CLI/last-activated/contained-profile identities, and coherent actual resources.
+An already-matching baseline or an uncalibrated resource shape remains unknown. No universal
+saved-field application or guest-boot proof is claimed. Unknown/failed activation leaves its
+names and handles for manual reconciliation; there is no automatic retry, fallback or rollback.
+Known activation effects remain separate from the immutable original baseline; recovery cannot
+call a changed power/resource baseline clean. Native jobs are retained, including failures.
+
+After exact deployed HEAD/import/locked-input checks and a new scoped grant, use a fresh private
+results path outside the checkout:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group system-profiles
+uv run --no-sync python scripts/live_system_profiles.py --results-file "$PRIVATE/test-results-system-profiles.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$PRIVATE/test-results-system-profiles.json"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/test-results-system-profiles.json"
+```
+
+Preflight performs read-only complete inventory/member/profile/ownership admission. Its
+`--skip-hardware` variant establishes configuration only. Independent recovery always rereads
+current state and requires both original-baseline equality and the complete finite terminal
+sequence. Missing stages, retained residue, partial execution or unreadable evidence are not
+CLEAN. Run it after every outcome, including interruption. Preserve raw results privately;
+only the standard evidence renderer filters them for public use. Product native proof has not
+run merely because the offline arm tests or historical source calibration passed.

@@ -815,3 +815,28 @@ def test_lpar_config_discloses_configured_dedicated_slot():
     )
     verdict = preflight._lpar_config_verdict(config)
     assert any("21010020" in target for target in verdict.mutates)
+
+
+def test_system_profiles_preflight(monkeypatch):
+    import json
+    from unittest.mock import AsyncMock
+
+    from live_test import system_profiles
+
+    config = live_config.LiveTestConfig(
+        system_profile_members_json=json.dumps(
+            [
+                {"partition": "a", "profile": "base"},
+                {"partition": "b", "profile": "base"},
+            ]
+        ),
+        system_profile_writer_window=True,
+    )
+    monkeypatch.setattr(preflight, "_check_configuration", lambda: (config, ""))
+    monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
+    probe = AsyncMock(return_value={})
+    monkeypatch.setattr(system_profiles, "preflight", probe)
+    assert preflight.main(["--group", "system-profiles"]) == 0
+    probe.assert_awaited_once()
+    probe.side_effect = ValueError("drift")
+    assert preflight.main(["--group", "system-profiles"]) == 2
