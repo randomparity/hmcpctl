@@ -271,12 +271,12 @@ def test_version_derives_from_release_tags(
         str(clone),
         cwd=tmp_path,
     )
-    target = {
-        "tag": "v0.1.0",
-        "dirty": "v0.1.0",
-        "one-past": first_commit_after_release(clone) if case == "one-past" else "",
-        "no-tags": "HEAD",
-    }[case]
+    if case == "one-past":
+        target = first_commit_after_release(clone)
+    elif case == "no-tags":
+        target = "HEAD"
+    else:
+        target = "v0.1.0"
     git("checkout", "--quiet", "--detach", target, cwd=clone)
     if case == "dirty":
         with (clone / "README.md").open("a", encoding="utf-8") as readme:
