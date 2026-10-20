@@ -14,7 +14,7 @@ import pytest
 
 from hmcpctl.audit import records as audit
 from hmcpctl.audit import sink as audit_sink
-from hmcpctl.config import validate_agent_id
+from hmcpctl.config import AGENT_ID_FORBIDDEN, validate_agent_id
 from hmcpctl.operations.lpar import core as operations_lpar
 from hmcpctl.operations.lpar import ownership as lpar_ownership
 from hmcpctl.operations.lpar.ownership import (
@@ -89,6 +89,13 @@ def test_validate_agent_id_double_quote():
 def test_validate_agent_id_backslash():
     with pytest.raises(ValueError, match="backslash"):
         validate_agent_id("agent\\x")
+
+
+def test_agent_id_description_names_every_refused_character():
+    description = HMCConfig.model_fields["agent_id"].description
+    assert description is not None
+    for character in AGENT_ID_FORBIDDEN:
+        assert ("space" if character == " " else f"`{character}`") in description
 
 
 def test_validate_agent_id_non_ascii():

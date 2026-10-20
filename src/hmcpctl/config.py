@@ -61,6 +61,29 @@ _override_report_lock = threading.Lock()
 _CERT_FINGERPRINT = re.compile(r"[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){31}")
 
 
+#: Every character ``validate_agent_id`` refuses, with the reason. The
+#: ``HMCConfig.agent_id`` description is built from the keys, so the two cannot drift.
+AGENT_ID_FORBIDDEN = {
+    ",": "commas corrupt the HMC CLI -i parser",
+    "=": "equals signs corrupt the HMC CLI -i parser",
+    '"': "double quotes are the HMC CLI -i record escape",
+    "[": "brackets break the ownership token format",
+    "]": "brackets break the ownership token format",
+    "/": "the HMC REST API rejects '/' in X-Audit-Memento",
+    ":": "colons make audit and ownership token formats ambiguous",
+    "\\": "backslash behaviour inside an HMC CLI -i record is unverified (ADR 0045)",
+    " ": "spaces corrupt the ownership token in the CLI -i parser",
+}
+
+
+def _agent_id_refused_characters() -> str:
+    """Name each refused character for help text, spelling out the space."""
+    return ", ".join(
+        "space" if character == " " else f"`{character}`"
+        for character in AGENT_ID_FORBIDDEN
+    )
+
+
 def validate_agent_id(agent_id: str) -> None:
     """Validate an agent identifier used in audit and ownership tokens."""
     if not agent_id:
@@ -76,19 +99,7 @@ def validate_agent_id(agent_id: str) -> None:
             "agent_id contains non-ASCII or non-printable characters; "
             "only printable ASCII is accepted"
         )
-    forbidden = {
-        ",": "commas corrupt the HMC CLI -i parser",
-        "=": "equals signs corrupt the HMC CLI -i parser",
-        '"': "double quotes are the HMC CLI -i record escape",
-        "[": "brackets break the ownership token format",
-        "]": "brackets break the ownership token format",
-        "/": "the HMC REST API rejects '/' in X-Audit-Memento",
-        ":": "colons make audit and ownership token formats ambiguous",
-        "\\": "backslash behaviour inside an HMC CLI -i record is unverified "
-        "(ADR 0045)",
-        " ": "spaces corrupt the ownership token in the CLI -i parser",
-    }
-    for character, reason in forbidden.items():
+    for character, reason in AGENT_ID_FORBIDDEN.items():
         if character in agent_id:
             raise ValueError(f"agent_id contains {character!r}; {reason}")
 
@@ -244,10 +255,9 @@ class HMCConfig(BaseSettings):
         description=(
             "Per-agent identifier folded into the X-Audit-Memento header as "
             "hmcpctl:<agent_id>. Used for multi-agent LPAR ownership attribution. "
-            "Must be 1–64 printable ASCII characters with no commas, = signs, "
-            "square brackets, double quotes, or backslashes — any of those would "
-            "corrupt the ownership stamp in the HMC CLI -i parser or the "
-            "description grammar. (HMC_AGENT_ID)"
+            "Must be 1–64 printable ASCII characters and must not contain "
+            f"{_agent_id_refused_characters()} — any of those would corrupt "
+            "the ownership stamp or the audit memento. (HMC_AGENT_ID)"
         ),
     )
 
