@@ -4,7 +4,7 @@ Manage IBM Power systems from your terminal or an AI assistant. hmcpctl connects
 to the IBM Hardware Management Console (HMC) to inventory systems, inspect LPARs
 and VIOS partitions, manage resources, and run lifecycle operations.
 
-Use it as a CLI, an MCP server, or a [Python library](https://github.com/randomparity/hmcpctl/blob/main/docs/python-api.md).
+Use it as a CLI, an MCP server, or a [Python library](docs/python-api.md).
 MCP access policies control which tools, connections, and targets an assistant can use.
 
 ## Install
@@ -45,10 +45,10 @@ Existing pre-release installations must use the one-time
 
 You need network access to an HMC and an HMC account with permissions for your
 intended operations. The project targets HMC V8–V11; individual operations have
-[version and firmware limits](https://github.com/randomparity/hmcpctl/blob/main/docs/compatibility.md).
+[version and firmware limits](docs/compatibility.md).
 Release 0.1.0 claims live verification for 15 system, LPAR, job and dedicated-PCIe
 operations on HMC V10R3; the
-[compatibility page](https://github.com/randomparity/hmcpctl/blob/main/docs/compatibility.md#what-010-supports)
+[compatibility page](docs/compatibility.md#what-010-supports)
 lists them and shows how to check any other operation's state.
 
 ## Configure
@@ -74,7 +74,7 @@ hmcpctl console info
 ```
 
 This prints HMC information after a successful logon. Some operations also use
-SSH; see [configuration](https://github.com/randomparity/hmcpctl/blob/main/docs/configuration.md)
+SSH; see [configuration](docs/configuration.md)
 for SSH credentials, TOML profiles, friendly nicknames, and connection precedence.
 For multiple consoles, start with `hmcpctl config init` and edit the file it prints.
 
@@ -103,7 +103,7 @@ guards still apply. MCP access policies apply only to the MCP server; shell
 commands run under your HMC credentials.
 
 Use `hmcpctl --help` or `hmcpctl lpars --help` to explore.
-The [CLI guide](https://github.com/randomparity/hmcpctl/blob/main/docs/cli.md)
+The [CLI guide](docs/cli.md)
 covers storage, adapters, snapshots, provisioning, and job output.
 
 ## MCP quick start
@@ -126,7 +126,7 @@ targets = "all-targets"
 
 This permits read tools across the default HMC. Read tools can also disclose
 local profile and policy metadata; see the
-[policy scope guide](https://github.com/randomparity/hmcpctl/blob/main/docs/mcp-server.md#what-the-policy-does-not-bound).
+[policy scope guide](docs/mcp-server.md#what-the-policy-does-not-bound).
 
 With the connection environment above available, start the server over stdio:
 
@@ -164,16 +164,16 @@ Call `hmc_effective_permissions` to inspect the active policy.
 
 An access policy is required. For broader permissions, migration from older
 deployments, audit logging, and HTTP setup, see the
-[MCP server guide](https://github.com/randomparity/hmcpctl/blob/main/docs/mcp-server.md).
+[MCP server guide](docs/mcp-server.md).
 HTTP is unauthenticated: keep it on loopback or put an authenticated proxy in front.
 
 ## Documentation
 
-- [Documentation index](https://github.com/randomparity/hmcpctl/blob/main/docs/index.md) — guides and reference.
-- [MCP tool reference](https://github.com/randomparity/hmcpctl/blob/main/docs/tools/index.md) — available tools, their effects, and one-line summaries.
-- [Environment variables](https://github.com/randomparity/hmcpctl/blob/main/docs/environment-variables.md) — all connection and operation settings.
-- [Operation details](https://github.com/randomparity/hmcpctl/blob/main/docs/operations.md) — selectors, units, limits, and firmware-specific behavior.
-- [Development guide](https://github.com/randomparity/hmcpctl/blob/main/docs/development.md) — stack, testing, source layout, and HMC API internals.
+- [Documentation index](docs/index.md) — guides and reference.
+- [MCP tool reference](docs/tools/index.md) — available tools, their effects, and one-line summaries.
+- [Environment variables](docs/environment-variables.md) — all connection and operation settings.
+- [Operation details](docs/operations.md) — selectors, units, limits, and firmware-specific behavior.
+- [Development guide](docs/development.md) — stack, testing, source layout, and HMC API internals.
 
 ## Contributing, security, and license
 

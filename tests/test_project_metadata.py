@@ -15,6 +15,11 @@ PROJECT_URLS = {
     "Security": "https://github.com/randomparity/hmcpctl/security/policy",
 }
 PRIVATE_ADVISORY_URL = "https://github.com/randomparity/hmcpctl/security/advisories/new"
+SELF_FILE_URLS = (
+    "github.com/randomparity/hmcpctl/blob/",
+    "github.com/randomparity/hmcpctl/tree/",
+)
+INLINE_LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
 GOVERNANCE_HEADING = "## Contributing, security, and license"
 GOVERNANCE_NEXT = None
 CONTRIBUTING_HEADING = "# Contributing"
@@ -128,6 +133,20 @@ def test_governance_links_relocated_out_of_their_section_are_caught() -> None:
     assert all(link in relocated for link in POLICY_LINKS.values())
     moved = _section(relocated, GOVERNANCE_HEADING, GOVERNANCE_NEXT)
     assert [link for link in POLICY_LINKS.values() if link in moved] == []
+
+
+def test_readme_links_repository_files_relatively() -> None:
+    """ADR 0251: a relative link resolves at the ref the reader is viewing."""
+    readme = (ROOT / "README.md").read_text()
+
+    assert [url for url in SELF_FILE_URLS if url in readme] == []
+    relative = [
+        target.split("#", 1)[0]
+        for target in INLINE_LINK_TARGET.findall(readme)
+        if "://" not in target and not target.startswith("#")
+    ]
+    assert relative
+    assert [path for path in relative if not (ROOT / path).exists()] == []
 
 
 def test_library_guide_documents_the_typed_facade_and_its_covered_surface() -> None:
