@@ -450,6 +450,8 @@ _IPV6 = re.compile(
     r"(?i)(?P<escape>\\\\?(?:[bfnrt]|u[0-9a-f]{4})|\\\\)"
     rf"(?P<address>{_IPV6_CANDIDATE}|(?<=\\[bf])(?::[0-9a-f]{{0,4}}){{2,7}}\b)?"
     rf"|\b{_IPV6_CANDIDATE}"
+    # `::`, `::1`: no hex group opens them, so no word boundary precedes them either.
+    r"|(?<![\w:])::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?(?![\w:])"
 )
 
 

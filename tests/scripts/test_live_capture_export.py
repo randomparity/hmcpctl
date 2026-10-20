@@ -3159,6 +3159,38 @@ def test_ipv6_backstop_keeps_non_addresses_and_placeholder(value: str) -> None:
     assert export._ipv6_leaks(value) == []
 
 
+@pytest.mark.parametrize("encode", [str, json.dumps], ids=["raw", "json"])
+@pytest.mark.parametrize(
+    ("value", "written"),
+    [
+        ("::", "2001:db8::1"),
+        ("::1", "2001:db8::1"),
+        ("::/::", "2001:db8::1/2001:db8::1"),
+    ],
+)
+def test_address_opening_with_double_colon_is_scrubbed(
+    value: str, written: str, encode: Any
+) -> None:
+    """V11R2 serves a VMI `Gateway` of `::` and console rules of `::/::`.
+
+    The scrub rule wanted a hex group before the first colon and kept them, so the
+    backstop, which counts them as addresses, refused the export.
+    """
+    tok = export.Tokenizer({}, set())
+    body = encode(f'<Root><Gateway kb="ROO">{value}</Gateway></Root>')
+    scrubbed = tok.tokenize(body)
+    assert scrubbed == body.replace(value, written)
+    assert tok.leaks(scrubbed) == []
+
+
+@pytest.mark.parametrize("text", ["ns::IPAddress", "Partition::State"])
+def test_double_colon_inside_a_word_is_not_an_address(text: str) -> None:
+    assert (
+        export.Tokenizer({}, set()).tokenize(f"<Note>{text}</Note>")
+        == f"<Note>{text}</Note>"
+    )
+
+
 def test_ipv6_backstop_bounds_each_candidate() -> None:
     # Oversized runs must be consumed once, with no repeated suffix validation.
     assert export._ipv6_leaks("a:" * 100_000 + " a" * 100_000) == []
