@@ -244,14 +244,18 @@ during the freeze. For 0.1.0 that work is #1468.
 Contributors record each user-facing change under `[Unreleased]` in `CHANGELOG.md`, in the
 usual [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories, ADR 0118 facade
 changes included. A release's changelog entry keeps those itemized categories, and it is also
-the GitHub release body. At the cut it gains:
+the GitHub release body. From 0.2.0 on, the entry has this order under its
+`## [X.Y.Z] - YYYY-MM-DD` heading:
 
-- a short statement of the release's scope and the consumer contract it serves;
-- a **Verified** section naming the claimed operations, each verified `current` at the gate;
-  and
-- a **Known issues** list that names concrete problems, including the global
-  verification counts from the [evidence gate](#evidence-gate). Every release's entry needs
-  one; an entry without it is incomplete.
+1. a short statement of the release's scope and the consumer contract it serves;
+2. a **Verified** section naming the claimed operations, each verified `current` at the gate;
+3. a **Known issues** list that names concrete problems, including the global verification
+   counts from the [evidence gate](#evidence-gate). Every release's entry needs one; an entry
+   without it is incomplete; and
+4. the itemized Keep a Changelog categories (`### Added`, `### Changed`, and so on).
+
+The scope statement leads, as in the 0.1.0 entry, so a reader of the release body meets what
+the release is for before the itemized changes.
 
 0.1.0 is the one exception: the first release, with nothing shipped before it, so its entry
 carries no itemized changes. Its itemized pre-release history was dropped from the changelog,
@@ -268,7 +272,7 @@ release.
    must then pass, because `uv sync --locked` in `just setup` refuses a lock that disagrees.
    Cut the changelog: move the `[Unreleased]` entries under a dated `## [X.Y.Z] - YYYY-MM-DD`
    heading in `CHANGELOG.md`, keeping their categories, and add the scope statement,
-   **Verified** and **Known issues** sections described under
+   **Verified** and **Known issues** sections ahead of them, in the order given under
    [docs and changelog](#docs-and-changelog) (`tests/unit/test_changelog.py` requires the
    declared version to have a heading). Point the changelog's link references at
    `vX.Y.Z` (the `[unreleased]` compare base and an `[X.Y.Z]` tag link), and update the
