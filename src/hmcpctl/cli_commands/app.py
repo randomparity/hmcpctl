@@ -189,6 +189,16 @@ def main(
             "SSL_CERT_FILE and --trust-system-store."
         ),
     ),
+    cert_fingerprint: str | None = typer.Option(
+        None,
+        "--cert-fingerprint",
+        envvar="HMC_CERT_FINGERPRINT",
+        help=(
+            "SHA-256 fingerprint (AA:BB:...) of the HMC's TLS certificate to trust. "
+            "When --verify-ssl is on, the connection proceeds only if the certificate "
+            "matches. --ca-bundle takes precedence."
+        ),
+    ),
     profile: str | None = typer.Option(
         None,
         "--profile",
@@ -203,6 +213,7 @@ def main(
         "verify_ssl",
         "trust_system_store",
         "ca_bundle",
+        "cert_fingerprint",
         "profile",
     )
     command_line_options = frozenset(
@@ -217,6 +228,7 @@ def main(
         verify_ssl=verify_ssl,
         trust_system_store=trust_system_store,
         ca_bundle=ca_bundle,
+        cert_fingerprint=cert_fingerprint,
         profile=profile,
         command_line_options=command_line_options,
     )

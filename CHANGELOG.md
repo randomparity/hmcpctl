@@ -4,7 +4,9 @@ All notable user-facing changes to this project are recorded in this file. The f
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): changes collect under
 `[Unreleased]` in its usual categories until a release is cut. Each release's entry keeps those
 itemized changes and adds a scope statement, a **Verified** section naming the operations
-verified live for it, and a **Known issues** section. The entry is also the GitHub release body.
+verified live for it, and a **Known issues** section, in the order set out under
+[Docs and changelog](docs/development.md#docs-and-changelog). The entry is also the GitHub
+release body.
 
 0.1.0 is the exception. As the first release it has no itemized changes: nothing shipped before
 it, and its pre-release development history is in the git history, not in this file.
@@ -20,6 +22,21 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   member, and reconcile create, rename/replacement, delete, validation and activation
   outcomes. Activation exposes bounded profile witnesses and explicit uncertainty;
   native product verification remains unrun (#1725).
+
+
+- `HMC_CERT_FINGERPRINT` (TOML `cert_fingerprint`, `--cert-fingerprint`) trusts an HMC whose
+  certificate has the given SHA-256 fingerprint, so a self-signed HMC can be verified without
+  a CA bundle. It takes effect with `HMC_VERIFY_SSL=true`, yields only to `HMC_CA_BUNDLE`, and
+  refuses a mismatched certificate before any request is sent. Each trusted connection emits
+  a `tls-fingerprint-verified` audit record (#1614, ADR 0224).
+
+- SSH dispatch accepts the secret values a command carries and redacts them from
+  timeout, connection, process-failure and SSH-library log text; `-i` record refusals
+  can omit a secret attribute's value. No operation uses it yet (#655).
+
+- `HMCClient.list_quick_all` fetches `/rest/api/uom/{Type}/quick/All`, or the
+  `ManagedSystem/{uuid}/{Child}/quick/All` child form, as one JSON array. No caller
+  uses it yet (#244).
 
 - Profile backup artifacts have bounded CLI/MCP listing and exact-name deletion
   with fresh readback. Restore adds explicit keystore-error handling while retaining
@@ -61,6 +78,17 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   mappings and volume-group volumes (#1479).
 
 ### Changed
+
+- Builds derive the package version from Git tags with `hatch-vcs`: a release tag `vX.Y.Z`
+  builds `X.Y.Z`, and every other commit builds `X.Y.(Z+1).devN+g<sha>`, so a development
+  build no longer reports the last release's version. Building a tree without Git metadata
+  needs `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_HMCPCTL` (#1471, ADR 0250).
+- **Breaking:** unscoped `hmc_list_lpars` and `lpar list --json` read one
+  `LogicalPartition/quick/All` request when every managed system is `operating` or
+  `power off`. Those entries have null `title`/`link` and carry the partition summary as
+  `Resource` (`RMCState`, numeric `PartitionID`, no nested configuration), and powered-off
+  systems' partitions are listed. Other fleets keep the per-system read, as does a failed
+  bulk read, which warns with its HTTP status or failure class (ADR 0248, #1731).
 
 - The HTTP 500 "Nested path contains null property" errors from a managed-system read by UUID
   and from the management-console read now name an `X-HMC-Schema-Version` pin as the likely
@@ -107,6 +135,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   stale, only those of the operations that import it (#1495).
 
 ### Fixed
+
+- `HMC_AGENT_ID` help text and the config schema now list every character `agent_id`
+  refuses, including `/`, `:` and space; the text is built from the validator's own
+  table so the two cannot drift (#1476, thanks to @KeuqS for the approach in #1485).
 
 - Migration authorizes and submits the partition UUID selected for validation,
   preventing a reassigned partition name from selecting another partition (#631).
@@ -162,6 +194,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 - Creating an HMC user without a description no longer fails with REST0344 on V10R3: the create
   now describes the user as `HMC User`, the HMC's own default (#1414). Modifying a user without a
   description still leaves it unchanged.
+- `hmc_read_lpar_refcodes` no longer describes an unknown partition as believed to return an
+  empty list: the HMC refuses it with `HSCL8012` and the tool raises, as the live probe showed
+  (#1475).
 
 ## [0.1.0] - 2026-10-12
 

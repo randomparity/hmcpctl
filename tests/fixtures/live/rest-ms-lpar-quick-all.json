@@ -1,0 +1,8 @@
+{
+  "capture": "2026-10-19-q244/07-child-LogicalPartition-quick-All.body",
+  "method": "GET",
+  "path": "/rest/api/uom/ManagedSystem/00000005-abcd-4ef0-8abc-000000000005/LogicalPartition/quick/All",
+  "status": 200,
+  "content_type": "application/json",
+  "body": "[{\"ProgressState\":null,\"Description\":\"desc-1\",\"MemoryMode\":\"Dedicated\",\"MigrationState\":\"Not_Migrating\",\"PowerManagementMode\":null,\"OperatingSystemVersion\":\"Unknown\",\"PartitionID\":1,\"IsVirtualServiceAttentionLEDOn\":\"false\",\"AllocatedVirtualProcessors\":4,\"PartitionState\":\"not activated\",\"ResourceMonitoringIPAddress\":null,\"HasPhysicalIO\":\"false\",\"SystemName\":\"sys-R2\",\"SharingMode\":\"uncapped\",\"UUID\":\"00000008-ABCD-4EF0-8ABC-000000000008\",\"MigrationDisable\":false,\"CurrentProcessors\":4,\"LastActivatedProfile\":\"default_profile\",\"CurrentUncappedWeight\":128,\"RemoteRestartState\":\"Invalid\",\"PartitionType\":\"AIX/Linux\",\"PartitionName\":\"sys-R2-lp5\",\"RMCState\":\"inactive\",\"OperatingSystemType\":\"Linux\",\"CurrentMemory\":32768,\"HasDedicatedProcessors\":\"false\",\"AssociatedManagedSystem\":\"https://hmc.test:443/rest/api/uom/ManagedSystem/00000005-abcd-4ef0-8abc-000000000005\",\"ReferenceCode\":\"\",\"CurrentProcessingUnits\":2}]"
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,15 +17,20 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 COMMAND_TIMEOUT_SECONDS = 180
+# ADR 0250: a tree without Git metadata takes its version from this variable.
+PRETEND_ENV = "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_HMCPCTL"
+PACKAGE_VERSION = "0.0.1.dev42"
+# Every prefix setuptools-scm and vcs-versioning read overrides from; an inherited one
+# would decide the version instead of the case under test.
+VERSION_OVERRIDE_PREFIXES = ("SETUPTOOLS_SCM_", "VCS_VERSIONING_")
 
 
-def declared_version() -> str:
-    """Read the statically declared version (ADR 0033) from pyproject.toml."""
-    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
-        return str(tomllib.load(handle)["project"]["version"])
-
-
-PACKAGE_VERSION = declared_version()
+def environment_without_version_overrides() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(VERSION_OVERRIDE_PREFIXES)
+    }
 
 
 def run(
@@ -33,17 +39,21 @@ def run(
     check: bool = True,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    environment = {
+        **environment_without_version_overrides(),
+        "UV_LINK_MODE": "copy",
+        "UV_NO_PROGRESS": "1",
+        PRETEND_ENV: PACKAGE_VERSION,
+        **(extra_env or {}),
+    }
+    if not environment[PRETEND_ENV]:
+        del environment[PRETEND_ENV]
     return subprocess.run(
         command,
         cwd=cwd,
         check=check,
         capture_output=True,
-        env={
-            **os.environ,
-            "UV_LINK_MODE": "copy",
-            "UV_NO_PROGRESS": "1",
-            **(extra_env or {}),
-        },
+        env=environment,
         text=True,
         timeout=COMMAND_TIMEOUT_SECONDS,
     )
@@ -82,9 +92,9 @@ def built_project(tmp_path_factory: pytest.TempPathFactory) -> BuiltProject:
     project = workspace / "project"
     project.mkdir()
     copy_tracked_project(project)
-    # ADR 0033: the build consults no Git state. The absence of a repository here is
-    # the property under test, not an accident of how the fixture is assembled --
-    # adding `git init` for tooling parity would silently retire that coverage.
+    # ADR 0250: without a repository the version comes from the pretend variable. The
+    # absence of a repository here is the property under test, not an accident of how
+    # the fixture is assembled -- adding `git init` would retire that coverage.
     assert not (project / ".git").exists()
     artifacts = workspace / "artifacts"
     run(
@@ -186,3 +196,97 @@ def test_editable_install_uses_computed_metadata(
     )
 
     assert result.stdout.strip() == built_project.version
+
+
+def test_gitless_build_without_pretend_version_fails(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    copy_tracked_project(project)
+
+    result = run(
+        "uv",
+        "build",
+        "--wheel",
+        "--out-dir",
+        str(tmp_path / "artifacts"),
+        str(project),
+        check=False,
+        extra_env={PRETEND_ENV: ""},
+    )
+
+    assert result.returncode != 0
+    assert PRETEND_ENV in result.stderr
+
+
+def git(*args: str, cwd: Path) -> str:
+    return run("git", *args, cwd=cwd).stdout.strip()
+
+
+def first_commit_after_release(clone: Path) -> str:
+    """The first commit on the ancestry path whose only unreleased commit is itself."""
+    candidates = git(
+        "rev-list", "--reverse", "--ancestry-path", "v0.1.0..HEAD", cwd=clone
+    ).split()
+    return next(
+        commit
+        for commit in candidates
+        if git("rev-list", "--count", f"v0.1.0..{commit}", cwd=clone) == "1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("tag", r"0\.1\.0"),
+        ("one-past", r"0\.1\.1\.dev1\+g(?P<sha>[0-9a-f]+)"),
+        ("dirty", r"0\.1\.1\.dev0\+g[0-9a-f]+\.d\d{8}"),
+        ("no-tags", r"0\.1\.dev\d+\+g[0-9a-f]+"),
+    ],
+)
+def test_version_derives_from_release_tags(
+    case: str,
+    expected: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hatch_vcs.version_source import VCSVersionSource
+
+    for key in os.environ:
+        if key.startswith(VERSION_OVERRIDE_PREFIXES):
+            monkeypatch.delenv(key)
+    # Clone and check out only; no commit, tag or merge, so no hook can run (#237).
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    tag = run(
+        "git", "rev-parse", "--verify", "v0.1.0^{commit}", cwd=PROJECT_ROOT, check=False
+    )
+    assert tag.returncode == 0, "tag v0.1.0 missing; fetch tags (git fetch --tags)"
+    clone = tmp_path / "clone"
+    no_tags = ("--no-tags",) if case == "no-tags" else ()
+    git(
+        "clone",
+        "--quiet",
+        "--no-checkout",
+        *no_tags,
+        str(PROJECT_ROOT),
+        str(clone),
+        cwd=tmp_path,
+    )
+    if case == "one-past":
+        target = first_commit_after_release(clone)
+    elif case == "no-tags":
+        target = "HEAD"
+    else:
+        target = "v0.1.0"
+    git("checkout", "--quiet", "--detach", target, cwd=clone)
+    if case == "dirty":
+        with (clone / "README.md").open("a", encoding="utf-8") as readme:
+            readme.write("\nlocal edit\n")
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
+        config = tomllib.load(handle)["tool"]["hatch"]["version"]
+
+    version = VCSVersionSource(str(clone), config).get_version_data()["version"]
+
+    match = re.fullmatch(expected, version)
+    assert match, f"{case}: {version!r} does not match {expected!r}"
+    if case == "one-past":
+        assert target.startswith(match["sha"])

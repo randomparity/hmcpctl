@@ -4,7 +4,8 @@ The HMC's search parser refuses a PartitionState value with a space:
 ``LogicalPartition/search/(PartitionState==not%20activated)`` is a captured
 ``500 Unable to parse expression``. ``list_lpars`` therefore filters the
 partition feeds itself; without a system it reads each operating system's
-``ManagedSystem/{uuid}/LogicalPartition`` feed (ADR 0197).
+``ManagedSystem/{uuid}/LogicalPartition`` feed (ADR 0197). A firmware that
+refuses ``LogicalPartition/quick/All`` falls back to those feeds (ADR 0248).
 """
 
 from __future__ import annotations
@@ -39,6 +40,9 @@ async def test_fleet_wide_state_filter_reads_the_feed_not_the_search(
         return_value=refused
     )
     mock_system_summaries(mock_hmc, (_SYSTEM_UUID, "sys-E2", "operating"))
+    bulk = mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(404)
+    )
     feed = mock_hmc.get(
         f"/rest/api/uom/ManagedSystem/{_SYSTEM_UUID}/LogicalPartition"
     ).mock(return_value=httpx.Response(200, text=_FEED))
@@ -53,6 +57,7 @@ async def test_fleet_wide_state_filter_reads_the_feed_not_the_search(
     assert not search.called
     assert not fleet_wide.called
     assert feed.call_count == 1
+    assert bulk.call_count == 1
     assert [lpar["Resource"]["PartitionState"] for lpar in listing.entries] == [state]
 
 

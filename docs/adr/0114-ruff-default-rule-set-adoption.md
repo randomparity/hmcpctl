@@ -156,3 +156,12 @@ they carry, so a change to those fixtures fails the suite rather than passing si
 - **Do nothing and stay on 0.15.22.** judgment: it defers a defaults migration whose cost
   grows with every subsequent release, and leaves the repository pinned to a superseded
   version for no stated benefit.
+
+## Amendment (2026-10-19, #1722)
+
+Ruff 0.17.0 dropped seven more rules from its defaults and added none: `DTZ001`,
+`DTZ005`, `DTZ006`, `DTZ007`, `DTZ011`, `DTZ012`, and `DTZ901`. The same mechanism as
+above applies — the eight `# noqa: DTZ011` and `# noqa: DTZ001` directives in the table
+became `RUF100` findings — so all seven join `extend-select`, not only the two that have
+directives. With them restored, `--show-settings` at 0.17.0 resolves the same 431
+enabled rules as 0.16.10.

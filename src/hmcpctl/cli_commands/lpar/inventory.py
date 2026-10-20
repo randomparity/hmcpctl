@@ -62,7 +62,11 @@ def lpars_list(
         help="Output format (default: table on TTY, tsv when redirected)",
     ),
 ) -> None:
-    """List logical partitions."""
+    """List logical partitions.
+
+    Without --system, JSON entries with a null title carry the partition
+    summary rather than the full document (ADR 0248).
+    """
     selected = resolve_inventory_format(as_json, format)
     listing = with_client(lambda hmc: list_lpars(hmc, system, state))
     report_unreadable(listing)

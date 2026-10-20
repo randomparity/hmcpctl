@@ -911,7 +911,8 @@ async def _surviving_fixture(call, inputs: RecoveryInputs) -> Finding | None:
             f"{inputs.system_name} ({state_status}), so its remedy cannot be chosen"
         )
     remedy = f"hmc rmsyscfg -m {inputs.system_name} -r lpar -n {inputs.fixture_lpar}"
-    if state != _NOT_ACTIVATED:
+    # REST's PartitionState is lower case ("not activated"); only the CLI title-cases it.
+    if state.strip().lower() != _NOT_ACTIVATED.lower():
         # The HMC refuses to delete a partition outside Not Activated (#950): a
         # run interrupted while its fixture is running needs a shutdown first.
         remedy = (

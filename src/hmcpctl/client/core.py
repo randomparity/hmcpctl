@@ -10,6 +10,7 @@ into :class:`HMCClient` by inheritance.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -26,7 +27,7 @@ import truststore
 from ..audit import records as audit
 from ..config import HMCConfig, env_var_value
 from ..documents.logon import build_logon_request_document
-from ..errors import HMCError, HMCTransportError
+from ..errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ..jobs import TERMINAL_JOB_STATUSES, canonical_job_path
 from .client_adapters import AdaptersMixin
 from .client_cluster import ClusterMixin
@@ -355,6 +356,62 @@ _tls_warning_lock = Lock()
 VERIFY_SSL_SOURCES: frozenset[str] = frozenset(get_args(VerifySSLSource))
 
 
+def _colon_hex(digest: str) -> str:
+    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2)).upper()
+
+
+class _FingerprintMismatch(ssl.SSLCertVerificationError):
+    """Raised inside the TLS handshake; carries the digest the peer presented."""
+
+    def __init__(self, presented: str) -> None:
+        super().__init__(
+            f"certificate fingerprint {presented} is not the configured one"
+        )
+        self.presented = presented
+
+
+def _fingerprint_ssl_context(expected: str, host: str) -> ssl.SSLContext:
+    """A context that trusts exactly the leaf certificate whose SHA-256 is *expected*.
+
+    The comparison runs in ``do_handshake``, before httpx can write a request byte,
+    so a mismatch never sends the logon credentials. It holds only for TLS objects
+    created through ``wrap_bio``, which is how anyio (httpx's async backend) wraps
+    every connection. The context must be a plain ``ssl.SSLContext``: anyio wraps
+    synchronously only for that exact type.
+    """
+    wanted = expected.replace(":", "").lower()
+
+    class _PinnedSSLObject(ssl.SSLObject):
+        def do_handshake(self) -> None:
+            super().do_handshake()
+            der = self.getpeercert(binary_form=True) or b""
+            presented = hashlib.sha256(der).hexdigest()
+            if presented != wanted:
+                raise _FingerprintMismatch(_colon_hex(presented))
+            audit.record_tls_fingerprint_verified(
+                host=host, fingerprint=_colon_hex(presented)
+            )
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # The digest replaces chain, hostname and validity checks (ADR 0224).
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    context.sslobject_class = _PinnedSSLObject
+    return context
+
+
+def _fingerprint_mismatch(exc: BaseException) -> _FingerprintMismatch | None:
+    """The pin failure behind an httpx transport error, through its cause chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, _FingerprintMismatch):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def _verify_ssl_source(config: HMCConfig) -> VerifySSLSource:
     """Name the source controlling ``verify_ssl`` using :data:`VerifySSLSource`.
 
@@ -436,10 +493,12 @@ class HMCClient(
                 "HMC_VERIFY_SSL defaults to false, but that default will change "
                 "to true in the 1.0 release. To keep verification off for this "
                 "HMC, set HMC_VERIFY_SSL=false explicitly (or pass "
-                "--no-verify-ssl). To verify instead, trust the HMC's "
-                "certificate: set HMC_TRUST_SYSTEM_STORE=true (the default) and "
-                "HMC_VERIFY_SSL=true, set HMC_CA_BUNDLE to a PEM file, or set "
-                "SSL_CERT_FILE/SSL_CERT_DIR. See docs/configuration.md#tls-trust.",
+                "--no-verify-ssl). To verify instead, set HMC_VERIFY_SSL=true and "
+                "trust the HMC's certificate through HMC_TRUST_SYSTEM_STORE=true "
+                "(the default), HMC_CA_BUNDLE (a PEM file), HMC_CERT_FINGERPRINT "
+                "(its SHA-256 fingerprint), or SSL_CERT_FILE/SSL_CERT_DIR; none of "
+                "them applies while HMC_VERIFY_SSL is false. "
+                "See docs/configuration.md#tls-trust.",
                 HMCVerifySSLDefaultWarning,
                 stacklevel=2,
             )
@@ -464,6 +523,11 @@ class HMCClient(
             # path string directly; httpx accepts a PEM path for verify=.
             # SSL_CERT_FILE/SSL_CERT_DIR and trust_system_store are ignored.
             verify = self.config.ca_bundle
+        elif self.config.verify_ssl and self.config.cert_fingerprint:
+            # ADR 0224: pin the leaf certificate by SHA-256; yields only to ca_bundle.
+            verify = _fingerprint_ssl_context(
+                self.config.cert_fingerprint, self.config.host
+            )
         elif (
             self.config.verify_ssl
             and self.config.trust_system_store
@@ -680,6 +744,15 @@ class HMCClient(
                 f"Increase HMC_TIMEOUT above {timeout} for a slower HMC or network."
             ) from exc
         except httpx.TransportError as exc:
+            mismatch = _fingerprint_mismatch(exc)
+            if mismatch is not None:
+                raise HMCTLSFingerprintError(
+                    f"{method.upper()} {path} refused: {self.config.host} presented TLS "
+                    f"certificate {mismatch.presented}, not the configured "
+                    f"HMC_CERT_FINGERPRINT {self.config.cert_fingerprint}. Nothing was "
+                    "sent. If the HMC certificate was regenerated, obtain its new "
+                    "fingerprint over a trusted channel and update HMC_CERT_FINGERPRINT."
+                ) from exc
             raise HMCTransportError(
                 f"{method.upper()} {path} failed before the HMC returned a response: {exc}"
             ) from exc
@@ -1121,6 +1194,54 @@ class HMCClient(
                 resp.text,
             )
         return names, schema_version
+
+    async def list_quick_all(
+        self,
+        resource_type: str,
+        *,
+        parent_type: str | None = None,
+        parent_uuid: str | None = None,
+    ) -> list[Any]:
+        """GET ``.../{resource_type}/quick/All``: one JSON array for a listing.
+
+        The child form takes *parent_type* and *parent_uuid*, both or neither.
+        Sends ``Accept: */*`` and returns the items unvalidated (ADR 0245).
+        """
+        _reject_unknown_uom_type("resource_type", resource_type)
+        uuid_path_arguments: dict[str, str] = {}
+        if parent_type is not None and parent_uuid is not None:
+            _reject_unknown_uom_type("parent_type", parent_type)
+            path = (
+                f"/rest/api/uom/{parent_type}/{parent_uuid}/{resource_type}/quick/All"
+            )
+            uuid_path_arguments["parent_uuid"] = parent_uuid
+        elif parent_type is None and parent_uuid is None:
+            path = f"/rest/api/uom/{resource_type}/quick/All"
+        else:
+            raise ValueError("parent_type and parent_uuid must be given together")
+        resp = await self._request_with_uuid_path_arguments(
+            "GET",
+            path,
+            uuid_path_arguments=uuid_path_arguments,
+            headers={"Accept": "*/*"},
+        )
+        if resp.status_code != 200:
+            raise HMCError(f"GET {path} failed", resp.status_code, resp.text)
+        try:
+            items = resp.json()
+        except ValueError as exc:
+            raise HMCError(
+                f"GET {path} returned invalid JSON: {str(exc)[:500]}"
+            ) from exc
+        except RecursionError as exc:
+            raise HMCError(
+                f"GET {path} returned invalid JSON: document nesting is too deep"
+            ) from exc
+        if not isinstance(items, list):
+            raise HMCError(
+                f"GET {path} returned a JSON {type(items).__name__}; expected an array"
+            )
+        return items
 
     async def search_uom(
         self,

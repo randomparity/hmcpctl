@@ -70,6 +70,10 @@ tool-docs:
 tool-docs-check:
     uv run --no-sync python scripts/gen_tool_reference.py --check
 
+# regenerate scripts/live_test/scenario_definitions.json from the capability ledger
+scenario-definitions:
+    uv run --no-sync python scripts/gen_scenario_definitions.py
+
 # verify every decision record in docs/adr/ carries a unique number
 adr-numbering:
     uv run --no-sync python scripts/check_adr_numbering.py

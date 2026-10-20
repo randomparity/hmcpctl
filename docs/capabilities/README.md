@@ -221,13 +221,25 @@ Review must tie the generated filtered matrices to the actual candidate, complet
 and clean recovery. An ad-hoc catalog update does not authorize writing a release snapshot;
 only the reviewed release-evidence flow changes the frozen verification fields.
 
-Scenario coverage remains hand-written until #706.
+Live scenarios remain hand-written; declared definitions (below) are not evidence.
 `uv run --no-sync python scripts/scenario_gap_report.py` reports, offline, the operations
 and rows no registered live scenario exercises, dispatches in scenario functions `SUBTASKS`
 no longer reaches, tools or operations the registry no longer has, and dispatches whose
 argument names the served input schema rejects. It exits 0; `--fail-on-dispatch` exits 1
 on an unregistered, mismatched or unreadable dispatch. `just scenario-gap`
 runs it with that flag as a `static` member, so a dispatch finding fails `just verify`.
+
+Declared scenario definitions (ADR 0247) live in
+`scripts/live_test/scenario_definitions.json`, validated by `scripts/live_test/definitions.py`:
+one `st100-<operation slug>` definition per operation, its read-only or mutating class, and
+arguments in which every target identity is a `{"target": "<kind>"}` placeholder. The report
+checks each definition's arguments against the served schema (`definition-mismatch:`) and
+counts defined operations; a definition never counts as exercised, and nothing runs one.
+`just scenario-definitions` regenerates the registry from `operations.json` and the served
+schemas (ADR 0249): an operation is defined only when every required argument is a target,
+and a mutating one only when every other argument it declares is a target selector, the
+connection argument or `ownership_override`. It prints every other operation as needing a
+hand-written scenario; the suite fails when the committed registry is stale.
 
 The catalog records no runtime eligibility. `existing-runtime-guards` neither grants
 nor revokes admission: authorization, ownership, validation, capability, and safety

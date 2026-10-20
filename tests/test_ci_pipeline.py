@@ -15,8 +15,8 @@ ROOT = Path(__file__).parents[1]
 TOOL_PINS = {
     "detect-secrets==1.5.0",
     "prek==0.5.5",
-    "ruff==0.16.10",
-    "ty==0.0.85",
+    "ruff==0.17.0",
+    "ty==0.0.86",
     "zizmor==1.30.1",
 }
 TY_INCLUDE = ["src/hmcpctl", "scripts"]
@@ -39,6 +39,13 @@ RUFF_EXTEND_SELECT = {
     "F405",
     "F406",
     "F722",
+    "DTZ001",
+    "DTZ005",
+    "DTZ006",
+    "DTZ007",
+    "DTZ011",
+    "DTZ012",
+    "DTZ901",
 }
 RUFF_PER_FILE_IGNORE_MODULES = {
     "tests/unit/test_audit.py",
@@ -52,11 +59,13 @@ BASELINED_FINDINGS = {
     "tests/app/test_cli.py": 2,
     "tests/conftest.py": 1,
     # An enum type name long enough to read as Base64 entropy, once per enum list (#1202).
+    "tests/fixtures/live/vocabulary/enums-v10r3-p10-9080-hex.json": 1,
     "tests/fixtures/live/vocabulary/enums-v10r3-p8-8247-22l.json": 1,
     "tests/fixtures/live/vocabulary/enums-v10r3-p9.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p10-9028-21b.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p10-9043-mrx.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p10-9080-hex.json": 1,
+    "tests/fixtures/live/vocabulary/enums-v11r2-p10-9105-22b.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p10-9105-42a.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p11-9043-mru.json": 1,
     "tests/fixtures/live/vocabulary/enums-v11r2-p11-9242-21b.json": 1,
@@ -71,8 +80,8 @@ ACTION_PINS = {
         "v7.0.1",
     ),
     "astral-sh/setup-uv": (
-        "c18668ad3cf93ea998bef934396af7bb5c839dc7",  # pragma: allowlist secret
-        "v10.2.0",
+        "1c37ad07a6a961277cf70c0d37d6f313000f5884",  # pragma: allowlist secret
+        "v10.3.0",
     ),
     "extractions/setup-just": (
         "53165ef7e734c5c07cb06b3c8e7b647c5aa16db3",  # pragma: allowlist secret
@@ -183,12 +192,12 @@ SCORECARD_ACTION_PINS = {
         "v7.0.2",
     ),
     "github/codeql-action/upload-sarif": (
-        "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",  # pragma: allowlist secret
-        "v4.38.2",
+        "24c54180a607b1449ed407dd24f251e4e9147c8d",  # pragma: allowlist secret
+        "v4.38.3",
     ),
     "ossf/scorecard-action": (
-        "2d1146689b8cda280b9bc96326124645441f03bc",  # pragma: allowlist secret
-        "v2.4.4",
+        "fa7117db83c52d787ae5a89f350999701505d78e",  # pragma: allowlist secret
+        "v2.5.0",
     ),
 }
 
@@ -465,21 +474,28 @@ def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:
     assert "PYPI" not in workflow.upper()
 
 
-def test_active_ci_checkouts_with_project_uv_do_not_fetch_full_history() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    active_workflow, _ = _inactive_ppc64le_job(workflow)
-    checkout_settings = re.findall(
+def _checkout_settings(workflow: str) -> list[str]:
+    return re.findall(
         r"uses: actions/checkout@[^\n]+\n"
         r"        with:\n"
         r"(?P<settings>(?:          [^\n]+\n)+)",
-        active_workflow,
+        workflow,
     )
 
+
+def test_only_the_source_building_ci_job_fetches_full_history() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    active_workflow, _ = _inactive_ppc64le_job(workflow)
+    checkout_settings = _checkout_settings(active_workflow)
+
     assert len(checkout_settings) == 5
-    assert active_workflow.count("uv run") >= 2
-    # Full history is no longer fetched: the version is declared statically and no
-    # workflow step reads Git history (ADR 0033).
-    assert not any("fetch-depth" in settings for settings in checkout_settings)
+    # The `ci` job builds and installs from source, and hatch-vcs derives the version
+    # from tags and history there (ADR 0250). Every other job installs the retained
+    # wheel, so it keeps the shallow default.
+    full_history = [s for s in checkout_settings if "fetch-depth: 0\n" in s]
+    assert len(full_history) == 1
+    assert _checkout_settings(_job_body(active_workflow, "ci")) == full_history
+    assert sum("fetch-depth" in settings for settings in checkout_settings) == 1
     for settings in checkout_settings:
         assert "persist-credentials: false\n" in settings
 
@@ -490,8 +506,9 @@ def test_dirty_project_commands_do_not_rebuild_editable_metadata(
     project = tmp_path / "project"
     project.mkdir()
     _copy_tracked_project(project)
-    # No commit: the build reads no Git state (ADR 0033). The repository and the staged
-    # index are still needed, because `prek run --all-files` resolves its file list
+    # No commit, so no hook runs (#237); the version is not asserted here, so the
+    # commit-less repository's `0.1.dev0` version is fine (ADR 0250). The repository and
+    # the staged index are needed because `prek run --all-files` resolves its file list
     # through `git ls-files`. No hooks-path override here -- `prek run` executes the
     # hooks declared in .pre-commit-config.yaml and never consults core.hooksPath.
     subprocess.run(
@@ -613,6 +630,8 @@ def test_github_ci_smokes_each_retained_wheel_in_a_fresh_environment() -> None:
     assert "merge-multiple:" not in body
     assert "UV_PYTHON: ${{ matrix.python-version }}" in body
     assert "uv run --no-project python scripts/smoke_release_wheel.py dist" in body
+    # The wheel filename carries the derived version into each leg's log (ADR 0250).
+    assert 0 <= body.find("run: ls -l dist\n") < body.index("smoke_release_wheel.py")
     assert "wheels=(dist/*.whl)" not in body
     assert "just setup" not in body
     assert "uv sync" not in body

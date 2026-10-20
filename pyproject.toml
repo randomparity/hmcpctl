@@ -1,6 +1,6 @@
 [project]
 name = "hmcpctl"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MCP server and CLI for the IBM HMC (Hardware Management Console) REST API"
 readme = "README.md"
 license = "MIT"
@@ -35,8 +35,13 @@ Security = "https://github.com/randomparity/hmcpctl/security/policy"
 hmcpctl = "hmcpctl:main"
 
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatch-vcs==0.5.0", "hatchling==1.32.4", "setuptools-scm==10.3.4"]
 build-backend = "hatchling.build"
+
+# ADR 0250: the version comes from the newest reachable `vX.Y.Z` tag.
+[tool.hatch.version]
+source = "vcs"
+raw-options = { dist_name = "hmcpctl" }
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -51,6 +56,7 @@ dev = [
     "cryptography==50.0.2",
     "detect-secrets==1.5.0",
     "fastmcp-slim[client]==4.0.10",
+    "hatch-vcs==0.5.0",
     "hatchling==1.32.4",
     "prek==0.5.5",
     "pytest==9.1.1",
@@ -58,8 +64,9 @@ dev = [
     "pytest-cov==7.1.0",
     "pytest-xdist==3.8.0",
     "respx==0.23.1",
-    "ruff==0.16.10",
-    "ty==0.0.85",
+    "ruff==0.17.0",
+    "setuptools-scm==10.3.4",
+    "ty==0.0.86",
     "zizmor==1.30.1",
 ]
 
@@ -73,10 +80,13 @@ exclude = ["*.md"]
 # Ruff 0.16 dropped these eighteen rules from its defaults. They were enforced here
 # under 0.15.22, and ten existing `# noqa: E402` directives in tests/ depend on E402
 # staying enabled -- without this list they become RUF100 findings whose only fix is
-# deleting documented suppressions. See ADR 0114.
+# deleting documented suppressions. Ruff 0.17 dropped the seven DTZ rules on the
+# last line the same way; eight `# noqa: DTZ001`/`DTZ011` directives depend on
+# them. See ADR 0114.
 extend-select = [
     "E401", "E402", "E701", "E702", "E703", "E711", "E712", "E713", "E714",
     "E721", "E731", "E741", "E742", "E743", "F403", "F405", "F406", "F722",
+    "DTZ001", "DTZ005", "DTZ006", "DTZ007", "DTZ011", "DTZ012", "DTZ901",
 ]
 
 [tool.ruff.lint.flake8-bugbear]

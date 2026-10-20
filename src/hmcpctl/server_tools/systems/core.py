@@ -109,12 +109,18 @@ def hmc_list_lpars(
     """List LPARs, optionally filtered by system and state.
 
     Returns ``entries`` (the partitions) and ``unreadable_systems``. Without a
-    system, each operating managed system's LPAR feed is read in turn; a system
-    that is not operating is not read and is named in ``unreadable_systems``
-    instead, so its partitions are absent from ``entries``. With a system,
-    ``unreadable_systems`` is empty. A state filter is applied to the feed
-    entries locally. Use hmc_get_lpar for a single partition or
-    hmc_get_lpar_state for a lightweight state lookup.
+    system, when every managed system is operating or powered off, partitions
+    come from one LogicalPartition/quick/All read: such an entry has a null
+    title and link, and its Resource is the partition summary (PartitionName,
+    PartitionID as a number, PartitionState, RMCState, CurrentMemory and
+    similar); powered-off systems' partitions are included and
+    unreadable_systems is empty. Otherwise each operating managed system's LPAR
+    feed is read in turn and each Resource is the full partition document; a
+    system that is not operating is not read and is named in
+    ``unreadable_systems``, so its partitions are absent from ``entries``. With
+    a system, entries carry the full documents and ``unreadable_systems`` is
+    empty. A state filter is applied to the entries locally. Use hmc_get_lpar
+    for a single partition or hmc_get_lpar_state for a lightweight state lookup.
 
     Args:
         system_name_or_uuid: Optional SystemName or UUID whose partitions to list.

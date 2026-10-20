@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import ast
+import asyncio
+import dataclasses
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -22,6 +25,8 @@ report = importlib.util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = report
 MODULE_SPEC.loader.exec_module(report)
 
+from live_test import definitions  # noqa: E402
+
 SCHEMAS = {
     "hmc_list_lpars": {"properties": {"system": {"type": "string"}}},
     "hmc_get_lpar": {
@@ -37,10 +42,12 @@ ROWS = ["rest:a", "rest:b", "cli:c"]
 ROOTS = {("m", "s")}
 
 
-def _report(source: str, schemas=SCHEMAS) -> list[str]:
+def _report(source: str, schemas=SCHEMAS, definitions=()) -> list[str]:
     """The report for one synthetic module ``m`` whose registered scenario is ``s``."""
     scan = report.scan_source(source, "m.py", "m")
-    return report.build_report([scan], ROOTS, OPERATIONS, ROWS, schemas)
+    return report.build_report(
+        [scan], ROOTS, OPERATIONS, ROWS, schemas, definitions=definitions
+    )
 
 
 def test_scan_reads_dispatches_operations_and_unreadable_sites():
@@ -138,7 +145,8 @@ def test_report_lists_uncovered_operations_and_rows():
         "uncovered-row: rest:b",
         (
             "summary: 1 dispatches; operations 1/2 exercised; rows 1/3 exercised; "
-            "0 departed; 0 unregistered; 0 dispatch mismatches; 0 unreadable"
+            "0 departed; 0 unregistered; 0 dispatch mismatches; 0 unreadable; "
+            "0 definitions; operations 0/2 defined; 0 definition mismatches"
         ),
     ]
 
@@ -334,3 +342,124 @@ def test_system_profiles_dispatch(capsys):
         line.startswith("unreadable: scripts/live_test/system_profiles.py")
         for line in lines
     )
+
+
+def _definition(**arguments):
+    return definitions.ScenarioDefinition(
+        "st100-lpar-get", "lpar.get", "hmc_get_lpar", True, arguments, "success"
+    )
+
+
+def test_definitions_are_checked_against_the_served_schema_and_counted():
+    source = (
+        'async def s(client, state):\n    await state.call(client, "hmc_list_lpars")\n'
+    )
+    scan = report.scan_source(source, "m.py", "m")
+    good = _definition(lpar=definitions.Placeholder("lpar"), system="s")
+    bad = dataclasses.replace(
+        _definition(system=1, extra="x"), scenario="st100-lpar-get-other"
+    )
+
+    lines = report.build_report(
+        [scan], ROOTS, OPERATIONS, ROWS, SCHEMAS, definitions=[good, bad]
+    )
+
+    assert lines == [
+        "uncovered-operation: lpar.get",
+        "uncovered-row: cli:c",
+        "uncovered-row: rest:b",
+        "definition-mismatch: st100-lpar-get-other hmc_get_lpar: unknown argument extra",
+        (
+            "definition-mismatch: st100-lpar-get-other hmc_get_lpar: "
+            "missing required argument lpar"
+        ),
+        (
+            "definition-mismatch: st100-lpar-get-other hmc_get_lpar: system expects "
+            "string, got int"
+        ),
+        (
+            "summary: 1 dispatches; operations 1/2 exercised; rows 1/3 exercised; "
+            "0 departed; 0 unregistered; 0 dispatch mismatches; 0 unreadable; "
+            "2 definitions; operations 1/2 defined; 3 definition mismatches"
+        ),
+    ]
+    assert report.exit_status(lines, fail_on_dispatch=True) == 1
+
+
+def test_a_definition_outside_the_ledger_is_unregistered_and_unchecked():
+    outside = dataclasses.replace(
+        _definition(extra="x"), operation="lpar.delete", tool="hmc_delete_lpar"
+    )
+
+    lines = _report("", definitions=[outside])
+
+    assert "unregistered: definition st100-lpar-get operation lpar.delete" in lines
+    assert not [line for line in lines if line.startswith("definition-mismatch:")]
+    assert lines[-1].endswith(
+        "1 definitions; operations 0/2 defined; 0 definition mismatches"
+    )
+
+
+def test_an_unloadable_registry_is_unreadable(monkeypatch, capsys):
+    def fail():
+        raise definitions.DefinitionError("definition 0: expected must be success")
+
+    monkeypatch.setattr(definitions, "read_definitions", fail)
+
+    assert report.main(["--fail-on-dispatch"]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert (
+        "unreadable: scripts/live_test/scenario_definitions.json "
+        "definition 0: expected must be success"
+    ) in out
+
+
+def test_the_definitions_module_adds_nothing_to_the_scan():
+    path = SCRIPTS / "live_test" / "definitions.py"
+    scan = report.scan_source(path.read_text(encoding="utf-8"), "d.py", "definitions")
+
+    assert (scan.dispatches, scan.verified, scan.unreadable) == ((), (), ())
+
+
+def test_real_definitions_pass_the_served_schema(tmp_path):
+    registry = tmp_path / "definitions.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "definitions": [
+                    {
+                        "scenario": "st100-lpar-get",
+                        "operation": "lpar.get",
+                        "class": "read-only",
+                        "arguments": {"lpar_name_or_uuid": {"target": "lpar"}},
+                        "expected": "success",
+                    },
+                    {
+                        "scenario": "st100-user-get",
+                        "operation": "user.get",
+                        "class": "read-only",
+                        "arguments": {
+                            "console_uuid": {"target": "console"},
+                            "user_profile_uuid": {"target": "user"},
+                        },
+                        "expected": "success",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = definitions.read_definitions(registry)
+
+    lines = report.build_report(
+        [],
+        set(),
+        report._load("operations.json", "operations"),
+        [],
+        asyncio.run(report.served_schemas()),
+        definitions=loaded,
+    )
+
+    assert not [line for line in lines if line.startswith(report._DISPATCH_PREFIXES)]
+    assert re.search(r"; 2 definitions; operations 2/\d+ defined; ", lines[-1])

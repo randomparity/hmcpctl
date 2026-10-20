@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import ssl
 import threading
 import traceback
 import warnings
@@ -34,7 +35,7 @@ from hmcpctl.client.core import (
     TLSVerificationDisabledWarning,
 )
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.jobs import build_job_request
 from hmcpctl.xmlutil import localname
 
@@ -1184,6 +1185,113 @@ async def test_quick_all_system_names_recursion_error_raises_hmc_error(
     message = str(exc_info.value)
     assert "quick/All returned invalid JSON: document nesting is too deep" in message
     assert isinstance(exc_info.value.__cause__, RecursionError)
+
+
+@pytest.mark.parametrize(
+    "fixture_name, resource_type, kwargs",
+    [
+        ("rest-lpar-quick-all", "LogicalPartition", {}),
+        ("rest-vios-quick-all", "VirtualIOServer", {}),
+        (
+            "rest-ms-lpar-quick-all",
+            "LogicalPartition",
+            {
+                "parent_type": "ManagedSystem",
+                "parent_uuid": "00000005-abcd-4ef0-8abc-000000000005",
+            },
+        ),
+    ],
+    ids=["lpar", "vios", "child-of-system"],
+)
+@pytest.mark.asyncio
+async def test_list_quick_all_returns_the_captured_array(
+    mock_hmc, fixture_name, resource_type, kwargs
+):
+    path, response = live_response(fixture_name)
+    route = mock_hmc.get(path).mock(return_value=response)
+    async with HMCClient(make_config()) as hmc:
+        items = await hmc.list_quick_all(resource_type, **kwargs)
+    assert items == json.loads(live_fixture(fixture_name)["body"])
+    assert len(items) >= 1
+    assert route.call_count == 1
+    assert route.calls.last.request.headers["accept"] == "*/*"
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_empty_array_returns_empty_list(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, text="[]")
+    )
+    async with HMCClient(make_config()) as hmc:
+        assert await hmc.list_quick_all("LogicalPartition") == []
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_non_200_raises_hmc_error_with_status_and_path(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(400, text="bad")
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError) as exc_info:
+            await hmc.list_quick_all("LogicalPartition")
+    assert exc_info.value.status_code == 400
+    assert "/rest/api/uom/LogicalPartition/quick/All" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_invalid_json_raises_hmc_error(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, text="{")
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="returned invalid JSON") as exc_info:
+            await hmc.list_quick_all("LogicalPartition")
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_non_array_json_raises_hmc_error(mock_hmc):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, json={"a": 1})
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="returned a JSON dict; expected an array"):
+            await hmc.list_quick_all("LogicalPartition")
+
+
+@pytest.mark.asyncio
+async def test_list_quick_all_recursion_error_raises_hmc_error(mock_hmc, monkeypatch):
+    mock_hmc.get("/rest/api/uom/LogicalPartition/quick/All").mock(
+        return_value=httpx.Response(200, text="[]")
+    )
+
+    def raise_recursion_error(_response):
+        raise RecursionError
+
+    monkeypatch.setattr(httpx.Response, "json", raise_recursion_error)
+
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError) as exc_info:
+            await hmc.list_quick_all("LogicalPartition")
+
+    assert "returned invalid JSON: document nesting is too deep" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, RecursionError)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"parent_type": "ManagedSystem"},
+        {"parent_uuid": "00000005-abcd-4ef0-8abc-000000000005"},
+    ],
+    ids=["type-only", "uuid-only"],
+)
+@pytest.mark.asyncio
+async def test_list_quick_all_requires_both_parent_arguments(mock_hmc, kwargs):
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(ValueError, match="must be given together"):
+            await hmc.list_quick_all("LogicalPartition", **kwargs)
+    assert [c for c in mock_hmc.calls if c.request.method == "GET"] == []
 
 
 CREATED_LPAR = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -4775,3 +4883,108 @@ async def test_discovery_nesting_failure_keeps_context_and_cause(
         f"Failed to parse GET {path} response: document nesting is too deep"
     )
     assert error.value.__cause__ is failure
+
+
+# ---------------------------------------------------------------------------
+# ADR 0224 Decision 1: cert_fingerprint (#1614)
+# ---------------------------------------------------------------------------
+
+_PIN = ":".join(["AB"] * 32)
+_PRESENTED = ":".join(["CD"] * 32)
+
+
+def _pinned_connect_error() -> httpx.ConnectError:
+    """The shape httpx raises when the pinned handshake refuses the peer."""
+    error = httpx.ConnectError("handshake failed")
+    error.__cause__ = client_core._FingerprintMismatch(_PRESENTED)
+    return error
+
+
+def test_cert_fingerprint_context_wins_over_env_bundle_and_system_store(monkeypatch):
+    monkeypatch.setenv("SSL_CERT_FILE", "/some/bundle.pem")
+    monkeypatch.setenv("SSL_CERT_DIR", "/some/ca-dir")
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(
+        make_config(verify_ssl=True, trust_system_store=True, cert_fingerprint=_PIN)
+    )
+    context = captured[0]
+    # anyio wraps synchronously only for this exact type, never a subclass.
+    assert type(context) is ssl.SSLContext
+    assert context.sslobject_class is not ssl.SSLObject
+    assert issubclass(context.sslobject_class, ssl.SSLObject)
+    assert context.verify_mode == ssl.CERT_NONE
+    assert context.check_hostname is False
+
+
+def test_ca_bundle_wins_over_cert_fingerprint(monkeypatch):
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(
+        make_config(
+            verify_ssl=True, ca_bundle="/hmc-specific.pem", cert_fingerprint=_PIN
+        )
+    )
+    assert captured[0] == "/hmc-specific.pem"
+
+
+def test_cert_fingerprint_ignored_when_verify_ssl_false(monkeypatch):
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=False, cert_fingerprint=_PIN))
+    assert captured[0] is False
+
+
+def _pinned_transport(monkeypatch, *, refuse_logon: bool) -> list[int]:
+    """Install a transport whose pinned handshake refuses /pinned (and logon, if asked).
+
+    httpx.MockTransport, not respx: respx re-raises a side effect ``from`` its own
+    wrapper, replacing the ``__cause__`` chain httpx really carries. Returns the
+    ports clients were built for.
+    """
+    ports: list[int] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/api/refused":
+            raise httpx.ConnectError("connection refused")
+        if request.url.path == "/rest/api/pinned" or (
+            refuse_logon and request.method == "PUT"
+        ):
+            raise _pinned_connect_error()
+        if request.method == "PUT":
+            return httpx.Response(200, text=LOGON_RESPONSE)
+        return httpx.Response(204)
+
+    def new_client(self, port: int) -> httpx.AsyncClient:
+        ports.append(port)
+        return httpx.AsyncClient(
+            base_url=f"https://hmc.test:{port}", transport=httpx.MockTransport(handle)
+        )
+
+    monkeypatch.setattr(HMCClient, "_new_http_client", new_client)
+    return ports
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_mismatch_maps_to_fingerprint_error(monkeypatch):
+    _pinned_transport(monkeypatch, refuse_logon=False)
+
+    async with HMCClient(make_config(cert_fingerprint=_PIN.lower())) as client:
+        with pytest.raises(HMCTLSFingerprintError) as caught:
+            await client._get("/rest/api/pinned")
+        with pytest.raises(HMCTransportError):
+            await client._get("/rest/api/refused")
+
+    assert not isinstance(caught.value, HMCTransportError)
+    assert _PRESENTED in str(caught.value)
+    assert _PIN in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_mismatch_skips_legacy_port_fallback(monkeypatch):
+    ports = _pinned_transport(monkeypatch, refuse_logon=True)
+
+    client = HMCClient(make_config(cert_fingerprint=_PIN))
+    assert client._legacy_port_fallback
+    with pytest.raises(HMCTLSFingerprintError):
+        await client.logon()
+    await client._http.aclose()
+
+    assert ports == [443]

@@ -107,15 +107,16 @@ scripts/         # repository guardrails, generators, test runners, smoke checks
 
 ## Releasing
 
-A release is a version in `pyproject.toml` and a Git tag on the same commit
-([ADR 0033](adr/0033-static-package-version.md)); the tag is annotated. Nothing is published
+A release is an annotated Git tag; the build derives the package version from it
+([ADR 0250](adr/0250-git-derived-versions-with-hatch-vcs.md)). Nothing is published
 to a package index, so the tag is what a consumer pins; the [README](../README.md#install)
 shows the form.
 
 Versions are semver. The tag is `vX.Y.Z`, and the GitHub release is titled
 `hmcpctl X.Y.Z (<short-sha>)`, where `<short-sha>` is the tag commit's
-`git rev-parse --short` ID. The version
-is static in `pyproject.toml`, as ADR 0033 sets out. The changelog heading stays
+`git rev-parse --short` ID. A build of the tag reports `X.Y.Z`; a build N commits later
+reports `X.Y.(Z+1).devN+g<sha>`, with a `.dYYYYMMDD` marker when tracked files are
+modified. The changelog heading stays
 `## [X.Y.Z] - YYYY-MM-DD`, because a commit cannot name its own SHA.
 
 Live verification is a release stage ([ADR 0212](adr/0212-release-scoped-live-verification.md)).
@@ -163,7 +164,7 @@ the whole rule. Changes that pass it include:
 
 - documentation, including the docs review and changelog cut below;
 - the release-prep commit of [tag and release](#tag-and-release) step 1, which changes
-  `pyproject.toml`, `uv.lock`, the changelog and the README's pinned tag; and
+  the changelog and the README's pinned tag; and
 - evidence commits that promote observations into the catalog, including the
   `src/hmcpctl/_operation_maturity.json` projection they regenerate, which is data, not a
   module.
@@ -244,14 +245,18 @@ during the freeze. For 0.1.0 that work is #1468.
 Contributors record each user-facing change under `[Unreleased]` in `CHANGELOG.md`, in the
 usual [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories, ADR 0118 facade
 changes included. A release's changelog entry keeps those itemized categories, and it is also
-the GitHub release body. At the cut it gains:
+the GitHub release body. From 0.2.0 on, the entry has this order under its
+`## [X.Y.Z] - YYYY-MM-DD` heading:
 
-- a short statement of the release's scope and the consumer contract it serves;
-- a **Verified** section naming the claimed operations, each verified `current` at the gate;
-  and
-- a **Known issues** list that names concrete problems, including the global
-  verification counts from the [evidence gate](#evidence-gate). Every release's entry needs
-  one; an entry without it is incomplete.
+1. a short statement of the release's scope and the consumer contract it serves;
+2. a **Verified** section naming the claimed operations, each verified `current` at the gate;
+3. a **Known issues** list that names concrete problems, including the global verification
+   counts from the [evidence gate](#evidence-gate). Every release's entry needs one; an entry
+   without it is incomplete; and
+4. the itemized Keep a Changelog categories (`### Added`, `### Changed`, and so on).
+
+The scope statement leads, as in the 0.1.0 entry, so a reader of the release body meets what
+the release is for before the itemized changes.
 
 0.1.0 is the one exception: the first release, with nothing shipped before it, so its entry
 carries no itemized changes. Its itemized pre-release history was dropped from the changelog,
@@ -264,20 +269,17 @@ The operator authorizes the tag after the gate passes, and authorizes the GitHub
 separately, after the tag. An agent or automated workflow never creates the tag or the
 release.
 
-1. On a branch, set `[project] version` to the new `X.Y.Z` and run `uv lock`; `uv lock --check`
-   must then pass, because `uv sync --locked` in `just setup` refuses a lock that disagrees.
-   Cut the changelog: move the `[Unreleased]` entries under a dated `## [X.Y.Z] - YYYY-MM-DD`
-   heading in `CHANGELOG.md`, keeping their categories, and add the scope statement,
-   **Verified** and **Known issues** sections described under
-   [docs and changelog](#docs-and-changelog) (`tests/unit/test_changelog.py` requires the
-   declared version to have a heading). Point the changelog's link references at
-   `vX.Y.Z` (the `[unreleased]` compare base and an `[X.Y.Z]` tag link), and update the
-   README's pinned tag. When `pyproject.toml` already declares `X.Y.Z` and the changelog
-   already has its heading but the version was never tagged, as `0.1.0` was, skip the bump
-   and replace both that existing section and the `[Unreleased]` entries, itemized
+1. On a branch, cut the changelog: move the `[Unreleased]` entries under a dated
+   `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md`, keeping their categories, and add the
+   scope statement, **Verified** and **Known issues** sections ahead of them, in the order given
+   under [docs and changelog](#docs-and-changelog) (`tests/unit/test_changelog.py` requires the
+   newest release tag to have a heading). Point the changelog's link references at `vX.Y.Z`
+   (the `[unreleased]` compare base and an `[X.Y.Z]` tag link), and update the README's pinned
+   tag. For `0.1.0`, whose changelog already had its heading before it was tagged, step 1
+   instead replaced both that existing section and the `[Unreleased]` entries, itemized
    pre-release history included, with a one-off minimal entry dated for the release (scope,
    Verified and Known issues only), leaving an empty `[Unreleased]` heading. Git keeps the
-   history. This applies to 0.1.0 alone; later releases keep their itemized categories.
+   history. That applied to 0.1.0 alone; later releases keep their itemized categories.
    Merge that change to `main`.
 2. Choose the tag commit: the `main` commit that change merged as, or a later `main` commit
    the freeze admits. Its CI must be green and `just verify` must pass on a clean checkout.
@@ -304,15 +306,22 @@ release.
    at the new evidence-bearing commit. Record the passing tag-commit read on the epic.
    Re-read `just verification-report`; if its global counts differ from Known issues,
    correct that entry, merge it, and repeat from step 2 on the resulting commit.
-4. Tag that exact commit and push the tag:
+4. Tag that exact commit locally, check the release build on a clean checkout of it, and only
+   then push the tag:
 
    ```bash
    git tag -a vX.Y.Z -m "hmcpctl X.Y.Z" <tag-commit-sha>
+   git checkout --detach vX.Y.Z
+   just build
+   uv run --no-sync pytest tests/unit/test_changelog.py --no-cov
+   uv run --no-sync python tests/validate_release_artifacts.py dist . --release
    git push origin vX.Y.Z
    ```
 
-   Check that `git rev-parse vX.Y.Z^{commit}` prints the tag commit and that
-   `git show vX.Y.Z:pyproject.toml` declares `X.Y.Z`.
+   `just build` must produce `dist/hmcpctl-X.Y.Z-py3-none-any.whl`; a `.dev` or `+` version
+   means the checkout is not clean or not at the tag. If any check fails, delete the local
+   tag with `git tag -d vX.Y.Z` instead of pushing it. Check that
+   `git rev-parse vX.Y.Z^{commit}` prints the tag commit.
 5. Create the GitHub release from the pushed tag. Its body is the version's changelog entry:
    copy the entry, without its `## [X.Y.Z]` heading, into the notes file. The title carries
    the tag commit's short ID:

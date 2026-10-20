@@ -355,6 +355,38 @@ def full_stderr_pipe():
             pass
 
 
+@pytest.fixture
+def isolated_git(monkeypatch):
+    """Keep the developer's global and system git config out of fixture repositories.
+
+    An inherited ``core.hooksPath`` or pre-commit hook can block a fixture commit,
+    so a test passes in CI and fails on a workstation (#1754). The variables go on
+    the process environment, so git started by a script under test inherits them.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+@pytest.fixture
+def hostile_git_config(tmp_path_factory, monkeypatch):
+    """Ambient user and system git config whose pre-commit hook always fails.
+
+    Request it before a fixture that commits: a module using `isolated_git` must
+    still commit, and one that does not fails. The files live outside `tmp_path`,
+    which several tests initialise as the repository whose cleanliness they assert.
+    """
+    root = tmp_path_factory.mktemp("hostile-git")
+    hook = root / "hooks" / "pre-commit"
+    hook.parent.mkdir()
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    config = root / "git" / "config"
+    config.parent.mkdir()
+    config.write_text(f"[core]\n\thooksPath = {hook.parent}\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(config))
+
+
 BASE = "https://hmc.test:443"
 
 LOGON_RESPONSE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

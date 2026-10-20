@@ -91,6 +91,8 @@ LIVE_WORKFLOW_MODULES = (
 
 from live_test import runner  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("isolated_git")
+
 
 class _FakeClient:
     def __init__(self, _server):
@@ -4215,7 +4217,7 @@ def test_run_provenance_outside_a_repository_reports_no_commit():
     }
 
 
-def test_run_provenance_reports_a_dirty_tree(tmp_path):
+def test_run_provenance_reports_a_dirty_tree(hostile_git_config, tmp_path):
     """A sha naming a tree that was not exercised must not read as attribution."""
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / "scripts").mkdir()

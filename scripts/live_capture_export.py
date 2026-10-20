@@ -257,6 +257,11 @@ def _key_value_leak(start: str, key: str, kept: str = "") -> re.Pattern[str]:
     )
 
 
+#: Element text that is only XML whitespace, raw or as `json.dumps` escapes at any depth:
+#: the indentation of a container element such as V11R2's `<AuthorizedKeysValue>`.
+_INDENT = r"(?:[ \t\r\n]|\\++[nrt])*+"
+
+
 def _element_rule(
     element: str, value: str, keep: str | None = None
 ) -> tuple[re.Pattern[str], str]:
@@ -267,7 +272,9 @@ def _element_rule(
     """
     kept = rf"(?!(?:{keep})<)" if keep else ""
     return (
-        re.compile(rf"(<(?>{_NS_PREFIX}{element}\b)(?>{_TAG_TAIL})){kept}[^<]+"),
+        re.compile(
+            rf"(<(?>{_NS_PREFIX}{element}\b)(?>{_TAG_TAIL})){kept}(?!{_INDENT}<)[^<]+"
+        ),
         rf"\g<1>{value}",
     )
 
@@ -299,7 +306,12 @@ def _element_leak(element: str, value: str, keep: str | None = None) -> re.Patte
         if keep
         else ""
     )
-    return re.compile(rf"{kept}(?:(?<![^<>])(?!{written}<)[^<>]++|\]\]>){closing}")
+    # Indentation between child elements identifies nothing; after `]]>` it is reported,
+    # so CDATA cannot hide behind it (#1590).
+    indent = rf"(?<!\]\]>){_INDENT}<"
+    return re.compile(
+        rf"{kept}(?:(?<![^<>])(?!{written}<)(?!{indent})[^<>]++|\]\]>){closing}"
+    )
 
 
 #: The JSON escapes a value can follow: `\\`, `\n` or `\u00e9`. A lookbehind must be
@@ -450,6 +462,8 @@ _IPV6 = re.compile(
     r"(?i)(?P<escape>\\\\?(?:[bfnrt]|u[0-9a-f]{4})|\\\\)"
     rf"(?P<address>{_IPV6_CANDIDATE}|(?<=\\[bf])(?::[0-9a-f]{{0,4}}){{2,7}}\b)?"
     rf"|\b{_IPV6_CANDIDATE}"
+    # `::`, `::1`: no hex group opens them, so no word boundary precedes them either.
+    r"|(?<![\w:])::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?(?![\w:])"
 )
 
 
@@ -633,13 +647,15 @@ IDENTIFIER_RULES: tuple[tuple[re.Pattern[str], Replacement], ...] = (
         re.compile(rf"{_SCRUB_START}(?:\d{{1,3}}\.){{3}}\d{{1,3}}\b"),
         rf"\g<escape>{PLACEHOLDER_IP}",
     ),
+    # Before the location rule: a VIOS mapping's `UniqueDeviceID` embeds a location
+    # code, and the element rule's value ends at the `<` of any token written first.
+    _element_rule(*_DEVICE_ID_ELEMENT),
     # Anywhere, even inside `1eU8375.42A.XXXXXXX-V100-C3`; the slot suffix after the
     # prefix is generic and code joins on it, so it stays.
     (re.compile(r"U[0-9A-Za-z]{4}\.[0-9A-Za-z]{3}\.[0-9A-Za-z]{7}"), "<REDACTED-LOC>"),
     # A `-L<hex>` segment of a location suffix is a disk WWN or RAID array id; `-L0`
     # and other short logical-unit segments stay.
     (re.compile(r"(?<=-)L[0-9A-F]{8,}(?=-L|\b)"), "L<REDACTED-DEVID>"),
-    _element_rule(*_DEVICE_ID_ELEMENT),
     # A quoted CSV field holds every value up to its closing quote: "wwpns=a,b". The
     # backslashes before that quote stay, so `json.dumps`'s `\"` keeps its escape and an
     # escaped backslash its pair. Each run is read once, possessively.

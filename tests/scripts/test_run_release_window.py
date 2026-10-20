@@ -17,6 +17,8 @@ from live_test import runner
 
 ROOT = Path(__file__).parents[2]
 
+pytestmark = pytest.mark.usefixtures("isolated_git")
+
 
 def git(root, *args):
     return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
@@ -99,7 +101,15 @@ def window(tmp_path):
     output.mkdir(mode=0o700)
     env = {
         key: os.environ[key]
-        for key in ("PATH", "LANG", "LC_ALL", "TMPDIR")
+        for key in (
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "TMPDIR",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_SYSTEM",
+        )
         if key in os.environ
     }
     env.update(
@@ -255,7 +265,9 @@ def summary(window):
     return json.loads(paths[0].read_text()), paths[0].parent
 
 
-def test_real_cli_promotes_only_after_complete_window(window, tmp_path):
+def test_real_cli_promotes_only_after_complete_window(
+    hostile_git_config, window, tmp_path
+):
     root, _, _, _ = window
     events = enable_boundaries(window, tmp_path)
     candidate = git(root, "rev-parse", "HEAD")

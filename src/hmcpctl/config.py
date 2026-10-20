@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import threading
 import tomllib
@@ -56,6 +57,32 @@ _reported_memento_override = False
 #: block a config being built on another thread.
 _override_report_lock = threading.Lock()
 
+#: A SHA-256 digest as ``openssl x509 -fingerprint -sha256`` prints it after ``=``.
+_CERT_FINGERPRINT = re.compile(r"[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){31}")
+
+
+#: Every character ``validate_agent_id`` refuses, with the reason. The
+#: ``HMCConfig.agent_id`` description is built from the keys, so the two cannot drift.
+AGENT_ID_FORBIDDEN = {
+    ",": "commas corrupt the HMC CLI -i parser",
+    "=": "equals signs corrupt the HMC CLI -i parser",
+    '"': "double quotes are the HMC CLI -i record escape",
+    "[": "brackets break the ownership token format",
+    "]": "brackets break the ownership token format",
+    "/": "the HMC REST API rejects '/' in X-Audit-Memento",
+    ":": "colons make audit and ownership token formats ambiguous",
+    "\\": "backslash behaviour inside an HMC CLI -i record is unverified (ADR 0045)",
+    " ": "spaces corrupt the ownership token in the CLI -i parser",
+}
+
+
+def _agent_id_refused_characters() -> str:
+    """Name each refused character for help text, spelling out the space."""
+    return ", ".join(
+        "space" if character == " " else f"`{character}`"
+        for character in AGENT_ID_FORBIDDEN
+    )
+
 
 def validate_agent_id(agent_id: str) -> None:
     """Validate an agent identifier used in audit and ownership tokens."""
@@ -72,19 +99,7 @@ def validate_agent_id(agent_id: str) -> None:
             "agent_id contains non-ASCII or non-printable characters; "
             "only printable ASCII is accepted"
         )
-    forbidden = {
-        ",": "commas corrupt the HMC CLI -i parser",
-        "=": "equals signs corrupt the HMC CLI -i parser",
-        '"': "double quotes are the HMC CLI -i record escape",
-        "[": "brackets break the ownership token format",
-        "]": "brackets break the ownership token format",
-        "/": "the HMC REST API rejects '/' in X-Audit-Memento",
-        ":": "colons make audit and ownership token formats ambiguous",
-        "\\": "backslash behaviour inside an HMC CLI -i record is unverified "
-        "(ADR 0045)",
-        " ": "spaces corrupt the ownership token in the CLI -i parser",
-    }
-    for character, reason in forbidden.items():
+    for character, reason in AGENT_ID_FORBIDDEN.items():
         if character in agent_id:
             raise ValueError(f"agent_id contains {character!r}; {reason}")
 
@@ -179,6 +194,16 @@ class HMCConfig(BaseSettings):
             "SSL_CERT_DIR, and HMC_TRUST_SYSTEM_STORE. Ignored when verify_ssl is false."
         ),
     )
+    cert_fingerprint: str | None = Field(
+        default=None,
+        description=(
+            "SHA-256 fingerprint of the HMC's leaf certificate as colon-separated hex "
+            "(HMC_CERT_FINGERPRINT). When set and verify_ssl is true, the connection is "
+            "trusted only if the presented certificate matches; takes precedence over "
+            "SSL_CERT_FILE, SSL_CERT_DIR and HMC_TRUST_SYSTEM_STORE, and yields to "
+            "HMC_CA_BUNDLE. Ignored when verify_ssl is false."
+        ),
+    )
     trust_system_store: bool = Field(
         default=True,
         description=(
@@ -230,10 +255,9 @@ class HMCConfig(BaseSettings):
         description=(
             "Per-agent identifier folded into the X-Audit-Memento header as "
             "hmcpctl:<agent_id>. Used for multi-agent LPAR ownership attribution. "
-            "Must be 1–64 printable ASCII characters with no commas, = signs, "
-            "square brackets, double quotes, or backslashes — any of those would "
-            "corrupt the ownership stamp in the HMC CLI -i parser or the "
-            "description grammar. (HMC_AGENT_ID)"
+            "Must be 1–64 printable ASCII characters and must not contain "
+            f"{_agent_id_refused_characters()} — any of those would corrupt "
+            "the ownership stamp or the audit memento. (HMC_AGENT_ID)"
         ),
     )
 
@@ -369,6 +393,19 @@ class HMCConfig(BaseSettings):
         if v is not None and v != "":
             validate_agent_id(v)
         return v
+
+    @field_validator("cert_fingerprint")
+    @classmethod
+    def _validate_cert_fingerprint(cls, v: str | None) -> str | None:
+        if not v:
+            return None
+        if not _CERT_FINGERPRINT.fullmatch(v):
+            raise ValueError(
+                "cert_fingerprint must be a SHA-256 digest written as 32 colon-separated "
+                "hex pairs (AA:BB:...), as printed after '=' by "
+                "`openssl x509 -noout -fingerprint -sha256`"
+            )
+        return v.upper()
 
     @model_validator(mode="after")
     def _warn_audit_memento_override(self) -> HMCConfig:

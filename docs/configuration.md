@@ -191,7 +191,8 @@ HMCs ship self-signed certificates, so TLS verification is off by default and
 `verify_ssl` setting source per process while it stays off. Reusable Python
 consumers can import that category from `hmcpctl.api` and filter it without
 suppressing unrelated `UserWarning`s. To verify the HMC certificate, trust its
-CA through `HMC_CA_BUNDLE` or `SSL_CERT_FILE` (see [TLS trust](#tls-trust)) and set
+CA through `HMC_CA_BUNDLE` or `SSL_CERT_FILE`, or pin its certificate with
+`HMC_CERT_FINGERPRINT` (see [TLS trust](#tls-trust)), and set
 `HMC_VERIFY_SSL=true` (`--verify-ssl`) — otherwise the HMC credentials are at risk of
 man-in-the-middle interception.
 
@@ -208,24 +209,31 @@ Configured audit handlers receive the original records. See
 
 ## TLS trust
 
-With `HMC_VERIFY_SSL=true` the client determines what to trust from three sources, in this order:
+With `HMC_VERIFY_SSL=true` the client determines what to trust from five sources, in this order:
 
 1. **`HMC_CA_BUNDLE`** (TOML key `ca_bundle`, CLI `--ca-bundle`): when set, the named PEM file
-   is used exclusively. Takes precedence over `SSL_CERT_FILE`, `SSL_CERT_DIR`, and
-   `HMC_TRUST_SYSTEM_STORE` (ADR 0223).
-2. **`SSL_CERT_FILE`** (or `SSL_CERT_DIR`): when set and `HMC_CA_BUNDLE` is not set, the named
+   is used exclusively. Takes precedence over `HMC_CERT_FINGERPRINT`, `SSL_CERT_FILE`,
+   `SSL_CERT_DIR`, and `HMC_TRUST_SYSTEM_STORE` (ADR 0223).
+2. **`HMC_CERT_FINGERPRINT`** (TOML key `cert_fingerprint`, CLI `--cert-fingerprint`): when set
+   and `HMC_CA_BUNDLE` is not, the connection proceeds only if the HMC's certificate has this
+   SHA-256 fingerprint. Chain, hostname and validity checks are not performed: the fingerprint
+   pins one exact certificate (ADR 0224). See
+   [Trust a self-signed HMC by fingerprint](#trust-a-self-signed-hmc-by-fingerprint).
+3. **`SSL_CERT_FILE`** (or `SSL_CERT_DIR`): when set and neither of the above is set, the named
    bundle is used exclusively. `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` are ignored.
-3. **`HMC_TRUST_SYSTEM_STORE=true`** (the default): when neither `HMC_CA_BUNDLE` nor an explicit
-   `SSL_CERT_FILE`/`SSL_CERT_DIR` is set, the operating-system trust store (macOS Keychain,
+4. **`HMC_TRUST_SYSTEM_STORE=true`** (the default): when none of the above is set, the
+   operating-system trust store (macOS Keychain,
    Windows Credential Store, the Linux CA bundle rebuilt by `update-ca-certificates` /
    `update-ca-trust`) is consulted via the `truststore` library (ADR 0222).
-4. **Bundled `certifi` roots**: when `HMC_TRUST_SYSTEM_STORE=false` and none of the above are
+5. **Bundled `certifi` roots**: when `HMC_TRUST_SYSTEM_STORE=false` and none of the above are
    set, only the CA roots bundled with the HTTP library are trusted.
 
 Set these variables in the environment of the process that runs `hmcpctl`, including the
 launcher of an MCP server. They need no root access and apply to every HMC that process
 connects to. An unreadable or malformed bundle file is an error; it does not fall back to
-other sources.
+other sources. A certificate fingerprint identifies one HMC, so with several HMCs set
+`cert_fingerprint` in each [TOML profile](#toml-profile-recommended-for-multi-hmc-setups)
+instead of exporting `HMC_CERT_FINGERPRINT`, which would apply to every profile.
 
 ### Choose what to trust
 
@@ -247,7 +255,35 @@ self-signed certificate.
   ```
 
 The certificate's names must still match the host you connect to; trusting it does not
-disable hostname checking.
+disable hostname checking. To trust a self-signed HMC without building a bundle, pin its
+fingerprint instead, as described next.
+
+### Trust a self-signed HMC by fingerprint
+
+Print the SHA-256 fingerprint of the certificate the HMC presents, and confirm it matches
+one you obtained by another route (for example from the HMC administrator):
+
+```bash
+openssl s_client -connect HMC:443 </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256
+```
+
+Use the 32 colon-separated hex pairs after `sha256 Fingerprint=`, in either case:
+
+```bash
+export HMC_CERT_FINGERPRINT="3A:7F:00:C2:...:C8:1D"   # all 32 pairs
+export HMC_VERIFY_SSL=true
+hmcpctl console info
+```
+
+Until the 1.0 release `HMC_VERIFY_SSL` defaults to `false`, and a fingerprint takes effect
+only with `HMC_VERIFY_SSL=true`. A value that is not 32 hex pairs is refused when the
+configuration loads. If the HMC presents a different certificate, the command fails with an
+error naming both fingerprints (`HMCTLSFingerprintError` to a Python caller), before any
+request is sent. When an HMC's
+certificate is regenerated, obtain the new fingerprint the same way and update the setting.
+Each connection trusted this way adds a `tls-fingerprint-verified` record to the
+[audit stream](authorization-audit.md).
 
 ### Build a PEM bundle
 

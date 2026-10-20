@@ -71,6 +71,12 @@ export: the type, model and serial `_summary_mtms` parses from quick/All (`#2`) 
 `ManagedSystem` feed read in the same session (`#4`, not committed). The entry's `WWPNPrefix` was
 zeroed by hand before #1639; the exporter now writes `<REDACTED-DEVID>` there.
 
+`rest-lpar-quick-all`, `rest-vios-quick-all` and `rest-ms-lpar-quick-all` (`capture` prefix
+`2026-10-19-q244/`) come from an operator-authorized read-only window for #244 on the #1161 V10R3
+HMC: `LogicalPartition/quick/All`, `VirtualIOServer/quick/All` and the child form
+`ManagedSystem/{uuid}/LogicalPartition/quick/All`, each trimmed to one or two items. Their token map
+is their own, as for the exports above; never join them to other fixtures by token.
+
 ## Format
 
 Every file is a JSON object with these keys:
@@ -142,9 +148,20 @@ for #1498 once the exporter stopped binding an element to an enum its name does 
 relate to. It still infers `Status` → `VirtualNICBackingDeviceStatus.Enum` from
 `LINK_DOWN` and `OPERATIONAL`, because the exporter binds by local name; the gate
 ignores that inferred binding, as the documented job statuses state `Status`. Its raw
-captures (`~/hmc-live-evidence/2026-10-13-q1290/`), corpus and the `export.sh` that
-re-runs the derivation (`~/hmc-live-evidence/2026-10-13-q1498/`) are private, on the
-live-test host. Beside them sit the
+captures (`~/hmc-live-evidence/2026-10-13-q1290/`) are private, on the live-test host.
+
+From read-only sweeps on 2026-10-20, after a lab power loss, each holding its state
+from before the sweep to after it: `v10r3-p10-9080-hex`, a 9080-HEX `Initializing`
+throughout, and `v11r2-p10-9105-22b`, a 9105-22B with one partition in `Error`
+throughout. The same day's sweeps of an 8247-22L and of a second 9105-42A, each
+`No Connection` throughout, were added to `v10r3-p8-8247-22l` and
+`v11r2-p10-9105-42a` by re-deriving each from all of its raw captures. That dropped
+two rows, both from `v10r3-p8-8247-22l`: `<text>` for `MacAddressValue` and
+`VirtualEthernetAdapterMACAddressPrefix`, whose 2026-10-01 corpus kept MAC addresses
+the exporter now zeroes. The 2026-10-20 raw captures and corpora, and the `export.sh`
+that re-runs all four derivations from them and from the 2026-10-01 and #1290 raw
+captures, are private, on the live-test host under
+`~/hmc-live-evidence/2026-10-20-sweeps/`. Beside them sit the
 documented job statuses (`enums-documented-jobs.json`, names cited to
 `docs/refs/`, each marked captured or documented-only), the stated bindings
 (`enums-stated-bindings.json`, the eighteen element-to-enum bindings #1516 dropped,
