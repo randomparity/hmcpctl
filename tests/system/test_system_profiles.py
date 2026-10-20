@@ -1531,3 +1531,36 @@ async def test_whole_call_deadline_includes_name_discovery(
     h.get_managed_system.assert_not_awaited()
     h.submit_job.assert_not_awaited()
     ssh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", ["submission", "terminal"])
+async def test_nested_job_diagnostic_is_bounded_in_serialized_outcome(
+    system_profiles, monkeypatch, site
+):
+    import json
+    from dataclasses import asdict
+
+    h, _, _, _ = system_profiles
+    submission = terminal(
+        "FAILED_BEFORE_COMPLETION" if site == "submission" else "NOT_STARTED",
+        error="x" * 10000 if site == "submission" else "",
+    )
+    failed = terminal("FAILED_BEFORE_COMPLETION", error="x" * 10000)
+    h.submit_job = AsyncMock(return_value=submission)
+    poll = (
+        AsyncMock(side_effect=TimeoutError("poll interrupted"))
+        if site == "submission"
+        else AsyncMock(return_value=failed)
+    )
+    monkeypatch.setattr("hmcpctl.jobs.wait_for_submitted_job", poll)
+    result = await ops.create_system_profile(
+        h,
+        S,
+        "new",
+        [ops.SystemProfilePair(partition=L, profile=P)],
+        exclusive_writer_window=True,
+    )
+    payload = json.loads(json.dumps(asdict(result)))
+    assert payload["job"]["error"] == "x" * 2048
+    assert payload["job"]["job_id"] == "job-1"

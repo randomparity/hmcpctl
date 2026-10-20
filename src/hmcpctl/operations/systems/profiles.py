@@ -714,16 +714,20 @@ async def _rest(hmc, system, operation, document, timeout, poll):
             ident, None, True, None, None, True, f"/rest/api/uom/jobs/{ident}"
         )
         _job_identity(hmc, submission, ident)
+        outcome = job_outcome(ident, submission)
         outcome = replace(
-            job_outcome(ident, submission),
+            outcome,
+            error=outcome.error[:2048] if outcome.error else outcome.error,
             job=None,
             job_href=f"/rest/api/uom/jobs/{ident}",
         )
         terminal = await wait_for_submitted_job(hmc, submission, True, timeout, poll)
         _job_identity(hmc, terminal, ident)
         _bounded(json.dumps(terminal))
+        outcome = job_outcome(ident, terminal)
         outcome = replace(
-            job_outcome(ident, terminal),
+            outcome,
+            error=outcome.error[:2048] if outcome.error else outcome.error,
             job=None,
             job_href=f"/rest/api/uom/jobs/{ident}",
         )
