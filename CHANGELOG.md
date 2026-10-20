@@ -126,6 +126,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- `HMC_AGENT_ID` help text and the config schema now list every character `agent_id`
+  refuses, including `/`, `:` and space; the text is built from the validator's own
+  table so the two cannot drift (#1476, thanks to @KeuqS for the approach in #1485).
+
 - Migration authorizes and submits the partition UUID selected for validation,
   preventing a reassigned partition name from selecting another partition (#631).
 
