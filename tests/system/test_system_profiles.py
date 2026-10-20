@@ -1311,3 +1311,40 @@ async def test_public_posteffect_unreadable_resource_retains_handle(
     )
     assert result.state == "uncertain" and result.postcondition == "unverified"
     assert result.job.job_id == "job-1" and h.submit_job.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("action", ["create", "update"])
+async def test_duplicate_native_name_refuses_uuid_selected_mutation(
+    system_profiles, kind, action
+):
+    h, member, profile, _ = system_profiles
+    other = deepcopy(member)
+    other["UUID"] = "44444444-4444-4444-8444-444444444444"
+    other["Resource"]["PartitionID"] = "2"
+    child = deepcopy(profile)
+    child["Resource"]["AssociatedPartition"]["href"] = (
+        f"https://hmc.test/rest/api/uom/{kind}/{other['UUID']}"
+    )
+    h.list_child.side_effect = lambda _kind, uuid, _: deepcopy(
+        [child if uuid == other["UUID"] else profile]
+    )
+    if kind == "LogicalPartition":
+        h.list_logical_partitions.side_effect = lambda _: deepcopy([member, other])
+    else:
+        h.list_vios.return_value = [other]
+    h.submit_job = AsyncMock()
+    pair = ops.SystemProfilePair(partition=other["UUID"], profile=P)
+    with pytest.raises(ValueError, match="duplicate current partition name"):
+        if action == "create":
+            await ops.create_system_profile(
+                h, S, "new", [pair], exclusive_writer_window=True
+            )
+        else:
+            await ops.update_system_profile(
+                h, S, "scratch", members=[pair], exclusive_writer_window=True
+            )
+    h.submit_job.assert_not_awaited()
+    inventory = await ops.list_system_profiles(h, S)
+    assert inventory.records is None and inventory.command_status == "uncertain"

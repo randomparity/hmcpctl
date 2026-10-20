@@ -210,6 +210,7 @@ async def _observe(hmc: HMCClient, system: str) -> _Phase:
         raise ValueError("duplicate system-profile namespace")
     entries: dict[str, dict] = {}
     ids: set[int] = set()
+    partition_names: set[str] = set()
     observed_bytes = 0
     for kind, feed in [
         ("LogicalPartition", await hmc.list_logical_partitions(system)),
@@ -234,7 +235,10 @@ async def _observe(hmc: HMCClient, system: str) -> _Phase:
             if ident in ids:
                 raise ValueError("duplicate current partition ID")
             ids.add(ident)
-            _name(_text(r.get("PartitionName")))
+            partition_name = _name(_text(r.get("PartitionName")))
+            if partition_name in partition_names:
+                raise ValueError("duplicate current partition name")
+            partition_names.add(partition_name)
             profiles = await hmc.list_child(kind, uuid, "LogicalPartitionProfile")
             observed_bytes += len(json.dumps(profiles).encode())
             if observed_bytes > LIMIT:
