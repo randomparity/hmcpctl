@@ -124,10 +124,11 @@ async def test_a_clean_system_yields_no_findings():
 
 
 @pytest.mark.asyncio
-async def test_a_surviving_marked_partition_is_reported():
-    """Not Activated (#950): `rmsyscfg` alone is a legal remedy."""
+@pytest.mark.parametrize("state", ["not activated", "Not Activated"])
+async def test_a_surviving_marked_partition_is_reported(state):
+    """Not Activated (#950): `rmsyscfg` alone is a legal remedy, in REST's case or the CLI's."""
     responses = _responses(
-        hmc_get_lpar_description=_stamped(_MARKER), hmc_get_lpar_state="Not Activated"
+        hmc_get_lpar_description=_stamped(_MARKER), hmc_get_lpar_state=state
     )
 
     findings = await recovery.check(_caller(responses), _INPUTS)
