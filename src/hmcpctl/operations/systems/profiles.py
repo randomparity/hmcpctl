@@ -191,7 +191,10 @@ async def _observe(hmc: HMCClient, system: str) -> _Phase:
     entry = await hmc.get_managed_system(system)
     if not entry or entry.get("UUID") != system:
         raise ValueError("managed-system identity unavailable")
-    cli = render_mtms(entry["Resource"])
+    resource = entry.get("Resource")
+    if not isinstance(resource, dict):
+        raise TypeError("native managed-system resource is malformed")
+    cli = render_mtms(resource)
     if cli is None:
         raise ValueError("unique current managed-system MTMS required")
     raw = _bounded(

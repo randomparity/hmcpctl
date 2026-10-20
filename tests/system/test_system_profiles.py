@@ -1564,3 +1564,80 @@ async def test_nested_job_diagnostic_is_bounded_in_serialized_outcome(
     payload = json.loads(json.dumps(asdict(result)))
     assert payload["job"]["error"] == "x" * 2048
     assert payload["job"]["job_id"] == "job-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", ["empty", "scalar", "list", "mapping"])
+@pytest.mark.parametrize("action", ["list", "create", "activate", "delete"])
+async def test_managed_system_shape_preserves_public_outcome(
+    system_profiles, shape, action
+):
+    from hmcpctl.xmlutil import parse_feed
+
+    h, _, _, ssh = system_profiles
+    original = deepcopy(h.get_managed_system.return_value)
+    parsed = parse_feed(
+        f'<entry xmlns="http://www.w3.org/2005/Atom"><id>urn:uuid:{S}</id>'
+        f"<content><ManagedSystem>{'scalar' if shape == 'scalar' else ''}"
+        "</ManagedSystem></content></entry>"
+    )[0]
+    if shape in {"list", "mapping"}:
+        parsed["Resource"] = [] if shape == "list" else {}
+    attempted = False
+
+    async def submit(*args):
+        nonlocal attempted
+        attempted = True
+        return terminal("NOT_STARTED")
+
+    async def command(_config, cmd, **kwargs):
+        nonlocal attempted
+        if cmd.startswith("rmsyscfg"):
+            attempted = True
+            return ""
+        return (
+            "name:lpar_id:curr_profile\nmember-a:1:\n"
+            if "-F name:lpar_id:curr_profile" in cmd
+            else "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+
+    ssh.side_effect = command
+    h.get_managed_system.side_effect = lambda *_: deepcopy(
+        parsed if attempted or action == "list" else original
+    )
+    h.submit_job = AsyncMock(side_effect=submit)
+    h.wait_for_job_entry = AsyncMock(return_value=terminal())
+    if action == "list":
+        result = await ops.list_system_profiles(h, S)
+        assert result.records is None and result.command_status == "uncertain"
+        h.submit_job.assert_not_awaited()
+        return
+    if action == "create":
+        result = await ops.create_system_profile(
+            h,
+            S,
+            "new",
+            [ops.SystemProfilePair(partition=L, profile=P)],
+            exclusive_writer_window=True,
+        )
+    elif action == "activate":
+        result = await ops.activate_system_profile(
+            h, S, "scratch", exclusive_writer_window=True
+        )
+    else:
+        result = await ops.delete_system_profile(
+            h, S, "scratch", exclusive_writer_window=True
+        )
+    assert (
+        attempted
+        and result.state == "uncertain"
+        and result.postcondition == "unverified"
+    )
+    if action != "delete":
+        assert result.job.job_id == "job-1" and result.job.status == "COMPLETED_OK"
+        assert result.return_code == "0" and h.submit_job.await_count == 1
+    else:
+        assert result.command_status == "completed"
+        h.submit_job.assert_not_awaited()
