@@ -64,8 +64,8 @@ CI is held to full history by `tests/test_ci_pipeline.py`; elsewhere this is acc
 nothing is published (ADR 0024).
 
 An editable install keeps the version of its first build: uv rebuilds it only when
-`pyproject.toml` changes or on `uv sync --reinstall-package hmcpctl`. Nothing reads
-`__version__` from a development environment; `just build` always recomputes.
+`pyproject.toml` changes or when `just setup`'s sync runs with `--reinstall-package hmcpctl`.
+Nothing reads `__version__` from a development environment; `just build` always recomputes.
 
 GitHub's release "Source code" archives carry no `.git` and no `PKG-INFO`, so building one
 needs the pretend variable. The documented install path is a Git URL at a tag, which builds the
