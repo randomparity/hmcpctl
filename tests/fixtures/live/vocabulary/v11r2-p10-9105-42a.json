@@ -1,7 +1,8 @@
 {
  "firmware": "v11r2-p10-9105-42a",
  "sources": [
-  "2026-10-13 read-only sweep, taken while a 9105-42A was No Connection for the whole capture; its HMC-wide reads also answered for the HMC's other managed systems: HMC V11R2 SP1120 managing a POWER10 9105-42A"
+  "2026-10-13 read-only sweep, taken while a 9105-42A was No Connection for the whole capture; its HMC-wide reads also answered for the HMC's other managed systems: HMC V11R2 SP1120 managing a POWER10 9105-42A",
+  "2026-10-20 read-only sweep after a lab power loss, taken while a second 9105-42A was No Connection for the whole capture: HMC V11R2 SP1120 managing a POWER10 9105-42A"
  ],
  "rest": {
   "endpoints": [
@@ -63,6 +64,34 @@
    },
    {
     "method": "GET",
+    "path": "/rest/api/uom/LogicalPartition/{uuid}",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=LogicalPartition",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=LogicalPartition"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/LogicalPartition/{uuid}/ClientNetworkAdapter",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=ClientNetworkAdapter",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=ClientNetworkAdapter"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/LogicalPartition/{uuid}/quick/PartitionState",
+    "accept": "*/*",
+    "status": 200,
+    "content_type": "application/json"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/LogicalPartition/{uuid}/quick/PartitionState",
+    "accept": "*/*",
+    "status": 404,
+    "content_type": "application/atom+xml"
+   },
+   {
+    "method": "GET",
     "path": "/rest/api/uom/ManagedSystem/quick/All",
     "accept": "*/*",
     "status": 200,
@@ -84,6 +113,20 @@
    },
    {
     "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=ManagedSystem",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=ManagedSystem"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}/LogicalPartition",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=LogicalPartition",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=LogicalPartition"
+   },
+   {
+    "method": "GET",
     "path": "/rest/api/uom/ManagedSystem/{uuid}/LogicalPartition",
     "accept": "application/vnd.ibm.powervm.uom+xml; type=LogicalPartition",
     "status": 204,
@@ -95,6 +138,13 @@
     "accept": "application/vnd.ibm.powervm.uom+xml; type=NetworkBridge",
     "status": 204,
     "content_type": "text/plain"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}/VirtualIOServer",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer"
    },
    {
     "method": "GET",
@@ -161,6 +211,13 @@
    },
    {
     "method": "GET",
+    "path": "/rest/api/uom/ManagementConsole/{uuid}?group=RemoteAccess",
+    "accept": "application/vnd.ibm.powervm.web+xml; type=ManagementConsole",
+    "status": 406,
+    "content_type": "text/html;charset=ISO-8859-1"
+   },
+   {
+    "method": "GET",
     "path": "/rest/api/uom/SRIOVAdapter",
     "accept": "application/vnd.ibm.powervm.uom+xml; type=SRIOVAdapter",
     "status": 400,
@@ -175,7 +232,42 @@
    },
    {
     "method": "GET",
+    "path": "/rest/api/uom/VirtualIOServer",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer"
+   },
+   {
+    "method": "GET",
     "path": "/rest/api/uom/VirtualIOServer/search/(PartitionState=={value})",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/VirtualIOServer/{uuid}/VolumeGroup",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/VirtualIOServer/{uuid}/VolumeGroup/{uuid}",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/VirtualIOServer/{uuid}?group=ViosSCSIMapping",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/VirtualIOServer/{uuid}?group=ViosSCSIMapping,ViosFCMapping",
     "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer",
     "status": 200,
     "content_type": "application/vnd.ibm.powervm.uom+xml; type=VirtualIOServer"
@@ -221,12 +313,30 @@
    },
    {
     "method": "GET",
+    "path": "/rest/api/uom/LogicalPartition/{uuid}/quick/PartitionState",
+    "status": 404,
+    "content_type": "application/atom+xml",
+    "form": "HttpErrorResponse",
+    "reason_code": "The supplied URI does not identify a known resource.",
+    "message": "REST029B The URL presented to the Management Console REST Web Services is not valid. The supplied URI does not identify a known resource."
+   },
+   {
+    "method": "GET",
     "path": "/rest/api/uom/LogicalPartition/search/(PartitionState=={value})",
     "status": 500,
     "content_type": "application/atom+xml",
     "form": "HttpErrorResponse",
     "reason_code": "Unknown internal error.",
     "message": "Unable to parse expression."
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/ManagementConsole/{uuid}?group=RemoteAccess",
+    "status": 406,
+    "content_type": "text/html;charset=ISO-8859-1",
+    "form": "Console Internal Error",
+    "reason_code": null,
+    "message": null
    }
   ],
   "values": {
@@ -240,6 +350,7 @@
     "<int>"
    ],
    "APICapable": [
+    "false",
     "true"
    ],
    "ASMAdminPasswordUpdatedRequired": [
@@ -307,6 +418,7 @@
     "<text>"
    ],
    "AdapterState": [
+    "Missing",
     "NotConfigured",
     "Running"
    ],
@@ -403,6 +515,9 @@
    "AuthenticationType": [
     "local"
    ],
+   "AuthorizedKey": [
+    "<text>"
+   ],
    "AutoManageEnabled": [
     "false"
    ],
@@ -417,6 +532,9 @@
     "true"
    ],
    "AvailablePorts": [
+    "<int>"
+   ],
+   "AvailableSize": [
     "<int>"
    ],
    "AvailableVirtualTrustedPlatformModulePartitions": [
@@ -436,6 +554,9 @@
    ],
    "BackplanePhysicalLocation": [
     "<text>"
+   ],
+   "BarrierSynchronizationRegisterArrayCount": [
+    "<int>"
    ],
    "BarrierSynchronizationRegisterCapable": [
     "false"
@@ -491,6 +612,7 @@
     "true"
    ],
    "CapacityOnDemandUtilityProcessorCapable": [
+    "false",
     "true"
    ],
    "ClockSkew": [
@@ -561,7 +683,13 @@
    "ConsoleMaximumWebUISessions": [
     "<int>"
    ],
+   "ControlChannelInterfaceName": [
+    "<text>"
+   ],
    "CurrentAdapterConfigurationOption": [
+    "<int>"
+   ],
+   "CurrentAllocatedBarrierSynchronizationRegisterArrays": [
     "<int>"
    ],
    "CurrentAssignedMemoryToPartitions": [
@@ -576,10 +704,16 @@
    "CurrentAvailableQoS": [
     "<int>"
    ],
+   "CurrentAvailableResourceGroupReservedMemory": [
+    "<int>"
+   ],
    "CurrentAvailableSystemMemory": [
     "<int>"
    ],
    "CurrentAvailableSystemProcessorUnits": [
+    "<int>"
+   ],
+   "CurrentBarrierSynchronizationRegisterArrays": [
     "<int>"
    ],
    "CurrentCapacityPercentage": [
@@ -688,6 +822,7 @@
     "<int>"
    ],
    "CurrentOptions": [
+    "<text>",
     "PriorityFlowControl",
     "Veb",
     "fullDuplex",
@@ -700,6 +835,7 @@
     "Temporary"
    ],
    "CurrentPowerSavingMode": [
+    "Disable",
     "Maximum_Performance",
     "Power_Saving",
     "Static"
@@ -715,9 +851,13 @@
    ],
    "CurrentProfileSync": [
     "Disabled",
-    "On"
+    "On",
+    "Suspended"
    ],
    "CurrentQoS": [
+    "<int>"
+   ],
+   "CurrentResourceGroupReservedMemory": [
     "<int>"
    ],
    "CurrentSecureBoot": [
@@ -948,6 +1088,9 @@
    "FirmwarePowerSaverCapable": [
     "true"
    ],
+   "FreeSpace": [
+    "<int>"
+   ],
    "FruNumber": [
     "<text>"
    ],
@@ -955,6 +1098,15 @@
     "true"
    ],
    "Gateway": [
+    "<text>"
+   ],
+   "GroupCapacity": [
+    "<int>"
+   ],
+   "GroupName": [
+    "<text>"
+   ],
+   "GroupSerialID": [
     "<text>"
    ],
    "HCNID": [
@@ -994,6 +1146,7 @@
     "true"
    ],
    "HighAvailabilityMode": [
+    "auto",
     "disabled"
    ],
    "HostChannelAdapterCapable": [
@@ -1015,6 +1168,7 @@
     "<int>"
    ],
    "IBMiCapable": [
+    "false",
     "true"
    ],
    "IBMiHardwareAcceleratorCapable": [
@@ -1031,6 +1185,7 @@
     "false"
    ],
    "IBMiNativeIOCapable": [
+    "false",
     "true"
    ],
    "IBMiNetworkInstallCapable": [
@@ -1270,6 +1425,7 @@
     "false"
    ],
    "IsVNICCapable": [
+    "false",
     "true"
    ],
    "IsVirtualServiceAttentionLEDOn": [
@@ -1315,6 +1471,9 @@
    ],
    "LANConsoleCapable": [
     "false"
+   ],
+   "Label": [
+    "<text>"
    ],
    "Language": [
     "Chinese",
@@ -1482,6 +1641,7 @@
     "true"
    ],
    "ManagerPassthroughCapable": [
+    "false",
     "true"
    ],
    "ManufacturingDefaultConfigurationEnabled": [
@@ -1574,6 +1734,9 @@
    "MaximumLogicalPortsSupported": [
     "<int>"
    ],
+   "MaximumLogicalVolumes": [
+    "<int>"
+   ],
    "MaximumMemory": [
     "<int>"
    ],
@@ -1659,6 +1822,7 @@
     "Not_In_Progress"
    ],
    "MemoryEncryptionHardwareAccessEnabled": [
+    "false",
     "true"
    ],
    "MemoryExpansionEnabled": [
@@ -1700,6 +1864,7 @@
    "MigrationStorageViosDataStatus": [
     "No_Data",
     "Update_Failed",
+    "Update_Pending",
     "Valid"
    ],
    "MigrationStorageViosDataTimestamp": [
@@ -1771,6 +1936,7 @@
    "Model": [
     "<text>",
     "HEX",
+    "MRU",
     "MRX"
    ],
    "ModelName": [
@@ -1942,6 +2108,7 @@
    ],
    "PartitionState": [
     "not activated",
+    "not available",
     "open firmware",
     "running"
    ],
@@ -2074,7 +2241,8 @@
     "<int>"
    ],
    "PowerChipQueryCapable": [
-    "false"
+    "false",
+    "true"
    ],
    "PowerOffWhenLastLogicalPartitionIsShutdown": [
     "false"
@@ -2090,7 +2258,8 @@
    "PowerOnSource": [
     "ASMMenu",
     "OperatorPanel",
-    "Other"
+    "Other",
+    "SystemManagementConsole"
    ],
    "PowerOnSpeed": [
     "Unknown",
@@ -2210,6 +2379,7 @@
     "true"
    ],
    "RequiredPowerSavingMode": [
+    "Disable",
     "Maximum_Performance",
     "Power_Saving",
     "Static"
@@ -2407,9 +2577,13 @@
    ],
    "Status": [
     "LINK_DOWN",
-    "OPERATIONAL"
+    "OPERATIONAL",
+    "POWERED_OFF"
    ],
    "StorageLabel": [
+    "<text>"
+   ],
+   "SubLabel": [
     "<text>"
    ],
    "Subnet": [
@@ -2450,6 +2624,7 @@
     "<int>"
    ],
    "SupportedOptions": [
+    "AdapterLldpForPortDisabled",
     "Veb",
     "Vepa",
     "fullDuplex",
@@ -2531,6 +2706,9 @@
    "TLSRequestCertificate": [
     "never"
    ],
+   "TaggedVLANIDs": [
+    "<int>"
+   ],
    "TaggedVLANSupported": [
     "false",
     "true"
@@ -2555,6 +2733,7 @@
     "false"
    ],
    "ThreadModeEnabled": [
+    "false",
     "true"
    ],
    "TicketLifeTime": [
@@ -2660,6 +2839,7 @@
     "true"
    ],
    "VNICFailOverCapable": [
+    "false",
     "true"
    ],
    "VODConfigurationOption": [
@@ -3033,6 +3213,7 @@
    ],
    "title": [
     "<text>",
+    "ClientNetworkAdapter",
     "LogicalPartition",
     "ManagedSystem",
     "ManagementConsole",
@@ -3043,7 +3224,8 @@
     "SearchParameterSet",
     "TaskRole",
     "UserProfile",
-    "VirtualIOServer"
+    "VirtualIOServer",
+    "VolumeGroup"
    ],
    "uncappedWeight": [
     "<int>"
@@ -3288,6 +3470,19 @@
     ]
    },
    {
+    "command": "lshwres -r virtualio --rsubtype vnic --level lpar -m {} --filter lpar_names={}",
+    "exit_status": [
+     1
+    ],
+    "codes": [
+     "HSCL9010"
+    ],
+    "outputs": [],
+    "error_streams": [
+     "stdout"
+    ]
+   },
+   {
     "command": "lshwres -r virtualio --rsubtype vnicbkdev -m {}",
     "exit_status": [
      1
@@ -3353,11 +3548,25 @@
     ]
    },
    {
+    "command": "lsmemopt -m {} -r lpar -o currscore --filter lpar_names={}",
+    "exit_status": [
+     1
+    ],
+    "codes": [
+     "HSCL9010"
+    ],
+    "outputs": [],
+    "error_streams": [
+     "stdout"
+    ]
+   },
+   {
     "command": "lsmemopt -m {} -r resgroup -o calcscore --gid all -F resource_group_name,resource_group_id,curr_score,predicted_score,requested_lpar_names,requested_lpar_ids,protected_lpar_names,protected_lpar_ids --header",
     "exit_status": [
      1
     ],
     "codes": [
+     "HSCL9010",
      "HSCLCA00"
     ],
     "outputs": [],
@@ -3371,6 +3580,7 @@
      1
     ],
     "codes": [
+     "HSCL9010",
      "HSCLCA00"
     ],
     "outputs": [],
@@ -3384,6 +3594,7 @@
      1
     ],
     "codes": [
+     "HSCL9010",
      "HSCLCA00"
     ],
     "outputs": [],
@@ -3406,6 +3617,19 @@
    },
    {
     "command": "lsmemopt -m {} -r sys -o currscore",
+    "exit_status": [
+     1
+    ],
+    "codes": [
+     "HSCL9010"
+    ],
+    "outputs": [],
+    "error_streams": [
+     "stdout"
+    ]
+   },
+   {
+    "command": "lsrefcode -r lpar -m {} --filter lpar_names={} -n 1 -F lpar_name,time_stamp,refcode --header",
     "exit_status": [
      1
     ],
@@ -3443,6 +3667,58 @@
    },
    {
     "command": "lssyscfg -r lpar -m {}",
+    "exit_status": [
+     1
+    ],
+    "codes": [
+     "HSCL0237"
+    ],
+    "outputs": [],
+    "error_streams": [
+     "stdout"
+    ]
+   },
+   {
+    "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F description",
+    "exit_status": [
+     1
+    ],
+    "codes": [
+     "HSCL0237"
+    ],
+    "outputs": [],
+    "error_streams": [
+     "stdout"
+    ]
+   },
+   {
+    "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F desired_lpar_proc_compat_mode,curr_lpar_proc_compat_mode,default_profile",
+    "exit_status": [
+     1
+    ],
+    "codes": [
+     "HSCL0237"
+    ],
+    "outputs": [],
+    "error_streams": [
+     "stdout"
+    ]
+   },
+   {
+    "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F min_affinity_score,min_affinity_score_action --header",
+    "exit_status": [
+     1
+    ],
+    "codes": [
+     "HSCL0237"
+    ],
+    "outputs": [],
+    "error_streams": [
+     "stdout"
+    ]
+   },
+   {
+    "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F msp",
     "exit_status": [
      1
     ],
@@ -3528,6 +3804,15 @@
     "error_streams": []
    },
    {
+    "command": "lsviosbk --filter vios_uuids={} -F name,type --header",
+    "exit_status": [
+     0
+    ],
+    "codes": [],
+    "outputs": [],
+    "error_streams": []
+   },
+   {
     "command": "lsviosbk -F --header",
     "exit_status": [
      0
@@ -3546,46 +3831,60 @@
    "lshmc :: version": [
     "<text>"
    ],
+   "lssyscfg -r sys :: 5250_application_capable": [
+    "<int>"
+   ],
    "lssyscfg -r sys :: active_lpar_mobility_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: active_lpar_share_idle_procs_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: active_mem_expansion_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: active_mem_mirroring_hypervisor_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: active_mem_sharing_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: addr_broadcast_perf_policy_capable": [
     "unavailable"
    ],
    "lssyscfg -r sys :: advanced_hmc_automation_and_monitoring_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: aix_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: aix_update_access_key_exp_date": [
     "<text>"
    ],
    "lssyscfg -r sys :: assign_5250_cpw_percent": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: capi_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: cluster_serial_num": [
     "<text>"
    ],
    "lssyscfg -r sys :: cod_mem_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: cod_proc_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: curr_mfg_default_boot_mode": [
@@ -3610,21 +3909,26 @@
     "None"
    ],
    "lssyscfg -r sys :: dynamic_platform_optimization_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: dynamic_simplified_remote_restart_toggle_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: electronic_err_reporting_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: firmware_power_saver_capable": [
     "<int>"
    ],
    "lssyscfg -r sys :: hardware_active_mem_expansion_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: hardware_discovery_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: hardware_power_saver_capable": [
@@ -3634,33 +3938,42 @@
     "<int>"
    ],
    "lssyscfg -r sys :: inactive_lpar_mobility_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: ipaddr": [
     "<text>"
    ],
    "lssyscfg -r sys :: lpar_avail_priority_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: lpar_keystore_max_kbytes": [
+    "<int>",
     "<text>"
    ],
    "lssyscfg -r sys :: lpar_keystore_min_kbytes": [
+    "<int>",
     "<text>"
    ],
    "lssyscfg -r sys :: lpar_proc_compat_mode_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: lpar_proc_compat_modes": [
+    "<text>",
     "null"
    ],
    "lssyscfg -r sys :: lpar_remote_restart_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: lpar_suspend_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: max_lpars": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: max_power_ctrl_lpars": [
@@ -3669,22 +3982,32 @@
    "lssyscfg -r sys :: max_remote_restart_capable_lpars": [
     "unavailable"
    ],
+   "lssyscfg -r sys :: max_resource_groups": [
+    "<int>"
+   ],
    "lssyscfg -r sys :: max_suspend_capable_lpars": [
     "unavailable"
    ],
+   "lssyscfg -r sys :: max_vtpm_lpars": [
+    "<int>"
+   ],
    "lssyscfg -r sys :: mfg_default_config": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: micro_lpar_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: name": [
     "<text>"
    ],
    "lssyscfg -r sys :: os400_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: os400_native_io_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: peer_collective_serial_num": [
@@ -3712,6 +4035,7 @@
     "<text>"
    ],
    "lssyscfg -r sys :: power_off_policy": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: power_on_attr": [
@@ -3730,12 +4054,15 @@
     "unavailable"
    ],
    "lssyscfg -r sys :: powervm_lpar_remote_restart_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: powervm_lpar_simplified_remote_restart_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: redundant_err_path_reporting_capable": [
+    "<int>",
     "<text>"
    ],
    "lssyscfg -r sys :: serial_num": [
@@ -3748,6 +4075,7 @@
     "<text>"
    ],
    "lssyscfg -r sys :: shared_eth_failover_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: sp_boot_attr": [
@@ -3766,6 +4094,7 @@
     "ebmc"
    ],
    "lssyscfg -r sys :: sp_version": [
+    "<text>",
     "null"
    ],
    "lssyscfg -r sys :: state": [
@@ -3773,6 +4102,12 @@
    ],
    "lssyscfg -r sys :: state_detail": [
     "<empty>"
+   ],
+   "lssyscfg -r sys :: supported_vtpm_encryptions": [
+    "<text>"
+   ],
+   "lssyscfg -r sys :: supported_vtpm_versions": [
+    "<float>"
    ],
    "lssyscfg -r sys :: sys_time": [
     "<text>"
@@ -3784,24 +4119,31 @@
     "<uuid-lower>"
    ],
    "lssyscfg -r sys :: vet_activation_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: virtual_fc_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: virtual_io_server_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: virtual_switch_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: vpp": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: vsi_on_veth_capable": [
+    "<int>",
     "unavailable"
    ],
    "lssyscfg -r sys :: vsn_phase2_capable": [
+    "<int>",
     "unavailable"
    ]
   }

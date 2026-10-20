@@ -1,7 +1,8 @@
 {
  "firmware": "v10r3-p8-8247-22l",
  "sources": [
-  "2026-10-01 read-only sweep: HMC V10R3 M1060 managing a POWER8 8247-22L"
+  "2026-10-01 read-only sweep: HMC V10R3 M1060 managing a POWER8 8247-22L",
+  "2026-10-20 read-only sweep after a lab power loss, taken while the 8247-22L was No Connection for the whole capture: HMC V10R3 M1060 managing a POWER8 8247-22L"
  ],
  "rest": {
   "endpoints": [
@@ -175,6 +176,13 @@
    },
    {
     "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}/LogicalPartition",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=LogicalPartition",
+    "status": 204,
+    "content_type": "text/plain"
+   },
+   {
+    "method": "GET",
     "path": "/rest/api/uom/ManagedSystem/{uuid}/NetworkBridge",
     "accept": "application/vnd.ibm.powervm.uom+xml; type=NetworkBridge",
     "status": 204,
@@ -203,10 +211,24 @@
    },
    {
     "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}/VirtualNetwork",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualNetwork",
+    "status": 204,
+    "content_type": "text/plain"
+   },
+   {
+    "method": "GET",
     "path": "/rest/api/uom/ManagedSystem/{uuid}/VirtualSwitch",
     "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualSwitch",
     "status": 200,
     "content_type": "application/vnd.ibm.powervm.uom+xml; type=VirtualSwitch"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}/VirtualSwitch",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VirtualSwitch",
+    "status": 204,
+    "content_type": "text/plain"
    },
    {
     "method": "GET",
@@ -303,8 +325,22 @@
     "method": "GET",
     "path": "/rest/api/uom/VirtualIOServer/{uuid}/VolumeGroup",
     "accept": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/VirtualIOServer/{uuid}/VolumeGroup",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup",
     "status": 204,
     "content_type": "text/plain"
+   },
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/VirtualIOServer/{uuid}/VolumeGroup/{uuid}",
+    "accept": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup",
+    "status": 200,
+    "content_type": "application/vnd.ibm.powervm.uom+xml; type=VolumeGroup"
    },
    {
     "method": "GET",
@@ -601,6 +637,10 @@
     "true"
    ],
    "AvailablePorts": [
+    "<int>"
+   ],
+   "AvailableSize": [
+    "<float>",
     "<int>"
    ],
    "AvailableVirtualTrustedPlatformModulePartitions": [
@@ -935,6 +975,7 @@
     "<int>"
    ],
    "CurrentStealableProcUnits": [
+    "<float>",
     "<int>"
    ],
    "CurrentSystemKeylock": [
@@ -1032,7 +1073,8 @@
     "<int>"
    ],
    "DetailedState": [
-    "None"
+    "None",
+    "Unknown"
    ],
    "DeviceName": [
     "<text>"
@@ -1134,11 +1176,24 @@
    "FirmwarePowerSaverCapable": [
     "true"
    ],
+   "FreeSpace": [
+    "<float>",
+    "<int>"
+   ],
    "FruNumber": [
     "<text>"
    ],
    "GPFSCapable": [
     "true"
+   ],
+   "GroupCapacity": [
+    "<int>"
+   ],
+   "GroupName": [
+    "<text>"
+   ],
+   "GroupSerialID": [
+    "<text>"
    ],
    "HCNID": [
     "<int>"
@@ -1574,7 +1629,7 @@
     "false"
    ],
    "MacAddressValue": [
-    "<text>"
+    "<int>"
    ],
    "MachineType": [
     "<int>",
@@ -1727,6 +1782,9 @@
    "MaximumLogicalPortsSupported": [
     "<int>"
    ],
+   "MaximumLogicalVolumes": [
+    "<int>"
+   ],
    "MaximumMemory": [
     "<int>"
    ],
@@ -1858,7 +1916,9 @@
     "<int>"
    ],
    "MergedReferenceCode": [
-    "<empty>"
+    "<empty>",
+    "<text>",
+    "STANDBY"
    ],
    "MicroCodeVersion": [
     "<int>"
@@ -1876,6 +1936,7 @@
    "MigrationStorageViosDataStatus": [
     "No_Data",
     "Update_Failed",
+    "Update_Pending",
     "Valid"
    ],
    "MigrationStorageViosDataTimestamp": [
@@ -2341,7 +2402,8 @@
    ],
    "ReferenceCode": [
     "<empty>",
-    "<text>"
+    "<text>",
+    "STANDBY"
    ],
    "RelatedSRIOVAdapterID": [
     "<int>"
@@ -2586,7 +2648,9 @@
     "Active",
     "Disconnected",
     "Inactive",
-    "operating"
+    "no connection",
+    "operating",
+    "standby"
    ],
    "Status": [
     "OPERATIONAL"
@@ -2860,8 +2924,7 @@
     "true"
    ],
    "VirtualEthernetAdapterMACAddressPrefix": [
-    "<int>",
-    "<text>"
+    "<int>"
    ],
    "VirtualEthernetCustomMACAddressCapable": [
     "true"
@@ -3227,7 +3290,8 @@
     "UserProfile",
     "VirtualIOServer",
     "VirtualNetwork",
-    "VirtualSwitch"
+    "VirtualSwitch",
+    "VolumeGroup"
    ],
    "uncappedWeight": [
     "<int>"
@@ -3291,215 +3355,320 @@
    {
     "command": "lshwres -r io --rsubtype slot -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r io --rsubtype slot -m {} -F drc_index,description,lpar_name --header",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r mem --level lpar -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r mempool -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r proc --level lpar -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r sriov --rsubtype adapter -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r sriov --rsubtype logport --level eth -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r sriov --rsubtype physport --level eth -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r sriov --rsubtype physport --level ethc -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r sriov --rsubtype physport --level roce -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r virtualio --rsubtype eth --level lpar -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r virtualio --rsubtype eth --level lpar -m {} -F lpar_name,port_vlan_id,vswitch,state,trunk_priority",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r virtualio --rsubtype fc --level lpar -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r virtualio --rsubtype vnic --level lpar -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r virtualio --rsubtype vnic --level lpar -m {} --filter lpar_names={}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lshwres -r virtualio --rsubtype vnicbkdev -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lslabelvios -r fcport -m {} -F --header",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL0238"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lslabelvios -r group -m {} --filter resources={} -F --header",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL0238"
+    ],
     "outputs": [
      "No results were found."
     ],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lsmemopt -m {} -r lpar -o calcscore",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lsmemopt -m {} -r lpar -o currscore",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lsmemopt -m {} -r lpar -o currscore --filter lpar_names={}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lsmemopt -m {} -r resgroup -o currscore --gid all",
@@ -3517,38 +3686,58 @@
    {
     "command": "lsmemopt -m {} -r sys -o calcscore",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lsmemopt -m {} -r sys -o currscore",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lsrefcode -r lpar -m {} --filter lpar_names={} -n 1 -F lpar_name,time_stamp,refcode --header",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lsrefcode -r lpar -m {} -n 1",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL9010"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lssyscfg -r lpar -F uuid,name",
@@ -3564,38 +3753,58 @@
    {
     "command": "lssyscfg -r lpar -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL0237"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F description",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL0237"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F desired_lpar_proc_compat_mode,curr_lpar_proc_compat_mode,default_profile",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL0237"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F msp",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL0237"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lssyscfg -r lpar -m {} --filter lpar_names={} -F name",
@@ -3603,6 +3812,7 @@
      1
     ],
     "codes": [
+     "HSCL0237",
      "HSCL8012"
     ],
     "outputs": [],
@@ -3613,11 +3823,16 @@
    {
     "command": "lssyscfg -r prof -m {}",
     "exit_status": [
-     0
+     0,
+     1
     ],
-    "codes": [],
+    "codes": [
+     "HSCL0237"
+    ],
     "outputs": [],
-    "error_streams": []
+    "error_streams": [
+     "stdout"
+    ]
    },
    {
     "command": "lssyscfg -r prof -m {} --filter lpar_names={},profile_names={}",
@@ -3637,6 +3852,15 @@
     "outputs": [
      "default"
     ],
+    "error_streams": []
+   },
+   {
+    "command": "lssyscfg -r sys -F name",
+    "exit_status": [
+     0
+    ],
+    "codes": [],
+    "outputs": [],
     "error_streams": []
    },
    {
@@ -4257,7 +4481,8 @@
     "<int>"
    ],
    "lssyscfg -r sys :: addr_broadcast_perf_policy_capable": [
-    "<int>"
+    "<int>",
+    "unavailable"
    ],
    "lssyscfg -r sys :: aix_capable": [
     "<int>"
@@ -4278,16 +4503,19 @@
     "<int>"
    ],
    "lssyscfg -r sys :: curr_mfg_default_boot_mode": [
-    "norm"
+    "norm",
+    "unavailable"
    ],
    "lssyscfg -r sys :: curr_mfg_default_ipl_source": [
     "<text>"
    ],
    "lssyscfg -r sys :: curr_power_on_side": [
-    "perm"
+    "perm",
+    "unavailable"
    ],
    "lssyscfg -r sys :: curr_power_on_speed": [
-    "norm"
+    "norm",
+    "unavailable"
    ],
    "lssyscfg -r sys :: curr_sys_keylock": [
     "<text>"
@@ -4377,22 +4605,27 @@
     "<text>"
    ],
    "lssyscfg -r sys :: pend_mfg_default_boot_mode": [
-    "norm"
+    "norm",
+    "unavailable"
    ],
    "lssyscfg -r sys :: pend_mfg_default_ipl_source": [
     "<text>"
    ],
    "lssyscfg -r sys :: pend_power_on_lpar_start_policy": [
+    "unavailable",
     "userinit"
    ],
    "lssyscfg -r sys :: pend_power_on_option": [
-    "standby"
+    "standby",
+    "unavailable"
    ],
    "lssyscfg -r sys :: pend_power_on_side": [
-    "perm"
+    "perm",
+    "unavailable"
    ],
    "lssyscfg -r sys :: pend_power_on_speed": [
-    "norm"
+    "norm",
+    "unavailable"
    ],
    "lssyscfg -r sys :: pend_sys_keylock": [
     "<text>"
@@ -4401,19 +4634,24 @@
     "<int>"
    ],
    "lssyscfg -r sys :: power_on_attr": [
-    "<int>"
+    "<int>",
+    "unavailable"
    ],
    "lssyscfg -r sys :: power_on_lpar_start_policy": [
+    "unavailable",
     "userinit"
    ],
    "lssyscfg -r sys :: power_on_method": [
-    "<int>"
+    "<int>",
+    "unavailable"
    ],
    "lssyscfg -r sys :: power_on_option": [
-    "standby"
+    "standby",
+    "unavailable"
    ],
    "lssyscfg -r sys :: power_on_type": [
-    "power on"
+    "power on",
+    "unavailable"
    ],
    "lssyscfg -r sys :: powervm_lpar_remote_restart_capable": [
     "<int>"
@@ -4434,13 +4672,16 @@
     "<int>"
    ],
    "lssyscfg -r sys :: sp_boot_attr": [
-    "<int>"
+    "<int>",
+    "unavailable"
    ],
    "lssyscfg -r sys :: sp_boot_major_type": [
-    "<int>"
+    "<int>",
+    "unavailable"
    ],
    "lssyscfg -r sys :: sp_boot_minor_type": [
-    "<int>"
+    "<int>",
+    "unavailable"
    ],
    "lssyscfg -r sys :: sp_failover_capable": [
     "<int>"
@@ -4452,6 +4693,7 @@
     "<text>"
    ],
    "lssyscfg -r sys :: state": [
+    "No Connection",
     "Operating"
    ],
    "lssyscfg -r sys :: state_detail": [

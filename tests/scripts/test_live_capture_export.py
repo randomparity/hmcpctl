@@ -913,6 +913,21 @@ def test_element_name_case_and_prefix_are_scrubbed(
     assert tok.leaks(scrubbed) == []
 
 
+@pytest.mark.parametrize("encode", [str, json.dumps], ids=["raw", "json"])
+def test_device_id_holding_a_location_code_is_scrubbed_whole(encode: Any) -> None:
+    """A VIOS mapping's `UniqueDeviceID` embeds a location code; the device rule takes it all.
+
+    The location rule ran first, so the device rule stopped at the `<` of the token it
+    wrote and left `<REDACTED-DEVID><REDACTED-LOC>-V100-C3`, which the backstop refused.
+    """
+    tok = export.Tokenizer({}, set())
+    value = "1eU8375.42A.ABCD123-V100-C3"
+    body = encode(f'<Root><UniqueDeviceID kb="ROR">{value}</UniqueDeviceID></Root>')
+    scrubbed = tok.tokenize(body)
+    assert scrubbed == body.replace(value, _escaped(DEVID) if encode is str else DEVID)
+    assert tok.leaks(scrubbed) == []
+
+
 #: What ends a prefix: XML's spaces, a tag end, a quote, `/` and `=`, and in
 #: `json.dumps` text a `\"` and an escape of any of those (#1588, #1623).
 PREFIX_GAPS = [" ", "\t", "\n", "\r", ">", '"', "'", "/", "="]
@@ -2746,6 +2761,32 @@ def test_authorized_keys_element_is_redacted_whole() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "encode", [str, json.dumps, _json_twice], ids=["raw", "json", "json-twice"]
+)
+def test_authorized_keys_container_keeps_its_indentation(encode: Any) -> None:
+    """V11R2 nests the key in `<AuthorizedKey>`; only indentation is the parent's text.
+
+    The scrub rule wrote a token over the indentation before the first child, and the
+    backstop reported the indentation before the closing tag, refusing the export.
+    """
+    key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB root@hmcbox7"
+    body = encode(
+        '<ManagementConsole><AuthorizedKeysValue kb="CUD">\n        <Metadata>'
+        f"<Atom/></Metadata>\n        <AuthorizedKey>{key}</AuthorizedKey>\n    "
+        "</AuthorizedKeysValue></ManagementConsole>"
+    )
+    tok = export.Tokenizer({}, set())
+    scrubbed = tok.tokenize(body)
+    assert scrubbed is not None
+    assert "AAAAB3" not in scrubbed
+    assert (
+        scrubbed.replace(scrubbed.split("<AuthorizedKey>")[1].split("</")[0], key)
+        == body
+    )
+    assert tok.leaks(scrubbed) == []
+
+
 def test_ssh_key_comment_stops_at_a_tag() -> None:
     body = "<Keys><Key>ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB root@hmcbox7</Key></Keys>"
     corpus = export.tokenize_records(_records(_rest("/k2", body)))
@@ -3142,6 +3183,38 @@ def test_ipv6_leak_backstop(address: str, before: str) -> None:
 def test_ipv6_backstop_keeps_non_addresses_and_placeholder(value: str) -> None:
     # Existing MAC backstops may report a live MAC; this check isolates IPv6 scanning.
     assert export._ipv6_leaks(value) == []
+
+
+@pytest.mark.parametrize("encode", [str, json.dumps], ids=["raw", "json"])
+@pytest.mark.parametrize(
+    ("value", "written"),
+    [
+        ("::", "2001:db8::1"),
+        ("::1", "2001:db8::1"),
+        ("::/::", "2001:db8::1/2001:db8::1"),
+    ],
+)
+def test_address_opening_with_double_colon_is_scrubbed(
+    value: str, written: str, encode: Any
+) -> None:
+    """V11R2 serves a VMI `Gateway` of `::` and console rules of `::/::`.
+
+    The scrub rule wanted a hex group before the first colon and kept them, so the
+    backstop, which counts them as addresses, refused the export.
+    """
+    tok = export.Tokenizer({}, set())
+    body = encode(f'<Root><Gateway kb="ROO">{value}</Gateway></Root>')
+    scrubbed = tok.tokenize(body)
+    assert scrubbed == body.replace(value, written)
+    assert tok.leaks(scrubbed) == []
+
+
+@pytest.mark.parametrize("text", ["ns::IPAddress", "Partition::State"])
+def test_double_colon_inside_a_word_is_not_an_address(text: str) -> None:
+    assert (
+        export.Tokenizer({}, set()).tokenize(f"<Note>{text}</Note>")
+        == f"<Note>{text}</Note>"
+    )
 
 
 def test_ipv6_backstop_bounds_each_candidate() -> None:
