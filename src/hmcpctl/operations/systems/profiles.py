@@ -374,11 +374,14 @@ async def list_system_profiles(
 ) -> SystemProfileInventory:
     """Read whole bound inventory before any requested-name lookup; never hide invalid rows."""
     validate_wait_timing(True, timeout_seconds, poll_interval)
-    system = await resolve_system_uuid(hmc, system_name_or_uuid)
+    system = None
     try:
         async with asyncio.timeout(timeout_seconds):
+            system = await resolve_system_uuid(hmc, system_name_or_uuid)
             _, records = await _inventory(hmc, system)
     except (HMCError, ValueError, KeyError, TypeError, TimeoutError) as exc:
+        if system is None:
+            raise
         return SystemProfileInventory(
             system, None, "ssh-command", None, _command_failure(exc), str(exc)[:2048]
         )
@@ -794,12 +797,13 @@ async def _metadata(
     from ...ssh.profiles import delete_system_profile_record
 
     validate_wait_timing(True, timeout_seconds, poll_interval)
-    system = await resolve_system_uuid(hmc, selector)
+    system = selector
     state, job, code, warnings, error = "uncertain", None, None, (), None
     attempted = False
     command_status = None
     try:
         async with asyncio.timeout(timeout_seconds):
+            system = await resolve_system_uuid(hmc, selector)
             phase, _old, desired = await _admit(
                 hmc,
                 system,
@@ -1133,7 +1137,7 @@ async def activate_system_profile(
     if action == "validate" and continue_on_error:
         raise ValueError("validation-only cannot continue activation")
     validate_wait_timing(True, timeout_seconds, poll_interval)
-    system = await resolve_system_uuid(hmc, system_name_or_uuid)
+    system = system_name_or_uuid
     state, command_status, job, code, warnings, error = (
         "uncertain",
         None,
@@ -1152,6 +1156,7 @@ async def activate_system_profile(
     attempted = False
     try:
         async with asyncio.timeout(timeout_seconds):
+            system = await resolve_system_uuid(hmc, system_name_or_uuid)
             phase, record, _ = await _admit(
                 hmc,
                 system,

@@ -1463,3 +1463,71 @@ async def test_failed_terminal_malformed_results_public_cli(
         ],
     )
     assert cli.exit_code == 1, cli.output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action",
+    [
+        "list",
+        "create",
+        "update",
+        "delete",
+        "activate",
+        "validate",
+        "validate-and-activate",
+    ],
+)
+async def test_whole_call_deadline_includes_name_discovery(
+    system_profiles, monkeypatch, action
+):
+    import asyncio
+
+    h, _, _, ssh = system_profiles
+
+    async def discover():
+        await asyncio.Event().wait()
+
+    h.list_system_summaries = AsyncMock(side_effect=discover)
+    h.submit_job = AsyncMock()
+    kwargs = {"timeout_seconds": 1, "poll_interval": 1}
+    if action == "list":
+        call = ops.list_system_profiles(h, "system-name", **kwargs)
+    elif action == "create":
+        call = ops.create_system_profile(
+            h,
+            "system-name",
+            "new",
+            [ops.SystemProfilePair(partition=L, profile=P)],
+            **kwargs,
+        )
+    elif action == "update":
+        call = ops.update_system_profile(
+            h, "system-name", "scratch", new_name="new", **kwargs
+        )
+    elif action == "delete":
+        # Delete has a fixed 300-second deadline; shorten only its clock boundary.
+        real_timeout = asyncio.timeout
+
+        def deadline(seconds):
+            assert seconds == 300
+            return real_timeout(1)
+
+        monkeypatch.setattr(ops.asyncio, "timeout", deadline)
+        call = ops.delete_system_profile(h, "system-name", "scratch")
+    else:
+        call = ops.activate_system_profile(
+            h, "system-name", "scratch", action=action, **kwargs
+        )
+    task = asyncio.create_task(call)
+    # The outer wait is a test bound, not a replacement for the operation deadline.
+    done, _ = await asyncio.wait([task], timeout=1.3)
+    if not done:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert done, "operation deadline did not cover managed-system name discovery"
+    with pytest.raises(TimeoutError):
+        await task
+    h.get_managed_system.assert_not_awaited()
+    h.submit_job.assert_not_awaited()
+    ssh.assert_not_awaited()
