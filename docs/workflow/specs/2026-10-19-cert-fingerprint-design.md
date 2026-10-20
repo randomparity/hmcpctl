@@ -30,7 +30,9 @@ In scope:
    `HMC_VERIFY_SSL=true`. Every operator-facing text that introduces the setting says so.
    A pin is per HMC, so in a multi-profile setup it belongs in each profile's TOML
    `cert_fingerprint`. An exported `HMC_CERT_FINGERPRINT` overrides every profile, as the
-   other `HMC_*` variables do.
+   other `HMC_*` variables do. For the same reason, `report utilization` refuses to run while
+   `HMC_CERT_FINGERPRINT` is exported. The name joins `_PROFILE_OVERRIDES` in
+   `cli_commands/report.py`. The two names that tuple already omitted are owned by #1743.
 3. **Handshake-time check.** The fingerprint branch passes
    `_fingerprint_ssl_context(expected, host)`. That is a stdlib
    `ssl.SSLContext(PROTOCOL_TLS_CLIENT)` with `check_hostname=False` and `verify_mode=CERT_NONE`,
@@ -80,6 +82,8 @@ Excluded, with owners approved by the operator in `WORK:SCOPE`:
 - The `HMC_VERIFY_SSL=true` default flip and the 1.0 upgrade notes belong to the 1.0 release
   under #1605.
 - The per-host CA-bundle map is rejected by ADR 0224 Decision 2.
+- The pre-existing `HMC_CA_BUNDLE` / `HMC_TRUST_SYSTEM_STORE` omissions from the
+  `report utilization` guard are owned by #1743.
 
 No new dependency: `ssl` and `hashlib` are stdlib. No ADR is added.
 
@@ -146,5 +150,6 @@ No new dependency: `ssl` and `hashlib` are stdlib. No ADR is added.
 | Error mapping and no degrade | focused-test | `tests/unit/test_client.py`: a transport error chained from `_FingerprintMismatch` becomes `HMCTLSFingerprintError`, which is not an `HMCTransportError` and carries the exact canonical expected value; logon on default port 443 does not rebuild for 12443 |
 | Audit record | focused-test | `tests/unit/test_audit.py` vocabulary and record shape; `tests/test_authorization_audit_doc.py` passes with the new section |
 | CLI option | focused-test | the e2e tests pass `--cert-fingerprint` |
+| Report override guard | focused-test | `tests/app/test_report_cli.py::test_exported_connection_override_is_refused` gains an `HMC_CERT_FINGERPRINT` case; the `configured` fixture clears it |
 | Env-var docs | focused-test | `just env-vars` |
 | Migration warning text, configuration prose, CHANGELOG, audit level wording, `set_audit_level` docstring | task-test-not-applicable | human-readable prose with no executable consumer; asserting the wording would snapshot prose |
