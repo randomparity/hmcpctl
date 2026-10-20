@@ -472,21 +472,28 @@ def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:
     assert "PYPI" not in workflow.upper()
 
 
-def test_active_ci_checkouts_with_project_uv_do_not_fetch_full_history() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    active_workflow, _ = _inactive_ppc64le_job(workflow)
-    checkout_settings = re.findall(
+def _checkout_settings(workflow: str) -> list[str]:
+    return re.findall(
         r"uses: actions/checkout@[^\n]+\n"
         r"        with:\n"
         r"(?P<settings>(?:          [^\n]+\n)+)",
-        active_workflow,
+        workflow,
     )
 
+
+def test_only_the_source_building_ci_job_fetches_full_history() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    active_workflow, _ = _inactive_ppc64le_job(workflow)
+    checkout_settings = _checkout_settings(active_workflow)
+
     assert len(checkout_settings) == 5
-    assert active_workflow.count("uv run") >= 2
-    # Full history is no longer fetched: the version is declared statically and no
-    # workflow step reads Git history (ADR 0033).
-    assert not any("fetch-depth" in settings for settings in checkout_settings)
+    # The `ci` job builds and installs from source, and hatch-vcs derives the version
+    # from tags and history there (ADR 0250). Every other job installs the retained
+    # wheel, so it keeps the shallow default.
+    full_history = [s for s in checkout_settings if "fetch-depth: 0\n" in s]
+    assert len(full_history) == 1
+    assert _checkout_settings(_job_body(active_workflow, "ci")) == full_history
+    assert sum("fetch-depth" in settings for settings in checkout_settings) == 1
     for settings in checkout_settings:
         assert "persist-credentials: false\n" in settings
 
@@ -497,8 +504,9 @@ def test_dirty_project_commands_do_not_rebuild_editable_metadata(
     project = tmp_path / "project"
     project.mkdir()
     _copy_tracked_project(project)
-    # No commit: the build reads no Git state (ADR 0033). The repository and the staged
-    # index are still needed, because `prek run --all-files` resolves its file list
+    # No commit, so no hook runs (#237); the version is not asserted here, so the
+    # commit-less repository's `0.1.dev0` version is fine (ADR 0250). The repository and
+    # the staged index are needed because `prek run --all-files` resolves its file list
     # through `git ls-files`. No hooks-path override here -- `prek run` executes the
     # hooks declared in .pre-commit-config.yaml and never consults core.hooksPath.
     subprocess.run(
@@ -620,6 +628,8 @@ def test_github_ci_smokes_each_retained_wheel_in_a_fresh_environment() -> None:
     assert "merge-multiple:" not in body
     assert "UV_PYTHON: ${{ matrix.python-version }}" in body
     assert "uv run --no-project python scripts/smoke_release_wheel.py dist" in body
+    # The wheel filename carries the derived version into each leg's log (ADR 0250).
+    assert 0 <= body.find("run: ls -l dist\n") < body.index("smoke_release_wheel.py")
     assert "wheels=(dist/*.whl)" not in body
     assert "just setup" not in body
     assert "uv sync" not in body

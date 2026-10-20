@@ -4,6 +4,8 @@
 
 Accepted
 
+> **Superseded by [0250](0250-git-derived-versions-with-hatch-vcs.md)** (2026-10-20)
+
 Supersedes [0023](0023-git-derived-package-versions.md).
 
 ## Context
