@@ -16,6 +16,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `HMC_CERT_FINGERPRINT` (TOML `cert_fingerprint`, `--cert-fingerprint`) trusts an HMC whose
+  certificate has the given SHA-256 fingerprint, so a self-signed HMC can be verified without
+  a CA bundle. It takes effect with `HMC_VERIFY_SSL=true`, yields only to `HMC_CA_BUNDLE`, and
+  refuses a mismatched certificate before any request is sent. Each trusted connection emits
+  a `tls-fingerprint-verified` audit record (#1614, ADR 0224).
+
 - SSH dispatch accepts the secret values a command carries and redacts them from
   timeout, connection, process-failure and SSH-library log text; `-i` record refusals
   can omit a secret attribute's value. No operation uses it yet (#655).
