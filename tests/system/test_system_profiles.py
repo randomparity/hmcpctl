@@ -1641,3 +1641,73 @@ async def test_managed_system_shape_preserves_public_outcome(
     else:
         assert result.command_status == "completed"
         h.submit_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", ["submission", "terminal"])
+@pytest.mark.parametrize("shape", ["attributes", "mapping", "list", "scalar"])
+async def test_native_job_diagnostics_preserve_terminal_public_cli(
+    system_profiles, monkeypatch, site, shape
+):
+    import asyncio
+
+    from typer.testing import CliRunner
+
+    from hmcpctl.cli import app
+    from hmcpctl.cli_commands.systems import profiles
+    from hmcpctl.xmlutil import parse_feed
+
+    h, _, _, _ = system_profiles
+    name = {
+        "attributes": '<ParameterName ksv="V1_0">returnCode</ParameterName>',
+        "mapping": "<ParameterName><unexpected/></ParameterName>",
+        "list": "<ParameterName>returnCode</ParameterName><ParameterName>ErrorData</ParameterName>",
+        "scalar": "<ParameterName>returnCode</ParameterName>",
+    }[shape]
+    failed = parse_feed(
+        '<entry xmlns="http://www.w3.org/2005/Atom"><id>urn:uuid:job-1</id>'
+        "<content><JobResponse><JobID>job-1</JobID>"
+        "<Status>FAILED_BEFORE_COMPLETION</Status><Results><JobParameter>"
+        + name
+        + '<ParameterValue ksv="V1_0">1</ParameterValue>'
+        "</JobParameter></Results></JobResponse></content></entry>"
+    )[0]
+    if shape == "scalar":
+        failed["Resource"]["Results"]["JobParameter"]["ParameterName"] = 1
+    h.submit_job = AsyncMock(
+        return_value=failed if site == "submission" else terminal("NOT_STARTED")
+    )
+    monkeypatch.setattr(
+        "hmcpctl.jobs.wait_for_submitted_job", AsyncMock(return_value=failed)
+    )
+    result = await ops.create_system_profile(
+        h,
+        S,
+        "new",
+        [ops.SystemProfilePair(partition=L, profile=P)],
+        exclusive_writer_window=True,
+    )
+    assert result.state == "failed" and result.job.status == "FAILED_BEFORE_COMPLETION"
+    assert result.job.job_id == "job-1" and result.job.timed_out is False
+    assert result.return_code == ("1" if shape == "attributes" else None)
+    assert result.error and len(result.error) <= 2048
+    assert h.submit_job.await_count == 1 and result.postcondition == "unverified"
+    monkeypatch.setattr(
+        profiles, "create_system_profile", AsyncMock(return_value=result)
+    )
+    monkeypatch.setattr(profiles, "with_client", lambda f: asyncio.run(f(h)))
+    cli = await asyncio.to_thread(
+        CliRunner().invoke,
+        app,
+        [
+            "systems",
+            "profile-create",
+            S,
+            "new",
+            "--member",
+            '{"partition":"member-a","profile":"base"}',
+            "--exclusive-writer-window",
+            "--json",
+        ],
+    )
+    assert cli.exit_code == 1, cli.output
