@@ -633,13 +633,15 @@ IDENTIFIER_RULES: tuple[tuple[re.Pattern[str], Replacement], ...] = (
         re.compile(rf"{_SCRUB_START}(?:\d{{1,3}}\.){{3}}\d{{1,3}}\b"),
         rf"\g<escape>{PLACEHOLDER_IP}",
     ),
+    # Before the location rule: a VIOS mapping's `UniqueDeviceID` embeds a location
+    # code, and the element rule's value ends at the `<` of any token written first.
+    _element_rule(*_DEVICE_ID_ELEMENT),
     # Anywhere, even inside `1eU8375.42A.XXXXXXX-V100-C3`; the slot suffix after the
     # prefix is generic and code joins on it, so it stays.
     (re.compile(r"U[0-9A-Za-z]{4}\.[0-9A-Za-z]{3}\.[0-9A-Za-z]{7}"), "<REDACTED-LOC>"),
     # A `-L<hex>` segment of a location suffix is a disk WWN or RAID array id; `-L0`
     # and other short logical-unit segments stay.
     (re.compile(r"(?<=-)L[0-9A-F]{8,}(?=-L|\b)"), "L<REDACTED-DEVID>"),
-    _element_rule(*_DEVICE_ID_ELEMENT),
     # A quoted CSV field holds every value up to its closing quote: "wwpns=a,b". The
     # backslashes before that quote stay, so `json.dumps`'s `\"` keeps its escape and an
     # escaped backslash its pair. Each run is read once, possessively.

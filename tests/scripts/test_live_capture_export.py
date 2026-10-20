@@ -913,6 +913,21 @@ def test_element_name_case_and_prefix_are_scrubbed(
     assert tok.leaks(scrubbed) == []
 
 
+@pytest.mark.parametrize("encode", [str, json.dumps], ids=["raw", "json"])
+def test_device_id_holding_a_location_code_is_scrubbed_whole(encode: Any) -> None:
+    """A VIOS mapping's `UniqueDeviceID` embeds a location code; the device rule takes it all.
+
+    The location rule ran first, so the device rule stopped at the `<` of the token it
+    wrote and left `<REDACTED-DEVID><REDACTED-LOC>-V100-C3`, which the backstop refused.
+    """
+    tok = export.Tokenizer({}, set())
+    value = "1eU8375.42A.ABCD123-V100-C3"
+    body = encode(f'<Root><UniqueDeviceID kb="ROR">{value}</UniqueDeviceID></Root>')
+    scrubbed = tok.tokenize(body)
+    assert scrubbed == body.replace(value, _escaped(DEVID) if encode is str else DEVID)
+    assert tok.leaks(scrubbed) == []
+
+
 #: What ends a prefix: XML's spaces, a tag end, a quote, `/` and `=`, and in
 #: `json.dumps` text a `\"` and an escape of any of those (#1588, #1623).
 PREFIX_GAPS = [" ", "\t", "\n", "\r", ">", '"', "'", "/", "="]
