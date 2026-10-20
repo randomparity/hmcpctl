@@ -180,6 +180,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 - Creating an HMC user without a description no longer fails with REST0344 on V10R3: the create
   now describes the user as `HMC User`, the HMC's own default (#1414). Modifying a user without a
   description still leaves it unchanged.
+- `hmc_read_lpar_refcodes` no longer describes an unknown partition as believed to return an
+  empty list: the HMC refuses it with `HSCL8012` and the tool raises, as the live probe showed
+  (#1475).
 
 ## [0.1.0] - 2026-10-12
 
