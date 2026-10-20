@@ -724,16 +724,17 @@ async def _rest(hmc, system, operation, document, timeout, poll):
             job=None,
             job_href=f"/rest/api/uom/jobs/{ident}",
         )
-        values = _job_values(terminal)
-        code = values.get("returnCode")
-        warnings = tuple(
-            values[k][:2048] for k in ("result", "detailedStatus") if values.get(k)
-        )
+        warnings = ()
         try:
+            values = _job_values(terminal)
+            code = values.get("returnCode")
+            warnings = tuple(
+                values[k][:2048] for k in ("result", "detailedStatus") if values.get(k)
+            )
             _job_facts(hmc, terminal, ident)
-        except ValueError as exc:
+        except (ValueError, TypeError, KeyError) as exc:
             state = "failed" if outcome.status in FAILED_JOB_STATUSES else "uncertain"
-            return state, outcome, code, warnings, str(exc)
+            return state, outcome, code, warnings, str(exc)[:2048]
         return "completed", outcome, code, warnings, None
     except asyncio.CancelledError as exc:
         raise _RestInterrupted(outcome, code) from exc

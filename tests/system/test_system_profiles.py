@@ -1408,3 +1408,58 @@ async def test_native_signal_preserves_uncertain_execution(
         assert result.activation_execution == (
             "failed" if expected == "failed" else "unknown"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformation", ["shape", "duplicate", "missing-code"])
+async def test_failed_terminal_malformed_results_public_cli(
+    system_profiles, monkeypatch, malformation
+):
+    import asyncio
+
+    from typer.testing import CliRunner
+
+    from hmcpctl.cli import app
+    from hmcpctl.cli_commands.systems import profiles
+
+    h, _, _, _ = system_profiles
+    h.submit_job = AsyncMock(return_value=terminal("NOT_STARTED"))
+    failed = terminal("FAILED_BEFORE_COMPLETION")
+    if malformation == "shape":
+        failed["Resource"]["Results"] = []
+    elif malformation == "duplicate":
+        failed["Resource"]["Results"]["JobParameter"] *= 2
+    else:
+        failed["Resource"]["Results"] = {}
+    monkeypatch.setattr(
+        "hmcpctl.jobs.wait_for_submitted_job", AsyncMock(return_value=failed)
+    )
+    result = await ops.create_system_profile(
+        h,
+        S,
+        "new",
+        [ops.SystemProfilePair(partition=L, profile=P)],
+        exclusive_writer_window=True,
+    )
+    assert result.state == "failed" and result.job.status == "FAILED_BEFORE_COMPLETION"
+    assert result.error and len(result.error) <= 2048
+    monkeypatch.setattr(
+        profiles, "create_system_profile", AsyncMock(return_value=result)
+    )
+    # Run the synchronous CLI in its own thread, retaining its normal asyncio runner.
+    monkeypatch.setattr(profiles, "with_client", lambda f: asyncio.run(f(h)))
+    cli = await asyncio.to_thread(
+        CliRunner().invoke,
+        app,
+        [
+            "systems",
+            "profile-create",
+            S,
+            "new",
+            "--member",
+            '{"partition":"member-a","profile":"base"}',
+            "--exclusive-writer-window",
+            "--json",
+        ],
+    )
+    assert cli.exit_code == 1, cli.output
