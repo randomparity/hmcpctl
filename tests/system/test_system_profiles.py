@@ -1348,3 +1348,63 @@ async def test_duplicate_native_name_refuses_uuid_selected_mutation(
     h.submit_job.assert_not_awaited()
     inventory = await ops.list_system_profiles(h, S)
     assert inventory.records is None and inventory.command_status == "uncertain"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["delete", "validate-and-activate"])
+@pytest.mark.parametrize(
+    "exit_status,signal,expected",
+    [
+        (-1, ("TERM", False, "", "en"), "uncertain"),
+        (None, None, "uncertain"),
+        (1, None, "failed"),
+        (1, ("TERM", False, "", "en"), "uncertain"),
+    ],
+)
+async def test_native_signal_preserves_uncertain_execution(
+    system_profiles, monkeypatch, action, exit_status, signal, expected
+):
+    import asyncssh
+
+    from hmcpctl.ssh import transport
+
+    h, _, _, _ = system_profiles
+    h.config = h.config.model_copy(update={"password": "synthetic-test-password"})
+    mutations = []
+
+    async def run(cmd, **kwargs):
+        if cmd.startswith(("rmsyscfg", "chsysstate")):
+            mutations.append(cmd)
+            raise asyncssh.ProcessError(
+                None, None, None, exit_status, signal, -15 if signal else 1, "", ""
+            )
+        raw = (
+            "name:lpar_id:curr_profile\nmember-a:1:\n"
+            if "-F name:lpar_id:curr_profile" in cmd
+            else "name:lpar_ids:profile_names\nscratch:1:base\n"
+            if "name:lpar_ids" in cmd
+            else "name\nscratch\n"
+        )
+        return SimpleNamespace(stdout=raw, stderr="")
+
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    connection.run.side_effect = run
+    monkeypatch.setattr(transport.asyncssh, "connect", lambda **_: connection)
+    monkeypatch.setattr(ops, "run_hmc_command", transport.run_hmc_command)
+    monkeypatch.setattr(
+        "hmcpctl.ssh.profiles.run_hmc_command", transport.run_hmc_command
+    )
+    result = (
+        await ops.delete_system_profile(h, S, "scratch", exclusive_writer_window=True)
+        if action == "delete"
+        else await ops.activate_system_profile(
+            h, S, "scratch", action=action, exclusive_writer_window=True
+        )
+    )
+    assert len(mutations) == 1
+    assert result.state == result.command_status == expected
+    if action != "delete":
+        assert result.activation_execution == (
+            "failed" if expected == "failed" else "unknown"
+        )

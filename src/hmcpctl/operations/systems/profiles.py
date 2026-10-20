@@ -357,7 +357,9 @@ def _command_failure(exc: BaseException) -> CommandStatus:
     return (
         "failed"
         if isinstance(cause, asyncssh.ProcessError)
-        and cause.exit_status not in (None, 0)
+        and cause.exit_status is not None
+        and cause.exit_status > 0
+        and not cause.exit_signal
         else "uncertain"
     )
 
