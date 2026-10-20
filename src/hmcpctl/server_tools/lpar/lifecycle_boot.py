@@ -65,9 +65,10 @@ def hmc_read_lpar_refcodes(
     ``Running`` is reported by the caller epic (#871) and has not been
     confirmed against hardware here; #879 owns that observation.
 
-    An empty list means no reference codes for that selector. A partition that
-    does not exist is believed to answer the same way rather than failing, but
-    that has not been confirmed against hardware; #879 owns the live check.
+    An empty list means an existing partition has no reference codes. A
+    partition that does not exist is not an empty list: the HMC refuses it with
+    exit 1 and ``HSCL8012``, and the tool raises ``HMCCLIError`` (observed live,
+    #893), so a mistyped name cannot be mistaken for a quiet partition.
 
     Broader reference-code, FRU and LED inventory is #691's; this is the narrow
     partition-scoped read and it reaches no LED control.
