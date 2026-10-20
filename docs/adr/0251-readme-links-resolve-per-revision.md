@@ -37,6 +37,8 @@ relative form.
   reopens this decision, under whichever record decides the publication.
 - A renamed or deleted doc that the README links now fails a test instead of 404ing.
 - Anchors can still drift unnoticed, as they could before.
+- ADR 0097 does not yet point here: this change left its file untouched, so its Status
+  needs an `Amended by` banner in a later change.
 
 ## Considered & rejected
 - **Keep `blob/main` and rewrite the links to `blob/vX.Y.Z` at release.** judgment: two
