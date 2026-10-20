@@ -18,13 +18,19 @@ In scope:
    the profile TOML key `cert_fingerprint` (profiles already construct `HMCConfig` from their
    keys), and the root CLI option `--cert-fingerprint`. A field validator accepts exactly 32
    colon-separated pairs of hex digits, in either case (`openssl x509 -fingerprint -sha256`
-   output after `=`). An empty string normalises to `None`, matching how `ca_bundle` treats an
-   empty value. Any other value fails construction with a message that names the expected shape
+   output after `=`) and returns the canonical upper-case colon form, the one value the comparison,
+   the error and the audit record all use. An empty string normalises to `None`, matching how
+   `ca_bundle` treats an empty value. Any other value fails construction with a message that names the expected shape
    and the `openssl` command, and does not echo the rejected value. The value is validated even
    when `verify_ssl` is false, so a typo surfaces before the flip.
 2. **Precedence.** With `verify_ssl` true, `_new_http_client` resolves trust in this order:
    `ca_bundle` → `cert_fingerprint` → `SSL_CERT_FILE`/`SSL_CERT_DIR` → `trust_system_store` →
    certifi. With `verify_ssl` false, `cert_fingerprint` is ignored and `verify=False` as today.
+   Until the 1.0 default flip (excluded), that means a pin takes effect only with
+   `HMC_VERIFY_SSL=true`. Every operator-facing text that introduces the setting says so.
+   A pin is per HMC, so in a multi-profile setup it belongs in each profile's TOML
+   `cert_fingerprint`. An exported `HMC_CERT_FINGERPRINT` overrides every profile, as the
+   other `HMC_*` variables do.
 3. **Handshake-time check.** The fingerprint branch passes
    `_fingerprint_ssl_context(expected, host)`. That is a stdlib
    `ssl.SSLContext(PROTOCOL_TLS_CLIENT)` with `check_hostname=False` and `verify_mode=CERT_NONE`,
@@ -40,22 +46,26 @@ In scope:
 
    This is ADR 0224's "connect, read the peer certificate, compare, abort on mismatch", placed
    at the earliest point where the certificate exists.
-4. **Error.** `HMCTLSFingerprintError(HMCTransportError)` in `hmcpctl.errors`. In
+4. **Error.** `HMCTLSFingerprintError(HMCError)` in `hmcpctl.errors`. It deliberately does not
+   derive from `HMCTransportError`. Several callers treat that class as "REST unreachable, degrade":
+   logon's legacy port-12443 retry, and the SSH name-resolution fallback in
+   `ssh/selectors.py`. A mismatch must abort rather than degrade, and deriving from `HMCError` gives
+   every such caller that behaviour with no per-site guard. In
    `HMCClient._request`, the `httpx.TransportError` handler walks the exception's
    `__cause__`/`__context__` chain. If it finds a `_FingerprintMismatch`, it raises
    `HMCTLSFingerprintError` naming the host, the expected and presented fingerprints, that
    nothing was sent, and the fix: re-obtain the fingerprint over a trusted channel and update
    `HMC_CERT_FINGERPRINT`. Otherwise the existing `HMCTransportError` path is unchanged.
-   `hmcpctl.api` is not extended (ADR 0118's six-name facade). `logon` re-raises
-   `HMCTLSFingerprintError` without attempting the legacy port-12443 fallback. A retry on
-   another port would replace the mismatch report with an unrelated connection error.
+   `hmcpctl.api` is not extended (ADR 0118's six-name facade).
 5. **Audit.** A new event, `tls-fingerprint-verified`, at INFO (`_ALLOW_LEVEL`), with `time`,
    `event`, `host` (`HMCConfig.host`) and `fingerprint` (normalised upper-case colon form). It is
    emitted once per verified TLS handshake: the host was authenticated by an operator-supplied
    digest rather than by a CA, and the stream records that per connection. It is added to the
    `Event` literal, to the hard-coded vocabulary in `tests/unit/test_audit.py`, and as a section
    with a JSON sample in `docs/authorization-audit.md` (held by
-   `tests/test_authorization_audit_doc.py`).
+   `tests/test_authorization_audit_doc.py`). Two texts state that `INFO` carries only permits,
+   and both are corrected to include this record: the level rule in that document's "Routing,
+   levels, and silencing" section, and the `set_audit_level` docstring in `audit/sink.py`.
 6. **Docs and messages.**
    - The `docs/environment-variables.md` table row plus the TLS verification bullet.
    - The precedence list in `docs/configuration.md#tls-trust`, plus how to obtain a fingerprint.
@@ -81,8 +91,9 @@ No new dependency: `ssl` and `hashlib` are stdlib. No ADR is added.
      profile.
    - A network attacker positioned between the client and the HMC.
 2. **Invariants and assets at stake.**
-   - The HMC credentials in the logon body must not be sent to a peer whose certificate digest
-     differs from the configured one.
+   - With `verify_ssl` true and a `cert_fingerprint` configured, the REST logon credentials are
+     not sent to a peer whose certificate digest differs from the configured one, and the
+     mismatch surfaces as an error rather than a degraded fallback.
    - Configurations that leave `cert_fingerprint` unset keep their current trust behaviour.
    - The closed audit vocabulary stays in step with its document.
 3. **Accepted failure classes.**
@@ -131,9 +142,9 @@ No new dependency: `ssl` and `hashlib` are stdlib. No ADR is added.
 |---|---|---|
 | Field validation and normalisation | focused-test | `tests/unit/test_config.py`: valid upper/lower case accepted, empty → `None`; bare hex, wrong length, non-hex rejected without echoing the value |
 | Precedence | focused-test | `tests/unit/test_client.py`: captured `verify=` is the fingerprint context over `SSL_CERT_FILE`, `SSL_CERT_DIR` and the system store; the path when `ca_bundle` is also set; `False` when `verify_ssl` is false |
-| Handshake match and mismatch | focused-test | `tests/app/test_cli_e2e.py` against `mock_hmc`: the matching digest lists systems; a mismatch exits non-zero naming the fingerprint error, with `request_log` empty |
-| Error mapping and no port fallback | focused-test | `tests/unit/test_client.py`: a transport error chained from `_FingerprintMismatch` becomes `HMCTLSFingerprintError`; logon on default port 443 does not rebuild for 12443 |
+| Handshake match and mismatch | focused-test | `tests/app/test_cli_e2e.py` against `mock_hmc`: the matching digest lists systems and emits exactly one `tls-fingerprint-verified` record with that host and fingerprint; a mismatch exits non-zero naming the fingerprint error, with `request_log` empty and no such record |
+| Error mapping and no degrade | focused-test | `tests/unit/test_client.py`: a transport error chained from `_FingerprintMismatch` becomes `HMCTLSFingerprintError`, which is not an `HMCTransportError` and carries the exact canonical expected value; logon on default port 443 does not rebuild for 12443 |
 | Audit record | focused-test | `tests/unit/test_audit.py` vocabulary and record shape; `tests/test_authorization_audit_doc.py` passes with the new section |
 | CLI option | focused-test | the e2e tests pass `--cert-fingerprint` |
 | Env-var docs | focused-test | `just env-vars` |
-| Migration warning text, configuration prose, CHANGELOG | task-test-not-applicable | human-readable prose with no executable consumer; asserting the wording would snapshot prose |
+| Migration warning text, configuration prose, CHANGELOG, audit level wording, `set_audit_level` docstring | task-test-not-applicable | human-readable prose with no executable consumer; asserting the wording would snapshot prose |
