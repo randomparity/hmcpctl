@@ -57,9 +57,10 @@ with (
             "probe_calls": len(probe.create_process_calls), "commands": commands,
         }))
 """
-# The child ends itself: --duration 60, then a release bounded by the scan and EOF
-# waits (#1058, #1072). This only catches a child that outlives those bounds.
-HANG_SECONDS = 180
+# A hang guard per phase, not a performance bound. The child ends itself within about
+# 81 s: --duration 60, then a release bounded by the 1 s scan and 20 s EOF waits
+# (#1058, #1072).
+HANG_SECONDS = 120
 
 
 def _hung(child: subprocess.Popen[bytes], captured: Future) -> str:
@@ -69,7 +70,7 @@ def _hung(child: subprocess.Popen[bytes], captured: Future) -> str:
     except TimeoutError:
         child.kill()
         stderr = captured.result()[1]
-    return f"child outlived its own bounds; stderr:\n{stderr.decode(errors='replace')}"
+    return f"child still running after {HANG_SECONDS} s; stderr:\n{stderr.decode(errors='replace')}"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="SIGINT subprocess contract is POSIX")
@@ -81,8 +82,9 @@ def test_sigint_retains_flushed_file_after_real_release(tmp_path, proven, late):
     target = tmp_path / "console.bin"
     expected = b"\r\n Open in progress  \r\n " + DATA + (HELD_SENTINEL if late else b"")
     # communicate drains stdout and stderr while the parent waits for flushed bytes.
-    # Only the child's own bounds end a slow run, so load cannot fail it; a lost
-    # SIGINT shows as a stop reason other than "interrupted" (#1753).
+    # Each wait is bounded by HANG_SECONDS, well above the child's own bounds, so
+    # load alone does not fail the test. A lost SIGINT shows as a stop reason other
+    # than "interrupted" (#1753).
     with (
         subprocess.Popen(
             [sys.executable, "-X", "faulthandler", "-c", SOURCE]
@@ -105,7 +107,7 @@ def test_sigint_retains_flushed_file_after_real_release(tmp_path, proven, late):
                 time.sleep(0.01)
             child.send_signal(signal.SIGINT)
             try:
-                stdout, stderr = captured.result(timeout=deadline - time.monotonic())
+                stdout, stderr = captured.result(timeout=HANG_SECONDS)
             except TimeoutError:
                 pytest.fail(_hung(child, captured))
         finally:
