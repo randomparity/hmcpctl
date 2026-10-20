@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import ssl
 import threading
 import traceback
 import warnings
@@ -34,7 +35,7 @@ from hmcpctl.client.core import (
     TLSVerificationDisabledWarning,
 )
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.jobs import build_job_request
 from hmcpctl.xmlutil import localname
 
@@ -4882,3 +4883,108 @@ async def test_discovery_nesting_failure_keeps_context_and_cause(
         f"Failed to parse GET {path} response: document nesting is too deep"
     )
     assert error.value.__cause__ is failure
+
+
+# ---------------------------------------------------------------------------
+# ADR 0224 Decision 1: cert_fingerprint (#1614)
+# ---------------------------------------------------------------------------
+
+_PIN = ":".join(["AB"] * 32)
+_PRESENTED = ":".join(["CD"] * 32)
+
+
+def _pinned_connect_error() -> httpx.ConnectError:
+    """The shape httpx raises when the pinned handshake refuses the peer."""
+    error = httpx.ConnectError("handshake failed")
+    error.__cause__ = client_core._FingerprintMismatch(_PRESENTED)
+    return error
+
+
+def test_cert_fingerprint_context_wins_over_env_bundle_and_system_store(monkeypatch):
+    monkeypatch.setenv("SSL_CERT_FILE", "/some/bundle.pem")
+    monkeypatch.setenv("SSL_CERT_DIR", "/some/ca-dir")
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(
+        make_config(verify_ssl=True, trust_system_store=True, cert_fingerprint=_PIN)
+    )
+    context = captured[0]
+    # anyio wraps synchronously only for this exact type, never a subclass.
+    assert type(context) is ssl.SSLContext
+    assert context.sslobject_class is not ssl.SSLObject
+    assert issubclass(context.sslobject_class, ssl.SSLObject)
+    assert context.verify_mode == ssl.CERT_NONE
+    assert context.check_hostname is False
+
+
+def test_ca_bundle_wins_over_cert_fingerprint(monkeypatch):
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(
+        make_config(
+            verify_ssl=True, ca_bundle="/hmc-specific.pem", cert_fingerprint=_PIN
+        )
+    )
+    assert captured[0] == "/hmc-specific.pem"
+
+
+def test_cert_fingerprint_ignored_when_verify_ssl_false(monkeypatch):
+    captured = _patch_async_client(monkeypatch)
+    HMCClient(make_config(verify_ssl=False, cert_fingerprint=_PIN))
+    assert captured[0] is False
+
+
+def _pinned_transport(monkeypatch, *, refuse_logon: bool) -> list[int]:
+    """Install a transport whose pinned handshake refuses /pinned (and logon, if asked).
+
+    httpx.MockTransport, not respx: respx re-raises a side effect ``from`` its own
+    wrapper, replacing the ``__cause__`` chain httpx really carries. Returns the
+    ports clients were built for.
+    """
+    ports: list[int] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rest/api/refused":
+            raise httpx.ConnectError("connection refused")
+        if request.url.path == "/rest/api/pinned" or (
+            refuse_logon and request.method == "PUT"
+        ):
+            raise _pinned_connect_error()
+        if request.method == "PUT":
+            return httpx.Response(200, text=LOGON_RESPONSE)
+        return httpx.Response(204)
+
+    def new_client(self, port: int) -> httpx.AsyncClient:
+        ports.append(port)
+        return httpx.AsyncClient(
+            base_url=f"https://hmc.test:{port}", transport=httpx.MockTransport(handle)
+        )
+
+    monkeypatch.setattr(HMCClient, "_new_http_client", new_client)
+    return ports
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_mismatch_maps_to_fingerprint_error(monkeypatch):
+    _pinned_transport(monkeypatch, refuse_logon=False)
+
+    async with HMCClient(make_config(cert_fingerprint=_PIN.lower())) as client:
+        with pytest.raises(HMCTLSFingerprintError) as caught:
+            await client._get("/rest/api/pinned")
+        with pytest.raises(HMCTransportError):
+            await client._get("/rest/api/refused")
+
+    assert not isinstance(caught.value, HMCTransportError)
+    assert _PRESENTED in str(caught.value)
+    assert _PIN in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_mismatch_skips_legacy_port_fallback(monkeypatch):
+    ports = _pinned_transport(monkeypatch, refuse_logon=True)
+
+    client = HMCClient(make_config(cert_fingerprint=_PIN))
+    assert client._legacy_port_fallback
+    with pytest.raises(HMCTLSFingerprintError):
+        await client.logon()
+    await client._http.aclose()
+
+    assert ports == [443]

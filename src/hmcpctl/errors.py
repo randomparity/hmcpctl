@@ -54,3 +54,12 @@ class HMCError(Exception):
 
 class HMCTransportError(HMCError):
     """REST request failed before the HMC returned an HTTP response."""
+
+
+class HMCTLSFingerprintError(HMCError):
+    """The HMC presented a TLS certificate whose SHA-256 digest is not the configured one.
+
+    Deliberately not an :class:`HMCTransportError`: callers that degrade on an
+    unreachable REST API (the legacy-port logon retry, the SSH name fallback) must
+    abort on a pin mismatch instead (ADR 0224).
+    """
