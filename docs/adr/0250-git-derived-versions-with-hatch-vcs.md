@@ -38,9 +38,10 @@ raw-options = { dist_name = "hmcpctl" }
   | N commits after it | `X.Y.(Z+1).devN+g<sha>` |
   | tracked files modified | `X.Y.(Z+1).devN+g<sha>.dYYYYMMDD`, N from 0 |
   | Git history but no reachable tag | `0.1.devN+g<sha>` |
+  | Git repository with no commit | `0.1.dev0+dYYYYMMDD` |
 
 - An sdist carries its version in `PKG-INFO`, and rebuilding from it needs no Git.
-- A tree with no Git metadata and no sdist metadata has no version. The build fails with
+- A tree with no `.git` and no sdist metadata has no version. The build fails with
   setuptools-scm's message naming `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_HMCPCTL`; tests that
   build a copied tree set that variable. `dist_name` is what lets the per-distribution
   variable match. There is no `fallback-version`.
@@ -62,8 +63,17 @@ A shallow or tag-less checkout builds a `0.1.devN` version, with at most a setup
 CI is held to full history by `tests/test_ci_pipeline.py`; elsewhere this is accepted because
 nothing is published (ADR 0024).
 
-An editable install records its version when `just setup` last built it; `__version__` there
-can lag the checkout. `just build` always recomputes.
+An editable install keeps the version of its first build: uv rebuilds it only when
+`pyproject.toml` changes or on `uv sync --reinstall-package hmcpctl`. Nothing reads
+`__version__` from a development environment; `just build` always recomputes.
+
+GitHub's release "Source code" archives carry no `.git` and no `PKG-INFO`, so building one
+needs the pretend variable. The documented install path is a Git URL at a tag, which builds the
+tag's version.
+
+The changelog check reads the newest reachable tag, so it can first see a release once the tag
+exists. The release procedure therefore creates the tag locally and runs that check and the
+release build before pushing it.
 
 The build environment resolves the plugins' own dependencies (`vcs-versioning`,
 `setuptools`, `packaging`) fresh, as it already does for hatchling's.
@@ -84,4 +94,8 @@ job now has it; that rejection's other grounds are unchanged.
   `fail_on_shallow` as "experimental, may change at any time" (`_backends/_git.py`).
 - **The generic `SETUPTOOLS_SCM_PRETEND_VERSION`.** judgment: it would also version any
   other setuptools-scm build in the same environment.
+- **uv `cache-keys` on Git commit and tags.** judgment: it rebuilds the editable install on
+  every `just setup` after a commit, for a `__version__` nothing in development reads.
+- **`.git_archival.txt` with `export-subst`.** judgment: two more tracked files for release
+  source archives, which no documented install path uses.
 - **Full history in every CI job.** judgment: four of the five jobs never build from source.
