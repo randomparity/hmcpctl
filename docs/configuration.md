@@ -221,8 +221,8 @@ With `HMC_VERIFY_SSL=true` the client determines what to trust from five sources
    [Trust a self-signed HMC by fingerprint](#trust-a-self-signed-hmc-by-fingerprint).
 3. **`SSL_CERT_FILE`** (or `SSL_CERT_DIR`): when set and neither of the above is set, the named
    bundle is used exclusively. `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` are ignored.
-4. **`HMC_TRUST_SYSTEM_STORE=true`** (the default): when neither `HMC_CA_BUNDLE` nor an explicit
-   `SSL_CERT_FILE`/`SSL_CERT_DIR` is set, the operating-system trust store (macOS Keychain,
+4. **`HMC_TRUST_SYSTEM_STORE=true`** (the default): when none of the above is set, the
+   operating-system trust store (macOS Keychain,
    Windows Credential Store, the Linux CA bundle rebuilt by `update-ca-certificates` /
    `update-ca-trust`) is consulted via the `truststore` library (ADR 0222).
 5. **Bundled `certifi` roots**: when `HMC_TRUST_SYSTEM_STORE=false` and none of the above are
