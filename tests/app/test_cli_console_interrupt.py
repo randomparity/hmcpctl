@@ -8,7 +8,7 @@ import signal
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -57,6 +57,20 @@ with (
             "probe_calls": len(probe.create_process_calls), "commands": commands,
         }))
 """
+# A hang guard per phase, not a performance bound. The child ends itself within about
+# 81 s: --duration 60, then a release bounded by the 1 s scan and 20 s EOF waits
+# (#1058, #1072).
+HANG_SECONDS = 120
+
+
+def _hung(child: subprocess.Popen[bytes], captured: Future) -> str:
+    child.send_signal(signal.SIGABRT)  # -X faulthandler writes every thread's stack
+    try:
+        stderr = captured.result(timeout=30)[1]
+    except TimeoutError:
+        child.kill()
+        stderr = captured.result()[1]
+    return f"child still running after {HANG_SECONDS} s; stderr:\n{stderr.decode(errors='replace')}"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="SIGINT subprocess contract is POSIX")
@@ -68,9 +82,13 @@ def test_sigint_retains_flushed_file_after_real_release(tmp_path, proven, late):
     target = tmp_path / "console.bin"
     expected = b"\r\n Open in progress  \r\n " + DATA + (HELD_SENTINEL if late else b"")
     # communicate drains stdout and stderr while the parent waits for flushed bytes.
+    # Each wait is bounded by HANG_SECONDS, well above the child's own bounds, so
+    # load alone does not fail the test. A lost SIGINT shows as a stop reason other
+    # than "interrupted" (#1753).
     with (
         subprocess.Popen(
-            [sys.executable, "-c", SOURCE, str(target), str(proven), str(late)],
+            [sys.executable, "-X", "faulthandler", "-c", SOURCE]
+            + [str(target), str(proven), str(late)],
             cwd=Path(__file__).resolve().parents[2],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -81,13 +99,17 @@ def test_sigint_retains_flushed_file_after_real_release(tmp_path, proven, late):
     ):
         captured = pool.submit(child.communicate)
         try:
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + HANG_SECONDS
             while not target.exists() or target.read_bytes() != expected:
-                assert child.poll() is None, captured.result(timeout=1)
-                assert time.monotonic() < deadline, "capture did not flush ready bytes"
+                assert not captured.done(), captured.result()
+                if time.monotonic() >= deadline:
+                    pytest.fail(_hung(child, captured))
                 time.sleep(0.01)
             child.send_signal(signal.SIGINT)
-            stdout, stderr = captured.result(timeout=15)
+            try:
+                stdout, stderr = captured.result(timeout=HANG_SECONDS)
+            except TimeoutError:
+                pytest.fail(_hung(child, captured))
         finally:
             if child.poll() is None:
                 child.kill()
@@ -104,8 +126,8 @@ def test_sigint_retains_flushed_file_after_real_release(tmp_path, proven, late):
     assert stdout == b""
     assert target.read_bytes() == expected
     assert target.stat().st_mode & 0o777 == 0o600
-    assert b"stop reason: interrupted" in stderr
-    assert f"released: {str(proven).lower()}".encode() in stderr
+    assert b"stop reason: interrupted" in stderr, stderr
+    assert f"released: {str(proven).lower()}".encode() in stderr, stderr
     if not proven:
         assert b"rmvterm" not in stderr
         assert b"check console ownership" in stderr
