@@ -422,7 +422,7 @@ JSON-RPC channel, and nothing inside the process can detect that.
 > `--enable-arbitrary-command`.
 
 Every tool is documented in the
-[MCP tool reference](https://github.com/randomparity/hmcpctl/blob/main/docs/tools/index.md):
+[MCP tool reference](tools/index.md):
 one page per operation domain, each row carrying the tool's effect class, operation, target
 kind, and summary. Those pages are generated from the server's own registry by
 `scripts/gen_tool_reference.py`, and `just tool-docs-check` fails CI when they fall behind the
