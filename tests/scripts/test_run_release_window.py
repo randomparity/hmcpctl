@@ -108,6 +108,7 @@ def window(tmp_path):
             "TMPDIR",
             "GIT_CONFIG_GLOBAL",
             "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_SYSTEM",
         )
         if key in os.environ
     }
