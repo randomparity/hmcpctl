@@ -42,6 +42,7 @@ import re
 import shutil
 import stat
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -588,14 +589,19 @@ def test_the_documented_migration_works_end_to_end(tmp_path):
     # `tools/list` over raw newline-delimited JSON-RPC, deliberately not a client
     # library: anything the server prints outside the protocol shows up as an
     # unparseable line on stdout and is observable.
-    server = subprocess.Popen(
-        [executable, "serve", "--access-policy", LEGACY_POLICY_NAME],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-    )
+    # stderr goes to a file, never an undrained pipe: the startup banner is ~20 KB at
+    # the pinned COLUMNS, and a pipe the kernel has shrunk to 8 KiB (user over
+    # fs.pipe-user-pages-soft) would block the server in write(2) before it replies.
+    stderr_path = tmp_path / "serve.stderr"
+    with stderr_path.open("wb") as stderr_file:
+        server = subprocess.Popen(
+            [executable, "serve", "--access-policy", LEGACY_POLICY_NAME],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            text=True,
+            env=env,
+        )
     try:
         request = {
             "jsonrpc": "2.0",
@@ -610,7 +616,17 @@ def test_the_documented_migration_works_end_to_end(tmp_path):
         assert server.stdin is not None and server.stdout is not None
         server.stdin.write(json.dumps(request) + "\n")
         server.stdin.flush()
-        line = server.stdout.readline()
+        replies: list[str] = []
+        reader = threading.Thread(
+            target=lambda: replies.append(server.stdout.readline()), daemon=True
+        )
+        reader.start()
+        reader.join(timeout=120)
+        assert replies, (
+            "no initialize reply within 120 s; server stderr tail: "
+            + stderr_path.read_text(errors="replace")[-2000:]
+        )
+        line = replies[0]
     finally:
         try:
             if server.stdin is not None and not server.stdin.closed:
@@ -619,9 +635,8 @@ def test_the_documented_migration_works_end_to_end(tmp_path):
                 server.kill()
             server.wait(timeout=30)
         finally:
-            for stream in (server.stdout, server.stderr):
-                if stream is not None and not stream.closed:
-                    stream.close()
+            if server.stdout is not None and not server.stdout.closed:
+                server.stdout.close()
 
     assert line, "the server produced no initialize reply"
     reply = json.loads(line)
