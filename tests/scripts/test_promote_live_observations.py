@@ -20,6 +20,8 @@ from live_test import evidence, runner
 
 ROOT = Path(__file__).parents[2]
 
+pytestmark = pytest.mark.usefixtures("isolated_git")
+
 
 def git(root, *args):
     return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
@@ -137,7 +139,7 @@ def promote(candidate, **kwargs):
     )
 
 
-def test_promote_completed_window(candidate):
+def test_promote_completed_window(hostile_git_config, candidate):
     root, claims, results, _, _, observation = candidate
     original = git(root, "rev-parse", "HEAD")
     env = {**os.environ, "PYTHONPATH": str(root / "src"), "UV_NO_SYNC": "1"}
