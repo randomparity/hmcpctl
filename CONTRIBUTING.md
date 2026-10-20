@@ -33,8 +33,9 @@ Every user-facing change that ships in a release must be recorded under `[Unrele
 format. When a release is cut, its entry keeps those changes and gains scope, **Verified** and
 **Known issues** sections ([releasing](docs/development.md#releasing)).
 
-- The version declared in `pyproject.toml` must have a matching `## [<version>]` entry, so a
-  release cannot ship without one. `tests/unit/test_changelog.py` enforces this.
+- The newest `vX.Y.Z` release tag must have a matching `## [X.Y.Z]` entry, so a release cannot
+  ship without one. `tests/unit/test_changelog.py` enforces this, and the release procedure
+  runs it on the tag before pushing it.
 - By convention, not by a test, changes to the six-name `hmcpctl.api` facade (ADR 0118) are
   recorded under ordinary changelog categories; domain-module APIs remain pre-release.
 

@@ -73,6 +73,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Changed
 
+- Builds derive the package version from Git tags with `hatch-vcs`: a release tag `vX.Y.Z`
+  builds `X.Y.Z`, and every other commit builds `X.Y.(Z+1).devN+g<sha>`, so a development
+  build no longer reports the last release's version. Building a tree without Git metadata
+  needs `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_HMCPCTL` (#1471, ADR 0250).
 - **Breaking:** unscoped `hmc_list_lpars` and `lpar list --json` read one
   `LogicalPartition/quick/All` request when every managed system is `operating` or
   `power off`. Those entries have null `title`/`link` and carry the partition summary as

@@ -165,6 +165,11 @@ editable (`.venv/lib/python3.11/site-packages/_editable_impl_hmcpctl.pth`), so
 `src/` is what imports. Only dependency and extra state drifts, and only
 `just setup` restores it.
 
+**The package version comes from Git tags** (ADR 0250), so the editable
+install's `__version__` is whatever its first build computed; `uv sync
+--reinstall-package hmcpctl` refreshes it. A build of a copied tree with no
+`.git` fails unless `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_HMCPCTL` is set.
+
 **Reading a `SyntaxError`.** Under an editable install, a `hmcpctl` syntax
 error surfaces at a `src/` path — that one is yours to fix in source. A
 `SyntaxError` at a `.venv/lib/…/site-packages/` path is third-party code, so it
