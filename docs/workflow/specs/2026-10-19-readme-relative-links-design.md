@@ -34,7 +34,8 @@ reader of a tag or older commit lands on `main`'s documentation.
    - Long description in built wheel/sdist metadata carries unresolvable relative links:
      no package index publishes it (ADR 0024); recorded in ADR 0251.
    - A stale `#anchor` passes the test: anchors were unchecked before; bounded to a scroll.
-   - Reference-style links (`[x]: target`) escape check (b): README uses none today.
+   - Check (b) reads only untitled inline links: reference-style (`[x]: target`) and titled
+     (`](target "title")`) links escape it, and README uses neither today.
 4. Covered elsewhere: `[project.urls]` form, separate owner per `WORK:SCOPE`; package-index
    publishing, ADR 0024.
 
@@ -43,14 +44,15 @@ reader of a tag or older commit lands on `main`'s documentation.
 - `grep -c 'hmcpctl/blob/' README.md` prints `0`.
 - The new test and `test_the_readme_points_at_the_generated_reference_and_keeps_no_tool_table`
   pass, as do the existing `test_readme_*` tests.
-- Reintroducing one `blob/main` link, or a relative link to a missing file, fails the new test.
+- Reintroducing one `blob/main` link, or an untitled inline relative link to a missing file,
+  fails the new test.
 
 ## Validation
 
 - Contract: README carries no absolute self-repository file link. Mode: focused-test —
   `test_readme_links_repository_files_relatively`, red before the README edit.
-- Contract: every relative README link names an existing path. Mode: focused-test — same
-  test; bite checked by a temporary missing-path link.
+- Contract: every untitled inline relative README link names an existing path. Mode:
+  focused-test — same test; bite checked by a temporary missing-path link.
 - Contract: tool-reference pointer is relative. Mode: focused-test —
   `test_the_readme_points_at_the_generated_reference_and_keeps_no_tool_table`, red before the
   README edit.
