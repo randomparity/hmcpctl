@@ -95,7 +95,7 @@ def test_agent_id_description_names_every_refused_character():
     description = HMCConfig.model_fields["agent_id"].description
     assert description is not None
     for character in AGENT_ID_FORBIDDEN:
-        assert ("space" if character == " " else character) in description
+        assert ("space" if character == " " else f"`{character}`") in description
 
 
 def test_validate_agent_id_non_ascii():
