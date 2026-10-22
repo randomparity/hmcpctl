@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 46; 26 to 36 are other arms' row ids.
-With no selection the original subtasks through 43 run; 44–46 require their named groups.
+Registered subtasks span 0 through 47; 26 to 36 are other arms' row ids.
+With no selection the original subtasks through 43 run; 44–47 require their named groups.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -90,7 +90,7 @@ from live_test.lpar import (
     mutate_lpar_properties,
     restore_lpar_baseline,
 )
-from live_test.lpar_config import exercise_lpar_config
+from live_test.lpar_config import exercise_lpar_config, exercise_lpar_settings
 from live_test.lpar_power import exercise_lpar_power
 from live_test.metrics import (
     exercise_pcm_preferences,
@@ -680,6 +680,7 @@ SUBTASKS = {
     44: exercise_system_profiles,
     45: exercise_profile_contract,
     46: exercise_partition_profiles,
+    47: exercise_lpar_settings,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -720,6 +721,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     # Not in "all": the arm creates, resizes, activates and deletes its own
     # partition (#1345).
     "lpar-config": [39],
+    "lpar-settings": [47],
     # ST40 mutates the VIOS's storage, so only its own arm dispatches it (#1348).
     "storage": [0, 3, 40, 42],
     # Not in "all": the arm creates, powers, provisions and deletes its own

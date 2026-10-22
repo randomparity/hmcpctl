@@ -18,6 +18,11 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR create/configure supports five typed performance, availability-priority,
+  time-reference, simplified-restart and migration flags, with explicit False/0,
+  owning authorization and verified/uncertain configuration outcomes (#1762).
+  Live coverage remains separate from implementation.
+
 - Saved LPAR and VIOS profile CLI/MCP lifecycle operations provide contained reads,
   typed ETag updates, current-configuration saves with verified retained recovery,
   default selection and guarded deletion. Outcomes separate requested changes,

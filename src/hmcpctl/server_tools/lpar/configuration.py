@@ -8,6 +8,7 @@ from ..._app import (
     ssh_with_client,
     with_client,
 )
+from ...documents.lpar import LparSettings
 from ...operations.affinity.ssh import (
     MinimumAffinityPolicyResult,
     ResourceGroupAffinityResult,
@@ -22,9 +23,12 @@ from ...operations.affinity.ssh import (
     set_minimum_affinity_policy,
 )
 from ...operations.lpar.configuration import (
+    LparSettingsResult,
     ProcessorCompatibilityMode,
     configure_lpar_msp,
     configure_lpar_processor_compatibility,
+    configure_lpar_settings,
+    read_lpar_settings,
 )
 from ...ssh.affinity import (
     MemoptLparSelector,
@@ -451,6 +455,61 @@ def hmc_set_lpar_proc_compat(
             profile_name=profile_name,
             ownership_override=ownership_override,
             system_name_or_uuid=system_name_or_uuid,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="lpar.configure", target_kind="lpar")
+def hmc_configure_lpar(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    settings: LparSettings,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> LparSettingsResult:
+    """Configure five C01 partition settings and verify preserved/supplied values.
+
+    A running time-reference partition can govern hypervisor/service-processor
+    time. This changes partition configuration, without activating it or changing
+    a guest clock. Migration/restart capability flags do not prove readiness.
+    Inspect unknown, unavailable or mismatching outcomes before retrying.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: AIX/Linux or IBM i partition name or UUID on that system.
+        settings: Nonempty canonical settings; None preserves, False/0 are explicit.
+        ownership_override: Bypass ownership rejection after operator approval.
+        profile: Configured HMC connection profile, or environment default.
+    """
+    return with_client(
+        lambda hmc: configure_lpar_settings(
+            hmc,
+            lpar_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="lpar.get_settings", target_kind="lpar")
+def hmc_get_lpar_settings(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile: str | None = None,
+) -> LparSettings:
+    """Read the five C01 partition settings after proving system containment.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: AIX/Linux or IBM i partition name or UUID on that system.
+        profile: Configured HMC connection profile, or environment default.
+    """
+    return with_client(
+        lambda hmc: read_lpar_settings(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         ),
         profile=profile,
     )

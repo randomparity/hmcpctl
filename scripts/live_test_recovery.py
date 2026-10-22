@@ -167,6 +167,7 @@ _WITNESSED_SUBTASKS = (
         network.INVENTORY_SUBTASK,
         network.SUBTASK,
         lpar_config.SUBTASK,
+        lpar_config.SETTINGS_SUBTASK,
         lpar_power.SUBTASK,
     }
 )
@@ -328,7 +329,10 @@ def lpar_config_inputs_from_document(
     """
     config = document.get("config")
     system = config.get("system_name") if isinstance(config, dict) else None
-    if lpar_config.SUBTASK not in subtasks or not system:
+    if (
+        not {lpar_config.SUBTASK, lpar_config.SETTINGS_SUBTASK}.intersection(subtasks)
+        or not system
+    ):
         return None
     return LparConfigInputs(str(system))
 

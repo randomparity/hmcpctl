@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
@@ -18,6 +18,7 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from ...documents.lpar import (
     Keylock,
     LparResources,
+    LparSettings,
     PartitionType,
     build_lpar_document,
     partition_updates,
@@ -33,11 +34,13 @@ from ...ssh.lpar import (
     apply_lpar_profile_via_cli,
     complete_create_resources,
     create_lpar_via_cli,
+    get_lpar_settings,
     resolve_system_cli_name,
     validate_caller_token,
 )
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml
+from .configuration import configure_lpar_settings
 
 _logger = logging.getLogger(__name__)
 
@@ -58,6 +61,7 @@ class LparCreation:
     # reports the apply as skipped because none is needed (#1164); False reports a
     # skipped apply step; None (not requested) adds no step.
     apply_profile: bool | None = None
+    settings: LparSettings = field(default_factory=LparSettings)
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,7 @@ class LparCreationResult:
     ownership_stamped: bool | None
     warnings: tuple[str, ...]
     apply_step: WorkflowStep | None = None
+    settings_step: WorkflowStep | None = None
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -102,6 +107,10 @@ async def _create_via_cli(
     Returns the CLI system name, the apply step, the created partition (None
     when the read-back failed) and the read-back error.
     """
+    if creation.keylock is not None:
+        raise ValueError(
+            "CLI creation cannot represent keylock; supply complete resources on an HMC accepting REST creation. Nothing was created."
+        )
     try:
         system_name = await resolve_system_cli_name(hmc.config, system_uuid)
     except HMCCLIError:
@@ -113,6 +122,8 @@ async def _create_via_cli(
         partition_type=creation.partition_type,
         resources=creation.resources,
         max_virtual_slots=creation.max_virtual_slots,
+        partition_id=creation.partition_id,
+        settings=creation.settings,
     )
     apply_step = (
         await _apply_created_profile(hmc, system_name, creation)
@@ -159,6 +170,8 @@ async def create_and_stamp_lpar(
         # stamp's best-effort catch: no create can precede rejection, and a
         # malformed token can never discard the ownership stamp (ADR 0064).
         validate_caller_token(creation.caller_token)
+    if not isinstance(creation.settings, LparSettings):
+        raise TypeError("settings must be LparSettings")
     validate_partition_type(creation.partition_type)
     validate_keylock(creation.keylock)
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
@@ -176,7 +189,7 @@ async def create_and_stamp_lpar(
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
     resources = complete_create_resources(creation.resources)
-    if resources is None:
+    if resources is None or (creation.settings.pairs() and creation.keylock is None):
         # Only mksyscfg's all_resources=1 expresses a create with no resource values.
         system_name, apply_step, created_lpar, readback_error = await _create_via_cli(
             hmc, system_uuid, system_name_or_uuid, creation
@@ -245,6 +258,15 @@ async def create_and_stamp_lpar(
                 f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
             ),
             apply_step=apply_step,
+            settings_step=(
+                WorkflowStep(
+                    "settings",
+                    "error",
+                    "Created partition readback unavailable; settings unverified",
+                )
+                if creation.settings.pairs()
+                else None
+            ),
         )
     ownership_stamped, warnings = await stamp_created_lpar_ownership(
         hmc,
@@ -271,7 +293,42 @@ async def create_and_stamp_lpar(
         ownership_stamped,
         (*apply_warnings, *warnings),
         apply_step,
+        await _created_settings_step(
+            hmc, system_uuid, system_name, creation, created_lpar
+        ),
     )
+
+
+async def _created_settings_step(
+    hmc: HMCClient,
+    system_uuid: str,
+    cli_system: str | None,
+    creation: LparCreation,
+    created: dict[str, Any],
+) -> WorkflowStep | None:
+    if not creation.settings.pairs():
+        return None
+    try:
+        if cli_system is None:
+            result = await configure_lpar_settings(
+                hmc,
+                created.get("UUID") or creation.name,
+                creation.settings,
+                system_name_or_uuid=system_uuid,
+            )
+            return WorkflowStep(
+                "settings", "ok" if result.status == "verified" else "error", result
+            )
+        observed = await get_lpar_settings(hmc.config, cli_system, creation.name)
+    except (HMCError, ValueError, PermissionError) as error:
+        return WorkflowStep(
+            "settings", "error", f"Partition exists; settings unverified: {error}"
+        )
+    matches = all(
+        getattr(observed, name) == getattr(creation.settings, name)
+        for name, _ in creation.settings.pairs()
+    )
+    return WorkflowStep("settings", "ok" if matches else "error", observed)
 
 
 async def _apply_created_profile(

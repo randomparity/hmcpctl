@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import csv
+import re
 import shlex
-from dataclasses import replace
+from dataclasses import fields, replace
 
 from ..config import HMCConfig
 from ..documents.lpar import (
     SHARING_MODES,
     LparResources,
+    LparSettings,
     shared_units_over_vcpus,
     shared_vcpu_defaults,
 )
-from .commands import build_attribute_record
+from .commands import build_attribute_record, build_filter
 from .description_validation import validate_lpar_description
 from .profiles import set_lpar_description
 from .transport import HMCCLIError, run_hmc_command
@@ -130,6 +133,9 @@ async def create_lpar_via_cli(
     resources: LparResources = LparResources(),
     max_virtual_slots: int | None = None,
     profile_name: str = DEFAULT_PROFILE_NAME,
+    *,
+    partition_id: int | None = None,
+    settings: LparSettings | None = None,
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -159,6 +165,10 @@ async def create_lpar_via_cli(
         ("profile_name", profile_name),
     ]
     config_pairs.extend(_lpar_resource_pairs(resources, max_virtual_slots))
+    if partition_id is not None:
+        config_pairs.append(("lpar_id", partition_id))
+    if settings is not None:
+        config_pairs.extend(settings.pairs())
 
     # Two guards at two layers, neither substituting for the other:
     # build_attribute_record keeps the record's own ',' and '=' delimiters
@@ -167,7 +177,12 @@ async def create_lpar_via_cli(
     # strips the quotes before the HMC ever sees the text.
     config_str = build_attribute_record(config_pairs)
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
-    return await run_hmc_command(config, cmd)
+    try:
+        return await run_hmc_command(config, cmd)
+    except HMCCLIError as error:
+        raise HMCCLIError(
+            f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
+        ) from error
 
 
 async def apply_lpar_profile_via_cli(
@@ -253,7 +268,10 @@ def _lpar_resource_pairs(
     """Build the complete HMC resource record or its all-resources variant."""
     complete = complete_create_resources(resources)
     if complete is None:
-        return [("all_resources", 1)]
+        all_pairs: list[tuple[str, object]] = [("all_resources", 1)]
+        if max_virtual_slots is not None:
+            all_pairs.append(("max_virtual_slots", max_virtual_slots))
+        return all_pairs
     pairs: list[tuple[str, object]] = [
         ("min_mem", complete.min_memory),
         ("desired_mem", complete.desired_memory),
@@ -483,4 +501,56 @@ def _match_uuid_name(raw: str, uuid: str, what: str) -> str:
     raise HMCCLIError(
         f"Could not resolve {what} UUID {uuid!r} to a CLI name over SSH. "
         "No matching row in the lssyscfg uuid,name output."
+    )
+
+
+async def get_lpar_settings(
+    config: HMCConfig, system_name: str, lpar_name: str
+) -> LparSettings:
+    """Read one AIX/Linux or IBM i partition's five C01 settings, strictly."""
+    names = tuple(item.name for item in fields(LparSettings))
+    selector = build_filter([("lpar_names", lpar_name)])
+    raw = await run_hmc_command(
+        config,
+        f"lssyscfg -r lpar -m {shlex.quote(system_name)} "
+        f"--filter {shlex.quote(selector)} -F lpar_env,{','.join(names)}",
+    )
+    try:
+        rows = list(csv.reader(raw.strip().splitlines(), strict=True))
+        if len(rows) != 1 or len(rows[0]) != 6:
+            raise ValueError("expected exactly one six-field partition row")
+        environment, *values = rows[0]
+        if environment not in {"aixlinux", "os400"}:
+            raise ValueError("C01 settings require an AIX/Linux or IBM i partition")
+        for name, value in zip(names, values, strict=True):
+            if name == "lpar_avail_priority":
+                if re.fullmatch(r"[0-9]+", value) is None:
+                    raise ValueError("priority must be a decimal integer")
+            else:
+                if value not in {"0", "1"}:
+                    raise ValueError(f"{name} must read as 0 or 1")
+        return LparSettings(
+            values[0] == "1",
+            int(values[1]),
+            values[2] == "1",
+            values[3] == "1",
+            values[4] == "1",
+        )
+    except (ValueError, csv.Error) as error:
+        raise HMCCLIError(
+            f"Cannot read partition settings: {error}; inspect lssyscfg output before retrying"
+        ) from error
+
+
+async def set_lpar_settings(
+    config: HMCConfig, system_name: str, lpar_name: str, settings: LparSettings
+) -> None:
+    """Write only the supplied canonical C01 fields on one named partition."""
+    pairs = settings.pairs()
+    if not pairs:
+        raise ValueError("Supply at least one partition setting")
+    record = build_attribute_record([("name", lpar_name), *pairs])
+    await run_hmc_command(
+        config,
+        f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(record)}",
     )

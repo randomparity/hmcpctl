@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET  # nosec B405 - reads an element the caller parsed with defusedxml
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Literal, get_args
+
+from pydantic import ConfigDict, StrictBool, StrictInt
 
 from ..xmlutil import escapes_string_arguments
 from .common import UOM_NS, document_envelope
@@ -65,6 +67,68 @@ def validate_keylock(keylock: str | None) -> None:
 
 def lpar_envelope(body: str) -> str:
     return document_envelope("LogicalPartition", body)
+
+
+@dataclass(frozen=True)
+class LparSettings:
+    """Optional C01 settings; None preserves HMC defaults/current configuration.
+
+    A running time_ref partition can govern hypervisor/service-processor time.
+    These configure capabilities, not a guest clock or migration/restart readiness.
+    """
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+    allow_perf_collection: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Allow performance data collection; omitted retains the HMC default/current value."
+        },
+    )
+    lpar_avail_priority: StrictInt | None = field(
+        default=None,
+        metadata={
+            "description": "Partition availability priority, integer 0–255; zero is explicit."
+        },
+    )
+    time_ref: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Whether the partition is a time reference; a running reference can govern hypervisor/service-processor time."
+        },
+    )
+    simplified_remote_restart_capable: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Allow remote restart without reserved storage on AIX/Linux or IBM i; does not prove restart readiness."
+        },
+    )
+    migration_disabled: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Disable partition migration on AIX/Linux or IBM i; does not perform a migration."
+        },
+    )
+
+    def __post_init__(self) -> None:
+        for item in fields(self):
+            value = getattr(self, item.name)
+            if value is None:
+                continue
+            if item.name == "lpar_avail_priority":
+                if type(value) is not int or not 0 <= value <= 255:
+                    raise ValueError(
+                        "lpar_avail_priority must be an integer from 0 to 255"
+                    )
+            elif type(value) is not bool:
+                raise ValueError(f"{item.name} must be a boolean")
+
+    def pairs(self) -> list[tuple[str, object]]:
+        """Supplied values in the documented 0/1 boolean grammar."""
+        return [
+            (item.name, int(value))
+            for item in fields(self)
+            if (value := getattr(self, item.name)) is not None
+        ]
 
 
 @dataclass(frozen=True)
