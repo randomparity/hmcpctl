@@ -111,4 +111,28 @@ Regenerate tools and maturity projection using repository recipes; keep new
 operation implementation implemented and live status unevidenced until evidence.
 Run `just verify` and `uv run --no-sync prek run --all-files` before push;
 CI checks Python 3.11–3.14. The reproducible procedure names preflight, named arm,
-recovery and deployed-HEAD check; no live operation is authorized by this spec.
+recovery and deployed-HEAD check; hardware execution requires the root's exclusive window.
+
+## Bounded named live arm
+
+Extend existing `scripts/live_test/lpar_config.py` with opt-in subtask47,
+`lpar-settings`, registered in runner/preflight and the existing prefix-based
+recovery witness. It reuses the arm's baseline, unique-name/token, inactive
+teardown and resource comparison helpers, without the ST39 activation/configuration
+sequence. Create one small disposable AIX/Linux partition through the owning
+core with `stamp_policy="required"`, explicit safe settings (False/0), and
+`apply_profile=False`. Require ownership and creation settings readback before
+MCP update probes: performance bool round-trip, priority0/255, time_ref=False,
+simplified restart and migration bool round-trips if firmware permits. Read
+through the typed presenter; compare supplied and omitted values. No profile
+mutator, power-on, guest clock change or time_ref=True call is made. Cleanup
+requires matching caller token and inactive state; teardown gains an explicit
+inactive-only mode which refuses active state without a power call, including
+a state change after an earlier probe; a failed/uncertain create is
+adopted only through existing token proof. Recovery includes subtask47 in the
+existing scratch-prefix witness. Preserve baseline names/free resources after
+delete. Record direct core creation as observed; promote only actual MCP
+settings/read dispatches with assertions and successful cleanup. Failed/skipped
+branches remain failed/skipped; root grants the candidate-bound live window.
+Focused offline arm tests cover group admission, strict ownership, no True time
+reference, cleanup on a failed probe, and registration/recovery coverage.
