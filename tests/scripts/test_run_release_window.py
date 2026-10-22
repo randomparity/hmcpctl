@@ -42,6 +42,8 @@ def window(tmp_path):
         "config.py",
         "runner.py",
         "partition_profiles.py",
+        "partition_profile_contract.py",
+        "profile_contract_run.py",
         "evidence.py",
         "scenario_validation.py",
     ):

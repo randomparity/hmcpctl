@@ -70,6 +70,10 @@ def test_partition_lifecycle_flag_dispatches_only_its_explicit_named_arm(monkeyp
     )
     assert wrapper.main(["--partition-lifecycle"]) == 0
     assert seen == [["--group", "partition-profiles"]]
-    assert runner.SUBTASK_GROUPS["partition-profiles"] == [45]
-    assert 45 not in runner.SUBTASK_GROUPS["all"]
-    assert 45 not in runner.SUBTASK_GROUPS["round2"]
+    assert runner.SUBTASK_GROUPS["partition-profiles"] == [46]
+    assert runner.SUBTASK_GROUPS["partition-profile-contract"] == [45]
+    assert runner.SUBTASKS[46].__module__.endswith(".partition_profiles")
+    assert runner.SUBTASKS[45].__module__.endswith(".partition_profile_contract")
+    for subtask in (45, 46):
+        assert subtask not in runner.SUBTASK_GROUPS["all"]
+        assert subtask not in runner.SUBTASK_GROUPS["round2"]

@@ -20,10 +20,10 @@ from hmcpctl.operations.lpar import profiles as domain
 from .config import decode_saved_config
 from .observation import Assertion, plain_data
 
-SUBTASK = 45
+SUBTASK = 46
 GROUP = "partition-profiles"
 PREFIX = "hmcpctl-live-partprof-"
-SCENARIO = "st45-partition-profile-lifecycle"
+SCENARIO = "st46-partition-profile-lifecycle"
 STAGES = (
     "create",
     "patch",

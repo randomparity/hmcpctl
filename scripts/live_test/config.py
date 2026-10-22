@@ -37,6 +37,8 @@ class LiveTestConfig:
     partition_profile_kind: str = "LogicalPartition"
     partition_profile_writer_window: bool = False
     partition_profile_memory_mib: int = 0
+    partition_profile_contract_packet: str = ""
+    partition_profile_contract_sha256: str = ""
     system_profile_members_json: str = ""
     system_profile_writer_window: bool = False
     system_profile_activation_action: str = "none"
@@ -161,6 +163,8 @@ class LiveTestConfig:
         "LIVE_TEST_PARTITION_PROFILE_KIND": "partition_profile_kind",
         "LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW": "partition_profile_writer_window",
         "LIVE_TEST_PARTITION_PROFILE_MEMORY_MIB": "partition_profile_memory_mib",
+        "LIVE_TEST_PARTITION_PROFILE_CONTRACT_PACKET": "partition_profile_contract_packet",
+        "LIVE_TEST_PARTITION_PROFILE_CONTRACT_SHA256": "partition_profile_contract_sha256",
         "LIVE_TEST_SYSTEM_PROFILE_MEMBERS_JSON": "system_profile_members_json",
         "LIVE_TEST_SYSTEM_PROFILE_WRITER_WINDOW": "system_profile_writer_window",
         "LIVE_TEST_SYSTEM_PROFILE_ACTIVATION_ACTION": "system_profile_activation_action",
@@ -505,6 +509,8 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
         "partition_profile_kind",
         "partition_profile_writer_window",
         "partition_profile_memory_mib",
+        "partition_profile_contract_packet",
+        "partition_profile_contract_sha256",
         "system_profile_members_json",
         "system_profile_writer_window",
         "system_profile_activation_action",

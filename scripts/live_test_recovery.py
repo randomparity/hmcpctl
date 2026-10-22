@@ -1839,6 +1839,27 @@ def main(argv: list[str] | None = None) -> int:
     if (
         isinstance(document, dict)
         and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "partition-profile-contract"
+    ):
+        from live_test.partition_profile_contract import recover_document
+
+        if not runner._bootstrap_config():
+            print("profile contract recovery: credentials unavailable", file=sys.stderr)
+            return 2
+        try:
+            asyncio.run(recover_document(HMCConfig(), document))
+        except Exception as error:  # noqa: BLE001 — incomplete evidence never attests CLEAN
+            print(
+                f"profile contract recovery unconfirmed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print("CLEAN: independent original baseline and fixture absence confirmed")
+        return 0
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
         and document["run"].get("group") == "system-profiles"
     ):
         from live_test import system_profiles
