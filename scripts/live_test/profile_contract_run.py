@@ -330,11 +330,14 @@ def child_uuid(entry, name):
 
 def reserve_effect(api, journal):
     snapshot_cost = len(journal.data["baseline"]["partitions"]) + 6
-    if api.budget.limit - api.budget.used < 3 * snapshot_cost + 13:
+    # Include this stage's preliminary snapshot and two profile reads before
+    # spending any of the effect/readback and known-state cleanup reservation.
+    if api.budget.limit - api.budget.used < 4 * snapshot_cost + 15:
         raise ContractMismatch("remaining arm budget reserved for known-state cleanup")
 
 
 async def patch(api, journal, names, name, value, stage):
+    reserve_effect(api, journal)
     entry = journal.data["latest_fixture"]
     uuid = child_uuid(entry, name)
     before = await api.read_profile(entry["UUID"], uuid)
@@ -343,7 +346,6 @@ async def patch(api, journal, names, name, value, stage):
     latest = await api.read_profile(entry["UUID"], uuid)
     if not same_read(before, latest):
         raise ValueError("ETag/full-tree stale guard refused before patch")
-    reserve_effect(api, journal)
     journal.intent(stage)
     response = await api._request(
         "POST",
@@ -384,6 +386,7 @@ async def patch(api, journal, names, name, value, stage):
 
 
 async def clone(api, journal, names, source, name, stage):
+    reserve_effect(api, journal)
     entry = journal.data["latest_fixture"]
     source_uuid = child_uuid(entry, source)
     before = await api.read_profile(entry["UUID"], source_uuid)
@@ -391,7 +394,6 @@ async def clone(api, journal, names, source, name, stage):
     await observe(api, journal, names)
     if not same_read(before, await api.read_profile(entry["UUID"], source_uuid)):
         raise ValueError("source ETag/full tree changed before clone")
-    reserve_effect(api, journal)
     journal.intent(stage)
     response = await api._request(
         "PUT",

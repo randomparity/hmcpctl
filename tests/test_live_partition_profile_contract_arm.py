@@ -134,7 +134,7 @@ def test_foreign_namespace_and_duplicate_fields_refuse_projection():
         arm.profile(arm.serialize(root))
 
 
-def experiment(tmp_path, monkeypatch, fault=None):
+def experiment(tmp_path, monkeypatch, fault=None, originals=3):
     import hashlib
     import json
     from types import SimpleNamespace
@@ -206,7 +206,7 @@ def experiment(tmp_path, monkeypatch, fault=None):
             "Resource": {"PartitionName": f"production-{n}"},
             "profiles": [],
         }
-        for n in (10, 11, 12)
+        for n in range(10, 10 + originals)
     ]
 
     def install(xml, name):
@@ -1044,10 +1044,61 @@ def test_pre_effect_reserve_includes_optional_cleanup_lookup():
 
     from live_test import profile_contract_run as flow
 
-    # Three original rows require three nine-call observations plus thirteen other
-    # reserved transports; 39 omits the possible cleanup system-name SSH lookup.
+    # The old post-preread allowance cannot also fund the next stage
+    # snapshot and its two initial profile reads.
     api = SimpleNamespace(budget=arm.Budget(39))
     journal = SimpleNamespace(data={"baseline": {"partitions": [{}, {}, {}]}})
     with pytest.raises(flow.ContractMismatch, match="reserved for known-state cleanup"):
         flow.reserve_effect(api, journal)
     assert api.budget.used == 0
+
+
+@pytest.mark.asyncio
+async def test_five_original_partitions_keep_cleanup_reserve_before_final_patch(
+    tmp_path, monkeypatch
+):
+    config, hmc, world, flow = experiment(tmp_path, monkeypatch, originals=5)
+    await flow.preflight(hmc, config)
+    real_patch = flow.patch
+
+    async def watch(api, journal, names, name, value, stage):
+        if stage != "patch-b":
+            return await real_patch(api, journal, names, name, value, stage)
+        dispatched = world.dispatched
+        with pytest.raises(flow.ContractMismatch) as caught:
+            await real_patch(api, journal, names, name, value, stage)
+        assert world.dispatched == dispatched
+        raise caught.value
+
+    monkeypatch.setattr(flow, "patch", watch)
+    result = await flow.execute(hmc, config)
+    assert result["status"] == "CONTRACT_DIFFERENCE"
+    assert result["deleted"] and world.deleted and not result["pending"]
+    assert result["completed"] == [*arm.EFFECTS[:5], "delete"]
+    assert "patch-b" not in result["attempted"]
+    assert len(world.posts) == 1 and len(world.puts) == 2
+    assert (await flow.recover(hmc, config))["status"] == "CLEAN"
+
+
+@pytest.mark.asyncio
+async def test_clone_low_budget_admission_spends_no_prereads_before_cleanup(
+    tmp_path, monkeypatch
+):
+    config, hmc, world, flow = experiment(tmp_path, monkeypatch)
+    await flow.preflight(hmc, config)
+    real_clone = flow.clone
+
+    async def constrained(api, journal, names, source, name, stage):
+        api.budget.limit = api.budget.used + 40
+        dispatched = world.dispatched
+        with pytest.raises(flow.ContractMismatch) as caught:
+            await real_clone(api, journal, names, source, name, stage)
+        assert world.dispatched == dispatched
+        raise caught.value
+
+    monkeypatch.setattr(flow, "clone", constrained)
+    result = await flow.execute(hmc, config)
+    assert result["status"] == "CONTRACT_DIFFERENCE" and world.deleted
+    assert not world.puts and len(world.posts) == 1
+    assert "copy-a" not in result["attempted"]
+    assert (await flow.recover(hmc, config))["status"] == "CLEAN"
