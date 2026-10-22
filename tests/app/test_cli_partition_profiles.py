@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import typer
+from click import unstyle
 from typer.testing import CliRunner
 
 from hmcpctl.cli_commands.lpar import profiles as cli
@@ -103,7 +104,7 @@ def test_all_six_profile_commands_are_registered_and_typed_patch_rejects_unknown
     ]:
         result = runner.invoke(app, ["lpars", name, "--help"])
         assert result.exit_code == 0, result.output
-        assert "--vios" in result.output
+        assert "--vios" in unstyle(result.output)
     monkeypatch.setattr(
         cli,
         "with_client",
