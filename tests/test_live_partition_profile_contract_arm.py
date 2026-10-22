@@ -286,9 +286,11 @@ def experiment(tmp_path, monkeypatch, fault=None):
 
         async def logon(self):
             self.budget.take()
+            self._session_token = "synthetic-session"
 
         async def logoff(self):
             self.budget.take(logoff=True)
+            self._session_token = None
 
         async def command(self, command, **kwargs):
             self.budget.take()
@@ -685,3 +687,140 @@ def test_older_recovery_documents_keep_experiment_disabled():
     restored = decode_saved_config(saved)
     assert restored.partition_profile_contract_packet == ""
     assert restored.partition_profile_contract_sha256 == ""
+
+
+@pytest.mark.asyncio
+async def test_expired_finalization_closes_locally_without_sending_logout(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from live_test import profile_contract_run as flow
+
+    api = SimpleNamespace(
+        _session_token="synthetic-session",
+        logoff=AsyncMock(),
+        _http=SimpleNamespace(aclose=AsyncMock()),
+    )
+    monkeypatch.setattr(flow, "monotonic", lambda: 600.0, raising=False)
+    assert await flow.finalize(api, 600.0) == "deadline-expired"
+    api.logoff.assert_not_awaited()
+    api._http.aclose.assert_awaited_once()
+
+
+def test_interrupted_arm_has_pre_effect_checkpoint_for_independent_cli_recovery(
+    tmp_path, monkeypatch, capsys
+):
+    import asyncio
+    import json
+    from dataclasses import asdict
+
+    import live_test_recovery as recovery
+    from live_test import runner
+
+    config, hmc, world, flow = experiment(tmp_path, monkeypatch)
+    admission = asyncio.run(flow.preflight(hmc, config))
+    results = tmp_path / "results.json"
+    state = runner.RunState(config=config, hmc_config=hmc, group=arm.GROUP)
+
+    def checkpoint():
+        arm.save(
+            results,
+            {
+                "run": {
+                    "group": arm.GROUP,
+                    "subtasks": [arm.SUBTASK],
+                    "partial": True,
+                    "tested_commit": "a" * 40,
+                    "tree_clean": True,
+                },
+                "config": asdict(config),
+                "hmc": runner._hmc_identity(hmc),
+                "artifacts": {},
+                "results": [],
+            },
+        )
+
+    class SimulatedProcessTermination(BaseException):
+        pass
+
+    async def stopped_after_durable_intent(*args):
+        journal = arm.Journal(tmp_path / "journal.json")
+        journal.data.update(
+            baseline=admission["baseline"],
+            started=admission["started"],
+            started_monotonic=admission["started_monotonic"],
+            packet_sha256=config.partition_profile_contract_sha256,
+            tested_commit="a" * 40,
+            tested_tree="b" * 40,
+        )
+        journal.intent("create")
+        world.created = True
+        raise SimulatedProcessTermination
+
+    state.checkpoint = checkpoint
+    monkeypatch.setattr(flow, "execute", stopped_after_durable_intent)
+    with pytest.raises(SimulatedProcessTermination):
+        asyncio.run(arm.exercise(None, state))
+    assert results.is_file()
+    saved = json.loads(results.read_text())
+    assert saved["run"]["partial"] is True
+    before = world.snapshots
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: hmc)
+    assert recovery.main(["--results", str(results)]) == 2
+    assert world.snapshots > before
+    assert "CLEAN:" not in capsys.readouterr().out
+    assert not world.deleted
+
+
+@pytest.mark.asyncio
+async def test_recovery_snapshot_using_remaining_window_cannot_send_late_logout_or_claim_clean(
+    tmp_path, monkeypatch
+):
+    import json
+
+    config, hmc, world, flow = experiment(tmp_path, monkeypatch)
+    await flow.preflight(hmc, config)
+    await flow.execute(hmc, config)
+    journal = json.loads((tmp_path / "journal.json").read_text())
+    current = [flow.monotonic()]
+    original = arm.Native.snapshot
+
+    async def snapshot_uses_window(self):
+        observed = await original(self)
+        current[0] = journal["started_monotonic"] + 600
+        return observed
+
+    monkeypatch.setattr(flow, "monotonic", lambda: current[0])
+    monkeypatch.setattr(arm.Native, "snapshot", snapshot_uses_window)
+    with pytest.raises(ValueError, match="session cleanup"):
+        await flow.recover(hmc, config)
+    receipt = json.loads((tmp_path / "recovery.json").read_text())
+    assert receipt["status"] == "UNKNOWN"
+    assert receipt["session_cleanup"] == "deadline-expired"
+    assert world.instances[-1]._session_token == "synthetic-session"
+    assert (
+        world.instances[-1].budget.used == 9
+    )  # one logon,eight snapshot reservations; no logout
+
+
+@pytest.mark.asyncio
+async def test_failed_recovery_checkpoint_prevents_execute(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from live_test import profile_contract_run as flow
+
+    execute = AsyncMock()
+    monkeypatch.setattr(flow, "execute", execute)
+    state = SimpleNamespace(
+        group=arm.GROUP,
+        hmc_config=object(),
+        config=object(),
+        checkpoint=Mock(side_effect=OSError("private disk unavailable")),
+        record=Mock(),
+    )
+    await arm.exercise(None, state)
+    execute.assert_not_awaited()
+    state.record.assert_called_once()
+    assert state.record.call_args.args[2] == "FAIL"

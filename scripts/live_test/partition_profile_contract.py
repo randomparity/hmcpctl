@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from xml.etree import ElementTree as ET
 
@@ -434,6 +435,7 @@ class Native(HMCClient):
     def __init__(self, config, packet, budget, directory):
         super().__init__(pinned(config, packet))
         self.packet, self.budget, self.directory = packet, budget, directory
+        self.deadline = float("inf")
 
     async def _request(self, method, path, **kwargs):
         self.budget.take(logoff=method == "DELETE" and path == "/rest/api/web/Logon")
@@ -453,7 +455,11 @@ class Native(HMCClient):
                     },
                 },
             )
-        response = await super()._request(method, path, **kwargs)
+        remaining = self.deadline - monotonic()
+        if remaining <= 0:
+            raise ValueError("absolute native request deadline expired")
+        async with asyncio.timeout(min(30, remaining)):
+            response = await super()._request(method, path, **kwargs)
         if not auth:
             # HMC error bodies can echo authentication/cookie headers; never retain them.
             save(
@@ -476,7 +482,12 @@ class Native(HMCClient):
 
     async def command(self, command):
         self.budget.take()
-        result = await asyncio.wait_for(run_hmc_command(self.config, command), 15)
+        remaining = self.deadline - monotonic()
+        if remaining <= 0:
+            raise ValueError("absolute native SSH deadline expired")
+        result = await asyncio.wait_for(
+            run_hmc_command(self.config, command), min(15, remaining)
+        )
         if len(result.encode()) > 8 * 1024 * 1024:
             raise ValueError("SSH response exceeds 8MiB")
         return result
@@ -577,6 +588,11 @@ async def exercise(client, state):
     from .profile_contract_run import execute
 
     try:
+        if state.checkpoint is None:
+            raise ValueError(
+                "durable runner recovery checkpoint required before effects"
+            )
+        state.checkpoint()
         result = await execute(state.hmc_config, state.config)
     except Exception as error:  # noqa: BLE001 — journal retains private details; runner reports a safe failure
         state.record(

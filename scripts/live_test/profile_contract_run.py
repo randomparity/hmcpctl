@@ -8,6 +8,7 @@ import json
 import math
 import time
 from pathlib import Path
+from time import monotonic
 
 from hmcpctl.operations.lpar.core import delete_lpar
 from hmcpctl.operations.lpar.ownership import (
@@ -193,6 +194,23 @@ async def observe(api, journal, names, *, owned=True):
     return entry
 
 
+async def finalize(api, deadline):
+    """Never start logout after the phase/window deadline; local close is always safe."""
+    try:
+        if api._session_token is None:
+            return "not-needed"
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return "deadline-expired"
+        try:
+            await asyncio.wait_for(api.logoff(), min(10, remaining))
+        except Exception:  # noqa: BLE001 — report incomplete own-session cleanup without replay
+            return "unconfirmed"
+        return "completed"
+    finally:
+        await api._http.aclose()
+
+
 async def preflight(hmc_config, config):
     packet = contract.configured(config)
     contract.verify_revision(packet)
@@ -203,17 +221,21 @@ async def preflight(hmc_config, config):
     marker.chmod(0o600)
     budget = contract.Budget(20)
     started = time.time()
+    started_monotonic = monotonic()
+    deadline = started_monotonic + 60
     journal = contract.Journal(marker)
     journal.data.update(
         started=started,
+        started_monotonic=started_monotonic,
         packet_sha256=config.partition_profile_contract_sha256,
         tested_commit=packet["tested_commit"],
         tested_tree=packet["tested_tree"],
         admitted=False,
     )
     api = contract.Native(hmc_config, packet, budget, directory)
+    api.deadline = deadline
     try:
-        async with asyncio.timeout(60):
+        async with asyncio.timeout(max(0, deadline - monotonic() - 10)):
             version = await api.command("lshmc -V")
             if not all(
                 text in version
@@ -242,12 +264,16 @@ async def preflight(hmc_config, config):
             capacity(snapshot)
             journal.data.update(baseline=stable(snapshot), admitted=True)
     finally:
-        try:
-            await api.logoff()
-        finally:
-            await api._http.aclose()
-            journal.data["transports_upper_bound"] = budget.used
-            journal.write()
+        session = await finalize(api, deadline)
+        journal.data["session_cleanup"] = session
+        journal.data["admitted"] = journal.data["admitted"] and session in {
+            "completed",
+            "not-needed",
+        }
+        journal.data["transports_upper_bound"] = budget.used
+        journal.write()
+        if session not in {"completed", "not-needed"}:
+            raise ValueError("native preflight own-session cleanup unconfirmed")
     return journal.data
 
 
@@ -432,7 +458,7 @@ async def execute(hmc_config, config):
     if (
         not admission.get("admitted")
         or admission.get("packet_sha256") != config.partition_profile_contract_sha256
-        or not 0 <= time.time() - admission["started"] < 60
+        or not 0 <= monotonic() - admission["started_monotonic"] < 60
     ):
         raise ValueError("fresh matching native preflight required")
     path = directory / "journal.json"
@@ -443,6 +469,7 @@ async def execute(hmc_config, config):
     journal.data.update(
         baseline=admission["baseline"],
         started=admission["started"],
+        started_monotonic=admission["started_monotonic"],
         tested_commit=packet["tested_commit"],
         tested_tree=packet["tested_tree"],
         packet_sha256=config.partition_profile_contract_sha256,
@@ -453,8 +480,10 @@ async def execute(hmc_config, config):
     budget = contract.Budget(160 - admission["transports_upper_bound"])
     api = contract.Native(hmc_config, packet, budget, directory / "arm")
     api.directory.mkdir(mode=0o700)
+    deadline = admission["started_monotonic"] + 420
+    api.deadline = deadline
     try:
-        async with asyncio.timeout(420 - (time.time() - admission["started"])):
+        async with asyncio.timeout(max(0, deadline - monotonic() - 10)):
             await api.logon()
             names = await create(api, journal)
             try:
@@ -479,15 +508,17 @@ async def execute(hmc_config, config):
         journal.data.update(status="STOP_RETAIN", error_type=type(error).__name__)
         raise
     finally:
-        try:
-            await api.logoff()
-        finally:
-            await api._http.aclose()
-            journal.data["arm_transports_upper_bound"] = budget.used
-            journal.data["preflight_transports_upper_bound"] = admission[
-                "transports_upper_bound"
-            ]
-            journal.write()
+        session = await finalize(api, deadline)
+        journal.data["session_cleanup"] = session
+        journal.data["arm_transports_upper_bound"] = budget.used
+        journal.data["preflight_transports_upper_bound"] = admission[
+            "transports_upper_bound"
+        ]
+        if session not in {"completed", "not-needed"}:
+            journal.data["status"] = "STOP_RETAIN"
+        journal.write()
+        if session not in {"completed", "not-needed"}:
+            raise ValueError("arm own-session cleanup unconfirmed")
     return journal.data
 
 
@@ -511,13 +542,16 @@ async def recover(hmc_config, config):
     api = contract.Native(hmc_config, packet, budget, directory / "recovery")
     api.directory.mkdir(mode=0o700)
     result = {"status": "UNKNOWN", "tested_commit": packet["tested_commit"]}
+    started_monotonic = journal["started_monotonic"]
+    deadline = min(started_monotonic + 600, monotonic() + 120)
+    api.deadline = deadline
     try:
-        remaining = 600 - (time.time() - journal["started"])
-        if remaining <= 0:
+        remaining = deadline - monotonic()
+        if remaining <= 10 or monotonic() < started_monotonic:
             raise ValueError(
-                "approved window expired before recovery; new authority required"
+                "approved window has no safe recovery/logout time remaining"
             )
-        async with asyncio.timeout(min(120, remaining)):
+        async with asyncio.timeout(remaining - 10):
             await api.logon()
             snapshot = await api.snapshot()
             if not observations_equal(journal["baseline"], stable(snapshot)):
@@ -537,10 +571,12 @@ async def recover(hmc_config, config):
                 raise ValueError("absence cannot settle an uncertain mutation")
             result["status"] = "CLEAN"
     finally:
-        try:
-            await api.logoff()
-        finally:
-            await api._http.aclose()
-            result["transports_upper_bound"] = budget.used
-            contract.save(receipt_path, result)
+        session = await finalize(api, deadline)
+        result["session_cleanup"] = session
+        if session not in {"completed", "not-needed"}:
+            result["status"] = "UNKNOWN"
+        result["transports_upper_bound"] = budget.used
+        contract.save(receipt_path, result)
+        if session not in {"completed", "not-needed"}:
+            raise ValueError("recovery own-session cleanup unconfirmed")
     return result

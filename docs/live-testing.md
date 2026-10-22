@@ -1513,7 +1513,13 @@ two minutes to independent recovery, and one minute to orchestration. The transp
 upper bound is 192, including authentication and SSH: admission plus the arm share 160,
 with 32 reserved for recovery. Namespace-read reservations can overcount a failed call,
 never undercount it. Logout slots are reserved. There is no retry, automatic resume,
-exception rollback or profile-capacity fallback.
+exception rollback or profile-capacity fallback. Phase deadlines use the same host's monotonic
+clock and reserve ten seconds for own-session logout. Expiry closes local resources without
+starting another HMC request and reports session cleanup unconfirmed.
+
+The runner persists its partial recovery dispatch document before the arm can write. An
+external termination can therefore leave a readable packet/journal recovery route; pending
+mutation intent still prevents CLEAN even when an independent read sees no fixture.
 
 Each attempted write gets a durable intent first. Lost replies, missing identities,
 stale trees/ETags, foreign ownership or uncertain membership retain the fixture and
