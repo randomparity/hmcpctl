@@ -7315,6 +7315,7 @@ def test_scenarios_declare_their_expected_assertion_ids():
     concludes a postcondition was checked that nothing checks any more.
     """
     assert _recorded_scenarios() == {
+        "st47-lpar-settings": {"settings-round-trip", "typed-settings-readback"},
         "st43-profile-artifacts": {
             "scratch-listed-exactly",
             "scratch-absence-read-back",
