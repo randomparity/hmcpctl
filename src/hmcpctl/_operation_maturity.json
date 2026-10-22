@@ -430,7 +430,21 @@
       "observed_at": "2026-10-06T09:47:30Z"
     },
     {
+      "operation": "lpar_profile.delete",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar_profile.delete_backup",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.list",
       "implementation": "implemented",
       "verification": "unevidenced",
       "reason": null,
@@ -444,6 +458,13 @@
       "observed_at": null
     },
     {
+      "operation": "lpar_profile.read",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar_profile.restore",
       "implementation": "partial",
       "verification": "stale",
@@ -451,11 +472,32 @@
       "observed_at": "2026-10-06T09:47:30Z"
     },
     {
+      "operation": "lpar_profile.save_current",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.set_default",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar_profile.sync",
       "implementation": "implemented",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T09:45:57Z"
+    },
+    {
+      "operation": "lpar_profile.update",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "media.create",
@@ -1170,6 +1212,48 @@
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-07T11:41:11Z"
+    },
+    {
+      "operation": "vios_profile.delete",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.list",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.read",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.save_current",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.set_default",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.update",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "vnic.add",

@@ -28,12 +28,12 @@ def profile(adapter="ProfileTrunkAdapter"):
         </{adapter}></ProfileVirtualIOAdapterSubclass></ProfileVirtualIOAdapters>
         <VirtualOpticonnectPool kb="CUD">false</VirtualOpticonnectPool>
       </IOConfigurationInstance>
-      <ProcessorAttributes kb="CUR"><Metadata><Atom/></Metadata><HasDedicatedProcessors kb="CUR">false</HasDedicatedProcessors>
-        <SharedProcessorConfiguration kb="CUR"><Metadata><Atom/></Metadata>
-          <MinimumVirtualProcessors kb="CUR">1</MinimumVirtualProcessors><DesiredVirtualProcessors kb="CUR">2</DesiredVirtualProcessors><MaximumVirtualProcessors kb="CUR">4</MaximumVirtualProcessors>
-          <MinimumProcessingUnits kb="CUR">0.05</MinimumProcessingUnits><DesiredProcessingUnits kb="CUR">0.1</DesiredProcessingUnits><MaximumProcessingUnits kb="CUR">1.0</MaximumProcessingUnits>
+      <ProcessorAttributes kb="CUR"><Metadata><Atom/></Metadata><HasDedicatedProcessors kb="CUD">false</HasDedicatedProcessors>
+        <SharedProcessorConfiguration kb="CUD"><Metadata><Atom/></Metadata>
+          <MinimumVirtualProcessors kb="CUD">1</MinimumVirtualProcessors><DesiredVirtualProcessors kb="CUD">2</DesiredVirtualProcessors><MaximumVirtualProcessors kb="CUD">4</MaximumVirtualProcessors>
+          <MinimumProcessingUnits kb="CUD">0.05</MinimumProcessingUnits><DesiredProcessingUnits kb="CUD">0.1</DesiredProcessingUnits><MaximumProcessingUnits kb="CUD">1.0</MaximumProcessingUnits>
           <UncappedWeight kb="CUD">128</UncappedWeight>
-        </SharedProcessorConfiguration><SharingMode kb="CUR">capped</SharingMode>
+        </SharedProcessorConfiguration><SharingMode kb="CUD">capped</SharingMode>
       </ProcessorAttributes>
       <ProfileMemory kb="CUR"><Metadata><Atom/></Metadata><MinimumMemory kb="CUD">512</MinimumMemory><DesiredMemory kb="CUD">768</DesiredMemory><MaximumMemory kb="CUD">1024</MaximumMemory>
         <DesiredEntitledMemory kb="CUD">AUTO</DesiredEntitledMemory><DesiredHugePageCount kb="CUD">0</DesiredHugePageCount><MaximumHugePageCount kb="CUD">0</MaximumHugePageCount><MinimumHugePageCount kb="CUD">0</MinimumHugePageCount><MemoryWeight kb="CUD">128</MemoryWeight><ManualEntitledModeEnabled kb="ROR">false</ManualEntitledModeEnabled>
@@ -322,3 +322,51 @@ def test_physical_io_configuration_retains_writable_volume_content_and_drops_rea
         )
         is not None
     )
+
+
+def test_every_captured_root_field_is_admitted_and_conflicting_annotation_refuses():
+    import json
+    from pathlib import Path
+
+    contract = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "fixtures/partition_profiles/reference-contracts.json"
+        ).read_text()
+    )
+    for name, token in contract["root_behavior"].items():
+        if token not in {"CUD", "CUR", "COD", "CUA", "COR"}:
+            continue
+        root = profile()
+        node = root.find("{" + U + "}" + name)
+        if node is None:
+            node = ET.SubElement(root, "{" + U + "}" + name, {"kb": token})
+            node.text = "opaque-preserved-value"
+        projected = clone_profile_document(root, "recovery")
+        assert projected.find("{" + U + "}" + name) is not None
+        if name != "ProfileName":
+            assert projected.find("{" + U + "}" + name).text == node.text
+        node.set("kb", "ROR")
+        with pytest.raises(ValueError):
+            clone_profile_document(root, "recovery")
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [
+        "ProfileTrunkAdapter",
+        "ProfileVirtualSCSIClientAdapter",
+        "ProfileVirtualFibreChannelClientAdapter",
+    ],
+)
+def test_conflicting_captured_adapter_slot_annotation_refuses_before_copy(adapter):
+    root = profile(adapter)
+    slot = field(
+        root,
+        "IOConfigurationInstance/ProfileVirtualIOAdapters/ProfileVirtualIOAdapterSubclass/"
+        + adapter
+        + "/VirtualSlotNumber",
+    )
+    slot.set("kb", "ROR")
+    with pytest.raises(ValueError):
+        clone_profile_document(root, "recovery")

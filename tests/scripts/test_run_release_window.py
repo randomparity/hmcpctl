@@ -41,6 +41,7 @@ def window(tmp_path):
         "cli.py",
         "config.py",
         "runner.py",
+        "partition_profiles.py",
         "evidence.py",
         "scenario_validation.py",
     ):

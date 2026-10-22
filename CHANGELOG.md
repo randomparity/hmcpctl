@@ -18,6 +18,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Saved LPAR and VIOS profile CLI/MCP lifecycle operations provide contained reads,
+  typed ETag updates, current-configuration saves with verified retained recovery,
+  default selection and guarded deletion. Outcomes separate requested changes,
+  preservation drift and execution uncertainty; native product verification is
+  not yet run (#1724).
+
 - System-profile CLI and MCP operations bind complete membership, authorize every
   member, and reconcile create, rename/replacement, delete, validation and activation
   outcomes. Activation exposes bounded profile witnesses and explicit uncertainty;

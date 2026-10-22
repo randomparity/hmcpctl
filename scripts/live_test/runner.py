@@ -17,7 +17,7 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 44; 26 to 36 are other arms' row ids.
+Registered subtasks span 0 through 45; 26 to 36 are other arms' row ids.
 With no selection the original subtasks through 43 run; 44 requires its named group.
 Subtasks 9, 11, 37, 38, 39, 40, 41 and 42 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
@@ -107,6 +107,7 @@ from live_test.observation import (
     classify_failure,
     grade_assertions,
 )
+from live_test.partition_profiles import exercise_partition_profiles
 from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
 from live_test.provisioning import (
     exercise_storage_provisioning,
@@ -676,6 +677,7 @@ SUBTASKS = {
     42: exercise_volume_group,
     43: exercise_backup_artifacts,
     44: exercise_system_profiles,
+    45: exercise_partition_profiles,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -702,6 +704,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "profiles": [0, 4, 10, 15],
     "profile-artifacts": [43],
     "system-profiles": [44],
+    "partition-profiles": [45],
     "users": [11],
     # ST9 runs only here: its round trips need the operator's network authorization.
     "network": [2, 9],
@@ -978,7 +981,7 @@ async def main(
             print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
             return 1
     else:
-        tasks = sorted(n for n in SUBTASKS if n != 44)
+        tasks = sorted(n for n in SUBTASKS if n not in {44, 45})
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]

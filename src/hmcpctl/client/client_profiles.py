@@ -173,3 +173,22 @@ async def write_native_profile(
         )
 
     return response.status_code
+
+
+async def delete_native_profile(
+    hmc: HMCClient, kind: PartitionKind, parent: str, uuid: str
+) -> int:
+    """Delete a contained profile without collapsing accepted202 into terminal success."""
+    path = profile_path(kind, parent, uuid)
+    response = await hmc._request_with_uuid_path_arguments(
+        "DELETE",
+        path,
+        uuid_path_arguments={"partition_uuid": parent, "profile_uuid": uuid},
+        headers={"Accept": "*/*"},
+    )
+    if response.status_code not in {200, 202, 204}:
+        raise HMCError(
+            "native profile deletion failed; reconcile before retrying",
+            response.status_code,
+        )
+    return response.status_code

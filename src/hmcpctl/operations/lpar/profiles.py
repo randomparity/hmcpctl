@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from ...client.client_profiles import (
     NativeProfile,
     PartitionKind,
+    delete_native_profile,
     read_native_profile,
     require_fresh_profile,
     write_native_profile,
@@ -404,6 +405,14 @@ async def update_partition_profile(
             comparison_complete=comparison.complete,
             details_truncated=comparison.details_truncated,
             differences=comparison.differences,
+            diagnostics=(
+                "applied with preservation drift;requested change verified but full preservation not verified;reconcile before another write",
+            )
+            if outcome.execution == "completed"
+            and requested
+            and comparison.complete
+            and not comparison.equal
+            else (),
         )
     except (HMCError, ValueError, TypeError) as error:
         return replace(outcome, error=str(error)[:2048])
@@ -636,11 +645,16 @@ async def _recovery(
         outcome = replace(outcome, recovery_profile=RecoveryProfile(None, name))
     try:
         if document is not None:
-            await write_native_profile(hmc, target.kind, target.uuid, document)
+            status = await write_native_profile(hmc, target.kind, target.uuid, document)
             recovery = _choose(await _inventory(hmc, target), name)
             outcome = replace(
                 outcome, recovery_profile=RecoveryProfile(recovery.uuid, name)
             )
+            if status == 202:
+                return replace(
+                    outcome,
+                    error="recovery copy accepted asynchronously;retain and reconcile before force-save",
+                )
         comparison = compare_profiles(before.element, recovery.element, recovery=True)
         if recovery.name != name or not comparison.equal or not comparison.complete:
             return replace(
@@ -886,12 +900,16 @@ async def delete_partition_profile(
     await _empty_system_profiles(hmc, target)
     outcome = _outcome("delete", target, before)
     try:
-        await hmc.delete_child(
-            target.kind, target.uuid, "LogicalPartitionProfile", before.uuid
-        )
+        status = await delete_native_profile(hmc, target.kind, target.uuid, before.uuid)
     except HMCError as error:
         return replace(outcome, error=str(error)[:2048])
-    outcome = replace(outcome, execution="completed")
+    outcome = replace(
+        outcome,
+        execution="unknown" if status == 202 else "completed",
+        error="delete accepted asynchronously;absence readback is provisional"
+        if status == 202
+        else None,
+    )
     try:
         after = await _inventory(hmc, target)
         if {r.uuid for r in after} != {

@@ -2,8 +2,10 @@
 
 ## Status
 
-Accepted (2026-10-18), pending nested clone/allocated-variant reconciliation and scope audit of the
-[design](../workflow/specs/2026-10-18-partition-profile-lifecycle-design.md).
+Accepted (2026-10-18), reconciled and approved for implementation on 2026-10-22 in
+scope6344262032. The complete [design](../workflow/specs/2026-10-18-partition-profile-lifecycle-design.md)
+retains the five-row allocation and three exclusion/owner pairs. Further review and
+scope-audit passes were explicitly waived; tests and shipping guards remain required.
 The user approved the three explicit contract boundaries in approval item 0 of
 call_6d051ffaf437410caef78c8c140679bb; that authority is not technical feasibility proof.
 Reserved by the campaign for #1724 before creation; reservation unchanged under design-only
@@ -100,7 +102,7 @@ profile; its identity and baseline content must survive that interruption. The p
 harness at package8720770 observed a memory patch and three additional
 CUD zero huge-page fields, with all disposable resources later independently CLEAN. That is sampled
 behavior, not implemented feature maturity or verified recovery-copy equivalence. No new native
-action is authorized by this Proposed record; complete reconciled design approval still precedes build.
+action is authorized by this record; the later complete implementation approval is recorded below.
 
 ## Considered & rejected
 

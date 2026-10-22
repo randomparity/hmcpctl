@@ -13,7 +13,7 @@ from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr
 
-from .lpar import _REST_SHARING_MODES, SHARING_MODES
+from .lpar import _REST_SHARING_MODES, SHARING_MODES, SharingMode
 
 UOM = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
 ATOM = "http://www.w3.org/2005/Atom"
@@ -40,6 +40,7 @@ ROOT_FIELDS = frozenset(
         "BootMode",
         "ConnectionMonitoringEnabled",
         "DesiredProcessorCompatibilityMode",
+        "ElectronicErrorReportingEnabled",
         "HostEthernetAdapterLogicalPorts",
         "IOConfigurationInstance",
         "PowerControlPartitions",
@@ -65,6 +66,9 @@ WRAPPERS = {
     ("RelatedIOAdapter", "IOAdapter"),
     ("RelatedIOAdapter", "PhysicalFibreChannelAdapter"),
     ("RelatedIOAdapter", "SRIOVAdapter"),
+    ("RelatedIOAdapter", "EthernetBackingDevice"),
+    ("RelatedIOAdapter", "HostChannelAdapter"),
+    ("RelatedIOAdapter", "HostEthernetAdapterLogicalPort"),
     ("ProfileVirtualIOAdapters", "ProfileVirtualIOAdapterSubclass"),
     *{("ProfileVirtualIOAdapterSubclass", a) for a in ADAPTERS},
     ("ProfileSRIOVEthernetLogicalPorts", "ProfileSRIOVEthernetLogicalPort"),
@@ -77,30 +81,467 @@ WRAPPERS = {
     ("PhysicalVolumes", "PhysicalVolume"),
     ("PowerControlPartitions", "link"),
 }
-EXPECTED_BEHAVIOR = {
-    ("LogicalPartitionProfile", "ProfileName"): "CUR",
-    ("LogicalPartitionProfile", "SettingID"): "ROO",
-    ("LogicalPartitionProfile", "AssociatedPartition"): "ROR",
-    ("LogicalPartitionProfile", "ProfileType"): "ROR",
-    ("LogicalPartitionProfile", "AssignAllResources"): "COD",
-    ("ProfileMemory", "ManualEntitledModeEnabled"): "ROR",
-    **{
-        ("ProfileMemory", k): "CUD"
-        for k in ("MinimumMemory", "DesiredMemory", "MaximumMemory")
+# Fixed behavior facts from the retained served profile schemas (ADR0242).
+# Unknown annotated fields remain opaque; contradictions of captured fields refuse.
+CAPTURED_BEHAVIOR = {
+    "AssociatedIOSlot": {
+        "BusGroupingRequired": "CUD",
+        "Description": "CUD",
+        "FeatureCodes": "ROO",
+        "IOBusID": "ROR",
+        "IORDevices": "ROO",
+        "IOUnitPhysicalLocation": "ROR",
+        "PCAdapterID": "ROO",
+        "PCIClass": "ROO",
+        "PCIDeviceID": "ROO",
+        "PCIManufacturerID": "ROO",
+        "PCIRevisionID": "ROO",
+        "PCISubsystemDeviceID": "ROO",
+        "PCISubsystemVendorID": "ROO",
+        "PCIVendorID": "ROO",
+        "ParentSlotDynamicReconfigurationConnectorIndex": "ROO",
+        "PartitionID": "ROO",
+        "PartitionName": "ROO",
+        "PartitionType": "ROO",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "PartnerSlotDynamicReconfigurationConnectorIndex": "ROR",
+        "PartnerSlotDynamicReconfigurationConnectorName": "CUD",
+        "RelatedIBMiIOSlot": "CUD",
+        "RelatedIOAdapter": "CUD",
+        "SRIOVCapableDevice": "ROO",
+        "SRIOVCapableSlot": "ROO",
+        "SRIOVLogicalPortsLimit": "ROO",
+        "SlotDynamicReconfigurationConnectorIndex": "ROR",
+        "SlotDynamicReconfigurationConnectorName": "CUD",
+        "SlotPhysicalLocationCode": "ROR",
+        "TwinaxialAttached": "ROO",
+        "TwinaxialCapable": "ROO",
+        "VitalProductDataModel": "ROO",
+        "VitalProductDataSerialNumber": "ROO",
+        "VitalProductDataStale": "ROO",
+        "VitalProductDataType": "ROO",
     },
-    **{
-        ("ProfileMemory", k): "CUD"
-        for k in (
-            "DesiredEntitledMemory",
-            "DesiredHugePageCount",
-            "MaximumHugePageCount",
-            "MinimumHugePageCount",
-            "MemoryWeight",
-        )
+    "Capability": {
+        "HighPercentage": "CUD",
+        "LowPercentage": "CUD",
+        "MediumPercentage": "CUD",
     },
-    ("IOConfigurationInstance", "VirtualOpticonnectPool"): "CUD",
-    ("SharedProcessorConfiguration", "UncappedWeight"): "CUD",
+    "DedicatedProcessorConfiguration": {
+        "DesiredProcessors": "CUD",
+        "MaximumProcessors": "CUD",
+        "MinimumProcessors": "CUD",
+    },
+    "Details": {
+        "AllowedOperatingSystemMACAddresses": "CUD",
+        "AllowedVLANIDs": "CUD",
+        "AutoPriorityFailover": "CUD",
+        "LparName": "CUD",
+        "MACAddress": "CUD",
+        "PortVLANID": "CUD",
+        "PortVLANIDPriority": "CUD",
+    },
+    "EthernetBackingDevice": {
+        "AdapterID": "ROR",
+        "Description": "CUD",
+        "DeviceName": "ROR",
+        "DeviceType": "ROR",
+        "DynamicPartitionAssignmentCapable": "ROR",
+        "DynamicReconfigurationConnectorName": "CUD",
+        "IPInterface": "CUD",
+        "LogicalPartitionAssignmentCapable": "ROO",
+        "PartnerAdapterID": "ROO",
+        "PartnerDynamicReconfigurationConnectorName": "CUD",
+        "PhysicalLocation": "ROR",
+        "UniqueDeviceID": "ROR",
+    },
+    "HostChannelAdapter": {
+        "AdapterID": "ROR",
+        "AllocationAllowed": "CUR",
+        "AssignedUUIDs": "CUD",
+        "CableType": "ROR",
+        "Capability": "CUR",
+        "Description": "CUD",
+        "DeviceName": "ROR",
+        "DeviceType": "ROR",
+        "DynamicPartitionAssignmentCapable": "ROR",
+        "DynamicReconfigurationConnectorName": "CUD",
+        "IsFunctional": "ROR",
+        "LogicalPartitionAssignmentCapable": "ROO",
+        "PartnerAdapterID": "ROO",
+        "PartnerDynamicReconfigurationConnectorName": "CUD",
+        "PhysicalLocation": "ROR",
+        "PhysicalLocationCode": "ROR",
+        "UUIDListSequential": "ROR",
+        "UnassignedGUIDs": "CUD",
+        "UniqueDeviceID": "ROR",
+    },
+    "HostEthernetAdapterLogicalPort": {
+        "AdapterID": "ROR",
+        "AllowedOSMACAddresses": "CUD",
+        "AllowedVLANIDs": "CUD",
+        "Description": "CUD",
+        "DeviceName": "ROR",
+        "DeviceType": "ROR",
+        "DynamicPartitionAssignmentCapable": "ROR",
+        "DynamicReconfigurationConnectorName": "CUD",
+        "HEALogicalPortPhysicalLocation": "ROR",
+        "IPInterface": "CUD",
+        "LogicalPartitionAssignmentCapable": "ROO",
+        "LogicalPortID": "CUD",
+        "MACAddress": "CUD",
+        "MACAddressDirectives": "CUD",
+        "PartitionLink": "CUR",
+        "PartnerAdapterID": "ROO",
+        "PartnerDynamicReconfigurationConnectorName": "CUD",
+        "PhysicalLocation": "ROR",
+        "PhysicalPortID": "ROR",
+        "PortGroupID": "CUD",
+        "PortState": "ROR",
+        "UniqueDeviceID": "ROR",
+    },
+    "IOAdapter": {
+        "AdapterID": "ROR",
+        "Description": "CUD",
+        "DeviceName": "ROR",
+        "DeviceType": "ROR",
+        "DynamicPartitionAssignmentCapable": "ROR",
+        "DynamicReconfigurationConnectorName": "CUD",
+        "LogicalPartitionAssignmentCapable": "ROO",
+        "PartnerAdapterID": "ROO",
+        "PartnerDynamicReconfigurationConnectorName": "CUD",
+        "PhysicalLocation": "ROR",
+        "UniqueDeviceID": "ROR",
+    },
+    "IOConfigurationInstance": {
+        "HighSpeedLinkOpticonnectPool": "CUD",
+        "HostChannelAdapters": "ROR",
+        "MaximumVirtualIOSlots": "CUD",
+        "PoolIDs": "CUD",
+        "ProfileIOSlots": "CUD",
+        "ProfileVirtualIOAdapters": "CUD",
+        "TaggedIO": "CUD",
+        "VirtualOpticonnectPool": "CUD",
+    },
+    "IPInterface": {
+        "Gateway": "CUD",
+        "HostName": "CUD",
+        "IPAddress": "CUD",
+        "IPV6Prefix": "CUD",
+        "InterfaceName": "CUD",
+        "State": "CUD",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "SubnetMask": "CUD",
+    },
+    "LogicalPartitionProfile": {
+        "AffinityGroupID": "CUD",
+        "AssignAllResources": "COD",
+        "AssociatedPartition": "ROR",
+        "AutoStart": "CUD",
+        "BootMode": "CUD",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "ConnectionMonitoringEnabled": "CUD",
+        "DesiredProcessorCompatibilityMode": "CUD",
+        "ElectronicErrorReportingEnabled": "CUD",
+        "HostEthernetAdapterLogicalPorts": "CUD",
+        "IOConfigurationInstance": "CUD",
+        "KVMReservedMemory": "CUD",
+        "PowerControlPartitions": "CUD",
+        "ProcessorAttributes": "CUR",
+        "ProfileMemory": "CUR",
+        "ProfileName": "CUR",
+        "ProfileSRIOVEthernetLogicalPorts": "CUD",
+        "ProfileSRIOVRoCELogicalPorts": "CUD",
+        "ProfileType": "ROR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "RedundantErrorPathReportingEnabled": "CUD",
+        "SettingID": "ROO",
+        "SwitchNetworkInterfaceDeviceID": "CUD",
+    },
+    "PhysicalFibreChannelAdapter": {
+        "AdapterID": "ROR",
+        "Description": "CUD",
+        "DeviceName": "ROR",
+        "DeviceType": "ROR",
+        "DynamicPartitionAssignmentCapable": "ROR",
+        "DynamicReconfigurationConnectorName": "CUD",
+        "LogicalPartitionAssignmentCapable": "ROO",
+        "PartnerAdapterID": "ROO",
+        "PartnerDynamicReconfigurationConnectorName": "CUD",
+        "PhysicalFibreChannelPorts": "CUD",
+        "PhysicalLocation": "ROR",
+        "UniqueDeviceID": "ROR",
+    },
+    "PhysicalFibreChannelPort": {
+        "AvailablePorts": "ROR",
+        "Label": "CUD",
+        "LocationCode": "ROR",
+        "PhysicalVolumes": "CUD",
+        "PortName": "CUR",
+        "TotalPorts": "ROR",
+        "UniqueDeviceID": "ROR",
+        "WWNN": "ROO",
+        "WWPN": "CUR",
+    },
+    "ProcessorAttributes": {
+        "DedicatedProcessorConfiguration": "CUD",
+        "HasDedicatedProcessors": "CUD",
+        "SharedProcessorConfiguration": "CUD",
+        "SharingMode": "CUD",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+    },
+    "ProfileClientNetworkAdapter": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "AllowedOperatingSystemMACAddresses": "CUD",
+        "IsQualityOfServicePriorityEnabled": "CUD",
+        "IsRequired": "CUD",
+        "IsTaggedVLANSupported": "CUA",
+        "LocalPartitionID": "CUR",
+        "MaCAddressValue": "CUD",
+        "PortVLANID": "CUR",
+        "QualityOfServicePriority": "CUD",
+        "TaggedVLANIDs": "CUA",
+        "VirtualSlotNumber": "CUR",
+        "VirtualSwitchID": "ROR",
+        "VirtualSwitchInterfaceManagerID": "CUD",
+        "VirtualSwitchInterfaceType": "CUD",
+        "VirtualSwitchInterfaceTypeVersion": "CUD",
+        "VirtualSwitchName": "CUD",
+    },
+    "ProfileIOSlot": {"AssociatedIOSlot": "CUD", "IsRequired": "CUD", "PoolID": "CUD"},
+    "ProfileMemory": {
+        "ActiveMemoryExpansionEnabled": "CUD",
+        "ActiveMemorySharingEnabled": "CUD",
+        "BarrierSynchronizationRegisterArrayCount": "CUD",
+        "DesiredEntitledMemory": "CUD",
+        "DesiredHugePageCount": "CUD",
+        "DesiredMemory": "CUD",
+        "DesiredPhysicalPageTableRatio": "CUD",
+        "ExpansionFactor": "CUD",
+        "HardwarePageTableRatio": "CUD",
+        "ManualEntitledModeEnabled": "ROR",
+        "MaximumHugePageCount": "CUD",
+        "MaximumMemory": "CUD",
+        "MemoryWeight": "CUD",
+        "MinimumHugePageCount": "CUD",
+        "MinimumMemory": "CUD",
+        "PrimaryPagingServicePartition": "CUD",
+        "SecondaryPagingServicePartition": "CUD",
+    },
+    "ProfileSRIOVEthernetLogicalPort": {
+        "AdapterID": "CUR",
+        "AllowedMACAddresses": "CUD",
+        "AllowedVLANs": "CUD",
+        "AssociatedProfileVETHBackupDevice": "COD",
+        "AssociatedProfileVNICBackupDevice": "COD",
+        "BackupDeviceSlotID": "COD",
+        "BackupDeviceType": "COD",
+        "ConfigurationID": "CUR",
+        "ConfiguredCapacity": "CUR",
+        "ConfiguredCapacityPercentage": "CUR",
+        "ConfiguredMaxCapacity": "CUR",
+        "HCNID": "ROR",
+        "IEEE8021QAllowablePriorities": "CUD",
+        "IEEE8021QPriority": "CUD",
+        "IsDebug": "CUR",
+        "IsDiagnostic": "CUR",
+        "IsHugeDMA": "CUR",
+        "IsPromiscous": "CUR",
+        "LocationCode": "ROR",
+        "LogicalPortID": "CUR",
+        "MACAddress": "CUD",
+        "MACAddressFlags": "CUD",
+        "Migratable": "COD",
+        "NumberOfAllowedVLANs": "CUD",
+        "PhysicalPortID": "CUR",
+        "PortVLANID": "CUR",
+        "TuningBufferID": "CUR",
+    },
+    "ProfileSRIOVRoCELogicalPort": {
+        "AdapterID": "CUR",
+        "AllowedMACAddresses": "CUD",
+        "AllowedVLANs": "CUD",
+        "AssociatedProfileVETHBackupDevice": "COD",
+        "AssociatedProfileVNICBackupDevice": "COD",
+        "BackupDeviceSlotID": "COD",
+        "BackupDeviceType": "COD",
+        "ConfigurationID": "CUR",
+        "ConfiguredCapacity": "CUR",
+        "ConfiguredCapacityPercentage": "CUR",
+        "ConfiguredMaxCapacity": "CUR",
+        "HCNID": "ROR",
+        "IEEE8021QAllowablePriorities": "CUD",
+        "IEEE8021QPriority": "CUD",
+        "IsDebug": "CUR",
+        "IsDiagnostic": "CUR",
+        "IsHugeDMA": "CUR",
+        "IsPromiscous": "CUR",
+        "LocationCode": "ROR",
+        "LogicalPortID": "CUR",
+        "MACAddress": "CUD",
+        "MACAddressFlags": "CUD",
+        "Migratable": "COD",
+        "NumberOfAllowedVLANs": "CUD",
+        "PhysicalPortID": "CUR",
+        "PortVLANID": "CUR",
+        "TuningBufferID": "CUR",
+    },
+    "ProfileSRIOVVirtualNICBackupDevice": {
+        "AdapterID": "COD",
+        "CurrentCapacityPercentage": "COD",
+        "FailOverPriority": "COD",
+        "MaxCapacityPercentage": "COD",
+        "PhysicalPortID": "COD",
+        "VIOSID": "COD",
+        "VIOSName": "COD",
+    },
+    "ProfileTrunkAdapter": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "AllowedOperatingSystemMACAddresses": "CUD",
+        "InterfaceName": "CUD",
+        "IsQualityOfServicePriorityEnabled": "CUD",
+        "IsRequired": "CUD",
+        "IsTaggedVLANSupported": "CUA",
+        "LocalPartitionID": "CUR",
+        "MaCAddressValue": "CUD",
+        "PortVLANID": "CUR",
+        "QualityOfServicePriority": "CUD",
+        "TaggedVLANIDs": "CUA",
+        "TrunkPriority": "CUD",
+        "VirtualSlotNumber": "CUR",
+        "VirtualSwitchID": "ROR",
+        "VirtualSwitchInterfaceManagerID": "CUD",
+        "VirtualSwitchInterfaceType": "CUD",
+        "VirtualSwitchInterfaceTypeVersion": "CUD",
+        "VirtualSwitchName": "CUD",
+    },
+    "ProfileVirtualFibreChannelClientAdapter": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "ConnectingPartitionID": "CUR",
+        "ConnectingVirtualSlotNumber": "CUR",
+        "IsRequired": "CUD",
+        "LocalPartitionID": "CUR",
+        "VirtualSlotNumber": "CUR",
+        "WWPNs": "CUR",
+    },
+    "ProfileVirtualFibreChannelServerAdapter": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "ConnectingPartitionID": "CUR",
+        "ConnectingVirtualSlotNumber": "CUR",
+        "IsRequired": "CUD",
+        "LocalPartitionID": "CUR",
+        "VirtualSlotNumber": "CUR",
+    },
+    "ProfileVirtualNICDedicated": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "AssociatedBackingDevices": "CUR",
+        "Details": "CUR",
+        "IsRequired": "CUD",
+        "LocalPartitionID": "CUR",
+        "VirtualSlotNumber": "CUR",
+    },
+    "ProfileVirtualNICSRIOVBackingDevice": {
+        "AssociatedVirtualIOServerID": "CUR",
+        "CurrentCapacityPercentage": "ROR",
+        "DesiredCapacityPercentage": "COD",
+        "DesiredMaxCapacityPercentage": "ROR",
+        "DeviceType": "CUR",
+        "FailOverPriority": "CUR",
+        "MaxCapacityPercentage": "COD",
+        "RelatedSRIOVAdapterID": "COR",
+        "RelatedSRIOVPhysicalPortID": "COR",
+    },
+    "ProfileVirtualNICShared": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "AssociatedSwitchID": "CUR",
+        "Details": "CUR",
+        "IsRequired": "CUD",
+        "LocalPartitionID": "CUR",
+        "VirtualSlotNumber": "CUR",
+    },
+    "ProfileVirtualSCSIClientAdapter": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "BackingDeviceName": "CUD",
+        "IsRequired": "CUD",
+        "LocalPartitionID": "CUR",
+        "RemoteBackingDeviceName": "CUD",
+        "RemotePartitionID": "CUR",
+        "RemoteSlotNumber": "CUA",
+        "VirtualSlotNumber": "CUR",
+    },
+    "ProfileVirtualSCSIServerAdapter": {
+        "AdapterType": "CUR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "BackingDeviceName": "CUD",
+        "IsRequired": "CUD",
+        "LocalPartitionID": "CUR",
+        "RemoteBackingDeviceName": "CUD",
+        "RemotePartitionID": "CUR",
+        "RemoteSlotNumber": "CUA",
+        "VirtualSlotNumber": "CUR",
+    },
+    "RelatedIBMiIOSlot": {
+        "AlternateLoadSourceAttached": "ROR",
+        "ConsoleCapable": "ROR",
+        "DirectOperationsConsoleCapable": "ROR",
+        "IOP": "ROR",
+        "IOPInfoStale": "ROR",
+        "IOPoolID": "ROR",
+        "LANConsoleCapable": "ROR",
+        "LoadSourceAttached": "ROR",
+        "LoadSourceCapable": "ROR",
+        "OperationsConsoleAttached": "ROR",
+        "OperationsConsoleCapable": "ROR",
+    },
+    "SRIOVAdapter": {
+        "AdapterID": "ROR",
+        "AdapterMode": "CUD",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "AdapterState": "ROR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "ConvergedEthernetPhysicalPorts": "ROR",
+        "CurrentAdapterConfigurationOption": "ROO",
+        "DefaultAdapterConfigurationOption": "ROO",
+        "Description": "CUD",
+        "DeviceName": "ROR",
+        "DeviceType": "ROR",
+        "DynamicPartitionAssignmentCapable": "ROR",
+        "DynamicReconfigurationConnectorName": "CUD",
+        "EthernetLogicalPorts": "ROR",
+        "EthernetPhysicalPorts": "ROR",
+        "FibreChannelOverEthernetLogicalPorts": "ROR",
+        "IsFunctional": "ROR",
+        "LogicalPartitionAssignmentCapable": "ROO",
+        "MaximumHugeDMALogicalPorts": "ROR",
+        "MaximumLogicalPortsSupported": "ROR",
+        "PartnerAdapterID": "ROO",
+        "PartnerDynamicReconfigurationConnectorName": "CUD",
+        "Personality": "ROR",  # live-vocabulary: allow captured schema behavior annotation, not a field value
+        "PhysicalLocation": "ROR",
+        "PossibleAdapterConfigurationOptions": "ROO",
+        "SRIOVAdapterID": "COD",
+        "SRIOVRoCELogicalPorts": "ROR",
+        "SRIOVRoCEPhysicalPorts": "ROR",
+        "UnconfiguredLogicalPorts": "ROR",
+        "UniqueDeviceID": "ROR",
+    },
+    "SharedProcessorConfiguration": {
+        "DesiredProcessingUnits": "CUD",
+        "DesiredVirtualProcessors": "CUD",
+        "MaximumProcessingUnits": "CUD",
+        "MaximumVirtualProcessors": "CUD",
+        "MinimumProcessingUnits": "CUD",
+        "MinimumVirtualProcessors": "CUD",
+        "SharedProcessorPoolID": "CUD",
+        "SharedProcessorPoolName": "CUD",
+        "UncappedWeight": "CUD",
+    },
+    "TaggedIO": {
+        "AlternateConsole": "CUD",
+        "AlternateLoadSource": "CUD",
+        "Console": "CUR",
+        "LoadSource": "CUR",
+        "OperationsConsole": "CUD",
+    },
 }
+CAPTURED_BEHAVIOR["LogicalPartitionProfile"]["PartitionPlacement"] = "CUD"
+EXPECTED_BEHAVIOR = {
+    (parent, field): behavior
+    for parent, fields in CAPTURED_BEHAVIOR.items()
+    for field, behavior in fields.items()
+}
+
 RECOVERY_TEXTS = {
     ("LogicalPartitionProfile", "ProfileName"),
     ("LogicalPartitionProfile", "SettingID"),
@@ -113,7 +554,10 @@ class ProfilePatch(BaseModel):
     """A bounded saved-profile patch; omitted fields are never injected."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    name: StrictStr | None = None
+    name: StrictStr | None = Field(
+        default=None,
+        description="New saved-profile name; omitted preserves the fetched name.",
+    )
     boot_mode: (
         Literal[
             "Normal",
@@ -124,17 +568,59 @@ class ProfilePatch(BaseModel):
             "Default",
         ]
         | None
-    ) = None
-    min_memory: StrictInt | None = Field(default=None, gt=0)
-    desired_memory: StrictInt | None = Field(default=None, gt=0)
-    max_memory: StrictInt | None = Field(default=None, gt=0)
-    min_processors: StrictInt | None = Field(default=None, gt=0)
-    desired_processors: StrictInt | None = Field(default=None, gt=0)
-    max_processors: StrictInt | None = Field(default=None, gt=0)
-    min_units: StrictFloat | None = Field(default=None, gt=0)
-    desired_units: StrictFloat | None = Field(default=None, gt=0)
-    max_units: StrictFloat | None = Field(default=None, gt=0)
-    sharing_mode: StrictStr | None = None
+    ) = Field(
+        default=None,
+        description="Saved-profile boot mode;this is not an activation-job token.",
+    )
+    min_memory: StrictInt | None = Field(
+        default=None,
+        gt=0,
+        description="Minimum saved memory in MiB; omitted preserves the fetched value.",
+    )
+    desired_memory: StrictInt | None = Field(
+        default=None,
+        gt=0,
+        description="Desired saved memory in MiB; omitted preserves the fetched value.",
+    )
+    max_memory: StrictInt | None = Field(
+        default=None,
+        gt=0,
+        description="Maximum saved memory in MiB; omitted preserves the fetched value.",
+    )
+    min_processors: StrictInt | None = Field(
+        default=None,
+        gt=0,
+        description="Minimum whole dedicated or virtual processor count,according to the saved mode; omitted preserves the fetched value.",
+    )
+    desired_processors: StrictInt | None = Field(
+        default=None,
+        gt=0,
+        description="Desired whole dedicated or virtual processor count,according to the saved mode; omitted preserves the fetched value.",
+    )
+    max_processors: StrictInt | None = Field(
+        default=None,
+        gt=0,
+        description="Maximum whole dedicated or virtual processor count,according to the saved mode; omitted preserves the fetched value.",
+    )
+    min_units: StrictFloat | None = Field(
+        default=None,
+        gt=0,
+        description="Minimum shared processing units; dedicated profiles refuse this field; omitted preserves the fetched value.",
+    )
+    desired_units: StrictFloat | None = Field(
+        default=None,
+        gt=0,
+        description="Desired shared processing units; dedicated profiles refuse this field; omitted preserves the fetched value.",
+    )
+    max_units: StrictFloat | None = Field(
+        default=None,
+        gt=0,
+        description="Maximum shared processing units; dedicated profiles refuse this field; omitted preserves the fetched value.",
+    )
+    sharing_mode: SharingMode | None = Field(
+        default=None,
+        description="Saved sharing mode compatible with the existing dedicated/shared processor mode.",
+    )
 
 
 @dataclass(frozen=True)

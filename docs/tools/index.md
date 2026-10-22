@@ -6,15 +6,15 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **170** tools are registered.
-- **169** are exposed by a default deployment.
+- **182** tools are registered.
+- **181** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
-| `destructive` | 36 |
-| `mutate` | 53 |
-| `read` | 80 |
+| `destructive` | 40 |
+| `mutate` | 57 |
+| `read` | 84 |
 
 ## Maturity vocabulary
 
@@ -40,7 +40,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `io_slot` | 1 | [io_slot.md](io_slot.md) |
 | `job` | 2 | [job.md](job.md) |
 | `lpar` | 37 | [lpar.md](lpar.md) |
-| `lpar_profile` | 5 | [lpar_profile.md](lpar_profile.md) |
+| `lpar_profile` | 11 | [lpar_profile.md](lpar_profile.md) |
 | `media` | 10 | [media.md](media.md) |
 | `memory_pool` | 2 | [memory_pool.md](memory_pool.md) |
 | `metrics` | 4 | [metrics.md](metrics.md) |
@@ -67,6 +67,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `user` | 5 | [user.md](user.md) |
 | `vios` | 10 | [vios.md](vios.md) |
 | `vios_label` | 7 | [vios_label.md](vios_label.md) |
+| `vios_profile` | 6 | [vios_profile.md](vios_profile.md) |
 | `vnic` | 3 | [vnic.md](vnic.md) |
 
 ## Not exposed by default
@@ -111,9 +112,11 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_delete_lpar` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_delete_media_repository` | `destructive` | [media.md](media.md) |
 | `hmc_delete_optical_media` | `destructive` | [media.md](media.md) |
+| `hmc_delete_partition_profile` | `destructive` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_delete_system_profile` | `destructive` | [system_profile.md](system_profile.md) |
 | `hmc_delete_user` | `destructive` | [user.md](user.md) |
 | `hmc_delete_vios` | `destructive` | [vios.md](vios.md) |
+| `hmc_delete_vios_partition_profile` | `destructive` | [vios_profile.md](vios_profile.md) |
 | `hmc_delete_virtual_disk` | `destructive` | [storage.md](storage.md) |
 | `hmc_delete_virtual_network` | `destructive` | [network.md](network.md) |
 | `hmc_deploy_partition_template` | `mutate` | [template.md](template.md) |
@@ -161,6 +164,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_list_network_bridges` | `read` | [network.md](network.md) |
 | `hmc_list_optical_mappings` | `read` | [media.md](media.md) |
 | `hmc_list_optical_media` | `read` | [media.md](media.md) |
+| `hmc_list_partition_profiles` | `read` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_list_partition_templates` | `read` | [template.md](template.md) |
 | `hmc_list_resource_group_memopt_scores` | `read` | [resource_group.md](resource_group.md) |
 | `hmc_list_resource_roles` | `read` | [resource_role.md](resource_role.md) |
@@ -178,6 +182,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_list_vios` | `read` | [vios.md](vios.md) |
 | `hmc_list_vios_backups` | `read` | [vios.md](vios.md) |
 | `hmc_list_vios_fc_port_labels` | `read` | [vios_label.md](vios_label.md) |
+| `hmc_list_vios_partition_profiles` | `read` | [vios_profile.md](vios_profile.md) |
 | `hmc_list_vios_vfc_group_labels` | `read` | [vios_label.md](vios_label.md) |
 | `hmc_list_virtual_networks` | `read` | [network.md](network.md) |
 | `hmc_list_virtual_switches` | `read` | [network.md](network.md) |
@@ -211,6 +216,8 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_provision_lpar` | `mutate` | [provision.md](provision.md) |
 | `hmc_read_lpar_boot_order` | `read` | [boot_order.md](boot_order.md) |
 | `hmc_read_lpar_refcodes` | `read` | [lpar.md](lpar.md) |
+| `hmc_read_partition_profile` | `read` | [lpar_profile.md](lpar_profile.md) |
+| `hmc_read_vios_partition_profile` | `read` | [vios_profile.md](vios_profile.md) |
 | `hmc_remote_restart_lpar` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_remove_memory_pool` | `destructive` | [memory_pool.md](memory_pool.md) |
 | `hmc_remove_vios_fc_port_label` | `destructive` | [vios_label.md](vios_label.md) |
@@ -220,7 +227,11 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_restore_lpar_profiles` | `destructive` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_restore_vios` | `destructive` | [vios.md](vios.md) |
 | `hmc_run_command` | `arbitrary-command` | [command.md](command.md) |
+| `hmc_save_current_partition_profile` | `destructive` | [lpar_profile.md](lpar_profile.md) |
+| `hmc_save_current_vios_partition_profile` | `destructive` | [vios_profile.md](vios_profile.md) |
 | `hmc_search_tools` | `read` | [tools.md](tools.md) |
+| `hmc_set_default_partition_profile` | `mutate` | [lpar_profile.md](lpar_profile.md) |
+| `hmc_set_default_vios_partition_profile` | `mutate` | [vios_profile.md](vios_profile.md) |
 | `hmc_set_lpar_boot_order` | `mutate` | [boot_order.md](boot_order.md) |
 | `hmc_set_lpar_description` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_set_lpar_msp` | `mutate` | [lpar.md](lpar.md) |
@@ -241,7 +252,9 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_unmount_optical_media` | `destructive` | [media.md](media.md) |
 | `hmc_update_console_software` | `destructive` | [update.md](update.md) |
 | `hmc_update_firmware` | `destructive` | [update.md](update.md) |
+| `hmc_update_partition_profile` | `mutate` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_update_system_profile` | `mutate` | [system_profile.md](system_profile.md) |
+| `hmc_update_vios_partition_profile` | `mutate` | [vios_profile.md](vios_profile.md) |
 | `hmc_update_vios_vfc_group_label` | `mutate` | [vios_label.md](vios_label.md) |
 | `hmc_upload_iso` | `mutate` | [media.md](media.md) |
 | `hmc_vios_update` | `destructive` | [update.md](update.md) |

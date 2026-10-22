@@ -48,8 +48,11 @@ class NativeService:
             "CurrentProfileSync": "Disabled",
         }
         self.calls = []
+        self.jobs = {}
+        self.job_number = 0
         self.add_field = False
         self.post_status = 200
+        self.delete_status = 204
         self.job_error = False
         self.copy_drift = False
         self.readback_error = False
@@ -96,6 +99,9 @@ class NativeService:
         self.hmc.wait_for_job_entry = AsyncMock(
             side_effect=lambda *a, **k: deepcopy(self.job)
         )
+        self.hmc.get_job_entry = AsyncMock(
+            side_effect=lambda ident, **kwargs: deepcopy(self.jobs.get(ident))
+        )
         self.hmc.get_console_info = AsyncMock(
             return_value={
                 "Resource": {
@@ -122,6 +128,9 @@ class NativeService:
                 + "</content></entry>"
             )
             return httpx.Response(200, text=raw, headers={"ETag": self.etags[key]})
+        if method == "DELETE":
+            del self.docs[key]
+            return httpx.Response(self.delete_status)
         if method == "POST":
             if self.post_status == 412:
                 return httpx.Response(412)
@@ -138,14 +147,21 @@ class NativeService:
         if method == "PUT":
             key = "55555555-5555-4555-8555-555555555555"
             root = ET.fromstring(kwargs["content"])
-            source = self.docs[F]
-            # Native reconstruction of omitted identity/readonly fields, observed only on sparse hardware copies.
-            root = deepcopy(source)
-            new_name = ET.fromstring(kwargs["content"]).find(N + "ProfileName").text
-            field(root, "ProfileName").text = new_name
+
+            # Reconstruct only server-derived readonly fields; honor every submitted writable value.
+            def hydrate(payload, template):
+                for index, original in enumerate(template):
+                    matches = [c for c in payload if c.tag == original.tag]
+                    if not matches and original.get("kb") in {"ROR", "ROO"}:
+                        payload.insert(index, deepcopy(original))
+                    elif len(matches) == 1 and len(original):
+                        hydrate(matches[0], original)
+
+            hydrate(root, self.docs[F])
+            atom = field(root, "Metadata/Atom")
+            ET.SubElement(atom, N + "AtomID").text = key
+            ET.SubElement(atom, N + "AtomCreated").text = "later"
             field(root, "SettingID").text = "new"
-            field(root, "Metadata/Atom/AtomID").text = key
-            field(root, "Metadata/Atom/AtomCreated").text = "later"
             if self.copy_drift:
                 field(root, "ProfileMemory/DesiredMemory").text = "999"
             self.docs[key] = root
@@ -178,10 +194,12 @@ class NativeService:
                 self.docs[key] = deepcopy(self.docs[F])
                 field(self.docs[key], "ProfileName").text = name
                 field(self.docs[key], "Metadata/Atom/AtomID").text = key
+                field(self.docs[key], "ProfileMemory/DesiredMemory").text = "1024"
                 self.etags[key] = "saved"
+        self.job_number += 1
         self.job = {
             "Resource": {
-                "JobID": "job-1",
+                "JobID": f"job-{self.job_number}",
                 "Status": "COMPLETED_WITH_ERROR" if self.job_error else "COMPLETED_OK",
                 "Results": {
                     "JobParameter": [
@@ -195,11 +213,11 @@ class NativeService:
                 },
             }
         }
+        self.jobs[self.job["Resource"]["JobID"]] = deepcopy(self.job)
         return deepcopy(self.job)
 
     def delete(self, kind, parent, child, uuid):
-        self.calls.append(("DELETE", uuid, {}))
-        del self.docs[uuid]
+        self.request("DELETE", f"/rest/api/uom/{kind}/{parent}/{child}/{uuid}")
 
 
 @pytest.fixture
@@ -238,6 +256,10 @@ async def test_patch_requested_change_and_preservation_are_independent(service, 
     assert result.preservation == ("drifted" if drift else "verified")
     assert result.before_etag == "e1" and result.after_etag == "e2"
     assert bool(result.differences) == drift
+    if drift:
+        assert any(
+            "applied with preservation drift" in text for text in result.diagnostics
+        )
 
 
 @pytest.mark.asyncio
@@ -694,3 +716,109 @@ async def test_empty_or_malformed_system_profile_read_never_proves_absence(
             service.hmc, S, P, "source", "e1", exclusive_writer_window=True
         )
     service.hmc.delete_child.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action", ["list", "read", "update", "new-save", "overwrite-save", "delete"]
+)
+async def test_vios_lifecycle_retains_its_own_containment_and_native_paths(
+    monkeypatch, action
+):
+    state = NativeService("VirtualIOServer")
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.profiles.run_hmc_command",
+        AsyncMock(return_value="No results were found.\n"),
+    )
+    kwargs = {"partition_type": "VirtualIOServer"}
+    if action == "list":
+        result = await list_partition_profiles(state.hmc, S, P, **kwargs)
+        assert {r.name for r in result.profiles} == {"source", "other"}
+    elif action == "read":
+        assert (
+            await read_partition_profile(state.hmc, S, P, "source", **kwargs)
+        ).uuid == F
+    else:
+        kwargs["exclusive_writer_window"] = True
+        if action == "update":
+            result = await update_partition_profile(
+                state.hmc,
+                S,
+                P,
+                "source",
+                "e1",
+                ProfilePatch(desired_memory=1024),
+                **kwargs,
+            )
+        elif action == "new-save":
+            result = await save_current_partition_profile(
+                state.hmc, S, P, "new", **kwargs
+            )
+        elif action == "overwrite-save":
+            result = await save_current_partition_profile(
+                state.hmc, S, P, "source", overwrite=True, expected_etag="e1", **kwargs
+            )
+            assert result.recovery_verified
+        else:
+            result = await delete_partition_profile(
+                state.hmc, S, P, "source", "e1", **kwargs
+            )
+        assert result.execution == "completed" and result.requested_change == "verified"
+    state.hmc.list_logical_partitions.assert_not_called()
+    assert all(
+        "/LogicalPartition/" not in path
+        for method, path, _ in state.calls
+        if method not in {"DELETE"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_recovery_creation_never_admits_force_save(service):
+    original = service.request
+
+    def asynchronous(method, path, **kwargs):
+        response = original(method, path, **kwargs)
+        return httpx.Response(202) if method == "PUT" else response
+
+    service.hmc._request_with_uuid_path_arguments.side_effect = asynchronous
+    result = await save_current_partition_profile(
+        service.hmc,
+        S,
+        P,
+        "source",
+        overwrite=True,
+        expected_etag="e1",
+        exclusive_writer_window=True,
+    )
+    assert result.recovery_profile is not None and not result.recovery_verified
+    service.hmc.submit_job.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_delete_confirmation_is_not_terminal_completion(service):
+    service.delete_status = 202
+    result = await delete_partition_profile(
+        service.hmc, S, P, "source", "e1", exclusive_writer_window=True
+    )
+    assert result.execution == "unknown"
+    assert result.requested_change == "verified"
+    assert F not in service.docs
+
+
+@pytest.mark.asyncio
+async def test_async_patch_with_visible_changes_does_not_claim_completed_application(
+    service,
+):
+    service.post_status = 202
+    service.add_field = True
+    result = await update_partition_profile(
+        service.hmc,
+        S,
+        P,
+        "source",
+        "e1",
+        ProfilePatch(desired_memory=1024),
+        exclusive_writer_window=True,
+    )
+    assert result.execution == "unknown" and result.requested_change == "verified"
+    assert not result.diagnostics

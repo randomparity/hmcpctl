@@ -48,6 +48,7 @@ from live_test import (
     dedicated_pcie,
     lpar_config,
     lpar_power,
+    partition_profiles,
     profiles,
     runner,
     storage_lifecycle,
@@ -452,6 +453,22 @@ def _profile_artifacts_verdict(config: live_config.LiveTestConfig) -> ArmVerdict
     )
 
 
+def _partition_profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        partition_profiles.configured(config)
+    except (ValueError, TypeError) as exc:
+        return ArmVerdict("partition-profiles", False, str(exc), (), config.system_name)
+    return ArmVerdict(
+        "partition-profiles",
+        True,
+        "explicit inactive disposable target and coordinated writers required; configuration only",
+        (
+            "one scratch saved profile and one retained recovery copy; eight native writes: create, typed memory patch, copy and force-save, default selection/restoration, two guarded deletes; no activation or automatic rollback",
+        ),
+        config.system_name,
+    )
+
+
 def _system_profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     try:
         system_profiles.configured(config)
@@ -474,6 +491,7 @@ _ARM_VERDICTS = {
     "profiles": _profiles_verdict,
     "profile-artifacts": _profile_artifacts_verdict,
     "system-profiles": _system_profiles_verdict,
+    "partition-profiles": _partition_profiles_verdict,
     "pcm": _pcm_verdict,
     "vios-backup": _vios_backup_verdict,
     "network": _network_verdict,

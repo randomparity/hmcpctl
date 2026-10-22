@@ -5102,6 +5102,466 @@
         ]
       },
       "evidence": []
+    },
+    {
+      "operation": "lpar_profile.delete",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "lpar-contained-profile-delete",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "expected_etag",
+                "constraint": "Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile."
+              },
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "Exact logical-partition name or UUID on the selected system."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios_profile.delete",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "vios-contained-profile-delete",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "expected_etag",
+                "constraint": "Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "Exact VIOS name or UUID on the selected system."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar_profile.list",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "lpar-contained-profile-list",
+            "parameters": [
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "Exact logical-partition name or UUID on the selected system."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios_profile.list",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "vios-contained-profile-list",
+            "parameters": [
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "Exact VIOS name or UUID on the selected system."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar_profile.read",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "lpar-contained-profile-read",
+            "parameters": [
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "Exact logical-partition name or UUID on the selected system."
+              },
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios_profile.read",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "vios-contained-profile-read",
+            "parameters": [
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "Exact VIOS name or UUID on the selected system."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar_profile.save_current",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "lpar-contained-profile-save-current",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "expected_etag",
+                "constraint": "Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile."
+              },
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "Exact logical-partition name or UUID on the selected system."
+              },
+              {
+                "name": "name",
+                "constraint": "Exact saved-profile name to create or overwrite."
+              },
+              {
+                "name": "overwrite",
+                "constraint": "Explicit consent to replace an existing profile only after verified retained recovery."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "poll_interval",
+                "constraint": "Positive native job polling interval in seconds."
+              },
+              {
+                "name": "recovery_profile_selector",
+                "constraint": "Optional existing contained recovery profile to revalidate against the complete baseline; omitted creates one retained copy."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "timeout_seconds",
+                "constraint": "Native job polling timeout in seconds; an uncertain result is never retried automatically."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios_profile.save_current",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "vios-contained-profile-save-current",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "expected_etag",
+                "constraint": "Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile."
+              },
+              {
+                "name": "name",
+                "constraint": "Exact saved-profile name to create or overwrite."
+              },
+              {
+                "name": "overwrite",
+                "constraint": "Explicit consent to replace an existing profile only after verified retained recovery."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "poll_interval",
+                "constraint": "Positive native job polling interval in seconds."
+              },
+              {
+                "name": "recovery_profile_selector",
+                "constraint": "Optional existing contained recovery profile to revalidate against the complete baseline; omitted creates one retained copy."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "timeout_seconds",
+                "constraint": "Native job polling timeout in seconds; an uncertain result is never retried automatically."
+              },
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "Exact VIOS name or UUID on the selected system."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar_profile.set_default",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "lpar-contained-profile-set-default",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "Exact logical-partition name or UUID on the selected system."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "poll_interval",
+                "constraint": "Positive native job polling interval in seconds."
+              },
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "timeout_seconds",
+                "constraint": "Native job polling timeout in seconds; an uncertain result is never retried automatically."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios_profile.set_default",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "vios-contained-profile-set-default",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "poll_interval",
+                "constraint": "Positive native job polling interval in seconds."
+              },
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "timeout_seconds",
+                "constraint": "Native job polling timeout in seconds; an uncertain result is never retried automatically."
+              },
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "Exact VIOS name or UUID on the selected system."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar_profile.update",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "lpar-contained-profile-update",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "expected_etag",
+                "constraint": "Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile."
+              },
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "Exact logical-partition name or UUID on the selected system."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "patch",
+                "constraint": "Typed saved-profile fields; omitted fields retain their exact represented content."
+              },
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios_profile.update",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "vios-contained-profile-update",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing."
+              },
+              {
+                "name": "expected_etag",
+                "constraint": "Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile."
+              },
+              {
+                "name": "ownership_override",
+                "constraint": "Use the existing audited ownership override after operator approval."
+              },
+              {
+                "name": "patch",
+                "constraint": "Typed saved-profile fields; omitted fields retain their exact represented content."
+              },
+              {
+                "name": "profile_selector",
+                "constraint": "Exact saved-profile name or UUID,not an HMC connection profile."
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "Exact managed-system name or UUID."
+              },
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "Exact VIOS name or UUID on the selected system."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
     }
   ]
 }

@@ -163,3 +163,20 @@ async def test_freshness_ignores_only_outer_publication_text():
 def test_invalid_paths_refused_before_transport(args):
     with pytest.raises((ValueError, HMCError)):
         profile_path(*args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 202, 204])
+async def test_native_delete_preserves_acceptance_status_and_never_sends_conditional_delete(
+    status,
+):
+    from hmcpctl.client.client_profiles import delete_native_profile
+
+    hmc = client(response(status=status))
+    assert await delete_native_profile(hmc, "LogicalPartition", P, F) == status
+    call = hmc._request_with_uuid_path_arguments.call_args
+    assert call.args == (
+        "DELETE",
+        f"/rest/api/uom/LogicalPartition/{P}/LogicalPartitionProfile/{F}",
+    )
+    assert "If-Match" not in call.kwargs["headers"]
