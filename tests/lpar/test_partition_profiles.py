@@ -260,3 +260,65 @@ def test_unknown_metadata_shape_refuses_before_copy():
     ).text = "value"
     with pytest.raises(ValueError):
         clone_profile_document(root, "copy")
+
+
+def test_nested_sriov_backup_configuration_is_retained_with_semantic_ids():
+    root = profile()
+    ports = ET.SubElement(
+        root, "{" + U + "}ProfileSRIOVEthernetLogicalPorts", {"kb": "CUD"}
+    )
+    port = ET.SubElement(ports, "{" + U + "}ProfileSRIOVEthernetLogicalPort")
+    backups = ET.SubElement(
+        port, "{" + U + "}AssociatedProfileVNICBackupDevice", {"kb": "COD"}
+    )
+    backup = ET.SubElement(backups, "{" + U + "}ProfileSRIOVVirtualNICBackupDevice")
+    for name, value in [
+        ("VIOSID", "2"),
+        ("AdapterID", "1"),
+        ("PhysicalPortID", "0"),
+        ("FailOverPriority", "10"),
+    ]:
+        ET.SubElement(backup, "{" + U + "}" + name, {"kb": "COD"}).text = value
+    copy = clone_profile_document(root, "recovery")
+    for name in ["VIOSID", "AdapterID", "PhysicalPortID", "FailOverPriority"]:
+        # Fixed UOM field path; the entropy detector mistakes schema names for a token.
+        path = f"ProfileSRIOVEthernetLogicalPorts/ProfileSRIOVEthernetLogicalPort/AssociatedProfileVNICBackupDevice/ProfileSRIOVVirtualNICBackupDevice/{name}"  # pragma: allowlist secret
+        assert field(copy, path).text == field(root, path).text
+
+
+def test_physical_io_configuration_retains_writable_volume_content_and_drops_readonly_fields():
+    root = profile()
+    slots = ET.SubElement(
+        field(root, "IOConfigurationInstance"),
+        "{" + U + "}ProfileIOSlots",
+        {"kb": "CUD"},
+    )
+    slot = ET.SubElement(slots, "{" + U + "}ProfileIOSlot")
+    associated = ET.SubElement(slot, "{" + U + "}AssociatedIOSlot", {"kb": "CUD"})
+    related = ET.SubElement(associated, "{" + U + "}RelatedIOAdapter", {"kb": "CUD"})
+    adapter = ET.SubElement(related, "{" + U + "}PhysicalFibreChannelAdapter")
+    ports = ET.SubElement(
+        adapter, "{" + U + "}PhysicalFibreChannelPorts", {"kb": "CUD"}
+    )
+    port = ET.SubElement(ports, "{" + U + "}PhysicalFibreChannelPort")
+    ET.SubElement(port, "{" + U + "}PortName", {"kb": "CUR"}).text = "synthetic-port"
+    ET.SubElement(port, "{" + U + "}AvailablePorts", {"kb": "ROR"}).text = "8"
+    volumes = ET.SubElement(port, "{" + U + "}PhysicalVolumes", {"kb": "CUD"})
+    volume = ET.SubElement(volumes, "{" + U + "}PhysicalVolume")
+    ET.SubElement(
+        volume, "{" + U + "}UnknownSavedConfiguration", {"kb": "CUD"}
+    ).text = "opaque-value"
+    copy = clone_profile_document(root, "recovery")
+    copied_ports = list(copy.iter("{" + U + "}PhysicalFibreChannelPort"))
+    assert len(copied_ports) == 1
+    assert copied_ports[0].find("{" + U + "}AvailablePorts") is None
+    assert (
+        next(copy.iter("{" + U + "}UnknownSavedConfiguration")).text == "opaque-value"
+    )
+    assert (
+        field(
+            root,
+            "IOConfigurationInstance/ProfileIOSlots/ProfileIOSlot/AssociatedIOSlot/RelatedIOAdapter/PhysicalFibreChannelAdapter/PhysicalFibreChannelPorts/PhysicalFibreChannelPort/AvailablePorts",
+        )
+        is not None
+    )

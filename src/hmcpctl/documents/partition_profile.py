@@ -348,11 +348,7 @@ def clone_profile_document(source: ET.Element, name: str) -> ET.Element:
     return root
 
 
-def apply_profile_patch(source: ET.Element, patch: ProfilePatch) -> ET.Element:
-    values = patch.model_dump(exclude_none=True)
-    if not values:
-        raise ValueError("profile patch requires at least one typed value")
-    result = deepcopy(source)
+def _patch_paths(source: ET.Element) -> tuple[str, dict[str, str]]:
     mapping = {
         "name": "ProfileName",
         "boot_mode": "BootMode",
@@ -378,6 +374,29 @@ def apply_profile_patch(source: ET.Element, patch: ProfilePatch) -> ET.Element:
         mapping[key + "_units"] = (
             f"ProcessorAttributes/SharedProcessorConfiguration/{word}ProcessingUnits"
         )
+    return dedicated, mapping
+
+
+def requested_profile_values(
+    source: ET.Element, patch: ProfilePatch
+) -> dict[str, str | None]:
+    """Read every requested scalar through the same finite typed-field mapping."""
+    _, mapping = _patch_paths(source)
+    result = {}
+    for key in patch.model_dump(exclude_none=True):
+        field = one(source, mapping[key])
+        if len(field):
+            raise ValueError("requested profile field is not scalar")
+        result[mapping[key]] = field.text
+    return result
+
+
+def apply_profile_patch(source: ET.Element, patch: ProfilePatch) -> ET.Element:
+    values = patch.model_dump(exclude_none=True)
+    if not values:
+        raise ValueError("profile patch requires at least one typed value")
+    result = deepcopy(source)
+    dedicated, mapping = _patch_paths(source)
     for key, value in values.items():
         if key == "name":
             value = profile_name(value)
