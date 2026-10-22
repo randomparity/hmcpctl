@@ -49,8 +49,10 @@ shell words using `shlex.quote`, and sends `chsyscfg -r lpar` for one target.
 Before update, scoped `lssyscfg -r lpar --filter ... -F` establishes partition
 type and baseline settings. Missing/malformed/duplicate rows refuse effects.
 Read after write and compare every supplied field; retain omitted baseline
-values for detecting collateral setting changes. Output is bounded by the
-existing SSH transport and fixed scalar field count.
+values for detecting collateral setting changes. Commands have configured finite
+timeouts and request a fixed scalar field count. Strict shape validation happens
+after output collection; the existing SSH transport has no byte limit. This path
+trusts the administered HMC to return bounded command output.
 
 Results distinguish `verified`, `mismatch`, `readback-unavailable`, and
 `write-outcome-unknown`: a command/transport failure cannot prove no mutation.
@@ -84,7 +86,8 @@ proof. Configuration evidence is separate from clock/restart/migration evidence.
   concurrent external writers can invalidate before/after comparison because CLI
   supplies no conditional update (report mismatch, no retry).
 - Covered elsewhere: profile lifecycle #1724/#637; resource/assignment validation
-  existing creation workflow; transport output bounds existing SSH transport;
+  existing creation workflow; configured command timeouts existing SSH transport
+  (no byte limit; trusted HMC output and post-collection shape validation);
   actual migration/remote-restart actions #671; system clocks remain operator-owned.
 
 ## Threat model
