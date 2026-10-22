@@ -55,6 +55,10 @@ Their approved equivalent CLI routes do not establish the unresolved REST invent
 delete or validation transports. Parent coverage-child accounting remains unchanged;
 operation implementation and unevidenced maturity records do not close that accounting.
 
+The [LPAR allocation map](lpar-allocation.md) records the approved whole-row transfers,
+shared-family responsibility boundaries and twenty native #638 children. It preserves
+the reference denominator without treating planning ownership as implemented coverage.
+
 ## Maturity and evidence catalog
 
 `maturity.json` is a complete current, format-versioned catalog keyed by the stable operation
