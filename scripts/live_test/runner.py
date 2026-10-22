@@ -17,11 +17,11 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 45; 26 to 36 are other arms' row ids.
-With no selection the original subtasks through 43 run; 44 requires its named group.
-Subtasks 9, 11, 37, 38, 39, 40, 41, 42 and 45 SKIP outside their
+Registered subtasks span 0 through 46; 26 to 36 are other arms' row ids.
+With no selection the original subtasks through 43 run; 44–46 require their named groups.
+Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
-`lpar-power` and `partition-profile-contract` groups. A bare
+`lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
 number runs that one subtask; `--group NAME` runs one arm. Results go to `test-results-<group>.json`, or `test-results-round2.json`
 for a bare or whole-suite run, unless
 `--results-file` names another path. That path must be git-ignored.
@@ -108,6 +108,7 @@ from live_test.observation import (
     grade_assertions,
 )
 from live_test.partition_profile_contract import exercise as exercise_profile_contract
+from live_test.partition_profiles import exercise_partition_profiles
 from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
 from live_test.provisioning import (
     exercise_storage_provisioning,
@@ -678,6 +679,7 @@ SUBTASKS = {
     43: exercise_backup_artifacts,
     44: exercise_system_profiles,
     45: exercise_profile_contract,
+    46: exercise_partition_profiles,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -704,6 +706,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "profiles": [0, 4, 10, 15],
     "profile-artifacts": [43],
     "system-profiles": [44],
+    "partition-profiles": [46],
     "partition-profile-contract": [45],
     "users": [11],
     # ST9 runs only here: its round trips need the operator's network authorization.
@@ -981,7 +984,7 @@ async def main(
             print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
             return 1
     else:
-        tasks = sorted(n for n in SUBTASKS if n not in {44, 45})
+        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46})
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]

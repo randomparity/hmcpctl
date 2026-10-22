@@ -1438,6 +1438,51 @@ CLEAN. Run it after every outcome, including interruption. Preserve raw results 
 only the standard evidence renderer filters them for public use. Product native proof has not
 run merely because the offline arm tests or historical source calibration passed.
 
+### Saved partition-profile lifecycle (#1724)
+
+The separately named `partition-profiles` arm uses one explicitly prepared,
+inactive, normally owned disposable partition. It never creates or activates a
+partition. Configure an empty system-profile inventory, disabled profile sync,
+and a memory value within the default profile's minimum/maximum range. Coordinate
+partition, saved-profile and system-profile writers for the entire run. Protected
+partitions and an occupied scratch/recovery namespace are refused.
+
+```dotenv
+LIVE_TEST_PARTITION_PROFILE_TARGET=<disposable-partition-name-or-uuid>
+LIVE_TEST_PARTITION_PROFILE_KIND=LogicalPartition
+LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true
+LIVE_TEST_PARTITION_PROFILE_MEMORY_MIB=512
+```
+
+Use `VirtualIOServer` only for an explicitly authorized inactive disposable VIOS.
+Confirm the deployed server matches the branch commit and the configured target
+before requesting run authority. Configuration and preflight grant no hardware
+permission. After authorization, use these exact named entry points:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group partition-profiles
+uv run --no-sync python scripts/live_profiles.py --partition-lifecycle
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-partition-profiles.json
+uv run --no-sync python scripts/live_test_evidence.py test-results-partition-profiles.json
+```
+
+The finite sequence lists and reads profiles, saves current configuration into a
+new random scratch profile, patches its desired memory, makes a retained recovery
+copy and force-saves current configuration, selects the scratch default, restores
+the original default, then deletes the two unprotected scratch profiles. This is
+seven product mutations and eight native writes. A durable private checkpoint
+precedes every product mutation. The independent recovery entry point performs
+only reads: it rechecks original profile identities, ETags and complete documents,
+current/default/sync identity, scratch absence and all four terminal native jobs.
+
+Any uncertainty stops later effects and suppresses successful observations. The
+results retain known scratch/recovery identities and pending intent; no automatic
+retry, rollback or uncertain cleanup occurs. An operator must reconcile retained
+profiles and default selection before using guarded product deletion. Independent
+recovery refuses `CLEAN` for a partial sequence even if profiles appear absent.
+Keep raw results private and generate public evidence through the evidence script.
+This implementation has no new native execution evidence yet.
+
 ## Disposable saved-profile contract experiment (#1724)
 
 `partition-profile-contract` is an opt-in diagnostic arm (subtask 45), excluded from

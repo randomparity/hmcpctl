@@ -315,6 +315,20 @@
       "expected": "success"
     },
     {
+      "scenario": "st100-lpar-profile-list",
+      "operation": "lpar_profile.list",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
       "scenario": "st100-lpar-profile-list-backups",
       "operation": "lpar_profile.list_backups",
       "class": "read-only",
@@ -743,6 +757,20 @@
       "arguments": {
         "system_name_or_uuid": {
           "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-profile-list",
+      "operation": "vios_profile.list",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        },
+        "vios_name_or_uuid": {
+          "target": "vios"
         }
       },
       "expected": "success"

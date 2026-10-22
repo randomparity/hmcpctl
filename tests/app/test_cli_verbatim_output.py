@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import pytest
+from click import unstyle
 from rich.console import Console
 from rich.table import Table
 from typer.testing import CliRunner
@@ -503,7 +504,7 @@ def test_issue_listed_sites_print_hmc_and_argument_text_verbatim(
     result = RUNNER.invoke(cli.app, argv)
 
     assert result.exit_code == 0, result.output
-    assert PRINTED_VERBATIM.search(result.stdout), result.stdout
+    assert PRINTED_VERBATIM.search(unstyle(result.stdout)), result.stdout
 
 
 def test_systems_list_table_prints_bracketed_system_name_verbatim(monkeypatch):

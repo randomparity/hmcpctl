@@ -14,8 +14,9 @@ a different one. Results go to `test-results-profiles.json`.
 **This mutates a managed system.** Run `scripts/live_test_preflight.py
 --group profiles` first to see what it will touch.
 
-Takes no options: everything else about a run is configuration, and the
-runner itself is there for an invocation this does not cover.
+Use --partition-lifecycle for the separately authorized saved-profile lifecycle
+on one explicitly configured inactive disposable partition. Preflight that arm
+with --group partition-profiles; its results are test-results-partition-profiles.json.
 """
 
 from __future__ import annotations
@@ -40,13 +41,15 @@ def main(argv: list[str] | None = None) -> int:
     the former. Calling `main` directly would run uncredentialled and write
     every arm's results over `test-results-round2.json`.
     """
-    # Parsed even though there are no options: without this, `--help` would be
-    # ignored and the wrapper would start mutating a managed system instead of
-    # explaining itself.
-    argparse.ArgumentParser(
+    # Parse before dispatch so help and invalid options never start a live run.
+    parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    ).parse_args(argv)
-    return runner._run_from_arguments(["--group", GROUP])
+    )
+    parser.add_argument("--partition-lifecycle", action="store_true")
+    args = parser.parse_args(argv)
+    return runner._run_from_arguments(
+        ["--group", "partition-profiles" if args.partition_lifecycle else GROUP]
+    )
 
 
 if __name__ == "__main__":

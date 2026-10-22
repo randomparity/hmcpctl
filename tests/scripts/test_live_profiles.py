@@ -61,3 +61,19 @@ def test_an_unknown_option_is_rejected_before_any_run(monkeypatch):
         wrapper.main(["--results-file", "x.json"])
 
     assert exit_info.value.code != 0
+
+
+def test_partition_lifecycle_flag_dispatches_only_its_explicit_named_arm(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        runner, "_run_from_arguments", lambda argv: seen.append(argv) or 0
+    )
+    assert wrapper.main(["--partition-lifecycle"]) == 0
+    assert seen == [["--group", "partition-profiles"]]
+    assert runner.SUBTASK_GROUPS["partition-profiles"] == [46]
+    assert runner.SUBTASK_GROUPS["partition-profile-contract"] == [45]
+    assert runner.SUBTASKS[46].__module__.endswith(".partition_profiles")
+    assert runner.SUBTASKS[45].__module__.endswith(".partition_profile_contract")
+    for subtask in (45, 46):
+        assert subtask not in runner.SUBTASK_GROUPS["all"]
+        assert subtask not in runner.SUBTASK_GROUPS["round2"]

@@ -1255,6 +1255,14 @@ _CLASSIFIED_UOM_SITES = (
             "comparison",
         ),
         ("client_storage", "_filter_optical_mappings", "lpar_uuid", "comparison"),
+        # ADR 0242: profile_path checks the two-kind set and canonical UUIDs.
+        # _validate_parent constructs comparison strings only, never destinations.
+        # tests/unit/test_client_profiles.py exercises these checks and foreign links.
+        ("client_profiles", "profile_path", "kind", "request"),
+        ("client_profiles", "profile_path", "parent", "request"),
+        ("client_profiles", "_validate_parent", "kind", "request"),
+        ("client_profiles", "_validate_parent", "parent", "request"),
+        ("client_profiles", "_validate_parent", "system", "request"),
         # Existing enforcement remains separately asserted: ADRs 0143, 0151, 0157.
         ("client_lpm", "LpmMixin._lpar_job", "operation", "request"),
         ("client_users", "UsersMixin._child_path", "child_type", "request"),

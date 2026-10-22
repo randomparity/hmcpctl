@@ -6,6 +6,7 @@ from ..._app import (
     ssh_with_client,
     with_client,
 )
+from ...documents.partition_profile import ProfilePatch
 from ...operations.lpar.configuration import (
     restore_system_lpar_profiles,
     synchronize_lpar_profile,
@@ -15,6 +16,17 @@ from ...operations.lpar.profile_artifacts import (
     BackupProfileInventory,
     delete_backup_profile_artifact,
     list_backup_profile_artifacts,
+)
+from ...operations.lpar.profiles import (
+    PartitionProfileInventory,
+    PartitionProfileOutcome,
+    PartitionProfileRecord,
+    delete_partition_profile,
+    list_partition_profiles,
+    read_partition_profile,
+    save_current_partition_profile,
+    set_default_partition_profile,
+    update_partition_profile,
 )
 from ...operations.virtualization.pcie import (
     assign_dedicated_pcie_slot,
@@ -344,3 +356,452 @@ def hmc_unassign_dedicated_pcie_slot(
         )
 
     return with_client(_go, profile=profile)
+
+
+# Saved-profile lifecycle; VIOS tools retain their own policy target kind.
+@tool(effect="read", operation="lpar_profile.list", target_kind="lpar")
+def hmc_list_partition_profiles(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile: str | None = None,
+) -> PartitionProfileInventory:
+    """List bounded saved profiles and their contained names,fields and opaque ETags.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        lpar_name_or_uuid: Exact logical-partition name or UUID on the selected system.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: list_partition_profiles(
+            hmc,
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            partition_type="LogicalPartition",
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="lpar_profile.read", target_kind="lpar")
+def hmc_read_partition_profile(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile_selector: str,
+    profile: str | None = None,
+) -> PartitionProfileRecord:
+    """Read one exact saved-profile name or UUID within its owning partition.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        lpar_name_or_uuid: Exact logical-partition name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: read_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            profile_selector,
+            partition_type="LogicalPartition",
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="lpar_profile.update", target_kind="lpar")
+def hmc_update_partition_profile(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile_selector: str,
+    expected_etag: str,
+    patch: ProfilePatch,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Patch typed saved fields with If-Match while preserving the complete fetched document.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+    Completed execution plus verified requested change and drifted preservation means applied with preservation drift; reconciliation is required.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        lpar_name_or_uuid: Exact logical-partition name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        expected_etag: Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile.
+        patch: Typed saved-profile fields; omitted fields retain their exact represented content.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: update_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            profile_selector,
+            expected_etag,
+            patch,
+            partition_type="LogicalPartition",
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="destructive", operation="lpar_profile.save_current", target_kind="lpar")
+def hmc_save_current_partition_profile(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    name: str,
+    overwrite: bool = False,
+    expected_etag: str | None = None,
+    recovery_profile_selector: str | None = None,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    timeout_seconds: int = 300,
+    poll_interval: int = 5,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Save current configuration to a new profile,or force-save after a retained recovery copy verifies.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+    A failed/uncertain overwrite can change the destination; retained recovery content is not an unchanged destination. Never delete required recovery material.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        lpar_name_or_uuid: Exact logical-partition name or UUID on the selected system.
+        name: Exact saved-profile name to create or overwrite.
+        overwrite: Explicit consent to replace an existing profile only after verified retained recovery.
+        expected_etag: Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile.
+        recovery_profile_selector: Optional existing contained recovery profile to revalidate against the complete baseline; omitted creates one retained copy.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        timeout_seconds: Native job polling timeout in seconds; an uncertain result is never retried automatically.
+        poll_interval: Positive native job polling interval in seconds.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: save_current_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            name,
+            partition_type="LogicalPartition",
+            overwrite=overwrite,
+            expected_etag=expected_etag,
+            recovery_profile_selector=recovery_profile_selector,
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+            timeout_seconds=timeout_seconds,
+            poll_interval=poll_interval,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="lpar_profile.set_default", target_kind="lpar")
+def hmc_set_default_partition_profile(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile_selector: str,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    timeout_seconds: int = 300,
+    poll_interval: int = 5,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Select a contained default profile with strict native job results and fresh readback.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        lpar_name_or_uuid: Exact logical-partition name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        timeout_seconds: Native job polling timeout in seconds; an uncertain result is never retried automatically.
+        poll_interval: Positive native job polling interval in seconds.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: set_default_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            profile_selector,
+            partition_type="LogicalPartition",
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+            timeout_seconds=timeout_seconds,
+            poll_interval=poll_interval,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="destructive", operation="lpar_profile.delete", target_kind="lpar")
+def hmc_delete_partition_profile(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile_selector: str,
+    expected_etag: str,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Delete only an unprotected saved profile after an empty unfiltered system-profile inventory.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+    Current,default,last,synchronized,linked-active and full-system profiles are protected. Any nonempty or unreadable system-profile inventory refuses deletion.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        lpar_name_or_uuid: Exact logical-partition name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        expected_etag: Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: delete_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            profile_selector,
+            expected_etag,
+            partition_type="LogicalPartition",
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="vios_profile.list", target_kind="vios")
+def hmc_list_vios_partition_profiles(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    profile: str | None = None,
+) -> PartitionProfileInventory:
+    """List bounded saved profiles and their contained names,fields and opaque ETags.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        vios_name_or_uuid: Exact VIOS name or UUID on the selected system.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: list_partition_profiles(
+            hmc,
+            system_name_or_uuid,
+            vios_name_or_uuid,
+            partition_type="VirtualIOServer",
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="vios_profile.read", target_kind="vios")
+def hmc_read_vios_partition_profile(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    profile_selector: str,
+    profile: str | None = None,
+) -> PartitionProfileRecord:
+    """Read one exact saved-profile name or UUID within its owning partition.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        vios_name_or_uuid: Exact VIOS name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: read_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            vios_name_or_uuid,
+            profile_selector,
+            partition_type="VirtualIOServer",
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="vios_profile.update", target_kind="vios")
+def hmc_update_vios_partition_profile(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    profile_selector: str,
+    expected_etag: str,
+    patch: ProfilePatch,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Patch typed saved fields with If-Match while preserving the complete fetched document.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+    Completed execution plus verified requested change and drifted preservation means applied with preservation drift; reconciliation is required.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        vios_name_or_uuid: Exact VIOS name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        expected_etag: Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile.
+        patch: Typed saved-profile fields; omitted fields retain their exact represented content.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: update_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            vios_name_or_uuid,
+            profile_selector,
+            expected_etag,
+            patch,
+            partition_type="VirtualIOServer",
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="destructive", operation="vios_profile.save_current", target_kind="vios")
+def hmc_save_current_vios_partition_profile(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    name: str,
+    overwrite: bool = False,
+    expected_etag: str | None = None,
+    recovery_profile_selector: str | None = None,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    timeout_seconds: int = 300,
+    poll_interval: int = 5,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Save current configuration to a new profile,or force-save after a retained recovery copy verifies.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+    A failed/uncertain overwrite can change the destination; retained recovery content is not an unchanged destination. Never delete required recovery material.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        vios_name_or_uuid: Exact VIOS name or UUID on the selected system.
+        name: Exact saved-profile name to create or overwrite.
+        overwrite: Explicit consent to replace an existing profile only after verified retained recovery.
+        expected_etag: Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile.
+        recovery_profile_selector: Optional existing contained recovery profile to revalidate against the complete baseline; omitted creates one retained copy.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        timeout_seconds: Native job polling timeout in seconds; an uncertain result is never retried automatically.
+        poll_interval: Positive native job polling interval in seconds.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: save_current_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            vios_name_or_uuid,
+            name,
+            partition_type="VirtualIOServer",
+            overwrite=overwrite,
+            expected_etag=expected_etag,
+            recovery_profile_selector=recovery_profile_selector,
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+            timeout_seconds=timeout_seconds,
+            poll_interval=poll_interval,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="vios_profile.set_default", target_kind="vios")
+def hmc_set_default_vios_partition_profile(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    profile_selector: str,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    timeout_seconds: int = 300,
+    poll_interval: int = 5,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Select a contained default profile with strict native job results and fresh readback.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        vios_name_or_uuid: Exact VIOS name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        timeout_seconds: Native job polling timeout in seconds; an uncertain result is never retried automatically.
+        poll_interval: Positive native job polling interval in seconds.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: set_default_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            vios_name_or_uuid,
+            profile_selector,
+            partition_type="VirtualIOServer",
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+            timeout_seconds=timeout_seconds,
+            poll_interval=poll_interval,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="destructive", operation="vios_profile.delete", target_kind="vios")
+def hmc_delete_vios_partition_profile(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    profile_selector: str,
+    expected_etag: str,
+    exclusive_writer_window: bool = False,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> PartitionProfileOutcome:
+    """Delete only an unprotected saved profile after an empty unfiltered system-profile inventory.
+
+    Requires the coordinated writer window and normal ownership authorization. No automatic retry or rollback.
+    Current,default,last,synchronized,linked-active and full-system profiles are protected. Any nonempty or unreadable system-profile inventory refuses deletion.
+
+    Args:
+        system_name_or_uuid: Exact managed-system name or UUID.
+        vios_name_or_uuid: Exact VIOS name or UUID on the selected system.
+        profile_selector: Exact saved-profile name or UUID,not an HMC connection profile.
+        expected_etag: Opaque ETag from a fresh contained profile read; mandatory for overwriting an existing profile.
+        exclusive_writer_window: Assert operator coordination of the partition,its profiles and referencing system profiles through reconciliation; no independent-writer fencing.
+        ownership_override: Use the existing audited ownership override after operator approval.
+        profile: Optional configured HMC connection profile; distinct from saved partition profiles.
+    """
+    return with_client(
+        lambda hmc: delete_partition_profile(
+            hmc,
+            system_name_or_uuid,
+            vios_name_or_uuid,
+            profile_selector,
+            expected_etag,
+            partition_type="VirtualIOServer",
+            exclusive_writer_window=exclusive_writer_window,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )

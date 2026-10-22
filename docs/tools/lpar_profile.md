@@ -2,7 +2,7 @@
 
 # `lpar_profile` tools
 
-5 tools in the `lpar_profile` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+11 tools in the `lpar_profile` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -10,6 +10,12 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `hmc_backup_lpar_profiles` | `destructive` | `lpar_profile.backup` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Backup all LPAR profiles on a Power system via the HMC CLI. |
 | `hmc_delete_backup_lpar_profile` | `destructive` | `lpar_profile.delete_backup` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | Delete one exact HMC profile backup name after complete inventory admission. |
+| `hmc_delete_partition_profile` | `destructive` | `lpar_profile.delete` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Delete only an unprotected saved profile after an empty unfiltered system-profile inventory. |
 | `hmc_list_backup_lpar_profiles` | `read` | `lpar_profile.list_backups` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | List HMC-side profile backup artifacts on one managed system. |
+| `hmc_list_partition_profiles` | `read` | `lpar_profile.list` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | List bounded saved profiles and their contained names,fields and opaque ETags. |
+| `hmc_read_partition_profile` | `read` | `lpar_profile.read` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read one exact saved-profile name or UUID within its owning partition. |
 | `hmc_restore_lpar_profiles` | `destructive` | `lpar_profile.restore` | `managed_system` | `partial` | `stale (closure-changed)` | `existing-runtime-guards` | Restore LPAR profiles from a backup file via the HMC CLI. |
+| `hmc_save_current_partition_profile` | `destructive` | `lpar_profile.save_current` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Save current configuration to a new profile,or force-save after a retained recovery copy verifies. |
+| `hmc_set_default_partition_profile` | `mutate` | `lpar_profile.set_default` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Select a contained default profile with strict native job results and fresh readback. |
 | `hmc_sync_lpar_profile` | `destructive` | `lpar_profile.sync` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set an LPAR's profile-synchronization setting (``sync_curr_profile``). |
+| `hmc_update_partition_profile` | `mutate` | `lpar_profile.update` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Patch typed saved fields with If-Match while preserving the complete fetched document. |

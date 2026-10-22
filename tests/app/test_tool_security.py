@@ -138,6 +138,9 @@ LEGACY_DESTRUCTIVE = frozenset(
         "hmc_power_off_vios",
         "hmc_migrate_abort_lpar",
         "hmc_remote_restart_lpar",
+        # Saving current configuration can overwrite an existing saved profile.
+        "hmc_save_current_partition_profile",
+        "hmc_save_current_vios_partition_profile",
         "hmc_restore_vios",
         "hmc_restore_lpar_profiles",
         "hmc_backup_lpar_profiles",
@@ -446,6 +449,9 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         # ADR 0199: its stop and restart actions power the partition off.
         "hmc_power_lpar",
         "hmc_remote_restart_lpar",
+        # Saving current configuration can overwrite an existing saved profile.
+        "hmc_save_current_partition_profile",
+        "hmc_save_current_vios_partition_profile",
         # #247: the firmware/software update tools overwrite existing software
         # they did not create (ADR 0035 amendment). No prefix is newly reliable:
         # "update" sits mid-name on hmc_vios_update and would over-match future

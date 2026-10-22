@@ -1813,6 +1813,32 @@ def main(argv: list[str] | None = None) -> int:
     if (
         isinstance(document, dict)
         and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "partition-profiles"
+    ):
+        from live_test import partition_profiles
+
+        if not runner._bootstrap_config():
+            print(
+                "partition-profiles recovery unreadable: credentials unavailable",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            asyncio.run(partition_profiles.recover_document(HMCConfig(), document))
+        except Exception as exc:  # noqa: BLE001 — incomplete evidence must refuse CLEAN
+            print(
+                f"partition-profiles recovery unconfirmed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: partition-profile original baseline and terminal sequence confirmed"
+        )
+        return 0
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
         and document["run"].get("group") == "partition-profile-contract"
     ):
         from live_test.partition_profile_contract import recover_document
