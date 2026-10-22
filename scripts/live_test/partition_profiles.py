@@ -64,7 +64,7 @@ async def snapshot(hmc_config, config):
             True,
         )
         if (
-            target.resource.get("PartitionState") != "Not Activated"
+            domain._text(target.resource.get("PartitionState")) != "not activated"
             or target.name in config.protected_lpar_names
         ):
             raise ValueError(

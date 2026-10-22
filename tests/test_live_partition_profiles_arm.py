@@ -34,7 +34,7 @@ def config():
 @pytest.fixture(params=["LogicalPartition", "VirtualIOServer"])
 def environment(monkeypatch, request):
     service = NativeService(request.param)
-    service.parent["PartitionState"] = "Not Activated"
+    service.parent["PartitionState"] = "not activated"
     service.hmc.__aenter__.return_value = service.hmc
     service.hmc.__aexit__.return_value = False
     monkeypatch.setattr(arm, "HMCClient", lambda *args, **kwargs: service.hmc)
@@ -189,4 +189,42 @@ async def test_arm_refuses_foreign_product_list_before_effects(environment):
     state.call = AsyncMock(return_value=("PASS", {"partition_uuid": "foreign"}))
     with pytest.raises(ValueError, match="identity differs"):
         await arm.exercise_partition_profiles(None, state)
+    assert not [c for c in service.calls if c[0] != "GET"]
+
+
+@pytest.mark.asyncio
+async def test_inactive_admission_accepts_the_captured_native_state(environment):
+    from hmcpctl.client.client_parse import _parse_feed
+
+    service, state, _ = environment
+    capture = json.loads(
+        (
+            Path(__file__).parent
+            / "fixtures/live"
+            / (
+                "rest-vios-create.json"
+                if state.config.partition_profile_kind == "VirtualIOServer"
+                else "rest-lpar-create-ok.json"
+            )
+        ).read_text()
+    )
+    resource = _parse_feed(capture["body"], "/rest/api/uom/LogicalPartition")[0][
+        "Resource"
+    ]
+    service.parent["PartitionState"] = resource["PartitionState"]
+    result = await arm.snapshot(state.hmc_config, state.config)
+    assert result["partition"] == P
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state_value", ["Not Activated", "running", None, "unknown"])
+async def test_live_arm_refuses_unknown_or_active_partition_state(
+    environment, state_value
+):
+    service, state, _ = environment
+    service.parent["PartitionState"] = state_value
+    error = TypeError if state_value is None else ValueError
+    message = "scalar is unavailable" if state_value is None else "inactive unprotected"
+    with pytest.raises(error, match=message):
+        await arm.snapshot(state.hmc_config, state.config)
     assert not [c for c in service.calls if c[0] != "GET"]
