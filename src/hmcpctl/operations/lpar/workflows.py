@@ -37,12 +37,17 @@ async def create_lpar(
     steps = [WorkflowStep("create", "ok", created.lpar)]
     if created.apply_step is not None:
         steps.append(created.apply_step)
+    if created.settings_step is not None:
+        steps.append(created.settings_step)
+    settings_failed = (
+        created.settings_step is not None and created.settings_step.status == "error"
+    )
     # A failed apply, or a create that returns no partition body to apply against,
     # stops the ordered workflow; the partition (if created) stays created.
     apply_failed = (
         created.apply_step is not None and created.apply_step.status == "error"
     )
-    assignments_skipped = created.lpar is None or apply_failed
+    assignments_skipped = created.lpar is None or apply_failed or settings_failed
     if assignments_skipped:
         steps.extend(
             WorkflowStep(name, "skipped") for name in assignment_step_names(assignments)

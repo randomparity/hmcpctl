@@ -6,6 +6,7 @@ from ..._app import with_client
 from ...documents.lpar import (
     Keylock,
     LparResources,
+    LparSettings,
     PartitionType,
     validate_partition_type,
 )
@@ -45,6 +46,7 @@ def hmc_create_lpar(
     assignments: LparPcieAssignments = LparPcieAssignments(),
     apply_partition_profile: bool = True,
     profile: str | None = None,
+    settings: LparSettings | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -69,6 +71,11 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        settings: Optional five C01 partition settings. Omitted values retain HMC
+            defaults; False/0 are explicit. A running time_ref partition can govern
+            hypervisor/service-processor time. Settings select documented CLI creation
+            unless explicit keylock requires REST plus a separate configuration step.
+            A failed settings step leaves the partition created and stops assignments.
         partition_type: Partition type: AIX/Linux or OS400. A Virtual I/O Server
             cannot be created here; use hmc_create_vios.
         partition_id: Optional numeric partition ID; the HMC assigns one when omitted.
@@ -103,6 +110,7 @@ def hmc_create_lpar(
                 max_virtual_slots=max_virtual_slots,
                 caller_token=caller_token,
                 apply_profile=apply_partition_profile,
+                settings=settings if settings is not None else LparSettings(),
             ),
             assignments,
         ),

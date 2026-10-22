@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import (
     _authorize_system_lpar_profile_restore,
+    _resolve_contained_lpar_names,
     _resolve_system_name,
     authorize_lpar_mutation,
     resolve_and_authorize_lpar_names,
@@ -18,6 +20,9 @@ from hmcpctl.resource_identity import (
     resolve_system_uuid,
 )
 
+from ...documents.lpar import LparSettings
+from ...ssh.commands import build_attribute_record
+from ...ssh.lpar import get_lpar_settings, set_lpar_settings
 from ...ssh.profiles import (
     ProfileRestoreType,
     ProfileSyncMode,
@@ -27,6 +32,7 @@ from ...ssh.profiles import (
     sync_lpar_profile,
     validate_profile_sync_mode,
 )
+from ...ssh.transport import HMCCLIError
 
 ProcessorCompatibilityMode = Literal[
     "default",
@@ -182,3 +188,81 @@ async def configure_lpar_processor_compatibility(
         hmc.config, system_name, lpar_name, mode, profile_name
     )
     return f"Set lpar_proc_compat_mode={mode} on profile {profile} of {lpar_name}"
+
+
+@dataclass(frozen=True)
+class LparSettingsResult:
+    """Observed outcome of a single non-retried settings write."""
+
+    status: Literal[
+        "verified", "mismatch", "readback-unavailable", "write-outcome-unknown"
+    ]
+    requested: LparSettings
+    observed: LparSettings | None
+    warnings: tuple[str, ...]
+
+
+async def read_lpar_settings(
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str
+) -> LparSettings:
+    """Read settings after establishing target containment."""
+    system, name = await _resolve_contained_lpar_names(
+        hmc, system_name_or_uuid, lpar_name_or_uuid
+    )
+    return await get_lpar_settings(hmc.config, system, name)
+
+
+async def configure_lpar_settings(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    settings: LparSettings,
+    *,
+    system_name_or_uuid: str,
+    ownership_override: bool = False,
+) -> LparSettingsResult:
+    """Authorize, write once and verify supplied and omitted C01 values.
+
+    A running time-reference partition may govern hypervisor/service-processor
+    time. This operation does not activate a partition or change a guest clock.
+    """
+    if not settings.pairs():
+        raise ValueError("Supply at least one partition setting")
+    system, name = await resolve_and_authorize_lpar_names(
+        hmc,
+        lpar_name_or_uuid,
+        system_name_or_uuid=system_name_or_uuid,
+        ownership_override=ownership_override,
+    )
+    build_attribute_record([("name", name), *settings.pairs()])
+    before = await get_lpar_settings(hmc.config, system, name)
+    try:
+        await set_lpar_settings(hmc.config, system, name, settings)
+    except HMCCLIError as error:
+        return LparSettingsResult(
+            "write-outcome-unknown",
+            settings,
+            None,
+            (f"Write did not confirm completion: {error}. Inspect before retrying.",),
+        )
+    try:
+        after = await get_lpar_settings(hmc.config, system, name)
+    except HMCCLIError as error:
+        return LparSettingsResult(
+            "readback-unavailable",
+            settings,
+            None,
+            (f"Write returned successfully but readback failed: {error}",),
+        )
+    expected = replace(
+        before, **{name: getattr(settings, name) for name, _ in settings.pairs()}
+    )
+    if after != expected:
+        return LparSettingsResult(
+            "mismatch",
+            settings,
+            after,
+            (
+                "Readback differs from requested or preserved settings; inspect before retrying.",
+            ),
+        )
+    return LparSettingsResult("verified", settings, after, ())

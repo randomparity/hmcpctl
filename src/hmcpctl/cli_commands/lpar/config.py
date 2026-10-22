@@ -7,7 +7,12 @@ from dataclasses import asdict
 import typer
 from rich.text import Text
 
-from hmcpctl.operations.lpar.configuration import configure_lpar_msp
+from hmcpctl.documents.lpar import LparSettings
+from hmcpctl.operations.lpar.configuration import (
+    configure_lpar_msp,
+    configure_lpar_settings,
+    read_lpar_settings,
+)
 from hmcpctl.operations.lpar.ownership import set_lpar_ownership_description
 
 from ...operations.affinity.ssh import (
@@ -496,6 +501,62 @@ def lpars_set_proc_compat(
     )
 
 
+def lpars_configure(
+    lpar_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+    allow_perf_collection: bool | None = typer.Option(
+        None, "--allow-perf-collection/--no-allow-perf-collection"
+    ),
+    lpar_avail_priority: int | None = typer.Option(
+        None, "--lpar-avail-priority", min=0, max=255
+    ),
+    time_ref: bool | None = typer.Option(None, "--time-ref/--no-time-ref"),
+    simplified_remote_restart_capable: bool | None = typer.Option(
+        None,
+        "--simplified-remote-restart-capable/--no-simplified-remote-restart-capable",
+    ),
+    migration_disabled: bool | None = typer.Option(
+        None, "--migration-disabled/--no-migration-disabled"
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+) -> None:
+    """Configure C01 settings and verify readback; unknown outcomes exit nonzero.
+
+    A running time-reference partition may govern hypervisor/service-processor
+    time. Omitted values are preserved. No power or guest clock action is taken.
+    """
+    settings = LparSettings(
+        allow_perf_collection=allow_perf_collection,
+        lpar_avail_priority=lpar_avail_priority,
+        time_ref=time_ref,
+        simplified_remote_restart_capable=simplified_remote_restart_capable,
+        migration_disabled=migration_disabled,
+    )
+    result = with_client(
+        lambda hmc: configure_lpar_settings(
+            hmc,
+            lpar_name,
+            settings,
+            system_name_or_uuid=system_name,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(1)
+
+
+def lpars_get_settings(
+    lpar_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+) -> None:
+    """Read the five C01 settings on a contained AIX/Linux or IBM i partition."""
+    result = with_client(
+        lambda hmc: read_lpar_settings(hmc, lpar_name, system_name_or_uuid=system_name)
+    )
+    print_json(asdict(result))
+
+
 def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
     group.command("memopt-score")(lpars_memopt_score)
@@ -508,6 +569,8 @@ def register_commands(group: typer.Typer) -> None:
     )
     group.command("plan-memopt-scores")(lpars_plan_memopt_scores)
     group.command("plan-system-memopt-score")(lpars_plan_system_memopt_score)
+    group.command("configure")(lpars_configure)
+    group.command("get-settings")(lpars_get_settings)
     group.command("get-description")(lpars_get_description)
     group.command("set-description")(lpars_set_description)
     group.command("get-msp")(lpars_get_msp)

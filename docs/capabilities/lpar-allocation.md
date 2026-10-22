@@ -63,7 +63,9 @@ Ethernet to retained client-network reconciliation and matching vNIC behavior to
 
 ## Filed configuration and dynamic-resource children
 
-All twenty issues are native children of #638 and retain `Blocked by #637`.
+All twenty issues are native children of #638 and start against the merged core
+in #1724, #1725 and #1726. #637 retains residual profile reconciliation and is
+not a blanket prerequisite; each child retains its specific dependencies.
 Their bodies bind the exact reviewed source selectors, applicable contexts and
 verification obligations. Source occurrences and shared selectors are not new
 exclusive ledger units. Full-spec design precedes implementation of each child.

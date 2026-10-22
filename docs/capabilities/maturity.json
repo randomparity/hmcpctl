@@ -1185,6 +1185,10 @@
                 "constraint": "SystemName or UUID"
               }
             ]
+          },
+          {
+            "variant": "c01-partition-settings",
+            "parameters": []
           }
         ],
         "missing_scope": []
@@ -5557,6 +5561,34 @@
                 "constraint": "Exact VIOS name or UUID on the selected system."
               }
             ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.configure",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c01-five-partition-settings",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.get_settings",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c01-five-partition-settings",
+            "parameters": []
           }
         ],
         "missing_scope": []

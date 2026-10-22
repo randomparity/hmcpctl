@@ -6,15 +6,15 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **182** tools are registered.
-- **181** are exposed by a default deployment.
+- **184** tools are registered.
+- **183** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
 | `destructive` | 40 |
-| `mutate` | 57 |
-| `read` | 84 |
+| `mutate` | 58 |
+| `read` | 85 |
 
 ## Maturity vocabulary
 
@@ -39,7 +39,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `inventory` | 1 | [inventory.md](inventory.md) |
 | `io_slot` | 1 | [io_slot.md](io_slot.md) |
 | `job` | 2 | [job.md](job.md) |
-| `lpar` | 37 | [lpar.md](lpar.md) |
+| `lpar` | 39 | [lpar.md](lpar.md) |
 | `lpar_profile` | 11 | [lpar_profile.md](lpar_profile.md) |
 | `media` | 10 | [media.md](media.md) |
 | `memory_pool` | 2 | [memory_pool.md](memory_pool.md) |
@@ -93,6 +93,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_capacity_report` | `read` | [capacity.md](capacity.md) |
 | `hmc_capture_lpar_console` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_clear_lpar_boot_order` | `mutate` | [boot_order.md](boot_order.md) |
+| `hmc_configure_lpar` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_configure_remote_access` | `mutate` | [remote_access.md](remote_access.md) |
 | `hmc_create_logical_unit` | `mutate` | [cluster.md](cluster.md) |
 | `hmc_create_lpar` | `mutate` | [lpar.md](lpar.md) |
@@ -134,6 +135,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_get_lpar_memopt_score` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_lpar_msp` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_lpar_proc_compat` | `read` | [lpar.md](lpar.md) |
+| `hmc_get_lpar_settings` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_lpar_state` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_media_repository` | `read` | [media.md](media.md) |
 | `hmc_get_minimum_affinity_policy` | `read` | [lpar.md](lpar.md) |

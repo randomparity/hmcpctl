@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client
 
+from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.lpar import LparResources, LparSettings
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 from hmcpctl.operations.virtualization.pcie import (
     _is_exact_admitted_environment,
@@ -36,7 +40,7 @@ from hmcpctl.xmlutil import leaf_text
 
 from . import dedicated_pcie
 from .dedicated_pcie import _ABSENCE_REREAD_DELAY_S, partition_not_found
-from .observation import Assertion, CallFailure, judge_create_result
+from .observation import Assertion, CallFailure, judge_create_result, plain_data
 from .results import field as result_field
 from .results import resource
 
@@ -45,6 +49,9 @@ if TYPE_CHECKING:
 
 SUBTASK = 39
 GROUP = "lpar-config"
+SETTINGS_SUBTASK = 47
+SETTINGS_GROUP = "lpar-settings"
+SETTINGS_SCENARIO = "st47-lpar-settings"
 #: Reserved for this arm: recovery reports any partition carrying it as stranded.
 NAME_PREFIX = "hmcpctl-live-lpar-"
 TOKEN_PREFIX = "lparcfg-"
@@ -188,6 +195,7 @@ class _Run:
     deleted: bool = False
     held: dict[str, bool] = field(default_factory=dict)
     data: dict[str, Any] = field(default_factory=dict)
+    subtask: int = SUBTASK
 
     def hold(self, operation: str, assertion: str, value: bool) -> None:
         self.held[f"{operation}:{assertion}"] = value
@@ -1167,17 +1175,20 @@ async def _gone(client: Client, state: RunState, run: _Run) -> bool:
     return False
 
 
-async def _delete(client: Client, state: RunState, run: _Run) -> str | None:
+async def _delete(
+    client: Client, state: RunState, run: _Run, *, inactive_only: bool = False
+) -> str | None:
     """Delete the scratch partition; return why it is not confirmed gone, or None."""
     if run.uuid is None and not await _adopt_by_name(client, state, run):
         if await _gone(client, state, run):
             run.deleted = True
             return None
         return "its UUID could not be resolved to a partition carrying this run's token"
-    if await _lpar_state(client, state, run) != _NOT_ACTIVATED and not await _power_off(
-        client, state, run
-    ):
-        return "it did not reach Not Activated"
+    if await _lpar_state(client, state, run) != _NOT_ACTIVATED:
+        if inactive_only:
+            return "inactive-only cleanup refused an active or unreadable state; no power action was taken"
+        if not await _power_off(client, state, run):
+            return "it did not reach Not Activated"
     if await _token_of(client, state, run, run.uuid or "") != run.token:
         return "its description no longer carries this run's caller token"
     st, data = await state.call(
@@ -1186,7 +1197,7 @@ async def _delete(client: Client, state: RunState, run: _Run) -> str | None:
         system_name_or_uuid=run.system,
         lpar_name_or_uuid=run.uuid,
     )
-    state.record(SUBTASK, "hmc_delete_lpar (scratch)", st, data)
+    state.record(run.subtask, "hmc_delete_lpar (scratch)", st, data)
     if st != "PASS":
         return "the delete was refused"
     run.deleted = await _gone(client, state, run)
@@ -1195,19 +1206,21 @@ async def _delete(client: Client, state: RunState, run: _Run) -> str | None:
     )
 
 
-async def _teardown(client: Client, state: RunState, run: _Run) -> None:
+async def _teardown(
+    client: Client, state: RunState, run: _Run, *, inactive_only: bool = False
+) -> None:
     if not run.create_attempted:
         return
     why = (
         "dedicated restoration is uncertain; inspect profile io_slots and slot ownership first"
         if run.dedicated is not None and not run.dedicated.restored
-        else await _delete(client, state, run)
+        else await _delete(client, state, run, inactive_only=inactive_only)
     )
     if why is None:
         return
     system, name = shlex.quote(run.system), shlex.quote(run.name)
     state.record(
-        SUBTASK,
+        run.subtask,
         "scratch partition teardown",
         "FAIL",
         f"MANUAL RECOVERY REQUIRED: partition {run.name!r} on {run.system!r} was NOT "
@@ -1230,7 +1243,7 @@ async def _compare(
             break
     same = reads[-1] == baseline
     state.record(
-        SUBTASK,
+        run.subtask,
         "system baseline compare",
         "PASS" if same else "FAIL",
         {
@@ -1442,3 +1455,157 @@ async def exercise_lpar_config(client: Client, state: RunState) -> None:
         _observe(state, run, cleanup)
         _observe_identity(state, run, cleanup)
         _observe_dedicated(state, run, cleanup)
+
+
+async def _settings_cases(client: Client, state: RunState, run: _Run) -> bool:
+    status, data = await state.call(
+        client,
+        "hmc_get_lpar_settings",
+        system_name_or_uuid=run.system,
+        lpar_name_or_uuid=run.uuid,
+    )
+    before = plain_data(data)
+    if status != "PASS" or not isinstance(before, dict):
+        state.record(SETTINGS_SUBTASK, "settings baseline", "FAIL", data)
+        return False
+    for patch in (
+        {"allow_perf_collection": True},
+        {"allow_perf_collection": False},
+        {"lpar_avail_priority": 255},
+        {"lpar_avail_priority": 0},
+        {"time_ref": False},
+        {"simplified_remote_restart_capable": True},
+        {"simplified_remote_restart_capable": False},
+        {"migration_disabled": True},
+        {"migration_disabled": False},
+    ):
+        if (
+            await _lpar_state(client, state, run) != _NOT_ACTIVATED
+            or await _token_of(client, state, run, run.uuid or "") != run.token
+        ):
+            state.record(
+                SETTINGS_SUBTASK,
+                "inactive owned fixture",
+                "FAIL",
+                "Fixture state/ownership changed; stopped before mutation",
+            )
+            return False
+        status, data = await state.call(
+            client,
+            "hmc_configure_lpar",
+            system_name_or_uuid=run.system,
+            lpar_name_or_uuid=run.uuid,
+            settings=patch,
+        )
+        result = plain_data(data)
+        verified = (
+            status == "PASS"
+            and isinstance(result, dict)
+            and result.get("status") == "verified"
+        )
+        state.record(
+            SETTINGS_SUBTASK, "hmc_configure_lpar", "PASS" if verified else "FAIL", data
+        )
+        if not verified:
+            return False
+        status, data = await state.call(
+            client,
+            "hmc_get_lpar_settings",
+            system_name_or_uuid=run.system,
+            lpar_name_or_uuid=run.uuid,
+        )
+        after = plain_data(data)
+        if status != "PASS" or after != before | patch:
+            state.record(SETTINGS_SUBTASK, "settings postcondition", "FAIL", data)
+            return False
+        before = after
+    return True
+
+
+async def exercise_lpar_settings(client: Client, state: RunState) -> None:
+    """ST47: one owned inactive fixture, nine bounded writes; no power/profile calls."""
+    if state.group != SETTINGS_GROUP or state.hmc_config is None:
+        state.skip(
+            SETTINGS_SUBTASK,
+            SETTINGS_GROUP,
+            "requires opt-in group and HMC configuration",
+        )
+        return
+    baseline = await _read_pools(client, state, state.config.system_name)
+    if baseline is None or scratch_partitions(baseline[0].names):
+        state.skip(
+            SETTINGS_SUBTASK,
+            SETTINGS_GROUP,
+            "baseline unavailable or stranded scratch exists; run recovery",
+        )
+        return
+    suffix = uuid.uuid4().hex[:8]
+    run = _Run(
+        state.config.system_name,
+        NAME_PREFIX + suffix,
+        TOKEN_PREFIX + suffix,
+        baseline[1],
+        subtask=SETTINGS_SUBTASK,
+    )
+    verified = False
+    try:
+        run.create_attempted = True
+        async with HMCClient(state.hmc_config) as hmc:
+            created = await create_and_stamp_lpar(
+                hmc,
+                run.system,
+                LparCreation(
+                    run.name,
+                    "AIX/Linux",
+                    LparResources(**RESOURCES),
+                    caller_token=run.token,
+                    stamp_policy="required",
+                    apply_profile=False,
+                    settings=LparSettings(False, 0, False, False, False),
+                ),
+            )
+        run.uuid = _uuid_of(created.lpar) if created.lpar is not None else None
+        if (
+            not created.resource_created
+            or created.ownership_stamped is not True
+            or created.settings_step is None
+            or created.settings_step.status != "ok"
+            or run.uuid is None
+        ):
+            raise ValueError(
+                "Required ownership or creation settings were not confirmed"
+            )
+        run.created = True
+        state.record(
+            SETTINGS_SUBTASK,
+            "owning core create",
+            "PASS",
+            asdict(created),
+            "Direct operation; no MCP create promotion",
+        )
+        verified = await _settings_cases(client, state, run)
+    except (HMCError, ValueError, PermissionError) as error:
+        state.record(SETTINGS_SUBTASK, "settings arm", "FAIL", str(error))
+    finally:
+        await _teardown(client, state, run, inactive_only=True)
+    same = await _compare(client, state, run, baseline[0])
+    cleanup = "passed" if run.deleted and same else "failed"
+    if run.created:
+        state.record_verified(
+            SETTINGS_SUBTASK,
+            "hmc_configure_lpar",
+            operation="lpar.configure",
+            scenario=SETTINGS_SCENARIO,
+            assertions=[Assertion("settings-round-trip", verified)],
+            cleanup=cleanup,
+            data={"time_ref_true": "not-run", "activation": "not-run"},
+        )
+        state.record_verified(
+            SETTINGS_SUBTASK,
+            "hmc_get_lpar_settings",
+            operation="lpar.get_settings",
+            scenario=SETTINGS_SCENARIO,
+            assertions=[Assertion("typed-settings-readback", verified)],
+            cleanup=cleanup,
+            data={"time_ref_true": "not-run"},
+        )

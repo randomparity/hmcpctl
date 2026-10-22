@@ -7,7 +7,12 @@ from pathlib import Path
 
 import typer
 
-from ...documents.lpar import PARTITION_TYPES, LparResources, validate_partition_type
+from ...documents.lpar import (
+    PARTITION_TYPES,
+    LparResources,
+    LparSettings,
+    validate_partition_type,
+)
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
 from ...ssh.lpar import validate_caller_token
@@ -72,6 +77,20 @@ def lpars_create(
         help="Leave the new partition profile unapplied when the HMC creates the "
         "partition through mksyscfg (the partition then has no current configuration)",
     ),
+    allow_perf_collection: bool | None = typer.Option(
+        None, "--allow-perf-collection/--no-allow-perf-collection"
+    ),
+    lpar_avail_priority: int | None = typer.Option(
+        None, "--lpar-avail-priority", min=0, max=255
+    ),
+    time_ref: bool | None = typer.Option(None, "--time-ref/--no-time-ref"),
+    simplified_remote_restart_capable: bool | None = typer.Option(
+        None,
+        "--simplified-remote-restart-capable/--no-simplified-remote-restart-capable",
+    ),
+    migration_disabled: bool | None = typer.Option(
+        None, "--migration-disabled/--no-migration-disabled"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Create a new LPAR on a managed system.
@@ -79,7 +98,8 @@ def lpars_create(
     Creates the partition powered off with a default profile; storage/network
     and boot settings are configured afterwards via the HMC. When the HMC
     creates it through mksyscfg, the profile is then applied (an
-    ``apply_profile`` step) unless --no-apply is given.
+    ``apply_profile`` step) unless --no-apply is given. Settings preserve omitted
+    values; a running time-reference partition can govern system time.
     """
     if caller_token is not None:
         validate_caller_token(caller_token)
@@ -121,6 +141,13 @@ def lpars_create(
                 partition_id=partition_id,
                 caller_token=caller_token,
                 apply_profile=not no_apply,
+                settings=LparSettings(
+                    allow_perf_collection=allow_perf_collection,
+                    lpar_avail_priority=lpar_avail_priority,
+                    time_ref=time_ref,
+                    simplified_remote_restart_capable=simplified_remote_restart_capable,
+                    migration_disabled=migration_disabled,
+                ),
             ),
             assignments,
         )
