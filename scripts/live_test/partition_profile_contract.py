@@ -427,7 +427,12 @@ def pinned(hmc_config, packet):
             "effective HMC destination/account/owner differs before authentication"
         )
     return hmc_config.model_copy(
-        update={"timeout": 15, "ssh_timeout": 15, "max_response_bytes": 8 * 1024 * 1024}
+        update={
+            "port": packet["port"],
+            "timeout": 15,
+            "ssh_timeout": 15,
+            "max_response_bytes": 8 * 1024 * 1024,
+        }
     )
 
 

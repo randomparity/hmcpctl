@@ -824,3 +824,43 @@ async def test_failed_recovery_checkpoint_prevents_execute(monkeypatch):
     execute.assert_not_awaited()
     state.record.assert_called_once()
     assert state.record.call_args.args[2] == "FAIL"
+
+
+@pytest.mark.asyncio
+async def test_native_omitted_port_never_falls_back_after_transport_failure(
+    tmp_path, respx_mock
+):
+    import httpx
+
+    from hmcpctl.config import HMCConfig
+    from hmcpctl.errors import HMCTransportError
+
+    config = HMCConfig.from_mapping(
+        {
+            "host": "hmc.test",
+            "user": "test-account",
+            "verify_ssl": True,
+            "password": "test-password",  # pragma: allowlist secret — synthetic mocked credential
+        }
+    )
+    assert "port" not in config.model_fields_set
+    packet = {
+        "host": "hmc.test",
+        "port": 443,
+        "user": "test-account",
+        "agent_id": "hmcpctl",
+    }
+    api = arm.Native(config, packet, arm.Budget(20), tmp_path)
+    primary = respx_mock.put("https://hmc.test:443/rest/api/web/Logon").mock(
+        side_effect=httpx.ConnectError("synthetic outage")
+    )
+    alternate = respx_mock.put("https://hmc.test:12443/rest/api/web/Logon").mock(
+        side_effect=httpx.ConnectError("alternate must never be attempted")
+    )
+    try:
+        with pytest.raises(HMCTransportError):
+            await api.logon()
+        assert primary.call_count == 1
+        assert alternate.call_count == 0
+    finally:
+        await api._http.aclose()
