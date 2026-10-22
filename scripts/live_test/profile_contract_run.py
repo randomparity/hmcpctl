@@ -330,7 +330,7 @@ def child_uuid(entry, name):
 
 def reserve_effect(api, journal):
     snapshot_cost = len(journal.data["baseline"]["partitions"]) + 6
-    if api.budget.limit - api.budget.used < 3 * snapshot_cost + 12:
+    if api.budget.limit - api.budget.used < 3 * snapshot_cost + 13:
         raise ContractMismatch("remaining arm budget reserved for known-state cleanup")
 
 
@@ -420,7 +420,7 @@ async def cleanup(api, journal, names):
         raise ValueError("uncertain effects forbid cleanup")
     if (
         api.budget.limit - api.budget.used
-        < 2 * (len(journal.data["baseline"]["partitions"]) + 6) + 8
+        < 2 * (len(journal.data["baseline"]["partitions"]) + 6) + 9
     ):
         raise ValueError("insufficient reserved arm budget for guarded cleanup")
     previous = journal.data["latest_fixture"]
@@ -428,7 +428,9 @@ async def cleanup(api, journal, names):
     if entry != previous:
         raise ValueError("fixture full state changed before cleanup")
     journal.intent("delete")
-    api.budget.take()  # Normal delete authorization performs one SSH ownership-description read.
+    # Normal authorization reads the description and may fall back to an SSH system-name lookup.
+    api.budget.take()
+    api.budget.take()
     await delete_lpar(
         api,
         entry["UUID"],

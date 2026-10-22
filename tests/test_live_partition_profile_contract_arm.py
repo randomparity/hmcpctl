@@ -196,6 +196,7 @@ def experiment(tmp_path, monkeypatch, fault=None):
         packet=packet,
         serial=100,
         snapshots=0,
+        dispatched=0,
     )
     fixture_uuid = "00000000-0000-4000-8000-000000000099"
     production = [
@@ -284,16 +285,20 @@ def experiment(tmp_path, monkeypatch, fault=None):
             super().__init__(*args)
             world.instances.append(self)
 
+        def dispatch(self, *, logoff=False):
+            self.budget.take(logoff=logoff)
+            world.dispatched += 1
+
         async def logon(self):
-            self.budget.take()
+            self.dispatch()
             self._session_token = "synthetic-session"
 
         async def logoff(self):
-            self.budget.take(logoff=True)
+            self.dispatch(logoff=True)
             self._session_token = None
 
         async def command(self, command, **kwargs):
-            self.budget.take()
+            self.dispatch()
             return "Version: 10 Release: 3 Service Pack: 1060 build2408210051"
 
         async def snapshot(self):
@@ -302,7 +307,7 @@ def experiment(tmp_path, monkeypatch, fault=None):
             if world.created and not world.deleted:
                 rows.append(entry())
             for _ in range(5 + len(rows)):
-                self.budget.take()
+                self.dispatch()
             if fault == "cleanup-owner" and len(world.posts) == 2:
                 world.resource["Description"] = (
                     "[hmcpctl owner:other created:2026-10-22]"
@@ -325,7 +330,7 @@ def experiment(tmp_path, monkeypatch, fault=None):
             }
 
         async def _request(self, method, path, **kwargs):
-            self.budget.take()
+            self.dispatch()
             if method == "PUT":
                 world.puts.append(path)
                 root = arm.profile(kwargs["content"])
@@ -366,35 +371,40 @@ def experiment(tmp_path, monkeypatch, fault=None):
             )
 
         async def get_logical_partition(self, uuid):
-            self.budget.take()
+            self.dispatch()
             assert uuid == fixture_uuid
             return entry()
 
         async def get_managed_system(self, uuid):
-            self.budget.take()
+            self.dispatch()
             return {"UUID": uuid, "Resource": {"SystemName": packet["system_name"]}}
 
         async def list_system_summaries(self):
-            self.budget.take()
+            self.dispatch()
+            if fault == "cleanup-system-fallback":
+                from hmcpctl.errors import HMCError
+
+                raise HMCError("synthetic quick-summary failure", status_code=503)
             return [
                 {"UUID": packet["system_uuid"], "SystemName": packet["system_name"]}
             ]
 
         async def list_logical_partitions(self, system_uuid=None):
-            self.budget.take()
+            self.dispatch()
             return [entry()] if world.created and not world.deleted else []
 
         async def get_quick_property(self, kind, uuid, name):
-            self.budget.take()
+            self.dispatch()
             return world.resource["PartitionState"]
 
         async def delete_logical_partition(self, uuid):
-            self.budget.take()
+            self.dispatch()
             assert uuid == fixture_uuid
             world.deleted = True
 
     async def ssh(config, command, **kwargs):
         world.ssh.append(command)
+        world.dispatched += 1
         if command.startswith("mksyscfg"):
             assert (
                 "min_mem=512" in command
@@ -419,6 +429,8 @@ def experiment(tmp_path, monkeypatch, fault=None):
             world.resource["Description"] = (
                 "[hmcpctl owner:test-agent created:2026-10-22] [caller q1724-1234abcd]"
             )
+        elif command == "lssyscfg -r sys -F uuid,name":
+            return packet["system_uuid"] + "," + packet["system_name"] + "\n"
         else:
             assert command.startswith("lssyscfg") and "description" in command
             return world.resource["Description"]
@@ -432,17 +444,21 @@ def experiment(tmp_path, monkeypatch, fault=None):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fallback", [False, True])
 async def test_full_experiment_uses_real_serializer_normal_owner_and_independent_recovery(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, fallback
 ):
-    config, hmc, world, flow = experiment(tmp_path, monkeypatch)
+    config, hmc, world, flow = experiment(
+        tmp_path, monkeypatch, "cleanup-system-fallback" if fallback else None
+    )
     admission = await flow.preflight(hmc, config)
     result = await flow.execute(hmc, config)
     recovered = await flow.recover(hmc, config)
     assert result["completed"] == list(arm.EFFECTS)
     assert result["status"] == "CONTRACT_OBSERVED" and result["deleted"]
     assert len(world.posts) == 2 and len(world.puts) == 2
-    assert len(world.ssh) == 3  # create,stamp,normal-delete authorization description
+    # Create, stamp and description always run; system-name lookup may fall back to SSH.
+    assert len(world.ssh) == 3 + int(fallback)
     assert all(
         v["configuration_equal"] and not v["recovery_admitted"]
         for v in result["copies"].values()
@@ -454,6 +470,12 @@ async def test_full_experiment_uses_real_serializer_normal_owner_and_independent
         + recovered["transports_upper_bound"]
         <= 192
     )
+    reported = (
+        admission["transports_upper_bound"]
+        + result["arm_transports_upper_bound"]
+        + recovered["transports_upper_bound"]
+    )
+    assert reported >= world.dispatched
     assert not result["pending"]
     with pytest.raises(FileExistsError):
         await flow.execute(hmc, config)
@@ -982,3 +1004,50 @@ async def test_private_transport_failure_diagnostics(tmp_path, monkeypatch, case
             assert diagnostic.stat().st_mode & 0o077 == 0
     finally:
         await api._http.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remaining", [1, 26])
+async def test_cleanup_budget_refuses_before_observation_or_delete_and_logs_out(
+    tmp_path, monkeypatch, remaining
+):
+    config, hmc, world, flow = experiment(tmp_path, monkeypatch)
+    await flow.preflight(hmc, config)
+    real_cleanup = flow.cleanup
+
+    async def constrained(api, journal, names):
+        # Three original rows: 26 was the previous threshold that omitted the fallback.
+        api.budget.limit = api.budget.used + remaining
+        dispatched = world.dispatched
+        try:
+            await real_cleanup(api, journal, names)
+        except ValueError as error:
+            assert "insufficient reserved arm budget" in str(error)
+            assert world.dispatched == dispatched
+            assert "delete" not in journal.data["attempted"]
+            raise
+        pytest.fail("cleanup began without the optional fallback reservation")
+
+    monkeypatch.setattr(flow, "cleanup", constrained)
+    with pytest.raises(ValueError, match="insufficient reserved arm budget"):
+        await flow.execute(hmc, config)
+    api = world.instances[-1]
+    assert not world.deleted
+    assert api._session_token is None
+    assert api.budget.used <= api.budget.limit
+    if remaining == 1:
+        assert api.budget.used == api.budget.limit
+
+
+def test_pre_effect_reserve_includes_optional_cleanup_lookup():
+    from types import SimpleNamespace
+
+    from live_test import profile_contract_run as flow
+
+    # Three original rows require three nine-call observations plus thirteen other
+    # reserved transports; 39 omits the possible cleanup system-name SSH lookup.
+    api = SimpleNamespace(budget=arm.Budget(39))
+    journal = SimpleNamespace(data={"baseline": {"partitions": [{}, {}, {}]}})
+    with pytest.raises(flow.ContractMismatch, match="reserved for known-state cleanup"):
+        flow.reserve_effect(api, journal)
+    assert api.budget.used == 0
