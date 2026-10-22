@@ -1,0 +1,1 @@
+Redacted served AIX/Linux profile from the retained #1724 V10R3 SP1060 capture. UUIDs and origin anonymized consistently; profile name replaced. Observed optional fields are represented values, not inferred defaults. No raw source XSD prose is reproduced.

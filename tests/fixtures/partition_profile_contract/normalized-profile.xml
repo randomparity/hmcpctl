@@ -1,0 +1,79 @@
+<ns0:entry xmlns:ns0="http://www.w3.org/2005/Atom" xmlns:ns1="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">
+    <ns0:id>00000000-0000-4000-8000-000000000001</ns0:id>
+    <ns0:title>LogicalPartitionProfile</ns0:title>
+    <ns0:published>2026-10-22T05:45:38.122Z</ns0:published>
+    <ns0:link rel="SELF" href="https://hmc.test:12443/rest/api/uom/ManagedSystem/00000000-0000-4000-8000-000000000002/LogicalPartition/00000000-0000-4000-8000-000000000003/LogicalPartitionProfile/00000000-0000-4000-8000-000000000001" />
+    <ns0:link rel="MANAGEMENT_CONSOLE" href="https://hmc.test:12443/rest/api/uom/ManagementConsole/00000000-0000-4000-8000-000000000004" />
+    <ns0:author>
+        <ns0:name>IBM Power Systems Management Console</ns0:name>
+    </ns0:author>
+    <ns1:etag>1486546494</ns1:etag>
+    <ns0:content type="application/vnd.ibm.powervm.uom+xml; type=LogicalPartitionProfile">
+        <ns1:LogicalPartitionProfile schemaVersion="V1_0">
+    <ns1:Metadata>
+        <ns1:Atom>
+            <ns1:AtomID>00000000-0000-4000-8000-000000000001</ns1:AtomID>
+            <ns1:AtomCreated>1792647706462</ns1:AtomCreated>
+        </ns1:Atom>
+    </ns1:Metadata>
+    <ns1:AffinityGroupID kb="CUD" kxe="false">0</ns1:AffinityGroupID>
+    <ns1:AssignAllResources kxe="false" kb="COD">false</ns1:AssignAllResources>
+    <ns1:AssociatedPartition kxe="false" kb="ROR" href="https://hmc.test:12443/rest/api/uom/ManagedSystem/00000000-0000-4000-8000-000000000002/LogicalPartition/00000000-0000-4000-8000-000000000003" rel="related" />
+    <ns1:AutoStart kxe="false" kb="CUD">false</ns1:AutoStart>
+    <ns1:BootMode kb="CUD" kxe="false">Normal</ns1:BootMode>
+    <ns1:ConnectionMonitoringEnabled kxe="false" kb="CUD">true</ns1:ConnectionMonitoringEnabled>
+    <ns1:DesiredProcessorCompatibilityMode kxe="false" kb="CUD">default</ns1:DesiredProcessorCompatibilityMode>
+    <ns1:IOConfigurationInstance kb="CUD" kxe="false" schemaVersion="V1_0">
+        <ns1:Metadata>
+            <ns1:Atom />
+        </ns1:Metadata>
+        <ns1:MaximumVirtualIOSlots kxe="false" kb="CUD">2</ns1:MaximumVirtualIOSlots>
+        <ns1:VirtualOpticonnectPool kb="CUD" kxe="false">false</ns1:VirtualOpticonnectPool>
+    </ns1:IOConfigurationInstance>
+    <ns1:ProcessorAttributes kxe="false" kb="CUR" schemaVersion="V1_0">
+        <ns1:Metadata>
+            <ns1:Atom />
+        </ns1:Metadata>
+        <ns1:HasDedicatedProcessors kb="CUD" kxe="false">false</ns1:HasDedicatedProcessors>
+        <ns1:SharedProcessorConfiguration kb="CUD" kxe="false" schemaVersion="V1_0">
+            <ns1:Metadata>
+                <ns1:Atom />
+            </ns1:Metadata>
+            <ns1:DesiredProcessingUnits kb="CUD" kxe="false">0.05</ns1:DesiredProcessingUnits>
+            <ns1:DesiredVirtualProcessors kb="CUD" kxe="false">1</ns1:DesiredVirtualProcessors>
+            <ns1:MaximumProcessingUnits kxe="false" kb="CUD">0.05</ns1:MaximumProcessingUnits>
+            <ns1:MaximumVirtualProcessors kxe="false" kb="CUD">1</ns1:MaximumVirtualProcessors>
+            <ns1:MinimumProcessingUnits kxe="false" kb="CUD">0.05</ns1:MinimumProcessingUnits>
+            <ns1:MinimumVirtualProcessors kxe="false" kb="CUD">1</ns1:MinimumVirtualProcessors>
+            <ns1:SharedProcessorPoolID kb="CUD" kxe="false">0</ns1:SharedProcessorPoolID>
+            <ns1:SharedProcessorPoolName ksv="V1_17_0" kxe="false" kb="CUD">DefaultPool</ns1:SharedProcessorPoolName>
+            <ns1:UncappedWeight kxe="false" kb="CUD">0</ns1:UncappedWeight>
+        </ns1:SharedProcessorConfiguration>
+        <ns1:SharingMode kxe="false" kb="CUD">capped</ns1:SharingMode>
+    </ns1:ProcessorAttributes>
+    <ns1:ProfileMemory kb="CUR" kxe="false" schemaVersion="V1_0">
+        <ns1:Metadata>
+            <ns1:Atom />
+        </ns1:Metadata>
+        <ns1:ActiveMemoryExpansionEnabled kxe="false" kb="CUD">false</ns1:ActiveMemoryExpansionEnabled>
+        <ns1:ActiveMemorySharingEnabled kb="CUD" kxe="false">false</ns1:ActiveMemorySharingEnabled>
+        <ns1:DesiredEntitledMemory kxe="false" kb="CUD">AUTO</ns1:DesiredEntitledMemory>
+        <ns1:DesiredHugePageCount kxe="false" kb="CUD">0</ns1:DesiredHugePageCount>
+        <ns1:DesiredMemory kb="CUD" kxe="false">512</ns1:DesiredMemory>
+        <ns1:ExpansionFactor kxe="false" kb="CUD">0.0</ns1:ExpansionFactor>
+        <ns1:HardwarePageTableRatio kb="CUD" kxe="false">7</ns1:HardwarePageTableRatio>
+        <ns1:ManualEntitledModeEnabled kxe="false" kb="ROR">false</ns1:ManualEntitledModeEnabled>
+        <ns1:MaximumHugePageCount kb="CUD" kxe="false">0</ns1:MaximumHugePageCount>
+        <ns1:MaximumMemory kxe="false" kb="CUD">1024</ns1:MaximumMemory>
+        <ns1:MemoryWeight kb="CUD" kxe="false">0</ns1:MemoryWeight>
+        <ns1:MinimumHugePageCount kb="CUD" kxe="false">0</ns1:MinimumHugePageCount>
+        <ns1:MinimumMemory kb="CUD" kxe="false">512</ns1:MinimumMemory>
+        <ns1:DesiredPhysicalPageTableRatio ksv="V1_6_0" kb="CUD" kxe="false">6</ns1:DesiredPhysicalPageTableRatio>
+    </ns1:ProfileMemory>
+    <ns1:ProfileName kxe="false" kb="CUR">base</ns1:ProfileName>
+    <ns1:ProfileType kxe="false" kb="ROR">REG_LPAR_PROFILE_TYPE</ns1:ProfileType>
+    <ns1:RedundantErrorPathReportingEnabled kb="CUD" kxe="false">false</ns1:RedundantErrorPathReportingEnabled>
+    <ns1:SettingID kxe="false" kb="ROO">63</ns1:SettingID>
+</ns1:LogicalPartitionProfile>
+    </ns0:content>
+</ns0:entry>
