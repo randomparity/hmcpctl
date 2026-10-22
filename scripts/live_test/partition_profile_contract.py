@@ -10,6 +10,7 @@ import copy
 import hashlib
 import inspect
 import json
+import math
 import os
 import re
 import subprocess
@@ -463,8 +464,43 @@ class Native(HMCClient):
         remaining = self.deadline - monotonic()
         if remaining <= 0:
             raise ValueError("absolute native request deadline expired")
-        async with asyncio.timeout(min(30, remaining)):
-            response = await super()._request(method, path, **kwargs)
+        started = monotonic()
+        try:
+            async with asyncio.timeout(min(30, remaining)):
+                response = await super()._request(method, path, **kwargs)
+        except BaseException as error:
+            if not auth:
+                finished = monotonic()
+                classes, seen = [], set()
+                cause = error
+                while cause is not None and len(classes) < 8 and id(cause) not in seen:
+                    seen.add(id(cause))
+                    classes.append(type(cause).__name__[:128])
+                    cause = cause.__cause__ or (
+                        None if cause.__suppress_context__ else cause.__context__
+                    )
+                try:
+                    save(
+                        self.directory / f"failure-{number}.json",
+                        {
+                            **row,
+                            "elapsed_ms": max(0, int((finished - started) * 1000)),
+                            "exception_classes": classes,
+                            "deadline_remaining_ms": max(
+                                0, int((self.deadline - finished) * 1000)
+                            )
+                            if math.isfinite(self.deadline)
+                            else None,
+                            "transport_count": number,
+                        },
+                    )
+                except (OSError, ValueError) as diagnostic_error:
+                    error.add_note(
+                        "Private transport diagnostic could not be saved ("
+                        + type(diagnostic_error).__name__
+                        + ")."
+                    )
+            raise
         if not auth:
             # HMC error bodies can echo authentication/cookie headers; never retain them.
             save(

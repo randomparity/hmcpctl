@@ -864,3 +864,121 @@ async def test_native_omitted_port_never_falls_back_after_transport_failure(
         assert alternate.call_count == 0
     finally:
         await api._http.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        "read",
+        "connect",
+        "cycle",
+        "deep",
+        "suppressed",
+        "write-failure",
+        "auth",
+        "context",
+        "unbounded",
+        "cancel",
+    ],
+)
+async def test_private_transport_failure_diagnostics(tmp_path, monkeypatch, case):
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    from hmcpctl.config import HMCConfig
+    from hmcpctl.errors import HMCTransportError
+
+    config = HMCConfig.from_mapping(
+        {
+            "host": "hmc.test",
+            "port": 12443,
+            "user": "test-account",
+            "password": "test-password",  # pragma: allowlist secret — synthetic mocked credential
+            "agent_id": "test-agent",
+            "verify_ssl": True,
+        }
+    )
+    packet = {
+        "host": "hmc.test",
+        "port": 12443,
+        "user": "test-account",
+        "agent_id": "test-agent",
+    }
+    api = arm.Native(config, packet, arm.Budget(4), tmp_path)
+    api.deadline = float("inf") if case == "unbounded" else 120
+    clock = [100.0]
+    monkeypatch.setattr(arm, "monotonic", lambda: clock[0])
+    secret = "synthetic-sensitive-message"  # pragma: allowlist secret — synthetic leak-test sentinel
+    error = (
+        asyncio.CancelledError(secret)
+        if case == "cancel"
+        else HMCTransportError(secret)
+    )
+    cause = (httpx.ConnectError if case == "connect" else httpx.ReadTimeout)(secret)
+    error.__cause__ = cause
+    expected = [type(error).__name__, type(cause).__name__]
+    if case == "cycle":
+        cause.__cause__ = error
+    if case == "deep":
+        node = cause
+        for _ in range(12):
+            node.__cause__ = httpx.ReadTimeout(secret)
+            node = node.__cause__
+        expected = ["HMCTransportError"] + ["ReadTimeout"] * 7
+    if case == "context":
+        error.__cause__ = None
+        error.__context__ = cause
+        error.__suppress_context__ = False
+    if case == "suppressed":
+        error.__cause__ = None
+        error.__context__ = cause
+        error.__suppress_context__ = True
+        expected = ["HMCTransportError"]
+    if case == "write-failure":
+        save = arm.save
+
+        def fail_diagnostic(path, value):
+            if path.name.startswith("failure-"):
+                raise OSError(secret)
+            save(path, value)
+
+        monkeypatch.setattr(arm, "save", fail_diagnostic)
+
+    async def fail(*args, **kwargs):
+        clock[0] = 100.125
+        raise error
+
+    request = AsyncMock(side_effect=fail)
+    monkeypatch.setattr(arm.HMCClient, "_request", request)
+    path = "/rest/api/web/Logon" if case == "auth" else "/rest/api/uom/example"
+    try:
+        with pytest.raises(type(error)) as caught:
+            await api._request("GET", path)
+        assert caught.value is error
+        assert request.await_count == api.budget.used == 1
+        assert api.config.timeout == api.config.ssh_timeout == 15
+        diagnostic = tmp_path / "failure-1.json"
+        if case == "auth":
+            assert list(tmp_path.iterdir()) == []
+        elif case == "write-failure":
+            assert not diagnostic.exists()
+            assert any("diagnostic" in note for note in error.__notes__)
+            assert all(secret not in note for note in error.__notes__)
+        else:
+            raw = diagnostic.read_text()
+            assert secret not in raw
+            assert json.loads(raw) == {
+                "method": "GET",
+                "path": path,
+                "elapsed_ms": 125,
+                "exception_classes": expected,
+                "deadline_remaining_ms": None if case == "unbounded" else 19875,
+                "transport_count": 1,
+            }
+            assert diagnostic.stat().st_mode & 0o077 == 0
+    finally:
+        await api._http.aclose()
