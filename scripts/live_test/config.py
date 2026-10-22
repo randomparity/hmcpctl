@@ -33,6 +33,8 @@ class LiveTestConfig:
     scratch_pv_name: str = ""
     scratch_vg_name: str = ""
     profile_artifact_suffix_hex_length: int = 16
+    partition_profile_contract_packet: str = ""
+    partition_profile_contract_sha256: str = ""
     system_profile_members_json: str = ""
     system_profile_writer_window: bool = False
     system_profile_activation_action: str = "none"
@@ -153,6 +155,8 @@ class LiveTestConfig:
     #: export cannot redirect an arm that creates and deletes partitions
     #: (ADR 0115).
     _OPTIONAL_CONFIG_FIELDS: ClassVar[dict[str, str]] = {
+        "LIVE_TEST_PARTITION_PROFILE_CONTRACT_PACKET": "partition_profile_contract_packet",
+        "LIVE_TEST_PARTITION_PROFILE_CONTRACT_SHA256": "partition_profile_contract_sha256",
         "LIVE_TEST_SYSTEM_PROFILE_MEMBERS_JSON": "system_profile_members_json",
         "LIVE_TEST_SYSTEM_PROFILE_WRITER_WINDOW": "system_profile_writer_window",
         "LIVE_TEST_SYSTEM_PROFILE_ACTIVATION_ACTION": "system_profile_activation_action",
@@ -487,6 +491,8 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
     parsed.setdefault("scratch_vg_name", "")
     parsed.setdefault("profile_artifact_suffix_hex_length", 16)
     for name in (
+        "partition_profile_contract_packet",
+        "partition_profile_contract_sha256",
         "system_profile_members_json",
         "system_profile_writer_window",
         "system_profile_activation_action",

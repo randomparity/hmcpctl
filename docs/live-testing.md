@@ -1437,3 +1437,96 @@ sequence. Missing stages, retained residue, partial execution or unreadable evid
 CLEAN. Run it after every outcome, including interruption. Preserve raw results privately;
 only the standard evidence renderer filters them for public use. Product native proof has not
 run merely because the offline arm tests or historical source calibration passed.
+
+## Disposable saved-profile contract experiment (#1724)
+
+`partition-profile-contract` is an opt-in diagnostic arm (subtask 45), excluded from
+`all` and `round2`. It creates one inactive AIX/Linux partition, stamps normal ownership,
+updates its base saved profile from 512 to 768 MiB, makes two successive REST profile
+copies, updates the second copy to 1024 MiB, and deletes the known owned inactive
+partition with its profiles. It never activates a partition, changes a default profile,
+invokes force-save, or writes VIOS/storage/network/system-profile configuration.
+
+This arm tests a finite sparse shape: 512/512/1024 MiB, one capped shared virtual CPU,
+0.05 minimum/desired/maximum processing units, two virtual slots, no adapters, and at
+most three profiles. It refuses a different release than V10R3 SP1060 build2408210051,
+insufficient capacity, an unaligned memory block, a system-profile entry, an unsafe
+stay-on policy, or existing residue under its reserved `hmcpctl-live-prof-` prefix.
+The original partition/profile/policy baseline must remain equal; only the already
+observed monotonic top-level runtime Uptime advance is exempted.
+
+A private, operator-reviewed packet binds the exact target/account/owner and deployed
+revision. Store it as a mode-0600 regular file in an owned mode-0700 directory outside
+the checkout. The same directory, named by `window_dir`, holds once-only admission,
+intent, raw non-authentication responses and recovery receipts. Error bodies are not
+retained because the HMC can echo authentication headers in them. The packet has exactly
+these fields; substitute the real authorized values privately:
+
+```json
+{
+  "authorized": true,
+  "host": "hmc.example.test",
+  "port": 12443,
+  "user": "example-account",
+  "agent_id": "example-agent",
+  "system_uuid": "11111111-1111-4111-8111-111111111111",
+  "system_name": "sys-R1",
+  "mtms": "9009-42A*REDACTED-SERIAL",
+  "expected_build": "2408210051",
+  "tested_commit": "<full verified git HEAD>",
+  "tested_tree": "<full verified git HEAD^{tree}>",
+  "fixture": "hmcpctl-live-prof-a1b2c3d4",
+  "base": "q1724-base",
+  "copies": ["q1724-copy-a", "q1724-copy-b"],
+  "caller": "q1724-a1b2c3d4",
+  "window_dir": "/private/authorized-profile-window"
+}
+```
+
+The effective HMC configuration must match the packet before authentication. Imported
+package source, clean deployed HEAD and tree must match the reviewed candidate. A packet
+is an execution binding for an already granted window; setting `authorized` is not a
+substitute for operator approval. No packet, target or candidate may be substituted
+within an attempt. Set these optional keys in the ignored `.env` beside the runner's
+normal required settings:
+
+```dotenv
+LIVE_TEST_PARTITION_PROFILE_CONTRACT_PACKET=/private/authorized-profile-window/packet.json
+LIVE_TEST_PARTITION_PROFILE_CONTRACT_SHA256=<SHA256 of the exact packet bytes>
+```
+
+Run from that verified checkout, with `PROFILE_WINDOW` naming the same existing private
+directory and `PROFILE_RESULTS` a fresh path there. The native admission receipt is
+once-only and the arm must start within 60 seconds of its beginning:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group partition-profile-contract
+uv run --no-sync python scripts/live_partition_profile_contract.py --results-file "$PROFILE_RESULTS"
+uv run --no-sync python scripts/live_test_recovery.py --results "$PROFILE_RESULTS"
+uv run --no-sync python scripts/live_test_evidence.py "$PROFILE_RESULTS"
+```
+
+An external operator/controller must run recovery after the arm has terminated even
+when its command failed or timed out; do not condition recovery on a zero arm exit.
+The ten-minute total window allocates at most seven minutes to admission plus the arm,
+two minutes to independent recovery, and one minute to orchestration. The transport
+upper bound is 192, including authentication and SSH: admission plus the arm share 160,
+with 32 reserved for recovery. Namespace-read reservations can overcount a failed call,
+never undercount it. Logout slots are reserved. There is no retry, automatic resume,
+exception rollback or profile-capacity fallback.
+
+Each attempted write gets a durable intent first. Lost replies, missing identities,
+stale trees/ETags, foreign ownership or uncertain membership retain the fixture and
+handles. A captured known configuration difference stops the copy chain; cleanup may
+run only with settled effects, fresh exact fixture state, normal ownership and the
+unchanged original baseline. Independent recovery always rereads the original baseline
+and fixture absence, and cannot turn a lost mutation reply into a known success.
+
+The first memory patch records HMC-added optional fields explicitly before freezing
+its returned state as the copy experiment's baseline. Absent, zero and false are never
+made equivalent. Read-only `ManualEntitledModeEnabled` is preserved in comparison.
+Results distinguish strict whole-UOM equality from a diagnostic configuration comparison
+that separately lists root name, SettingID and metadata deltas. Complete raw structural
+differences remain private. Neither diagnostic equality nor clean cleanup admits a
+production recovery copy, establishes VIOS/adapter/force-save behavior, or promotes a
+capability's maturity. Use the filtered evidence generator for public summaries.

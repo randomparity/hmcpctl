@@ -1,0 +1,304 @@
+{
+  "AllowPerformanceDataCollection": "false",
+  "AssociatedManagedSystem": {
+    "href": "https://hmc.test:12443/rest/api/uom/ManagedSystem/00000000-0000-4000-8000-000000000010",
+    "rel": "related"
+  },
+  "AssociatedPersistentMemoryConfiguration": {
+    "@attrs": {
+      "ksv": "V1_10_0"
+    },
+    "CurrentDramPersistentMemoryVolumes": {
+      "@attrs": {
+        "ksv": "V1_10_0"
+      },
+      "text": "0"
+    },
+    "CurrentPersistentMemoryVolumes": {
+      "@attrs": {
+        "ksv": "V1_10_0"
+      },
+      "text": "0"
+    },
+    "MaximumDramPersistentMemoryVolumes": {
+      "@attrs": {
+        "ksv": "V1_10_0"
+      },
+      "text": "4"
+    },
+    "MaximumPersistentMemoryVolumes": {
+      "@attrs": {
+        "ksv": "V1_10_0"
+      },
+      "text": "964"
+    },
+    "Metadata": {
+      "Atom": ""
+    }
+  },
+  "AvailabilityPriority": "127",
+  "BootListInformation": {
+    "@attrs": {
+      "ksv": "V1_5_0"
+    },
+    "BootDeviceList": {
+      "group": "Advanced",
+      "ksv": "V1_5_0"
+    },
+    "LastBootedDeviceString": {
+      "group": "Advanced",
+      "ksv": "V1_5_0"
+    },
+    "Metadata": {
+      "Atom": ""
+    },
+    "PendingBootString": {
+      "group": "Advanced",
+      "ksv": "V1_5_0"
+    },
+    "ShadowBootDeviceList": {
+      "group": "Advanced",
+      "ksv": "V1_5_0"
+    }
+  },
+  "BootMode": {
+    "@attrs": {
+      "ksv": "V1_10_1"
+    },
+    "text": "Normal"
+  },
+  "CurrentProcessorCompatibilityMode": "POWER9_Base",
+  "CurrentProfileSync": "Disabled",
+  "CurrentSecureBoot": {
+    "@attrs": {
+      "ksv": "V1_8_0"
+    },
+    "text": "0"
+  },
+  "DefaultProfileName": "q1724-base",
+  "Description": "[hmcpctl owner:hmcpctl created:2026-10-22] [caller q1724-1234abcd]",
+  "HardwareAcceleratorQoS": {
+    "@attrs": {
+      "ksv": "V1_7_0"
+    },
+    "Metadata": {
+      "Atom": ""
+    }
+  },
+  "HasDedicatedProcessorsForMigration": "true",
+  "HasPhysicalIO": {
+    "@attrs": {
+      "ksv": "V1_7_0"
+    },
+    "text": "false"
+  },
+  "HostEthernetAdapterLogicalPorts": {
+    "Metadata": {
+      "Atom": ""
+    }
+  },
+  "IsBootable": {
+    "@attrs": {
+      "ksv": "V1_3_0"
+    },
+    "text": "false"
+  },
+  "IsOperationInProgress": "false",
+  "IsRedundantErrorPathReportingEnabled": "false",
+  "IsServicePartition": "false",
+  "IsTimeReferencePartition": "false",
+  "IsVirtualServiceAttentionLEDOn": "false",
+  "IsVirtualTrustedPlatformModuleEnabled": "false",
+  "KeyStoreSize": {
+    "@attrs": {
+      "ksv": "V1_11_0"
+    },
+    "text": "0"
+  },
+  "KeylockPosition": "normal",
+  "KvmCapable": {
+    "@attrs": {
+      "ksv": "V1_17_0"
+    },
+    "text": "false"
+  },
+  "LastActivatedProfile": {
+    "ksv": "V1_7_0"
+  },
+  "LogicalSerialNumber": "REDACTED-SERIAL",
+  "Metadata": {
+    "Atom": {
+      "AtomCreated": "1792649227399",
+      "AtomID": "00000000-0000-4000-8000-000000000011"
+    }
+  },
+  "MigrationDisable": {
+    "@attrs": {
+      "ksv": "V1_3_0"
+    },
+    "text": "false"
+  },
+  "MigrationState": "Not_Migrating",
+  "MigrationStorageViosDataStatus": {
+    "@attrs": {
+      "ksv": "V1_3_0"
+    },
+    "text": "No_Data"
+  },
+  "OperatingSystemType": {
+    "@attrs": {
+      "ksv": "V1_8_0"
+    },
+    "text": "AIX/Linux"
+  },
+  "OperatingSystemVersion": "Unknown",
+  "PartitionCapabilities": {
+    "DynamicLogicalPartitionIOCapable": "false",
+    "DynamicLogicalPartitionMemoryCapable": "false",
+    "DynamicLogicalPartitionProcessorCapable": "false",
+    "InternalAndExternalIntrusionDetectionCapable": "false",
+    "Metadata": {
+      "Atom": ""
+    },
+    "ResourceMonitoringControlOperatingSystemShutdownCapable": "false"
+  },
+  "PartitionID": "2",
+  "PartitionIOConfiguration": {
+    "CurrentMaximumVirtualIOSlots": "8",
+    "MaximumVirtualIOSlots": "8",
+    "Metadata": {
+      "Atom": ""
+    },
+    "ProfileIOSlots": {
+      "Metadata": {
+        "Atom": ""
+      }
+    }
+  },
+  "PartitionMemoryConfiguration": {
+    "ActiveMemoryExpansionEnabled": "false",
+    "ActiveMemorySharingEnabled": "false",
+    "CurrentExpansionFactor": "0.0",
+    "CurrentHardwarePageTableRatio": "7",
+    "CurrentHugePageCount": "0",
+    "CurrentMaximumHugePageCount": "0",
+    "CurrentMaximumMemory": "0",
+    "CurrentMemory": "0",
+    "CurrentMinimumHugePageCount": "0",
+    "CurrentMinimumMemory": "0",
+    "DesiredHugePageCount": "0",
+    "DesiredMemory": "0",
+    "ExpansionFactor": "0.0",
+    "HardwarePageTableRatio": "7",
+    "MaximumHugePageCount": "0",
+    "MaximumMemory": "0",
+    "MemoryEncryptionHardwareAccessEnabled": "true",
+    "MemoryExpansionEnabled": "false",
+    "MemoryExpansionHardwareAccessEnabled": "true",
+    "Metadata": {
+      "Atom": ""
+    },
+    "MinimumHugePageCount": "0",
+    "MinimumMemory": "0",
+    "PhysicalPageTableRatio": {
+      "@attrs": {
+        "ksv": "V1_6_0"
+      },
+      "text": "6"
+    },
+    "RedundantErrorPathReportingEnabled": "false",
+    "RuntimeHugePageCount": "0",
+    "RuntimeMemory": "0",
+    "RuntimeMinimumMemory": "0",
+    "SharedMemoryEnabled": "false"
+  },
+  "PartitionName": "hmcpctl-live-prof-1234abcd",
+  "PartitionProcessorConfiguration": {
+    "CurrentDedicatedProcessorConfiguration": {
+      "CurrentMaximumProcessors": "0",
+      "CurrentMinimumProcessors": "0",
+      "CurrentProcessors": "0",
+      "Metadata": {
+        "Atom": ""
+      },
+      "RunProcessors": "0"
+    },
+    "CurrentHasDedicatedProcessors": "true",
+    "CurrentSharingMode": "sre idle proces",
+    "DedicatedProcessorConfiguration": {
+      "DesiredProcessors": "0",
+      "MaximumProcessors": "0",
+      "Metadata": {
+        "Atom": ""
+      },
+      "MinimumProcessors": "0"
+    },
+    "HasDedicatedProcessors": "true",
+    "Metadata": {
+      "Atom": ""
+    },
+    "RuntimeHasDedicatedProcessors": "true",
+    "SharedProcessorConfiguration": {
+      "Metadata": {
+        "Atom": ""
+      }
+    },
+    "SharingMode": "sre idle proces"
+  },
+  "PartitionProfiles": {
+    "link": [
+      {
+        "href": "https://hmc.test:12443/rest/api/uom/LogicalPartition/00000000-0000-4000-8000-000000000011/LogicalPartitionProfile/00000000-0000-4000-8000-000000000012",
+        "rel": "related"
+      },
+      {
+        "href": "https://hmc.test:12443/rest/api/uom/LogicalPartition/00000000-0000-4000-8000-000000000011/LogicalPartitionProfile/00000000-0000-4000-8000-000000000013",
+        "rel": "related"
+      }
+    ]
+  },
+  "PartitionState": "not activated",
+  "PartitionType": "AIX/Linux",
+  "PartitionUUID": "00000000-0000-4000-8000-000000000011",
+  "PendingProcessorCompatibilityMode": "default",
+  "PendingSecureBoot": {
+    "@attrs": {
+      "ksv": "V1_8_0"
+    },
+    "text": "0"
+  },
+  "PowerOnWithHypervisor": {
+    "@attrs": {
+      "ksv": "V1_2_0"
+    },
+    "text": "false"
+  },
+  "PowerVMManagementCapable": {
+    "@attrs": {
+      "ksv": "V1_5_0"
+    },
+    "text": "false"
+  },
+  "ProgressPartitionDataRemaining": "0",
+  "ProgressPartitionDataTotal": "0",
+  "ReferenceCode": "",
+  "RemoteRestartCapable": "false",
+  "RemoteRestartState": "Invalid",
+  "ResourceMonitoringControlState": "inactive",
+  "SimplifiedRemoteRestartCapable": {
+    "@attrs": {
+      "ksv": "V1_2_0"
+    },
+    "text": "false"
+  },
+  "SuspendCapable": "false",
+  "SystemName": "sys-R1",
+  "Uptime": {
+    "@attrs": {
+      "group": "Advanced",
+      "ksv": "V1_15_0"
+    },
+    "text": "0"
+  },
+  "VirtualSerialNumber": "REDACTED-SERIAL"
+}

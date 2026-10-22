@@ -48,6 +48,7 @@ from live_test import (
     dedicated_pcie,
     lpar_config,
     lpar_power,
+    partition_profile_contract,
     profiles,
     runner,
     storage_lifecycle,
@@ -468,12 +469,36 @@ def _system_profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _profile_contract_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        partition_profile_contract.configured(config)
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        return ArmVerdict(
+            partition_profile_contract.GROUP,
+            False,
+            type(error).__name__,
+            (),
+            config.system_name,
+        )
+    return ArmVerdict(
+        partition_profile_contract.GROUP,
+        True,
+        "exact private authorized packet required",
+        (
+            "one inactive AIX/Linux fixture512–1024MiB/1 capped vCPU0.05units; max3profiles; seven once-only effect attempts",
+            "no activation,force-save,VIOS or other-HMC writes; bounded192transports/10min; independent recovery required",
+        ),
+        config.system_name,
+    )
+
+
 _ARM_VERDICTS = {
     "dedicated": _dedicated_verdict,
     "bare-cec": _bare_cec_verdict,
     "profiles": _profiles_verdict,
     "profile-artifacts": _profile_artifacts_verdict,
     "system-profiles": _system_profiles_verdict,
+    "partition-profile-contract": _profile_contract_verdict,
     "pcm": _pcm_verdict,
     "vios-backup": _vios_backup_verdict,
     "network": _network_verdict,
@@ -693,6 +718,27 @@ def main(argv: list[str] | None = None) -> int:
                 config.system_name,
             ),
         )
+
+    if args.group == partition_profile_contract.GROUP:
+        if config is None or not credentials_ok or not verdicts[0].runnable:
+            print(
+                "profile contract preflight refused: explicit packet/config/credentials required"
+            )
+            return 1
+        if args.skip_hardware:
+            print(
+                "configuration only; native profile-contract admission NOT established"
+            )
+            return 0
+        from live_test.profile_contract_run import preflight
+
+        try:
+            asyncio.run(preflight(HMCConfig(), config))
+        except Exception as error:  # noqa: BLE001 — private diagnostics never escape this boundary
+            print(f"profile contract native preflight refused: {type(error).__name__}")
+            return 2
+        print("profile contract native read-only preflight admitted; no effects")
+        return 0
 
     if args.group == "system-profiles":
         if config is None or not credentials_ok or not verdicts[0].runnable:
