@@ -69,7 +69,9 @@ async def exercise_lpar_physical_io(client: Client, state: RunState) -> None:
         lpar = data.get("lpar")
         run.uuid = lpar.get("UUID") if isinstance(lpar, dict) else None
         run.created = bool(run.uuid)
-        steps = data.get("steps", [])
+        steps = data.get("steps")
+        if not isinstance(steps, list):
+            raise TypeError("IBM i creation returned malformed workflow steps")
         verified = (
             data.get("workflow_completed") is True
             and data.get("ownership_stamped") is True
@@ -85,7 +87,7 @@ async def exercise_lpar_physical_io(client: Client, state: RunState) -> None:
                 "IBM i console profile readback/ownership was not confirmed"
             )
         state.record(SUBTASK, "explicit HMC console creation", "PASS", data)
-    except (HMCError, ValueError, PermissionError) as error:
+    except (HMCError, ValueError, TypeError, PermissionError) as error:
         state.record(SUBTASK, GROUP, "FAIL", str(error))
     finally:
         await _teardown(client, state, run, inactive_only=True)

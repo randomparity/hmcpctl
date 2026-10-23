@@ -12,7 +12,7 @@ from live_test import lpar_physical_io as arm
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize("failure", [False, True, "malformed"])
 async def test_arm_always_tears_down_and_compares(monkeypatch, failure):
     state = SimpleNamespace(
         group=arm.GROUP,
@@ -24,12 +24,14 @@ async def test_arm_always_tears_down_and_compares(monkeypatch, failure):
     )
     state.call = AsyncMock(
         return_value=(
-            "FAIL" if failure else "PASS",
+            "FAIL" if failure is True else "PASS",
             {
                 "lpar": {"UUID": "new"},
                 "ownership_stamped": True,
                 "workflow_completed": True,
-                "steps": [{"step": "physical_io", "status": "ok"}],
+                "steps": None
+                if failure == "malformed"
+                else [{"step": "physical_io", "status": "ok"}],
             },
         )
     )
