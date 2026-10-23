@@ -11,6 +11,7 @@ from conftest import make_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.security_policy import (
     admit_security_policy,
     parse_security_policy,
@@ -603,5 +604,352 @@ async def test_fixed_native_record_refuses_delimiters(policy_target, delimiter):
             "sys",
             f"part{delimiter}extra",
             LparSecurityPolicy(secure_boot=0),
+        )
+    command.assert_not_awaited()
+
+
+@pytest.fixture
+def creation_target(policy_target, monkeypatch):
+    from hmcpctl.operations.lpar import core
+
+    hmc, entry, command = policy_target
+    hmc.find_partition_by_name.side_effect = [None, entry]
+    entry["Resource"]["PendingSecureBoot"] = "0"
+    monkeypatch.setattr(
+        core, "resolve_system_cli_name", AsyncMock(return_value="sys-R1")
+    )
+    monkeypatch.setattr(
+        core, "stamp_created_lpar_ownership", AsyncMock(return_value=(True, ()))
+    )
+    monkeypatch.setattr(core, "require_memory_within_system", AsyncMock())
+    return hmc, entry, command
+
+
+@pytest.mark.asyncio
+async def test_creation_policy_composes_once(creation_target, monkeypatch):
+    import shlex
+
+    from hmcpctl.documents.lpar import (
+        LparReportingSettings,
+        LparResources,
+        LparSettings,
+    )
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+    from hmcpctl.ssh.profiles import ProfileIoSlot
+
+    hmc, _entry, command = creation_target
+    monkeypatch.setattr(core, "admit_creation_io", AsyncMock())
+    monkeypatch.setattr(
+        core,
+        "created_io_step",
+        AsyncMock(return_value=WorkflowStep("physical_io", "ok")),
+    )
+    for name in (
+        "_created_settings_step",
+        "_created_reporting_step",
+        "_created_vtpm_step",
+    ):
+        monkeypatch.setattr(
+            core, name, AsyncMock(return_value=WorkflowStep(name, "ok"))
+        )
+    monkeypatch.setattr(core, "read_vtpm_capabilities", AsyncMock())
+    monkeypatch.setattr(core, "admit_vtpm", lambda *a: None)
+    creation = core.LparCreation(
+        "part-R1",
+        "AIX/Linux",
+        LparResources(desired_memory=1024),
+        physical_io=LparPhysicalIO(io_slots=(ProfileIoSlot("21010010", None, False),)),
+        partition_id=7,
+        max_virtual_slots=40,
+        settings=LparSettings(time_ref=True),
+        reporting_settings=LparReportingSettings(work_group_id=0),
+        vtpm_settings=LparVtpmSettings(False),
+        security_policy=LparSecurityPolicy(
+            secure_boot=0, keystore_signed_updates=False
+        ),
+    )
+    result = await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+    command.assert_awaited_once()
+    record = shlex.split(command.await_args.args[1])[-1]
+    for field in (
+        "io_slots=21010010//0",
+        "lpar_id=7",
+        "max_virtual_slots=40",
+        "time_ref=1",
+        "work_group_id=0",
+        "vtpm_enabled=0",
+        "secure_boot=0",
+        "keystore_signed_updates=0",
+    ):
+        assert record.count(field) == 1
+    assert result.security_policy_step.status == "ok"
+    hmc.create_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lpar_policy_cpu_only_default_capacity(creation_target, monkeypatch):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.memory_bound import require_memory_within_system
+
+    hmc, _, command = creation_target
+    hmc.list_system_summaries.return_value[0]["State"] = "operating"
+    hmc.get_managed_system.return_value["Resource"][
+        "AssociatedSystemMemoryConfiguration"
+    ] = {"ConfigurableSystemMemory": "2048"}
+    monkeypatch.setattr(
+        core, "require_memory_within_system", require_memory_within_system
+    )
+    with pytest.raises(ValueError, match="4096.*2048"):
+        await core.create_and_stamp_lpar(
+            hmc,
+            SYSTEM,
+            core.LparCreation(
+                "part-R1",
+                "AIX/Linux",
+                LparResources(desired_procs=0.1),
+                security_policy=LparSecurityPolicy(secure_boot=0),
+            ),
+        )
+    command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure", ["missing", "wrong", "name", "read-uuid", "read-failure", "mismatch"]
+)
+async def test_created_policy_wrong_uuid_stops_followups(
+    creation_target, monkeypatch, failure
+):
+    from copy import deepcopy
+
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar import core
+
+    hmc, entry, command = creation_target
+    if failure == "missing":
+        entry.pop("UUID")
+    elif failure == "wrong":
+        entry["UUID"] = "invalid"
+    elif failure == "name":
+        entry["Resource"]["PartitionName"] = "replacement"
+    elif failure == "read-uuid":
+        wrong = deepcopy(entry)
+        wrong["UUID"] = SYSTEM
+        hmc.get_logical_partition.return_value = wrong
+    elif failure == "read-failure":
+        hmc.get_logical_partition.side_effect = HMCError("secret-host secret-key")
+    else:
+        entry["Resource"]["PendingSecureBoot"] = "1"
+    apply = AsyncMock()
+    monkeypatch.setattr(core, "apply_lpar_profile_via_cli", apply)
+    result = await core.create_and_stamp_lpar(
+        hmc,
+        SYSTEM,
+        core.LparCreation(
+            "part-R1",
+            "AIX/Linux",
+            LparResources(desired_memory=1024),
+            apply_profile=True,
+            security_policy=LparSecurityPolicy(secure_boot=0),
+        ),
+    )
+    assert result.security_policy_step.status == "error"
+    assert "secret-host" not in repr(result.security_policy_step)
+    apply.assert_not_awaited()
+    command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "domain", ["stamp", "settings", "reporting", "vtpm", "io", "policy", None]
+)
+@pytest.mark.parametrize("missing", [False, True])
+async def test_apply_waits_for_requested_domain_verification(
+    creation_target, monkeypatch, domain, missing
+):
+    from hmcpctl.documents.lpar import (
+        LparReportingSettings,
+        LparResources,
+        LparSettings,
+    )
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    hmc, _, _ = creation_target
+    events = []
+
+    async def verified(name):
+        events.append(name)
+        if domain == name and missing:
+            return None
+        return WorkflowStep(name, "error" if domain == name else "ok")
+
+    for name, helper in [
+        ("settings", "_created_settings_step"),
+        ("reporting", "_created_reporting_step"),
+        ("vtpm", "_created_vtpm_step"),
+        ("io", "created_io_step"),
+        ("policy", "_created_security_policy_step"),
+    ]:
+
+        async def read(*args, name=name):
+            return await verified(name)
+
+        monkeypatch.setattr(core, helper, read)
+    monkeypatch.setattr(
+        core,
+        "stamp_created_lpar_ownership",
+        AsyncMock(return_value=(domain != "stamp", ())),
+    )
+    monkeypatch.setattr(core, "read_vtpm_capabilities", AsyncMock())
+    monkeypatch.setattr(core, "admit_vtpm", lambda *args: None)
+    monkeypatch.setattr(core, "admit_creation_io", AsyncMock())
+    apply = AsyncMock(side_effect=lambda *a: events.append("apply"))
+    monkeypatch.setattr(core, "apply_lpar_profile_via_cli", apply)
+    # The physical-I/O requested property is exercised through its real typed declaration.
+    from hmcpctl.ssh.profiles import ProfileIoSlot
+
+    creation = core.LparCreation(
+        "part-R1",
+        "AIX/Linux",
+        LparResources(desired_memory=1024),
+        apply_profile=True,
+        settings=LparSettings(time_ref=True),
+        reporting_settings=LparReportingSettings(work_group_id=0),
+        vtpm_settings=LparVtpmSettings(False),
+        physical_io=LparPhysicalIO(io_slots=(ProfileIoSlot("21010010", None, False),)),
+        security_policy=LparSecurityPolicy(secure_boot=0),
+    )
+    result = await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+    assert apply.await_count == int(domain is None)
+    if domain is None:
+        assert events[-1] == "apply"
+        assert result.apply_step.status == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native", [False, True])
+async def test_empty_policy_preserves_each_route(creation_target, native):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar import core
+
+    hmc, entry, command = creation_target
+    hmc.create_logical_partition.return_value = entry
+    result = await core.create_and_stamp_lpar(
+        hmc,
+        SYSTEM,
+        core.LparCreation(
+            "part-R1",
+            "AIX/Linux",
+            LparResources() if native else LparResources(desired_memory=1024),
+            security_policy=LparSecurityPolicy(),
+        ),
+    )
+    assert result.security_policy_step is None
+    assert command.await_count == int(native)
+    assert hmc.create_logical_partition.await_count == int(not native)
+    hmc.get_console_info.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy",
+    [
+        LparSecurityPolicy(keystore_signed_updates_without_verification=False),
+        LparSecurityPolicy(linux_dynamic_key_secure_boot=False),
+    ],
+)
+async def test_creation_policy_invalid_context_refuses_before_create(
+    creation_target, policy
+):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar import core
+
+    hmc, _, command = creation_target
+    with pytest.raises(ValueError):
+        await core.create_and_stamp_lpar(
+            hmc,
+            SYSTEM,
+            core.LparCreation(
+                "part-R1",
+                "OS400",
+                LparResources(desired_memory=1024),
+                security_policy=policy,
+            ),
+        )
+    command.assert_not_awaited()
+    hmc.find_partition_by_name.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [None, "uuid", "missing-policy", "read"])
+async def test_vios_creation_uses_contained_immutable_policy_readback(
+    policy_target, monkeypatch, failure
+):
+    from copy import deepcopy
+
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.vios import core
+
+    hmc, entry, command = policy_target
+    entry["Resource"]["PartitionType"] = "Virtual IO Server"
+    hmc.find_vios_by_name.side_effect = [None, entry]
+    monkeypatch.setattr(core, "require_memory_within_system", AsyncMock())
+    if failure == "uuid":
+        wrong = deepcopy(entry)
+        wrong["UUID"] = SYSTEM
+        hmc.get_uom.return_value = wrong
+    elif failure == "missing-policy":
+        entry["Resource"].pop("PendingSecureBoot")
+    elif failure == "read":
+        hmc.get_uom.side_effect = HMCError("secret-host secret-key")
+    if failure:
+        with pytest.raises(HMCError, match="exists or may exist") as error:
+            await core.create_vios(
+                hmc,
+                SYSTEM,
+                "part-R1",
+                LparResources(desired_memory=1024),
+                security_policy=LparSecurityPolicy(secure_boot=0),
+            )
+        assert "secret-host" not in str(error.value)
+    else:
+        assert (
+            await core.create_vios(
+                hmc,
+                SYSTEM,
+                "part-R1",
+                LparResources(desired_memory=1024),
+                security_policy=LparSecurityPolicy(secure_boot=0),
+            )
+            == entry
+        )
+    command.assert_awaited_once()
+    hmc.get_uom.assert_awaited_once_with("VirtualIOServer", PARTITION)
+
+
+@pytest.mark.asyncio
+async def test_creation_policy_keylock_is_not_silently_lost(creation_target):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar import core
+
+    hmc, _, command = creation_target
+    with pytest.raises(ValueError, match="cannot represent keylock"):
+        await core.create_and_stamp_lpar(
+            hmc,
+            SYSTEM,
+            core.LparCreation(
+                "part-R1",
+                "AIX/Linux",
+                LparResources(desired_memory=1024),
+                keylock="normal",
+                security_policy=LparSecurityPolicy(secure_boot=0),
+            ),
         )
     command.assert_not_awaited()
