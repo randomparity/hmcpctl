@@ -674,3 +674,144 @@ async def test_combined_creation_and_vnic_capacity_rejects_before_create(
             SimpleNamespace(config=object()), "system", creation, collection
         )
     create.assert_not_awaited()
+
+
+@pytest.fixture
+def sriov_creation_inventory(admission, monkeypatch):
+    from hmcpctl.operations.lpar import assignments, core
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+    from hmcpctl.operations.virtualization import pcie
+
+    raw = [
+        {"adapter_id": "1", "logical_port_id": "27004002", "location_code": "port-0-S1"}
+    ]
+    configured = AsyncMock(return_value=[])
+    unused = AsyncMock(return_value=raw)
+    observed = AsyncMock(return_value=raw)
+    monkeypatch.setattr(
+        pcie,
+        "read_sriov_environment",
+        AsyncMock(
+            return_value=("Version: 10\nRelease: 3\nService Pack: 1060", "8375-42A")
+        ),
+    )
+    monkeypatch.setattr(
+        pcie,
+        "list_sriov_adapter_rows",
+        AsyncMock(
+            return_value=[
+                {
+                    "adapter_id": "1",
+                    "config_state": "sriov",
+                    "functional_state": "1",
+                    "phys_loc": "adapter",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        pcie,
+        "list_sriov_physical_port_rows",
+        AsyncMock(
+            return_value=[
+                {
+                    "adapter_id": "1",
+                    "phys_port_id": str(index),
+                    "state": "1",
+                    "phys_port_loc": f"port-{index}",
+                    "min_eth_capacity_granularity": "1",
+                }
+                for index in (0, 1)
+            ]
+        ),
+    )
+    monkeypatch.setattr(pcie, "list_sriov_configured_logical_port_rows", configured)
+    monkeypatch.setattr(
+        assignments, "list_sriov_configured_logical_port_rows", configured
+    )
+    monkeypatch.setattr(
+        assignments, "list_vnic_backing_rows", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(pcie, "list_sriov_unconfigured_logical_port_rows", unused)
+    monkeypatch.setattr(
+        admission.module, "list_sriov_unconfigured_logical_port_rows", observed
+    )
+    admission.hmc.find_partition_by_name = AsyncMock(return_value=None)
+    monkeypatch.setattr(core, "resolve_system_uuid", AsyncMock(return_value="system"))
+    monkeypatch.setattr(core, "require_memory_within_system", AsyncMock())
+    dispatch = AsyncMock(return_value=("system", None, {"UUID": "created"}, None))
+    monkeypatch.setattr(core, "_create_via_cli", dispatch)
+    monkeypatch.setattr(
+        core, "stamp_created_lpar_ownership", AsyncMock(return_value=(True, ()))
+    )
+    monkeypatch.setattr(
+        core,
+        "created_io_step",
+        AsyncMock(return_value=WorkflowStep("physical_io", "ok")),
+    )
+    return SimpleNamespace(
+        core=core,
+        hmc=admission.hmc,
+        raw=raw,
+        configured=configured,
+        unused=unused,
+        observed=observed,
+        dispatch=dispatch,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "problem", ["valid", "missing", "duplicate", "configured", "wrong-parent"]
+)
+async def test_sriov_creation_identity_admission_precedes_native_dispatch(
+    sriov_creation_inventory, problem
+):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.core import LparCreation
+
+    b = sriov_creation_inventory
+    if problem == "missing":
+        b.observed.return_value = []
+    elif problem == "duplicate":
+        b.observed.return_value = b.raw * 2
+    elif problem == "configured":
+        b.unused.return_value = []
+        b.configured.return_value = [
+            {
+                "adapter_id": "1",
+                "phys_port_id": "0",
+                "logical_port_id": "27004002",
+                "functional_state": "1",
+                "lpar_name": "other",
+                "lpar_id": "4",
+                "capacity": "2",
+                "max_capacity": "100",
+            }
+        ]
+    elif problem == "wrong-parent":
+        b.raw[0]["location_code"] = "port-1-S1"
+    creation = LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=256, desired_procs=0.1),
+        physical_io=LparPhysicalIO(console_slot="hmc"),
+        creation_sriov=(
+            SriovLogicalPortAssignment(
+                "default_profile", "1", "0", "27004002", Decimal(2)
+            ),
+        ),
+    )
+    if problem == "valid":
+        result = await b.core.create_and_stamp_lpar(b.hmc, "system", creation)
+        assert result.physical_io_step.status == "ok"
+        b.dispatch.assert_awaited_once()
+    else:
+        message = (
+            "uniquely unconfigured"
+            if problem in {"missing", "duplicate"}
+            else "selected physical port"
+        )
+        with pytest.raises(ValueError, match=message):
+            await b.core.create_and_stamp_lpar(b.hmc, "system", creation)
+        b.dispatch.assert_not_awaited()
