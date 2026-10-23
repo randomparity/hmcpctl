@@ -1189,6 +1189,10 @@
           {
             "variant": "c01-partition-settings",
             "parameters": []
+          },
+          {
+            "variant": "c02-partition-reporting",
+            "parameters": []
           }
         ],
         "missing_scope": []
@@ -5588,6 +5592,34 @@
         "implemented_scope": [
           {
             "variant": "c01-five-partition-settings",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.configure_reporting",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c02-partition-reporting",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.get_reporting_settings",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c02-partition-reporting",
             "parameters": []
           }
         ],

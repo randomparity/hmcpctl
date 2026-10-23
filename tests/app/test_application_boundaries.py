@@ -116,8 +116,9 @@ def test_create_mcp_returns_independent_complete_applications():
     # #1725 adds five system-profile operations through the existing policy boundary.
     # #1724 adds twelve fixed LPAR/VIOS saved-profile lifecycle tools.
     # #1762 adds typed partition settings configuration and readback.
-    assert len(asyncio.run(first.list_tools())) == 183
-    assert len(asyncio.run(second.list_tools())) == 183
+    # #1763 adds partition reporting configuration and readback.
+    assert len(asyncio.run(first.list_tools())) == 185
+    assert len(asyncio.run(second.list_tools())) == 185
 
 
 def test_operations_do_not_import_application_modules():

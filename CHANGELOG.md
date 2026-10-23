@@ -18,6 +18,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Partition creation and reporting configuration expose the five C02 fields in
+  their documented contexts, with IBM i admission, explicit false/zero/none,
+  ownership guards and verified/uncertain outcomes (#1763). Creation-only
+  redundant reporting and update-only IPL remain distinct. Live behavior stays
+  unevidenced until commit-bound execution.
+
 - LPAR create/configure supports five typed performance, availability-priority,
   time-reference, simplified-restart and migration flags, with explicit False/0,
   owning authorization and verified/uncertain configuration outcomes (#1762).

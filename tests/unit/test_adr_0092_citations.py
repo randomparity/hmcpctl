@@ -103,6 +103,7 @@ _CLASSIFIED_MUTATORS = frozenset(
         "clear_lpar_boot_order",
         "set_lpar_boot_order",
         "configure_lpar_settings",
+        "configure_lpar_reporting_settings",
         "configure_lpar_msp",
         "configure_lpar_processor_compatibility",
         "synchronize_lpar_profile",

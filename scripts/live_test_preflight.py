@@ -309,6 +309,20 @@ def _lpar_settings_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _lpar_reporting_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-reporting",
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            f"one inactive IBM i partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create; eight fixed reporting updates; delete and independent absence/resource comparison",
+            "no activation, guest clock, profile mutation or time_ref=True probe; IBM i eligibility must be established by the operator; existing scratch prefix must be absent",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the partitions and the VIOS volume the lpar-power arm (#1346) creates."""
     return ArmVerdict(
@@ -537,6 +551,7 @@ _ARM_VERDICTS = {
     "users": _users_verdict,
     "lpar-config": _lpar_config_verdict,
     "lpar-settings": _lpar_settings_verdict,
+    "lpar-reporting": _lpar_reporting_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,

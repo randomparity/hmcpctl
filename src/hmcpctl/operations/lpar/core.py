@@ -17,6 +17,7 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 from ...documents.lpar import (
     Keylock,
+    LparReportingSettings,
     LparResources,
     LparSettings,
     PartitionType,
@@ -34,6 +35,7 @@ from ...ssh.lpar import (
     apply_lpar_profile_via_cli,
     complete_create_resources,
     create_lpar_via_cli,
+    get_lpar_reporting_settings,
     get_lpar_settings,
     resolve_system_cli_name,
     validate_caller_token,
@@ -62,6 +64,9 @@ class LparCreation:
     # skipped apply step; None (not requested) adds no step.
     apply_profile: bool | None = None
     settings: LparSettings = field(default_factory=LparSettings)
+    reporting_settings: LparReportingSettings = field(
+        default_factory=LparReportingSettings
+    )
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,7 @@ class LparCreationResult:
     warnings: tuple[str, ...]
     apply_step: WorkflowStep | None = None
     settings_step: WorkflowStep | None = None
+    reporting_step: WorkflowStep | None = None
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -124,6 +130,7 @@ async def _create_via_cli(
         max_virtual_slots=creation.max_virtual_slots,
         partition_id=creation.partition_id,
         settings=creation.settings,
+        reporting_settings=creation.reporting_settings,
     )
     apply_step = (
         await _apply_created_profile(hmc, system_name, creation)
@@ -173,6 +180,13 @@ async def create_and_stamp_lpar(
     if not isinstance(creation.settings, LparSettings):
         raise TypeError("settings must be LparSettings")
     validate_partition_type(creation.partition_type)
+    if not isinstance(creation.reporting_settings, LparReportingSettings):
+        raise TypeError("reporting_settings must be LparReportingSettings")
+    creation.reporting_settings.validate_context("create", creation.partition_type)
+    if creation.reporting_settings.pairs() and creation.keylock is not None:
+        raise ValueError(
+            "Reporting settings cannot be combined with explicit keylock: CLI creation cannot represent keylock. Nothing was created."
+        )
     validate_keylock(creation.keylock)
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     # Scoped: the HMC-wide search misses partitions on a system it cannot
@@ -189,7 +203,11 @@ async def create_and_stamp_lpar(
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
     resources = complete_create_resources(creation.resources)
-    if resources is None or (creation.settings.pairs() and creation.keylock is None):
+    if (
+        resources is None
+        or creation.reporting_settings.pairs()
+        or (creation.settings.pairs() and creation.keylock is None)
+    ):
         # Only mksyscfg's all_resources=1 expresses a create with no resource values.
         system_name, apply_step, created_lpar, readback_error = await _create_via_cli(
             hmc, system_uuid, system_name_or_uuid, creation
@@ -267,6 +285,15 @@ async def create_and_stamp_lpar(
                 if creation.settings.pairs()
                 else None
             ),
+            reporting_step=(
+                WorkflowStep(
+                    "reporting_settings",
+                    "error",
+                    "Created partition readback unavailable; reporting settings unverified",
+                )
+                if creation.reporting_settings.pairs()
+                else None
+            ),
         )
     ownership_stamped, warnings = await stamp_created_lpar_ownership(
         hmc,
@@ -296,7 +323,38 @@ async def create_and_stamp_lpar(
         await _created_settings_step(
             hmc, system_uuid, system_name, creation, created_lpar
         ),
+        await _created_reporting_step(hmc, system_name, creation),
     )
+
+
+async def _created_reporting_step(
+    hmc: HMCClient, cli_system: str | None, creation: LparCreation
+) -> WorkflowStep | None:
+    if not creation.reporting_settings.pairs():
+        return None
+    try:
+        if cli_system is None:
+            raise ValueError(
+                "Reporting creation did not retain its CLI system identity"
+            )
+        observed = await get_lpar_reporting_settings(
+            hmc.config,
+            cli_system,
+            creation.name,
+            creation=True,
+            require_ibmi=creation.reporting_settings.requires_ibmi(),
+        )
+    except (HMCError, ValueError, PermissionError) as error:
+        return WorkflowStep(
+            "reporting_settings",
+            "error",
+            f"Partition exists; reporting unverified: {error}",
+        )
+    matches = all(
+        getattr(observed, name) == getattr(creation.reporting_settings, name)
+        for name, _ in creation.reporting_settings.pairs()
+    )
+    return WorkflowStep("reporting_settings", "ok" if matches else "error", observed)
 
 
 async def _created_settings_step(

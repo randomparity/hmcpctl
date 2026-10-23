@@ -918,3 +918,96 @@ async def test_settings_arm_opt_in_only():
     assert state.results[0]["status"] == "SKIP"
     assert runner.SUBTASK_GROUPS["lpar-settings"] == [47]
     assert 47 not in runner.SUBTASK_GROUPS["all"]
+
+
+@pytest.mark.asyncio
+async def test_reporting_arm_opt_in_only():
+    state = runner.RunState(group="all")
+    await lpar_config.exercise_lpar_reporting(object(), state)
+    assert state.results[0]["status"] == "SKIP"
+    assert runner.SUBTASK_GROUPS["lpar-reporting"] == [48]
+    assert 48 not in runner.SUBTASK_GROUPS["all"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["none", "probe", "active", "stamp", "foreign"])
+async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
+    from dataclasses import asdict
+
+    from hmcpctl.documents.lpar import LparReportingSettings
+    from hmcpctl.operations.lpar.core import LparCreationResult
+
+    hmc = FakeHMC(foreign_token=fault == "foreign")
+    settings = asdict(LparReportingSettings("a", False, "none", False))
+    creates = []
+
+    @asynccontextmanager
+    async def client_context(config):
+        yield object()
+
+    async def create(_hmc, system, creation):
+        creates.append(creation)
+        hmc._hmc_create_lpar(
+            {
+                "name": creation.name,
+                "caller_token": creation.caller_token,
+                "resources": asdict(creation.resources),
+            }
+        )
+        return LparCreationResult(
+            True,
+            {"UUID": SCRATCH_UUID},
+            fault != "stamp",
+            (),
+            reporting_step=WorkflowStep("reporting_settings", "ok"),
+        )
+
+    async def call(_state, _client, tool, **kwargs):
+        if tool in {"hmc_get_lpar_reporting_settings", "hmc_configure_lpar_reporting"}:
+            hmc.calls.append((tool, kwargs))
+            assert kwargs["lpar_name_or_uuid"] == SCRATCH_UUID
+            if tool == "hmc_get_lpar_reporting_settings":
+                return "PASS", settings.copy()
+            if fault == "probe":
+                return "FAIL", _failure("connection lost")
+            if fault == "active":
+                hmc.state = "Open Firmware"
+            assert kwargs["settings"].get("time_ref") is not True
+            settings.update(kwargs["settings"])
+            return "PASS", {"status": "verified", "observed": settings.copy()}
+        return hmc.answer(tool, kwargs)
+
+    monkeypatch.setattr(lpar_config, "HMCClient", client_context)
+    monkeypatch.setattr(lpar_config, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(runner.RunState, "call", call)
+    state = runner.RunState(
+        config=live_config.LiveTestConfig(system_name=SYSTEM),
+        group="lpar-reporting",
+        hmc_config=HMCConfig.from_mapping({}),
+    )
+    await lpar_config.exercise_lpar_reporting(object(), state)
+    assert len(creates) == 1
+    assert creates[0].stamp_policy == "required"
+    assert creates[0].apply_profile is False
+    assert creates[0].partition_type == "OS400"
+    assert creates[0].reporting_settings.work_group_id == "none"
+    assert (
+        len([tool for tool, _ in hmc.calls if tool == "hmc_configure_lpar_reporting"])
+        <= 8
+    )
+    assert not any("power_" in tool for tool, _ in hmc.calls)
+    if fault in {"active", "foreign"}:
+        assert not hmc.deleted
+        assert "MANUAL RECOVERY REQUIRED" in str(state.results)
+    else:
+        assert hmc.deleted
+    if fault in {"stamp", "foreign"}:
+        assert not any(tool == "hmc_configure_lpar_reporting" for tool, _ in hmc.calls)
+    if fault == "none":
+        assert {row["observation"]["result"] for row in state.observations} == {
+            "passed"
+        }
+    else:
+        assert not any(
+            row["observation"]["result"] == "passed" for row in state.observations
+        )
