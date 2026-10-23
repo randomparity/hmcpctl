@@ -930,7 +930,9 @@ async def test_reporting_arm_opt_in_only():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["none", "probe", "active", "stamp", "foreign"])
+@pytest.mark.parametrize(
+    "fault", ["none", "probe", "active", "stamp", "foreign", "io-error", "io-missing"]
+)
 async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
     from dataclasses import asdict
 
@@ -960,6 +962,9 @@ async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
             fault != "stamp",
             (),
             reporting_step=WorkflowStep("reporting_settings", "ok"),
+            physical_io_step=None
+            if fault == "io-missing"
+            else WorkflowStep("physical_io", "error" if fault == "io-error" else "ok"),
         )
 
     async def call(_state, _client, tool, **kwargs):
@@ -1002,8 +1007,14 @@ async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
         assert "MANUAL RECOVERY REQUIRED" in str(state.results)
     else:
         assert hmc.deleted
-    if fault in {"stamp", "foreign"}:
+    if fault in {"stamp", "foreign", "io-error", "io-missing"}:
         assert not any(tool == "hmc_configure_lpar_reporting" for tool, _ in hmc.calls)
+    if fault in {"io-error", "io-missing"}:
+        assert state.observations == []
+        assert not any(
+            row["status"] == "PASS" and row["tool"] == "owning core create"
+            for row in state.results
+        )
     if fault == "none":
         assert {row["observation"]["result"] for row in state.observations} == {
             "passed"

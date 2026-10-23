@@ -1736,10 +1736,12 @@ async def exercise_lpar_reporting(client: Client, state: RunState) -> None:
             or created.ownership_stamped is not True
             or created.reporting_step is None
             or created.reporting_step.status != "ok"
+            or created.physical_io_step is None
+            or created.physical_io_step.status != "ok"
             or run.uuid is None
         ):
             raise ValueError(
-                "Required ownership or creation settings were not confirmed"
+                "Required ownership, console I/O or reporting settings were not confirmed"
             )
         run.created = True
         state.record(
