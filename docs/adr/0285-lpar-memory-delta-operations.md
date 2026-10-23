@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for issue #1774 under frozen scope q1774-4f3dda1d.
+Accepted for issue #1774 implementation within frozen scope q1774-4f3dda1d.
 
 ## Context
 

@@ -66,8 +66,10 @@ is positive, and set zero is a real reset request, not an implicit no-op.
 Quantity input and resulting nonzero quantity must align to MemoryRegionSize. All API
 amounts are MiB; no decimal MB conversion or rounding. Numeric entitlement does not inherit
 the logical memory-region alignment requirement. Entitlement is admitted only when the
-partition reports shared memory. Its numeric target is computed from CurrentEntitledMemory;
-auto requests automatic mode, with no invented formula or predicted numeric entitlement.
+partition reports shared memory. Its numeric target is computed from CurrentEntitledMemory; refuse subtraction beyond that
+current entitlement and reject a negative target. Auto requests automatic mode, with no
+invented formula or predicted numeric entitlement. Numeric add/remove requires a reported
+numeric baseline even when automatic mode was previously enabled.
 
 For dedicated growth, compare required increment with CurrentAvailableSystemMemory and
 configured system memory. For shared mode, read the documented selected-system
