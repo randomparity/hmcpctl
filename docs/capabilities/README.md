@@ -15,7 +15,7 @@ The artifacts use format version 1:
   Each row preserves its POWER10/POWER11 presence. Coverage-child rows map to
   concrete children of epic #620. A missing page in either snapshot records only that delta;
   it does not claim that an HMC release lacks the capability.
-- `operations.json` reconciles all 184 registered MCP operations to reference
+- `operations.json` reconciles registered MCP operations to reference
   families or explains a repository-specific composite. It records the current
   handler signature, registered surface and relevant test paths. These links do
   not claim that a test passed or that hardware verification exists.
