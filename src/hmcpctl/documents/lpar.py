@@ -140,11 +140,36 @@ class LparReportingSettings:
     """
 
     __pydantic_config__ = ConfigDict(extra="forbid")
-    ipl_source: Literal["a", "b", "c", "d"] | None = None
-    os400_restricted_io_mode: StrictBool | None = None
-    work_group_id: StrictInt | Literal["none"] | None = None
-    electronic_err_reporting: StrictBool | None = None
-    redundant_err_path_reporting: StrictBool | None = None
+    ipl_source: Literal["a", "b", "c", "d"] | None = field(
+        default=None,
+        metadata={
+            "description": "IBM i IPL source a, b, c or d; partition update only. Omitted preserves the current value."
+        },
+    )
+    os400_restricted_io_mode: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "IBM i restricted I/O mode; strict boolean for creation/update, omitted preserves defaults/current value."
+        },
+    )
+    work_group_id: StrictInt | Literal["none"] | None = field(
+        default=None,
+        metadata={
+            "description": "EWLM integer work-group ID or none for no EWLM; no numeric range is supplied by the cited contract. Zero is explicit; omitted preserves defaults/current value."
+        },
+    )
+    electronic_err_reporting: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "IBM i electronic error reporting; strict boolean for creation/update, omitted preserves defaults/current value."
+        },
+    )
+    redundant_err_path_reporting: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Redundant error-path reporting; strict boolean, partition creation only. Refused on partition update; omitted retains the HMC default."
+        },
+    )
 
     def __post_init__(self) -> None:
         for item in fields(self):

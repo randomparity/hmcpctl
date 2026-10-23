@@ -229,6 +229,20 @@
       "expected": "success"
     },
     {
+      "scenario": "st100-lpar-get-reporting-settings",
+      "operation": "lpar.get_reporting_settings",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
       "scenario": "st100-lpar-get-settings",
       "operation": "lpar.get_settings",
       "class": "read-only",

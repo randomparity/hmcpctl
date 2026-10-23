@@ -1583,12 +1583,12 @@ production recovery copy, establishes VIOS/adapter/force-save behavior, or promo
 capability's maturity. Use the filtered evidence generator for public summaries.
 
 
-## IBM i partition reporting (C02, opt-in subtask48)
+## IBM i partition reporting (C02, opt-in subtask 48)
 
 The `lpar-reporting` arm creates one owned, inactive OS400 scratch partition,
 reads its four creation reporting fields, performs eight fixed update calls,
 and deletes it without activation, power changes or profile mutation. It uses
-2 GiB desired memory and0.5 shared processing units (the lpar-config resource
+2 GiB desired memory and 0.5 shared processing units (the lpar-config resource
 fixture). IBM i support/eligibility and available resources must be established
 by the operator on the selected system before the exclusive bounded window;
 configuration preflight alone does not prove IBM i eligibility. Do not substitute

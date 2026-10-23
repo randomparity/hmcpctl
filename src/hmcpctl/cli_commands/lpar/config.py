@@ -579,9 +579,10 @@ def lpars_configure_reporting(
     ),
     ownership_override: bool = typer.Option(False, "--ownership-override"),
 ) -> None:
-    """Configure C02 reporting and verify readback; IBM i-only fields require OS400.
+    """Configure reporting.
 
-    Omitted values are preserved. Readback is configuration, not guest IPL proof.
+    IBM i-only fields require OS400. Omitted values are preserved.
+    Readback is configuration, not guest IPL proof.
     """
     try:
         settings = TypeAdapter(LparReportingSettings).validate_python(
@@ -598,7 +599,7 @@ def lpars_configure_reporting(
         )
     except ValueError as error:
         raise typer.BadParameter(
-            f"Invalid reporting setting: {error}; use IPL a/b/c/d and work-group integer or none"
+            f"Invalid reporting setting: {terminal_field(error, err=True)}; use IPL a/b/c/d and work-group integer or none"
         ) from error
     result = with_client(
         lambda hmc: configure_lpar_reporting_settings(
@@ -618,7 +619,7 @@ def lpars_get_reporting_settings(
     lpar_name: str = typer.Argument(...),
     system_name: str = typer.Argument(...),
 ) -> None:
-    """Read applicable C02 update settings on one contained partition."""
+    """Read reporting settings."""
     result = with_client(
         lambda hmc: read_lpar_reporting_settings(
             hmc, lpar_name, system_name_or_uuid=system_name
