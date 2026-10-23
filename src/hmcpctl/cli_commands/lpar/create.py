@@ -141,9 +141,11 @@ def lpars_create(
     try:
         policy.validate_creation(partition_type)
     except ValueError as error:
-        usage_error(f"Invalid --security-policy: {error}")
+        usage_error(f"Invalid --security-policy: {terminal_field(error, err=True)}")
     if policy.pairs():
-        err_console.print(SECURITY_POLICY_WARNING, markup=False)
+        err_console.print(
+            terminal_field(SECURITY_POLICY_WARNING, err=True), markup=False
+        )
     try:
         vtpm = LparVtpmSettings(vtpm_enabled, vtpm_version, vtpm_encryption)
         vtpm.validate_creation(partition_type)

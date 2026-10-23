@@ -371,3 +371,19 @@ def test_creation_context_refuses_before_transport(monkeypatch, group, payload):
     assert result.exit_code == 2, result.output
     assert "--security-policy" in result.output
     assert reached == []
+
+
+@pytest.mark.parametrize("group", ["lpars", "vios"])
+def test_security_policy_discovery_keeps_narrow_help_bounded(group, monkeypatch):
+    from rich.text import Text
+
+    monkeypatch.setenv("COLUMNS", "40")
+    runner = CliRunner()
+    result = runner.invoke(app, [group, "--help"], terminal_width=40)
+    assert result.exit_code == 0
+    help_text = Text.from_ansi(result.output).plain
+    assert len(help_text) < 20000
+    assert "security-policy" in help_text
+    detail = runner.invoke(app, [group, "configure-security-policy", "--help"])
+    assert detail.exit_code == 0
+    assert "irreversible" in Text.from_ansi(detail.output).plain

@@ -168,8 +168,12 @@ def register_commands(group: typer.Typer) -> None:
     group.command("list")(vios_list)
     group.command("create")(vios_create)
     group.command("get-vtpm-settings")(vios_get_vtpm_settings)
-    group.command("get-security-policy")(vios_get_security_policy)
-    group.command("configure-security-policy")(vios_configure_security_policy)
+    group.command("get-security-policy", short_help="Read policy.")(
+        vios_get_security_policy
+    )
+    group.command("configure-security-policy", short_help="Set policy.")(
+        vios_configure_security_policy
+    )
     group.command("configure-vtpm")(vios_configure_vtpm)
     group.command("power-on")(vios_power_on)
     group.command("power-off")(vios_power_off)
@@ -196,9 +200,13 @@ def vios_create(
     try:
         policy.validate_creation("Virtual IO Server")
     except ValueError as error:
-        raise typer.BadParameter(str(error), param_hint="--security-policy") from None
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--security-policy"
+        ) from None
     if policy.pairs():
-        err_console.print(SECURITY_POLICY_WARNING, markup=False)
+        err_console.print(
+            terminal_field(SECURITY_POLICY_WARNING, err=True), markup=False
+        )
     try:
         resource_values = (
             VIOS_DEFAULT_RESOURCES
@@ -312,7 +320,7 @@ def vios_configure_security_policy(
     settings = load_security_policy(security_policy)
     if not settings.pairs():
         raise typer.BadParameter("Supply at least one security policy setting")
-    err_console.print(SECURITY_POLICY_WARNING, markup=False)
+    err_console.print(terminal_field(SECURITY_POLICY_WARNING, err=True), markup=False)
     if not yes:
         typer.confirm(
             "Change security policy on the selected partition?",

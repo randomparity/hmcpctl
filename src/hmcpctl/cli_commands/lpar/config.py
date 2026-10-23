@@ -657,8 +657,12 @@ def register_commands(group: typer.Typer) -> None:
     )
     group.command("plan-memopt-scores")(lpars_plan_memopt_scores)
     group.command("plan-system-memopt-score")(lpars_plan_system_memopt_score)
-    group.command("get-security-policy")(lpars_get_security_policy)
-    group.command("configure-security-policy")(lpars_configure_security_policy)
+    group.command("get-security-policy", short_help="Read policy.")(
+        lpars_get_security_policy
+    )
+    group.command("configure-security-policy", short_help="Set policy.")(
+        lpars_configure_security_policy
+    )
     group.command("configure-vtpm")(lpars_configure_vtpm)
     group.command("get-vtpm-settings")(lpars_get_vtpm_settings)
     group.command("configure-reporting")(lpars_configure_reporting)
@@ -760,7 +764,7 @@ def lpars_configure_security_policy(
     settings = load_security_policy(security_policy)
     if not settings.pairs():
         raise typer.BadParameter("Supply at least one security policy setting")
-    err_console.print(SECURITY_POLICY_WARNING, markup=False)
+    err_console.print(terminal_field(SECURITY_POLICY_WARNING, err=True), markup=False)
     if not yes:
         typer.confirm(
             "Change security policy on the selected partition?",
