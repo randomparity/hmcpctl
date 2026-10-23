@@ -526,3 +526,256 @@ async def test_vios_read_refuses_missing_or_malformed_identity(
     with pytest.raises(ValueError, match="VIOS"):
         await read_lpar_vtpm(b.hmc, "p", system_name_or_uuid="sys-R1", vios=True)
     assert not b.state.commands
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("readback", ["ok", "mismatch", "unavailable", "missing"])
+async def test_creation_real_encoder_admission_and_verification_composition(
+    monkeypatch, readback
+):
+    from hmcpctl.documents.lpar import (
+        LparReportingSettings,
+        LparResources,
+        LparSettings,
+    )
+    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+
+    system_id = "00000001-abcd-4ef0-8abc-000000000001"
+    entry = {"UUID": "created", "Resource": {"PartitionName": "p"}}
+    hmc = SimpleNamespace(
+        config=CONFIG,
+        get_managed_system=AsyncMock(
+            return_value={
+                "Resource": {
+                    "SystemName": "sys-R1",
+                    "SystemCapabilities": {
+                        "VirtualTrustedPlatformModuleCapable": "true",
+                        "VirtualTrustedPlatformModule20Capable": "false",
+                    },
+                }
+            }
+        ),
+        find_partition_by_name=AsyncMock(
+            side_effect=[None, None if readback == "missing" else entry]
+        ),
+        list_system_summaries=AsyncMock(
+            return_value=[{"UUID": system_id, "SystemName": "sys-R1"}]
+        ),
+        create_logical_partition=AsyncMock(),
+    )
+    for name, mock in [
+        ("resolve_system_uuid", AsyncMock(return_value=system_id)),
+        ("require_memory_within_system", AsyncMock()),
+        ("resolve_system_cli_name", AsyncMock(return_value="sys-R1")),
+        ("stamp_created_lpar_ownership", AsyncMock(return_value=(True, ()))),
+    ]:
+        monkeypatch.setattr("hmcpctl.operations.lpar.core." + name, mock)
+    native = []
+
+    async def original_transport(config, command):
+        native.append(command)
+        if command.startswith("mksyscfg"):
+            return ""
+        if command.endswith("lpar_env"):
+            return "aixlinux\n"
+        if "work_group_id" in command:
+            return "aixlinux,none,0\n"
+        return "aixlinux,0,0,0,0,0\n"
+
+    async def vtpm_transport(config, command):
+        if "-r sys" in command:
+            return "1.2,null\n"
+        if readback == "unavailable":
+            raise HMCCLIError("read failed")
+        return (
+            "p,aixlinux,Not Activated,0,null,null\n"
+            if readback == "mismatch"
+            else "p,aixlinux,Not Activated,1,1.2,null\n"
+        )
+
+    monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", original_transport)
+    monkeypatch.setattr("hmcpctl.ssh.lpar_vtpm.run_hmc_command", vtpm_transport)
+    result = await create_and_stamp_lpar(
+        hmc,
+        "sys-R1",
+        LparCreation(
+            "p",
+            "AIX/Linux",
+            LparResources(desired_memory=1024),
+            settings=LparSettings(time_ref=False),
+            reporting_settings=LparReportingSettings(
+                work_group_id="none", redundant_err_path_reporting=False
+            ),
+            vtpm_settings=ENABLED,
+            max_virtual_slots=32,
+        ),
+    )
+    assert result.resource_created
+    assert result.vtpm_step is not None
+    assert result.vtpm_step.status == ("ok" if readback == "ok" else "error")
+    hmc.create_logical_partition.assert_not_awaited()
+    creates = [c for c in native if c.startswith("mksyscfg")]
+    assert len(creates) == 1
+    record = shlex.split(creates[0])[-1]
+    for pair in (
+        "vtpm_enabled=1",
+        "vtpm_version=1.2",
+        "time_ref=0",
+        "work_group_id=none",
+        "redundant_err_path_reporting=0",
+        "max_virtual_slots=32",
+    ):
+        assert pair in record
+    if readback != "missing":
+        assert (
+            result.settings_step.status == "ok" and result.reporting_step.status == "ok"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["ibmi", "keylock", "wrong-model", "unsupported"])
+async def test_creation_vtpm_rejection_precedes_all_effects(monkeypatch, kind):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+
+    hmc = SimpleNamespace(
+        config=CONFIG, find_partition_by_name=AsyncMock(return_value=None)
+    )
+    if kind == "unsupported":
+        hmc.get_managed_system = AsyncMock(
+            return_value={
+                "Resource": {
+                    "SystemCapabilities": {
+                        "VirtualTrustedPlatformModuleCapable": "false"
+                    }
+                }
+            }
+        )
+        monkeypatch.setattr(
+            "hmcpctl.operations.lpar.core.resolve_system_uuid",
+            AsyncMock(return_value="00000001-abcd-4ef0-8abc-000000000001"),
+        )
+    create = AsyncMock()
+    monkeypatch.setattr("hmcpctl.operations.lpar.core.create_lpar_via_cli", create)
+    with pytest.raises((ValueError, TypeError)):
+        await create_and_stamp_lpar(
+            hmc,
+            "sys-R1",
+            LparCreation(
+                "p",
+                "OS400" if kind == "ibmi" else "AIX/Linux",
+                LparResources(),
+                keylock="normal" if kind == "keylock" else None,
+                vtpm_settings={} if kind == "wrong-model" else ENABLED,
+            ),
+        )
+    create.assert_not_awaited()
+    if kind != "unsupported":
+        hmc.find_partition_by_name.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("step", ["error", "missing"])
+async def test_requested_vtpm_missing_or_failed_step_stops_assignment_consumer(
+    monkeypatch, step
+):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+    from hmcpctl.operations.lpar.workflows import create_lpar
+
+    # Construct a malformed/unverified producer result to test the downstream barrier.
+    result = LparCreationResult(
+        True,
+        {"UUID": "created"},
+        True,
+        (),
+        vtpm_step=WorkflowStep("vtpm", "error", "unverified")
+        if step == "error"
+        else None,
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.prevalidate_lpar_pcie_assignments",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.create_and_stamp_lpar",
+        AsyncMock(return_value=result),
+    )
+    assign = AsyncMock()
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.apply_validated_lpar_pcie_assignments",
+        assign,
+    )
+    actual = await create_lpar(
+        object(),
+        "sys-R1",
+        LparCreation("p", "AIX/Linux", LparResources(), vtpm_settings=ENABLED),
+        LparPcieAssignments(),
+    )
+    assert not actual.workflow_completed
+    assign.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_version_advertisement_never_admits_a_boolean_only_update(
+    boundary,
+):
+    b = boundary
+    b.state.advertisement = "null,null\n"
+    with pytest.raises(ValueError, match="advertis"):
+        await configure_lpar_vtpm(b.hmc, "p", DISABLED, system_name_or_uuid="sys-R1")
+    assert not b.state.wrote
+
+
+def test_implicit_enable_cannot_guess_an_unadmitted_default_protocol():
+    with pytest.raises(ValueError, match="explicit|compatib"):
+        admit_vtpm(
+            LparVtpmSettings(True), VtpmCapabilities(("2.0",), ("Power10v1",), False)
+        )
+    with pytest.raises(ValueError, match="explicit|compatib"):
+        admit_vtpm(LparVtpmSettings(True), VtpmCapabilities(("3.0",), (), True))
+
+
+@pytest.mark.asyncio
+async def test_vios_reader_resolves_its_scoped_feed_and_correct_resource(
+    boundary, monkeypatch
+):
+    b = boundary
+    system_id = "00000001-abcd-4ef0-8abc-000000000001"
+    vios_id = "00000002-abcd-4ef0-8abc-000000000002"
+    entry = {"UUID": vios_id, "Resource": {"PartitionName": "p"}}
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.vtpm.resolve_system_uuid",
+        AsyncMock(return_value=system_id),
+    )
+    b.hmc.find_vios_by_name = AsyncMock(return_value=entry)
+    b.hmc.get_vios = AsyncMock(return_value=entry)
+    b.state.environment = "vioserver"
+    result = await read_lpar_vtpm(b.hmc, "p", system_name_or_uuid="sys-R1", vios=True)
+    assert result.environment == "vioserver" and result.settings == DISABLED
+    b.hmc.find_vios_by_name.assert_awaited_once_with("p", system_uuid=system_id)
+    b.hmc.get_vios.assert_awaited_once_with(vios_id)
+    b.resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_vios_reader_refuses_a_uuid_outside_the_selected_feed(
+    boundary, monkeypatch
+):
+    b = boundary
+    system_id = "00000001-abcd-4ef0-8abc-000000000001"
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.vtpm.resolve_system_uuid",
+        AsyncMock(return_value=system_id),
+    )
+    b.hmc.list_vios = AsyncMock(return_value=[])
+    with pytest.raises(ValueError):
+        await read_lpar_vtpm(
+            b.hmc,
+            "00000002-abcd-4ef0-8abc-000000000002",
+            system_name_or_uuid="sys-R1",
+            vios=True,
+        )
+    assert b.state.commands == []

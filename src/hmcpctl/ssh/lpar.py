@@ -9,6 +9,7 @@ from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
 from ..documents.lpar_io import LparPhysicalIO
+from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
 if TYPE_CHECKING:
@@ -147,6 +148,7 @@ async def create_lpar_via_cli(
     partition_id: int | None = None,
     settings: LparSettings | None = None,
     reporting_settings: LparReportingSettings | None = None,
+    vtpm_settings: LparVtpmSettings | None = None,
     physical_io: LparPhysicalIO | None = None,
     creation_sriov: tuple[SriovLogicalPortAssignment, ...] = (),
 ) -> str:
@@ -174,6 +176,10 @@ async def create_lpar_via_cli(
     """
     if reporting_settings is not None:
         reporting_settings.validate_context("create", partition_type)
+    if vtpm_settings is not None:
+        if not isinstance(vtpm_settings, LparVtpmSettings):
+            raise TypeError("vtpm_settings must be LparVtpmSettings")
+        vtpm_settings.validate_creation(partition_type)
     config_pairs: list[tuple[str, object]] = [
         ("name", name),
         ("lpar_env", _lpar_environment(partition_type)),
@@ -186,6 +192,8 @@ async def create_lpar_via_cli(
         config_pairs.extend(settings.pairs())
     if reporting_settings is not None:
         config_pairs.extend(reporting_settings.pairs())
+    if vtpm_settings is not None:
+        config_pairs.extend(vtpm_settings.pairs())
 
     # Two guards at two layers, neither substituting for the other:
     # build_attribute_record keeps the record's own ',' and '=' delimiters
@@ -229,7 +237,7 @@ async def apply_lpar_profile_via_cli(
 def _lpar_environment(partition_type: str) -> str:
     """Return the HMC environment identifier for a requested partition type."""
     normalized = partition_type.lower()
-    if "ios" in normalized or "vios" in normalized:
+    if normalized == "virtual io server" or "ios" in normalized or "vios" in normalized:
         return "vioserver"
     if "os400" in normalized or "ibmi" in normalized or normalized == "i":
         return "os400"

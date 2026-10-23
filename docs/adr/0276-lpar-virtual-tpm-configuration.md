@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — issue #1764; operator-approved interface choices, pending design review.
+Accepted (2026-10-23) — issue #1764; operator-approved interfaces, bounded design review and scope audit complete.
 
 ## Context
 

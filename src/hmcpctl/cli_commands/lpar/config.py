@@ -9,6 +9,7 @@ from pydantic import TypeAdapter
 from rich.text import Text
 
 from hmcpctl.documents.lpar import LparReportingSettings, LparSettings
+from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.operations.lpar.configuration import (
     configure_lpar_msp,
     configure_lpar_reporting_settings,
@@ -17,6 +18,7 @@ from hmcpctl.operations.lpar.configuration import (
     read_lpar_settings,
 )
 from hmcpctl.operations.lpar.ownership import set_lpar_ownership_description
+from hmcpctl.operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 
 from ...operations.affinity.ssh import (
     get_lpar_memopt_score,
@@ -640,6 +642,8 @@ def register_commands(group: typer.Typer) -> None:
     )
     group.command("plan-memopt-scores")(lpars_plan_memopt_scores)
     group.command("plan-system-memopt-score")(lpars_plan_system_memopt_score)
+    group.command("configure-vtpm")(lpars_configure_vtpm)
+    group.command("get-vtpm-settings")(lpars_get_vtpm_settings)
     group.command("configure-reporting")(lpars_configure_reporting)
     group.command("get-reporting-settings")(lpars_get_reporting_settings)
     group.command("configure")(lpars_configure)
@@ -651,3 +655,53 @@ def register_commands(group: typer.Typer) -> None:
     group.command("get-proc-compat-modes")(lpars_get_proc_compat_modes)
     group.command("get-proc-compat")(lpars_get_proc_compat)
     group.command("set-proc-compat")(lpars_set_proc_compat)
+
+
+def lpars_get_vtpm_settings(
+    lpar_name: str = typer.Argument(...), system_name: str = typer.Argument(...)
+) -> None:
+    """Read vTPM settings.
+
+    The selected AIX/Linux partition must be contained in the managed system.
+    """
+    result = with_client(
+        lambda hmc: read_lpar_vtpm(hmc, lpar_name, system_name_or_uuid=system_name)
+    )
+    print_json(asdict(result))
+
+
+def lpars_configure_vtpm(
+    lpar_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+    vtpm_enabled: bool | None = typer.Option(None, "--vtpm-enabled/--no-vtpm-enabled"),
+    vtpm_version: str | None = typer.Option(None, "--vtpm-version"),
+    vtpm_encryption: str | None = typer.Option(None, "--vtpm-encryption"),
+    acknowledge_data_loss: bool = typer.Option(
+        False,
+        "--acknowledge-data-loss",
+        help="Consent to key/data loss on enabled disable",
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+) -> None:
+    """Configure vTPM.
+
+    Inactive only; no implicit reset, power or profile operation. Disabling an
+    enabled instance can destroy keys/data and requires explicit acknowledgement.
+    """
+    try:
+        settings = LparVtpmSettings(vtpm_enabled, vtpm_version, vtpm_encryption)
+    except ValueError as error:
+        raise typer.BadParameter(terminal_field(error, err=True)) from error
+    result = with_client(
+        lambda hmc: configure_lpar_vtpm(
+            hmc,
+            lpar_name,
+            settings,
+            system_name_or_uuid=system_name,
+            acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(1)

@@ -55,6 +55,13 @@ class LparVtpmSettings:
             if (value := getattr(self, item.name)) is not None
         ]
 
+    def validate_creation(self, partition_type: str) -> None:
+        """Native vTPM creation applies only to AIX/Linux and VIOS."""
+        if self.pairs() and partition_type not in {"AIX/Linux", "Virtual IO Server"}:
+            raise ValueError(
+                "vTPM creation settings require AIX/Linux or a Virtual IO Server; nothing was created"
+            )
+
 
 @dataclass(frozen=True)
 class VtpmState:

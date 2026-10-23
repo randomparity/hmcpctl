@@ -80,6 +80,10 @@ def admit_vtpm(
     before: LparVtpmSettings | None = None,
 ) -> None:
     """Validate supplied advertisement membership and known protocol compatibility."""
+    if not capabilities.versions:
+        raise ValueError(
+            "Selected system has no usable vTPM version advertisement; nothing was changed"
+        )
     version = settings.vtpm_version
     encryption = settings.vtpm_encryption
     if version is not None and version not in capabilities.versions:
@@ -97,6 +101,18 @@ def admit_vtpm(
         if before is not None
         else None
     )
+    if (
+        settings.vtpm_enabled is True
+        and effective_version is None
+        and any(
+            value not in {"1.2", "2.0"}
+            or (value == "2.0" and not capabilities.version20_capable)
+            for value in capabilities.versions
+        )
+    ):
+        raise ValueError(
+            "Supply an explicit compatible advertised vTPM version; the default protocol cannot be admitted"
+        )
     if effective_version is not None and effective_version not in {"1.2", "2.0"}:
         raise ValueError(
             "The advertised vTPM version has no supported compatibility contract; nothing was changed"

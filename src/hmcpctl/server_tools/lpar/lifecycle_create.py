@@ -12,6 +12,7 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.lpar_io import LparPhysicalIO
+from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
@@ -51,6 +52,7 @@ def hmc_create_lpar(
     profile: str | None = None,
     settings: LparSettings | None = None,
     reporting_settings: LparReportingSettings | None = None,
+    vtpm_settings: LparVtpmSettings | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -75,6 +77,7 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        vtpm_settings: Optional advertised vTPM fields for AIX/Linux creation; native single-record creation, no implicit reset. Unverified readback stops assignments; explicit keylock cannot be combined.
         reporting_settings: Optional C02 creation fields: restricted I/O and electronic
             reporting (IBM i only), work group integer or "none", redundant reporting.
             IPL source is update-only. Explicit keylock plus reporting is refused
@@ -129,6 +132,9 @@ def hmc_create_lpar(
                 else LparPhysicalIO(),
                 apply_profile=apply_partition_profile,
                 settings=settings if settings is not None else LparSettings(),
+                vtpm_settings=vtpm_settings
+                if vtpm_settings is not None
+                else LparVtpmSettings(),
                 reporting_settings=reporting_settings
                 if reporting_settings is not None
                 else LparReportingSettings(),

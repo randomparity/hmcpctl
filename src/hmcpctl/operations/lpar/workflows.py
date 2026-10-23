@@ -59,6 +59,11 @@ async def create_lpar(
         steps.append(created.settings_step)
     if created.reporting_step is not None:
         steps.append(created.reporting_step)
+    if created.vtpm_step is not None:
+        steps.append(created.vtpm_step)
+    vtpm_failed = bool(creation.vtpm_settings.pairs()) and (
+        created.vtpm_step is None or created.vtpm_step.status != "ok"
+    )
     reporting_failed = (
         created.reporting_step is not None and created.reporting_step.status == "error"
     )
@@ -79,6 +84,7 @@ async def create_lpar(
         or settings_failed
         or reporting_failed
         or io_failed
+        or vtpm_failed
     )
     if assignments_skipped:
         steps.extend(
