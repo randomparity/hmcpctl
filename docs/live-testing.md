@@ -1617,3 +1617,38 @@ No fabricated numeric EWLM ID is used. Record firmware/state rejections and
 unavailable readback honestly. Generate public evidence using
 `scripts/live_test_evidence.py`; raw result documents remain private. POWER9
 execution does not establish POWER10/POWER11 hardware coverage.
+
+## Inactive vTPM configuration (arm 51)
+
+The opt-in `lpar-vtpm` arm creates one inactive AIX/Linux scratch partition with
+required ownership stamping and explicit vTPM settings. It reads the selected
+system's advertised versions/encryption levels, preferring 1.2; otherwise it uses
+2.0 with an advertised encryption level. Missing or unsupported advertisements
+skip before creation. The creation owner also checks the system's positive
+capability and compatibility before submitting a write.
+
+Successful creation identity, ownership and vTPM readback are prerequisites for
+both updates: an acknowledged disable, then an explicit enable with the selected
+settings. Disabling can destroy keys and stored TPM data; the acknowledgement
+applies only to this disposable fixture. An uncertain or mismatched outcome stops
+further updates. There is no activation, profile application, key management,
+automatic retry or corrective reset. Guarded inactive-only deletion and an
+independent resource comparison follow even after failure.
+
+Use an explicitly authorized, exclusive hardware window and deploy its exact
+candidate commit before these commands. The runner configuration and scratch
+resource requirements above apply. A stranded shared scratch prefix blocks the
+arm until recovery is resolved.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-vtpm
+uv run --no-sync python scripts/live_lpar_vtpm.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-vtpm.json
+```
+
+Always run recovery, including after apparent success. Generate public evidence
+with `scripts/live_test_evidence.py`; keep raw results private. The selected
+version/encryption is the only variant exercised. VIOS creation/update, other
+versions/encryption levels, guest boot, TPM objects and migration remain unrun;
+a passing configuration readback does not establish those behaviors. Registration
+of the arm adds no packaged maturity credit.

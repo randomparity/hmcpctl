@@ -335,6 +335,19 @@ def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _lpar_vtpm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-vtpm",
+        True,
+        "configuration validated",
+        (
+            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: advertised vTPM create; acknowledged disable; explicit enable; matching-token deletion",
+            "no activation, profile apply, VIOS creation or key management; existing scratch prefix must be absent; independent recovery/resource comparison required",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the partitions and the VIOS volume the lpar-power arm (#1346) creates."""
     return ArmVerdict(
@@ -565,6 +578,7 @@ _ARM_VERDICTS = {
     "lpar-settings": _lpar_settings_verdict,
     "lpar-reporting": _lpar_reporting_verdict,
     "lpar-physical-io": _lpar_physical_io_verdict,
+    "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,
