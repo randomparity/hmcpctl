@@ -207,3 +207,13 @@ is the saved native `inventory_reads` output. No name-only raw response was
 invented. Existing tokenizer/vocabulary exporter produced the artifact; enum
 input contributes no REST values. `../system_profiles/provenance.txt` retains
 public integrity hashes. This is SOURCE command vocabulary, not product evidence.
+
+`vocabulary/v10r3-8375-42a-memory-source.json` is a narrow #1774 SOURCE derivation
+from one authorized read-only `ManagedSystem/{uuid}/SharedMemoryPool` collection
+GET on HMC V10R3 SP1060 managing an 8375-42A. The actual response was HTTP 204
+with an empty body. Existing capture, tokenizer and vocabulary exporter produced
+this endpoint record; enum input adds no returned values. Admission version/system
+reads are not published. This proves only the captured empty collection route,
+with no positive shared-memory pool capacity, AMS mutation or running-guest proof.
+The raw capture, extracted unchanged collection record, corpus and reproduction
+script remain in the operator's private campaign evidence archive for #638/#1774.

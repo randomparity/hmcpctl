@@ -1,12 +1,16 @@
 """D01 non-pool quantity grammar and guarded effective-memory outcomes."""
 
 import shlex
+from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_memory import LparMemoryChange
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.lpar.memory import change_lpar_memory
 from hmcpctl.ssh.memory import change_lpar_memory_quantity
 
 CONFIG = HMCConfig.from_mapping({})
@@ -150,3 +154,519 @@ async def test_native_quantity_requires_validated_model(monkeypatch):
     with pytest.raises(TypeError, match="typed LparMemoryChange"):
         await change_lpar_memory_quantity(CONFIG, "sys-R1", 2, {"operation": "add"})
     command.assert_not_awaited()
+
+
+SYSTEM_UUID = "cccc0000-0000-0000-0000-000000000001"
+LPAR_UUID = "aaaa0000-0000-0000-0000-000000000001"
+
+
+def memory_entry():
+    return {
+        "UUID": LPAR_UUID,
+        "Resource": {
+            "PartitionName": "lpar-R1",
+            "PartitionID": "7",
+            "PartitionType": "AIX/Linux",
+            "PartitionState": "not activated",
+            "ResourceMonitoringControlState": "inactive",
+            "CurrentProfileSync": "Disabled",
+            "PartitionCapabilities": {"DynamicLogicalPartitionMemoryCapable": "true"},
+            "PartitionMemoryConfiguration": {
+                "CurrentMemory": "1024",
+                "CurrentMinimumMemory": "512",
+                "CurrentMaximumMemory": "4096",
+                "DesiredMemory": "2048",
+                "MinimumMemory": "512",
+                "MaximumMemory": "4096",
+                "RuntimeMemory": "0",
+                "SharedMemoryEnabled": "false",
+                "AutoEntitledMemoryEnabled": "false",
+                "CurrentEntitledMemory": "100",
+                "RuntimeEntitledMemory": "0",
+            },
+            "PartitionProcessorConfiguration": {
+                "HasDedicatedProcessors": "true",
+                "CurrentHasDedicatedProcessors": "true",
+                "CurrentDedicatedProcessorConfiguration": {
+                    "CurrentMinimumProcessors": "1",
+                    "CurrentProcessors": "1",
+                    "CurrentMaximumProcessors": "2",
+                },
+            },
+        },
+    }
+
+
+@pytest.fixture
+def quantity_boundary(monkeypatch):
+    before = memory_entry()
+    after = deepcopy(before)
+    after["Resource"]["PartitionMemoryConfiguration"]["CurrentMemory"] = "1536"
+    system = {
+        "UUID": SYSTEM_UUID,
+        "Resource": {
+            "SystemName": "sys-R1",
+            "State": "operating",
+            "AssociatedSystemMemoryConfiguration": {
+                "MemoryRegionSize": "256",
+                "CurrentAvailableSystemMemory": "8192",
+                "ConfigurableSystemMemory": "16384",
+            },
+        },
+    }
+    pool = {
+        "UUID": "bbbb0000-0000-0000-0000-000000000001",
+        "Resource": {
+            "CurrentAvailablePoolMemory": "500",
+            "CurrentPoolMemory": "1000",
+            "PoolID": "0",
+        },
+    }
+    boundary = SimpleNamespace(
+        before=before,
+        after=after,
+        system=system,
+        pool=pool,
+        submitted=False,
+        submit_error=None,
+        read_error=None,
+    )
+
+    async def read(uuid):
+        if boundary.submitted and boundary.read_error:
+            raise boundary.read_error
+        return deepcopy(boundary.after if boundary.submitted else boundary.before)
+
+    async def submit(config, command, **kwargs):
+        boundary.submitted = True
+        if boundary.submit_error:
+            raise boundary.submit_error
+        return "native completion"
+
+    hmc = SimpleNamespace(
+        config=CONFIG,
+        get_logical_partition=AsyncMock(side_effect=read),
+        get_managed_system=AsyncMock(
+            side_effect=lambda uuid: deepcopy(boundary.system)
+        ),
+        list_child=AsyncMock(side_effect=lambda *args: [deepcopy(boundary.pool)]),
+    )
+    boundary.hmc = hmc
+    boundary.authorize = AsyncMock(return_value=("sys-R1", "lpar-R1"))
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.memory.resolve_system_uuid",
+        AsyncMock(return_value=SYSTEM_UUID),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.memory.resolve_lpar_uuid",
+        AsyncMock(return_value=LPAR_UUID),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.memory.resolve_and_authorize_lpar_names",
+        boundary.authorize,
+    )
+    boundary.command = AsyncMock(side_effect=submit)
+    monkeypatch.setattr("hmcpctl.ssh.memory.run_hmc_command", boundary.command)
+    return boundary
+
+
+async def change(boundary, **kwargs):
+    return await change_lpar_memory(
+        boundary.hmc,
+        LPAR_UUID,
+        LparMemoryChange(**kwargs),
+        system_name_or_uuid=SYSTEM_UUID,
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_uses_current_not_desired_and_reports_profile_location(
+    quantity_boundary,
+):
+    b = quantity_boundary
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "applied" and result["workflow_completed"] is True
+    assert result["expected"]["quantity_mib"] == 1536
+    assert result["before"]["current_memory_mib"] == 1024
+    assert result["after"]["current_memory_mib"] == 1536
+    assert result["change_location"]["lives_in"] == "current-configuration"
+    assert result["warnings"]
+    assert b.command.await_count == 1
+    b.authorize.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quantity", [1, 257, 5000, -1])
+async def test_quantity_bounds_alignment_and_types_refuse_before_submission(
+    quantity_boundary, quantity
+):
+    with pytest.raises(ValueError):
+        await change(quantity_boundary, operation="add", quantity_mib=quantity)
+    quantity_boundary.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_capacity_and_entitlement_mode_refuse_before_submission(
+    quantity_boundary,
+):
+    b = quantity_boundary
+    b.system["Resource"]["AssociatedSystemMemoryConfiguration"][
+        "CurrentAvailableSystemMemory"
+    ] = "256"
+    with pytest.raises(ValueError, match="capacity|available"):
+        await change(b, operation="add", quantity_mib=512)
+    with pytest.raises(ValueError, match="shared"):
+        await change(b, operation="set", entitled_mib=100)
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_shared_memory_growth_is_not_capped_to_system_physical_capacity(
+    quantity_boundary,
+):
+    b = quantity_boundary
+    for entry in [b.before, b.after]:
+        entry["Resource"]["PartitionMemoryConfiguration"]["SharedMemoryEnabled"] = (
+            "true"
+        )
+    b.system["Resource"]["AssociatedSystemMemoryConfiguration"].update(
+        CurrentAvailableSystemMemory="0", ConfigurableSystemMemory="1024"
+    )
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "applied"
+    b.hmc.list_child.assert_awaited_once_with(
+        "ManagedSystem", SYSTEM_UUID, "SharedMemoryPool"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entitled", ["auto", 150])
+async def test_shared_entitlement_verifies_automatic_or_manual_mode(
+    quantity_boundary, entitled
+):
+    b = quantity_boundary
+    for entry in [b.before, b.after]:
+        entry["Resource"]["PartitionMemoryConfiguration"]["SharedMemoryEnabled"] = (
+            "true"
+        )
+    after = b.after["Resource"]["PartitionMemoryConfiguration"]
+    after["AutoEntitledMemoryEnabled"] = "true" if entitled == "auto" else "false"
+    after["CurrentEntitledMemory"] = "175" if entitled == "auto" else "150"
+    result = await change(b, operation="set", entitled_mib=entitled)
+    assert result["outcome"] == "applied"
+    assert "-q" not in shlex.split(b.command.call_args.args[1])
+
+
+@pytest.mark.asyncio
+async def test_partial_combined_change_is_not_completed(quantity_boundary):
+    b = quantity_boundary
+    for entry in [b.before, b.after]:
+        entry["Resource"]["PartitionMemoryConfiguration"]["SharedMemoryEnabled"] = (
+            "true"
+        )
+    result = await change(b, operation="add", quantity_mib=512, entitled_mib=50)
+    assert result["outcome"] == "partial" and result["workflow_completed"] is False
+    assert b.command.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_post_write_read_is_unverified_without_replay(quantity_boundary):
+    b = quantity_boundary
+    b.read_error = HMCError("independent read unavailable")
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "unverified" and result["workflow_completed"] is False
+    assert b.command.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_independent_matching_state_retains_uncertain_submission_error(
+    quantity_boundary,
+):
+    b = quantity_boundary
+    b.submit_error = HMCError("transport lost after submission")
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "applied"
+    assert "transport lost" in result["submission_error"]
+    assert b.command.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_authorization_refusal_precedes_native_submission(quantity_boundary):
+    b = quantity_boundary
+    b.authorize.side_effect = PermissionError("foreign owner")
+    with pytest.raises(PermissionError, match="foreign"):
+        await change(b, operation="add", quantity_mib=512)
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field", ["AutoEntitledMemoryEnabled", "CurrentEntitledMemory"]
+)
+async def test_missing_entitlement_readback_is_unverified(quantity_boundary, field):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"]["SharedMemoryEnabled"] = "true"
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"]["AutoEntitledMemoryEnabled"] = (
+        "true"
+    )
+    del b.after["Resource"]["PartitionMemoryConfiguration"][field]
+    result = await change(b, operation="set", entitled_mib="auto")
+    assert result["outcome"] == "unverified"
+    assert not result["workflow_completed"]
+    b.command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_transport_loss_with_unchanged_readback_is_not_known_rejection(
+    quantity_boundary,
+):
+    b = quantity_boundary
+    b.after = deepcopy(b.before)
+    b.submit_error = HMCError("SSH connection lost")
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "unverified"
+    b.command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["1e999999", "NaN", "Infinity", "-1", "2.5"])
+async def test_non_integral_schema_lexemes_refuse_before_submission(
+    quantity_boundary, value
+):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"]["CurrentMemory"] = value
+    with pytest.raises(ValueError):
+        await change(b, operation="add", quantity_mib=512)
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state,kind,rmc,capability,force,accepted,deferred",
+    [
+        ("running", "AIX/Linux", "active", "true", False, True, False),
+        ("running", "Virtual IO Server", "active", "true", False, True, False),
+        ("running", "AIX/Linux", "inactive", "false", True, True, True),
+        ("running", "AIX/Linux", "inactive", "true", False, False, None),
+        ("running", "AIX/Linux", "active", "false", False, False, None),
+        ("running", "OS400", "inactive", "true", False, True, False),
+        ("running", "OS400", "active", "true", True, False, None),
+        ("starting", "AIX/Linux", "active", "true", False, False, None),
+        ("not activated", "unknown", "inactive", "true", False, False, None),
+    ],
+)
+async def test_state_rmc_capability_and_force_admission(
+    quantity_boundary, state, kind, rmc, capability, force, accepted, deferred
+):
+    b = quantity_boundary
+    resource = b.before["Resource"]
+    resource.update(
+        PartitionState=state, PartitionType=kind, ResourceMonitoringControlState=rmc
+    )
+    resource["PartitionCapabilities"]["DynamicLogicalPartitionMemoryCapable"] = (
+        capability
+    )
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentMemory="1536", RuntimeMemory="1536"
+    )
+    if not accepted:
+        with pytest.raises(ValueError):
+            await change(b, operation="add", quantity_mib=512, force=force)
+        b.command.assert_not_awaited()
+        return
+    result = await change(b, operation="add", quantity_mib=512, force=force)
+    assert result["outcome"] == "applied"
+    assert result["expected"]["deferred"] is deferred
+    assert ("--force" in b.command.await_args.args[1]) is force
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["add", "remove"])
+async def test_zero_delta_is_noop_without_native_submission(
+    quantity_boundary, operation
+):
+    result = await change(quantity_boundary, operation=operation, quantity_mib=0)
+    assert result["outcome"] == "noop"
+    assert result["workflow_completed"]
+    quantity_boundary.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shared_processors", [False, True])
+async def test_shutdown_below_minimum_verifies_coupled_cpu_reset(
+    quantity_boundary, shared_processors
+):
+    b = quantity_boundary
+    cpu = b.before["Resource"]["PartitionProcessorConfiguration"]
+    if shared_processors:
+        cpu.clear()
+        cpu.update(
+            CurrentHasDedicatedProcessors="false",
+            CurrentSharedProcessorConfiguration={
+                "CurrentMinimumProcessingUnits": "0.05",
+                "CurrentProcessingUnits": "0.1",
+                "CurrentMaximumProcessingUnits": "1.0",
+                "CurrentMinimumVirtualProcessors": "1",
+                "AllocatedVirtualProcessors": "1",
+                "CurrentMaximumVirtualProcessors": "2",
+            },
+        )
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentMemory="0", CurrentMinimumMemory="0", CurrentMaximumMemory="0"
+    )
+    after_cpu = b.after["Resource"]["PartitionProcessorConfiguration"]
+    vector = after_cpu[
+        "CurrentSharedProcessorConfiguration"
+        if shared_processors
+        else "CurrentDedicatedProcessorConfiguration"
+    ]
+    for key in vector:
+        vector[key] = "0"
+    result = await change(b, operation="remove", quantity_mib=768)
+    assert result["outcome"] == "applied"
+    assert result["expected"]["reset"]
+    assert result["expected"]["quantity_mib"] == 0
+    assert any("processor" in warning for warning in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cpu_reset_partial_effect_is_not_completed(quantity_boundary):
+    b = quantity_boundary
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentMemory="0", CurrentMinimumMemory="0", CurrentMaximumMemory="0"
+    )
+    result = await change(b, operation="set", quantity_mib=0)
+    assert result["outcome"] == "partial"
+    assert not result["workflow_completed"]
+
+
+@pytest.mark.asyncio
+async def test_partition_drift_refuses_before_submit(quantity_boundary):
+    b = quantity_boundary
+    fresh = deepcopy(b.before)
+    fresh["Resource"]["PartitionMemoryConfiguration"]["CurrentMemory"] = "1280"
+    b.hmc.get_logical_partition.side_effect = [b.before, fresh]
+    with pytest.raises(ValueError, match="changed before"):
+        await change(b, operation="add", quantity_mib=512)
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("CurrentAvailablePoolMemory", "10"),
+        ("CurrentPoolMemory", "100"),
+        ("PoolID", None),
+    ],
+)
+async def test_pool_capacity_or_source_refusal_precedes_submit(
+    quantity_boundary, field, value
+):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"]["SharedMemoryEnabled"] = "true"
+    b.pool["Resource"][field] = value
+    with pytest.raises(ValueError):
+        await change(b, operation="add", entitled_mib=50)
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_numeric_entitlement_underflow_refuses_before_submit(quantity_boundary):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"]["SharedMemoryEnabled"] = "true"
+    with pytest.raises(ValueError, match="subtraction"):
+        await change(b, operation="remove", entitled_mib=101)
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_manual_entitlement_mode_mismatch_is_partial(quantity_boundary):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"]["SharedMemoryEnabled"] = "true"
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentEntitledMemory="150", AutoEntitledMemoryEnabled="true"
+    )
+    result = await change(b, operation="set", entitled_mib=150)
+    assert result["outcome"] == "partial"
+    assert not result["workflow_completed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign_system", [False, True])
+async def test_real_containment_and_ownership_guard_precedes_memory_submit(
+    monkeypatch, foreign_system
+):
+    from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
+    from hmcpctl.resource_identity import resolve_lpar_uuid, resolve_system_uuid
+
+    native = AsyncMock()
+    description = AsyncMock(return_value="[hmcpctl owner:foreign created:2026-10-22]")
+    hmc = SimpleNamespace(
+        config=CONFIG,
+        list_logical_partitions=AsyncMock(
+            return_value=[] if foreign_system else [memory_entry()]
+        ),
+        list_system_summaries=AsyncMock(
+            return_value=[{"UUID": SYSTEM_UUID, "SystemName": "sys-R1"}]
+        ),
+        get_logical_partition=AsyncMock(return_value=memory_entry()),
+        get_managed_system=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.memory.resolve_system_uuid", resolve_system_uuid
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.memory.resolve_lpar_uuid", resolve_lpar_uuid
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.memory.resolve_and_authorize_lpar_names",
+        resolve_and_authorize_lpar_names,
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.ownership.get_lpar_description", description
+    )
+    monkeypatch.setattr("hmcpctl.ssh.memory.run_hmc_command", native)
+    with pytest.raises(
+        ValueError if foreign_system else PermissionError,
+        match="does not belong" if foreign_system else "ownership_override=true",
+    ):
+        await change_lpar_memory(
+            hmc,
+            LPAR_UUID,
+            LparMemoryChange(operation="add", quantity_mib=512),
+            system_name_or_uuid=SYSTEM_UUID,
+        )
+    native.assert_not_awaited()
+    hmc.get_managed_system.assert_not_awaited()
+    if foreign_system:
+        description.assert_not_awaited()
+    else:
+        description.assert_awaited_once_with(CONFIG, "sys-R1", "lpar-R1")
+
+
+@pytest.mark.asyncio
+async def test_native_process_failure_with_unchanged_readback_is_rejected(
+    quantity_boundary,
+):
+    import asyncssh
+
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    b = quantity_boundary
+    b.after = deepcopy(b.before)
+    error = HMCCLIError("native resource refusal")
+    error.__cause__ = asyncssh.ProcessError(
+        None, "chhwres", None, 1, None, 1, "", "refused"
+    )
+    b.submit_error = error
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "rejected"
+    assert not result["workflow_completed"]
+    assert result["submission_error"] == "native resource refusal"
+    b.command.assert_awaited_once()
