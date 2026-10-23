@@ -13,7 +13,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_create_lpar` | `mutate` | `lpar.create` | `managed_system` | `implemented` | `current` | `existing-runtime-guards` | Create a new LPAR on a managed system. |
 | `hmc_decommission_lpar` | `destructive` | `lpar.decommission` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Inventory, authorize, and optionally decommission one LPAR. |
 | `hmc_delete_lpar` | `destructive` | `lpar.delete` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Delete (destroy) an LPAR by name or UUID. |
-| `hmc_dlpar_mem` | `mutate` | `lpar.dlpar_mem` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | DLPAR memory hot-plug: change memory resources on a running LPAR. |
+| `hmc_dlpar_mem` | `mutate` | `lpar.dlpar_mem` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Change absolute memory resources or typed native current-memory quantities. |
 | `hmc_dlpar_proc` | `mutate` | `lpar.dlpar_proc` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | DLPAR processor hot-plug: change CPU resources on a running LPAR. |
 | `hmc_dump_restart_lpar` | `destructive` | `lpar.dump_restart` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Crash a logical partition and take a platform dump (PowerOff operation=dumprestart). |
 | `hmc_get_lpar` | `read` | `lpar.get` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Get one logical partition by partition name or UUID. |

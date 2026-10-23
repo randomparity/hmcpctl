@@ -18,6 +18,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Native LPAR memory add/remove/set quantities and shared I/O entitlement inputs
+  are available through `hmc_dlpar_mem(change=...)` and `lpars memory`, with
+  guarded admission and independent applied/partial/uncertain readback (#1774).
+
 - LPAR create/configure supports five typed performance, availability-priority,
   time-reference, simplified-restart and migration flags, with explicit False/0,
   owning authorization and verified/uncertain configuration outcomes (#1762).
