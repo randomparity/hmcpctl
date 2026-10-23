@@ -7,8 +7,21 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from hmcpctl.operations.lpar.vtpm import VtpmCapabilities
+
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import lpar_vtpm as arm
+
+
+@pytest.fixture(autouse=True)
+def mocked_capability_session(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def session(config):
+        yield object()
+
+    monkeypatch.setattr(arm, "HMCClient", session)
 
 
 @pytest.mark.asyncio
@@ -30,16 +43,6 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
             (
                 "PASS",
                 {
-                    "Resource": {
-                        "SystemCapabilities": {
-                            "VirtualTrustedPlatformModuleCapable": "true"
-                        }
-                    }
-                },
-            ),
-            (
-                "PASS",
-                {
                     "lpar": {"UUID": "fixture"},
                     "ownership_stamped": True,
                     "workflow_completed": True,
@@ -58,7 +61,9 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
         ]
     )
     monkeypatch.setattr(
-        arm, "get_vtpm_advertisement", AsyncMock(return_value=(("1.2",), ()))
+        arm,
+        "read_vtpm_capabilities",
+        AsyncMock(return_value=VtpmCapabilities(("1.2",), (), False)),
     )
     monkeypatch.setattr(
         arm, "_read_pools", AsyncMock(return_value=(SimpleNamespace(names=[]), 256))
@@ -76,16 +81,16 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
     cleanup.assert_awaited_once()
     compare.assert_awaited_once()
     calls = state.call.await_args_list
-    assert len(calls) == (5 if creation == "ok" else 2)
-    assert calls[1].kwargs["apply_partition_profile"] is False
-    assert calls[1].kwargs["vtpm_settings"] == {
+    assert len(calls) == (4 if creation == "ok" else 1)
+    assert calls[0].kwargs["apply_partition_profile"] is False
+    assert calls[0].kwargs["vtpm_settings"] == {
         "vtpm_enabled": True,
         "vtpm_version": "1.2",
     }
     if creation == "ok":
-        assert calls[3].kwargs["acknowledge_data_loss"] is True
-        assert calls[3].kwargs["settings"] == {"vtpm_enabled": False}
-        assert calls[4].kwargs["settings"] == {
+        assert calls[2].kwargs["acknowledge_data_loss"] is True
+        assert calls[2].kwargs["settings"] == {"vtpm_enabled": False}
+        assert calls[3].kwargs["settings"] == {
             "vtpm_enabled": True,
             "vtpm_version": "1.2",
         }
@@ -115,7 +120,9 @@ async def test_unsupported_variant_skips_before_baseline_or_effects(
         skip=Mock(),
     )
     monkeypatch.setattr(
-        arm, "get_vtpm_advertisement", AsyncMock(return_value=(versions, encryptions))
+        arm,
+        "read_vtpm_capabilities",
+        AsyncMock(return_value=VtpmCapabilities(versions, encryptions, True)),
     )
     pools = AsyncMock()
     monkeypatch.setattr(arm, "_read_pools", pools)
@@ -155,17 +162,6 @@ async def test_real_served_typed_results_and_update_failure_stop(
     app = FastMCP("vtpm-arm-test")
     patches = []
 
-    @app.tool(name="hmc_get_system")
-    async def system(system_name_or_uuid: str) -> dict:
-        return {
-            "Resource": {
-                "SystemCapabilities": {
-                    "VirtualTrustedPlatformModuleCapable": "true",
-                    "VirtualTrustedPlatformModule20Capable": "true",
-                }
-            }
-        }
-
     @app.tool(name="hmc_create_lpar")
     async def create(
         system_name_or_uuid: str,
@@ -204,7 +200,9 @@ async def test_real_served_typed_results_and_update_failure_stop(
     state.record = Mock()
     state.record_verified = Mock()
     monkeypatch.setattr(
-        arm, "get_vtpm_advertisement", AsyncMock(return_value=(("2.0",), ("level",)))
+        arm,
+        "read_vtpm_capabilities",
+        AsyncMock(return_value=VtpmCapabilities(("2.0",), ("level",), True)),
     )
     monkeypatch.setattr(
         arm, "_read_pools", AsyncMock(return_value=(SimpleNamespace(names=[]), 256))
@@ -227,33 +225,42 @@ async def test_real_served_typed_results_and_update_failure_stop(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("capability", [None, False, 1, "false"])
-async def test_missing_positive_general_capability_skips_before_baseline(
-    monkeypatch, capability
+@pytest.mark.parametrize("wrong_container", [False, True])
+async def test_arm_uses_shared_admission_through_captured_xml(
+    mock_hmc, monkeypatch, wrong_container
 ):
-    state = SimpleNamespace(
-        group=arm.GROUP,
-        hmc_config=object(),
-        config=SimpleNamespace(system_name="system"),
-        skip=Mock(),
-        call=AsyncMock(
-            return_value=(
-                "PASS",
-                {
-                    "Resource": {
-                        "SystemCapabilities": {
-                            "VirtualTrustedPlatformModuleCapable": capability
-                        }
-                    }
-                },
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        arm, "get_vtpm_advertisement", AsyncMock(return_value=(("1.2",), ()))
-    )
+    import httpx
+    from conftest import live_fixture, live_response, make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.operations.lpar.vtpm import read_vtpm_capabilities
+
+    captured = live_fixture("rest-ms-entry-mtms-pair")
+    body = captured["body"]
+    if wrong_container:
+        body = body.replace("AssociatedSystemCapabilities", "SystemCapabilities")
+    mock_hmc.get(captured["path"]).mock(return_value=httpx.Response(200, text=body))
+    path, response = live_response("rest-ms-quick-all-mtms-pair")
+    mock_hmc.get(path).mock(return_value=response)
+    transport = AsyncMock(return_value="1.2,null\n")
+    monkeypatch.setattr("hmcpctl.ssh.lpar_vtpm.run_hmc_command", transport)
+    monkeypatch.setattr(arm, "HMCClient", HMCClient)
+    assert arm.read_vtpm_capabilities is read_vtpm_capabilities
     pools = AsyncMock(return_value=None)
     monkeypatch.setattr(arm, "_read_pools", pools)
+    state = SimpleNamespace(
+        group=arm.GROUP,
+        hmc_config=make_config(),
+        config=SimpleNamespace(system_name=captured["path"].rsplit("/", 1)[1]),
+        skip=Mock(),
+        call=AsyncMock(),
+    )
     await arm.exercise_lpar_vtpm(object(), state)
-    pools.assert_not_awaited()
-    assert state.call.await_args.args[1] == "hmc_get_system"
+    if wrong_container:
+        pools.assert_not_awaited()
+        transport.assert_not_awaited()
+    else:
+        pools.assert_awaited_once()
+        transport.assert_awaited_once()
+    state.call.assert_not_awaited()
+    state.skip.assert_called_once()

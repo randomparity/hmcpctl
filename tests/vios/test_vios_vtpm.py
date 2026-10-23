@@ -26,7 +26,7 @@ def boundary(monkeypatch):
             return_value={
                 "Resource": {
                     "SystemName": "sys-R1",
-                    "SystemCapabilities": {
+                    "AssociatedSystemCapabilities": {
                         "VirtualTrustedPlatformModuleCapable": "true"
                     },
                 }
@@ -121,9 +121,9 @@ async def test_vios_pre_effect_admission_refuses_before_native_creation(
             AsyncMock(side_effect=ValueError("capacity")),
         )
     if mode == "unsupported":
-        b.hmc.get_managed_system.return_value["Resource"]["SystemCapabilities"][
-            "VirtualTrustedPlatformModuleCapable"
-        ] = "false"
+        b.hmc.get_managed_system.return_value["Resource"][
+            "AssociatedSystemCapabilities"
+        ]["VirtualTrustedPlatformModuleCapable"] = "false"
     with pytest.raises((ValueError, TypeError)):
         await create_vios(
             b.hmc,

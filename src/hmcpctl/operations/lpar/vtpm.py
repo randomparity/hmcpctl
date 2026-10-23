@@ -52,7 +52,11 @@ async def read_vtpm_capabilities(
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     entry = await hmc.get_managed_system(system_uuid)
     resource = (entry or {}).get("Resource") or {}
-    caps = resource.get("SystemCapabilities") if isinstance(resource, dict) else None
+    caps = (
+        resource.get("AssociatedSystemCapabilities")
+        if isinstance(resource, dict)
+        else None
+    )
     capability = (
         leaf_text(caps.get("VirtualTrustedPlatformModuleCapable"))
         if isinstance(caps, dict)

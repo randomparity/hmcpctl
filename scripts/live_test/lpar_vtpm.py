@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.ssh.lpar_vtpm import get_vtpm_advertisement
-from hmcpctl.xmlutil import leaf_text
+from hmcpctl.operations.lpar.vtpm import read_vtpm_capabilities
 
 from .lpar_config import (
     NAME_PREFIX,
@@ -37,51 +37,22 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
         state.skip(SUBTASK, GROUP, "requires opt-in group and HMC configuration")
         return
     try:
-        versions, encryptions = await get_vtpm_advertisement(
-            state.hmc_config, state.config.system_name
-        )
-    except HMCError as error:
-        state.skip(SUBTASK, GROUP, f"advertisement unavailable: {error}")
+        async with HMCClient(state.hmc_config) as hmc:
+            capabilities = await read_vtpm_capabilities(hmc, state.config.system_name)
+    except (HMCError, ValueError) as error:
+        state.skip(SUBTASK, GROUP, f"capability advertisement unavailable: {error}")
         return
     settings: dict[str, bool | str] = {"vtpm_enabled": True}
-    if "1.2" in versions:
+    if "1.2" in capabilities.versions:
         settings["vtpm_version"] = "1.2"
-    elif "2.0" in versions and encryptions:
-        settings.update(vtpm_version="2.0", vtpm_encryption=encryptions[0])
+    elif (
+        "2.0" in capabilities.versions
+        and capabilities.version20_capable
+        and capabilities.encryptions
+    ):
+        settings.update(vtpm_version="2.0", vtpm_encryption=capabilities.encryptions[0])
     else:
         state.skip(SUBTASK, GROUP, "no supported explicit advertised test variant")
-        return
-    status, system = await state.call(
-        client, "hmc_get_system", system_name_or_uuid=state.config.system_name
-    )
-    system = plain_data(system)
-    resource = system.get("Resource") if isinstance(system, dict) else None
-    capabilities = (
-        resource.get("SystemCapabilities") if isinstance(resource, dict) else None
-    )
-    capable = (
-        leaf_text(capabilities.get("VirtualTrustedPlatformModuleCapable"))
-        if isinstance(capabilities, dict)
-        else None
-    )
-    capable20 = (
-        leaf_text(capabilities.get("VirtualTrustedPlatformModule20Capable"))
-        if isinstance(capabilities, dict)
-        else None
-    )
-    if (
-        status != "PASS"
-        or not (capable is True or capable == "true")
-        or (
-            settings["vtpm_version"] == "2.0"
-            and not (capable20 is True or capable20 == "true")
-        )
-    ):
-        state.skip(
-            SUBTASK,
-            GROUP,
-            "selected system does not positively advertise the test capability",
-        )
         return
     baseline = await _read_pools(client, state, state.config.system_name)
     if baseline is None or scratch_partitions(baseline[0].names):

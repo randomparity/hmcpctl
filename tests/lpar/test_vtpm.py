@@ -263,7 +263,7 @@ def boundary(monkeypatch):
         get_managed_system=AsyncMock(
             return_value={
                 "Resource": {
-                    "SystemCapabilities": {
+                    "AssociatedSystemCapabilities": {
                         "VirtualTrustedPlatformModuleCapable": "true",
                         "VirtualTrustedPlatformModule20Capable": {
                             "text": "false",
@@ -372,9 +372,9 @@ async def test_pre_effect_gates_refuse_without_a_write(boundary, kind):
         settings = LparVtpmSettings(False, "2.0")
         ack = True
         b.state.advertisement = '"1.2,2.0","Power10v1,Power10v2"'
-        b.hmc.get_managed_system.return_value["Resource"]["SystemCapabilities"][
-            "VirtualTrustedPlatformModule20Capable"
-        ] = "true"
+        b.hmc.get_managed_system.return_value["Resource"][
+            "AssociatedSystemCapabilities"
+        ]["VirtualTrustedPlatformModule20Capable"] = "true"
     if kind == "empty":
         settings = LparVtpmSettings()
     if kind == "strict-ack":
@@ -466,7 +466,9 @@ async def test_capability_absence_false_or_unknown_never_admits(boundary, capabi
     b = boundary
     b.hmc.get_managed_system.return_value = {
         "Resource": {
-            "SystemCapabilities": {"VirtualTrustedPlatformModuleCapable": capability}
+            "AssociatedSystemCapabilities": {
+                "VirtualTrustedPlatformModuleCapable": capability
+            }
         }
     }
     with pytest.raises((ValueError, HMCCLIError)):
@@ -548,7 +550,7 @@ async def test_creation_real_encoder_admission_and_verification_composition(
             return_value={
                 "Resource": {
                     "SystemName": "sys-R1",
-                    "SystemCapabilities": {
+                    "AssociatedSystemCapabilities": {
                         "VirtualTrustedPlatformModuleCapable": "true",
                         "VirtualTrustedPlatformModule20Capable": "false",
                     },
@@ -645,7 +647,7 @@ async def test_creation_vtpm_rejection_precedes_all_effects(monkeypatch, kind):
         hmc.get_managed_system = AsyncMock(
             return_value={
                 "Resource": {
-                    "SystemCapabilities": {
+                    "AssociatedSystemCapabilities": {
                         "VirtualTrustedPlatformModuleCapable": "false"
                     }
                 }
@@ -779,3 +781,49 @@ async def test_vios_reader_refuses_a_uuid_outside_the_selected_feed(
             vios=True,
         )
     assert b.state.commands == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admitted", [True, False])
+async def test_capabilities_follow_managed_system_association(boundary, admitted):
+    """ManagedSystem.xsd names the association; the type name is not a property."""
+    boundary.hmc.get_managed_system.return_value = {
+        "Resource": {
+            "AssociatedSystemCapabilities": {
+                "VirtualTrustedPlatformModuleCapable": "true" if admitted else "false",
+                "VirtualTrustedPlatformModule20Capable": "false",
+            },
+            "SystemCapabilities": {
+                "VirtualTrustedPlatformModuleCapable": "false" if admitted else "true",
+                "VirtualTrustedPlatformModule20Capable": "true",
+            },
+        }
+    }
+    if admitted:
+        capabilities = await read_vtpm_capabilities(boundary.hmc, "sys-R1")
+        assert capabilities == VtpmCapabilities(("1.2",), (), False)
+    else:
+        with pytest.raises(ValueError, match="positively advertise"):
+            await read_vtpm_capabilities(boundary.hmc, "sys-R1")
+    assert not boundary.state.wrote
+
+
+@pytest.mark.asyncio
+async def test_captured_managed_system_xml_admits_through_real_client_parser(
+    mock_hmc, monkeypatch
+):
+    from conftest import live_response, make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    path, response = live_response("rest-ms-entry-mtms-pair")
+    mock_hmc.get(path).mock(return_value=response)
+    quick_path, quick_response = live_response("rest-ms-quick-all-mtms-pair")
+    mock_hmc.get(quick_path).mock(return_value=quick_response)
+    transport = AsyncMock(return_value="1.2,null\n")
+    monkeypatch.setattr("hmcpctl.ssh.lpar_vtpm.run_hmc_command", transport)
+    async with HMCClient(make_config()) as hmc:
+        capabilities = await read_vtpm_capabilities(hmc, path.rsplit("/", 1)[1])
+    assert capabilities == VtpmCapabilities(("1.2",), (), False)
+    transport.assert_awaited_once()
+    assert transport.await_args.args[1].startswith("lssyscfg -r sys -m ")

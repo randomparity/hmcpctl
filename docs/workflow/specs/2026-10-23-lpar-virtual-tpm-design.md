@@ -50,7 +50,9 @@ separate from `lpar` grants, even though the implementation is shared.
 Basic typed/record validation precedes transport. Resolve the selected system and
 its contained LogicalPartition or VirtualIOServer, and cross the existing
 ownership guard before an update. The selected system must advertise vTPM
-capability. Supplied versions/encryptions must belong to its fixed-command lists;
+capability through `ManagedSystem.Resource.AssociatedSystemCapabilities`, the
+association to the schema's `SystemCapabilities.Type`. Supplied versions/encryptions
+must belong to its fixed-command lists;
 2.0 also requires its specific capability. Known compatibility admits encryption
 only with effective version 2.0, rejects it for 1.2, and refuses unrecognized
 version/encryption compatibility rather than extrapolating a new TPM protocol.
