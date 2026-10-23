@@ -46,11 +46,14 @@ No claim of guest boot, key-object, migration or runtime enforcement follows.
 Read selected ManagedSystem `Resource.AssociatedSystemCapabilities` for positive
 `PartitionSecureBootCapable`, `PartitionKeyStoreCapable`, and
 `PartitionDynamicKeySecureBootCapable` for their respective requested fields.
-Read advertised `MinimumKeyStoreSize`/`MaximumkeyStoreSize` for nonzero stores;
+Read direct ManagedSystem.Resource children `MinimumKeyStoreSize`/`MaximumkeyStoreSize`
+for nonzero stores; only the three capability flags belong to the associated object;
 missing, malformed, nonpositive or inverted bounds refuse store requests. Dynamic
 fields require positive dynamic capability even when explicitlyFalse; no implicit
-unsupported-as-false substitution. Use actual console version, SystemFirmware
-and processor-mode queries only for the release-dependent branches above.
+unsupported-as-false substitution. The full capability reader may collect
+console-version and selected-system SystemFirmware evidence regardless of field selection; only the existing processor-mode
+query is conditional on `need_power11`. Apply release guards only to PKS, OS400
+secure boot and nonzero store shrink as specified above; unknown required metadata refuses.
 
 Update admission merges supplied values with the strict before snapshot. A
 requested signed/Linux True requires effective nonzero store and effective signed
