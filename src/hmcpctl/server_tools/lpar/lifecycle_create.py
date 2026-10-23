@@ -10,6 +10,7 @@ from ...documents.lpar import (
     PartitionType,
     validate_partition_type,
 )
+from ...documents.lpar_io import LparPhysicalIO
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
@@ -45,6 +46,7 @@ def hmc_create_lpar(
     caller_token: str | None = None,
     assignments: LparPcieAssignments = LparPcieAssignments(),
     apply_partition_profile: bool = True,
+    physical_io: LparPhysicalIO | None = None,
     profile: str | None = None,
     settings: LparSettings | None = None,
 ) -> LparPcieWorkflowResult:
@@ -92,6 +94,11 @@ def hmc_create_lpar(
             ``apply_profile`` step reports it. False leaves it unapplied. A REST
             create sets the current configuration itself, so the step reports
             the apply as skipped.
+        physical_io: Optional typed initial physical/pool and IBM i tagged-I/O
+            configuration. No implicit console is chosen. Physical/direct SR-IOV
+            DRCs and explicit hmc console are supported; unresolved virtual-slot
+            selectors fail before effects (remaining linkage gap #638). C12 profile
+            readback must succeed before application and later workflow steps.
         profile: Optional configured HMC profile name; uses the default when omitted.
     """
     if caller_token is not None:
@@ -109,6 +116,9 @@ def hmc_create_lpar(
                 keylock=keylock,
                 max_virtual_slots=max_virtual_slots,
                 caller_token=caller_token,
+                physical_io=physical_io
+                if physical_io is not None
+                else LparPhysicalIO(),
                 apply_profile=apply_partition_profile,
                 settings=settings if settings is not None else LparSettings(),
             ),

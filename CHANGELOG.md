@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR creation and provisioning accept typed physical-slot/pool and IBM i tagged
+  I/O inputs, with explicit HMC-console selection, reused direct SR-IOV declarations,
+  fresh relationship checks and native profile verification before application.
+  Unknown or partial outcomes stop dependent writes without rollback. Positive
+  virtual-slot forms without creation-time adapter linkage remain rejected and
+  tracked for #638 reconciliation; hardware evidence is separate (#1773).
+
 - LPAR create/configure supports five typed performance, availability-priority,
   time-reference, simplified-restart and migration flags, with explicit False/0,
   owning authorization and verified/uncertain configuration outcomes (#1762).

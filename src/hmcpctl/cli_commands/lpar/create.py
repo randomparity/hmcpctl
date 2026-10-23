@@ -18,7 +18,7 @@ from ...operations.lpar.workflows import create_lpar
 from ...ssh.lpar import validate_caller_token
 from ..output import console, err_console, print_json, terminal_field, usage_error
 from ..runtime import with_client
-from .assignment_input import load_pcie_assignments
+from .assignment_input import load_pcie_assignments, load_physical_io
 
 
 def lpars_create(
@@ -58,6 +58,11 @@ def lpars_create(
     ),
     capped: bool = typer.Option(
         False, "--capped", help="Cap shared CPU (default uncapped)"
+    ),
+    physical_io: Path | None = typer.Option(
+        None,
+        "--physical-io",
+        help="Typed creation I/O JSON (64 KiB maximum); no implicit console default",
     ),
     pcie_assignments: Path | None = typer.Option(
         None,
@@ -140,6 +145,7 @@ def lpars_create(
                 resources,
                 partition_id=partition_id,
                 caller_token=caller_token,
+                physical_io=load_physical_io(physical_io),
                 apply_profile=not no_apply,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,

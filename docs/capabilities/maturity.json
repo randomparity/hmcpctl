@@ -1171,7 +1171,7 @@
     {
       "operation": "lpar.create",
       "implementation": {
-        "state": "implemented",
+        "state": "partial",
         "implemented_scope": [
           {
             "variant": "aix-linux-partition",
@@ -1189,9 +1189,28 @@
           {
             "variant": "c01-partition-settings",
             "parameters": []
+          },
+          {
+            "variant": "c12-physical-tagged-io-creation",
+            "parameters": [
+              {
+                "name": "physical_io",
+                "constraint": "eight typed creation fields; physical/HMC and declared direct SR-IOV selectors; native profile comparison before apply/dependent writes"
+              }
+            ]
           }
         ],
-        "missing_scope": []
+        "missing_scope": [
+          {
+            "variant": "c12-positive-virtual-slot-linkage",
+            "parameters": [
+              {
+                "name": "physical_io.load_source_slot,physical_io.alt_restart_device_slot,physical_io.console_slot",
+                "constraint": "positive virtual-slot forms without creation-time adapter linkage rejected before effects; operator-approved gap retained for #638 dependency reconciliation, existing adapter owners unchanged"
+              }
+            ]
+          }
+        ]
       },
       "evidence": [
         {
@@ -4687,6 +4706,15 @@
                 "constraint": "SystemName or UUID"
               }
             ]
+          },
+          {
+            "variant": "c12-physical-tagged-io-creation",
+            "parameters": [
+              {
+                "name": "physical_io",
+                "constraint": "eight typed creation fields; physical/HMC and declared direct SR-IOV selectors; native profile comparison before apply/dependent writes"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -4696,6 +4724,15 @@
               {
                 "name": "assignments.dedicated",
                 "constraint": "refused before provisioning; profile-first activation is owned by issue #1225"
+              }
+            ]
+          },
+          {
+            "variant": "c12-positive-virtual-slot-linkage",
+            "parameters": [
+              {
+                "name": "physical_io.load_source_slot,physical_io.alt_restart_device_slot,physical_io.console_slot",
+                "constraint": "positive virtual-slot forms without creation-time adapter linkage rejected before effects; operator-approved gap retained for #638 dependency reconciliation, existing adapter owners unchanged"
               }
             ]
           }
