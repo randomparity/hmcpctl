@@ -162,6 +162,14 @@ def _render_provision_result(
             style="green",
             markup=False,
         )
+    elif result.resource_created is None:
+        console.print(
+            f"LPAR '{terminal_field(name)}' creation outcome is unknown. "
+            "Inspect the scoped partition and profile before retrying; "
+            "no rollback performed.",
+            style="yellow",
+            markup=False,
+        )
     elif result.resource_created:
         identity = result.lpar_uuid or "UUID unavailable"
         console.print(

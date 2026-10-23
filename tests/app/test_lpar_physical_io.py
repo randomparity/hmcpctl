@@ -70,3 +70,34 @@ def test_cli_console_json_forwarding_and_invalid_file(monkeypatch, tmp_path):
 def test_schema_refuses_coercions_and_unknown_keys(payload):
     with pytest.raises(ValidationError):
         TypeAdapter(LparPhysicalIO).validate_python(payload)
+
+
+@pytest.mark.parametrize(
+    "created,expected",
+    [
+        (None, "creation outcome is unknown"),
+        (False, "was not created"),
+        (True, "was created"),
+    ],
+)
+def test_provision_cli_preserves_creation_state(capsys, created, expected):
+    from hmcpctl.cli_commands.lpar.provision import _render_provision_result
+    from hmcpctl.operations.lpar.provision import ProvisionResult
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    guidance = "Inspect the scoped partition and profile before retrying"
+    result = ProvisionResult(
+        created,
+        False,
+        None,
+        False,
+        None,
+        (WorkflowStep("create", "error", guidance),),
+        (),
+    )
+    _render_provision_result(result, "new", False, False)
+    output = capsys.readouterr().out
+    assert expected in output
+    if created is None:
+        assert "was not created" not in output
+        assert "Inspect" in output and "before retrying" in output

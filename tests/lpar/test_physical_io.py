@@ -533,3 +533,62 @@ async def test_created_step_never_confirms_unverified_profile(monkeypatch, mode)
 def test_bounded_identity_and_collection_inputs(args):
     with pytest.raises((ValueError, TypeError)):
         LparPhysicalIO(**args)
+
+
+@pytest.mark.asyncio
+async def test_native_dispatch_failure_reports_unknown_without_retry(monkeypatch):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar import core
+
+    hmc = SimpleNamespace(
+        config=object(), find_partition_by_name=AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(core, "resolve_system_uuid", AsyncMock(return_value="system"))
+    monkeypatch.setattr(core, "require_memory_within_system", AsyncMock())
+    monkeypatch.setattr(core, "admit_creation_io", AsyncMock())
+    dispatch = AsyncMock(side_effect=HMCError("SSH response lost"))
+    stamp = AsyncMock()
+    monkeypatch.setattr(core, "_create_via_cli", dispatch)
+    monkeypatch.setattr(core, "stamp_created_lpar_ownership", stamp)
+    with pytest.raises(HMCError, match="outcome is unknown.*Inspect.*before retrying"):
+        await core.create_and_stamp_lpar(
+            hmc,
+            "system",
+            core.LparCreation(
+                "new",
+                "OS400",
+                LparResources(desired_memory=256, desired_procs=0.1),
+                physical_io=LparPhysicalIO(console_slot="hmc"),
+            ),
+        )
+    dispatch.assert_awaited_once()
+    stamp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provision_unknown_create_preserves_uncertainty_and_stops_legs(
+    monkeypatch,
+):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar import provision
+
+    request = provision.ProvisionRequest(
+        "new",
+        provision.ProvisionAdapters(1),
+        provision.ProvisionStorage("vios", "disk"),
+        LparResources(),
+        partition_type="OS400",
+        physical_io=LparPhysicalIO(console_slot="hmc"),
+    )
+    monkeypatch.setattr(provision, "_preflight_provision_request", AsyncMock())
+    create = AsyncMock(side_effect=HMCError("outcome unknown: inspect before retrying"))
+    legs = AsyncMock()
+    monkeypatch.setattr(provision, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(provision, "_run_legs_through_power", legs)
+    result = await provision.provision_lpar(object(), "system", request)
+    assert result.resource_created is None and not result.workflow_completed
+    assert "inspect before retrying" in result.steps[0].result
+    create.assert_awaited_once()
+    legs.assert_not_awaited()

@@ -103,7 +103,9 @@ class ProvisionResult:
     """Truthful outcome of a provisioning attempt."""
 
     resource_created: bool | None = field(
-        metadata={"description": "Whether this call created the LPAR."}
+        metadata={
+            "description": "Whether this call created the LPAR, or null when its outcome is unknown."
+        }
     )
     workflow_completed: bool = field(
         metadata={"description": "Whether every requested workflow step completed."}
