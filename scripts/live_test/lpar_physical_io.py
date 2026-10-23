@@ -17,7 +17,7 @@ from .lpar_config import (
     _teardown,
     scratch_partitions,
 )
-from .observation import Assertion
+from .observation import Assertion, plain_data
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -62,9 +62,10 @@ async def exercise_lpar_physical_io(client: Client, state: RunState) -> None:
             physical_io={"console_slot": "hmc"},
             apply_partition_profile=False,
         )
+        data = plain_data(data)
         if status != "PASS" or not isinstance(data, dict):
             raise ValueError(
-                "IBM i creation did not return a successful structured result"
+                f"IBM i creation did not return a successful structured result ({status}): {data!r}"
             )
         lpar = data.get("lpar")
         run.uuid = lpar.get("UUID") if isinstance(lpar, dict) else None
@@ -84,7 +85,7 @@ async def exercise_lpar_physical_io(client: Client, state: RunState) -> None:
         )
         if not verified:
             raise ValueError(
-                "IBM i console profile readback/ownership was not confirmed"
+                f"IBM i console profile readback/ownership was not confirmed: {data!r}"
             )
         state.record(SUBTASK, "explicit HMC console creation", "PASS", data)
     except (HMCError, ValueError, TypeError, PermissionError) as error:
