@@ -340,13 +340,12 @@ async def create_and_stamp_lpar(
                 "retrying; a created partition can be re-stamped with "
                 "set_lpar_ownership_description."
             )
-        skipped = (
-            "created identity readback unavailable; inspect the contained partition before retrying"
-            if policy_requested
-            else "create returned no LPAR body"
-            if readback_error is None
-            else f"read-back after mksyscfg failed: {readback_error}"
-        )
+        if policy_requested:
+            skipped = "created identity readback unavailable; inspect the contained partition before retrying"
+        elif readback_error is None:
+            skipped = "create returned no LPAR body"
+        else:
+            skipped = f"read-back after mksyscfg failed: {readback_error}"
         return LparCreationResult(
             resource_created=True,
             lpar=None,
