@@ -2,16 +2,18 @@
 
 # `vios` tools
 
-10 tools in the `vios` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+12 tools in the `vios` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `hmc_backup_vios` | `mutate` | `vios.backup` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create a named VIOS backup with the supported ``mkviosbk`` command. |
+| `hmc_configure_vios_vtpm` | `destructive` | `vios.configure_vtpm` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure an inactive VIOS's advertised vTPM settings without implicit reset. |
 | `hmc_create_vios` | `mutate` | `vios.create` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | Create a new Virtual IO Server (VIOS) partition on a managed system. |
 | `hmc_delete_vios` | `destructive` | `vios.delete` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Delete (destroy) a VIOS partition by name or UUID. |
 | `hmc_get_vios_storage_detail` | `read` | `vios.get` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Get storage-detail mappings for one VIOS by partition name or UUID. |
+| `hmc_get_vios_vtpm_settings` | `read` | `vios.get_vtpm_settings` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read one contained VIOS partition's vTPM configuration. |
 | `hmc_install_vios` | `destructive` | `vios.install` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Install a VIOS onto an existing partition via the HMC ``installios`` CLI. |
 | `hmc_list_vios` | `read` | `vios.list` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List Virtual I/O Servers, optionally filtered by system or state. |
 | `hmc_list_vios_backups` | `read` | `vios.list_backups` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List a VIOS backup catalog with the supported ``lsviosbk`` command. |

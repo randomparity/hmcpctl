@@ -18,6 +18,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Typed vTPM creation and inactive updates expose `vtpm_enabled`, `vtpm_version`
+  and `vtpm_encryption` for AIX/Linux partitions and VIOS through CLI/MCP.
+  Values are admitted against the selected system's advertisements; disabling an
+  enabled instance requires separate data-loss acknowledgement. Readback reports
+  verified, mismatched or uncertain outcomes without replay or rollback (#1764).
+  Opt-in arm 51 exercises one disposable inactive AIX/Linux variant; hardware
+  evidence remains separate from implementation maturity.
+
 - Partition creation and reporting configuration expose the five C02 fields in
   their documented contexts, with IBM i admission, explicit false/zero/none,
   ownership guards and verified/uncertain outcomes (#1763). Creation-only

@@ -5,10 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict
 
 import typer
+from pydantic import TypeAdapter
 
+from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
+from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 from ...operations.partition_state import PartitionState
-from ...operations.vios.core import list_vios, power_vios
+from ...operations.vios.core import create_vios, list_vios, power_vios
 from ..output import (
     InventoryFormat,
     console,
@@ -152,5 +156,92 @@ def vios_power_off(
 def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
     group.command("list")(vios_list)
+    group.command("create")(vios_create)
+    group.command("get-vtpm-settings")(vios_get_vtpm_settings)
+    group.command("configure-vtpm")(vios_configure_vtpm)
     group.command("power-on")(vios_power_on)
     group.command("power-off")(vios_power_off)
+
+
+def vios_create(
+    name: str = typer.Argument(...),
+    system: str = typer.Option(..., "--system", "-s"),
+    resources: str | None = typer.Option(
+        None, "--resources", help="Typed resource JSON; omitted uses VIOS defaults"
+    ),
+    vtpm_settings: str | None = typer.Option(
+        None, "--vtpm-settings", help="Three-field typed vTPM JSON"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+) -> None:
+    """Create an inactive VIOS through its existing owner."""
+    try:
+        resource_values = (
+            VIOS_DEFAULT_RESOURCES
+            if resources is None
+            else TypeAdapter(LparResources).validate_json(resources)
+        )
+        settings = (
+            None
+            if vtpm_settings is None
+            else TypeAdapter(LparVtpmSettings).validate_json(vtpm_settings)
+        )
+    except ValueError as error:
+        raise typer.BadParameter(terminal_field(error, err=True)) from error
+    if not yes:
+        typer.confirm(
+            f"Create VIOS {terminal_field(name)} on {terminal_field(system)}?",
+            abort=True,
+        )
+    result = with_client(
+        lambda hmc: create_vios(
+            hmc, system, name, resource_values, vtpm_settings=settings
+        )
+    )
+    print_json(result)
+
+
+def vios_get_vtpm_settings(
+    vios_name: str = typer.Argument(...), system_name: str = typer.Argument(...)
+) -> None:
+    """Read contained VIOS vTPM settings."""
+    result = with_client(
+        lambda hmc: read_lpar_vtpm(
+            hmc, vios_name, system_name_or_uuid=system_name, vios=True
+        )
+    )
+    print_json(asdict(result))
+
+
+def vios_configure_vtpm(
+    vios_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+    vtpm_enabled: bool | None = typer.Option(None, "--vtpm-enabled/--no-vtpm-enabled"),
+    vtpm_version: str | None = typer.Option(None, "--vtpm-version"),
+    vtpm_encryption: str | None = typer.Option(None, "--vtpm-encryption"),
+    acknowledge_data_loss: bool = typer.Option(
+        False,
+        "--acknowledge-data-loss",
+        help="Consent to key/data loss on enabled disable",
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+) -> None:
+    """Configure inactive VIOS vTPM without implicit reset, power or profile action."""
+    try:
+        settings = LparVtpmSettings(vtpm_enabled, vtpm_version, vtpm_encryption)
+    except ValueError as error:
+        raise typer.BadParameter(terminal_field(error, err=True)) from error
+    result = with_client(
+        lambda hmc: configure_lpar_vtpm(
+            hmc,
+            vios_name,
+            settings,
+            system_name_or_uuid=system_name,
+            vios=True,
+            acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(1)

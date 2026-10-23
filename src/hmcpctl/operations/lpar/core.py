@@ -27,6 +27,7 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.lpar_io import LparPhysicalIO
+from ...documents.lpar_vtpm import LparVtpmSettings
 from ...errors import HMCError
 from ...resource_identity import (
     resolve_system_uuid,
@@ -41,11 +42,13 @@ from ...ssh.lpar import (
     resolve_system_cli_name,
     validate_caller_token,
 )
+from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml
 from .assignments import SriovLogicalPortAssignment
 from .configuration import configure_lpar_settings
 from .physical_io import admit_creation_io, created_io_step
+from .vtpm import admit_vtpm, read_vtpm_capabilities
 
 _logger = logging.getLogger(__name__)
 
@@ -72,6 +75,7 @@ class LparCreation:
     reporting_settings: LparReportingSettings = field(
         default_factory=LparReportingSettings
     )
+    vtpm_settings: LparVtpmSettings = field(default_factory=LparVtpmSettings)
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,7 @@ class LparCreationResult:
     settings_step: WorkflowStep | None = None
     physical_io_step: WorkflowStep | None = None
     reporting_step: WorkflowStep | None = None
+    vtpm_step: WorkflowStep | None = None
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -137,6 +142,7 @@ async def _create_via_cli(
         partition_id=creation.partition_id,
         settings=creation.settings,
         reporting_settings=creation.reporting_settings,
+        vtpm_settings=creation.vtpm_settings,
         physical_io=creation.physical_io,
         creation_sriov=creation.creation_sriov,
     )
@@ -185,6 +191,13 @@ async def create_and_stamp_lpar(
         # stamp's best-effort catch: no create can precede rejection, and a
         # malformed token can never discard the ownership stamp (ADR 0064).
         validate_caller_token(creation.caller_token)
+    if not isinstance(creation.vtpm_settings, LparVtpmSettings):
+        raise TypeError("vtpm_settings must be LparVtpmSettings")
+    creation.vtpm_settings.validate_creation(creation.partition_type)
+    if creation.vtpm_settings.pairs() and creation.keylock is not None:
+        raise ValueError(
+            "vTPM settings cannot be combined with explicit keylock: native creation cannot represent keylock. Nothing was created"
+        )
     if not isinstance(creation.settings, LparSettings):
         raise TypeError("settings must be LparSettings")
     if not isinstance(creation.physical_io, LparPhysicalIO):
@@ -208,6 +221,10 @@ async def create_and_stamp_lpar(
             f"(UUID {existing.get('UUID')!r}). Choose a different name "
             "or delete the existing partition first."
         )
+    if creation.vtpm_settings.pairs():
+        admit_vtpm(
+            creation.vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid)
+        )
     await admit_creation_io(hmc, system_uuid, creation)
     await require_memory_within_system(hmc, system_uuid, creation.resources)
     system_name: str | None = None
@@ -217,6 +234,7 @@ async def create_and_stamp_lpar(
     if (
         resources is None
         or creation.reporting_settings.pairs()
+        or creation.vtpm_settings.pairs()
         or creation.physical_io.requested
         or (creation.settings.pairs() and creation.keylock is None)
     ):
@@ -314,6 +332,11 @@ async def create_and_stamp_lpar(
                 if creation.settings.pairs()
                 else None
             ),
+            vtpm_step=WorkflowStep(
+                "vtpm", "error", "Created identity unavailable; vTPM unverified"
+            )
+            if creation.vtpm_settings.pairs()
+            else None,
             reporting_step=(
                 WorkflowStep(
                     "reporting_settings",
@@ -375,7 +398,28 @@ async def create_and_stamp_lpar(
         ),
         io_step,
         await _created_reporting_step(hmc, system_name, creation),
+        await _created_vtpm_step(hmc, system_name, creation),
     )
+
+
+async def _created_vtpm_step(
+    hmc: HMCClient, cli_system: str | None, creation: LparCreation
+) -> WorkflowStep | None:
+    if not creation.vtpm_settings.pairs():
+        return None
+    try:
+        if cli_system is None:
+            raise ValueError("Native vTPM creation did not retain its system identity")
+        observed = await get_lpar_vtpm_state(hmc.config, cli_system, creation.name)
+    except (HMCError, ValueError, PermissionError) as error:
+        return WorkflowStep(
+            "vtpm", "error", f"Partition exists; vTPM unverified: {error}"
+        )
+    matches = all(
+        getattr(observed.settings, name) == getattr(creation.vtpm_settings, name)
+        for name, _ in creation.vtpm_settings.pairs()
+    )
+    return WorkflowStep("vtpm", "ok" if matches else "error", observed)
 
 
 async def _created_reporting_step(

@@ -1202,6 +1202,15 @@
                 "constraint": "eight typed creation fields; physical/HMC and declared direct SR-IOV selectors; native profile comparison before apply/dependent writes"
               }
             ]
+          },
+          {
+            "variant": "c03-partition-vtpm",
+            "parameters": [
+              {
+                "name": "vtpm_settings",
+                "constraint": "three typed fields; selected-system advertisement/known compatibility; native single-record creation and requested-value readback"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -4899,6 +4908,15 @@
           {
             "variant": "virtual-ioserver-collection-create",
             "parameters": []
+          },
+          {
+            "variant": "c03-vios-vtpm",
+            "parameters": [
+              {
+                "name": "vtpm_settings",
+                "constraint": "three typed fields; selected-system advertisement/known compatibility; native single-record creation and requested-value readback"
+              }
+            ]
           }
         ],
         "missing_scope": []
@@ -5657,6 +5675,62 @@
         "implemented_scope": [
           {
             "variant": "c02-partition-reporting",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.get_vtpm_settings",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c03-vtpm",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.configure_vtpm",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c03-vtpm",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.get_vtpm_settings",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c03-vtpm",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.configure_vtpm",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c03-vtpm",
             "parameters": []
           }
         ],
