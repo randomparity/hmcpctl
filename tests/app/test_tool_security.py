@@ -443,6 +443,8 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         "hmc_activate_system_profile",
         "hmc_backup_lpar_profiles",
         # Disabling vTPM can destroy keys and stored TPM data (ADR 0276).
+        "hmc_configure_lpar_security_policy",
+        "hmc_configure_vios_security_policy",
         "hmc_configure_lpar_vtpm",
         "hmc_configure_vios_vtpm",
         "hmc_dump_restart_lpar",

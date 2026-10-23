@@ -185,6 +185,13 @@
       "observed_at": null
     },
     {
+      "operation": "lpar.configure_security_policy",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.configure_vtpm",
       "implementation": "implemented",
       "verification": "unevidenced",
@@ -277,6 +284,13 @@
     },
     {
       "operation": "lpar.get_reporting_settings",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.get_security_policy",
       "implementation": "implemented",
       "verification": "unevidenced",
       "reason": null,
@@ -1144,6 +1158,13 @@
       "observed_at": "2026-10-06T15:27:07Z"
     },
     {
+      "operation": "vios.configure_security_policy",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "vios.configure_vtpm",
       "implementation": "implemented",
       "verification": "unevidenced",
@@ -1166,6 +1187,13 @@
     },
     {
       "operation": "vios.get",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.get_security_policy",
       "implementation": "implemented",
       "verification": "unevidenced",
       "reason": null,

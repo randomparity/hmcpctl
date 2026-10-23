@@ -8,6 +8,10 @@ import typer
 from pydantic import TypeAdapter
 from rich.text import Text
 
+from hmcpctl.cli_commands.lpar.assignment_input import (
+    SECURITY_POLICY_WARNING,
+    load_security_policy,
+)
 from hmcpctl.documents.lpar import LparReportingSettings, LparSettings
 from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.operations.lpar.configuration import (
@@ -18,6 +22,10 @@ from hmcpctl.operations.lpar.configuration import (
     read_lpar_settings,
 )
 from hmcpctl.operations.lpar.ownership import set_lpar_ownership_description
+from hmcpctl.operations.lpar.security_policy import (
+    configure_lpar_security_policy,
+    read_lpar_security_policy,
+)
 from hmcpctl.operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 
 from ...operations.affinity.ssh import (
@@ -43,7 +51,14 @@ from ...ssh.profiles import (
     get_proc_compat_modes,
     set_lpar_proc_compat,
 )
-from ..output import VerbatimTable, console, print_json, terminal_field, usage_error
+from ..output import (
+    VerbatimTable,
+    console,
+    err_console,
+    print_json,
+    terminal_field,
+    usage_error,
+)
 from ..runtime import run_cli_coroutine, ssh_config, with_client
 
 
@@ -642,6 +657,8 @@ def register_commands(group: typer.Typer) -> None:
     )
     group.command("plan-memopt-scores")(lpars_plan_memopt_scores)
     group.command("plan-system-memopt-score")(lpars_plan_system_memopt_score)
+    group.command("get-security-policy")(lpars_get_security_policy)
+    group.command("configure-security-policy")(lpars_configure_security_policy)
     group.command("configure-vtpm")(lpars_configure_vtpm)
     group.command("get-vtpm-settings")(lpars_get_vtpm_settings)
     group.command("configure-reporting")(lpars_configure_reporting)
@@ -699,6 +716,62 @@ def lpars_configure_vtpm(
             settings,
             system_name_or_uuid=system_name,
             acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(1)
+
+
+def lpars_get_security_policy(
+    lpar_name: str = typer.Argument(...), system_name: str = typer.Argument(...)
+) -> None:
+    """Read pending security policy and separate current secure boot; no runtime proof."""
+    result = with_client(
+        lambda hmc: read_lpar_security_policy(
+            hmc, lpar_name, system_name_or_uuid=system_name
+        )
+    )
+    print_json(asdict(result))
+
+
+def lpars_configure_security_policy(
+    lpar_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+    security_policy: str = typer.Option(
+        ...,
+        "--security-policy",
+        help="Strict inline policy JSON (64 KiB maximum); no filename",
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Confirm the security-policy consequences"
+    ),
+) -> None:
+    """Configure security policy without power, profile or key actions.
+
+    Secure boot may be weakened. Signed/Linux enables are irreversible; store
+    enable/increase requires inactivity, nonzero shrink requires Power11, and
+    disabling a store requires HMC emptiness checks. PK bypass skips old-PK
+    authentication. Linux selection declares intent only, without guest proof.
+    Pending policy may require restart; readback proves no runtime enforcement.
+    """
+    settings = load_security_policy(security_policy)
+    if not settings.pairs():
+        raise typer.BadParameter("Supply at least one security policy setting")
+    err_console.print(SECURITY_POLICY_WARNING, markup=False)
+    if not yes:
+        typer.confirm(
+            "Change security policy on the selected partition?",
+            abort=True,
+        )
+    result = with_client(
+        lambda hmc: configure_lpar_security_policy(
+            hmc,
+            lpar_name,
+            settings,
+            system_name_or_uuid=system_name,
             ownership_override=ownership_override,
         )
     )

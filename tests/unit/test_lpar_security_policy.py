@@ -357,3 +357,56 @@ def test_creation_dependencies_and_environment():
         admit_security_policy(
             LparSecurityPolicy(secure_boot=1), CAPS, environment="untrusted-value"
         )
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"secure_boot": "PRIVATE-POLICY-MARKER"},
+        {"PRIVATE-POLICY-MARKER": True},
+        "PRIVATE-POLICY-MARKER",
+        {"PRIVATE-POLICY-MARKER" + str(i) + "x" * 70000: True for i in range(8)},
+    ],
+)
+def test_nested_validation_details_are_private_and_bounded(invalid):
+    from pydantic import BaseModel
+
+    class Arguments(BaseModel):
+        settings: LparSecurityPolicy
+
+    with pytest.raises(ValidationError) as caught:
+        Arguments.model_validate({"settings": invalid})
+    errors = caught.value.errors()
+    assert "PRIVATE-POLICY-MARKER" not in str(errors)
+    assert "PRIVATE-POLICY-MARKER" not in str(caught.value)
+    assert len(errors) <= 6
+    assert len(str(errors)) < 3000
+    assert all(e["input"] is None for e in errors)
+
+
+def test_private_validation_retains_compiled_fields_codes_and_counts():
+    invalid = {name: "PRIVATE-POLICY-MARKER" for name in FIELDS}
+    invalid.update({f"PRIVATE-POLICY-MARKER-{i}": True for i in range(20)})
+    with pytest.raises(ValidationError) as caught:
+        TypeAdapter(LparSecurityPolicy).validate_python(invalid)
+    errors = caught.value.errors()
+    assert len(errors) == 6
+    assert [error["loc"] for error in errors] == [(name,) for name in FIELDS] + [
+        ("unknown_field",)
+    ]
+    assert [error["type"] for error in errors] == [
+        "int_type",
+        "int_type",
+        "bool_type",
+        "bool_type",
+        "bool_type",
+        "extra_forbidden",
+    ]
+    assert all(error["input"] is None for error in errors)
+    assert all("ctx" not in error for error in errors)
+    assert "PRIVATE-POLICY-MARKER" not in str(caught.value)
+    with pytest.raises(ValidationError) as caught:
+        TypeAdapter(LparSecurityPolicy).validate_python({"secure_boot": 10})
+    assert caught.value.errors()[0]["loc"] == ("secure_boot",)
+    assert caught.value.errors()[0]["type"] == "value_error"
+    assert caught.value.errors()[0]["input"] is None

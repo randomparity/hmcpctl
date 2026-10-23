@@ -12,6 +12,7 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.lpar_io import LparPhysicalIO
+from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
 from ...operations.lpar.core import LparCreation
@@ -53,6 +54,7 @@ def hmc_create_lpar(
     settings: LparSettings | None = None,
     reporting_settings: LparReportingSettings | None = None,
     vtpm_settings: LparVtpmSettings | None = None,
+    security_policy: LparSecurityPolicy | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -77,6 +79,10 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        security_policy: Optional strict pending secure-boot/keystore policy.
+            Signed enablement is irreversible; store requires inactivity and HMC
+            bounds. Linux selection declares intent, not guest proof. No key
+            actions; unverified policy stops follow-ups.
         vtpm_settings: Optional advertised vTPM fields for AIX/Linux creation; native single-record creation, no implicit reset. Unverified readback stops assignments; explicit keylock cannot be combined.
         reporting_settings: Optional C02 creation fields: restricted I/O and electronic
             reporting (IBM i only), work group integer or "none", redundant reporting.
@@ -110,7 +116,8 @@ def hmc_create_lpar(
             DRCs and explicit hmc console are supported; unresolved virtual-slot
             selectors fail before effects (remaining linkage gap #638). C12 profile
             readback must succeed before application and later workflow steps.
-        profile: Optional configured HMC profile name; uses the default when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses the default when omitted.
     """
     if caller_token is not None:
         validate_caller_token(caller_token)
@@ -131,6 +138,9 @@ def hmc_create_lpar(
                 if physical_io is not None
                 else LparPhysicalIO(),
                 apply_profile=apply_partition_profile,
+                security_policy=security_policy
+                if security_policy is not None
+                else LparSecurityPolicy(),
                 settings=settings if settings is not None else LparSettings(),
                 vtpm_settings=vtpm_settings
                 if vtpm_settings is not None
