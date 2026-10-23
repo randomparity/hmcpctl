@@ -31,12 +31,14 @@ PK. Bypass requires effective signed-update infrastructure. Linux enablement als
 requires it; the Linux field includingFalse is accepted only for AIX/Linux,
 rejected for VIOS/OS400, and proves no guest OS. Store zero is subject to HMC
 emptiness checks; this tool reads no key objects and claims no emptiness proof.
-Power11 permits store decrease; older systems reject decreases before effects.
+Power11 permits nonzero store shrink (`0 < requested < before`); older systems
+reject that branch. Zero-disable is separate and does not require Power11; HMC
+rejects it if the store is not empty, without this tool reading key objects.
 Source-backed minimum PKS release is HMC9.2.950/FW950.
 [IBM i enhancement details](https://www.ibm.com/support/pages/ibm-i-functional-enhancements-details)
 establish IBM i7.6/Power11 secure boot with HMC11.1.1110/FW1110, including enforce.
 Require POWER11 in the existing selected-system processor-mode advertisement and
-those console/firmware floors for OS400 secure-boot settings and store decreases;
+those console/firmware floors for OS400 secure-boot settings and nonzero store shrink;
 unknown/malformed release metadata refuses those branches. Warn that installed
 IBM i7.6 and OS-specific3–9 semantics are operator prerequisites, not verified facts.
 No claim of guest boot, key-object, migration or runtime enforcement follows.
@@ -57,8 +59,9 @@ rather than guessed defaults. BypassTrue requires effective signed infrastructur
 and nonzero store. Refuse observedTrue→requestedFalse for either irreversible flag.
 An explicitFalse with unknown old irreversible value refuses before submission.
 Store enable/increase and signed/Linux enable transitions require observed
-`Not Activated`; other changes require a recognized stable state (`Running` or
-`Not Activated`), without silently powering off. Creation is inactive and requires
+`not activated`; other changes require a recognized stable REST state (`running` or
+`not activated`), using the existing `operations/partition_state.py` vocabulary, without silently
+powering off. Feed captured parsed states through admission tests. Creation is inactive and requires
 explicit nonzero store/dependency settings when enabling dynamic features. Creation
 has no before-state; omission leaves HMC defaults, subject to readback.
 
