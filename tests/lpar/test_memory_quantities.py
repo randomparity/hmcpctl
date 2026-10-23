@@ -670,3 +670,22 @@ async def test_native_process_failure_with_unchanged_readback_is_rejected(
     assert not result["workflow_completed"]
     assert result["submission_error"] == "native resource refusal"
     b.command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_post_submit_containment_loss_cannot_be_reported_applied(
+    quantity_boundary, monkeypatch
+):
+    b = quantity_boundary
+    containment = AsyncMock(
+        side_effect=[
+            LPAR_UUID,
+            ValueError("partition no longer belongs to selected system"),
+        ]
+    )
+    monkeypatch.setattr("hmcpctl.operations.lpar.memory.resolve_lpar_uuid", containment)
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "unverified"
+    assert not result["workflow_completed"]
+    b.command.assert_awaited_once()
+    assert containment.await_count == 2

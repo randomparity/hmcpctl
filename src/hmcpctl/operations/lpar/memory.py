@@ -438,6 +438,7 @@ async def change_lpar_memory(
             exc.__cause__.exit_status is not None and exc.__cause__.exit_status != 0
         )
     try:
+        await resolve_lpar_uuid(hmc, uuid, system_name_or_uuid=system_uuid)
         after = _snapshot(await hmc.get_logical_partition(uuid), uuid)
         matched = _postconditions(before, after, targets)
     except (HMCError, ValueError) as exc:
