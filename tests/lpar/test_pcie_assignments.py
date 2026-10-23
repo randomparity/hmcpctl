@@ -9,6 +9,7 @@ import pytest
 from conftest import live_fixture
 
 from hmcpctl.config import HMCConfig
+from hmcpctl.documents.lpar import LparResources
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
@@ -19,6 +20,7 @@ from hmcpctl.operations.lpar.assignments import (
     apply_validated_lpar_pcie_assignments,
     prevalidate_lpar_pcie_assignments,
 )
+from hmcpctl.operations.lpar.core import LparCreation
 from hmcpctl.operations.lpar.workflows import create_lpar
 from hmcpctl.operations.virtualization.pcie import (
     InventoryResult,
@@ -541,7 +543,7 @@ async def test_create_refuses_off_granularity_capacity_before_creating_the_lpar(
         await create_lpar(
             SimpleNamespace(config=config),
             "sys",
-            SimpleNamespace(name="new-lpar", partition_type="AIX/Linux"),
+            LparCreation("new-lpar", "AIX/Linux", LparResources()),
             LparPcieAssignments(sriov=(_sriov_at("7.5"),)),
         )
     create.assert_not_awaited()
@@ -589,7 +591,7 @@ async def test_create_refuses_sriov_items_outside_the_mutation_envelope(
         await create_lpar(
             SimpleNamespace(config=config),
             "sys",
-            SimpleNamespace(name="new-lpar", partition_type="AIX/Linux"),
+            LparCreation("new-lpar", "AIX/Linux", LparResources()),
             assignments,
         )
     create.assert_not_awaited()

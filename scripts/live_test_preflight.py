@@ -309,6 +309,20 @@ def _lpar_settings_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-physical-io",
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            f"one inactive OS400 partition {lpar_config.NAME_PREFIX}<8 hex>: explicit console_slot=hmc; verify native profile; delete matching-token fixture",
+            "no activation, profile apply, physical/SR-IOV assignment, foreign partition or retry; independent recovery and resource comparison required",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the partitions and the VIOS volume the lpar-power arm (#1346) creates."""
     return ArmVerdict(
@@ -537,6 +551,7 @@ _ARM_VERDICTS = {
     "users": _users_verdict,
     "lpar-config": _lpar_config_verdict,
     "lpar-settings": _lpar_settings_verdict,
+    "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,

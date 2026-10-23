@@ -179,7 +179,7 @@
     },
     {
       "operation": "lpar.create",
-      "implementation": "implemented",
+      "implementation": "partial",
       "verification": "current",
       "reason": null,
       "observed_at": "2026-10-12T22:11:29Z"

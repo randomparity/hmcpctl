@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..._app import with_client
 from ...documents.lpar import LparResources, PartitionType, validate_partition_type
+from ...documents.lpar_io import LparPhysicalIO
 from ...operations.affinity.rest import ProvisionAffinityAssessment
 from ...operations.lpar.assignments import LparPcieAssignments
 from ...operations.lpar.provision import (
@@ -53,6 +54,7 @@ def hmc_provision_lpar(
     caller_token: str | None = None,
     minimum_affinity_policy: MinimumAffinityPolicy | None = None,
     affinity_assessment: ProvisionAffinityAssessment | None = None,
+    physical_io: LparPhysicalIO | None = None,
     profile: str | None = None,
 ) -> ProvisionResult:
     """Provision an LPAR with a virtual Ethernet adapter, vSCSI storage, and optional power-on.
@@ -81,6 +83,11 @@ def hmc_provision_lpar(
         affinity_assessment: Optional target-bound captured evidence and explicit
             warning or fail response. Assessment waits for successful activation;
             omission preserves asynchronous power-on behavior.
+        physical_io: Optional typed initial physical/pool and IBM i tagged-I/O
+            configuration. No implicit console is chosen. Physical/direct SR-IOV
+            DRCs and explicit hmc console are supported; unresolved virtual-slot
+            selectors fail before effects (remaining linkage gap #638). C12 profile
+            readback must succeed before application and later workflow steps.
         profile: Optional TOML profile name; uses environment defaults when omitted.
 
     Returns:
@@ -110,6 +117,9 @@ def hmc_provision_lpar(
                 dry_run=dry_run,
                 assignments=assignments,
                 caller_token=caller_token,
+                physical_io=physical_io
+                if physical_io is not None
+                else LparPhysicalIO(),
                 minimum_affinity_policy=minimum_affinity_policy,
                 affinity_assessment=affinity_assessment,
             ),

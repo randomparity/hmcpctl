@@ -2185,7 +2185,8 @@ def test_baseline_scope_distinguishes_fixed_serialization_and_denied_assignment(
     provision = by_operation["provision.lpar"]["implementation"]
     assert provision["state"] == "partial"
     assert {row["variant"] for row in provision["missing_scope"]} == {
-        "dedicated-assignment"
+        "dedicated-assignment",
+        "c12-positive-virtual-slot-linkage",
     }
     assert not any(
         "dedicated" in parameter["constraint"]

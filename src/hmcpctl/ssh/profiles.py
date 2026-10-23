@@ -5,8 +5,10 @@ from __future__ import annotations
 import csv
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
+
+from pydantic import ConfigDict, StrictBool
 
 from ..config import HMCConfig
 from .commands import build_attribute_record, build_filter, parse_hmc_result_rows
@@ -439,9 +441,19 @@ DRC_INDEX_PATTERN = re.compile(r"[0-9A-F]{8}")
 class ProfileIoSlot:
     """One `io_slots` entry in the ADR 0165-admitted read rendering."""
 
-    drc_index: str
-    pool_id: str | None
-    is_required: bool
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    drc_index: str = field(
+        metadata={
+            "description": "Physical slot DRC index: eight uppercase hexadecimal digits."
+        }
+    )
+    pool_id: str | None = field(
+        metadata={"description": "Decimal I/O pool ID, or null for no pool."}
+    )
+    is_required: StrictBool = field(
+        metadata={"description": "Whether the slot is required for profile activation."}
+    )
 
 
 def profile_io_slot_rows_command(system_name: str) -> str:

@@ -99,6 +99,14 @@ is reused; no duplicate minimum-policy child is filed. Profile-context capabilit
 remain with #1724; C06/C07/C09/C11/C12 coordinate shared models rather than duplicate
 profile lifecycle. Pool lifecycle remains separate from partition resource changes.
 
+The operator-approved C12 boundary retains all eight fields/sixteen source
+bindings. Physical/HMC and declared direct-SR-IOV creation selectors are implemented
+in #1773. Positive virtual-slot forms for `load_source_slot`,
+`alt_restart_device_slot` and `console_slot` without creation-time adapter linkage
+remain rejected before effects and owned by #638 dependency reconciliation. Existing
+adapter implementation owners are unchanged; this is no new issue or enqueue.
+Implementation does not establish passing live evidence for those modes.
+
 ## Retained reconciliation
 
 #638 retains bounded client-networking, utilization configuration/read/delete,
