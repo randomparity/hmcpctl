@@ -8,7 +8,7 @@ from ..._app import (
     ssh_with_client,
     with_client,
 )
-from ...documents.lpar import LparSettings
+from ...documents.lpar import LparReportingSettings, LparSettings
 from ...operations.affinity.ssh import (
     MinimumAffinityPolicyResult,
     ResourceGroupAffinityResult,
@@ -23,11 +23,14 @@ from ...operations.affinity.ssh import (
     set_minimum_affinity_policy,
 )
 from ...operations.lpar.configuration import (
+    LparReportingSettingsResult,
     LparSettingsResult,
     ProcessorCompatibilityMode,
     configure_lpar_msp,
     configure_lpar_processor_compatibility,
+    configure_lpar_reporting_settings,
     configure_lpar_settings,
+    read_lpar_reporting_settings,
     read_lpar_settings,
 )
 from ...ssh.affinity import (
@@ -509,6 +512,64 @@ def hmc_get_lpar_settings(
     """
     return with_client(
         lambda hmc: read_lpar_settings(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="lpar.configure_reporting", target_kind="lpar")
+def hmc_configure_lpar_reporting(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    settings: LparReportingSettings,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> LparReportingSettingsResult:
+    """Configure partition reporting once and verify applicable readback.
+
+    IPL source (a/b/c/d), restricted I/O and electronic reporting require IBM i.
+    Work group accepts integer or "none"; omitted values are preserved.
+    Redundant error-path reporting is creation-only and is refused here.
+    Readback proves configuration, not guest IPL or dynamic runtime behavior.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: Partition name or UUID on that system.
+        settings: Typed C02 update fields; bool false, zero and "none" are explicit.
+        ownership_override: Explicitly bypass ownership rejection.
+        profile: TOML connection profile, or environment-default HMC when omitted.
+    """
+    return with_client(
+        lambda hmc: configure_lpar_reporting_settings(
+            hmc,
+            lpar_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="lpar.get_reporting_settings", target_kind="lpar")
+def hmc_get_lpar_reporting_settings(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile: str | None = None,
+) -> LparReportingSettings:
+    """Read applicable C02 update settings after proving partition containment.
+
+    IBM i-only fields are omitted (null) for AIX/Linux; redundant reporting is
+    creation-only and is not requested by this update-settings reader.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: Partition name or UUID on that system.
+        profile: TOML connection profile, or environment-default HMC when omitted.
+    """
+    return with_client(
+        lambda hmc: read_lpar_reporting_settings(
             hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         ),
         profile=profile,

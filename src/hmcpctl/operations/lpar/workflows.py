@@ -57,6 +57,11 @@ async def create_lpar(
         steps.append(created.apply_step)
     if created.settings_step is not None:
         steps.append(created.settings_step)
+    if created.reporting_step is not None:
+        steps.append(created.reporting_step)
+    reporting_failed = (
+        created.reporting_step is not None and created.reporting_step.status == "error"
+    )
     io_failed = (
         created.physical_io_step is not None and created.physical_io_step.status != "ok"
     )
@@ -69,7 +74,11 @@ async def create_lpar(
         created.apply_step is not None and created.apply_step.status == "error"
     )
     assignments_skipped = (
-        created.lpar is None or apply_failed or settings_failed or io_failed
+        created.lpar is None
+        or apply_failed
+        or settings_failed
+        or reporting_failed
+        or io_failed
     )
     if assignments_skipped:
         steps.extend(

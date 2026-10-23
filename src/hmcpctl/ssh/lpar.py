@@ -14,9 +14,12 @@ from .lpar_io import creation_io_record
 if TYPE_CHECKING:
     from ..operations.lpar.assignments import SriovLogicalPortAssignment
 
+from pydantic import TypeAdapter
+
 from ..config import HMCConfig
 from ..documents.lpar import (
     SHARING_MODES,
+    LparReportingSettings,
     LparResources,
     LparSettings,
     shared_units_over_vcpus,
@@ -143,6 +146,7 @@ async def create_lpar_via_cli(
     *,
     partition_id: int | None = None,
     settings: LparSettings | None = None,
+    reporting_settings: LparReportingSettings | None = None,
     physical_io: LparPhysicalIO | None = None,
     creation_sriov: tuple[SriovLogicalPortAssignment, ...] = (),
 ) -> str:
@@ -168,6 +172,8 @@ async def create_lpar_via_cli(
     processor mode's ``sharing_mode``. Omitted values take the defaults of
     :func:`complete_create_resources`, which the REST create uses too.
     """
+    if reporting_settings is not None:
+        reporting_settings.validate_context("create", partition_type)
     config_pairs: list[tuple[str, object]] = [
         ("name", name),
         ("lpar_env", _lpar_environment(partition_type)),
@@ -178,6 +184,8 @@ async def create_lpar_via_cli(
         config_pairs.append(("lpar_id", partition_id))
     if settings is not None:
         config_pairs.extend(settings.pairs())
+    if reporting_settings is not None:
+        config_pairs.extend(reporting_settings.pairs())
 
     # Two guards at two layers, neither substituting for the other:
     # build_attribute_record keeps the record's own ',' and '=' delimiters
@@ -562,6 +570,80 @@ async def set_lpar_settings(
     if not pairs:
         raise ValueError("Supply at least one partition setting")
     record = build_attribute_record([("name", lpar_name), *pairs])
+    await run_hmc_command(
+        config,
+        f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(record)}",
+    )
+
+
+async def get_lpar_reporting_settings(
+    config: HMCConfig,
+    system_name: str,
+    lpar_name: str,
+    *,
+    creation: bool = False,
+    require_ibmi: bool = False,
+) -> LparReportingSettings:
+    """Strict applicable partition readback; creation includes creation-only fields."""
+    selector = build_filter([("lpar_names", lpar_name)])
+    command = (
+        f"lssyscfg -r lpar -m {shlex.quote(system_name)} "
+        f"--filter {shlex.quote(selector)} -F "
+    )
+    environment = (await run_hmc_command(config, command + "lpar_env")).strip()
+    if environment not in {"aixlinux", "os400"} or (
+        require_ibmi and environment != "os400"
+    ):
+        raise HMCCLIError(
+            "Cannot read reporting settings: expected one applicable partition; IBM i is required for IPL, restricted I/O and electronic reporting"
+        )
+    names = [
+        item.name
+        for item in fields(LparReportingSettings)
+        if item.name != ("ipl_source" if creation else "redundant_err_path_reporting")
+        and (
+            environment == "os400"
+            or item.name in {"work_group_id", "redundant_err_path_reporting"}
+        )
+    ]
+    raw = await run_hmc_command(config, command + "lpar_env," + ",".join(names))
+    try:
+        rows = list(csv.reader(raw.strip().splitlines(), strict=True))
+        if (
+            len(rows) != 1
+            or len(rows[0]) != len(names) + 1
+            or rows[0][0] != environment
+        ):
+            raise ValueError(
+                "expected one complete row with unchanged partition environment"
+            )
+        values: dict[str, object] = {}
+        for name, value in zip(names, rows[0][1:], strict=True):
+            if name == "work_group_id":
+                if value != "none" and re.fullmatch(r"-?[0-9]+", value) is None:
+                    raise ValueError("work_group_id must read as an integer or none")
+                values[name] = value if value == "none" else int(value)
+            elif name == "ipl_source":
+                values[name] = value
+            else:
+                if value not in {"0", "1"}:
+                    raise ValueError(f"{name} must read as 0 or 1")
+                values[name] = value == "1"
+        return TypeAdapter(LparReportingSettings).validate_python(values)
+    except (ValueError, TypeError, csv.Error) as error:
+        raise HMCCLIError(
+            f"Cannot read reporting settings: {error}; inspect before retrying"
+        ) from error
+
+
+async def set_lpar_reporting_settings(
+    config: HMCConfig, system_name: str, lpar_name: str, settings: LparReportingSettings
+) -> None:
+    """Write one fixed C02 partition-update record; owning operation admits type."""
+    settings.validate_context("update")
+    if not settings.pairs():
+        raise ValueError("Supply at least one reporting setting")
+    record = build_attribute_record([("name", lpar_name), *settings.pairs()])
     await run_hmc_command(
         config,
         f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(record)}",

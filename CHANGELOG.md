@@ -18,6 +18,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Partition creation and reporting configuration expose the five C02 fields in
+  their documented contexts, with IBM i admission, explicit false/zero/none,
+  ownership guards and verified/uncertain outcomes (#1763). Creation-only
+  redundant reporting and update-only IPL remain distinct. Live behavior stays
+  unevidenced until commit-bound execution.
+
 - LPAR creation and provisioning accept typed physical-slot/pool and IBM i tagged
   I/O inputs, with explicit HMC-console selection, reused direct SR-IOV declarations,
   fresh relationship checks and native profile verification before application.

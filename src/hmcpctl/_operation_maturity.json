@@ -178,6 +178,13 @@
       "observed_at": null
     },
     {
+      "operation": "lpar.configure_reporting",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.create",
       "implementation": "partial",
       "verification": "current",
@@ -260,6 +267,13 @@
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T09:42:24Z"
+    },
+    {
+      "operation": "lpar.get_reporting_settings",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar.get_settings",

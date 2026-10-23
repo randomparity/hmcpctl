@@ -169,6 +169,7 @@ wildcard records the operation's actual scope.
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
+| `configure_lpar_reporting_settings` | `operations/lpar/configuration.py::configure_lpar_reporting_settings` | guarded (`operations/lpar/configuration.py::configure_lpar_reporting_settings`, via `resolve_and_authorize_lpar_names`) | — |
 | `configure_lpar_settings` | `operations/lpar/configuration.py::configure_lpar_settings` | guarded (`operations/lpar/configuration.py::configure_lpar_settings`, via `resolve_and_authorize_lpar_names`) | — |
 | `set_lpar_boot_order` | `operations/lpar/boot_order.py::set_lpar_boot_order` | guarded (`operations/lpar/boot_order.py::set_lpar_boot_order`) | — |
 | `clear_lpar_boot_order` | `operations/lpar/boot_order.py::clear_lpar_boot_order` | guarded (`operations/lpar/boot_order.py::clear_lpar_boot_order`) | — |

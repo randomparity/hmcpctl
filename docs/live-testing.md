@@ -1581,3 +1581,39 @@ that separately lists root name, SettingID and metadata deltas. Complete raw str
 differences remain private. Neither diagnostic equality nor clean cleanup admits a
 production recovery copy, establishes VIOS/adapter/force-save behavior, or promotes a
 capability's maturity. Use the filtered evidence generator for public summaries.
+
+
+## IBM i partition reporting (C02, opt-in subtask 48)
+
+The `lpar-reporting` arm explicitly requests `LparPhysicalIO(console_slot="hmc")`
+through the landed typed creation prerequisite and creates one owned, inactive
+OS400 scratch partition. It reads its four creation reporting fields, performs eight fixed update calls,
+and deletes it without activation, power changes or profile mutation. It uses
+2 GiB desired memory and 0.5 shared processing units (the lpar-config resource
+fixture). IBM i support/eligibility and available resources must be established
+by the operator on the selected system before the exclusive bounded window;
+configuration preflight alone does not prove IBM i eligibility. Do not substitute
+another partition if creation or readback is refused.
+
+Deploy the exact candidate into a separate checkout, run `just setup`, compare
+`git rev-parse HEAD` with the candidate SHA and confirm `hmcpctl.__file__` resolves
+inside that checkout. Keep credentials private and do not write through a shared
+`.env` symlink. Then execute only this named arm:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-reporting
+uv run --no-sync python scripts/live_test_runner.py --group lpar-reporting
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-reporting.json
+```
+
+Recovery is required after success or failure. The arm independently compares
+partition names and free memory/processing units before and after; teardown
+requires its caller token and inactive state and refuses an active/foreign
+fixture without a power call. Maximum effects are one create, eight update
+attempts and one delete, with existing finite SSH/RPC/job timeouts and no write
+retry. IPL a/b/a, restricted-I/O true/false, electronic-reporting true/false and
+work-group `none` are configuration probes, not guest-runtime or IPL evidence.
+No fabricated numeric EWLM ID is used. Record firmware/state rejections and
+unavailable readback honestly. Generate public evidence using
+`scripts/live_test_evidence.py`; raw result documents remain private. POWER9
+execution does not establish POWER10/POWER11 hardware coverage.

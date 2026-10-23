@@ -9,6 +9,7 @@ import typer
 
 from ...documents.lpar import (
     PARTITION_TYPES,
+    LparReportingSettings,
     LparResources,
     LparSettings,
     validate_partition_type,
@@ -96,6 +97,18 @@ def lpars_create(
     migration_disabled: bool | None = typer.Option(
         None, "--migration-disabled/--no-migration-disabled"
     ),
+    os400_restricted_io_mode: bool | None = typer.Option(
+        None, "--os400-restricted-io-mode/--no-os400-restricted-io-mode"
+    ),
+    work_group_id: str | None = typer.Option(
+        None, "--work-group-id", help="Integer EWLM ID or none"
+    ),
+    electronic_err_reporting: bool | None = typer.Option(
+        None, "--electronic-err-reporting/--no-electronic-err-reporting"
+    ),
+    redundant_err_path_reporting: bool | None = typer.Option(
+        None, "--redundant-err-path-reporting/--no-redundant-err-path-reporting"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Create a new LPAR on a managed system.
@@ -106,6 +119,22 @@ def lpars_create(
     ``apply_profile`` step) unless --no-apply is given. Settings preserve omitted
     values; a running time-reference partition can govern system time.
     """
+    try:
+        reporting = LparReportingSettings(
+            os400_restricted_io_mode=os400_restricted_io_mode,
+            work_group_id=None
+            if work_group_id is None
+            else "none"
+            if work_group_id == "none"
+            else int(work_group_id),
+            electronic_err_reporting=electronic_err_reporting,
+            redundant_err_path_reporting=redundant_err_path_reporting,
+        )
+        reporting.validate_context("create", partition_type)
+    except ValueError as error:
+        usage_error(
+            f"Invalid reporting settings: {error}; work-group ID must be integer or none"
+        )
     if caller_token is not None:
         validate_caller_token(caller_token)
     try:
@@ -147,6 +176,7 @@ def lpars_create(
                 caller_token=caller_token,
                 physical_io=load_physical_io(physical_io),
                 apply_profile=not no_apply,
+                reporting_settings=reporting,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,

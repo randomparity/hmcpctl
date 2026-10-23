@@ -132,6 +132,98 @@ class LparSettings:
 
 
 @dataclass(frozen=True)
+class LparReportingSettings:
+    """C02 reporting fields; None omits, False/zero/"none" are explicit.
+
+    Work-group IDs have no numeric range in the cited command sections; HMC
+    admission decides whether an otherwise well-formed integer is supported.
+    """
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+    ipl_source: Literal["a", "b", "c", "d"] | None = field(
+        default=None,
+        metadata={
+            "description": "IBM i IPL source a, b, c or d; partition update only. Omitted preserves the current value."
+        },
+    )
+    os400_restricted_io_mode: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "IBM i restricted I/O mode; strict boolean for creation/update, omitted preserves defaults/current value."
+        },
+    )
+    work_group_id: StrictInt | Literal["none"] | None = field(
+        default=None,
+        metadata={
+            "description": "EWLM integer work-group ID or none for no EWLM; no numeric range is supplied by the cited contract. Zero is explicit; omitted preserves defaults/current value."
+        },
+    )
+    electronic_err_reporting: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "IBM i electronic error reporting; strict boolean for creation/update, omitted preserves defaults/current value."
+        },
+    )
+    redundant_err_path_reporting: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Redundant error-path reporting; strict boolean, partition creation only. Refused on partition update; omitted retains the HMC default."
+        },
+    )
+
+    def __post_init__(self) -> None:
+        for item in fields(self):
+            value = getattr(self, item.name)
+            if value is None:
+                continue
+            if item.name == "ipl_source":
+                valid = type(value) is str and value in {"a", "b", "c", "d"}
+            elif item.name == "work_group_id":
+                valid = type(value) is int or (type(value) is str and value == "none")
+            else:
+                valid = type(value) is bool
+            if not valid:
+                raise ValueError(
+                    f"Invalid {item.name}: use the documented typed reporting value"
+                )
+
+    def pairs(self) -> list[tuple[str, object]]:
+        """Return supplied fields in command order, preserving sentinel and zero."""
+        return [
+            (item.name, int(value) if type(value) is bool else value)
+            for item in fields(self)
+            if (value := getattr(self, item.name)) is not None
+        ]
+
+    def requires_ibmi(self) -> bool:
+        return any(
+            getattr(self, name) is not None
+            for name in (
+                "ipl_source",
+                "os400_restricted_io_mode",
+                "electronic_err_reporting",
+            )
+        )
+
+    def validate_context(
+        self, context: Literal["create", "update"], partition_type: str | None = None
+    ) -> None:
+        unsupported = (
+            "ipl_source" if context == "create" else "redundant_err_path_reporting"
+        )
+        if getattr(self, unsupported) is not None:
+            raise ValueError(f"{unsupported} is not supported in partition {context}")
+        if (
+            partition_type is not None
+            and self.requires_ibmi()
+            and partition_type != "OS400"
+        ):
+            raise ValueError(
+                "IPL source, restricted I/O and electronic reporting require IBM i (OS400)"
+            )
+
+
+@dataclass(frozen=True)
 class LparResources:
     min_memory: int | None = field(
         default=None, metadata={"description": "Minimum memory in MiB."}
