@@ -243,6 +243,20 @@
       "expected": "success"
     },
     {
+      "scenario": "st100-lpar-get-security-policy",
+      "operation": "lpar.get_security_policy",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
       "scenario": "st100-lpar-get-settings",
       "operation": "lpar.get_settings",
       "class": "read-only",
@@ -757,6 +771,20 @@
       "operation": "vios.get",
       "class": "read-only",
       "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-get-security-policy",
+      "operation": "vios.get_security_policy",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        },
         "vios_name_or_uuid": {
           "target": "vios"
         }
