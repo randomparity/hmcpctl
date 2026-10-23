@@ -827,6 +827,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "fc_port_label_round_trip",
         "remove_vios_fc_port_label",
         "set_lpar_settings",
+        "set_lpar_security_policy",
         "set_lpar_reporting_settings",
         "set_lpar_vtpm_settings",
         "set_lpar_description",

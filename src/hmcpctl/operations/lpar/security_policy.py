@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from pydantic import TypeAdapter
 
 from ...client.core import HMCClient
-from ...documents.lpar_security_policy import LparSecurityPolicy, SecurityPolicyState
-from ...resource_identity import resolve_system_uuid
+from ...documents.lpar_security_policy import (
+    LparSecurityPolicy,
+    SecurityPolicyResult,
+    SecurityPolicyState,
+)
+from ...errors import HMCError
+from ...resource_identity import (
+    resolve_lpar_uuid,
+    resolve_system_uuid,
+    resolve_vios_uuid,
+)
+from ...ssh.commands import build_attribute_record
+from ...ssh.lpar import set_lpar_security_policy
 from ...ssh.profiles import get_proc_compat_modes
 from ...xmlutil import console_version, leaf_text
 from ..partition_state import PARTITION_STATES
+from .configuration import _resolve_and_authorize_vios_names
+from .ownership import resolve_and_authorize_lpar_names
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,3 +298,197 @@ def admit_security_policy(
             raise ValueError(
                 "Store enable/increase and signed/Linux enablement require not activated state"
             )
+
+
+def _selection(vios: bool, ownership_override: bool = False) -> None:
+    if type(vios) is not bool or type(ownership_override) is not bool:
+        raise TypeError("vios and ownership_override must be booleans")
+
+
+async def _policy_snapshot(
+    hmc: HMCClient, uuid: str, *, vios: bool, expected_name: str | None = None
+) -> tuple[str, SecurityPolicyState]:
+    entry = (
+        await hmc.get_uom("VirtualIOServer", uuid)
+        if vios
+        else await hmc.get_logical_partition(uuid)
+    )
+    resource = (entry or {}).get("Resource")
+    if (
+        not isinstance(resource, dict)
+        or str((entry or {}).get("UUID", "")).casefold() != uuid.casefold()
+    ):
+        raise ValueError(
+            "Security policy requires matching immutable partition identity"
+        )
+    name = leaf_text(resource.get("PartitionName"))
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+        or (expected_name is not None and name != expected_name)
+    ):
+        raise ValueError("Security policy requires matching partition name")
+    state = parse_security_policy(resource)
+    if (state.environment == "Virtual IO Server") != vios:
+        raise ValueError("Security policy requires matching LPAR or VIOS target kind")
+    return name, state
+
+
+async def read_lpar_security_policy(
+    hmc: HMCClient, name: str, *, system_name_or_uuid: str, vios: bool = False
+) -> SecurityPolicyState:
+    """Read strict REST policy only after selected-system containment proof."""
+    _selection(vios)
+    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+    resolver = resolve_vios_uuid if vios else resolve_lpar_uuid
+    uuid = await resolver(hmc, name, system_name_or_uuid=system_uuid)
+    _, state = await _policy_snapshot(hmc, uuid, vios=vios)
+    return state
+
+
+def _policy_result(
+    settings: LparSecurityPolicy,
+    before: SecurityPolicyState,
+    after: SecurityPolicyState,
+    changed: tuple[str, ...],
+) -> SecurityPolicyResult:
+    mismatches = []
+    warnings = []
+    for item in fields(settings):
+        name = item.name
+        requested, previous = getattr(settings, name), getattr(before.settings, name)
+        expected = requested if requested is not None else previous
+        if expected is not None and getattr(after.settings, name) != expected:
+            mismatches.append(name)
+        if expected is None:
+            warnings.append(f"Preserved {name} was unknown before submission.")
+    if before.current_secure_boot is not None:
+        if after.current_secure_boot != before.current_secure_boot:
+            mismatches.append("current_secure_boot")
+    else:
+        warnings.append("Preserved current_secure_boot was unknown before submission.")
+    if after.environment != before.environment:
+        mismatches.append("environment")
+    if (
+        after.settings.secure_boot is not None
+        and after.current_secure_boot is not None
+        and after.settings.secure_boot != after.current_secure_boot
+    ):
+        warnings.append(
+            "Pending secure boot differs from current; restart required. Runtime enforcement is unverified."
+        )
+    if settings.secure_boot is not None and settings.secure_boot >= 3:
+        warnings.append(
+            "Secure-boot values 3–9 require OS-specific operator knowledge; guest semantics are unverified."
+        )
+    if before.environment == "OS400" and settings.secure_boot is not None:
+        warnings.append(
+            "Installed IBM i 7.6 is an operator prerequisite and is unverified."
+        )
+    if settings.linux_dynamic_key_secure_boot is not None:
+        warnings.append(
+            "Linux intent is declared; guest OS and key readiness are unverified."
+        )
+    if mismatches:
+        warnings.append(
+            "Readback differs for "
+            + ", ".join(mismatches)
+            + "; inspect before retrying."
+        )
+    return SecurityPolicyResult(
+        "mismatch" if mismatches else "verified",
+        settings,
+        after,
+        changed,
+        tuple(warnings),
+    )
+
+
+async def configure_lpar_security_policy(
+    hmc: HMCClient,
+    name: str,
+    settings: LparSecurityPolicy,
+    *,
+    system_name_or_uuid: str,
+    ownership_override: bool = False,
+    vios: bool = False,
+) -> SecurityPolicyResult:
+    """Authorize, admit, submit once and compare pending and preserved evidence."""
+    _selection(vios, ownership_override)
+    if not settings.pairs():
+        raise ValueError("Supply at least one security policy setting")
+    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+    resolver = resolve_vios_uuid if vios else resolve_lpar_uuid
+    uuid = await resolver(hmc, name, system_name_or_uuid=system_uuid)
+    if vios:
+        system, partition = await _resolve_and_authorize_vios_names(
+            hmc,
+            system_uuid,
+            uuid,
+            ownership_override=ownership_override,
+        )
+    else:
+        system, partition = await resolve_and_authorize_lpar_names(
+            hmc,
+            uuid,
+            system_name_or_uuid=system_uuid,
+            ownership_override=ownership_override,
+        )
+    # Refresh containment after the authorization helper's independent lookup.
+    if await resolver(hmc, partition, system_name_or_uuid=system_uuid) != uuid:
+        raise ValueError(
+            "Security policy partition identity changed during authorization"
+        )
+    _, before = await _policy_snapshot(hmc, uuid, vios=vios, expected_name=partition)
+    system_entry = await hmc.get_managed_system(system_uuid)
+    if (
+        leaf_text(((system_entry or {}).get("Resource") or {}).get("SystemName"))
+        != system
+    ):
+        raise ValueError(
+            "Security policy managed-system name changed during authorization"
+        )
+    need_power11 = (
+        before.environment == "OS400" and settings.secure_boot is not None
+    ) or (
+        settings.keystore_kbytes is not None
+        and before.settings.keystore_kbytes is not None
+        and 0 < settings.keystore_kbytes < before.settings.keystore_kbytes
+    )
+    capabilities = await read_security_policy_capabilities(
+        hmc, system_uuid, need_power11=need_power11
+    )
+    admit_security_policy(
+        settings, capabilities, environment=before.environment, before=before
+    )
+    build_attribute_record([("name", partition), *settings.pairs()])
+    changed = tuple(
+        field
+        for field, _ in settings.pairs()
+        if getattr(settings, field) != getattr(before.settings, field)
+    )
+    try:
+        await set_lpar_security_policy(hmc.config, system, partition, settings)
+    except HMCError:
+        return SecurityPolicyResult(
+            "write-outcome-unknown",
+            settings,
+            None,
+            changed,
+            (
+                "Submission failed (HMCError); inspect before retrying. No replay attempted.",
+            ),
+        )
+    try:
+        _, after = await _policy_snapshot(hmc, uuid, vios=vios, expected_name=partition)
+    except (HMCError, ValueError, TypeError):
+        return SecurityPolicyResult(
+            "readback-unavailable",
+            settings,
+            None,
+            changed,
+            (
+                "Readback failed (policy evidence unavailable); inspect before retrying.",
+            ),
+        )
+    return _policy_result(settings, before, after, changed)

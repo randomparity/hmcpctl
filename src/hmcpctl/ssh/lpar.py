@@ -9,6 +9,7 @@ from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
 from ..documents.lpar_io import LparPhysicalIO
+from ..documents.lpar_security_policy import LparSecurityPolicy
 from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
@@ -652,6 +653,20 @@ async def set_lpar_reporting_settings(
     if not settings.pairs():
         raise ValueError("Supply at least one reporting setting")
     record = build_attribute_record([("name", lpar_name), *settings.pairs()])
+    await run_hmc_command(
+        config,
+        f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(record)}",
+    )
+
+
+async def set_lpar_security_policy(
+    config: HMCConfig, system_name: str, lpar_name: str, settings: LparSecurityPolicy
+) -> None:
+    """Submit one finite policy record without retrying uncertain writes."""
+    pairs = settings.pairs()
+    if not pairs:
+        raise ValueError("Supply at least one security policy setting")
+    record = build_attribute_record([("name", lpar_name), *pairs])
     await run_hmc_command(
         config,
         f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(record)}",

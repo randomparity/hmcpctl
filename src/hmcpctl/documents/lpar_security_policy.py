@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass as standard_dataclass
 from dataclasses import field, fields
+from typing import Literal
 
 from pydantic import ConfigDict, StrictBool, StrictInt
 from pydantic.dataclasses import dataclass
@@ -103,3 +104,16 @@ class SecurityPolicyState:
     state: str
     settings: LparSecurityPolicy
     current_secure_boot: int | None
+
+
+@standard_dataclass(frozen=True, slots=True)
+class SecurityPolicyResult:
+    """Configuration evidence from one submission; uncertainty requires inspection."""
+
+    status: Literal[
+        "verified", "mismatch", "readback-unavailable", "write-outcome-unknown"
+    ]
+    requested: LparSecurityPolicy
+    observed: SecurityPolicyState | None
+    changed_fields: tuple[str, ...]
+    warnings: tuple[str, ...]

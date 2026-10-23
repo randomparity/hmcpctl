@@ -277,3 +277,331 @@ async def test_unassociated_flags_cannot_admit_selected_system(mock_hmc):
         admit_security_policy(
             LparSecurityPolicy(secure_boot=0), evidence, environment="AIX/Linux"
         )
+
+
+@pytest.fixture
+def policy_target(monkeypatch):
+    from hmcpctl.config import HMCConfig
+
+    hmc = AsyncMock(spec=HMCClient)
+    hmc.config = HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
+    resource = {
+        "PartitionName": "part-R1",
+        "PartitionType": "AIX/Linux",
+        "PartitionState": "not activated",
+        "PendingSecureBoot": "0",
+        "CurrentSecureBoot": "0",
+        "KeyStoreSize": "4",
+        "KeyStoreSignedUpdatesEnabled": "false",
+    }
+    entry = {"UUID": PARTITION, "Resource": resource}
+    hmc.list_logical_partitions.return_value = [entry]
+    hmc.list_vios.return_value = [entry]
+    hmc.list_system_summaries.return_value = [{"UUID": SYSTEM, "SystemName": "sys-R1"}]
+    hmc.get_logical_partition.return_value = entry
+    hmc.get_uom.return_value = entry
+    hmc.find_partition_by_name.return_value = entry
+    hmc.find_vios_by_name.return_value = entry
+    hmc.get_managed_system.return_value = {
+        "Resource": {
+            "SystemName": "sys-R1",
+            "SystemFirmware": "VL950_FW950.10 (100)",
+            "AssociatedSystemCapabilities": {
+                "PartitionSecureBootCapable": "true",
+                "PartitionKeyStoreCapable": "true",
+                "PartitionDynamicKeySecureBootCapable": "true",
+            },
+            "MinimumKeyStoreSize": "4",
+            "MaximumkeyStoreSize": "64",
+        }
+    }
+    hmc.get_console_info.return_value = {
+        "Resource": {
+            "VersionInfo": {
+                "Version": "10",
+                "Release": "3",
+                "ServicePackName": "1060",
+            }
+        }
+    }
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.ownership.get_lpar_description",
+        AsyncMock(return_value=""),
+    )
+    command = AsyncMock(return_value="")
+    monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", command)
+    return hmc, entry, command
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vios", [False, True])
+@pytest.mark.parametrize("failure", ["foreign", "ownership", "kind"])
+async def test_lpar_and_vios_guards_precede_write(
+    policy_target, monkeypatch, vios, failure
+):
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, entry, command = policy_target
+    entry["Resource"]["PartitionType"] = "Virtual IO Server" if vios else "AIX/Linux"
+    if failure == "foreign":
+        hmc.list_vios.return_value = []
+        hmc.list_logical_partitions.return_value = []
+    elif failure == "ownership":
+        monkeypatch.setattr(
+            "hmcpctl.operations.lpar.ownership.get_lpar_description",
+            AsyncMock(return_value="[hmcpctl owner:other created:2026-10-23]"),
+        )
+    else:
+        entry["Resource"]["PartitionType"] = (
+            "AIX/Linux" if vios else "Virtual IO Server"
+        )
+    with pytest.raises((ValueError, PermissionError)):
+        await configure_lpar_security_policy(
+            hmc,
+            PARTITION,
+            LparSecurityPolicy(secure_boot=1),
+            system_name_or_uuid=SYSTEM,
+            vios=vios,
+        )
+    command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fixed_record_escaping_and_false_zero(policy_target):
+    import csv
+    import shlex
+
+    from hmcpctl.ssh.lpar import set_lpar_security_policy
+
+    hmc, _, command = policy_target
+    await set_lpar_security_policy(
+        hmc.config,
+        "sys;'x",
+        "part;'x",
+        LparSecurityPolicy(secure_boot=0, keystore_signed_updates=False),
+    )
+    args = shlex.split(command.await_args.args[1])
+    assert args[:5] == ["chsyscfg", "-r", "lpar", "-m", "sys;'x"]
+    assert args[5] == "-i"
+    assert next(csv.reader([args[6]])) == [
+        "name=part;'x",
+        "secure_boot=0",
+        "keystore_signed_updates=0",
+    ]
+    command.assert_awaited_once()
+    with pytest.raises(ValueError):
+        await set_lpar_security_policy(hmc.config, "sys", "part", LparSecurityPolicy())
+    assert command.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vios", [False, True])
+@pytest.mark.parametrize("drift", [None, "KeyStoreSize", "CurrentSecureBoot"])
+async def test_requested_and_preserved_readback(policy_target, vios, drift):
+    from copy import deepcopy
+
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, before, command = policy_target
+    before["Resource"]["PartitionType"] = "Virtual IO Server" if vios else "AIX/Linux"
+    after = deepcopy(before)
+    after["Resource"]["PendingSecureBoot"] = "1"
+    if drift:
+        after["Resource"][drift] = "8"
+
+    async def write(*args):
+        hmc.get_logical_partition.return_value = after
+        hmc.get_uom.return_value = after
+
+    command.side_effect = write
+    result = await configure_lpar_security_policy(
+        hmc,
+        PARTITION,
+        LparSecurityPolicy(secure_boot=1),
+        system_name_or_uuid=SYSTEM,
+        vios=vios,
+    )
+    assert result.status == ("mismatch" if drift else "verified")
+    assert result.changed_fields == ("secure_boot",)
+    assert result.observed.settings.linux_dynamic_key_secure_boot is None
+    assert result.observed.current_secure_boot == (
+        8 if drift == "CurrentSecureBoot" else 0
+    )
+    command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pending_is_not_current(policy_target):
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, entry, command = policy_target
+    entry["Resource"]["PendingSecureBoot"] = "1"
+    result = await configure_lpar_security_policy(
+        hmc, PARTITION, LparSecurityPolicy(secure_boot=1), system_name_or_uuid=SYSTEM
+    )
+    assert result.status == "verified"
+    assert any("restart" in warning.lower() for warning in result.warnings)
+    assert result.changed_fields == ()
+    command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,settings",
+    [
+        ("PendingSecureBoot", LparSecurityPolicy(secure_boot=0)),
+        (
+            "KeyStoreSignedUpdatesEnabled",
+            LparSecurityPolicy(keystore_signed_updates=False),
+        ),
+    ],
+)
+async def test_missing_requested_field_cannot_verify(policy_target, field, settings):
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, entry, command = policy_target
+
+    async def write(*args):
+        entry["Resource"].pop(field)
+
+    command.side_effect = write
+    result = await configure_lpar_security_policy(
+        hmc, PARTITION, settings, system_name_or_uuid=SYSTEM
+    )
+    assert result.status == "mismatch"
+    assert getattr(result.observed.settings, settings.pairs()[0][0]) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["write", "read"])
+async def test_submission_never_replayed(policy_target, phase):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, _, command = policy_target
+    reads_at_write = []
+
+    async def write(*args):
+        reads_at_write.append(hmc.get_logical_partition.await_count)
+        if phase == "write":
+            raise HMCError("sensitive-host secret-key")
+        hmc.get_logical_partition.side_effect = HMCError("sensitive-host secret-key")
+
+    command.side_effect = write
+    result = await configure_lpar_security_policy(
+        hmc, PARTITION, LparSecurityPolicy(secure_boot=1), system_name_or_uuid=SYSTEM
+    )
+    assert result.status == (
+        "write-outcome-unknown" if phase == "write" else "readback-unavailable"
+    )
+    command.assert_awaited_once()
+    assert hmc.get_logical_partition.await_count == reads_at_write[0] + (
+        phase == "read"
+    )
+    assert result.observed is None
+    assert "sensitive-host" not in repr(result) and "secret-key" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_sensitive_transport_errors_are_bounded(policy_target):
+    from hmcpctl.operations.lpar.security_policy import read_lpar_security_policy
+
+    hmc, entry, command = policy_target
+    entry["Resource"]["PendingSecureBoot"] = "sensitive-host secret-key"
+    with pytest.raises(ValueError) as error:
+        await read_lpar_security_policy(hmc, PARTITION, system_name_or_uuid=SYSTEM)
+    assert "sensitive-host" not in str(error.value)
+    command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vios", [False, True])
+@pytest.mark.parametrize(
+    "failure", ["uuid", "name", "retarget", "system", "capability"]
+)
+async def test_identity_and_admission_refresh_precede_write(
+    policy_target, vios, failure
+):
+    from copy import deepcopy
+
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, entry, command = policy_target
+    entry["Resource"]["PartitionType"] = "Virtual IO Server" if vios else "AIX/Linux"
+    bad = deepcopy(entry)
+    if failure == "uuid":
+        bad["UUID"] = SYSTEM
+    elif failure == "name":
+        bad["Resource"]["PartitionName"] = "replacement"
+    elif failure == "retarget":
+        hmc.find_partition_by_name.return_value = {"UUID": SYSTEM}
+        hmc.find_vios_by_name.return_value = {"UUID": SYSTEM}
+    elif failure == "system":
+        hmc.get_managed_system.return_value["Resource"]["SystemName"] = "replacement"
+    else:
+        hmc.get_managed_system.return_value["Resource"]["AssociatedSystemCapabilities"][
+            "PartitionSecureBootCapable"
+        ] = "false"
+    if vios:
+        hmc.get_uom.return_value = bad
+    else:
+        hmc.get_logical_partition.side_effect = [entry, bad]
+    with pytest.raises(ValueError):
+        await configure_lpar_security_policy(
+            hmc,
+            PARTITION,
+            LparSecurityPolicy(secure_boot=1),
+            system_name_or_uuid=SYSTEM,
+            vios=vios,
+        )
+    command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("options", [{"vios": 1}, {"ownership_override": "false"}])
+async def test_selector_options_are_strict(policy_target, options):
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, _, command = policy_target
+    with pytest.raises(TypeError):
+        await configure_lpar_security_policy(
+            hmc,
+            PARTITION,
+            LparSecurityPolicy(secure_boot=1),
+            system_name_or_uuid=SYSTEM,
+            **options,
+        )
+    command.assert_not_awaited()
+    hmc.list_logical_partitions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vios", [False, True])
+async def test_contained_rest_read_preserves_unknowns(policy_target, vios):
+    from hmcpctl.operations.lpar.security_policy import read_lpar_security_policy
+
+    hmc, entry, command = policy_target
+    entry["Resource"]["PartitionType"] = "Virtual IO Server" if vios else "AIX/Linux"
+    result = await read_lpar_security_policy(
+        hmc, PARTITION, system_name_or_uuid=SYSTEM, vios=vios
+    )
+    assert result.settings.secure_boot == 0
+    assert result.settings.linux_dynamic_key_secure_boot is None
+    command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delimiter", [",", '"', "=", "\n"])
+async def test_fixed_native_record_refuses_delimiters(policy_target, delimiter):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.ssh.lpar import set_lpar_security_policy
+
+    hmc, _, command = policy_target
+    with pytest.raises(HMCError):
+        await set_lpar_security_policy(
+            hmc.config,
+            "sys",
+            f"part{delimiter}extra",
+            LparSecurityPolicy(secure_boot=0),
+        )
+    command.assert_not_awaited()
