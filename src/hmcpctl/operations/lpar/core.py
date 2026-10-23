@@ -318,6 +318,12 @@ async def create_and_stamp_lpar(
     apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
 
     if created_lpar is None:
+        if policy_requested and creation.stamp_policy == "required":
+            raise HMCError(
+                "Policy creation may have succeeded, but created identity readback is "
+                "unavailable and ownership was not stamped. Inspect the contained "
+                "partition before retrying; no rollback performed."
+            ) from None
         if creation.stamp_policy == "required" and readback_error is not None:
             raise HMCError(
                 f"stamp_policy='required': mksyscfg created LPAR {creation.name!r} "
@@ -335,7 +341,9 @@ async def create_and_stamp_lpar(
                 "set_lpar_ownership_description."
             )
         skipped = (
-            "create returned no LPAR body"
+            "created identity readback unavailable; inspect the contained partition before retrying"
+            if policy_requested
+            else "create returned no LPAR body"
             if readback_error is None
             else f"read-back after mksyscfg failed: {readback_error}"
         )

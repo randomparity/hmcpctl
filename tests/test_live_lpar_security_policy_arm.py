@@ -45,8 +45,8 @@ def setup_arm(monkeypatch):
         record_verified=Mock(),
     )
     before = {
-        "environment": "aixlinux",
-        "state": "Not Activated",
+        "environment": "AIX/Linux",
+        "state": "not activated",
         "settings": {"secure_boot": 0},
         "current_secure_boot": 0,
     }
@@ -281,22 +281,32 @@ async def test_baseline_difference_prevents_clean_evidence(setup_arm):
     "variant", ["verified", "current-drift", "omitted-drift", "postread-drift"]
 )
 async def test_real_served_typed_policy_results(setup_arm, variant):
+    import json
+    from dataclasses import replace
+
     from fastmcp import Client, FastMCP
     from live_test.runner import RunState
 
+    from hmcpctl.client.core import HMCClient
     from hmcpctl.documents.lpar_security_policy import (
         LparSecurityPolicy,
         SecurityPolicyResult,
         SecurityPolicyState,
     )
     from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
+    from hmcpctl.operations.lpar.security_policy import parse_security_policy
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     env = setup_arm
     app = FastMCP("policy-arm-test")
-    observed = SecurityPolicyState(
-        "aixlinux", "Not Activated", LparSecurityPolicy(0), 0
-    )
+    body = json.loads(
+        (Path(__file__).parent / "fixtures/live/rest-lpar-entry.json").read_text()
+    )["body"]
+    entry = HMCClient._first_entry(body, "LogicalPartition")
+    initial = parse_security_policy(entry["Resource"])
+    assert initial.environment == "AIX/Linux"
+    assert initial.state == "not activated"
+    observed = initial
     writes = []
     reads = []
 
@@ -327,9 +337,7 @@ async def test_real_served_typed_policy_results(setup_arm, variant):
     ) -> SecurityPolicyState:
         reads.append(observed)
         if len(reads) == 2 and variant == "postread-drift":
-            return SecurityPolicyState(
-                "aixlinux", "Not Activated", LparSecurityPolicy(0), 0
-            )
+            return initial
         return observed
 
     @app.tool(name="hmc_configure_lpar_security_policy")
@@ -338,11 +346,18 @@ async def test_real_served_typed_policy_results(setup_arm, variant):
     ) -> SecurityPolicyResult:
         nonlocal observed
         writes.append(settings)
-        observed = SecurityPolicyState(
-            "aixlinux",
-            "Not Activated",
-            LparSecurityPolicy(1, 1 if variant == "omitted-drift" else None),
-            1 if variant == "current-drift" else 0,
+        observed = replace(
+            initial,
+            settings=replace(
+                initial.settings,
+                secure_boot=1,
+                keystore_kbytes=1
+                if variant == "omitted-drift"
+                else initial.settings.keystore_kbytes,
+            ),
+            current_secure_boot=1
+            if variant == "current-drift"
+            else initial.current_secure_boot,
         )
         return SecurityPolicyResult(
             "verified", settings, observed, ("secure_boot",), ()

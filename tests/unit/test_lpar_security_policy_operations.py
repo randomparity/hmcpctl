@@ -953,3 +953,33 @@ async def test_creation_policy_keylock_is_not_silently_lost(creation_target):
             ),
         )
     command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stamp_policy", ["required", "best-effort"])
+async def test_policy_early_creation_readback_error_is_private(
+    creation_target, stamp_policy
+):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar import core
+
+    hmc, _entry, command = creation_target
+    marker = "sensitive-remote-body-marker"
+    hmc.find_partition_by_name.side_effect = [None, HMCError(marker)]
+    creation = core.LparCreation(
+        name="part-R1",
+        partition_type="AIX/Linux",
+        resources=LparResources(desired_memory=1024, desired_vcpus=1),
+        security_policy=LparSecurityPolicy(secure_boot=0),
+        stamp_policy=stamp_policy,
+    )
+    if stamp_policy == "required":
+        with pytest.raises(HMCError) as error:
+            await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+        output = str(error.value)
+    else:
+        output = repr(await core.create_and_stamp_lpar(hmc, SYSTEM, creation))
+    assert marker not in output
+    assert "inspect" in output.lower()
+    command.assert_awaited_once()

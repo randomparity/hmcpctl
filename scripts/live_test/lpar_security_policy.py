@@ -36,8 +36,8 @@ SCENARIO = "st52-lpar-security-policy"
 def _inactive_policy(value: object, pending: int, current: int | None) -> bool:
     return (
         isinstance(value, dict)
-        and value.get("environment") == "aixlinux"
-        and value.get("state") == "Not Activated"
+        and value.get("environment") == "AIX/Linux"
+        and value.get("state") == "not activated"
         and isinstance(value.get("settings"), dict)
         and type(value["settings"].get("secure_boot")) is int
         and value["settings"]["secure_boot"] == pending
