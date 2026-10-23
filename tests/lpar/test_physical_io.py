@@ -592,3 +592,85 @@ async def test_provision_unknown_create_preserves_uncertainty_and_stops_legs(
     assert "inspect before retrying" in result.steps[0].result
     create.assert_awaited_once()
     legs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit_creation", [False, True])
+async def test_combined_creation_and_vnic_capacity_rejects_before_create(
+    monkeypatch, explicit_creation
+):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar import assignments, workflows
+    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
+
+    direct = SriovLogicalPortAssignment(
+        "default_profile", "1", "0", "27004002", Decimal(60)
+    )
+    vnic = assignments.VnicAssignment(
+        VnicBackingSelector("vios", "2", "1", "0", Decimal(60)), 1
+    )
+    collection = assignments.LparPcieAssignments(
+        sriov=() if explicit_creation else (direct,), vnics=(vnic,)
+    )
+    creation = LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=256, desired_procs=0.1),
+        physical_io=LparPhysicalIO(console_slot="hmc"),
+        creation_sriov=(direct,) if explicit_creation else (),
+    )
+    monkeypatch.setattr(
+        assignments, "resolve_ssh_names", AsyncMock(return_value=("system", None))
+    )
+    monkeypatch.setattr(assignments, "require_admitted_environment", AsyncMock())
+    monkeypatch.setattr(
+        assignments,
+        "list_sriov_adapters",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                capability="available",
+                system="system",
+                items=[SimpleNamespace(mode="sriov", availability="1")],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        assignments,
+        "list_sriov_physical_ports",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                capability="available",
+                items=[
+                    SimpleNamespace(
+                        availability="up",
+                        minimum_capacity_granularity_percent=Decimal(1),
+                    )
+                ],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        assignments,
+        "list_sriov_logical_ports",
+        AsyncMock(return_value=SimpleNamespace(capability="available")),
+    )
+    monkeypatch.setattr(
+        assignments, "_existing_capacity", AsyncMock(return_value=Decimal(0))
+    )
+    monkeypatch.setattr(
+        assignments,
+        "read_vios_identity",
+        AsyncMock(
+            return_value={"name": "vios", "lpar_id": "2", "lpar_env": "vioserver"}
+        ),
+    )
+    create = AsyncMock(
+        side_effect=AssertionError("creation reached before aggregate admission")
+    )
+    monkeypatch.setattr(workflows, "create_and_stamp_lpar", create)
+    with pytest.raises(ValueError, match="120% requested"):
+        await workflows.create_lpar(
+            SimpleNamespace(config=object()), "system", creation, collection
+        )
+    create.assert_not_awaited()

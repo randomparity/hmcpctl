@@ -39,8 +39,10 @@ async def create_lpar(
         creation = replace(
             creation, creation_sriov=creation.creation_sriov or assignments.sriov
         )
-        assignments = replace(assignments, sriov=())
+        assignments = replace(assignments, sriov=creation.creation_sriov)
     await prevalidate_lpar_pcie_assignments(hmc, system_name_or_uuid, assignments)
+    if creation.physical_io.requested:
+        assignments = replace(assignments, sriov=())
     try:
         created = await create_and_stamp_lpar(hmc, system_name_or_uuid, creation)
     except HMCError as exc:
