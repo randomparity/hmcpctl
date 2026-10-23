@@ -6,6 +6,13 @@ import csv
 import re
 import shlex
 from dataclasses import fields, replace
+from typing import TYPE_CHECKING
+
+from ..documents.lpar_io import LparPhysicalIO
+from .lpar_io import creation_io_record
+
+if TYPE_CHECKING:
+    from ..operations.lpar.assignments import SriovLogicalPortAssignment
 
 from pydantic import TypeAdapter
 
@@ -140,6 +147,8 @@ async def create_lpar_via_cli(
     partition_id: int | None = None,
     settings: LparSettings | None = None,
     reporting_settings: LparReportingSettings | None = None,
+    physical_io: LparPhysicalIO | None = None,
+    creation_sriov: tuple[SriovLogicalPortAssignment, ...] = (),
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -184,6 +193,9 @@ async def create_lpar_via_cli(
     # keeps the whole record one word for the remote shell, which runs first and
     # strips the quotes before the HMC ever sees the text.
     config_str = build_attribute_record(config_pairs)
+    extra = creation_io_record(physical_io or LparPhysicalIO(), creation_sriov)
+    if extra:
+        config_str += "," + extra
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
     try:
         return await run_hmc_command(config, cmd)

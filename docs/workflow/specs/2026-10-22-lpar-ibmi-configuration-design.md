@@ -5,7 +5,7 @@
 Issue #1763 / C02 / token `q1763-619aec68`: five fields, sixteen source
 occurrences; approved exclusions empty. Campaign operator authorized beginning
 these children against landed core. #637's closure adds no scope.
-[ADR 0255](../../adr/0255-lpar-ibmi-configuration.md) chooses an independent
+[ADR 0275](../../adr/0275-lpar-ibmi-configuration.md) chooses an independent
 reporting model extending existing owners without moving responsibility.
 
 ## Contract

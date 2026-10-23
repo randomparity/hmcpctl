@@ -21,6 +21,7 @@ from fastmcp import Client
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparReportingSettings, LparResources, LparSettings
+from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
@@ -1720,6 +1721,7 @@ async def exercise_lpar_reporting(client: Client, state: RunState) -> None:
                     caller_token=run.token,
                     stamp_policy="required",
                     apply_profile=False,
+                    physical_io=LparPhysicalIO(console_slot="hmc"),
                     reporting_settings=LparReportingSettings(
                         os400_restricted_io_mode=False,
                         work_group_id="none",

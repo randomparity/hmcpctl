@@ -8,7 +8,7 @@ result and an optional dry-run that validates preconditions only.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
@@ -16,6 +16,7 @@ from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutatio
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_location
 
 from ...documents.lpar import LparResources, PartitionType, validate_partition_type
+from ...documents.lpar_io import LparPhysicalIO
 from ...documents.storage import StorageKind, validate_virtual_disk
 from ...errors import HMCError
 from ...jobs import JobOutcome, job_identifier, job_outcome
@@ -43,6 +44,7 @@ from .assignments import (
     prevalidate_lpar_pcie_assignments,
 )
 from .core import LparCreation, LparCreationResult, create_and_stamp_lpar
+from .physical_io import admit_creation_io
 from .workflow_contract import WorkflowStep
 
 
@@ -93,14 +95,17 @@ class ProvisionRequest:
     caller_token: str | None = None
     minimum_affinity_policy: MinimumAffinityPolicy | None = None
     affinity_assessment: ProvisionAffinityAssessment | None = None
+    physical_io: LparPhysicalIO = field(default_factory=LparPhysicalIO)
 
 
 @dataclass(frozen=True)
 class ProvisionResult:
     """Truthful outcome of a provisioning attempt."""
 
-    resource_created: bool = field(
-        metadata={"description": "Whether this call created the LPAR."}
+    resource_created: bool | None = field(
+        metadata={
+            "description": "Whether this call created the LPAR, or null when its outcome is unknown."
+        }
     )
     workflow_completed: bool = field(
         metadata={"description": "Whether every requested workflow step completed."}
@@ -592,6 +597,18 @@ async def _preflight_provision_request(
     if request.minimum_affinity_policy is not None:
         system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
         await require_minimum_affinity_policy_capability(hmc.config, system_name)
+    if request.physical_io.requested:
+        await admit_creation_io(
+            hmc,
+            system_uuid,
+            LparCreation(
+                request.name,
+                request.partition_type,
+                request.resources,
+                physical_io=request.physical_io,
+                creation_sriov=request.assignments.sriov,
+            ),
+        )
     await _check_name_unique(hmc, system_uuid, request.name)
     await check_vlan_exists(hmc, system_uuid, request.adapters.port_vlan_id)
     if request.storage.vg_uuid is not None:
@@ -725,12 +742,21 @@ async def provision_lpar(
                 request.resources,
                 caller_token=request.caller_token,
                 apply_profile=True,
+                physical_io=request.physical_io,
+                creation_sriov=request.assignments.sriov
+                if request.physical_io.requested
+                else (),
             ),
         )
     except HMCError as exc:
         steps.append(WorkflowStep("create", "error", str(exc)))
         _skip_steps(steps, step_names[1:])
-        return _provision_result(None, None, steps, False)
+        failed = _provision_result(None, None, steps, False)
+        return (
+            replace(failed, resource_created=None)
+            if request.physical_io.requested
+            else failed
+        )
 
     created_lpar = creation.lpar
     created_uuid = (created_lpar or {}).get("UUID")
@@ -740,9 +766,17 @@ async def provision_lpar(
         _skip_steps(steps, step_names[len(steps) :])
         return _provision_result(creation, None, steps, False)
     steps.append(WorkflowStep("create", "ok", created_lpar))
+    if creation.physical_io_step is not None:
+        step_names.insert(len(steps), "physical_io")
+        steps.append(creation.physical_io_step)
+        if creation.physical_io_step.status != "ok":
+            return _failed_provision_result(creation, created_uuid, steps, step_names)
     if not _append_apply_step(steps, step_names, creation):
         return _failed_provision_result(creation, created_uuid, steps, step_names)
 
+    if request.physical_io.requested:
+        request = replace(request, assignments=replace(request.assignments, sriov=()))
+        step_names = [n for n in step_names if not n.startswith("sriov[")]
     completed, warnings, change_location = await _run_legs_through_power(
         hmc, system_name_or_uuid, request, created_uuid, steps, step_names
     )

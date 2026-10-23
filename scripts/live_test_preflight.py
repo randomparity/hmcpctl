@@ -315,9 +315,21 @@ def _lpar_reporting_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
         True,
         "configuration validated",
         (
-            f"managed system {config.system_name}",
-            f"one inactive IBM i partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create; eight fixed reporting updates; delete and independent absence/resource comparison",
+            f"one inactive IBM i partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create; explicit console_slot=hmc; eight fixed reporting updates; delete and independent absence/resource comparison",
             "no activation, guest clock, profile mutation or time_ref=True probe; IBM i eligibility must be established by the operator; existing scratch prefix must be absent",
+        ),
+        config.system_name,
+    )
+
+
+def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-physical-io",
+        True,
+        "configuration validated",
+        (
+            f"one inactive OS400 partition {lpar_config.NAME_PREFIX}<8 hex>: explicit console_slot=hmc; verify native profile; delete matching-token fixture",
+            "no activation, profile apply, physical/SR-IOV assignment, foreign partition or retry; independent recovery and resource comparison required",
         ),
         config.system_name,
     )
@@ -552,6 +564,7 @@ _ARM_VERDICTS = {
     "lpar-config": _lpar_config_verdict,
     "lpar-settings": _lpar_settings_verdict,
     "lpar-reporting": _lpar_reporting_verdict,
+    "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,

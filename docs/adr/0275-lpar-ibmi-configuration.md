@@ -1,4 +1,4 @@
-# ADR 0255: LPAR IBM i and reporting configuration
+# ADR 0275: LPAR IBM i and reporting configuration
 
 ## Status
 

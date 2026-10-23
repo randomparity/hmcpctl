@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
 
@@ -20,9 +19,9 @@ from hmcpctl.operations.lpar.workflows import create_lpar
 
 
 def _creation() -> LparCreation:
-    return cast(
-        LparCreation, SimpleNamespace(name="app-lpar", partition_type="AIX/Linux")
-    )
+    from hmcpctl.documents.lpar import LparResources
+
+    return LparCreation("app-lpar", "AIX/Linux", LparResources())
 
 
 @pytest.mark.asyncio

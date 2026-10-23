@@ -1585,8 +1585,9 @@ capability's maturity. Use the filtered evidence generator for public summaries.
 
 ## IBM i partition reporting (C02, opt-in subtask 48)
 
-The `lpar-reporting` arm creates one owned, inactive OS400 scratch partition,
-reads its four creation reporting fields, performs eight fixed update calls,
+The `lpar-reporting` arm explicitly requests `LparPhysicalIO(console_slot="hmc")`
+through the landed typed creation prerequisite and creates one owned, inactive
+OS400 scratch partition. It reads its four creation reporting fields, performs eight fixed update calls,
 and deletes it without activation, power changes or profile mutation. It uses
 2 GiB desired memory and 0.5 shared processing units (the lpar-config resource
 fixture). IBM i support/eligibility and available resources must be established

@@ -990,6 +990,7 @@ async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
     assert creates[0].stamp_policy == "required"
     assert creates[0].apply_profile is False
     assert creates[0].partition_type == "OS400"
+    assert creates[0].physical_io.console_slot == "hmc"
     assert creates[0].reporting_settings.work_group_id == "none"
     assert (
         len([tool for tool, _ in hmc.calls if tool == "hmc_configure_lpar_reporting"])

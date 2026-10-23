@@ -260,8 +260,11 @@ async def test_create_conflicts_refuse_before_resolution(settings, keylock, ptyp
 
 
 @pytest.mark.asyncio
-async def test_create_transport_passes_four_fields_and_preserves_c01(monkeypatch):
+async def test_create_transport_passes_four_fields_and_preserves_c01_and_io(
+    monkeypatch,
+):
     from hmcpctl.documents.lpar import LparResources, LparSettings
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
     from hmcpctl.ssh.lpar import create_lpar_via_cli
 
     run = AsyncMock(return_value="")
@@ -275,6 +278,7 @@ async def test_create_transport_passes_four_fields_and_preserves_c01(monkeypatch
         32,
         partition_id=7,
         settings=LparSettings(time_ref=False),
+        physical_io=LparPhysicalIO(console_slot="hmc"),
         reporting_settings=LparReportingSettings(
             os400_restricted_io_mode=False,
             work_group_id="none",
@@ -285,6 +289,7 @@ async def test_create_transport_passes_four_fields_and_preserves_c01(monkeypatch
     record = shlex.split(run.await_args.args[1])[-1]
     for part in (
         "lpar_id=7",
+        "console_slot=hmc",
         "max_virtual_slots=32",
         "time_ref=0",
         "os400_restricted_io_mode=0",
