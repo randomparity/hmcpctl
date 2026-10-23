@@ -30,6 +30,16 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
             (
                 "PASS",
                 {
+                    "Resource": {
+                        "SystemCapabilities": {
+                            "VirtualTrustedPlatformModuleCapable": "true"
+                        }
+                    }
+                },
+            ),
+            (
+                "PASS",
+                {
                     "lpar": {"UUID": "fixture"},
                     "ownership_stamped": True,
                     "workflow_completed": True,
@@ -66,16 +76,16 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
     cleanup.assert_awaited_once()
     compare.assert_awaited_once()
     calls = state.call.await_args_list
-    assert len(calls) == (4 if creation == "ok" else 1)
-    assert calls[0].kwargs["apply_partition_profile"] is False
-    assert calls[0].kwargs["vtpm_settings"] == {
+    assert len(calls) == (5 if creation == "ok" else 2)
+    assert calls[1].kwargs["apply_partition_profile"] is False
+    assert calls[1].kwargs["vtpm_settings"] == {
         "vtpm_enabled": True,
         "vtpm_version": "1.2",
     }
     if creation == "ok":
-        assert calls[2].kwargs["acknowledge_data_loss"] is True
-        assert calls[2].kwargs["settings"] == {"vtpm_enabled": False}
-        assert calls[3].kwargs["settings"] == {
+        assert calls[3].kwargs["acknowledge_data_loss"] is True
+        assert calls[3].kwargs["settings"] == {"vtpm_enabled": False}
+        assert calls[4].kwargs["settings"] == {
             "vtpm_enabled": True,
             "vtpm_version": "1.2",
         }
@@ -145,6 +155,17 @@ async def test_real_served_typed_results_and_update_failure_stop(
     app = FastMCP("vtpm-arm-test")
     patches = []
 
+    @app.tool(name="hmc_get_system")
+    async def system(system_name_or_uuid: str) -> dict:
+        return {
+            "Resource": {
+                "SystemCapabilities": {
+                    "VirtualTrustedPlatformModuleCapable": "true",
+                    "VirtualTrustedPlatformModule20Capable": "true",
+                }
+            }
+        }
+
     @app.tool(name="hmc_create_lpar")
     async def create(
         system_name_or_uuid: str,
@@ -203,3 +224,36 @@ async def test_real_served_typed_results_and_update_failure_stop(
     assert observed["assertions"][0].holds is (update_status == "verified")
     assert observed["cleanup"] == "failed"
     assert observed["data"]["guest-tpm-objects"] == "not-run"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capability", [None, False, 1, "false"])
+async def test_missing_positive_general_capability_skips_before_baseline(
+    monkeypatch, capability
+):
+    state = SimpleNamespace(
+        group=arm.GROUP,
+        hmc_config=object(),
+        config=SimpleNamespace(system_name="system"),
+        skip=Mock(),
+        call=AsyncMock(
+            return_value=(
+                "PASS",
+                {
+                    "Resource": {
+                        "SystemCapabilities": {
+                            "VirtualTrustedPlatformModuleCapable": capability
+                        }
+                    }
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        arm, "get_vtpm_advertisement", AsyncMock(return_value=(("1.2",), ()))
+    )
+    pools = AsyncMock(return_value=None)
+    monkeypatch.setattr(arm, "_read_pools", pools)
+    await arm.exercise_lpar_vtpm(object(), state)
+    pools.assert_not_awaited()
+    assert state.call.await_args.args[1] == "hmc_get_system"
