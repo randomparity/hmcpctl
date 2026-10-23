@@ -90,6 +90,13 @@ exception during submission never causes replay. Creation verifies supplied valu
 and reports full observed defaults; it has no previous configuration to preserve.
 Unknown creation identity/readback is an incomplete workflow, not successful proof.
 
+An acknowledged disable can apply while preservation still fails: the bounded
+1.2 observation at commit `449f3fea09f32fb989f926787581ce1ae0634865` changed enabled
+true to false and cleared omitted version 1.2. Its `mismatch` and failed scenario
+remain recorded separately. This supplies no exception to equality or permission
+to replay. The positive live scenario explicitly starts disabled and requests
+the version/encryption during its one enable transition.
+
 ## Failure model
 
 - Named deployments: AIX/Linux and VIOS on systems whose runtime advertisements
@@ -114,8 +121,10 @@ composition and typed presentation/security metadata. Remove a gate deliberately
 and observe its negative test fail before restoring it. Do not snapshot prose.
 The plan maps these contracts to tests and exact commands. Register arm 51,
 `lpar-vtpm`, with preflight and recovery. It creates one inactive, run-owned
-AIX/Linux partition, uses only advertised settings, verifies enablement and
-explicit disable acknowledgement, then deletes only that fixture and confirms the
-independent baseline. No guest boot, VIOS creation, 2.0 or encryption claim follows
+AIX/Linux partition with vTPM explicitly disabled, verifies that state, makes one
+advertised enable/version/encryption request requiring `verified`, and independently
+re-reads the enabled settings. It then deletes only that fixture and confirms the
+independent baseline. Disable acknowledgement and unchanged drift reporting retain
+their focused regression and separately reported disable observation. No guest boot, VIOS creation, 2.0 or encryption claim follows
 when those arms have not run. `just verify`, all pinned hooks and CI precede the
 worker's author handoff; root alone merges.

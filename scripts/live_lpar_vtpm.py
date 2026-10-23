@@ -1,4 +1,4 @@
-"""Run opt-in arm 51: inactive vTPM create, disable, enable and cleanup.
+"""Run opt-in arm 51: inactive disabled vTPM create, enable and cleanup.
 
 This mutates a managed system. Run live_test_preflight.py --group lpar-vtpm
 first and live_test_recovery.py afterwards, including after apparent success.

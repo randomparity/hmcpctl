@@ -1621,19 +1621,28 @@ execution does not establish POWER10/POWER11 hardware coverage.
 ## Inactive vTPM configuration (arm 51)
 
 The opt-in `lpar-vtpm` arm creates one inactive AIX/Linux scratch partition with
-required ownership stamping and explicit vTPM settings. It reads the selected
+confirmed ownership stamping and vTPM explicitly disabled. It reads the selected
 system's advertised versions/encryption levels, preferring 1.2; otherwise it uses
 2.0 with an advertised encryption level. Missing or unsupported advertisements
 skip before creation. The creation owner also checks the system's positive
 capability and compatibility before submitting a write.
 
-Successful creation identity, ownership and vTPM readback are prerequisites for
-both updates: an acknowledged disable, then an explicit enable with the selected
-settings. Disabling can destroy keys and stored TPM data; the acknowledgement
-applies only to this disposable fixture. An uncertain or mismatched outcome stops
-further updates. There is no activation, profile application, key management,
-automatic retry or corrective reset. Guarded inactive-only deletion and an
-independent resource comparison follow even after failure.
+Successful creation identity, ownership and independent disabled readback are
+prerequisites for one explicit enable with the advertised version/encryption.
+The update must report `verified`; another independent read must equal its full
+observed settings before the arm records a passing update. Any uncertain or
+mismatched outcome fails that assertion and stops further work. There is no
+activation, profile application, key management, automatic retry or corrective
+reset. Guarded inactive-only deletion and an independent resource comparison
+follow even after failure.
+
+Disabling an enabled instance still requires separate data-loss acknowledgement;
+it can destroy keys and stored TPM data. An observed 1.2 disable at commit
+`449f3fea09f32fb989f926787581ce1ae0634865` applied the requested false value but
+cleared the omitted version. The API reported preservation `mismatch`, and that
+run's two FAIL rows remain failed evidence with clean recovery. Acknowledgement
+does not waive preservation equality. The positive arm starts disabled so that
+the version/encryption added by enablement are explicit requested fields.
 
 Use an explicitly authorized, exclusive hardware window and deploy its exact
 candidate commit before these commands. The runner configuration and scratch

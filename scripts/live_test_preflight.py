@@ -341,7 +341,7 @@ def _lpar_vtpm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
         True,
         "configuration validated",
         (
-            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: advertised vTPM create; acknowledged disable; explicit enable; matching-token deletion",
+            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit disabled vTPM create; one advertised enable; matching-token deletion",
             "no activation, profile apply, VIOS creation or key management; existing scratch prefix must be absent; independent recovery/resource comparison required",
         ),
         config.system_name,

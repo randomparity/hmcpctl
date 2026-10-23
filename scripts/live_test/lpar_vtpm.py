@@ -1,4 +1,4 @@
-"""ST51: inactive vTPM creation, acknowledged disable and explicit enable."""
+"""ST51: inactive disabled vTPM creation and one explicit enable."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ SCENARIO = "st51-lpar-vtpm"
 
 
 async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
-    """One owned inactive fixture, two updates, no activation/profile/key effects."""
+    """One owned inactive fixture and enable; no activation/profile/key effects."""
     if state.group != GROUP or state.hmc_config is None:
         state.skip(SUBTASK, GROUP, "requires opt-in group and HMC configuration")
         return
@@ -69,7 +69,7 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
         subtask=SUBTASK,
     )
     created_verified = False
-    updates_verified = False
+    enable_verified = False
     read_verified = False
     try:
         run.create_attempted = True
@@ -81,7 +81,7 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
             partition_type="AIX/Linux",
             resources=RESOURCES,
             caller_token=run.token,
-            vtpm_settings=settings,
+            vtpm_settings={"vtpm_enabled": False},
             apply_partition_profile=False,
         )
         data = plain_data(data)
@@ -122,29 +122,47 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
             status != "PASS"
             or not isinstance(actual, dict)
             or observed.get("state") != "Not Activated"
-            or any(actual.get(key) != value for key, value in settings.items())
+            or actual.get("vtpm_enabled") is not False
         ):
             raise ValueError(
                 "Independent typed vTPM read did not confirm inactive creation settings"
             )
         read_verified = True
-        for patch, consent in [({"vtpm_enabled": False}, True), (settings, False)]:
-            status, result = await state.call(
-                client,
-                "hmc_configure_lpar_vtpm",
-                system_name_or_uuid=run.system,
-                lpar_name_or_uuid=run.uuid,
-                settings=patch,
-                acknowledge_data_loss=consent,
+        status, result = await state.call(
+            client,
+            "hmc_configure_lpar_vtpm",
+            system_name_or_uuid=run.system,
+            lpar_name_or_uuid=run.uuid,
+            settings=settings,
+            acknowledge_data_loss=False,
+        )
+        result = plain_data(result)
+        expected = result.get("observed") if isinstance(result, dict) else None
+        if (
+            status != "PASS"
+            or not isinstance(result, dict)
+            or result.get("status") != "verified"
+            or not isinstance(expected, dict)
+            or any(expected.get(key) != value for key, value in settings.items())
+        ):
+            raise ValueError(f"vTPM enable readback was not verified: {result!r}")
+        status, readback = await state.call(
+            client,
+            "hmc_get_lpar_vtpm_settings",
+            system_name_or_uuid=run.system,
+            lpar_name_or_uuid=run.uuid,
+        )
+        readback = plain_data(readback)
+        if (
+            status != "PASS"
+            or not isinstance(readback, dict)
+            or readback.get("state") != "Not Activated"
+            or readback.get("settings") != expected
+        ):
+            raise ValueError(
+                "Independent typed vTPM read did not confirm the enabled settings"
             )
-            result = plain_data(result)
-            if (
-                status != "PASS"
-                or not isinstance(result, dict)
-                or result.get("status") != "verified"
-            ):
-                raise ValueError(f"vTPM update readback was not verified: {result!r}")
-        updates_verified = True
+        enable_verified = True
     except (HMCError, ValueError, TypeError, PermissionError) as error:
         state.record(SUBTASK, GROUP, "FAIL", str(error))
     finally:
@@ -158,7 +176,11 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
         scenario=SCENARIO,
         assertions=[Assertion("explicit-vtpm-creation-readback", created_verified)],
         cleanup=cleanup,
-        data={"variant": settings, "vios": "not-run", "activation": "not-run"},
+        data={
+            "variant": {"vtpm_enabled": False},
+            "vios": "not-run",
+            "activation": "not-run",
+        },
     )
     state.record_verified(
         SUBTASK,
@@ -166,7 +188,7 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
         operation="lpar.configure_vtpm",
         scenario=SCENARIO,
         assertions=[
-            Assertion("acknowledged-disable-explicit-enable-readback", updates_verified)
+            Assertion("explicit-disabled-to-enabled-readback", enable_verified)
         ],
         cleanup=cleanup,
         data={"variant": settings, "guest-tpm-objects": "not-run"},
@@ -178,5 +200,8 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
         scenario=SCENARIO,
         assertions=[Assertion("independent-inactive-vtpm-readback", read_verified)],
         cleanup=cleanup,
-        data={"variant": settings},
+        data={
+            "variant": {"vtpm_enabled": False},
+            "post_enable_readback": enable_verified,
+        },
     )

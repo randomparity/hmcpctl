@@ -53,11 +53,35 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
                 "PASS",
                 {
                     "state": "Not Activated",
-                    "settings": {"vtpm_enabled": True, "vtpm_version": "1.2"},
+                    "settings": {
+                        "vtpm_enabled": False,
+                        "vtpm_version": None,
+                        "vtpm_encryption": None,
+                    },
                 },
             ),
-            ("PASS", {"status": "verified"}),
-            ("PASS", {"status": "verified"}),
+            (
+                "PASS",
+                {
+                    "status": "verified",
+                    "observed": {
+                        "vtpm_enabled": True,
+                        "vtpm_version": "1.2",
+                        "vtpm_encryption": None,
+                    },
+                },
+            ),
+            (
+                "PASS",
+                {
+                    "state": "Not Activated",
+                    "settings": {
+                        "vtpm_enabled": True,
+                        "vtpm_version": "1.2",
+                        "vtpm_encryption": None,
+                    },
+                },
+            ),
         ]
     )
     monkeypatch.setattr(
@@ -83,14 +107,10 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
     calls = state.call.await_args_list
     assert len(calls) == (4 if creation == "ok" else 1)
     assert calls[0].kwargs["apply_partition_profile"] is False
-    assert calls[0].kwargs["vtpm_settings"] == {
-        "vtpm_enabled": True,
-        "vtpm_version": "1.2",
-    }
+    assert calls[0].kwargs["vtpm_settings"] == {"vtpm_enabled": False}
     if creation == "ok":
-        assert calls[2].kwargs["acknowledge_data_loss"] is True
-        assert calls[2].kwargs["settings"] == {"vtpm_enabled": False}
-        assert calls[3].kwargs["settings"] == {
+        assert calls[2].kwargs["acknowledge_data_loss"] is False
+        assert calls[2].kwargs["settings"] == {
             "vtpm_enabled": True,
             "vtpm_version": "1.2",
         }
@@ -147,7 +167,17 @@ def test_registration_preflight_and_independent_recovery():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("update_status", ["verified", "mismatch"])
+@pytest.mark.parametrize(
+    "update_status",
+    [
+        "verified",
+        "mismatch",
+        "readback-unavailable",
+        "write-outcome-unknown",
+        "malformed",
+        "postread-drift",
+    ],
+)
 async def test_real_served_typed_results_and_update_failure_stop(
     monkeypatch, update_status
 ):
@@ -161,6 +191,8 @@ async def test_real_served_typed_results_and_update_failure_stop(
 
     app = FastMCP("vtpm-arm-test")
     patches = []
+    observed = LparVtpmSettings(False)
+    reads = []
 
     @app.tool(name="hmc_create_lpar")
     async def create(
@@ -178,9 +210,8 @@ async def test_real_served_typed_results_and_update_failure_stop(
 
     @app.tool(name="hmc_get_lpar_vtpm_settings")
     async def read(system_name_or_uuid: str, lpar_name_or_uuid: str) -> VtpmState:
-        return VtpmState(
-            "aixlinux", "Not Activated", LparVtpmSettings(True, "2.0", "level")
-        )
+        reads.append(observed)
+        return VtpmState("aixlinux", "Not Activated", observed)
 
     @app.tool(name="hmc_configure_lpar_vtpm")
     async def update(
@@ -189,8 +220,23 @@ async def test_real_served_typed_results_and_update_failure_stop(
         settings: LparVtpmSettings,
         acknowledge_data_loss: bool,
     ) -> VtpmResult:
+        nonlocal observed
         patches.append(settings)
-        return VtpmResult(update_status, settings, settings, ())
+        observed = settings
+        if update_status == "postread-drift":
+            observed = LparVtpmSettings(True, "2.0", "other")
+        status = (
+            "verified"
+            if update_status in {"malformed", "postread-drift"}
+            else update_status
+        )
+        after = (
+            None
+            if update_status
+            in {"malformed", "readback-unavailable", "write-outcome-unknown"}
+            else settings
+        )
+        return VtpmResult(status, settings, after, ())
 
     state = RunState(
         config=SimpleNamespace(system_name="system"),
@@ -216,12 +262,14 @@ async def test_real_served_typed_results_and_update_failure_stop(
     monkeypatch.setattr(arm, "_compare", AsyncMock(return_value=False))
     async with Client(app) as client:
         await arm.exercise_lpar_vtpm(client, state)
-    assert len(patches) == (2 if update_status == "verified" else 1)
+    assert len(patches) == 1
+    assert patches[0] == LparVtpmSettings(True, "2.0", "level")
+    assert len(reads) == (2 if update_status in {"verified", "postread-drift"} else 1)
     cleanup.assert_awaited_once()
-    observed = state.record_verified.call_args_list[1].kwargs
-    assert observed["assertions"][0].holds is (update_status == "verified")
-    assert observed["cleanup"] == "failed"
-    assert observed["data"]["guest-tpm-objects"] == "not-run"
+    recorded = state.record_verified.call_args_list[1].kwargs
+    assert recorded["assertions"][0].holds is (update_status == "verified")
+    assert recorded["cleanup"] == "failed"
+    assert recorded["data"]["guest-tpm-objects"] == "not-run"
 
 
 @pytest.mark.asyncio

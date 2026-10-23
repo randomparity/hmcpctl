@@ -531,9 +531,10 @@ async def test_vios_read_refuses_missing_or_malformed_identity(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("readback", ["ok", "mismatch", "unavailable", "missing"])
 async def test_creation_real_encoder_admission_and_verification_composition(
-    monkeypatch, readback
+    monkeypatch, readback, enabled
 ):
     from hmcpctl.documents.lpar import (
         LparReportingSettings,
@@ -589,10 +590,11 @@ async def test_creation_real_encoder_admission_and_verification_composition(
             return "1.2,null\n"
         if readback == "unavailable":
             raise HMCCLIError("read failed")
+        observed_enabled = not enabled if readback == "mismatch" else enabled
         return (
-            "p,aixlinux,Not Activated,0,null,null\n"
-            if readback == "mismatch"
-            else "p,aixlinux,Not Activated,1,1.2,null\n"
+            "p,aixlinux,Not Activated,1,1.2,null\n"
+            if observed_enabled
+            else "p,aixlinux,Not Activated,0,null,null\n"
         )
 
     monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", original_transport)
@@ -608,7 +610,7 @@ async def test_creation_real_encoder_admission_and_verification_composition(
             reporting_settings=LparReportingSettings(
                 work_group_id="none", redundant_err_path_reporting=False
             ),
-            vtpm_settings=ENABLED,
+            vtpm_settings=ENABLED if enabled else DISABLED,
             max_virtual_slots=32,
         ),
     )
@@ -620,14 +622,16 @@ async def test_creation_real_encoder_admission_and_verification_composition(
     assert len(creates) == 1
     record = shlex.split(creates[0])[-1]
     for pair in (
-        "vtpm_enabled=1",
-        "vtpm_version=1.2",
+        f"vtpm_enabled={int(enabled)}",
         "time_ref=0",
         "work_group_id=none",
         "redundant_err_path_reporting=0",
         "max_virtual_slots=32",
     ):
         assert pair in record
+    assert ("vtpm_version=1.2" in record) is enabled
+    if not enabled:
+        assert "vtpm_encryption=" not in record
     if readback != "missing":
         assert (
             result.settings_step.status == "ok" and result.reporting_step.status == "ok"
@@ -827,3 +831,27 @@ async def test_captured_managed_system_xml_admits_through_real_client_parser(
     assert capabilities == VtpmCapabilities(("1.2",), (), False)
     transport.assert_awaited_once()
     assert transport.await_args.args[1].startswith("lssyscfg -r sys -m ")
+
+
+@pytest.mark.asyncio
+async def test_acknowledged_disable_reports_version_removal_as_preservation_drift(
+    boundary,
+):
+    """The observed 1.2 removal does not become an exception to omission equality."""
+    boundary.state.settings = ENABLED
+    boundary.state.after = DISABLED
+    result = await configure_lpar_vtpm(
+        boundary.hmc,
+        "p",
+        DISABLED,
+        system_name_or_uuid="sys-R1",
+        acknowledge_data_loss=True,
+    )
+    assert result.status == "mismatch"
+    assert result.requested == result.observed == DISABLED
+    assert any("vtpm_version" in warning for warning in result.warnings)
+    writes = [
+        command for command in boundary.state.commands if command.startswith("chsyscfg")
+    ]
+    assert len(writes) == 1 and "vtpm_enabled=0" in writes[0]
+    assert "vtpm_version=" not in writes[0]
