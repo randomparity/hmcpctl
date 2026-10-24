@@ -9,6 +9,7 @@ from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
 from ..documents.lpar_io import LparPhysicalIO
+from ..documents.lpar_security_policy import LparSecurityPolicy
 from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
@@ -149,6 +150,7 @@ async def create_lpar_via_cli(
     settings: LparSettings | None = None,
     reporting_settings: LparReportingSettings | None = None,
     vtpm_settings: LparVtpmSettings | None = None,
+    security_policy: LparSecurityPolicy | None = None,
     physical_io: LparPhysicalIO | None = None,
     creation_sriov: tuple[SriovLogicalPortAssignment, ...] = (),
 ) -> str:
@@ -180,6 +182,10 @@ async def create_lpar_via_cli(
         if not isinstance(vtpm_settings, LparVtpmSettings):
             raise TypeError("vtpm_settings must be LparVtpmSettings")
         vtpm_settings.validate_creation(partition_type)
+    if security_policy is not None:
+        if not isinstance(security_policy, LparSecurityPolicy):
+            raise TypeError("security_policy must be LparSecurityPolicy")
+        security_policy.validate_creation(partition_type)
     config_pairs: list[tuple[str, object]] = [
         ("name", name),
         ("lpar_env", _lpar_environment(partition_type)),
@@ -194,6 +200,9 @@ async def create_lpar_via_cli(
         config_pairs.extend(reporting_settings.pairs())
     if vtpm_settings is not None:
         config_pairs.extend(vtpm_settings.pairs())
+
+    if security_policy is not None:
+        config_pairs.extend(security_policy.pairs())
 
     # Two guards at two layers, neither substituting for the other:
     # build_attribute_record keeps the record's own ',' and '=' delimiters
@@ -652,6 +661,20 @@ async def set_lpar_reporting_settings(
     if not settings.pairs():
         raise ValueError("Supply at least one reporting setting")
     record = build_attribute_record([("name", lpar_name), *settings.pairs()])
+    await run_hmc_command(
+        config,
+        f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(record)}",
+    )
+
+
+async def set_lpar_security_policy(
+    config: HMCConfig, system_name: str, lpar_name: str, settings: LparSecurityPolicy
+) -> None:
+    """Submit one finite policy record without retrying uncertain writes."""
+    pairs = settings.pairs()
+    if not pairs:
+        raise ValueError("Supply at least one security policy setting")
+    record = build_attribute_record([("name", lpar_name), *pairs])
     await run_hmc_command(
         config,
         f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(record)}",

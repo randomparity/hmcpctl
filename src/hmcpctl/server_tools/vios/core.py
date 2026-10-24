@@ -10,7 +10,16 @@ from ..._app import (
     with_client,
 )
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_security_policy import (
+    LparSecurityPolicy,
+    SecurityPolicyResult,
+    SecurityPolicyState,
+)
 from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
+from ...operations.lpar.security_policy import (
+    configure_lpar_security_policy,
+    read_lpar_security_policy,
+)
 from ...operations.lpar.vtpm import VtpmResult, configure_lpar_vtpm, read_lpar_vtpm
 from ...operations.vios.core import (
     BackupType,
@@ -41,6 +50,7 @@ def hmc_create_vios(
     resources: LparResources = VIOS_DEFAULT_RESOURCES,
     profile: str | None = None,
     vtpm_settings: LparVtpmSettings | None = None,
+    security_policy: LparSecurityPolicy | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -56,13 +66,23 @@ def hmc_create_vios(
         system_name_or_uuid: Target managed-system name or UUID.
         name: Name for the new VIOS partition.
         resources: Memory and processor settings for the VIOS.
+        security_policy: Optional strict pending secure-boot/keystore policy.
+            Signed enablement is irreversible; store requires inactivity and HMC
+            bounds. Linux selection declares intent, not guest proof. No key
+            actions; unverified policy stops follow-ups.
         vtpm_settings: Optional advertised vTPM creation fields, encoded in the native creation record; no profile apply or activation. Unverified creation must be inspected before retrying.
-        profile: Optional TOML profile name; uses environment defaults when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses environment defaults when omitted.
     """
 
     return with_client(
         lambda hmc: create_vios(
-            hmc, system_name_or_uuid, name, resources, vtpm_settings=vtpm_settings
+            hmc,
+            system_name_or_uuid,
+            name,
+            resources,
+            vtpm_settings=vtpm_settings,
+            security_policy=security_policy,
         ),
         profile=profile,
     )
@@ -92,7 +112,8 @@ def hmc_delete_vios(
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID.
-        profile: Optional TOML profile name; uses environment defaults when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses environment defaults when omitted.
         system_name_or_uuid: Optional managed system used to disambiguate a VIOS name.
     """
 
@@ -205,7 +226,8 @@ def hmc_list_vios_backups(
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID.
-        profile: Optional TOML profile name; uses environment defaults when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses environment defaults when omitted.
 
     Raises:
         ValueError: If the ``lsviosbk`` CSV is malformed.
@@ -248,7 +270,8 @@ def hmc_backup_vios(
             entry as ``<backup_name>.tar.gz`` (observed on V10R3), and
             hmc_restore_vios takes that listed name, not this one.
         backup_type: Backup kind: vios, viosioconfig, or ssp.
-        profile: Optional TOML profile name; uses environment defaults when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses environment defaults when omitted.
 
     Raises:
         ValueError: If the backup type or catalog name is invalid, or a selector
@@ -300,7 +323,8 @@ def hmc_restore_vios(
         backup_name: Backup catalog name returned by hmc_list_vios_backups.
         backup_type: Restore kind: viosioconfig or ssp.
         restart_if_required: Append ``-r`` to authorize a conditional restart.
-        profile: Optional TOML profile name; uses environment defaults when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses environment defaults when omitted.
 
     Raises:
         ValueError: If the restore type or catalog name is invalid, or a selector
@@ -337,7 +361,8 @@ def hmc_power_on_vios(
         wait: Wait for the power job's terminal outcome when true.
         timeout_seconds: Maximum client-side wait in seconds.
         poll_interval: Seconds between job-status requests while waiting.
-        profile: Optional TOML profile name; uses environment defaults when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses environment defaults when omitted.
     """
 
     return with_client(
@@ -372,7 +397,8 @@ def hmc_power_off_vios(
         wait: Wait for the power job's terminal outcome when true.
         timeout_seconds: Maximum client-side wait in seconds.
         poll_interval: Seconds between job-status requests while waiting.
-        profile: Optional TOML profile name; uses environment defaults when omitted.
+        profile: Optional HMC connection profile, distinct from a logical-partition
+            profile; uses environment defaults when omitted.
         system_name_or_uuid: Optional managed system used to disambiguate a VIOS name.
     """
 
@@ -441,6 +467,68 @@ def hmc_configure_vios_vtpm(
             vios=True,
             acknowledge_data_loss=acknowledge_data_loss,
             ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="vios.get_security_policy", target_kind="vios")
+def hmc_get_vios_security_policy(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    profile: str | None = None,
+) -> SecurityPolicyState:
+    """Read contained partition pending policy and separate current secure boot.
+
+    Configuration proves no guest OS, runtime enforcement or key readiness.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        vios_name_or_uuid: Contained VIOS partition name or UUID.
+        profile: HMC connection profile, distinct from a logical-partition profile.
+    """
+    return with_client(
+        lambda hmc: read_lpar_security_policy(
+            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid, vios=True
+        ),
+        profile=profile,
+    )
+
+
+@tool(
+    effect="destructive", operation="vios.configure_security_policy", target_kind="vios"
+)
+def hmc_configure_vios_security_policy(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    settings: LparSecurityPolicy,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> SecurityPolicyResult:
+    """Configure security policy once; verify pending policy separately from current boot.
+
+    WARNING: Secure boot can be weakened. Signed-update/Linux enables are irreversible;
+    store disable requires HMC emptiness checks and nonzero shrink requires Power11.
+    Enabling/increasing a store or enabling dynamic features requires inactivity.
+    Bypass provisions PK without authenticating against the old PK. Linux field selection
+    declares intent only. Configuration proves no guest OS, enforcement or key readiness.
+    Inspect uncertain outcomes before retrying; no power, profile, key action or replay.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        vios_name_or_uuid: Contained VIOS partition name or UUID.
+        settings: Nonempty strict policy; omitted fields preserve, false/zero are explicit.
+        ownership_override: Operator-approved ownership bypass.
+        profile: HMC connection profile, distinct from a logical-partition profile.
+    """
+    return with_client(
+        lambda hmc: configure_lpar_security_policy(
+            hmc,
+            vios_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+            vios=True,
         ),
         profile=profile,
     )

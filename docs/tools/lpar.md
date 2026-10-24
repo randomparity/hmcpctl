@@ -2,7 +2,7 @@
 
 # `lpar` tools
 
-43 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+45 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -11,6 +11,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_capture_lpar_console` | `mutate` | `lpar.capture_console` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Capture a bounded snapshot of an LPAR's virtual console (mkvterm). |
 | `hmc_configure_lpar` | `mutate` | `lpar.configure` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure five C01 partition settings and verify preserved/supplied values. |
 | `hmc_configure_lpar_reporting` | `mutate` | `lpar.configure_reporting` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure partition reporting once and verify applicable readback. |
+| `hmc_configure_lpar_security_policy` | `destructive` | `lpar.configure_security_policy` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure security policy once; verify pending policy separately from current boot. |
 | `hmc_configure_lpar_vtpm` | `destructive` | `lpar.configure_vtpm` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure an inactive AIX/Linux partition's advertised vTPM settings. |
 | `hmc_create_lpar` | `mutate` | `lpar.create` | `managed_system` | `partial` | `current` | `existing-runtime-guards` | Create a new LPAR on a managed system. |
 | `hmc_decommission_lpar` | `destructive` | `lpar.decommission` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Inventory, authorize, and optionally decommission one LPAR. |
@@ -24,6 +25,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_get_lpar_msp` | `read` | `lpar.get_msp` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return an LPAR's CLI-only Migratable Service Partition flag. |
 | `hmc_get_lpar_proc_compat` | `read` | `lpar.get_proc_compat` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return an LPAR's processor compatibility modes and a profile's mode. |
 | `hmc_get_lpar_reporting_settings` | `read` | `lpar.get_reporting_settings` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read applicable C02 update settings after proving partition containment. |
+| `hmc_get_lpar_security_policy` | `read` | `lpar.get_security_policy` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read contained partition pending policy and separate current secure boot. |
 | `hmc_get_lpar_settings` | `read` | `lpar.get_settings` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read the five C01 partition settings after proving system containment. |
 | `hmc_get_lpar_state` | `read` | `lpar.get_state` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Return the current state of one LPAR by partition name or UUID. |
 | `hmc_get_lpar_vtpm_settings` | `read` | `lpar.get_vtpm_settings` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read one contained AIX/Linux partition's vTPM configuration. |

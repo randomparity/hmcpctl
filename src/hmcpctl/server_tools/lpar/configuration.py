@@ -11,6 +11,11 @@ from ..._app import (
     with_client,
 )
 from ...documents.lpar import LparReportingSettings, LparSettings
+from ...documents.lpar_security_policy import (
+    LparSecurityPolicy,
+    SecurityPolicyResult,
+    SecurityPolicyState,
+)
 from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
 from ...operations.affinity.ssh import (
     MinimumAffinityPolicyResult,
@@ -35,6 +40,10 @@ from ...operations.lpar.configuration import (
     configure_lpar_settings,
     read_lpar_reporting_settings,
     read_lpar_settings,
+)
+from ...operations.lpar.security_policy import (
+    configure_lpar_security_policy,
+    read_lpar_security_policy,
 )
 from ...operations.lpar.vtpm import VtpmResult, configure_lpar_vtpm, read_lpar_vtpm
 from ...ssh.affinity import (
@@ -629,6 +638,67 @@ def hmc_configure_lpar_vtpm(
             settings,
             system_name_or_uuid=system_name_or_uuid,
             acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="lpar.get_security_policy", target_kind="lpar")
+def hmc_get_lpar_security_policy(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile: str | None = None,
+) -> SecurityPolicyState:
+    """Read contained partition pending policy and separate current secure boot.
+
+    Configuration proves no guest OS, runtime enforcement or key readiness.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: Contained LPAR partition name or UUID.
+        profile: HMC connection profile, distinct from a logical-partition profile.
+    """
+    return with_client(
+        lambda hmc: read_lpar_security_policy(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
+        profile=profile,
+    )
+
+
+@tool(
+    effect="destructive", operation="lpar.configure_security_policy", target_kind="lpar"
+)
+def hmc_configure_lpar_security_policy(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    settings: LparSecurityPolicy,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> SecurityPolicyResult:
+    """Configure security policy once; verify pending policy separately from current boot.
+
+    WARNING: Secure boot can be weakened. Signed-update/Linux enables are irreversible;
+    store disable requires HMC emptiness checks and nonzero shrink requires Power11.
+    Enabling/increasing a store or enabling dynamic features requires inactivity.
+    Bypass provisions PK without authenticating against the old PK. Linux field selection
+    declares intent only. Configuration proves no guest OS, enforcement or key readiness.
+    Inspect uncertain outcomes before retrying; no power, profile, key action or replay.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: Contained LPAR partition name or UUID.
+        settings: Nonempty strict policy; omitted fields preserve, false/zero are explicit.
+        ownership_override: Operator-approved ownership bypass.
+        profile: HMC connection profile, distinct from a logical-partition profile.
+    """
+    return with_client(
+        lambda hmc: configure_lpar_security_policy(
+            hmc,
+            lpar_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         ),
         profile=profile,

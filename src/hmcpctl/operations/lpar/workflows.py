@@ -53,7 +53,8 @@ async def create_lpar(
     steps = [WorkflowStep("create", "ok", created.lpar)]
     if created.physical_io_step is not None:
         steps.append(created.physical_io_step)
-    if created.apply_step is not None:
+    policy_requested = bool(creation.security_policy.pairs())
+    if created.apply_step is not None and not policy_requested:
         steps.append(created.apply_step)
     if created.settings_step is not None:
         steps.append(created.settings_step)
@@ -61,6 +62,24 @@ async def create_lpar(
         steps.append(created.reporting_step)
     if created.vtpm_step is not None:
         steps.append(created.vtpm_step)
+    if created.security_policy_step is not None:
+        steps.append(created.security_policy_step)
+    if created.apply_step is not None and policy_requested:
+        steps.append(created.apply_step)
+    policy_failed = policy_requested and (
+        created.security_policy_step is None
+        or created.security_policy_step.status != "ok"
+        or created.ownership_stamped is not True
+        or any(
+            requested and (step is None or step.status != "ok")
+            for requested, step in (
+                (creation.settings.pairs(), created.settings_step),
+                (creation.reporting_settings.pairs(), created.reporting_step),
+                (creation.vtpm_settings.pairs(), created.vtpm_step),
+                (creation.physical_io.requested, created.physical_io_step),
+            )
+        )
+    )
     vtpm_failed = bool(creation.vtpm_settings.pairs()) and (
         created.vtpm_step is None or created.vtpm_step.status != "ok"
     )
@@ -85,6 +104,7 @@ async def create_lpar(
         or reporting_failed
         or io_failed
         or vtpm_failed
+        or policy_failed
     )
     if assignments_skipped:
         steps.extend(

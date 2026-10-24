@@ -20,7 +20,12 @@ from ...operations.lpar.workflows import create_lpar
 from ...ssh.lpar import validate_caller_token
 from ..output import console, err_console, print_json, terminal_field, usage_error
 from ..runtime import with_client
-from .assignment_input import load_pcie_assignments, load_physical_io
+from .assignment_input import (
+    SECURITY_POLICY_WARNING,
+    load_pcie_assignments,
+    load_physical_io,
+    load_security_policy,
+)
 
 
 def lpars_create(
@@ -117,6 +122,11 @@ def lpars_create(
     vtpm_encryption: str | None = typer.Option(
         None, "--vtpm-encryption", help="Advertised 2.0 level"
     ),
+    security_policy: str | None = typer.Option(
+        None,
+        "--security-policy",
+        help="Inline strict policy JSON (64 KiB); signed/Linux enablement irreversible, Linux selection declares intent only",
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Create a new LPAR on a managed system.
@@ -127,6 +137,15 @@ def lpars_create(
     ``apply_profile`` step) unless --no-apply is given. Settings preserve omitted
     values; a running time-reference partition can govern system time.
     """
+    policy = load_security_policy(security_policy)
+    try:
+        policy.validate_creation(partition_type)
+    except ValueError as error:
+        usage_error(f"Invalid --security-policy: {terminal_field(error, err=True)}")
+    if policy.pairs():
+        err_console.print(
+            terminal_field(SECURITY_POLICY_WARNING, err=True), markup=False
+        )
     try:
         vtpm = LparVtpmSettings(vtpm_enabled, vtpm_version, vtpm_encryption)
         vtpm.validate_creation(partition_type)
@@ -188,6 +207,7 @@ def lpars_create(
                 apply_profile=not no_apply,
                 reporting_settings=reporting,
                 vtpm_settings=vtpm,
+                security_policy=policy,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,

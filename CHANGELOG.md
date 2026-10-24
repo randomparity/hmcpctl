@@ -18,6 +18,15 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Typed secure-boot and keystore policy for LPAR/VIOS creation, reads and updates
+  through CLI/MCP (#1765). Strict inline JSON preserves omitted settings and
+  explicit false/zero, with selected-system capability/release and ownership
+  admission. Signed-update/Linux enables are irreversible; PK bypass skips
+  old-key authentication. Readback separates pending from current secure boot
+  and reports uncertain outcomes without replay. Configuration proves neither
+  guest OS/runtime enforcement nor key readiness; hardware evidence remains
+  separate from implementation maturity.
+
 - Typed vTPM creation and inactive updates expose `vtpm_enabled`, `vtpm_version`
   and `vtpm_encryption` for AIX/Linux partitions and VIOS through CLI/MCP.
   Values are admitted against the selected system's advertisements; disabling an
