@@ -3,13 +3,20 @@
 ## Authority and success
 
 Frozen scope: #1765, token `q1765-9d5051e9`, C04, five fields/eighteen bindings,
-explicit empty exclusions. [ADR 0277](../../adr/0277-lpar-secure-boot-keystore.md)
+the operator-approved creation-combination exclusion below. [ADR 0277](../../adr/0277-lpar-secure-boot-keystore.md)
 records the existing-owner extension. Success is typed creation/update coverage
 with admission, honest readback and supported CLI/MCP presentations for this set.
 The operator chose explicit settings plus existing confirmation/`--yes`, and
 selection of the Linux field as Linux intent; neither introduces another flag.
 Profile lifecycle remains with #1724. No owner migration or compatibility facade
 change is needed; the existing six-name stable facade remains unchanged.
+
+Creation requesting `simplified_remote_restart_capable=True` and `keystore_kbytes>0`
+is refused before create, stamp, apply or assignments until a supported positive
+user-defined system-key check exists. IBM requires that key for this combination;
+the operator approved the bounded refusal and retained the gap under #638.
+Explicit false, zero, omitted values and standalone fields retain existing contracts.
+This adds no update restriction, reader, key action or public parameter.
 
 ## Sources and admission
 

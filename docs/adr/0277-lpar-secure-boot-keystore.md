@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-23) — issue #1765; frozen C04 scope and two operator decisions.
+Proposed (2026-10-23) — issue #1765; frozen C04 scope and operator decisions.
 
 ## Context
 
@@ -22,6 +22,10 @@ admission. Report pending configuration separately from current boot policy.
 Use explicit settings plus existing CLI confirmation/`--yes` and warnings as
 consent; add neither a security acknowledgement nor a Linux-intent parameter.
 Selection of the Linux field declares intent but proves no installed guest OS.
+Refuse creation requesting simplified remote restart together with a nonzero
+keystore until a supported positive user-defined system-key check is established.
+The operator approved this bounded exclusion; #638 retains the combination gap.
+The five fields remain separately available, with no new update restriction.
 Extend ADR0092's existing guarded VIOS mutation inventory only for this new setter.
 
 ## Consequences

@@ -216,6 +216,17 @@ async def create_and_stamp_lpar(
         )
     if not isinstance(creation.settings, LparSettings):
         raise TypeError("settings must be LparSettings")
+    if (
+        creation.settings.simplified_remote_restart_capable is True
+        and creation.security_policy.keystore_kbytes is not None
+        and creation.security_policy.keystore_kbytes > 0
+    ):
+        raise ValueError(
+            "Creation combining simplified remote restart with a nonzero keystore "
+            "requires a supported positive user-defined system-key check. "
+            "Select only one of these features for this creation. "
+            "Nothing was created."
+        )
     if not isinstance(creation.physical_io, LparPhysicalIO):
         raise TypeError("physical_io must be LparPhysicalIO")
     validate_partition_type(creation.partition_type)

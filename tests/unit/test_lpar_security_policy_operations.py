@@ -1028,3 +1028,71 @@ async def test_policy_malformed_identity_retains_required_stamp_contract(
     stamp.assert_not_awaited()
     apply.assert_not_awaited()
     command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_creation_refuses_srr_with_nonzero_keystore_before_effects(
+    creation_target, monkeypatch
+):
+    from hmcpctl.documents.lpar import LparResources, LparSettings
+    from hmcpctl.operations.lpar import core
+
+    hmc, _, command = creation_target
+    assign = AsyncMock()
+    monkeypatch.setattr(core, "_created_settings_step", assign)
+    creation = core.LparCreation(
+        "part-R1",
+        "AIX/Linux",
+        LparResources(desired_memory=1024),
+        settings=LparSettings(simplified_remote_restart_capable=True),
+        security_policy=LparSecurityPolicy(keystore_kbytes=4),
+        apply_profile="default_profile",
+    )
+    with pytest.raises(ValueError, match="simplified remote restart.*nonzero"):
+        await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+    command.assert_not_awaited()
+    hmc.create_logical_partition.assert_not_awaited()
+    core.stamp_created_lpar_ownership.assert_not_awaited()
+    assign.assert_not_awaited()
+    hmc.find_partition_by_name.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "srr,keystore", [(False, 4), (None, 4), (True, 0), (True, None)]
+)
+async def test_creation_preserves_standalone_srr_and_keystore(
+    creation_target, monkeypatch, srr, keystore
+):
+    import shlex
+
+    from hmcpctl.documents.lpar import LparResources, LparSettings
+    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    hmc, entry, command = creation_target
+    entry["Resource"]["KeyStoreSize"] = str(keystore or 0)
+    monkeypatch.setattr(
+        core,
+        "_created_settings_step",
+        AsyncMock(return_value=WorkflowStep("settings", "ok")),
+    )
+    creation = core.LparCreation(
+        "part-R1",
+        "AIX/Linux",
+        LparResources(desired_memory=1024),
+        settings=LparSettings(simplified_remote_restart_capable=srr),
+        security_policy=LparSecurityPolicy(secure_boot=0, keystore_kbytes=keystore),
+    )
+    result = await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+    assert result.security_policy_step.status == "ok"
+    command.assert_awaited_once()
+    record = shlex.split(command.await_args.args[1])[-1]
+    if srr is not None:
+        assert f"simplified_remote_restart_capable={int(srr)}" in record
+    else:
+        assert "simplified_remote_restart_capable=" not in record
+    if keystore is not None:
+        assert f"keystore_kbytes={keystore}" in record
+    else:
+        assert "keystore_kbytes=" not in record
