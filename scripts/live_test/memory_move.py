@@ -12,7 +12,11 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.memory_move import _read_endpoint, _system_bounds
 from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
-from hmcpctl.resource_identity import resolve_system_uuid, system_name_from_uuid
+from hmcpctl.resource_identity import (
+    is_uuid,
+    resolve_system_uuid,
+    system_name_from_uuid,
+)
 from hmcpctl.ssh.profiles import get_lpar_description
 from hmcpctl.ssh.transport import run_hmc_command
 
@@ -414,12 +418,27 @@ async def recover_document(hmc_config, document):
     if len(baselines) != 1:
         raise ValueError("One original dual baseline is required")
     baseline = baselines[0]
+    stored_peers = baseline.get("peers") if isinstance(baseline, Mapping) else None
+    if (
+        not isinstance(stored_peers, list)
+        or len(stored_peers) != 2
+        or any(
+            not isinstance(peer, Mapping)
+            or not isinstance(peer.get("uuid"), str)
+            or not is_uuid(peer["uuid"])
+            for peer in stored_peers
+        )
+    ):
+        raise ValueError("Recovery requires two valid UUID baseline peers")
+    selectors = [peer["uuid"] for peer in stored_peers]
+    if selectors[0].lower() == selectors[1].lower():
+        raise ValueError("Recovery requires distinct UUID baseline peers")
     async with HMCClient(hmc_config) as hmc:
         peers = await admit(
             hmc,
             baseline["system_uuid"],
             baseline["system"],
-            [p["uuid"] for p in baseline["peers"]],
+            selectors,
             baseline["protected_names"],
         )
         observed = await oracle(hmc, baseline["system"], baseline["peers"])

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -207,6 +207,86 @@ async def test_recovery_compares_both_without_writes(live_boundary):
     with pytest.raises(ValueError, match="baselines differ"):
         await arm.recover_document(CONFIG, document)
     assert state.effects == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "baseline-shape",
+        "peers-shape",
+        "peers-mapping",
+        "too-few",
+        "too-many",
+        "peer-shape",
+        "missing-uuid",
+        "nonstring-uuid",
+        "invalid-uuid",
+        "duplicate-uuid",
+    ],
+)
+async def test_recovery_bounds_peers_before_client(
+    live_boundary,
+    boundary,  # noqa: F811 — pytest injects the imported HTTP/SSH fixture
+    monkeypatch,
+    fault,
+):
+    state, _, _ = live_boundary
+    await arm.exercise_memory_move(None, state)
+    document = {
+        "run": {
+            "group": arm.GROUP,
+            "subtasks": [54],
+            "tree_clean": True,
+            "partial": False,
+            "tested_commit": "c" * 40,
+        },
+        "hmc": {
+            "host": CONFIG.host,
+            "port": CONFIG.port,
+            "user": CONFIG.user,
+            "verify_ssl": CONFIG.verify_ssl,
+        },
+        "results": deepcopy(state.results),
+    }
+    baseline = document["results"][0]["data"]
+    peers = baseline["peers"]
+    if fault == "baseline-shape":
+        document["results"][0]["data"] = None
+    elif fault == "peers-shape":
+        baseline["peers"] = None
+    elif fault == "peers-mapping":
+        baseline["peers"] = {"source": peers[0], "destination": peers[1]}
+    elif fault == "too-few":
+        baseline["peers"] = peers[:1]
+    elif fault == "too-many":
+        baseline["peers"] = peers + peers[:1]
+    elif fault == "peer-shape":
+        peers[1] = None
+    elif fault == "missing-uuid":
+        del peers[1]["uuid"]
+    elif fault == "nonstring-uuid":
+        peers[1]["uuid"] = 8
+    elif fault == "invalid-uuid":
+        peers[1]["uuid"] = "target-R2"
+    else:
+        peers[1]["uuid"] = peers[0]["uuid"].upper()
+    client = Mock(wraps=arm.HMCClient)
+    monkeypatch.setattr(arm, "HMCClient", client)
+    boundary.hmc.get_logical_partition.reset_mock()
+    boundary.hmc.list_logical_partitions.reset_mock()
+    boundary.description.reset_mock()
+    arm.run_hmc_command.reset_mock()
+    with pytest.raises(ValueError, match="baseline peers"):
+        try:
+            await arm.recover_document(CONFIG, document)
+        finally:
+            client.assert_not_called()
+    boundary.hmc.get_logical_partition.assert_not_awaited()
+    boundary.hmc.list_logical_partitions.assert_not_awaited()
+    boundary.description.assert_not_awaited()
+    arm.run_hmc_command.assert_not_awaited()
+    assert state.effects == 2
 
 
 @pytest.mark.asyncio
