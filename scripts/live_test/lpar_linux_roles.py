@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from hmcpctl.client.core import HMCClient
@@ -30,7 +31,7 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, plain_data
+from .observation import Assertion, grade_assertions, plain_data
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -122,7 +123,9 @@ def _fixture_resources(resource: dict[str, Any]) -> bool:
     )
 
 
-async def _create(client: Client, state: RunState, run: _Run, controller: bool) -> dict:
+async def _create(
+    client: Client, state: RunState, run: _Run, controller: bool, *, kvm: bool
+) -> dict:
     run.create_attempted = True
     status, data = await state.call(
         client,
@@ -132,7 +135,10 @@ async def _create(client: Client, state: RunState, run: _Run, controller: bool) 
         partition_type="AIX/Linux",
         resources=RESOURCES,
         caller_token=run.token,
-        settings={"powervm_mgmt_capable": False, "kvm_capable": True},
+        settings={
+            "powervm_mgmt_capable": False,
+            **({"kvm_capable": True} if kvm else {}),
+        },
         apply_partition_profile=not controller,
     )
     data = plain_data(data)
@@ -160,11 +166,16 @@ async def _create(client: Client, state: RunState, run: _Run, controller: bool) 
         raise ValueError(
             "Independent explicit dedicated never-share resources unconfirmed"
         )
-    if _roles(resource) != {"powervm_mgmt_capable": False, "kvm_capable": True}:
+    if _roles(resource)["powervm_mgmt_capable"] or (
+        kvm and not _roles(resource)["kvm_capable"]
+    ):
         raise ValueError("Independent creation role readback differs")
-    if leaf_text(resource.get("PendingProcessorCompatibilityMode")) != "POWER10":
+    if (
+        kvm
+        and leaf_text(resource.get("PendingProcessorCompatibilityMode")) != "POWER10"
+    ):
         raise ValueError("Independent pending POWER10 companion unconfirmed")
-    if not controller:
+    if kvm and not controller:
         status, compat = await state.call(
             client,
             "hmc_get_lpar_proc_compat",
@@ -220,6 +231,32 @@ async def _update(
     return after
 
 
+async def _creation_mode(hmc: HMCClient, system: str) -> tuple[bool, bool]:
+    """Require management authority; KVM evidence selects only the full variant."""
+    caps = await read_role_capabilities(hmc, system, need_kvm=False)
+    creation = LparCreation(
+        "eligibility-only",
+        partition_type="AIX/Linux",
+        resources=LparResources(**RESOURCES),
+        settings=LparSettings(powervm_mgmt_capable=False),
+        apply_profile=not caps.controller_mode,
+    )
+    admit_role_creation(creation, caps)
+    try:
+        full_caps = await read_role_capabilities(hmc, system, need_kvm=True)
+        admit_role_creation(
+            replace(
+                creation,
+                settings=LparSettings(powervm_mgmt_capable=False, kvm_capable=True),
+            ),
+            full_caps,
+        )
+    except (HMCError, ValueError, TypeError):
+        return caps.controller_mode, False
+    else:
+        return full_caps.controller_mode, True
+
+
 async def exercise_lpar_linux_roles(client: Client, state: RunState) -> None:
     """Require eligibility before one fixture; clean and compare even on cancellation."""
     if state.group != GROUP or state.hmc_config is None:
@@ -228,17 +265,7 @@ async def exercise_lpar_linux_roles(client: Client, state: RunState) -> None:
     try:
         async with HMCClient(state.hmc_config) as hmc:
             system = await resolve_system_uuid(hmc, state.config.system_name)
-            caps = await read_role_capabilities(hmc, system, need_kvm=True)
-            admit_role_creation(
-                LparCreation(
-                    "eligibility-only",
-                    partition_type="AIX/Linux",
-                    resources=LparResources(**RESOURCES),
-                    settings=LparSettings(powervm_mgmt_capable=False, kvm_capable=True),
-                    apply_profile=not caps.controller_mode,
-                ),
-                caps,
-            )
+            controller, kvm = await _creation_mode(hmc, system)
     except (HMCError, ValueError, TypeError) as error:
         state.skip(
             SUBTASK,
@@ -262,12 +289,12 @@ async def exercise_lpar_linux_roles(client: Client, state: RunState) -> None:
     )
     verified = False
     try:
-        before = await _create(client, state, run, caps.controller_mode)
-        for settings in (
-            {"kvm_capable": False},
-            {"powervm_mgmt_capable": True},
-            {"powervm_mgmt_capable": False},
-        ):
+        before = await _create(client, state, run, controller, kvm=kvm)
+        updates = [{"kvm_capable": False}] if kvm else []
+        updates.extend(
+            ({"powervm_mgmt_capable": True}, {"powervm_mgmt_capable": False})
+        )
+        for settings in updates:
             before = await _update(client, state, run, before, settings)
         verified = True
     except asyncio.CancelledError:
@@ -284,34 +311,53 @@ async def exercise_lpar_linux_roles(client: Client, state: RunState) -> None:
             cleanup = "passed" if run.deleted and same else "failed"
             assertions = [Assertion("independent-finite-role-lifecycle", verified)]
             data = {
-                "classic-profile-apply": not caps.controller_mode,
+                "classic-profile-apply": not controller,
                 "activation": "not-run",
                 "recovery": "required",
             }
-            state.record_verified(
-                SUBTASK,
-                "hmc_create_lpar",
-                operation="lpar.create",
-                scenario=SCENARIO,
-                assertions=assertions,
-                cleanup=cleanup,
-                data=data,
-            )
-            state.record_verified(
-                SUBTASK,
-                "hmc_configure_lpar",
-                operation="lpar.configure",
-                scenario=SCENARIO,
-                assertions=assertions,
-                cleanup=cleanup,
-                data=data,
-            )
-            state.record_verified(
-                SUBTASK,
-                "hmc_get_lpar",
-                operation="lpar.get",
-                scenario=SCENARIO,
-                assertions=assertions,
-                cleanup=cleanup,
-                data=data,
-            )
+            if not kvm:
+                assertions = [
+                    Assertion("independent-management-role-lifecycle", verified)
+                ]
+                status, note = grade_assertions(assertions, cleanup)
+                state.record(
+                    SUBTASK,
+                    "linux-management-only-lifecycle",
+                    status,
+                    {
+                        **data,
+                        "kvm-lifecycle": "not-run",
+                        "cleanup": cleanup,
+                        "assertions": [item.id for item in assertions if item.holds],
+                        "known-role-and-resource-preservation": verified,
+                    },
+                    "Management roles only; KVM not run. " + note,
+                )
+            else:
+                state.record_verified(
+                    SUBTASK,
+                    "hmc_create_lpar",
+                    operation="lpar.create",
+                    scenario=SCENARIO,
+                    assertions=assertions,
+                    cleanup=cleanup,
+                    data=data,
+                )
+                state.record_verified(
+                    SUBTASK,
+                    "hmc_configure_lpar",
+                    operation="lpar.configure",
+                    scenario=SCENARIO,
+                    assertions=assertions,
+                    cleanup=cleanup,
+                    data=data,
+                )
+                state.record_verified(
+                    SUBTASK,
+                    "hmc_get_lpar",
+                    operation="lpar.get",
+                    scenario=SCENARIO,
+                    assertions=assertions,
+                    cleanup=cleanup,
+                    data=data,
+                )

@@ -158,7 +158,9 @@ def external_hmc(monkeypatch):
             b.entry = deepcopy(b.template)
             b.entry["Resource"].update(
                 PartitionName=fields["name"],
-                KvmCapable="true" if fields.get("kvm_capable") == "1" else "false",
+                KvmCapable=("true" if fields["kvm_capable"] == "1" else "false")
+                if "kvm_capable" in fields
+                else b.template["Resource"]["KvmCapable"],
                 PowerVMManagementCapable="true"
                 if fields.get("powervm_mgmt_capable") == "1"
                 else "false",
@@ -196,6 +198,10 @@ def external_hmc(monkeypatch):
                     b.entry["Resource"][rest] = (
                         "true" if fields[field] == "1" else "false"
                     )
+            if b.failure == "role-drift":
+                b.entry["Resource"]["KvmCapable"] = "true"
+            if b.failure == "compat-drift":
+                b.entry["Resource"]["PendingProcessorCompatibilityMode"] = "POWER9"
             if b.failure == "preserved-drift":
                 b.entry["Resource"]["PartitionMemoryConfiguration"]["DesiredMemory"] = (
                     "8192"
@@ -424,7 +430,7 @@ async def test_eligible_synthetic_success(external_hmc, controller):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("admission", ["captured", "authority", "firmware", "hmc"])
+@pytest.mark.parametrize("admission", ["authority"])
 async def test_ineligible_before_any_fixture(external_hmc, admission, monkeypatch):
     b = external_hmc
     if admission == "captured":
@@ -567,3 +573,148 @@ async def test_opt_in_precedes_any_external_request(external_hmc):
     state = await exercise(b, group="all")
     assert b.commands == [] and not b.entry and not b.deletes
     assert not state.observations and state.results[0]["result"] == "skipped"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("controller", [False, True])
+@pytest.mark.parametrize("known_kvm", ["false", "true"])
+async def test_management_only_fallback_is_nonpromoting(
+    external_hmc, controller, known_kvm
+):
+    b = external_hmc
+    b.system["Resource"]["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = (
+        "false"
+    )
+    if controller:
+        b.system["Resource"].update(
+            IsClassicHMCManagement="false", IsHMCPowerVMManagementController="true"
+        )
+    b.template["Resource"].update(
+        KvmCapable=known_kvm, PendingProcessorCompatibilityMode="default"
+    )
+    state = await exercise(b)
+    creates = [cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]
+    assert len(creates) == 1 and "powervm_mgmt_capable=0" in creates[0]
+    assert (
+        "kvm_capable=" not in creates[0] and "lpar_proc_compat_mode=" not in creates[0]
+    )
+    updates = [
+        cmd
+        for cmd in b.commands
+        if cmd.startswith("chsyscfg ")
+        and "description=" not in cmd
+        and "-o apply" not in cmd
+    ]
+    assert len(updates) == b.updates == 2
+    assert (
+        "powervm_mgmt_capable=1" in updates[0]
+        and "powervm_mgmt_capable=0" in updates[1]
+    )
+    assert all(
+        "kvm_capable=" not in cmd and "lpar_proc_compat_mode=" not in cmd
+        for cmd in updates
+    )
+    assert sum("-o apply" in cmd for cmd in b.commands) == (0 if controller else 1)
+    assert (
+        b.entry is None and b.deletes == [PARTITION] and await recovery_findings() == []
+    )
+    assert not state.observations
+    rows = [
+        row for row in state.results if row["tool"] == "linux-management-only-lifecycle"
+    ]
+    assert (
+        len(rows) == 1
+        and rows[0]["status"] == "PASS"
+        and rows[0]["result"] == "observed"
+    )
+    assert rows[0]["data"]["kvm-lifecycle"] == "not-run"
+    assert rows[0]["data"]["cleanup"] == "passed"
+    assert rows[0]["data"]["assertions"] == ["independent-management-role-lifecycle"]
+    assert rows[0]["data"]["known-role-and-resource-preservation"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "lost-false",
+        "write-transport",
+        "read-transport",
+        "preserved-drift",
+        "role-drift",
+        "compat-drift",
+        "foreign",
+        "active",
+        "cleanup",
+        "baseline",
+        "cancel",
+        "creation-role",
+        "resources",
+    ],
+)
+async def test_management_only_failure_has_no_positive_observation(
+    external_hmc, failure
+):
+    b = external_hmc
+    b.system["Resource"]["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = (
+        "false"
+    )
+    b.failure = failure
+    state = await exercise(b)
+    assert not state.observations
+    assert not any(
+        row["tool"] == "linux-management-only-lifecycle" and row["status"] == "PASS"
+        for row in state.results
+    )
+    assert any(row["status"] == "FAIL" for row in state.results)
+    assert len([cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]) == 1
+    assert len(b.deletes) <= 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unavailable", ["captured", "firmware", "console", "console-transport"]
+)
+async def test_management_fallback_when_kvm_evidence_unavailable(
+    external_hmc, unavailable, monkeypatch
+):
+    b = external_hmc
+    if unavailable == "captured":
+        b.system["Resource"] = captured("rest-ms-entry-mtms-pair.json")["Resource"]
+        b.system["Resource"]["SystemName"] = "sys-R1"
+    elif unavailable == "firmware":
+        b.system["Resource"]["SystemFirmware"] = "unknown"
+    else:
+
+        async def unavailable_console(self):
+            if unavailable == "console-transport":
+                raise HMCError("synthetic private remote body")
+            return {"Resource": {}}
+
+        monkeypatch.setattr(HMCClient, "get_console_info", unavailable_console)
+    state = await exercise(b)
+    rows = [
+        row for row in state.results if row["tool"] == "linux-management-only-lifecycle"
+    ]
+    assert len(rows) == 1 and rows[0]["status"] == "PASS" and not state.observations
+    assert b.updates == 2 and b.entry is None and b.deletes == [PARTITION]
+    assert not any(
+        "kvm_capable=" in cmd or "lpar_proc_compat_mode=" in cmd for cmd in b.commands
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [None, "unknown"])
+async def test_management_fallback_requires_both_readable_roles(external_hmc, missing):
+    b = external_hmc
+    b.system["Resource"]["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = (
+        "false"
+    )
+    b.template["Resource"]["KvmCapable"] = missing
+    state = await exercise(b)
+    assert not state.observations and b.updates == 0
+    assert not any(
+        row["tool"] == "linux-management-only-lifecycle" and row["status"] == "PASS"
+        for row in state.results
+    )
+    assert b.entry is None and b.deletes == [PARTITION]

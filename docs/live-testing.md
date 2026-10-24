@@ -1777,19 +1777,28 @@ no maturity evidence. Generate public summaries only with
 
 The opt-in `lpar-linux-roles` arm creates one owned, inactive AIX/Linux fixture
 with explicit dedicated never-share CPUs (minimum/desired/maximum one processor)
-and memory (1024/2048/4096 MiB). Creation selects management false and KVM true
-with POWER10 in the same native record. Classic management explicitly applies
-the initial profile after verification; current-HMC controller mode passes
-explicit false and omits the profile. The arm independently reads roles,
+and memory (1024/2048/4096 MiB). When KVM prerequisites are admitted, creation
+selects management false and KVM true with POWER10 in the same native record.
+Classic management explicitly applies the initial profile after verification;
+current-HMC controller mode passes
+explicit false and omits the profile. The full variant independently reads roles,
 compatibility and resources, disables KVM, then changes management false→true→false
 while KVM remains false. It does not activate a guest, install software, manage
 keys, change the controller or rewrite an existing partition's resources.
 
-Unknown or ineligible selected-system capability, HMC release, firmware or
-management authority stops before fixture creation. The committed captured
-system reports KVM capability false and FW950; it cannot establish an eligible
-positive run. Mocked eligible variants are synthetic. No native C05 lifecycle
-has been executed by adding this procedure.
+Unknown management authority stops before fixture creation. If KVM evidence
+is unavailable or ineligible but management-only admission succeeds, the same
+arm omits KVM and POWER10 selection, verifies management false, and performs only
+the two management updates. Independent reads must still expose both role values;
+the known KVM value, compatibility and resources are preserved. Cleanup and
+baseline comparison remain mandatory. This subset records explicitly labelled
+management-only PASS/FAIL rows and emits no catalog observation or maturity
+promotion. Generated matrices require context stating that KVM was not run.
+The full KVM branch and its three catalog observations remain separate.
+
+The committed captured system reports KVM capability false and FW950; it cannot
+establish an eligible positive KVM run. Mocked eligible variants are synthetic.
+No native C05 lifecycle has been executed by adding this procedure.
 
 A later, separately authorized finite execution packet must bind the exact
 candidate HEAD and imported source provenance, target, explicit resources,
