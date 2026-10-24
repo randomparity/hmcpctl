@@ -88,6 +88,13 @@ async def _read(client: Client, state: RunState, run: _Run) -> dict[str, Any]:
         )
     ):
         raise ValueError("Independent inactive fixture identity or roles unconfirmed")
+    mode = leaf_text(resource.get("PendingProcessorCompatibilityMode"))
+    if (
+        not isinstance(mode, str)
+        or not mode.strip()
+        or mode.strip().lower() == "unknown"
+    ):
+        raise ValueError("Independent configured compatibility unconfirmed")
     return deepcopy(resource)
 
 

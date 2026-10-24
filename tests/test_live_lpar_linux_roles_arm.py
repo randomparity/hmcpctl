@@ -72,6 +72,7 @@ def external_hmc(monkeypatch):
         updates=0,
         reads=0,
         baseline_reads=0,
+        compatibility_probe=None,
     )
 
     async def session(self):
@@ -117,7 +118,15 @@ def external_hmc(monkeypatch):
         b.reads += 1
         if b.failure == "read-transport" and b.updates:
             raise HMCError("synthetic transport unavailable")
-        return deepcopy(b.entry)
+        entry = deepcopy(b.entry)
+        if entry is not None and b.compatibility_probe is not None:
+            stage, value = b.compatibility_probe
+            if stage == "before" or b.updates:
+                if value is None:
+                    entry["Resource"].pop("PendingProcessorCompatibilityMode", None)
+                else:
+                    entry["Resource"]["PendingProcessorCompatibilityMode"] = value
+        return entry
 
     async def quick(self, kind, uuid, prop):
         assert (
@@ -567,8 +576,9 @@ async def test_opt_in_precedes_any_external_request(external_hmc):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("controller", [False, True])
 @pytest.mark.parametrize("known_kvm", ["false", "true"])
+@pytest.mark.parametrize("wrapped", [False, True])
 async def test_management_only_fallback_is_nonpromoting(
-    external_hmc, controller, known_kvm
+    external_hmc, controller, known_kvm, wrapped
 ):
     b = external_hmc
     b.system["Resource"]["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = (
@@ -578,8 +588,16 @@ async def test_management_only_fallback_is_nonpromoting(
         b.system["Resource"].update(
             IsClassicHMCManagement="false", IsHMCPowerVMManagementController="true"
         )
+    mode = leaf_text(
+        captured("rest-lpar-entry.json")["Resource"][
+            "PendingProcessorCompatibilityMode"
+        ]
+    )
     b.template["Resource"].update(
-        KvmCapable=known_kvm, PendingProcessorCompatibilityMode="default"
+        KvmCapable=known_kvm,
+        PendingProcessorCompatibilityMode={"@attrs": {"ksv": "V1_0"}, "text": mode}
+        if wrapped
+        else "default",
     )
     state = await exercise(b)
     creates = [cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]
@@ -778,3 +796,32 @@ def test_actual_cli_withheld_role_apply_exits_nonzero(
     assert b.entry is not None and not b.deletes
     assert len([cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]) == 1
     assert not any("-o apply" in cmd for cmd in b.commands)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["before", "after"])
+@pytest.mark.parametrize(
+    "evidence", [None, {}, False, " ", "unknown", {"text": "UNKNOWN"}]
+)
+async def test_management_compatibility_requires_known_evidence(
+    external_hmc, stage, evidence
+):
+    b = external_hmc
+    b.system["Resource"]["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = (
+        "false"
+    )
+    b.compatibility_probe = (stage, evidence)
+    state = await exercise(b)
+    assert not state.observations
+    rows = [
+        row for row in state.results if row["tool"] == "linux-management-only-lifecycle"
+    ]
+    assert len(rows) == 1 and rows[0]["status"] == "FAIL"
+    assert b.updates == (0 if stage == "before" else 1)
+    assert len([cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]) == 1
+    assert len([cmd for cmd in b.commands if "description=" in cmd]) == 1
+    assert sum("-o apply" in cmd for cmd in b.commands) == 1
+    assert (
+        b.entry is None and b.deletes == [PARTITION] and await recovery_findings() == []
+    )
+    assert rows[0]["data"]["cleanup"] == "passed"
