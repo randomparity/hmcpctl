@@ -101,7 +101,7 @@ def lpars_memory_move(
     except ValueError as error:
         usage_error(str(error))
     if not yes and not typer.confirm(
-        f"Move {quantity} MiB from '{terminal_field(source)}' to '{terminal_field(destination)}'? "
+        f"Move {terminal_field(quantity)} MiB from '{terminal_field(source)}' to '{terminal_field(destination)}'? "
         "Partial/uncertain effects require inspection; force may require an OS restart"
     ):
         return

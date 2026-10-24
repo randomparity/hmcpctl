@@ -232,3 +232,53 @@ def test_cli_move_accepts_confirmation_and_explicit_intent(monkeypatch):
         system_name_or_uuid="sys-R1",
         ownership_override=True,
     )
+
+
+@pytest.mark.parametrize(
+    "width,rich_panels", [(40, False), (61, False), (62, True), (80, True)]
+)
+def test_memory_move_discovery_is_bounded_in_real_cli(width, rich_panels, tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    from rich.text import Text
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from hmcpctl.cli import app; app()", "lpars", "--help"],
+        cwd=tmp_path,
+        env={**os.environ, "COLUMNS": str(width)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    help_text = Text.from_ansi(result.stdout).plain
+    assert len(help_text) < 20000
+    assert "memory-move" in help_text and "security-policy" in help_text
+    assert ("╭" in help_text) is rich_panels
+
+
+def test_memory_move_confirmation_encodes_terminal_controls(monkeypatch):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdout", Terminal())
+    prompts = []
+    monkeypatch.setattr(
+        memory.typer, "confirm", lambda prompt: prompts.append(prompt) or False
+    )
+    client = MagicMock()
+    monkeypatch.setattr(memory, "with_client", client)
+    memory.lpars_memory_move(
+        "source\x1b[31m", "target\nR2", "sys-R1", 256, False, False, False
+    )
+    assert "Move 256 MiB" in prompts[0]
+    assert "source\\x1b[31m" in prompts[0] and "target\\nR2" in prompts[0]
+    assert "\x1b" not in prompts[0] and "\n" not in prompts[0]
+    client.assert_not_called()
