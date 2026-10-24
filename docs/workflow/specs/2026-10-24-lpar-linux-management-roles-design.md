@@ -78,7 +78,8 @@ Selection of either field, including false, declares Linux intent on AIX/Linux
    from explicit true; otherwise require explicit current-HMC controller true.
    Unknown/contradictory evidence fails before effects. Never acquire authority.
 3. A supplied KVM field requires positive selected-system KVM advertisement
-   and usable console release >=10.3.1060.1 (retain the maintenance component). Positive enablement additionally
+   and usable console release >=10.3.1060.1 (retain the fix level from
+   `VersionInfo/Minor`, not `Maintenance`). Positive enablement additionally
    requires the documented firmware floor: FW1060.10 on Power10 or FW1110 on
    Power11, with processor generation determined by advertised modes, not host.
 4. For update, KVM field selection requires inactive state and no reported

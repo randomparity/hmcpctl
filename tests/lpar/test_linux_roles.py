@@ -22,7 +22,7 @@ from hmcpctl.ssh.lpar import (
     set_lpar_settings,
 )
 from hmcpctl.ssh.transport import HMCCLIError
-from hmcpctl.xmlutil import parse_feed
+from hmcpctl.xmlutil import leaf_text, parse_feed
 
 SYSTEM = "0000000e-abcd-4ef0-8abc-00000000000e"
 PARTITION = "0000000c-abcd-4ef0-8abc-00000000000c"
@@ -158,7 +158,8 @@ def source_boundary(monkeypatch):
             "Version": "10",
             "Release": "3",
             "ServicePackName": "1060",
-            "Maintenance": "1",
+            "Maintenance": "0",
+            "Minor": "1",
         }
     }
     hmc = SimpleNamespace(
@@ -178,14 +179,14 @@ async def test_capability_source_decoding(source_boundary):
     b.modes.return_value = ["POWER10", "POWER11"]
     b.system["SystemFirmware"] = {"text": "FW1110_FW1110.00 (1)"}
     assert (await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)).power11
-    for field in ("Version", "Release", "ServicePackName", "Maintenance"):
+    for field in ("Version", "Release", "ServicePackName", "Minor"):
         old = b.console["VersionInfo"].pop(field)
         assert (
             await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
         ).hmc_version is None
         b.console["VersionInfo"][field] = old
     for bad in (None, "bad", "-1", "1.0", True):
-        b.console["VersionInfo"]["Maintenance"] = bad
+        b.console["VersionInfo"]["Minor"] = bad
         assert (
             await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
         ).hmc_version is None
@@ -205,6 +206,53 @@ async def test_capability_source_decoding(source_boundary):
         )
         with pytest.raises(ValueError):
             await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=False)
+
+
+@pytest.mark.asyncio
+async def test_captured_console_fix_level(source_boundary):
+    b = source_boundary
+    console = captured("rest-management-console.json")["Resource"]
+    # IBM MF71703/MF71704 identifies build 2408210051 as V10 R3 M1060.3:
+    # https://delivery04-mul.dhe.ibm.com/sar/CMA/HMA/0chw6/4/vMF71703.readme.html
+    assert leaf_text(console["VersionInfo"]["BuildLevel"]) == "2408210051"
+    assert roles._role_console_version(console) == (10, 3, 1060, 3)
+    b.hmc.get_console_info.return_value = {"Resource": console}
+    b.system.clear()
+    b.system.update(captured("rest-ms-entry-mtms-pair.json")["Resource"])
+    caps = await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+    assert caps.hmc_version == (10, 3, 1060, 3)
+    assert not caps.kvm and caps.firmware == (950, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize(
+    "maintenance,minor", [("0", "0"), ("0", "1"), ("0", "3"), ("1", "0")]
+)
+async def test_source_fix_level_admission(
+    source_boundary, maintenance, minor, selected
+):
+    from hmcpctl.operations.lpar.core import LparCreation
+
+    b = source_boundary
+    b.console["VersionInfo"].update(Maintenance=maintenance, Minor=minor)
+    caps = await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+    assert caps.hmc_version == (10, 3, 1060, int(minor))
+    settings = LparSettings(kvm_capable=selected)
+    creation = LparCreation(
+        "owned",
+        "AIX/Linux",
+        LparResources(dedicated=True, desired_procs=2),
+        settings=settings,
+    )
+    if minor == "0":
+        with pytest.raises(ValueError, match=r"HMC >=10\.3\.1060\.1"):
+            roles.admit_role_update(settings, caps, eligible_resource())
+        with pytest.raises(ValueError, match=r"HMC >=10\.3\.1060\.1"):
+            roles.admit_role_creation(creation, caps)
+    else:
+        roles.admit_role_update(settings, caps, eligible_resource())
+        roles.admit_role_creation(creation, caps)
 
 
 @pytest.mark.asyncio

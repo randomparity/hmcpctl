@@ -94,7 +94,8 @@ def external_hmc(monkeypatch):
                     "Version": "10",
                     "Release": "3",
                     "ServicePackName": "1060",
-                    "Maintenance": "1",
+                    "Maintenance": "0",
+                    "Minor": "1",
                 }
             }
         }

@@ -46,14 +46,14 @@ def _role_console_version(resource: object) -> tuple[int, int, int, int] | None:
         return None
     parts = [
         leaf_text(info.get(name))
-        for name in ("Version", "Release", "ServicePackName", "Maintenance")
+        for name in ("Version", "Release", "ServicePackName", "Minor")
     ]
     if not all(
         isinstance(part, str) and re.fullmatch(r"[0-9]{1,4}", part) for part in parts
     ):
         return None
-    version, release, service_pack, maintenance = (int(str(part)) for part in parts)
-    return version, release, service_pack, maintenance
+    version, release, service_pack, fix_level = (int(str(part)) for part in parts)
+    return version, release, service_pack, fix_level
 
 
 async def read_role_capabilities(

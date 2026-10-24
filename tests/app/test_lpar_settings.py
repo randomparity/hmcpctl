@@ -197,7 +197,8 @@ def role_app_boundary(monkeypatch):
                         "Version": "10",
                         "Release": "3",
                         "ServicePackName": "1060",
-                        "Maintenance": "1",
+                        "Maintenance": "0",
+                        "Minor": "1",
                     }
                 }
             }
@@ -359,6 +360,42 @@ async def test_mcp_capability_false_denial_has_reason(role_app_boundary, creatio
     )
     assert b.writes == []
     assert (await b.hmc.get_logical_partition(PARTITION))["Resource"] == before
+
+
+@pytest.mark.parametrize("minor", ["0", "1", "3"])
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.asyncio
+async def test_mcp_kvm_console_fix_level(role_app_boundary, minor, selected):
+    b = role_app_boundary
+    b.hmc.get_console_info.return_value["Resource"]["VersionInfo"]["Minor"] = minor
+    # Synthetic eligibility isolates console release from the captured hardware.
+    b.system["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = "true"
+    b.system["SystemFirmware"] = "FW1060_FW1060.10 (10)"
+    b.resource["PendingProcessorCompatibilityMode"] = "POWER10"
+    b.resource["PartitionProcessorConfiguration"].update(
+        HasDedicatedProcessors="true", SharingMode="keep idle procs"
+    )
+    before = deepcopy(b.resource)
+    async with Client(policy_app("hmc_configure_lpar")) as client:
+        result = await client.call_tool(
+            "hmc_configure_lpar",
+            {
+                "system_name_or_uuid": SYSTEM,
+                "lpar_name_or_uuid": PARTITION,
+                "settings": {"kvm_capable": selected},
+            },
+            raise_on_error=False,
+        )
+    if minor == "0":
+        assert result.is_error
+        assert "HMC >=10.3.1060.1" in str(result.content)
+        assert b.writes == [] and b.resource == before
+    else:
+        assert not result.is_error, result
+        assert result.structured_content["status"] == "verified"
+        assert result.structured_content["observed"]["kvm_capable"] is selected
+        assert len(b.writes) == 1
+        assert f"kvm_capable={int(selected)}" in b.writes[0]
 
 
 @pytest.mark.parametrize("stage", ["write", "readback"])
