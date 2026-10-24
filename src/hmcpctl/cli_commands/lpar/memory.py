@@ -78,4 +78,4 @@ def lpars_memory(
 
 def register_commands(group: typer.Typer) -> None:
     """Register native memory changes on the existing LPAR group."""
-    group.command("memory")(lpars_memory)
+    group.command("memory", short_help="Change memory.")(lpars_memory)
