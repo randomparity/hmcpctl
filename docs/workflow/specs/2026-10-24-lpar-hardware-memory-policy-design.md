@@ -2,8 +2,8 @@
 
 Design proposal for #1771, linked to [ADR 0283](../../adr/0283-lpar-hardware-memory-policy.md).
 Base: `40f9f85672dee57c6dcc03d6446534efab93e43e`. Full-spec lane; frozen M denominator 250.
-Authority: [WORK:SCOPE](https://github.com/randomparity/hmcpctl/issues/1771#issuecomment-6387628908),
-token `q1771-6351885f`; interactive campaign dispatch. Exclusion/owner pairs `[]`.
+Authority: [WORK:SCOPE](https://github.com/randomparity/hmcpctl/issues/1771#issuecomment-6389647881),
+token `q1771-65513414`; interactive campaign dispatch. Exclusion/owner pairs `[]`.
 This proposal is neither implementation approval nor a hardware execution grant.
 
 ## Problem and scope
