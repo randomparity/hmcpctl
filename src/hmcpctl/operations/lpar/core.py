@@ -334,7 +334,7 @@ async def create_and_stamp_lpar(
                 else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
                 if policy_requested
                 else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-            ) from error
+            ) from (None if role_requested else error)
     else:
         document = build_lpar_document(
             name=creation.name,

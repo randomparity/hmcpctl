@@ -403,7 +403,9 @@ async def test_mcp_kvm_console_fix_level(role_app_boundary, minor, selected):
 @pytest.mark.parametrize("stage", ["write", "readback"])
 @pytest.mark.parametrize("creation", [False, True])
 @pytest.mark.asyncio
-async def test_mcp_role_remote_diagnostic_privacy(role_app_boundary, creation, stage):
+async def test_mcp_role_remote_diagnostic_privacy(
+    role_app_boundary, creation, stage, caplog
+):
     b = role_app_boundary
     marker = "PRIVATE-ROLE-MARKER\x1b[31m password=hidden"
     b.state["error"] = marker if stage == "write" else None
@@ -436,10 +438,12 @@ async def test_mcp_role_remote_diagnostic_privacy(role_app_boundary, creation, s
         )
     assert marker not in str(result)
     assert "PRIVATE-ROLE-MARKER" not in str(result)
+    assert "PRIVATE-ROLE-MARKER" not in caplog.text
     assert len(b.writes) == 1
     assert "powervm_mgmt_capable=0" in b.writes[0]
     if creation and stage == "write":
         assert result.is_error
+        assert "Native role creation outcome is unknown" in caplog.text
         assert (
             "Native role creation outcome is unknown; the partition may exist"
             in str(result.content)

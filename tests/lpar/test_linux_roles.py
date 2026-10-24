@@ -2,6 +2,7 @@
 
 import json
 import shlex
+import traceback
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -926,16 +927,67 @@ async def test_role_failed_creation_stops_assignments(
     assert MARKER not in repr(result)
 
 
+@pytest.mark.parametrize("selected", [False, True])
 @pytest.mark.asyncio
-async def test_role_native_creation_error_is_uncertain_and_safe(creation_boundary):
+async def test_role_native_creation_error_is_uncertain_and_safe(
+    creation_boundary, selected
+):
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
 
     b = creation_boundary
     b.create.side_effect = HMCError(MARKER)
     with pytest.raises(HMCError) as error:
-        await create_and_stamp_lpar(b.hmc, SYSTEM, b.creation)
+        await create_and_stamp_lpar(
+            b.hmc,
+            SYSTEM,
+            replace(b.creation, settings=LparSettings(powervm_mgmt_capable=selected)),
+        )
     assert MARKER not in str(error.value)
+    assert MARKER not in "".join(traceback.format_exception(error.value))
+    assert error.value.__cause__ is None and error.value.__suppress_context__
     assert "unknown" in str(error.value)
+    b.create.assert_awaited_once()
+    b.stamp.assert_not_awaited()
+
+
+@pytest.mark.parametrize("domain", ["settings", "policy", "physical_io"])
+@pytest.mark.asyncio
+async def test_no_role_native_creation_error_chain_is_unchanged(
+    creation_boundary, monkeypatch, domain
+):
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.security_policy import SecurityPolicyCapabilities
+
+    b = creation_boundary
+    failure = HMCError(MARKER)
+    b.create.side_effect = failure
+    creation = replace(b.creation, settings=LparSettings(time_ref=False))
+    if domain == "policy":
+        creation = replace(creation, security_policy=LparSecurityPolicy(secure_boot=0))
+        monkeypatch.setattr(
+            core,
+            "read_security_policy_capabilities",
+            AsyncMock(
+                return_value=SecurityPolicyCapabilities(
+                    True, True, True, 0, 65536, False, (10, 3, 1060), 1060
+                )
+            ),
+        )
+    elif domain == "physical_io":
+        creation = replace(creation, physical_io=LparPhysicalIO(console_slot="hmc"))
+    with pytest.raises(HMCError) as caught:
+        await core.create_and_stamp_lpar(b.hmc, SYSTEM, creation)
+    if domain == "settings":
+        assert caught.value is failure
+    else:
+        assert caught.value.__cause__ is failure
+        assert (
+            f"Native {'policy' if domain == 'policy' else 'I/O'} creation outcome is unknown"
+            in str(caught.value)
+        )
+    assert MARKER in "".join(traceback.format_exception(caught.value))
     b.create.assert_awaited_once()
     b.stamp.assert_not_awaited()
 
