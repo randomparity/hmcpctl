@@ -38,6 +38,7 @@ def test_refuses_existing_or_public_destination(tmp_path, monkeypatch):
         wrapper.main(["--results-file", str(existing)])
     directory = tmp_path / "public"
     directory.mkdir(mode=0o755)
+    directory.chmod(0o755)
     with pytest.raises(SystemExit):
         wrapper.main(["--results-file", str(directory / "results.json")])
     assert existing.read_text() == "original" and calls == []
