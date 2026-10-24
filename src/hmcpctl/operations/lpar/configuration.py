@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from typing import Literal
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.lpar.linux_roles import (
+    admit_role_update,
+    read_role_capabilities,
+    roles_requested,
+    with_role_evidence,
+)
 from hmcpctl.operations.lpar.ownership import (
     _authorize_system_lpar_profile_restore,
     _resolve_contained_lpar_names,
@@ -17,6 +24,7 @@ from hmcpctl.resource_identity import (
     ResourceNotFoundError,
     _hosts_partition,
     is_uuid,
+    resolve_lpar_uuid,
     resolve_system_uuid,
 )
 
@@ -38,6 +46,7 @@ from ...ssh.profiles import (
     validate_profile_sync_mode,
 )
 from ...ssh.transport import HMCCLIError
+from ...xmlutil import leaf_text
 
 ProcessorCompatibilityMode = Literal[
     "default",
@@ -217,6 +226,20 @@ async def read_lpar_settings(
     return await get_lpar_settings(hmc.config, system, name)
 
 
+async def _role_resource(hmc: HMCClient, uuid: str, name: str) -> dict[str, object]:
+    entry = await hmc.get_logical_partition(uuid)
+    resource = (entry or {}).get("Resource")
+    if (
+        not isinstance(resource, dict)
+        or str((entry or {}).get("UUID", "")).casefold() != uuid.casefold()
+        or leaf_text(resource.get("PartitionName")) != name
+    ):
+        raise ValueError(
+            "Linux roles require matching immutable partition identity and name"
+        )
+    return resource
+
+
 async def configure_lpar_settings(
     hmc: HMCClient,
     lpar_name_or_uuid: str,
@@ -225,43 +248,87 @@ async def configure_lpar_settings(
     system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> LparSettingsResult:
-    """Authorize, write once and verify supplied and omitted C01 values.
+    """Authorize, write once and verify supplied and known-preserved settings.
 
     A running time-reference partition may govern hypervisor/service-processor
     time. This operation does not activate a partition or change a guest clock.
     """
     if not settings.pairs():
         raise ValueError("Supply at least one partition setting")
+    role_selection = roles_requested(settings)
+    uuid = None
+    system_uuid = None
+    if role_selection:
+        system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+        uuid = await resolve_lpar_uuid(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_uuid
+        )
     system, name = await resolve_and_authorize_lpar_names(
         hmc,
-        lpar_name_or_uuid,
-        system_name_or_uuid=system_name_or_uuid,
+        uuid if uuid is not None else lpar_name_or_uuid,
+        system_name_or_uuid=system_uuid
+        if system_uuid is not None
+        else system_name_or_uuid,
         ownership_override=ownership_override,
     )
+    resource = None
+    if uuid is not None and system_uuid is not None:
+        contained = await resolve_lpar_uuid(hmc, name, system_name_or_uuid=system_uuid)
+        if contained.casefold() != uuid.casefold():
+            raise ValueError(
+                "Linux role partition identity changed during authorization"
+            )
+        resource = await _role_resource(hmc, uuid, name)
+        caps = await read_role_capabilities(
+            hmc, system_uuid, need_kvm=settings.kvm_capable is not None
+        )
+        admit_role_update(settings, caps, resource)
     build_attribute_record([("name", name), *settings.pairs()])
     before = await get_lpar_settings(hmc.config, system, name)
+    if resource is not None:
+        before = with_role_evidence(before, resource, LparSettings())
+    expected = replace(
+        before, **{name: getattr(settings, name) for name, _ in settings.pairs()}
+    )
     try:
         await set_lpar_settings(hmc.config, system, name, settings)
-    except HMCCLIError as error:
+    except HMCError as error:
+        if not role_selection and not isinstance(error, HMCCLIError):
+            raise
         return LparSettingsResult(
             "write-outcome-unknown",
             settings,
             None,
-            (f"Write did not confirm completion: {error}. Inspect before retrying.",),
+            (
+                "Submission failed; inspect before retrying. No replay attempted."
+                if role_selection
+                else f"Write did not confirm completion: {error}. Inspect before retrying.",
+            ),
         )
     try:
         after = await get_lpar_settings(hmc.config, system, name)
-    except HMCCLIError as error:
+        if uuid is not None:
+            after = with_role_evidence(
+                after, await _role_resource(hmc, uuid, name), expected
+            )
+    except (HMCError, ValueError, TypeError) as error:
+        if not role_selection and not isinstance(error, HMCCLIError):
+            raise
         return LparSettingsResult(
             "readback-unavailable",
             settings,
             None,
-            (f"Write returned successfully but readback failed: {error}",),
+            (
+                "Write returned successfully but role readback is unavailable; inspect before retrying."
+                if role_selection
+                else f"Write returned successfully but readback failed: {error}",
+            ),
         )
-    expected = replace(
-        before, **{name: getattr(settings, name) for name, _ in settings.pairs()}
-    )
-    if after != expected:
+    if any(
+        getattr(expected, field.name) is not None
+        and getattr(after, field.name) != getattr(expected, field.name)
+        for field in fields(expected)
+    ):
         return LparSettingsResult(
             "mismatch",
             settings,
