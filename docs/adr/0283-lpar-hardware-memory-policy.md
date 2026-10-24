@@ -21,7 +21,11 @@ Omission preserves the old route; explicit false emits 0 and true emits 1.
 Use the existing fixed attribute encoder, creation authorization, duplicate checks,
 LPAR ownership stamping, and native submission owner. Add no update operation.
 Require positive selected-system capability advertisement for supplied fields.
-Keep existing security, resource, partition-environment and native-path restrictions.
+Keep existing security, resource and partition-environment restrictions.
+For a supplied field, require observed IsClassicHMCManagement=true,
+IsHMCPowerVMManagementController=false and IsPowerVMManagementController=false
+from the selected-system resource. This admits a contemporaneously observed native profile-creation configuration,
+not a proven mode mapping; other or unavailable tuples refuse before submission.
 Do not invent release floors, mutual exclusions, or implicit AME factor changes.
 
 Read the contained inactive resource independently after creation, comparing supplied

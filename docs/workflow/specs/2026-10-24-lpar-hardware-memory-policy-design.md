@@ -20,7 +20,12 @@ The local `docs/refs/hmc-commands-p10/commands/mksyscfg.md:41` and
 `docs/refs/hmc-commands-p11/commands/mksyscfg.md:49` specify optional
 0/1 fields in the partition section. Enclosing sections do not establish a special OS,
 release floor or mutual exclusion for these flags. The native owner supplies a profile;
-the documented controller-mode profile restriction still bounds that owner.
+the published controller-mode prohibition on profile_name is a known incompatibility.
+The current owner has no mode guard. Three optional ROO schema booleans have no
+source-established mapping to that published mode; lscomgmt returned is_controller=null.
+Historical candidate 2a2201b641d5c5e9a1dc40bcec1b54d0d2ad0c16 successfully created
+a native profile on the same selected system whose contemporaneous tuple was true/false/false.
+This establishes an observed profile route, not C10 flag support or general mode semantics.
 Existing system capture `tests/fixtures/live/rest-ms-entry-mtms-pair.json` advertises
 `AssociatedSystemCapabilities/HardwareMemoryEncryptionCapable` and
 `HardwareMemoryCompressionCapable`; a separate retained system response confirms both.
@@ -51,8 +56,14 @@ boundaries. A focused operation helper performs selected-system capability admis
 and contained post-create reading; reuse existing identity resolution and XML leaf
 parsing. No public policy model, generic registry, parser or facade export is added.
 Only supplied fields require their positive capabilities, including explicit false.
-Absent, false or malformed capability refuses before creation; native final rejection
-remains authoritative for constraints that advertisements do not describe.
+Evidence-bounded admission also requires the selected-system resource tuple
+IsClassicHMCManagement=true, IsHMCPowerVMManagementController=false and
+IsPowerVMManagementController=false. Missing, malformed, mixed or any other tuple
+refuses before effects with a bounded unavailable-evidence message. This compares
+observations; it neither defines controller authority nor proves a mode mapping.
+Read these fields from the same get_managed_system response as capabilities, with no
+additional request. Both omitted flags preserve the existing no-hardware-read route.
+Native final rejection remains authoritative for constraints not locally established.
 Explicit keylock plus either flag refuses before effects because the native owner cannot
 represent keylock. Existing vTPM/security/reporting/I/O/resource checks remain in force.
 Two supplied flags may coexist; no source supports a new mutual exclusion.
@@ -82,7 +93,7 @@ claims that enabling access changes an AME factor or transparent physical encryp
 
 S1: None/False/True and their nine combinations retain strict, omission-preserving
 behavior across direct operation, native encoder, CLI and actual FastMCP boundaries.
-S2: Admission refuses bad types, missing capabilities, incompatible existing policy
+S2: Admission refuses bad types, missing capabilities, non-admitted tuples, incompatible existing policy
 or keylock before submission; AIX/Linux, IBM i and VIOS use existing environment paths.
 S3: Cross-system UUIDs, wrong names/types/states, malformed/missing leaves, read errors
 and mismatches cannot produce verified hardware status or later workflow effects.
