@@ -349,6 +349,19 @@ def _memory_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict
     )
 
 
+def _lpar_security_policy_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-security-policy",
+        True,
+        "configuration validated; positive selected-system secure boot capability required at dispatch",
+        (
+            f"one inactive owned AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: secure_boot=0 create, one secure_boot=1 update, matching-token deletion",
+            "2 GiB desired memory/0.5 shared units; no activation/profile/key/keystore/dynamic/bypass effects; independent baseline and recovery required",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_vtpm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-vtpm",
@@ -594,6 +607,7 @@ _ARM_VERDICTS = {
     "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
+    "lpar-security-policy": _lpar_security_policy_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,

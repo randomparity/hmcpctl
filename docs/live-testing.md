@@ -1732,3 +1732,43 @@ runtime convergence before advancing. Preserve ownership/containment checks, no 
 per-call/window bounds and independent before/after evidence. Any partial, rejected or
 unverified outcome stops the sequence for the approved recovery procedure. This is a
 validation procedure, not a second implemented live wrapper or an authorization to run it.
+
+## Inactive partition security policy (arm 52)
+
+The opt-in `lpar-security-policy` arm requires a positive selected-system secure
+boot capability and an independent resource baseline with no stranded shared
+scratch prefix. It creates one owned inactive AIX/Linux fixture with explicit
+`secure_boot=0`, using 2 GiB desired memory and 0.5 shared processing units.
+Confirmed creation identity, ownership stamp, successful policy workflow step
+and independent inactive readback precede one explicit `secure_boot=1` update.
+The update must verify pending 1, preserve separately observed current secure
+boot and every observable omitted setting, and match another independent read.
+Missing current readback, uncertain writes and mismatches remain failures; there
+is no retry or corrective write.
+
+Use a separately authorized exclusive window and deploy the exact reviewed
+candidate, verifying both HEAD and imported package source before these commands:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-security-policy
+uv run --no-sync python scripts/live_lpar_security_policy.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-security-policy.json
+```
+
+Always run recovery after success or failure. Maximum effects are one creation,
+one policy update attempt and one guarded inactive-only deletion. Existing
+containment, identity, authorization, ownership and capability reads remain
+required; the operation's two policy snapshots are not a total transport cap.
+A concrete execution packet must count all physical requests, including session
+establishment/logout, independent reads, cleanup and recovery, and retain the
+existing finite transport/job timeouts. Cleanup uses the exact fixture identity
+and caller token; an active or foreign fixture is retained without a power call.
+Independent before/after partition and free-resource comparison and recovery
+absence confirmation are required.
+
+There are no keystore, dynamic-key, bypass, activation, profile or key-management
+effects. Configuration readback proves no guest boot or runtime enforcement.
+Capability-false, other secure-boot values, VIOS, OS400/Power11, irreversible
+enables and keystore variants remain unrun. Mocks and scenario registration add
+no maturity evidence. Generate public summaries only with
+`scripts/live_test_evidence.py`; raw result documents remain private.

@@ -133,6 +133,7 @@ against that commit rather than maintained forward.
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
+| `configure_lpar_security_policy` | `operations/lpar/security_policy.py::configure_lpar_security_policy` | guarded (`operations/lpar/security_policy.py::configure_lpar_security_policy`, via contained LPAR/VIOS authorization helpers); explicit settings plus existing operator confirmation declare consent | #1765 / ADR 0277 |
 | `configure_lpar_vtpm` | `operations/lpar/vtpm.py::configure_lpar_vtpm` | guarded (`operations/lpar/vtpm.py::configure_lpar_vtpm`, via contained LPAR/VIOS authorization helpers); destructive enabled disable additionally requires independent consent | #1764 / ADR 0276 |
 | `delete_lpar` | `operations/lpar/core.py::delete_lpar` | guarded (`operations/lpar/core.py::delete_lpar`) | — |
 | `decommission_lpar` | `operations/lpar/decommission.py::decommission_lpar` | guarded (`operations/lpar/decommission.py::decommission_lpar`, via `authorize_decommission_lpar_ownership_snapshot`) | — |

@@ -159,3 +159,80 @@ async def test_create_lpar_skips_assignments_when_no_lpar_body(monkeypatch):
     )
     assert result.warnings == ("no body",)
     apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [None, "error", "ok"])
+@pytest.mark.parametrize("stamped", [True, False])
+async def test_missing_or_failed_policy_step_stops_followups(
+    monkeypatch, status, stamped
+):
+    from dataclasses import replace
+
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+
+    hmc = cast(HMCClient, object())
+    creation = replace(_creation(), security_policy=LparSecurityPolicy(secure_boot=0))
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.prevalidate_lpar_pcie_assignments",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.create_and_stamp_lpar",
+        AsyncMock(
+            return_value=LparCreationResult(
+                True,
+                {"UUID": "created"},
+                stamped,
+                (),
+                security_policy_step=WorkflowStep("security_policy", status)
+                if status
+                else None,
+            )
+        ),
+    )
+    apply = AsyncMock(return_value=AssignmentResult(True, False, ()))
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.apply_validated_lpar_pcie_assignments", apply
+    )
+    result = await create_lpar(hmc, "sys1", creation, LparPcieAssignments())
+    assert apply.await_count == int(status == "ok" and stamped)
+    assert result.workflow_completed == (status == "ok" and stamped)
+
+
+@pytest.mark.asyncio
+async def test_policy_workflow_reports_verification_before_apply(monkeypatch):
+    from dataclasses import replace
+
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+
+    creation = replace(_creation(), security_policy=LparSecurityPolicy(secure_boot=0))
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.prevalidate_lpar_pcie_assignments",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.create_and_stamp_lpar",
+        AsyncMock(
+            return_value=LparCreationResult(
+                True,
+                {"UUID": "created"},
+                True,
+                (),
+                apply_step=WorkflowStep("apply_profile", "ok"),
+                security_policy_step=WorkflowStep("security_policy", "ok"),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.apply_validated_lpar_pcie_assignments",
+        AsyncMock(return_value=AssignmentResult(True, False, ())),
+    )
+    result = await create_lpar(
+        cast(HMCClient, object()), "sys1", creation, LparPcieAssignments()
+    )
+    assert [step.step for step in result.steps] == [
+        "create",
+        "security_policy",
+        "apply_profile",
+    ]

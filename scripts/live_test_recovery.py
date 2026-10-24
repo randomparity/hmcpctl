@@ -69,6 +69,7 @@ from live_test import (
     lpar_config,
     lpar_physical_io,
     lpar_power,
+    lpar_security_policy,
     lpar_vtpm,
     memory_quantities,
     network,
@@ -175,6 +176,7 @@ _WITNESSED_SUBTASKS = (
         lpar_physical_io.SUBTASK,
         lpar_vtpm.SUBTASK,
         memory_quantities.SUBTASK,
+        lpar_security_policy.SUBTASK,
         lpar_power.SUBTASK,
     }
 )
@@ -344,6 +346,7 @@ def lpar_config_inputs_from_document(
             lpar_physical_io.SUBTASK,
             lpar_vtpm.SUBTASK,
             memory_quantities.SUBTASK,
+            lpar_security_policy.SUBTASK,
         }.intersection(subtasks)
         or not system
     ):

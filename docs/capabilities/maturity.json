@@ -1211,6 +1211,15 @@
                 "constraint": "three typed fields; selected-system advertisement/known compatibility; native single-record creation and requested-value readback"
               }
             ]
+          },
+          {
+            "variant": "c04-security-policy-creation",
+            "parameters": [
+              {
+                "name": "security_policy",
+                "constraint": "four typed creation fields: secure_boot, keystore_kbytes, keystore_signed_updates, linux_dynamic_key_secure_boot; selected-system admission and requested readback; keystore_signed_updates_without_verification is update-only, including false"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -4934,6 +4943,15 @@
                 "constraint": "three typed fields; selected-system advertisement/known compatibility; native single-record creation and requested-value readback"
               }
             ]
+          },
+          {
+            "variant": "c04-security-policy-creation",
+            "parameters": [
+              {
+                "name": "security_policy",
+                "constraint": "four typed creation fields: secure_boot, keystore_kbytes, keystore_signed_updates, linux_dynamic_key_secure_boot; selected-system admission and requested readback; keystore_signed_updates_without_verification is update-only, including false"
+              }
+            ]
           }
         ],
         "missing_scope": []
@@ -5749,6 +5767,72 @@
           {
             "variant": "c03-vtpm",
             "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.get_security_policy",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c04-security-policy",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.configure_security_policy",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c04-security-policy",
+            "parameters": [
+              {
+                "name": "settings",
+                "constraint": "five finite strict C04 security-policy fields; omitted values preserve and false/zero are explicit; selected-system admission, one native write and contained REST pending/current readback"
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.get_security_policy",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c04-security-policy",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.configure_security_policy",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "c04-security-policy",
+            "parameters": [
+              {
+                "name": "settings",
+                "constraint": "five finite strict C04 security-policy fields; omitted values preserve and false/zero are explicit; selected-system admission, one native write and contained REST pending/current readback"
+              }
+            ]
           }
         ],
         "missing_scope": []

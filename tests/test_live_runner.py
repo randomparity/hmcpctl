@@ -7717,6 +7717,9 @@ def _live_repo(tmp_path: Path) -> Path:
     (package / "__init__.py").write_text("", encoding="utf-8")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "placeholder.py").write_text("", encoding="utf-8")
+    source = tmp_path / "scripts" / "live_test" / "evidence.py"
+    source.parent.mkdir()
+    source.write_text("", encoding="utf-8")
     subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
     subprocess.run(
         [
@@ -8034,6 +8037,9 @@ def test_the_repository_root_is_resolved_from_git_not_the_working_directory(
     """From a subdirectory, `Path.cwd()` would fingerprint no files at all."""
     repo = _live_repo(tmp_path)
     subdirectory = repo / "scripts"
+    monkeypatch.setattr(
+        evidence, "__file__", str(subdirectory / "live_test" / "evidence.py")
+    )
     monkeypatch.chdir(subdirectory)
 
     assert evidence.repository_root() == repo
@@ -8044,6 +8050,10 @@ def test_the_repository_root_refuses_a_checkout_without_the_package(
 ):
     """A repository that is not this one must not silently fingerprint nothing."""
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+    module = tmp_path / "scripts" / "evidence.py"
+    module.parent.mkdir()
+    module.write_text("", encoding="utf-8")
+    monkeypatch.setattr(evidence, "__file__", str(module))
     monkeypatch.chdir(tmp_path)
 
     assert evidence.repository_root() is None
@@ -8587,14 +8597,16 @@ async def test_job_get_consumers_grade_normalized_outcomes_strictly(
 
 
 def test_validation_and_evidence_have_direct_owners():
-    from live_test import evidence, scenario_validation
+    from live_test import capture, evidence, scenario_validation
 
     assert evidence.write_results.__module__ == "live_test.evidence"
     assert (
         scenario_validation.validate_declared_outcomes.__module__
         == "live_test.scenario_validation"
     )
+    assert evidence.destination_is_ignored is capture.destination_is_ignored
     owners = {
+        capture: ("destination_is_ignored",),
         scenario_validation: (
             "validate_expected_dispatch",
             "_declared_names",
@@ -8609,7 +8621,6 @@ def test_validation_and_evidence_have_direct_owners():
             "_git",
             "repository_root",
             "run_provenance",
-            "destination_is_ignored",
             "observations_path",
             "_tree_is_clean",
             "emit_observations",
@@ -8669,3 +8680,275 @@ async def test_system_profiles_checkpoint_precedes_effect(monkeypatch, tmp_path)
         )
     assert effects == ["effect-boundary"]
     assert json.loads(destination.read_text())["run"]["partial"] is True
+
+
+@pytest.mark.parametrize("cwd_kind", ["outside", "foreign", "subdirectory", "linked"])
+@pytest.mark.parametrize("dirty", [False, True])
+def test_provenance_uses_executed_checkout_from_any_cwd(
+    tmp_path, monkeypatch, cwd_kind, dirty
+):
+    owner = tmp_path / "owner"
+    owner.mkdir()
+    owner = _live_repo(owner)
+    linked = tmp_path / "linked"
+    if cwd_kind == "linked":
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(owner),
+                "worktree",
+                "add",
+                "--detach",
+                str(linked),
+                "HEAD",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        executing = linked
+    else:
+        executing = owner
+    try:
+        module = executing / "scripts" / "live_test" / "evidence.py"
+        monkeypatch.setattr(evidence, "__file__", str(module))
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        cwd = outside
+        if cwd_kind == "foreign":
+            foreign = tmp_path / "foreign"
+            foreign.mkdir()
+            cwd = _live_repo(foreign)
+        elif cwd_kind == "subdirectory":
+            cwd = executing / "scripts"
+        if dirty:
+            (executing / "src" / "hmcpctl" / "__init__.py").write_text(
+                "changed = True\n", encoding="utf-8"
+            )
+        monkeypatch.chdir(cwd)
+        found = evidence.repository_root()
+        assert found == executing
+        provenance = evidence.run_provenance(
+            [52], "lpar-security-policy", found, "V1_0", False
+        )
+        expected = subprocess.check_output(
+            ["git", "-C", str(executing), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assert provenance["tested_commit"] == expected
+        assert provenance["tree_clean"] is (not dirty)
+    finally:
+        monkeypatch.chdir(tmp_path)
+        if linked.exists():
+            subprocess.run(
+                ["git", "-C", str(linked), "restore", "src/hmcpctl/__init__.py"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(owner), "worktree", "remove", str(linked)], check=True
+            )
+
+
+def test_copied_runner_source_cannot_borrow_callers_git_identity(tmp_path, monkeypatch):
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    _live_repo(caller)
+    copied = tmp_path / "copy" / "evidence.py"
+    copied.parent.mkdir()
+    copied.write_text("", encoding="utf-8")
+    monkeypatch.setattr(evidence, "__file__", str(copied))
+    monkeypatch.chdir(caller)
+    assert evidence.repository_root() is None
+
+
+@pytest.mark.parametrize("foreign_cwd", [False, True])
+def test_runner_writes_publishable_source_provenance_outside_checkout(
+    tmp_path, monkeypatch, foreign_cwd
+):
+    import asyncio
+
+    import live_test_evidence as renderer
+
+    _isolate_runner(monkeypatch)
+    owner = tmp_path / "owner"
+    owner.mkdir()
+    _live_repo(owner)
+    monkeypatch.setattr(
+        evidence, "__file__", str(owner / "scripts" / "live_test" / "evidence.py")
+    )
+    output = tmp_path / "output"
+    output.mkdir()
+    repositories = [owner]
+    if foreign_cwd:
+        _live_repo(output)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(output),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "foreign",
+            ],
+            check=True,
+        )
+        repositories.append(output)
+    catalog = Path(__file__).resolve().parents[1] / "docs/capabilities/maturity.json"
+    for repository in repositories:
+        target = repository / "docs/capabilities/maturity.json"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(catalog.read_bytes())
+    monkeypatch.chdir(output)
+
+    async def offline_task(_client, state):
+        state.record(52, "offline-provenance", "PASS", {})
+
+    monkeypatch.setattr(runner, "SUBTASKS", {52: offline_task})
+    path = output / "test-results.json"
+    assert (
+        asyncio.run(
+            runner.main(
+                subtask_filter=52,
+                results_path=str(path),
+                config=live_config.LiveTestConfig(),
+            )
+        )
+        == 0
+    )
+    document = json.loads(path.read_text())
+    expected = subprocess.check_output(
+        ["git", "-C", str(owner), "rev-parse", "HEAD"], text=True
+    ).strip()
+    assert document["run"]["tested_commit"] == expected
+    assert document["run"]["tree_clean"] is True
+    matrix = renderer.render(document)
+    assert matrix is not None and expected in matrix
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+@pytest.mark.parametrize(
+    "destination_kind", ["outside", "foreign-ignored", "foreign-unignored"]
+)
+def test_emission_admits_actual_destination_independently_of_source(
+    tmp_path, monkeypatch, absolute, destination_kind
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    _live_repo(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    stem = "custom-policy"
+    if destination_kind != "outside":
+        _live_repo(destination)
+        if destination_kind == "foreign-ignored":
+            (destination / ".gitignore").write_text(
+                "custom-policy.json\ncustom-policy-observations.json\n",
+                encoding="utf-8",
+            )
+        else:
+            stem = "test-results-private"
+            (destination / ".gitignore").write_text("", encoding="utf-8")
+    monkeypatch.chdir(destination)
+    path = evidence.observations_path(stem + ".json")
+    if absolute:
+        path = destination / path
+    allowed = destination_kind != "foreign-unignored"
+    assert (
+        evidence.emit_observations(
+            _state_with_one_observation(),
+            path,
+            ("V10R3M1060", "POWER10"),
+            "V1_0",
+            source,
+        )
+        is allowed
+    )
+    assert path.exists() is allowed
+    if allowed:
+        written = json.loads(path.read_text())
+        expected = subprocess.check_output(
+            ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assert written[0]["observation"]["tested_commit"] == expected
+
+
+def test_ignored_nested_copy_cannot_borrow_outer_source_identity(tmp_path, monkeypatch):
+    owner = _live_repo(tmp_path)
+    copied = owner / ".scratch" / "scripts" / "live_test" / "evidence.py"
+    copied.parent.mkdir(parents=True)
+    copied.write_text("copied_source = True\n", encoding="utf-8")
+    (owner / ".gitignore").write_text(".scratch/\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(owner), "add", ".gitignore"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(owner),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.test",
+            "commit",
+            "-qm",
+            "ignore scratch",
+        ],
+        check=True,
+    )
+    monkeypatch.setattr(evidence, "__file__", str(copied))
+    assert evidence._tree_is_clean(owner)
+    assert evidence.repository_root() is None
+
+
+@pytest.mark.parametrize("placement", ["untracked-ignored", "symlink", "missing"])
+def test_canonical_evidence_source_must_be_regular_and_tracked(
+    tmp_path, monkeypatch, placement
+):
+    owner = _live_repo(tmp_path)
+    source = owner / "scripts" / "live_test" / "evidence.py"
+    if placement == "untracked-ignored":
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(owner),
+                "rm",
+                "--cached",
+                "scripts/live_test/evidence.py",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        (owner / ".gitignore").write_text(
+            "/scripts/live_test/evidence.py\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "-C", str(owner), "add", ".gitignore"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(owner),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.test",
+                "commit",
+                "-qm",
+                "ignore copied source",
+            ],
+            check=True,
+        )
+        assert evidence._tree_is_clean(owner)
+    elif placement == "symlink":
+        copied = owner / ".scratch" / "evidence.py"
+        copied.parent.mkdir()
+        copied.write_text("copied_source = True\n", encoding="utf-8")
+        source.unlink()
+        source.symlink_to(copied)
+    else:
+        source.unlink()
+    monkeypatch.setattr(evidence, "__file__", str(source))
+    assert evidence.repository_root() is None

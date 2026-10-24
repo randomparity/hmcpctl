@@ -200,3 +200,116 @@ async def test_vios_native_capacity_uses_completed_resource_values(
             vtpm_settings=SETTINGS,
         )
     assert not b.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vtpm", [False, True])
+@pytest.mark.parametrize(
+    "mode", ["ok", "duplicate", "capacity", "empty", "mismatch", "identity"]
+)
+async def test_vios_policy_resource_and_duplicate_admission(
+    boundary, monkeypatch, vtpm, mode
+):
+    from hmcpctl.documents.lpar_security_policy import (
+        LparSecurityPolicy,
+        SecurityPolicyState,
+    )
+    from hmcpctl.operations.lpar.security_policy import SecurityPolicyCapabilities
+    from hmcpctl.operations.vios import core
+
+    b = boundary
+    b.entry["UUID"] = "00000012-abcd-4ef0-8abc-000000000012"
+    b.entry["Resource"]["PartitionType"] = "Virtual IO Server"
+    caps = SecurityPolicyCapabilities(
+        True, True, True, 4, 64, False, (10, 3, 1060), 950
+    )
+    monkeypatch.setattr(
+        core, "read_security_policy_capabilities", AsyncMock(return_value=caps)
+    )
+    reader = AsyncMock(
+        return_value=SecurityPolicyState(
+            "Virtual IO Server", "not activated", LparSecurityPolicy(secure_boot=0), 0
+        )
+    )
+    monkeypatch.setattr(core, "read_lpar_security_policy", reader)
+    if mode == "duplicate":
+        b.hmc.find_vios_by_name.side_effect = None
+        b.hmc.find_vios_by_name.return_value = b.entry
+    elif mode == "capacity":
+        monkeypatch.setattr(
+            core,
+            "require_memory_within_system",
+            AsyncMock(side_effect=ValueError("capacity")),
+        )
+    elif mode == "mismatch":
+        reader.return_value = SecurityPolicyState(
+            "Virtual IO Server", "not activated", LparSecurityPolicy(), 0
+        )
+    elif mode == "identity":
+        b.entry["UUID"] = "invalid"
+    resources = LparResources() if mode == "empty" else LparResources(desired_procs=0.1)
+    kwargs = {
+        "vtpm_settings": SETTINGS if vtpm else None,
+        "security_policy": LparSecurityPolicy(secure_boot=0),
+    }
+    if mode in {"duplicate", "capacity", "empty"}:
+        with pytest.raises(ValueError):
+            await create_vios(b.hmc, SYSTEM, "vios-R1", resources, **kwargs)
+        assert not b.calls
+    elif mode in {"mismatch", "identity"}:
+        with pytest.raises(HMCError, match="exists or may exist.*[Ii]nspect"):
+            await create_vios(b.hmc, SYSTEM, "vios-R1", resources, **kwargs)
+        assert len(b.calls) == 1
+    else:
+        assert (
+            await create_vios(b.hmc, SYSTEM, "vios-R1", resources, **kwargs) == b.entry
+        )
+        assert len(b.calls) == 1
+        record = shlex.split(b.calls[0])[-1]
+        assert record.count("secure_boot=0") == 1
+        assert "desired_mem=4096" in record
+        assert ("vtpm_enabled=1" in record) is vtpm
+        reader.assert_awaited_once_with(
+            b.hmc, b.entry["UUID"], system_name_or_uuid=SYSTEM, vios=True
+        )
+    b.hmc.create_vios.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vtpm", [False, True])
+@pytest.mark.parametrize("empty", [None, "empty"])
+async def test_empty_policy_preserves_each_route(boundary, vtpm, empty):
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+
+    b = boundary
+    await create_vios(
+        b.hmc,
+        SYSTEM,
+        "vios-R1",
+        LparResources(desired_memory=1024),
+        vtpm_settings=SETTINGS if vtpm else None,
+        security_policy=LparSecurityPolicy() if empty else None,
+    )
+    assert len(b.calls) == int(vtpm)
+    assert b.hmc.create_vios.await_count == int(not vtpm)
+
+
+@pytest.mark.asyncio
+async def test_vios_policy_uncertain_submission_is_bounded(boundary, monkeypatch):
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+    from hmcpctl.operations.vios import core
+
+    b = boundary
+    monkeypatch.setattr(core, "read_security_policy_capabilities", AsyncMock())
+    monkeypatch.setattr(core, "admit_security_policy", lambda *a, **kw: None)
+    b.state.write_error = HMCCLIError("secret-host secret-key")
+    with pytest.raises(HMCError, match="exists or may exist") as error:
+        await create_vios(
+            b.hmc,
+            SYSTEM,
+            "vios-R1",
+            LparResources(desired_memory=1024),
+            security_policy=LparSecurityPolicy(secure_boot=0),
+        )
+    assert "secret-host" not in str(error.value)
+    assert len(b.calls) == 1

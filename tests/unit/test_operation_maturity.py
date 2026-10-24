@@ -146,3 +146,15 @@ def test_projection_rejects_duplicate_json_keys(
 
     with pytest.raises(maturity.OperationMaturityError, match="duplicate key"):
         maturity.operation_maturity_catalog()
+
+
+@pytest.mark.parametrize("kind", ["lpar", "vios"])
+@pytest.mark.parametrize(
+    "operation", ["get_security_policy", "configure_security_policy"]
+)
+def test_security_policy_implementation_does_not_claim_hardware_evidence(
+    kind, operation
+):
+    result = maturity.operation_maturity(f"{kind}.{operation}")
+    assert result.implementation == "implemented"
+    assert result.verification == "unevidenced"

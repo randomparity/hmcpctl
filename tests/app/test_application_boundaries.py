@@ -118,8 +118,9 @@ def test_create_mcp_returns_independent_complete_applications():
     # #1762 adds typed partition settings configuration and readback.
     # #1763 adds partition reporting configuration and readback.
     # #1764 adds target-specific LPAR/VIOS vTPM reads and guarded updates.
-    assert len(asyncio.run(first.list_tools())) == 189
-    assert len(asyncio.run(second.list_tools())) == 189
+    # #1765 adds target-specific LPAR/VIOS security-policy reads and updates.
+    assert len(asyncio.run(first.list_tools())) == 193
+    assert len(asyncio.run(second.list_tools())) == 193
 
 
 def test_operations_do_not_import_application_modules():

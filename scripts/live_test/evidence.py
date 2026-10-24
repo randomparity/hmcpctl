@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 import check_capability_inventory
 
 from live_test import config as live_config
+from live_test.capture import destination_is_ignored
 
 if TYPE_CHECKING:
     from live_test.runner import RunState
@@ -106,15 +107,26 @@ def _git(repo_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 def repository_root() -> Path | None:
     """The repository the runner is checked out in, whatever directory it ran from.
 
-    `Path.cwd()` would silently produce an empty import closure when the runner
-    is invoked from a subdirectory, giving every observation the digest of no
-    files and marking it stale forever.
+    The caller's directory can be outside Git or inside another checkout. Only
+    the canonical tracked source can identify HEAD, cleanliness and closures.
     """
-    result = _git(Path.cwd(), "rev-parse", "--show-toplevel")
+    module = Path(__file__).resolve()
+    result = _git(module.parent, "rev-parse", "--show-toplevel")
     if result.returncode != 0:
         return None
-    root = Path(result.stdout.strip())
-    return root if (root / "src" / "hmcpctl").is_dir() else None
+    root = Path(result.stdout.strip()).resolve()
+    canonical = root / "scripts" / "live_test" / "evidence.py"
+    if (
+        module != canonical
+        or canonical.is_symlink()
+        or not canonical.is_file()
+        or not (root / "src" / "hmcpctl").is_dir()
+    ):
+        return None
+    tracked = _git(
+        root, "ls-files", "--error-unmatch", "--", "scripts/live_test/evidence.py"
+    )
+    return root if tracked.returncode == 0 else None
 
 
 def run_provenance(
@@ -129,10 +141,10 @@ def run_provenance(
     """What this run was, so a matrix taken from it can be dated.
 
     Written unconditionally, unlike the sibling observations document, which is
-    skipped when nothing resolves or the runner is outside the repository — the
-    run that fails early is the one whose provenance matters most. Outside a
-    repository the commit is `None`, which is a reportable state; a missing
-    block is not.
+    skipped when nothing resolves or the source has no checkout — the run that
+    fails early is the one whose provenance matters most. Without a source
+    checkout the commit is `None`, which is a reportable state; a missing block
+    is not.
 
     `tree_clean` qualifies `commit`: with `src` or `scripts` dirty the sha names
     a tree that was not the one exercised, so evidence cannot cite it.
@@ -165,19 +177,6 @@ def run_provenance(
     if detach_probe:
         provenance["detach_probe"] = True
     return provenance
-
-
-def destination_is_ignored(path: Path, repo_root: Path | None = None) -> bool:
-    """Report whether Git would let *path* be committed from where it is written.
-
-    Exit 0 means ignored, 1 means the path sits in a repository unignored, and
-    anything else means no repository, or a path outside one — in which case
-    there is nothing to commit into and the write is safe.
-    """
-    return (
-        _git(repo_root or Path.cwd(), "check-ignore", "-q", "--", str(path)).returncode
-        != 1
-    )
 
 
 def observations_path(results_path: str) -> Path:
@@ -218,7 +217,7 @@ def emit_observations(
     # pattern can establish that the destination is ignored; ask Git instead.
     # `_run_from_arguments` checks the same thing before the run; this covers a
     # direct call to `main`.
-    if not destination_is_ignored(path, repo_root):
+    if not destination_is_ignored(path):
         print(f"{path} is not ignored by git — observations not written")
         return False
     head = _git(repo_root, "rev-parse", "HEAD")
