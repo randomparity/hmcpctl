@@ -1702,3 +1702,46 @@ Capability-false, other secure-boot values, VIOS, OS400/Power11, irreversible
 enables and keystore variants remain unrun. Mocks and scenario registration add
 no maturity evidence. Generate public summaries only with
 `scripts/live_test_evidence.py`; raw result documents remain private.
+
+### Linux management roles (C05, arm 53)
+
+The opt-in `lpar-linux-roles` arm creates one owned, inactive AIX/Linux fixture
+with explicit dedicated never-share CPUs (minimum/desired/maximum one processor)
+and memory (1024/2048/4096 MiB). Creation selects management false and KVM true
+with POWER10 in the same native record. Classic management explicitly applies
+the initial profile after verification; current-HMC controller mode passes
+explicit false and omits the profile. The arm independently reads roles,
+compatibility and resources, disables KVM, then changes management false→true→false
+while KVM remains false. It does not activate a guest, install software, manage
+keys, change the controller or rewrite an existing partition's resources.
+
+Unknown or ineligible selected-system capability, HMC release, firmware or
+management authority stops before fixture creation. The committed captured
+system reports KVM capability false and FW950; it cannot establish an eligible
+positive run. Mocked eligible variants are synthetic. No native C05 lifecycle
+has been executed by adding this procedure.
+
+A later, separately authorized finite execution packet must bind the exact
+candidate HEAD and imported source provenance, target, explicit resources,
+management mode and classic-apply effect, transport deadlines, cleanup/recovery
+reserves and baseline facts before dispatch. Follow the shared preflight and
+source-provenance procedure; private raw captures stay outside repositories.
+The wrapper's maximum effects are one creation, three role updates and guarded
+inactive-only matching-token deletion. Containment, ownership, admission and
+independent verification add physical reads; these effect counts are not a
+transport-request cap. Run only the named group:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-linux-roles
+uv run --no-sync python scripts/live_lpar_linux_roles.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-linux-roles.json
+```
+
+Always run recovery, including after success, cancellation, transport failure or
+unknown completion. The arm attempts owned inactive cleanup in `finally` and
+compares independent before/after partition names and free processor/memory
+inventory. Active, foreign-owned or unreadable fixtures remain untouched and
+require operator inspection. An unconfirmed cleanup or baseline mismatch cannot
+produce passing evidence. Generate any public, redacted, HEAD-bound evidence
+through `scripts/live_test_evidence.py`; never publish raw result JSON or treat
+configuration readback as Linux, KVM or management-controller deployment proof.

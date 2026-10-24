@@ -335,6 +335,20 @@ def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _lpar_linux_roles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-linux-roles",
+        True,
+        "configuration validated; positive selected-system KVM/release/firmware/authority evidence required before creation",
+        (
+            f"one owned inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit dedicated never-share, 2 GiB desired memory/one CPU, same-record POWER10/KVM create",
+            "classic: explicit profile apply; controller: explicit false and no profile; KVM true-to-false then management false-to-true-to-false; no activation, guest, key or controller-takeover effects",
+            "independent roles/compatibility/resource reads, inactive-only matching-token deletion, baseline comparison and mandatory recovery",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_security_policy_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-security-policy",
@@ -593,6 +607,7 @@ _ARM_VERDICTS = {
     "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
+    "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,
