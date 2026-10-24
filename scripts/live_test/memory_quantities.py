@@ -117,8 +117,12 @@ async def _case(
         matched = (
             status == "FAIL"
             and isinstance(data, CallFailure)
-            and data.exception_type == "ValueError"
-            and "exceeds the partition maximum" in data.message
+            and data.exception_type == "ToolError"
+            and data.message
+            == (
+                "ToolError: Error calling tool 'hmc_dlpar_mem': "
+                "Requested memory target exceeds the partition maximum"
+            )
         )
     else:
         matched = (

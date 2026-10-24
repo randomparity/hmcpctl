@@ -1,11 +1,19 @@
 """Owned inactive arm50 must establish outcomes through independent readback."""
 
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+from fastmcp import Client, FastMCP
+from lpar.test_memory_quantities import (
+    LPAR_UUID,
+    SYSTEM_UUID,
+    quantity_boundary,  # noqa: F401 -- shared HMC boundary fixture
+)
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.operations.lpar.core import LparCreationResult
@@ -16,6 +24,10 @@ from live_test import config, lpar_config, memory_quantities, runner
 from live_test.observation import CallFailure
 
 UUID = "aaaaaaaa-0000-4000-8000-000000000050"
+OVER_MAXIMUM_MESSAGE = (
+    "ToolError: Error calling tool 'hmc_dlpar_mem': "
+    "Requested memory target exceeds the partition maximum"
+)
 
 
 @dataclass
@@ -82,7 +94,9 @@ class ScriptedSystem:
                 )
             if self.fault == "malformed":
                 memory["CurrentMemory"] = "missing"
-            if self.fault == "post-read" and self.native_calls:
+            if (self.fault == "post-read" and self.native_calls) or (
+                self.fault == "refusal-post-unavailable" and self.native_calls == 3
+            ):
                 return "FAIL", CallFailure("HMCError", "lost read", "", None, False)
             return "PASS", {
                 "UUID": UUID,
@@ -101,12 +115,22 @@ class ScriptedSystem:
         if change["quantity_mib"] > 4096:
             if self.fault == "refusal-read":
                 return "FAIL", CallFailure("HMCError", "timeout", "", None, False)
+            if self.fault == "refusal-unavailable":
+                return "FAIL", None
+            if self.fault == "refusal-post-read":
+                self.current -= 256
+            message = {
+                "refusal-permission": "ToolError: ownership permission denied",
+                "refusal-transport": "ToolError: Timeout connecting to HMC",
+                "refusal-reason": "ToolError: Error calling tool 'hmc_dlpar_mem': Requested memory exceeds available system capacity",
+                "refusal-message": OVER_MAXIMUM_MESSAGE + "; transport lost",
+            }.get(self.fault, OVER_MAXIMUM_MESSAGE)
             return "FAIL", CallFailure(
-                "ValueError",
-                "Requested memory target exceeds the partition maximum",
+                "ValueError" if self.fault == "refusal-type" else "ToolError",
+                message,
                 "",
                 None,
-                False,
+                self.fault == "refusal-permission",
             )
         if self.fault == "native-rejected":
             return "PASS", {"outcome": "rejected", "workflow_completed": False}
@@ -231,6 +255,14 @@ async def test_inactive_removal_sequence_independently_reads_and_cleans(
         "post-read",
         "delete",
         "refusal-read",
+        "refusal-permission",
+        "refusal-transport",
+        "refusal-reason",
+        "refusal-post-unavailable",
+        "refusal-message",
+        "refusal-type",
+        "refusal-unavailable",
+        "refusal-post-read",
     ],
 )
 async def test_failed_or_uncertain_arm_never_promotes_success_and_guards_cleanup(
@@ -326,3 +358,55 @@ async def test_inactive_removal_can_reach_minimum_without_reset(monkeypatch):
     state = await run_arm(monkeypatch, system)
     assert system.current == 1024 and system.deleted
     assert state.observations[0]["observation"]["result"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_overmax_oracle_through_actual_mcp_memory_admission(
+    monkeypatch,
+    quantity_boundary,  # noqa: F811 -- imported pytest boundary fixture
+):
+    from hmcpctl.operations.lpar import memory, ownership
+    from hmcpctl.server_tools.lpar import lifecycle
+
+    boundary = quantity_boundary
+    run = lpar_config._Run(SYSTEM_UUID, "lpar-R1", "lparcfg-a1b2c3d4", 256, subtask=50)
+    run.uuid = LPAR_UUID
+    stamp = f"[hmcpctl owner:hmcpctl created:2026-10-23] [caller {run.token}]"
+    monkeypatch.setattr(
+        memory, "authorize_lpar_mutation", ownership.authorize_lpar_mutation
+    )
+    monkeypatch.setattr(
+        ownership, "get_lpar_description", AsyncMock(return_value=stamp)
+    )
+    monkeypatch.setattr(
+        lifecycle, "with_client", lambda fn, **kwargs: asyncio.run(fn(boundary.hmc))
+    )
+    server = FastMCP("memory admission boundary")
+    server.tool(lifecycle.hmc_dlpar_mem)
+
+    @server.tool
+    async def hmc_get_lpar(lpar_name_or_uuid: str, system_name_or_uuid: str) -> dict:
+        assert lpar_name_or_uuid == LPAR_UUID and system_name_or_uuid == SYSTEM_UUID
+        return await boundary.hmc.get_logical_partition(lpar_name_or_uuid)
+
+    @server.tool
+    async def hmc_get_lpar_description(
+        lpar_name_or_uuid: str, system_name_or_uuid: str
+    ) -> str:
+        assert lpar_name_or_uuid == LPAR_UUID and system_name_or_uuid == SYSTEM_UUID
+        return await ownership.get_lpar_description(
+            boundary.hmc.config, "sys-R1", run.name
+        )
+
+    state = runner.RunState()
+    async with Client(server) as client:
+        held = await memory_quantities._case(
+            client, state, run, "add", 4352, (512, 1024, 4096), "refused"
+        )
+    assert held
+    failure = state.results[-1]["data"]["result"]
+    assert failure.exception_type == "ToolError"
+    assert failure.message == OVER_MAXIMUM_MESSAGE
+    assert boundary.hmc.get_managed_system.await_count == 1
+    assert boundary.hmc.get_logical_partition.await_count >= 2
+    boundary.command.assert_not_awaited()
