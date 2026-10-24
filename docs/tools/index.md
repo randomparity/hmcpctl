@@ -6,15 +6,15 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **184** tools are registered.
-- **183** are exposed by a default deployment.
+- **190** tools are registered.
+- **189** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
-| `destructive` | 40 |
-| `mutate` | 58 |
-| `read` | 85 |
+| `destructive` | 42 |
+| `mutate` | 59 |
+| `read` | 88 |
 
 ## Maturity vocabulary
 
@@ -39,7 +39,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `inventory` | 1 | [inventory.md](inventory.md) |
 | `io_slot` | 1 | [io_slot.md](io_slot.md) |
 | `job` | 2 | [job.md](job.md) |
-| `lpar` | 39 | [lpar.md](lpar.md) |
+| `lpar` | 43 | [lpar.md](lpar.md) |
 | `lpar_profile` | 11 | [lpar_profile.md](lpar_profile.md) |
 | `media` | 10 | [media.md](media.md) |
 | `memory_pool` | 2 | [memory_pool.md](memory_pool.md) |
@@ -65,7 +65,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `update` | 4 | [update.md](update.md) |
 | `upgrade` | 1 | [upgrade.md](upgrade.md) |
 | `user` | 5 | [user.md](user.md) |
-| `vios` | 10 | [vios.md](vios.md) |
+| `vios` | 12 | [vios.md](vios.md) |
 | `vios_label` | 7 | [vios_label.md](vios_label.md) |
 | `vios_profile` | 6 | [vios_profile.md](vios_profile.md) |
 | `vnic` | 3 | [vnic.md](vnic.md) |
@@ -94,7 +94,10 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_capture_lpar_console` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_clear_lpar_boot_order` | `mutate` | [boot_order.md](boot_order.md) |
 | `hmc_configure_lpar` | `mutate` | [lpar.md](lpar.md) |
+| `hmc_configure_lpar_reporting` | `mutate` | [lpar.md](lpar.md) |
+| `hmc_configure_lpar_vtpm` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_configure_remote_access` | `mutate` | [remote_access.md](remote_access.md) |
+| `hmc_configure_vios_vtpm` | `destructive` | [vios.md](vios.md) |
 | `hmc_create_logical_unit` | `mutate` | [cluster.md](cluster.md) |
 | `hmc_create_lpar` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_create_media_repository` | `mutate` | [media.md](media.md) |
@@ -135,8 +138,10 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_get_lpar_memopt_score` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_lpar_msp` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_lpar_proc_compat` | `read` | [lpar.md](lpar.md) |
+| `hmc_get_lpar_reporting_settings` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_lpar_settings` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_lpar_state` | `read` | [lpar.md](lpar.md) |
+| `hmc_get_lpar_vtpm_settings` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_media_repository` | `read` | [media.md](media.md) |
 | `hmc_get_minimum_affinity_policy` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_partition_template` | `read` | [template.md](template.md) |
@@ -148,6 +153,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_get_system_memopt_score` | `read` | [system.md](system.md) |
 | `hmc_get_user` | `read` | [user.md](user.md) |
 | `hmc_get_vios_storage_detail` | `read` | [vios.md](vios.md) |
+| `hmc_get_vios_vtpm_settings` | `read` | [vios.md](vios.md) |
 | `hmc_inspect_lpar` | `read` | [lpar.md](lpar.md) |
 | `hmc_install_vios` | `destructive` | [vios.md](vios.md) |
 | `hmc_inventory` | `read` | [inventory.md](inventory.md) |

@@ -67,7 +67,9 @@ from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import (
     lpar_config,
+    lpar_physical_io,
     lpar_power,
+    lpar_vtpm,
     network,
     runner,
     storage_lifecycle,
@@ -168,6 +170,9 @@ _WITNESSED_SUBTASKS = (
         network.SUBTASK,
         lpar_config.SUBTASK,
         lpar_config.SETTINGS_SUBTASK,
+        lpar_config.REPORTING_SUBTASK,
+        lpar_physical_io.SUBTASK,
+        lpar_vtpm.SUBTASK,
         lpar_power.SUBTASK,
     }
 )
@@ -322,7 +327,7 @@ class LparConfigInputs:
 def lpar_config_inputs_from_document(
     document: dict[str, Any], subtasks: list[int]
 ) -> LparConfigInputs | None:
-    """The run's system when it dispatched ST39, else `None`.
+    """The system for a creation/configuration arm using the shared scratch prefix.
 
     The reserved name prefix is the identity, as the users arm's is: a run
     interrupted before it wrote its document still has its partition found.
@@ -330,7 +335,13 @@ def lpar_config_inputs_from_document(
     config = document.get("config")
     system = config.get("system_name") if isinstance(config, dict) else None
     if (
-        not {lpar_config.SUBTASK, lpar_config.SETTINGS_SUBTASK}.intersection(subtasks)
+        not {
+            lpar_config.SUBTASK,
+            lpar_config.SETTINGS_SUBTASK,
+            lpar_config.REPORTING_SUBTASK,
+            lpar_physical_io.SUBTASK,
+            lpar_vtpm.SUBTASK,
+        }.intersection(subtasks)
         or not system
     ):
         return None

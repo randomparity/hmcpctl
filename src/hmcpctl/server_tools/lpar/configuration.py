@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from pydantic import StrictBool
+
 from hmcpctl.operations.lpar.ownership import set_lpar_ownership_description
 
 from ..._app import (
     ssh_with_client,
     with_client,
 )
-from ...documents.lpar import LparSettings
+from ...documents.lpar import LparReportingSettings, LparSettings
+from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
 from ...operations.affinity.ssh import (
     MinimumAffinityPolicyResult,
     ResourceGroupAffinityResult,
@@ -23,13 +26,17 @@ from ...operations.affinity.ssh import (
     set_minimum_affinity_policy,
 )
 from ...operations.lpar.configuration import (
+    LparReportingSettingsResult,
     LparSettingsResult,
     ProcessorCompatibilityMode,
     configure_lpar_msp,
     configure_lpar_processor_compatibility,
+    configure_lpar_reporting_settings,
     configure_lpar_settings,
+    read_lpar_reporting_settings,
     read_lpar_settings,
 )
+from ...operations.lpar.vtpm import VtpmResult, configure_lpar_vtpm, read_lpar_vtpm
 from ...ssh.affinity import (
     MemoptLparSelector,
     MemoptResourceGroupSelector,
@@ -510,6 +517,119 @@ def hmc_get_lpar_settings(
     return with_client(
         lambda hmc: read_lpar_settings(
             hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="lpar.configure_reporting", target_kind="lpar")
+def hmc_configure_lpar_reporting(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    settings: LparReportingSettings,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> LparReportingSettingsResult:
+    """Configure partition reporting once and verify applicable readback.
+
+    IPL source (a/b/c/d), restricted I/O and electronic reporting require IBM i.
+    Work group accepts integer or "none"; omitted values are preserved.
+    Redundant error-path reporting is creation-only and is refused here.
+    Readback proves configuration, not guest IPL or dynamic runtime behavior.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: Partition name or UUID on that system.
+        settings: Typed C02 update fields; bool false, zero and "none" are explicit.
+        ownership_override: Explicitly bypass ownership rejection.
+        profile: TOML connection profile, or environment-default HMC when omitted.
+    """
+    return with_client(
+        lambda hmc: configure_lpar_reporting_settings(
+            hmc,
+            lpar_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="lpar.get_reporting_settings", target_kind="lpar")
+def hmc_get_lpar_reporting_settings(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    profile: str | None = None,
+) -> LparReportingSettings:
+    """Read applicable C02 update settings after proving partition containment.
+
+    IBM i-only fields are omitted (null) for AIX/Linux; redundant reporting is
+    creation-only and is not requested by this update-settings reader.
+
+    Args:
+        system_name_or_uuid: Containing managed system name or UUID.
+        lpar_name_or_uuid: Partition name or UUID on that system.
+        profile: TOML connection profile, or environment-default HMC when omitted.
+    """
+    return with_client(
+        lambda hmc: read_lpar_reporting_settings(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="lpar.get_vtpm_settings", target_kind="lpar")
+def hmc_get_lpar_vtpm_settings(
+    system_name_or_uuid: str, lpar_name_or_uuid: str, profile: str | None = None
+) -> VtpmState:
+    """Read one contained AIX/Linux partition's vTPM configuration.
+
+    Args:
+        system_name_or_uuid: Selected managed system name or UUID.
+        lpar_name_or_uuid: Contained AIX/Linux partition name or UUID.
+        profile: Optional configured HMC connection profile.
+    """
+    return with_client(
+        lambda hmc: read_lpar_vtpm(
+            hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="destructive", operation="lpar.configure_vtpm", target_kind="lpar")
+def hmc_configure_lpar_vtpm(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    settings: LparVtpmSettings,
+    acknowledge_data_loss: StrictBool = False,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> VtpmResult:
+    """Configure an inactive AIX/Linux partition's advertised vTPM settings.
+
+    No implicit reset, replacement, power, profile or key-management operation.
+    Acknowledgement is required before disabling an enabled instance; keys and
+    stored TPM data can be lost. Inspect uncertain outcomes before retrying.
+
+    Args:
+        system_name_or_uuid: Selected managed system name or UUID.
+        lpar_name_or_uuid: Contained AIX/Linux partition name or UUID.
+        settings: Three typed optional fields; omitted values are preserved.
+        acknowledge_data_loss: Explicit consent to losing keys/data on enabled disable.
+        ownership_override: Operator-approved ownership bypass, separate from data-loss consent.
+        profile: Optional configured HMC connection profile.
+    """
+    return with_client(
+        lambda hmc: configure_lpar_vtpm(
+            hmc,
+            lpar_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
+            acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
         ),
         profile=profile,
     )

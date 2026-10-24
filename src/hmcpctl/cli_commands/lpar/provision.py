@@ -28,7 +28,7 @@ from ..output import (
     usage_error,
 )
 from ..runtime import with_client
-from .assignment_input import load_pcie_assignments
+from .assignment_input import load_pcie_assignments, load_physical_io
 
 
 def lpars_provision(
@@ -64,6 +64,11 @@ def lpars_provision(
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate preconditions only; do not create"
+    ),
+    physical_io: Path | None = typer.Option(
+        None,
+        "--physical-io",
+        help="Typed creation I/O JSON (64 KiB maximum); no implicit console default",
     ),
     pcie_assignments: Path | None = typer.Option(
         None,
@@ -126,6 +131,7 @@ def lpars_provision(
         power_on=power_on,
         dry_run=dry_run,
         assignments=assignments,
+        physical_io=load_physical_io(physical_io),
     )
     result = with_client(
         lambda hmc: provision_lpar(
@@ -154,6 +160,14 @@ def _render_provision_result(
         console.print(
             f"LPAR '{terminal_field(name)}' provisioned successfully",
             style="green",
+            markup=False,
+        )
+    elif result.resource_created is None:
+        console.print(
+            f"LPAR '{terminal_field(name)}' creation outcome is unknown. "
+            "Inspect the scoped partition and profile before retrying; "
+            "no rollback performed.",
+            style="yellow",
             markup=False,
         )
     elif result.resource_created:

@@ -20,9 +20,14 @@ from hmcpctl.resource_identity import (
     resolve_system_uuid,
 )
 
-from ...documents.lpar import LparSettings
+from ...documents.lpar import LparReportingSettings, LparSettings
 from ...ssh.commands import build_attribute_record
-from ...ssh.lpar import get_lpar_settings, set_lpar_settings
+from ...ssh.lpar import (
+    get_lpar_reporting_settings,
+    get_lpar_settings,
+    set_lpar_reporting_settings,
+    set_lpar_settings,
+)
 from ...ssh.profiles import (
     ProfileRestoreType,
     ProfileSyncMode,
@@ -266,3 +271,82 @@ async def configure_lpar_settings(
             ),
         )
     return LparSettingsResult("verified", settings, after, ())
+
+
+@dataclass(frozen=True)
+class LparReportingSettingsResult:
+    """Outcome of one C02 settings write; configuration is not guest-runtime proof."""
+
+    status: Literal[
+        "verified", "mismatch", "readback-unavailable", "write-outcome-unknown"
+    ]
+    requested: LparReportingSettings
+    observed: LparReportingSettings | None
+    warnings: tuple[str, ...]
+
+
+async def read_lpar_reporting_settings(
+    hmc: HMCClient, lpar_name_or_uuid: str, *, system_name_or_uuid: str
+) -> LparReportingSettings:
+    """Read applicable reporting settings on a contained partition."""
+    system, name = await _resolve_contained_lpar_names(
+        hmc, system_name_or_uuid, lpar_name_or_uuid
+    )
+    return await get_lpar_reporting_settings(hmc.config, system, name)
+
+
+async def configure_lpar_reporting_settings(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    settings: LparReportingSettings,
+    *,
+    system_name_or_uuid: str,
+    ownership_override: bool = False,
+) -> LparReportingSettingsResult:
+    """Authorize, admit partition type, write once and compare supplied/omitted values."""
+    settings.validate_context("update")
+    if not settings.pairs():
+        raise ValueError("Supply at least one reporting setting")
+    system, name = await resolve_and_authorize_lpar_names(
+        hmc,
+        lpar_name_or_uuid,
+        system_name_or_uuid=system_name_or_uuid,
+        ownership_override=ownership_override,
+    )
+    build_attribute_record([("name", name), *settings.pairs()])
+    before = await get_lpar_reporting_settings(
+        hmc.config, system, name, require_ibmi=settings.requires_ibmi()
+    )
+    try:
+        await set_lpar_reporting_settings(hmc.config, system, name, settings)
+    except HMCCLIError as error:
+        return LparReportingSettingsResult(
+            "write-outcome-unknown",
+            settings,
+            None,
+            (f"Write did not confirm completion: {error}. Inspect before retrying.",),
+        )
+    try:
+        after = await get_lpar_reporting_settings(
+            hmc.config, system, name, require_ibmi=settings.requires_ibmi()
+        )
+    except HMCCLIError as error:
+        return LparReportingSettingsResult(
+            "readback-unavailable",
+            settings,
+            None,
+            (f"Write returned successfully but readback failed: {error}",),
+        )
+    expected = replace(
+        before, **{name: getattr(settings, name) for name, _ in settings.pairs()}
+    )
+    return LparReportingSettingsResult(
+        "verified" if after == expected else "mismatch",
+        settings,
+        after,
+        ()
+        if after == expected
+        else (
+            "Reporting readback differs from requested/preserved values; inspect before retrying",
+        ),
+    )

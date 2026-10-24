@@ -1480,7 +1480,10 @@ async def test_lpar_config_unreadable_listing_is_not_clean():
         )
 
 
-@pytest.mark.parametrize("subtask,group", [(39, "lpar-config"), (47, "lpar-settings")])
+@pytest.mark.parametrize(
+    "subtask,group",
+    [(39, "lpar-config"), (47, "lpar-settings"), (49, "lpar-physical-io")],
+)
 def test_lpar_config_run_is_witnessed(tmp_path, monkeypatch, capsys, subtask, group):
     document = {
         "run": {"subtasks": [subtask], "group": group},

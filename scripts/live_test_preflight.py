@@ -309,6 +309,45 @@ def _lpar_settings_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _lpar_reporting_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-reporting",
+        True,
+        "configuration validated",
+        (
+            f"one inactive IBM i partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create; explicit console_slot=hmc; eight fixed reporting updates; delete and independent absence/resource comparison",
+            "no activation, guest clock, profile mutation or time_ref=True probe; IBM i eligibility must be established by the operator; existing scratch prefix must be absent",
+        ),
+        config.system_name,
+    )
+
+
+def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-physical-io",
+        True,
+        "configuration validated",
+        (
+            f"one inactive OS400 partition {lpar_config.NAME_PREFIX}<8 hex>: explicit console_slot=hmc; verify native profile; delete matching-token fixture",
+            "no activation, profile apply, physical/SR-IOV assignment, foreign partition or retry; independent recovery and resource comparison required",
+        ),
+        config.system_name,
+    )
+
+
+def _lpar_vtpm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-vtpm",
+        True,
+        "configuration validated",
+        (
+            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit disabled vTPM create; one advertised enable; matching-token deletion",
+            "no activation, profile apply, VIOS creation or key management; existing scratch prefix must be absent; independent recovery/resource comparison required",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the partitions and the VIOS volume the lpar-power arm (#1346) creates."""
     return ArmVerdict(
@@ -537,6 +576,9 @@ _ARM_VERDICTS = {
     "users": _users_verdict,
     "lpar-config": _lpar_config_verdict,
     "lpar-settings": _lpar_settings_verdict,
+    "lpar-reporting": _lpar_reporting_verdict,
+    "lpar-physical-io": _lpar_physical_io_verdict,
+    "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,

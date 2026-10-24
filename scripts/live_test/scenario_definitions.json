@@ -229,6 +229,20 @@
       "expected": "success"
     },
     {
+      "scenario": "st100-lpar-get-reporting-settings",
+      "operation": "lpar.get_reporting_settings",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
       "scenario": "st100-lpar-get-settings",
       "operation": "lpar.get_settings",
       "class": "read-only",
@@ -249,6 +263,20 @@
       "arguments": {
         "lpar_name_or_uuid": {
           "target": "lpar"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-lpar-get-vtpm-settings",
+      "operation": "lpar.get_vtpm_settings",
+      "class": "read-only",
+      "arguments": {
+        "lpar_name_or_uuid": {
+          "target": "lpar"
+        },
+        "system_name_or_uuid": {
+          "target": "managed_system"
         }
       },
       "expected": "success"
@@ -729,6 +757,20 @@
       "operation": "vios.get",
       "class": "read-only",
       "arguments": {
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
+      "scenario": "st100-vios-get-vtpm-settings",
+      "operation": "vios.get_vtpm_settings",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        },
         "vios_name_or_uuid": {
           "target": "vios"
         }

@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import Client
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.documents.lpar import LparResources, LparSettings
+from hmcpctl.documents.lpar import LparReportingSettings, LparResources, LparSettings
+from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
@@ -49,6 +50,9 @@ if TYPE_CHECKING:
 
 SUBTASK = 39
 GROUP = "lpar-config"
+REPORTING_SUBTASK = 48
+REPORTING_GROUP = "lpar-reporting"
+REPORTING_SCENARIO = "st48-lpar-reporting"
 SETTINGS_SUBTASK = 47
 SETTINGS_GROUP = "lpar-settings"
 SETTINGS_SCENARIO = "st47-lpar-settings"
@@ -1608,4 +1612,168 @@ async def exercise_lpar_settings(client: Client, state: RunState) -> None:
             assertions=[Assertion("typed-settings-readback", verified)],
             cleanup=cleanup,
             data={"time_ref_true": "not-run"},
+        )
+
+
+async def _reporting_cases(client: Client, state: RunState, run: _Run) -> bool:
+    status, data = await state.call(
+        client,
+        "hmc_get_lpar_reporting_settings",
+        system_name_or_uuid=run.system,
+        lpar_name_or_uuid=run.uuid,
+    )
+    before = plain_data(data)
+    if status != "PASS" or not isinstance(before, dict):
+        state.record(REPORTING_SUBTASK, "settings baseline", "FAIL", data)
+        return False
+    for patch in (
+        {"ipl_source": "a"},
+        {"ipl_source": "b"},
+        {"ipl_source": "a"},
+        {"os400_restricted_io_mode": True},
+        {"os400_restricted_io_mode": False},
+        {"electronic_err_reporting": True},
+        {"electronic_err_reporting": False},
+        {"work_group_id": "none"},
+    ):
+        if (
+            await _lpar_state(client, state, run) != _NOT_ACTIVATED
+            or await _token_of(client, state, run, run.uuid or "") != run.token
+        ):
+            state.record(
+                REPORTING_SUBTASK,
+                "inactive owned fixture",
+                "FAIL",
+                "Fixture state/ownership changed; stopped before mutation",
+            )
+            return False
+        status, data = await state.call(
+            client,
+            "hmc_configure_lpar_reporting",
+            system_name_or_uuid=run.system,
+            lpar_name_or_uuid=run.uuid,
+            settings=patch,
+        )
+        result = plain_data(data)
+        verified = (
+            status == "PASS"
+            and isinstance(result, dict)
+            and result.get("status") == "verified"
+        )
+        state.record(
+            REPORTING_SUBTASK,
+            "hmc_configure_lpar_reporting",
+            "PASS" if verified else "FAIL",
+            data,
+        )
+        if not verified:
+            return False
+        status, data = await state.call(
+            client,
+            "hmc_get_lpar_reporting_settings",
+            system_name_or_uuid=run.system,
+            lpar_name_or_uuid=run.uuid,
+        )
+        after = plain_data(data)
+        if status != "PASS" or after != before | patch:
+            state.record(REPORTING_SUBTASK, "settings postcondition", "FAIL", data)
+            return False
+        before = after
+    return True
+
+
+async def exercise_lpar_reporting(client: Client, state: RunState) -> None:
+    """ST48: one owned inactive IBM i fixture, eight bounded writes; no power/profile calls."""
+    if state.group != REPORTING_GROUP or state.hmc_config is None:
+        state.skip(
+            REPORTING_SUBTASK,
+            REPORTING_GROUP,
+            "requires opt-in group and HMC configuration",
+        )
+        return
+    baseline = await _read_pools(client, state, state.config.system_name)
+    if baseline is None or scratch_partitions(baseline[0].names):
+        state.skip(
+            REPORTING_SUBTASK,
+            REPORTING_GROUP,
+            "baseline unavailable or stranded scratch exists; run recovery",
+        )
+        return
+    suffix = uuid.uuid4().hex[:8]
+    run = _Run(
+        state.config.system_name,
+        NAME_PREFIX + suffix,
+        TOKEN_PREFIX + suffix,
+        baseline[1],
+        subtask=REPORTING_SUBTASK,
+    )
+    verified = False
+    try:
+        run.create_attempted = True
+        async with HMCClient(state.hmc_config) as hmc:
+            created = await create_and_stamp_lpar(
+                hmc,
+                run.system,
+                LparCreation(
+                    run.name,
+                    "OS400",
+                    LparResources(**RESOURCES),
+                    caller_token=run.token,
+                    stamp_policy="required",
+                    apply_profile=False,
+                    physical_io=LparPhysicalIO(console_slot="hmc"),
+                    reporting_settings=LparReportingSettings(
+                        os400_restricted_io_mode=False,
+                        work_group_id="none",
+                        electronic_err_reporting=False,
+                        redundant_err_path_reporting=False,
+                    ),
+                ),
+            )
+        run.uuid = _uuid_of(created.lpar) if created.lpar is not None else None
+        if (
+            not created.resource_created
+            or created.ownership_stamped is not True
+            or created.reporting_step is None
+            or created.reporting_step.status != "ok"
+            or created.physical_io_step is None
+            or created.physical_io_step.status != "ok"
+            or run.uuid is None
+        ):
+            raise ValueError(
+                "Required ownership, console I/O or reporting settings were not confirmed"
+            )
+        run.created = True
+        state.record(
+            REPORTING_SUBTASK,
+            "owning core create",
+            "PASS",
+            asdict(created),
+            "Direct operation; no MCP create promotion",
+        )
+        verified = await _reporting_cases(client, state, run)
+    except (HMCError, ValueError, PermissionError) as error:
+        state.record(REPORTING_SUBTASK, "settings arm", "FAIL", str(error))
+    finally:
+        await _teardown(client, state, run, inactive_only=True)
+    same = await _compare(client, state, run, baseline[0])
+    cleanup = "passed" if run.deleted and same else "failed"
+    if run.created:
+        state.record_verified(
+            REPORTING_SUBTASK,
+            "hmc_configure_lpar_reporting",
+            operation="lpar.configure_reporting",
+            scenario=REPORTING_SCENARIO,
+            assertions=[Assertion("reporting-round-trip", verified)],
+            cleanup=cleanup,
+            data={"activation": "not-run", "guest_ipl": "not-run"},
+        )
+        state.record_verified(
+            REPORTING_SUBTASK,
+            "hmc_get_lpar_reporting_settings",
+            operation="lpar.get_reporting_settings",
+            scenario=REPORTING_SCENARIO,
+            assertions=[Assertion("typed-reporting-readback", verified)],
+            cleanup=cleanup,
+            data={"guest_ipl": "not-run"},
         )

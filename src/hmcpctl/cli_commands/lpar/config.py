@@ -5,15 +5,20 @@ from __future__ import annotations
 from dataclasses import asdict
 
 import typer
+from pydantic import TypeAdapter
 from rich.text import Text
 
-from hmcpctl.documents.lpar import LparSettings
+from hmcpctl.documents.lpar import LparReportingSettings, LparSettings
+from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.operations.lpar.configuration import (
     configure_lpar_msp,
+    configure_lpar_reporting_settings,
     configure_lpar_settings,
+    read_lpar_reporting_settings,
     read_lpar_settings,
 )
 from hmcpctl.operations.lpar.ownership import set_lpar_ownership_description
+from hmcpctl.operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 
 from ...operations.affinity.ssh import (
     get_lpar_memopt_score,
@@ -557,6 +562,74 @@ def lpars_get_settings(
     print_json(asdict(result))
 
 
+def lpars_configure_reporting(
+    lpar_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+    ipl_source: str | None = typer.Option(
+        None, "--ipl-source", help="IBM i IPL source a/b/c/d"
+    ),
+    os400_restricted_io_mode: bool | None = typer.Option(
+        None, "--os400-restricted-io-mode/--no-os400-restricted-io-mode"
+    ),
+    work_group_id: str | None = typer.Option(
+        None,
+        "--work-group-id",
+        help="Integer EWLM ID or none; no universal numeric range is documented",
+    ),
+    electronic_err_reporting: bool | None = typer.Option(
+        None, "--electronic-err-reporting/--no-electronic-err-reporting"
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+) -> None:
+    """Configure reporting.
+
+    IBM i-only fields require OS400. Omitted values are preserved.
+    Readback is configuration, not guest IPL proof.
+    """
+    try:
+        settings = TypeAdapter(LparReportingSettings).validate_python(
+            {
+                "ipl_source": ipl_source,
+                "os400_restricted_io_mode": os400_restricted_io_mode,
+                "work_group_id": None
+                if work_group_id is None
+                else "none"
+                if work_group_id == "none"
+                else int(work_group_id),
+                "electronic_err_reporting": electronic_err_reporting,
+            }
+        )
+    except ValueError as error:
+        raise typer.BadParameter(
+            f"Invalid reporting setting: {terminal_field(error, err=True)}; use IPL a/b/c/d and work-group integer or none"
+        ) from error
+    result = with_client(
+        lambda hmc: configure_lpar_reporting_settings(
+            hmc,
+            lpar_name,
+            settings,
+            system_name_or_uuid=system_name,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(1)
+
+
+def lpars_get_reporting_settings(
+    lpar_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+) -> None:
+    """Read reporting settings."""
+    result = with_client(
+        lambda hmc: read_lpar_reporting_settings(
+            hmc, lpar_name, system_name_or_uuid=system_name
+        )
+    )
+    print_json(asdict(result))
+
+
 def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
     group.command("memopt-score")(lpars_memopt_score)
@@ -569,6 +642,10 @@ def register_commands(group: typer.Typer) -> None:
     )
     group.command("plan-memopt-scores")(lpars_plan_memopt_scores)
     group.command("plan-system-memopt-score")(lpars_plan_system_memopt_score)
+    group.command("configure-vtpm")(lpars_configure_vtpm)
+    group.command("get-vtpm-settings")(lpars_get_vtpm_settings)
+    group.command("configure-reporting")(lpars_configure_reporting)
+    group.command("get-reporting-settings")(lpars_get_reporting_settings)
     group.command("configure")(lpars_configure)
     group.command("get-settings")(lpars_get_settings)
     group.command("get-description")(lpars_get_description)
@@ -578,3 +655,53 @@ def register_commands(group: typer.Typer) -> None:
     group.command("get-proc-compat-modes")(lpars_get_proc_compat_modes)
     group.command("get-proc-compat")(lpars_get_proc_compat)
     group.command("set-proc-compat")(lpars_set_proc_compat)
+
+
+def lpars_get_vtpm_settings(
+    lpar_name: str = typer.Argument(...), system_name: str = typer.Argument(...)
+) -> None:
+    """Read vTPM settings.
+
+    The selected AIX/Linux partition must be contained in the managed system.
+    """
+    result = with_client(
+        lambda hmc: read_lpar_vtpm(hmc, lpar_name, system_name_or_uuid=system_name)
+    )
+    print_json(asdict(result))
+
+
+def lpars_configure_vtpm(
+    lpar_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+    vtpm_enabled: bool | None = typer.Option(None, "--vtpm-enabled/--no-vtpm-enabled"),
+    vtpm_version: str | None = typer.Option(None, "--vtpm-version"),
+    vtpm_encryption: str | None = typer.Option(None, "--vtpm-encryption"),
+    acknowledge_data_loss: bool = typer.Option(
+        False,
+        "--acknowledge-data-loss",
+        help="Consent to key/data loss on enabled disable",
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+) -> None:
+    """Configure vTPM.
+
+    Inactive only; no implicit reset, power or profile operation. Disabling an
+    enabled instance can destroy keys/data and requires explicit acknowledgement.
+    """
+    try:
+        settings = LparVtpmSettings(vtpm_enabled, vtpm_version, vtpm_encryption)
+    except ValueError as error:
+        raise typer.BadParameter(terminal_field(error, err=True)) from error
+    result = with_client(
+        lambda hmc: configure_lpar_vtpm(
+            hmc,
+            lpar_name,
+            settings,
+            system_name_or_uuid=system_name,
+            acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(1)

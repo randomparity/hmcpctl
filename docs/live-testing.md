@@ -1581,3 +1581,83 @@ that separately lists root name, SettingID and metadata deltas. Complete raw str
 differences remain private. Neither diagnostic equality nor clean cleanup admits a
 production recovery copy, establishes VIOS/adapter/force-save behavior, or promotes a
 capability's maturity. Use the filtered evidence generator for public summaries.
+
+
+## IBM i partition reporting (C02, opt-in subtask 48)
+
+The `lpar-reporting` arm explicitly requests `LparPhysicalIO(console_slot="hmc")`
+through the landed typed creation prerequisite and creates one owned, inactive
+OS400 scratch partition. It reads its four creation reporting fields, performs eight fixed update calls,
+and deletes it without activation, power changes or profile mutation. It uses
+2 GiB desired memory and 0.5 shared processing units (the lpar-config resource
+fixture). IBM i support/eligibility and available resources must be established
+by the operator on the selected system before the exclusive bounded window;
+configuration preflight alone does not prove IBM i eligibility. Do not substitute
+another partition if creation or readback is refused.
+
+Deploy the exact candidate into a separate checkout, run `just setup`, compare
+`git rev-parse HEAD` with the candidate SHA and confirm `hmcpctl.__file__` resolves
+inside that checkout. Keep credentials private and do not write through a shared
+`.env` symlink. Then execute only this named arm:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-reporting
+uv run --no-sync python scripts/live_test_runner.py --group lpar-reporting
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-reporting.json
+```
+
+Recovery is required after success or failure. The arm independently compares
+partition names and free memory/processing units before and after; teardown
+requires its caller token and inactive state and refuses an active/foreign
+fixture without a power call. Maximum effects are one create, eight update
+attempts and one delete, with existing finite SSH/RPC/job timeouts and no write
+retry. IPL a/b/a, restricted-I/O true/false, electronic-reporting true/false and
+work-group `none` are configuration probes, not guest-runtime or IPL evidence.
+No fabricated numeric EWLM ID is used. Record firmware/state rejections and
+unavailable readback honestly. Generate public evidence using
+`scripts/live_test_evidence.py`; raw result documents remain private. POWER9
+execution does not establish POWER10/POWER11 hardware coverage.
+
+## Inactive vTPM configuration (arm 51)
+
+The opt-in `lpar-vtpm` arm creates one inactive AIX/Linux scratch partition with
+confirmed ownership stamping and vTPM explicitly disabled. It reads the selected
+system's advertised versions/encryption levels, preferring 1.2; otherwise it uses
+2.0 with an advertised encryption level. Missing or unsupported advertisements
+skip before creation. The creation owner also checks the system's positive
+capability and compatibility before submitting a write.
+
+Successful creation identity, ownership and independent disabled readback are
+prerequisites for one explicit enable with the advertised version/encryption.
+The update must report `verified`; another independent read must equal its full
+observed settings before the arm records a passing update. Any uncertain or
+mismatched outcome fails that assertion and stops further work. There is no
+activation, profile application, key management, automatic retry or corrective
+reset. Guarded inactive-only deletion and an independent resource comparison
+follow even after failure.
+
+Disabling an enabled instance still requires separate data-loss acknowledgement;
+it can destroy keys and stored TPM data. An observed 1.2 disable at commit
+`449f3fea09f32fb989f926787581ce1ae0634865` applied the requested false value but
+cleared the omitted version. The API reported preservation `mismatch`, and that
+run's two FAIL rows remain failed evidence with clean recovery. Acknowledgement
+does not waive preservation equality. The positive arm starts disabled so that
+the version/encryption added by enablement are explicit requested fields.
+
+Use an explicitly authorized, exclusive hardware window and deploy its exact
+candidate commit before these commands. The runner configuration and scratch
+resource requirements above apply. A stranded shared scratch prefix blocks the
+arm until recovery is resolved.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-vtpm
+uv run --no-sync python scripts/live_lpar_vtpm.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-vtpm.json
+```
+
+Always run recovery, including after apparent success. Generate public evidence
+with `scripts/live_test_evidence.py`; keep raw results private. The selected
+version/encryption is the only variant exercised. VIOS creation/update, other
+versions/encryption levels, guest boot, TPM objects and migration remain unrun;
+a passing configuration readback does not establish those behaviors. Registration
+of the arm adds no packaged maturity credit.

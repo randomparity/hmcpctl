@@ -5,11 +5,14 @@ from __future__ import annotations
 from ..._app import with_client
 from ...documents.lpar import (
     Keylock,
+    LparReportingSettings,
     LparResources,
     LparSettings,
     PartitionType,
     validate_partition_type,
 )
+from ...documents.lpar_io import LparPhysicalIO
+from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
@@ -45,8 +48,11 @@ def hmc_create_lpar(
     caller_token: str | None = None,
     assignments: LparPcieAssignments = LparPcieAssignments(),
     apply_partition_profile: bool = True,
+    physical_io: LparPhysicalIO | None = None,
     profile: str | None = None,
     settings: LparSettings | None = None,
+    reporting_settings: LparReportingSettings | None = None,
+    vtpm_settings: LparVtpmSettings | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -71,6 +77,13 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        vtpm_settings: Optional advertised vTPM fields for AIX/Linux creation; native single-record creation, no implicit reset. Unverified readback stops assignments; explicit keylock cannot be combined.
+        reporting_settings: Optional C02 creation fields: restricted I/O and electronic
+            reporting (IBM i only), work group integer or "none", redundant reporting.
+            IPL source is update-only. Explicit keylock plus reporting is refused
+            before effects. Omitted values retain HMC defaults; false/zero/"none"
+            are explicit. Readback failure leaves the created partition and stops
+            assignments. Configuration does not prove guest-runtime behavior.
         settings: Optional five C01 partition settings. Omitted values retain HMC
             defaults; False/0 are explicit. A running time_ref partition can govern
             hypervisor/service-processor time. Settings select documented CLI creation
@@ -92,6 +105,11 @@ def hmc_create_lpar(
             ``apply_profile`` step reports it. False leaves it unapplied. A REST
             create sets the current configuration itself, so the step reports
             the apply as skipped.
+        physical_io: Optional typed initial physical/pool and IBM i tagged-I/O
+            configuration. No implicit console is chosen. Physical/direct SR-IOV
+            DRCs and explicit hmc console are supported; unresolved virtual-slot
+            selectors fail before effects (remaining linkage gap #638). C12 profile
+            readback must succeed before application and later workflow steps.
         profile: Optional configured HMC profile name; uses the default when omitted.
     """
     if caller_token is not None:
@@ -109,8 +127,17 @@ def hmc_create_lpar(
                 keylock=keylock,
                 max_virtual_slots=max_virtual_slots,
                 caller_token=caller_token,
+                physical_io=physical_io
+                if physical_io is not None
+                else LparPhysicalIO(),
                 apply_profile=apply_partition_profile,
                 settings=settings if settings is not None else LparSettings(),
+                vtpm_settings=vtpm_settings
+                if vtpm_settings is not None
+                else LparVtpmSettings(),
+                reporting_settings=reporting_settings
+                if reporting_settings is not None
+                else LparReportingSettings(),
             ),
             assignments,
         ),

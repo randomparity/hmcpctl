@@ -22,6 +22,27 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   are available through `hmc_dlpar_mem(change=...)` and `lpars memory`, with
   guarded admission and independent applied/partial/uncertain readback (#1774).
 
+- Typed vTPM creation and inactive updates expose `vtpm_enabled`, `vtpm_version`
+  and `vtpm_encryption` for AIX/Linux partitions and VIOS through CLI/MCP.
+  Values are admitted against the selected system's advertisements; disabling an
+  enabled instance requires separate data-loss acknowledgement. Readback reports
+  verified, mismatched or uncertain outcomes without replay or rollback (#1764).
+  Opt-in arm 51 exercises one disposable inactive AIX/Linux variant; hardware
+  evidence remains separate from implementation maturity.
+
+- Partition creation and reporting configuration expose the five C02 fields in
+  their documented contexts, with IBM i admission, explicit false/zero/none,
+  ownership guards and verified/uncertain outcomes (#1763). Creation-only
+  redundant reporting and update-only IPL remain distinct. Live behavior stays
+  unevidenced until commit-bound execution.
+
+- LPAR creation and provisioning accept typed physical-slot/pool and IBM i tagged
+  I/O inputs, with explicit HMC-console selection, reused direct SR-IOV declarations,
+  fresh relationship checks and native profile verification before application.
+  Unknown or partial outcomes stop dependent writes without rollback. Positive
+  virtual-slot forms without creation-time adapter linkage remain rejected and
+  tracked for #638 reconciliation; hardware evidence is separate (#1773).
+
 - LPAR create/configure supports five typed performance, availability-priority,
   time-reference, simplified-restart and migration flags, with explicit False/0,
   owning authorization and verified/uncertain configuration outcomes (#1762).

@@ -9,16 +9,18 @@ import typer
 
 from ...documents.lpar import (
     PARTITION_TYPES,
+    LparReportingSettings,
     LparResources,
     LparSettings,
     validate_partition_type,
 )
+from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
 from ...ssh.lpar import validate_caller_token
 from ..output import console, err_console, print_json, terminal_field, usage_error
 from ..runtime import with_client
-from .assignment_input import load_pcie_assignments
+from .assignment_input import load_pcie_assignments, load_physical_io
 
 
 def lpars_create(
@@ -59,6 +61,11 @@ def lpars_create(
     capped: bool = typer.Option(
         False, "--capped", help="Cap shared CPU (default uncapped)"
     ),
+    physical_io: Path | None = typer.Option(
+        None,
+        "--physical-io",
+        help="Typed creation I/O JSON (64 KiB maximum); no implicit console default",
+    ),
     pcie_assignments: Path | None = typer.Option(
         None,
         "--pcie-assignments",
@@ -91,6 +98,25 @@ def lpars_create(
     migration_disabled: bool | None = typer.Option(
         None, "--migration-disabled/--no-migration-disabled"
     ),
+    os400_restricted_io_mode: bool | None = typer.Option(
+        None, "--os400-restricted-io-mode/--no-os400-restricted-io-mode"
+    ),
+    work_group_id: str | None = typer.Option(
+        None, "--work-group-id", help="Integer EWLM ID or none"
+    ),
+    electronic_err_reporting: bool | None = typer.Option(
+        None, "--electronic-err-reporting/--no-electronic-err-reporting"
+    ),
+    redundant_err_path_reporting: bool | None = typer.Option(
+        None, "--redundant-err-path-reporting/--no-redundant-err-path-reporting"
+    ),
+    vtpm_enabled: bool | None = typer.Option(None, "--vtpm-enabled/--no-vtpm-enabled"),
+    vtpm_version: str | None = typer.Option(
+        None, "--vtpm-version", help="Advertised version"
+    ),
+    vtpm_encryption: str | None = typer.Option(
+        None, "--vtpm-encryption", help="Advertised 2.0 level"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Create a new LPAR on a managed system.
@@ -101,6 +127,24 @@ def lpars_create(
     ``apply_profile`` step) unless --no-apply is given. Settings preserve omitted
     values; a running time-reference partition can govern system time.
     """
+    try:
+        vtpm = LparVtpmSettings(vtpm_enabled, vtpm_version, vtpm_encryption)
+        vtpm.validate_creation(partition_type)
+        reporting = LparReportingSettings(
+            os400_restricted_io_mode=os400_restricted_io_mode,
+            work_group_id=None
+            if work_group_id is None
+            else "none"
+            if work_group_id == "none"
+            else int(work_group_id),
+            electronic_err_reporting=electronic_err_reporting,
+            redundant_err_path_reporting=redundant_err_path_reporting,
+        )
+        reporting.validate_context("create", partition_type)
+    except ValueError as error:
+        usage_error(
+            f"Invalid reporting settings: {error}; work-group ID must be integer or none"
+        )
     if caller_token is not None:
         validate_caller_token(caller_token)
     try:
@@ -140,7 +184,10 @@ def lpars_create(
                 resources,
                 partition_id=partition_id,
                 caller_token=caller_token,
+                physical_io=load_physical_io(physical_io),
                 apply_profile=not no_apply,
+                reporting_settings=reporting,
+                vtpm_settings=vtpm,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,

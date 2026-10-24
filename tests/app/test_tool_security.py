@@ -442,6 +442,9 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         # System-profile activation can power every contained member.
         "hmc_activate_system_profile",
         "hmc_backup_lpar_profiles",
+        # Disabling vTPM can destroy keys and stored TPM data (ADR 0276).
+        "hmc_configure_lpar_vtpm",
+        "hmc_configure_vios_vtpm",
         "hmc_dump_restart_lpar",
         # ADR 0189: classed by the most severe tool it can reach.
         "hmc_invoke_tool",

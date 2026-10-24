@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import StrictBool
+
 from ..._app import (
     with_client,
 )
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
+from ...operations.lpar.vtpm import VtpmResult, configure_lpar_vtpm, read_lpar_vtpm
 from ...operations.vios.core import (
     BackupType,
     RestoreBackupType,
@@ -36,6 +40,7 @@ def hmc_create_vios(
     name: str,
     resources: LparResources = VIOS_DEFAULT_RESOURCES,
     profile: str | None = None,
+    vtpm_settings: LparVtpmSettings | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -51,11 +56,14 @@ def hmc_create_vios(
         system_name_or_uuid: Target managed-system name or UUID.
         name: Name for the new VIOS partition.
         resources: Memory and processor settings for the VIOS.
+        vtpm_settings: Optional advertised vTPM creation fields, encoded in the native creation record; no profile apply or activation. Unverified creation must be inspected before retrying.
         profile: Optional TOML profile name; uses environment defaults when omitted.
     """
 
     return with_client(
-        lambda hmc: create_vios(hmc, system_name_or_uuid, name, resources),
+        lambda hmc: create_vios(
+            hmc, system_name_or_uuid, name, resources, vtpm_settings=vtpm_settings
+        ),
         profile=profile,
     )
 
@@ -378,6 +386,61 @@ def hmc_power_off_vios(
             wait=wait,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="vios.get_vtpm_settings", target_kind="vios")
+def hmc_get_vios_vtpm_settings(
+    system_name_or_uuid: str, vios_name_or_uuid: str, profile: str | None = None
+) -> VtpmState:
+    """Read one contained VIOS partition's vTPM configuration.
+
+    Args:
+        system_name_or_uuid: Selected managed system name or UUID.
+        vios_name_or_uuid: Contained Virtual I/O Server name or UUID.
+        profile: Optional configured HMC connection profile.
+    """
+    return with_client(
+        lambda hmc: read_lpar_vtpm(
+            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid, vios=True
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="destructive", operation="vios.configure_vtpm", target_kind="vios")
+def hmc_configure_vios_vtpm(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    settings: LparVtpmSettings,
+    acknowledge_data_loss: StrictBool = False,
+    ownership_override: bool = False,
+    profile: str | None = None,
+) -> VtpmResult:
+    """Configure an inactive VIOS's advertised vTPM settings without implicit reset.
+
+    Disabling enabled vTPM can destroy keys and stored data; separate explicit
+    acknowledgement is mandatory. No activation/profile/key action is performed.
+
+    Args:
+        system_name_or_uuid: Selected managed system name or UUID.
+        vios_name_or_uuid: Contained Virtual I/O Server name or UUID.
+        settings: Three typed optional fields; omitted values are preserved.
+        acknowledge_data_loss: Explicit consent to losing keys/data on enabled disable.
+        ownership_override: Operator-approved ownership bypass, separate from data-loss consent.
+        profile: Optional configured HMC connection profile.
+    """
+    return with_client(
+        lambda hmc: configure_lpar_vtpm(
+            hmc,
+            vios_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
+            vios=True,
+            acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
         ),
         profile=profile,
     )

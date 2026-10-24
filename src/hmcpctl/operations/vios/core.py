@@ -17,6 +17,7 @@ from hmcpctl.operations.systems.fleet import (
 )
 
 from ...documents.lpar import LparResources, build_vios_document
+from ...documents.lpar_vtpm import LparVtpmSettings
 from ...errors import HMCError
 from ...jobs import (
     DEFAULT_JOB_POLL_INTERVAL,
@@ -31,8 +32,13 @@ from ...resource_identity import (
     resolve_vios_uuid,
 )
 from ...ssh.commands import HMC_NO_RESULTS, build_filter
+from ...ssh.lpar import complete_create_resources, create_lpar_via_cli
+from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
+from ..lpar.memory_bound import require_memory_within_system
+from ..lpar.ownership import _resolve_system_name
+from ..lpar.vtpm import admit_vtpm, read_vtpm_capabilities
 
 
 async def list_vios(
@@ -97,6 +103,8 @@ async def create_vios(
     system_name_or_uuid: str,
     name: str,
     resources: LparResources,
+    *,
+    vtpm_settings: LparVtpmSettings | None = None,
 ) -> dict[str, Any] | None:
     """Create a VIOS partition on a managed system and return its entry.
 
@@ -104,10 +112,53 @@ async def create_vios(
     VirtualIOServer document; V10R3 refuses one sent as a LogicalPartition
     (#1214).
     """
+    if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
+        raise TypeError("vtpm_settings must be LparVtpmSettings")
+    if vtpm_settings is not None and vtpm_settings.pairs():
+        completed = complete_create_resources(resources)
+        if completed is None:
+            raise ValueError(
+                "VIOS vTPM creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
+            )
+        resources = completed
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    return await hmc.create_vios(
-        system_uuid, build_vios_document(name=name, resources=resources)
+    if vtpm_settings is None or not vtpm_settings.pairs():
+        return await hmc.create_vios(
+            system_uuid, build_vios_document(name=name, resources=resources)
+        )
+    vtpm_settings.validate_creation("Virtual IO Server")
+    if await hmc.find_vios_by_name(name, system_uuid=system_uuid):
+        raise ValueError(
+            "A VIOS with that name already exists on the selected system; nothing was created"
+        )
+    await require_memory_within_system(hmc, system_uuid, resources)
+    admit_vtpm(vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid))
+    system = await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
+    await create_lpar_via_cli(
+        hmc.config,
+        system,
+        name,
+        "Virtual IO Server",
+        resources,
+        vtpm_settings=vtpm_settings,
     )
+    try:
+        entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
+        if entry is None or not entry.get("UUID"):
+            raise ValueError("Created VIOS identity was not confirmed")
+        observed = await get_lpar_vtpm_state(hmc.config, system, name, vios=True)
+        if any(
+            getattr(observed.settings, field) != getattr(vtpm_settings, field)
+            for field, _ in vtpm_settings.pairs()
+        ):
+            raise ValueError(
+                "Created VIOS vTPM readback differs from the requested fields"
+            )
+    except (HMCError, ValueError, PermissionError) as error:
+        raise HMCError(
+            f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
+        ) from error
+    return entry
 
 
 async def delete_vios(

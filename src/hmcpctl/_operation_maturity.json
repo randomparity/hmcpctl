@@ -178,8 +178,22 @@
       "observed_at": null
     },
     {
-      "operation": "lpar.create",
+      "operation": "lpar.configure_reporting",
       "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.configure_vtpm",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.create",
+      "implementation": "partial",
       "verification": "current",
       "reason": null,
       "observed_at": "2026-10-12T22:11:29Z"
@@ -262,6 +276,13 @@
       "observed_at": "2026-10-06T09:42:24Z"
     },
     {
+      "operation": "lpar.get_reporting_settings",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.get_settings",
       "implementation": "implemented",
       "verification": "unevidenced",
@@ -274,6 +295,13 @@
       "verification": "current",
       "reason": null,
       "observed_at": "2026-10-12T21:44:54Z"
+    },
+    {
+      "operation": "lpar.get_vtpm_settings",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar.inspect",
@@ -1116,6 +1144,13 @@
       "observed_at": "2026-10-06T15:27:07Z"
     },
     {
+      "operation": "vios.configure_vtpm",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "vios.create",
       "implementation": "implemented",
       "verification": "unevidenced",
@@ -1131,6 +1166,13 @@
     },
     {
       "operation": "vios.get",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.get_vtpm_settings",
       "implementation": "implemented",
       "verification": "unevidenced",
       "reason": null,

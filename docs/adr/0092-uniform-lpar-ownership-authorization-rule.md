@@ -4,6 +4,8 @@
 
 Accepted (2026-08-25)
 
+> Amended by [ADR 0276](0276-lpar-virtual-tpm-configuration.md) for the new VIOS vTPM update branch only; unrelated VIOS policy is unchanged.
+
 ## Context
 
 ADR 0011 established the advisory ownership protocol: a token
@@ -131,6 +133,7 @@ against that commit rather than maintained forward.
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
+| `configure_lpar_vtpm` | `operations/lpar/vtpm.py::configure_lpar_vtpm` | guarded (`operations/lpar/vtpm.py::configure_lpar_vtpm`, via contained LPAR/VIOS authorization helpers); destructive enabled disable additionally requires independent consent | #1764 / ADR 0276 |
 | `delete_lpar` | `operations/lpar/core.py::delete_lpar` | guarded (`operations/lpar/core.py::delete_lpar`) | — |
 | `decommission_lpar` | `operations/lpar/decommission.py::decommission_lpar` | guarded (`operations/lpar/decommission.py::decommission_lpar`, via `authorize_decommission_lpar_ownership_snapshot`) | — |
 | `rename_lpar` | `operations/lpar/core.py::rename_lpar` | guarded (`operations/lpar/core.py::rename_lpar`) | — |
@@ -169,6 +172,7 @@ wildcard records the operation's actual scope.
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
+| `configure_lpar_reporting_settings` | `operations/lpar/configuration.py::configure_lpar_reporting_settings` | guarded (`operations/lpar/configuration.py::configure_lpar_reporting_settings`, via `resolve_and_authorize_lpar_names`) | — |
 | `configure_lpar_settings` | `operations/lpar/configuration.py::configure_lpar_settings` | guarded (`operations/lpar/configuration.py::configure_lpar_settings`, via `resolve_and_authorize_lpar_names`) | — |
 | `set_lpar_boot_order` | `operations/lpar/boot_order.py::set_lpar_boot_order` | guarded (`operations/lpar/boot_order.py::set_lpar_boot_order`) | — |
 | `clear_lpar_boot_order` | `operations/lpar/boot_order.py::clear_lpar_boot_order` | guarded (`operations/lpar/boot_order.py::clear_lpar_boot_order`) | — |
