@@ -2,6 +2,7 @@
 
 import itertools
 import shlex
+import traceback
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -541,4 +542,82 @@ async def test_malformed_created_identity_blocks_stamping_and_followups(target, 
         assert PRIVATE not in repr(step)
     assert b.events.count("create") == 1
     assert "stamp" not in b.events and "apply" not in b.events
+    b.assign.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "vios,phase",
+    [(False, "create"), (True, "create"), (True, "identity"), (True, "read")],
+)
+@pytest.mark.parametrize("field", ["hardware_mem_encryption", "hardware_mem_expansion"])
+@pytest.mark.parametrize("policy", [False, True])
+async def test_hardware_exception_chain_is_private(target, vios, phase, field, policy):
+    b = target
+    b.fault = phase
+    if phase == "identity":
+        b.hmc.find_vios_by_name.side_effect = [None, HMCError(PRIVATE)]
+    options = {field: False}
+    if policy:
+        options["security_policy"] = LparSecurityPolicy(secure_boot=0)
+    with pytest.raises(HMCError) as raised:
+        await invoke(b, vios, **options)
+    error = raised.value
+    expected = (
+        "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
+        if vios and phase == "create"
+        else "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+        if phase == "create"
+        else "VIOS exists or may exist; hardware memory access readback-unavailable. Inspect before retrying. No second create or rollback performed"
+    )
+    assert str(error) == expected
+    assert PRIVATE not in "".join(traceback.format_exception(error))
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert b.events.count("create") == 1
+    assert "apply" not in b.events
+    b.assign.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
+    b.hmc.create_vios.assert_not_awaited()
+    b.hmc.delete_logical_partition.assert_not_awaited()
+    b.hmc.delete_vios.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    ["lpar-omitted", "lpar-policy", "vios-policy-native", "vios-policy-identity"],
+)
+async def test_hardware_exception_chain_preserves_legacy_diagnostics(target, case):
+    b = target
+    b.fault = "create"
+    policy = LparSecurityPolicy(secure_boot=0)
+    if case == "vios-policy-identity":
+        b.fault = None
+        b.hmc.find_vios_by_name.side_effect = [None, HMCError(PRIVATE)]
+    with pytest.raises(HMCError) as raised:
+        if case == "lpar-omitted":
+            await core.create_and_stamp_lpar(
+                b.hmc,
+                SYSTEM,
+                core.LparCreation("part-R1", "AIX/Linux", LparResources()),
+            )
+        else:
+            await invoke(b, case.startswith("vios"), security_policy=policy)
+    error = raised.value
+    if case == "lpar-omitted":
+        assert str(error) == (
+            f"Creation outcome unknown for 'part-R1': {PRIVATE}. Inspect whether the partition exists before retrying; ownership stamping has not run."
+        )
+    else:
+        expected = {
+            "lpar-policy": "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed.",
+            "vios-policy-native": "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed",
+            "vios-policy-identity": "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed",
+        }
+        assert str(error) == expected[case]
+    assert error.__cause__ is not None and error.__context__ is not None
+    assert PRIVATE in "".join(traceback.format_exception(error))
+    assert b.events.count("create") == 1
+    assert "apply" not in b.events
     b.assign.assert_not_awaited()

@@ -305,6 +305,7 @@ async def create_and_stamp_lpar(
         or (creation.settings.pairs() and creation.keylock is None)
     ):
         # Only mksyscfg's all_resources=1 expresses a create with no resource values.
+        native_failed = False
         try:
             (
                 system_name,
@@ -313,19 +314,20 @@ async def create_and_stamp_lpar(
                 readback_error,
             ) = await _create_via_cli(hmc, system_uuid, system_name_or_uuid, creation)
         except HMCError as error:
-            if (
-                not creation.physical_io.requested
-                and not policy_requested
-                and not hardware_requested
-            ):
+            if hardware_requested:
+                native_failed = True
+            elif not creation.physical_io.requested and not policy_requested:
                 raise
+            else:
+                raise HMCError(
+                    "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                    if policy_requested
+                    else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                ) from error
+        if native_failed:
             raise HMCError(
                 "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                if hardware_requested
-                else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                if policy_requested
-                else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-            ) from error
+            )
     else:
         document = build_lpar_document(
             name=creation.name,

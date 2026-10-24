@@ -167,6 +167,7 @@ async def create_vios(
         hmc, system_uuid, hardware_mem_encryption, hardware_mem_expansion
     )
     system = await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
+    native_failed = False
     try:
         await create_lpar_via_cli(
             hmc.config,
@@ -180,11 +181,19 @@ async def create_vios(
             hardware_mem_expansion=hardware_mem_expansion,
         )
     except HMCError as error:
-        if not policy_requested and not hardware_requested:
+        if hardware_requested:
+            native_failed = True
+        elif not policy_requested:
             raise
+        else:
+            raise HMCError(
+                "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
+            ) from error
+    if native_failed:
         raise HMCError(
             "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
-        ) from error
+        )
+    verification_failed = False
     try:
         entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
         if entry is None or not entry.get("UUID"):
@@ -217,15 +226,20 @@ async def create_vios(
                     "Created VIOS policy readback differs from requested fields"
                 )
     except (HMCError, ValueError, PermissionError) as error:
-        if policy_requested or hardware_requested:
+        if hardware_requested:
+            verification_failed = True
+        elif policy_requested:
             raise HMCError(
-                "VIOS exists or may exist; hardware memory access readback-unavailable. Inspect before retrying. No second create or rollback performed"
-                if hardware_requested
-                else "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
+                "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
             ) from error
+        else:
+            raise HMCError(
+                f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
+            ) from error
+    if verification_failed:
         raise HMCError(
-            f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
-        ) from error
+            "VIOS exists or may exist; hardware memory access readback-unavailable. Inspect before retrying. No second create or rollback performed"
+        )
     hardware_step = await created_hardware_memory_step(
         hmc,
         system_uuid,
