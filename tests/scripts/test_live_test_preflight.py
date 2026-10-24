@@ -848,3 +848,9 @@ def test_settings_group_preflight_routes_only_registered_arm(workspace, monkeypa
     assert preflight.main(["--group", "lpar-settings", "--skip-hardware"]) == 0
     assert runner.SUBTASK_GROUPS["lpar-settings"] == [47]
     assert 47 not in runner.SUBTASK_GROUPS["all"]
+
+
+def test_memory_group_preflight_declares_bounded_owned_setup(workspace, monkeypatch):
+    (workspace / ".env").write_text(_env_text(), encoding="utf-8")
+    _credentials(monkeypatch)
+    assert preflight.main(["--group", "lpar-memory-quantities", "--skip-hardware"]) == 0

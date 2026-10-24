@@ -28,6 +28,7 @@ class ScriptedSystem:
     calls: list = field(default_factory=list)
     native_calls: int = 0
     creations: list = field(default_factory=list)
+    applies: int = 0
 
     def answer(self, tool, kwargs):
         self.calls.append((tool, kwargs))
@@ -43,7 +44,9 @@ class ScriptedSystem:
             return "PASS", "8.0" if "proc" in command else "16384,256"
         assert kwargs["lpar_name_or_uuid"] == UUID
         if tool == "hmc_get_lpar_description":
-            token = "other" if self.fault == "foreign" else self.token
+            token = (
+                "other" if self.fault in {"foreign", "apply-foreign"} else self.token
+            )
             return (
                 "PASS",
                 f"[hmcpctl owner:hmcpctl created:2026-10-23] [caller {token}]",
@@ -61,7 +64,17 @@ class ScriptedSystem:
                 "CurrentMinimumMemory": "1024",
                 "CurrentMaximumMemory": "4096",
             }
-            if self.fault == "uninitialized":
+            if (
+                self.fault
+                in {
+                    "uninitialized",
+                    "setup",
+                    "apply-refused",
+                    "apply-foreign",
+                    "apply-moved",
+                }
+                and not self.applies
+            ):
                 memory.update(
                     CurrentMemory="0",
                     CurrentMinimumMemory="0",
@@ -117,7 +130,9 @@ class ScriptedSystem:
 async def run_arm(monkeypatch, system, group="lpar-memory-quantities"):
     @asynccontextmanager
     async def client_context(config):
-        yield object()
+        from types import SimpleNamespace
+
+        yield SimpleNamespace(config=config)
 
     async def create(client, selected, creation):
         assert selected == "sys-R1"
@@ -132,6 +147,27 @@ async def run_arm(monkeypatch, system, group="lpar-memory-quantities"):
                 "apply_profile", "error" if system.fault == "apply" else "ok"
             ),
         )
+
+    async def authorize(client, lpar, *, system_name_or_uuid):
+        assert lpar == UUID and system_name_or_uuid == "sys-R1"
+        if system.fault == "apply-moved":
+            raise ValueError("Target left selected system")
+        return "sys-R1", system.name
+
+    async def apply(config, selected, name):
+        assert system.creations[0].apply_profile is False
+        assert selected == "sys-R1" and name == system.name
+        assert any(tool == "hmc_get_lpar_description" for tool, _ in system.calls)
+        if system.fault == "apply-refused":
+            raise ValueError("Native setup refused")
+        system.applies += 1
+        if system.fault == "uninitialized":
+            system.current = 0
+
+    monkeypatch.setattr(
+        memory_quantities, "resolve_and_authorize_lpar_names", authorize
+    )
+    monkeypatch.setattr(memory_quantities, "apply_lpar_profile_via_cli", apply)
 
     async def call(state, client, tool, **kwargs):
         return system.answer(tool, kwargs)
@@ -158,8 +194,9 @@ async def test_full_inactive_quantity_sequence_independently_reads_and_cleans(
     state = await run_arm(monkeypatch, system)
     assert system.deleted
     assert system.current == 2048
+    assert system.applies == 0
     assert len(system.creations) == 1
-    assert system.creations[0].apply_profile is True
+    assert system.creations[0].apply_profile is False
     assert system.creations[0].stamp_policy == "required"
     changes = [
         kwargs["change"] for tool, kwargs in system.calls if tool == "hmc_dlpar_mem"
@@ -229,3 +266,31 @@ async def test_stranded_fixture_prevents_new_creation(monkeypatch):
     assert not system.creations
     assert not state.observations
     assert state.results[-1]["status"] == "SKIP"
+
+
+def test_named_arm_is_registered_without_joining_default_run():
+    assert runner.SUBTASK_GROUPS[memory_quantities.GROUP] == [50]
+    assert runner.SUBTASKS[50] is memory_quantities.exercise_memory_quantities
+    assert 50 not in runner.SUBTASK_GROUPS["all"]
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_create_applies_only_after_owned_identity_read(monkeypatch):
+    system = ScriptedSystem(fault="setup")
+    state = await run_arm(monkeypatch, system)
+    assert system.applies == 1
+    assert system.native_calls == 5
+    assert state.observations[0]["observation"]["result"] == "passed"
+    assert system.deleted
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["apply-refused", "apply-foreign", "apply-moved"])
+async def test_unsafe_or_failed_setup_never_submits_quantities(monkeypatch, fault):
+    system = ScriptedSystem(fault=fault)
+    state = await run_arm(monkeypatch, system)
+    assert system.native_calls == 0
+    assert system.applies == 0
+    assert not any(
+        item["observation"]["result"] == "passed" for item in state.observations
+    )

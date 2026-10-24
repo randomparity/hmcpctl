@@ -3,8 +3,8 @@
 ## Problem and authority
 
 Issue #1774, native child of #638, owns non-pool `chhwres -r mem -o a/r/s`
-quantity and entitled-memory semantics. Frozen scope is q1774-4f3dda1d in
-issue comment 6355899616; exclusions are explicitly empty. Moves, pool lifecycle,
+quantity and entitled-memory semantics. Frozen scope is q1774-64c7b84d in
+issue comment 6378886135; exclusions are explicitly empty. Moves, pool lifecycle,
 paging, statistics and profile operations retain their existing owners.
 [ADR 0285](../../adr/0285-lpar-memory-delta-operations.md) records the transport split.
 
@@ -156,6 +156,11 @@ recovery, independent before/after comparison and generated commit-bound evidenc
 activates a guest or invents AMS support. AMS/active/forced cases remain explicit gaps if not run.
 No hardware access is granted by this design. Root must grant each candidate-bound window.
 
-Shared runner/preflight/recovery plumbing overlaps unmerged #1773. Implementation must stop
-before those edits until #1773 lands, then refresh preserving its arm49 and add arm50. Source,
-review counts and frozen scope survive that pause; there is no premature merge-ready handoff.
+The shared integration prerequisite #1773 has landed; arm49 remains registered beside arm50.
+Fixture setup creates with apply disabled and required ownership stamp. Only an independently
+confirmed all-zero current envelope permits one existing default-profile apply after contained
+UUID/name/type/token/inactive checks and ordinary ownership authorization, followed by fresh
+identity/token/state checks. Positive current bounds skip apply; malformed/mixed evidence refuses.
+The resulting positive current envelope is mandatory before quantities. This fixture-only setup
+contract was explicitly approved by the campaign coordinator on resumption; no profile API changes
+or hardware execution follows from it. Native writer races remain outside an atomic fence.

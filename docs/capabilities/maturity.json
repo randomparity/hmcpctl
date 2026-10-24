@@ -3789,6 +3789,23 @@
           {
             "variant": "memory-read-modify-write",
             "parameters": []
+          },
+          {
+            "variant": "native-current-memory-quantities",
+            "parameters": [
+              {
+                "name": "entitled_mib",
+                "constraint": "shared-memory positive numeric quantity or auto; numeric delta requires reported current entitlement"
+              },
+              {
+                "name": "force",
+                "constraint": "explicit AIX/Linux/VIOS no-RMC deferred effect only; never IBM i"
+              },
+              {
+                "name": "operation",
+                "constraint": "add/remove/set with source-backed MiB alignment, current bounds, capacity, ownership and independent outcome checks"
+              }
+            ]
           }
         ],
         "missing_scope": []

@@ -1,4 +1,4 @@
-"""Owned inactive native memory quantity proof; arm50 registration is separate."""
+"""Owned inactive native memory quantities with independent current readback."""
 
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
+from hmcpctl.ssh.lpar import apply_lpar_profile_via_cli
 from hmcpctl.xmlutil import leaf_text
 
 from . import lpar_config as fixture
@@ -28,7 +30,11 @@ SCENARIO = "st50-lpar-memory-quantities"
 
 
 async def _read_current(
-    client: Client, state: RunState, run: fixture._Run
+    client: Client,
+    state: RunState,
+    run: fixture._Run,
+    *,
+    allow_uninitialized: bool = False,
 ) -> tuple[int, int, int]:
     status, data = await fixture._read_lpar(client, state, run)
     if status != "PASS" or not isinstance(data, Mapping):
@@ -55,11 +61,36 @@ async def _read_current(
             )
         values.append(int(text))
     minimum, current, maximum = values
+    if allow_uninitialized and (minimum, current, maximum) == (0, 0, 0):
+        return 0, 0, 0
     if not 0 < minimum <= current <= maximum:
         raise ValueError(
             "Independent memory oracle requires initialized positive current bounds"
         )
     return minimum, current, maximum
+
+
+async def _initialize_current(
+    client: Client, state: RunState, run: fixture._Run
+) -> None:
+    before = await _read_current(client, state, run, allow_uninitialized=True)
+    if before != (0, 0, 0):
+        return
+    if state.hmc_config is None:
+        raise ValueError("Setup apply requires HMC configuration")
+    async with HMCClient(state.hmc_config) as hmc:
+        system_name, lpar_name = await resolve_and_authorize_lpar_names(
+            hmc, run.uuid or "", system_name_or_uuid=run.system
+        )
+        if lpar_name != run.name:
+            raise ValueError("Setup apply resolved a different fixture name")
+        if await fixture._token_of(client, state, run, run.uuid or "") != run.token:
+            raise PermissionError("Setup apply requires the fixture ownership token")
+        if await _read_current(client, state, run, allow_uninitialized=True) != before:
+            raise ValueError("Setup apply refused changed current-memory evidence")
+        await apply_lpar_profile_via_cli(hmc.config, system_name, lpar_name)
+    await _read_current(client, state, run)
+    state.record(SUBTASK, "owned default-profile apply (SETUP)", "PASS", {})
 
 
 async def _case(
@@ -155,8 +186,9 @@ async def _cases(client: Client, state: RunState, run: fixture._Run) -> list[Ass
 async def exercise_memory_quantities(client: Client, state: RunState) -> None:
     """ST50: one inactive owned fixture, setup apply, three native writes, cleanup.
 
-    The initial profile application belongs to existing creation SETUP, making
-    current bounds available. Quantity operations never apply or write a profile.
+    Creation suppresses profile apply. Only a confirmed owned inactive fixture
+    with all-zero current bounds receives one setup apply, followed by readback.
+    Quantity operations never apply or write a profile.
     No power/activation, shared-pool mutation or foreign partition is admitted.
     """
     if state.group != GROUP or state.hmc_config is None:
@@ -191,7 +223,7 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
                     LparResources(**fixture.RESOURCES),
                     caller_token=run.token,
                     stamp_policy="required",
-                    apply_profile=True,
+                    apply_profile=False,
                 ),
             )
         run.uuid = fixture._uuid_of(created.lpar) if created.lpar is not None else None
@@ -207,8 +239,9 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
             raise ValueError("Memory fixture creation/ownership was not confirmed")
         run.created = True
         state.record(
-            SUBTASK, "owning core create (SETUP profile apply)", "PASS", asdict(created)
+            SUBTASK, "owning core create (no profile apply)", "PASS", asdict(created)
         )
+        await _initialize_current(client, state, run)
         results = await _cases(client, state, run)
         assertions = results + [
             Assertion(
