@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 import check_capability_inventory
 
 from live_test import config as live_config
+from live_test.capture import destination_is_ignored
 
 if TYPE_CHECKING:
     from live_test.runner import RunState
@@ -166,19 +167,6 @@ def run_provenance(
     return provenance
 
 
-def destination_is_ignored(path: Path, repo_root: Path | None = None) -> bool:
-    """Report whether Git would let *path* be committed from where it is written.
-
-    Exit 0 means ignored, 1 means the path sits in a repository unignored, and
-    anything else means no repository, or a path outside one — in which case
-    there is nothing to commit into and the write is safe.
-    """
-    return (
-        _git(repo_root or Path.cwd(), "check-ignore", "-q", "--", str(path)).returncode
-        != 1
-    )
-
-
 def observations_path(results_path: str) -> Path:
     """The observations file written beside a run's results document."""
     path = Path(results_path)
@@ -217,7 +205,7 @@ def emit_observations(
     # pattern can establish that the destination is ignored; ask Git instead.
     # `_run_from_arguments` checks the same thing before the run; this covers a
     # direct call to `main`.
-    if not destination_is_ignored(path, repo_root):
+    if not destination_is_ignored(path):
         print(f"{path} is not ignored by git — observations not written")
         return False
     head = _git(repo_root, "rev-parse", "HEAD")

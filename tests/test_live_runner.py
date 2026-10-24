@@ -8592,14 +8592,16 @@ async def test_job_get_consumers_grade_normalized_outcomes_strictly(
 
 
 def test_validation_and_evidence_have_direct_owners():
-    from live_test import evidence, scenario_validation
+    from live_test import capture, evidence, scenario_validation
 
     assert evidence.write_results.__module__ == "live_test.evidence"
     assert (
         scenario_validation.validate_declared_outcomes.__module__
         == "live_test.scenario_validation"
     )
+    assert evidence.destination_is_ignored is capture.destination_is_ignored
     owners = {
+        capture: ("destination_is_ignored",),
         scenario_validation: (
             "validate_expected_dispatch",
             "_declared_names",
@@ -8614,7 +8616,6 @@ def test_validation_and_evidence_have_direct_owners():
             "_git",
             "repository_root",
             "run_provenance",
-            "destination_is_ignored",
             "observations_path",
             "_tree_is_clean",
             "emit_observations",
@@ -8819,3 +8820,50 @@ def test_runner_writes_publishable_source_provenance_outside_checkout(
     assert document["run"]["tree_clean"] is True
     matrix = renderer.render(document)
     assert matrix is not None and expected in matrix
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+@pytest.mark.parametrize(
+    "destination_kind", ["outside", "foreign-ignored", "foreign-unignored"]
+)
+def test_emission_admits_actual_destination_independently_of_source(
+    tmp_path, monkeypatch, absolute, destination_kind
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    _live_repo(source)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    stem = "custom-policy"
+    if destination_kind != "outside":
+        _live_repo(destination)
+        if destination_kind == "foreign-ignored":
+            (destination / ".gitignore").write_text(
+                "custom-policy.json\ncustom-policy-observations.json\n",
+                encoding="utf-8",
+            )
+        else:
+            stem = "test-results-private"
+            (destination / ".gitignore").write_text("", encoding="utf-8")
+    monkeypatch.chdir(destination)
+    path = evidence.observations_path(stem + ".json")
+    if absolute:
+        path = destination / path
+    allowed = destination_kind != "foreign-unignored"
+    assert (
+        evidence.emit_observations(
+            _state_with_one_observation(),
+            path,
+            ("V10R3M1060", "POWER10"),
+            "V1_0",
+            source,
+        )
+        is allowed
+    )
+    assert path.exists() is allowed
+    if allowed:
+        written = json.loads(path.read_text())
+        expected = subprocess.check_output(
+            ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assert written[0]["observation"]["tested_commit"] == expected
