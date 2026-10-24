@@ -1,0 +1,24 @@
+{
+ "firmware": "v10r3-8375-42a-memory-source",
+ "sources": [
+  "2026-10-23 authorized #1774 read-only collection capture at 1373d713; HMC V10R3 SP1060 managing 8375-42A; HTTP 204 empty SharedMemoryPool collection. SOURCE endpoint evidence only, no positive AMS capacity or runtime proof."
+ ],
+ "rest": {
+  "endpoints": [
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}/SharedMemoryPool",
+    "accept": null,
+    "status": 204,
+    "content_type": "text/plain"
+   }
+  ],
+  "errors": [],
+  "values": {},
+  "element_enums": {}
+ },
+ "cli": {
+  "commands": [],
+  "values": {}
+ }
+}

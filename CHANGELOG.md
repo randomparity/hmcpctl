@@ -18,6 +18,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Native LPAR memory add/remove/set quantities and shared I/O entitlement inputs
+  are available through `hmc_dlpar_mem(change=...)` and `lpars memory`, with
+  guarded admission and independent applied/partial/uncertain readback (#1774).
+
 - Typed secure-boot and keystore policy for LPAR/VIOS creation, reads and updates
   through CLI/MCP (#1765). Strict inline JSON preserves omitted settings and
   explicit false/zero, with selected-system capability/release and ownership

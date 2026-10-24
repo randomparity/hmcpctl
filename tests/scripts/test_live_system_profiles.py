@@ -34,6 +34,7 @@ def test_system_profiles_wrapper_refuses_nonprivate_or_existing(tmp_path, monkey
         wrapper.main(["--results-file", str(occupied)])
     public = tmp_path / "public"
     public.mkdir(mode=0o755)
+    public.chmod(0o755)
     with pytest.raises(SystemExit):
         wrapper.main(["--results-file", str(public / "results.json")])
     assert occupied.read_text() == "original" and called == []

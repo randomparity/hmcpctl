@@ -335,6 +335,20 @@ def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _memory_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-memory-quantities",
+        True,
+        "configuration validated",
+        (
+            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create without apply; optional once-only default-profile apply after identity/ownership confirmation",
+            "one native removal hypothesis at or above minimum, zero-delta no-op and over-maximum refusal; matching-token deletion and independent resource comparison",
+            "no activation, force, full removal, AMS or foreign resources; current bounds must be independently positive before quantity calls",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_security_policy_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-security-policy",
@@ -591,6 +605,7 @@ _ARM_VERDICTS = {
     "lpar-settings": _lpar_settings_verdict,
     "lpar-reporting": _lpar_reporting_verdict,
     "lpar-physical-io": _lpar_physical_io_verdict,
+    "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
     "lpar-power": _lpar_power_verdict,
