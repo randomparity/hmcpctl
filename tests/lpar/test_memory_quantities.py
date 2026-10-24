@@ -252,18 +252,14 @@ def quantity_boundary(monkeypatch):
         list_child=AsyncMock(side_effect=lambda *args: [deepcopy(boundary.pool)]),
     )
     boundary.hmc = hmc
-    boundary.authorize = AsyncMock(return_value=("sys-R1", "lpar-R1"))
-    monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.resolve_system_uuid",
-        AsyncMock(return_value=SYSTEM_UUID),
+    boundary.authorize = AsyncMock()
+    hmc.list_logical_partitions = AsyncMock(return_value=[before])
+    hmc.list_vios = AsyncMock(return_value=[])
+    hmc.list_system_summaries = AsyncMock(
+        return_value=[{"UUID": SYSTEM_UUID, "SystemName": "sys-R1"}]
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.resolve_lpar_uuid",
-        AsyncMock(return_value=LPAR_UUID),
-    )
-    monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.resolve_and_authorize_lpar_names",
-        boundary.authorize,
+        "hmcpctl.operations.lpar.memory.authorize_lpar_mutation", boundary.authorize
     )
     boundary.command = AsyncMock(side_effect=submit)
     monkeypatch.setattr("hmcpctl.ssh.memory.run_hmc_command", boundary.command)
@@ -602,13 +598,11 @@ async def test_manual_entitlement_mode_mismatch_is_partial(quantity_boundary):
 async def test_real_containment_and_ownership_guard_precedes_memory_submit(
     monkeypatch, foreign_system
 ):
-    from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
-    from hmcpctl.resource_identity import resolve_lpar_uuid, resolve_system_uuid
-
     native = AsyncMock()
     description = AsyncMock(return_value="[hmcpctl owner:foreign created:2026-10-22]")
     hmc = SimpleNamespace(
         config=CONFIG,
+        list_vios=AsyncMock(return_value=[]),
         list_logical_partitions=AsyncMock(
             return_value=[] if foreign_system else [memory_entry()]
         ),
@@ -619,22 +613,14 @@ async def test_real_containment_and_ownership_guard_precedes_memory_submit(
         get_managed_system=AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.resolve_system_uuid", resolve_system_uuid
-    )
-    monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.resolve_lpar_uuid", resolve_lpar_uuid
-    )
-    monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.resolve_and_authorize_lpar_names",
-        resolve_and_authorize_lpar_names,
-    )
-    monkeypatch.setattr(
         "hmcpctl.operations.lpar.ownership.get_lpar_description", description
     )
     monkeypatch.setattr("hmcpctl.ssh.memory.run_hmc_command", native)
     with pytest.raises(
         ValueError if foreign_system else PermissionError,
-        match="does not belong" if foreign_system else "ownership_override=true",
+        match="outside the selected system"
+        if foreign_system
+        else "ownership_override=true",
     ):
         await change_lpar_memory(
             hmc,
@@ -679,13 +665,219 @@ async def test_post_submit_containment_loss_cannot_be_reported_applied(
     b = quantity_boundary
     containment = AsyncMock(
         side_effect=[
-            LPAR_UUID,
-            ValueError("partition no longer belongs to selected system"),
+            [memory_entry()],
+            [],
         ]
     )
-    monkeypatch.setattr("hmcpctl.operations.lpar.memory.resolve_lpar_uuid", containment)
+    b.hmc.list_logical_partitions = containment
     result = await change(b, operation="add", quantity_mib=512)
     assert result["outcome"] == "unverified"
     assert not result["workflow_completed"]
     b.command.assert_awaited_once()
     assert containment.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["add", "set"])
+async def test_growth_from_zero_below_configured_minimum_refuses(
+    quantity_boundary, operation
+):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentMemory="0", CurrentMinimumMemory="0", CurrentMaximumMemory="0"
+    )
+    b.after = deepcopy(b.before)
+    b.submit_error = HMCError("native refusal")
+    with pytest.raises(ValueError, match="below.*minimum"):
+        await change(b, operation=operation, quantity_mib=256)
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["add", "set"])
+async def test_growth_from_zero_at_minimum_preserves_requested_target(
+    quantity_boundary, operation
+):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentMemory="0", CurrentMinimumMemory="0", CurrentMaximumMemory="0"
+    )
+    b.after["Resource"]["PartitionMemoryConfiguration"]["CurrentMemory"] = "512"
+    result = await change(b, operation=operation, quantity_mib=512)
+    assert result["outcome"] == "applied"
+    assert result["expected"]["quantity_mib"] == 512
+    assert not result["expected"]["reset"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_partition_name_across_kinds_refuses(quantity_boundary):
+    b = quantity_boundary
+    b.hmc.list_vios.return_value = [deepcopy(b.before)]
+    with pytest.raises(ValueError, match="ambiguous"):
+        await change_lpar_memory(
+            b.hmc,
+            "lpar-R1",
+            LparMemoryChange(operation="add", quantity_mib=512),
+            system_name_or_uuid=SYSTEM_UUID,
+        )
+    b.authorize.assert_not_awaited()
+    b.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_partition_kind_change_after_submit_is_unverified(quantity_boundary):
+    b = quantity_boundary
+    b.hmc.list_logical_partitions.side_effect = [[b.before], []]
+    b.hmc.list_vios.side_effect = [[], [b.after]]
+    result = await change(b, operation="add", quantity_mib=512)
+    assert result["outcome"] == "unverified"
+    assert not result["workflow_completed"]
+    b.command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_forced_auto_entitlement_does_not_claim_runtime_convergence(
+    quantity_boundary,
+):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionState"] = "running"
+    b.before["Resource"]["PartitionMemoryConfiguration"].update(
+        SharedMemoryEnabled="true", RuntimeMemory="1024", RuntimeEntitledMemory="100"
+    )
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentEntitledMemory="175", AutoEntitledMemoryEnabled="true"
+    )
+    result = await change(b, operation="set", entitled_mib="auto", force=True)
+    assert result["outcome"] == "applied"
+    assert result["expected"]["deferred"]
+    assert result["after"]["runtime_entitled_mib"] == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "current,runtime,outcome",
+    [
+        ("175", "175", "applied"),
+        ("175", "100", "partial"),
+        ("175", None, "unverified"),
+        ("175", "auto", "unverified"),
+        ("auto", "auto", "unverified"),
+    ],
+)
+async def test_live_auto_entitlement_requires_numeric_convergence(
+    quantity_boundary, current, runtime, outcome
+):
+    b = quantity_boundary
+    b.before["Resource"].update(
+        PartitionState="running", ResourceMonitoringControlState="active"
+    )
+    b.before["Resource"]["PartitionMemoryConfiguration"].update(
+        SharedMemoryEnabled="true", RuntimeMemory="1024", RuntimeEntitledMemory="100"
+    )
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentEntitledMemory=current,
+        RuntimeEntitledMemory=runtime,
+        AutoEntitledMemoryEnabled="true",
+    )
+    result = await change(b, operation="set", entitled_mib="auto")
+    assert result["outcome"] == outcome
+    assert result["workflow_completed"] is (outcome == "applied")
+    b.command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selector", [LPAR_UUID, "lpar-R1"])
+async def test_vios_quantities_use_contained_vios_http_resource(
+    mock_hmc, monkeypatch, selector
+):
+    import xml.etree.ElementTree as ET
+
+    import httpx
+    from conftest import make_config, mock_system_summary
+
+    from hmcpctl.client.core import HMCClient
+
+    atom = "http://www.w3.org/2005/Atom"
+    uom = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
+    before = memory_entry()
+    before["Resource"]["PartitionType"] = "Virtual IO Server"
+    after = deepcopy(before)
+    after["Resource"]["PartitionMemoryConfiguration"]["CurrentMemory"] = "1536"
+
+    def xml(entry, kind):
+        root = ET.Element(f"{{{atom}}}entry")
+        ET.SubElement(root, f"{{{atom}}}id").text = f"urn:uuid:{entry['UUID']}"
+        resource = ET.SubElement(
+            ET.SubElement(root, f"{{{atom}}}content"), f"{{{uom}}}{kind}"
+        )
+
+        def fields(parent, values):
+            for name, value in values.items():
+                child = ET.SubElement(parent, f"{{{uom}}}{name}")
+                if isinstance(value, dict):
+                    fields(child, value)
+                else:
+                    child.text = str(value)
+
+        fields(resource, entry["Resource"])
+        return ET.tostring(root, encoding="unicode")
+
+    mock_system_summary(mock_hmc, SYSTEM_UUID, "sys-R1")
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").respond(
+        204
+    )
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/VirtualIOServer").respond(
+        200, text=xml(before, "VirtualIOServer")
+    )
+    wrong = mock_hmc.get(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}").respond(404)
+    submitted = False
+
+    def read(request):
+        return httpx.Response(
+            200, text=xml(after if submitted else before, "VirtualIOServer")
+        )
+
+    right = mock_hmc.get(f"/rest/api/uom/VirtualIOServer/{LPAR_UUID}").mock(
+        side_effect=read
+    )
+    system = {
+        "UUID": SYSTEM_UUID,
+        "Resource": {
+            "SystemName": "sys-R1",
+            "State": "operating",
+            "AssociatedSystemMemoryConfiguration": {
+                "MemoryRegionSize": "256",
+                "CurrentAvailableSystemMemory": "8192",
+                "ConfigurableSystemMemory": "16384",
+            },
+        },
+    }
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}").respond(
+        200, text=xml(system, "ManagedSystem")
+    )
+    description = AsyncMock(return_value="")
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.ownership.get_lpar_description", description
+    )
+
+    async def native(*args, **kwargs):
+        nonlocal submitted
+        submitted = True
+        return ""
+
+    command = AsyncMock(side_effect=native)
+    monkeypatch.setattr("hmcpctl.ssh.memory.run_hmc_command", command)
+    async with HMCClient(make_config()) as hmc:
+        result = await change_lpar_memory(
+            hmc,
+            selector,
+            LparMemoryChange(operation="add", quantity_mib=512),
+            system_name_or_uuid=SYSTEM_UUID,
+        )
+    assert result["outcome"] == "applied"
+    assert not wrong.called
+    assert right.call_count >= 3
+    description.assert_awaited_once()
+    command.assert_awaited_once()

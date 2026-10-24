@@ -13,11 +13,15 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryChange
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.inventory.composite import resource_container
-from hmcpctl.resource_identity import resolve_lpar_uuid, resolve_system_uuid
+from hmcpctl.resource_identity import (
+    is_uuid,
+    resolve_system_uuid,
+    system_name_from_uuid,
+)
 from hmcpctl.ssh.memory import change_lpar_memory_quantity
 from hmcpctl.xmlutil import leaf_text
 
-from .ownership import resolve_and_authorize_lpar_names
+from .ownership import authorize_lpar_mutation
 from .profile_sync import ChangeLocation, change_location_of
 
 _MEMORY_FIELDS = {
@@ -223,6 +227,12 @@ def _targets(
         )
     if target is not None and target > maximum:
         raise ValueError("Requested memory target exceeds the partition maximum")
+    if (
+        target is not None
+        and 0 < target < minimum
+        and target >= before["current_memory_mib"]
+    ):
+        raise ValueError("Requested memory growth is below the partition minimum")
     reset = target is not None and not noop and (target < minimum or target == 0)
     if reset:
         if before["state"] != "not activated":
@@ -332,12 +342,19 @@ def _postconditions(
             checks.append(after["runtime_memory_mib"] == targets["quantity_mib"])
     entitled = targets["entitled_mib"]
     if entitled is not None:
-        if after["automatic_entitlement"] is None or after["entitled_mib"] is None:
+        if (
+            after["automatic_entitlement"] is None
+            or type(after["entitled_mib"]) is not int
+        ):
             raise ValueError(
-                "Memory entitlement readback is missing current value or automatic mode"
+                "Memory entitlement readback requires numeric current value and automatic mode"
             )
-        if not targets["deferred"] and after["runtime_entitled_mib"] is None:
-            raise ValueError("Memory entitlement readback is missing runtime value")
+        if not targets["deferred"]:
+            if type(after["runtime_entitled_mib"]) is not int:
+                raise ValueError(
+                    "Memory entitlement readback requires numeric runtime value"
+                )
+            checks.append(after["runtime_entitled_mib"] == after["entitled_mib"])
         checks.append(after["automatic_entitlement"] is (entitled == "auto"))
         if type(entitled) is int:
             checks.append(after["entitled_mib"] == entitled)
@@ -390,6 +407,34 @@ def _result(
     }
 
 
+async def _contained_partition(
+    hmc: HMCClient, system_uuid: str, selector: str
+) -> tuple[str, str]:
+    matches = []
+    for kind, entries in (
+        ("LogicalPartition", await hmc.list_logical_partitions(system_uuid)),
+        ("VirtualIOServer", await hmc.list_vios(system_uuid)),
+    ):
+        for entry in entries:
+            uuid = entry.get("UUID")
+            name = resource_container(entry, "Resource").get("PartitionName")
+            if (
+                is_uuid(selector)
+                and isinstance(uuid, str)
+                and uuid.lower() == selector.lower()
+            ) or (not is_uuid(selector) and name == selector):
+                if not isinstance(uuid, str) or not is_uuid(uuid):
+                    raise ValueError(
+                        "Memory target has missing or malformed partition UUID"
+                    )
+                matches.append((kind, uuid))
+    if len(matches) != 1:
+        raise ValueError(
+            "Memory target is missing, ambiguous or outside the selected system"
+        )
+    return matches[0]
+
+
 async def change_lpar_memory(
     hmc: HMCClient,
     lpar_name_or_uuid: str,
@@ -408,20 +453,19 @@ async def change_lpar_memory(
     if not system_name_or_uuid or not system_name_or_uuid.strip():
         raise ValueError("system_name_or_uuid is required for native memory quantities")
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    system_name, lpar_name = await resolve_and_authorize_lpar_names(
-        hmc,
-        lpar_name_or_uuid,
-        system_name_or_uuid=system_uuid,
-        ownership_override=ownership_override,
+    kind, uuid = await _contained_partition(hmc, system_uuid, lpar_name_or_uuid)
+    read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
+    before = _snapshot(await read(uuid), uuid)
+    if not is_uuid(lpar_name_or_uuid) and before["name"] != lpar_name_or_uuid:
+        raise ValueError("Memory target name changed after containment resolution")
+    system_name = await system_name_from_uuid(hmc, system_uuid)
+    if not system_name:
+        raise ValueError("Memory target system has no unique CLI name")
+    await authorize_lpar_mutation(
+        hmc, system_name, before["name"], ownership_override=ownership_override
     )
-    uuid = await resolve_lpar_uuid(
-        hmc, lpar_name_or_uuid, system_name_or_uuid=system_uuid
-    )
-    before = _snapshot(await hmc.get_logical_partition(uuid), uuid)
-    if before["name"] != lpar_name:
-        raise ValueError("Memory target name changed after ownership authorization")
     targets = await _admit_capacity(hmc, system_uuid, system_name, before, change)
-    fresh = _snapshot(await hmc.get_logical_partition(uuid), uuid)
+    fresh = _snapshot(await read(uuid), uuid)
     if fresh != before:
         raise ValueError("Partition changed before memory submission; nothing was sent")
     if targets["noop"]:
@@ -438,8 +482,9 @@ async def change_lpar_memory(
             exc.__cause__.exit_status is not None and exc.__cause__.exit_status != 0
         )
     try:
-        await resolve_lpar_uuid(hmc, uuid, system_name_or_uuid=system_uuid)
-        after = _snapshot(await hmc.get_logical_partition(uuid), uuid)
+        if await _contained_partition(hmc, system_uuid, uuid) != (kind, uuid):
+            raise ValueError("Memory readback partition kind or identity changed")
+        after = _snapshot(await read(uuid), uuid)
         matched = _postconditions(before, after, targets)
     except (HMCError, ValueError) as exc:
         return _result(before, None, targets, "unverified", error, str(exc))
