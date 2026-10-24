@@ -109,8 +109,18 @@ class LparSettings:
         },
     )
 
-    powervm_mgmt_capable: StrictBool | None = None
-    kvm_capable: StrictBool | None = None
+    powervm_mgmt_capable: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Linux PowerVM management capability; selecting true or false declares Linux intent, not installed OS or NovaLink deployment. Omitted preserves the default/current value."
+        },
+    )
+    kvm_capable: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Linux KVM eligibility configuration only; false is explicit, omitted preserves. Requires positive system capability and HMC >=10.3.1060.1. Enablement requires supported firmware, dedicated never-share CPUs and zero keystore/persistent memory. Creation adds fixed POWER10 in the same record; all updates require inactive state, and true additionally requires existing POWER10. CPUs are never rewritten."
+        },
+    )
 
     def __post_init__(self) -> None:
         for item in fields(self):

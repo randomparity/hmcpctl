@@ -7,8 +7,8 @@ partition flags in eight P10/P11 creation/update bindings. The frozen
 [scope](https://github.com/randomparity/hmcpctl/issues/1766#issuecomment-6378396996)
 provides C1–C7; [ADR 0278](../../adr/0278-lpar-linux-management-roles.md) records
 transport and intent decisions. Exclusions are empty. This is full-spec M250.
-The current phase authors design only. Forge requires root release after #1765
-lands and the design/plan are reconciled against its actual landed code.
+Implementation was released after #1765 landed. Its existing security-policy
+parser supplies keystore admission evidence; no duplicate policy owner is added.
 
 ## Global Constraints
 

@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed — issue #1766; design-only until the campaign releases implementation.
+Accepted — issue #1766; implementation released after #1765 landed. Hardware
+execution and guest deployment remain unevidenced.
 
 ## Context
 
@@ -46,8 +47,8 @@ contains the source bindings, failure model and validation contracts.
 Operators must supply compatible resources and separately prepare Linux software.
 HMC/transport races remain possible and uncertain results require inspection.
 Creation may leave an owned partition whose role verification failed; later
-assignment steps stop. #1765's landed owner supplies PKS evidence, and this
-integration must be reconciled after that change lands.
+assignment steps stop. #1765's landed security-policy parser supplies PKS
+evidence through its existing typed state; no second policy parser is introduced.
 
 ## Considered & rejected
 
