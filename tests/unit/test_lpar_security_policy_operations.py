@@ -983,3 +983,48 @@ async def test_policy_early_creation_readback_error_is_private(
     assert marker not in output
     assert "inspect" in output.lower()
     command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stamp_policy", ["required", "best-effort"])
+@pytest.mark.parametrize("identity_failure", ["missing", "invalid", "name"])
+async def test_policy_malformed_identity_retains_required_stamp_contract(
+    creation_target, monkeypatch, stamp_policy, identity_failure
+):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar import core
+
+    hmc, entry, command = creation_target
+    marker = "sensitive-identity-marker"
+    if identity_failure == "missing":
+        entry.pop("UUID")
+    elif identity_failure == "invalid":
+        entry["UUID"] = marker
+    else:
+        entry["Resource"]["PartitionName"] = marker
+    apply = AsyncMock()
+    monkeypatch.setattr(core, "apply_lpar_profile_via_cli", apply)
+    stamp = AsyncMock(return_value=(True, ()))
+    monkeypatch.setattr(core, "stamp_created_lpar_ownership", stamp)
+    creation = core.LparCreation(
+        "part-R1",
+        "AIX/Linux",
+        LparResources(desired_memory=1024),
+        apply_profile=True,
+        stamp_policy=stamp_policy,
+        security_policy=LparSecurityPolicy(secure_boot=0),
+    )
+    if stamp_policy == "required":
+        with pytest.raises(HMCError) as failure:
+            await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+        message = str(failure.value)
+    else:
+        result = await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+        assert result.ownership_stamped is None
+        assert result.security_policy_step.status == "error"
+        message = result.security_policy_step.result
+    assert "inspect" in message.lower()
+    assert marker not in message
+    stamp.assert_not_awaited()
+    apply.assert_not_awaited()
+    command.assert_awaited_once()

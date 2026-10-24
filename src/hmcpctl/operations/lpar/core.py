@@ -398,6 +398,12 @@ async def create_and_stamp_lpar(
         or not is_uuid(created_lpar["UUID"])
         or (created_lpar.get("Resource") or {}).get("PartitionName") != creation.name
     ):
+        if creation.stamp_policy == "required":
+            raise HMCError(
+                "stamp_policy='required': creation may have occurred, but partition "
+                "identity and ownership are unconfirmed. Inspect the contained "
+                "partition before retrying; no rollback performed."
+            )
         return LparCreationResult(
             True,
             created_lpar,
