@@ -8,6 +8,7 @@ from hmcpctl.client.core import HMCClient
 
 from ...documents.lpar import validate_partition_type
 from ...errors import HMCError
+from ...resource_identity import resolve_system_uuid
 from .assignments import (
     LparPcieAssignments,
     LparPcieWorkflowResult,
@@ -17,6 +18,7 @@ from .assignments import (
 )
 from .core import LparCreation, create_and_stamp_lpar
 from .errors import translate_lpar_write_error
+from .linux_roles import read_role_capabilities, roles_requested
 from .workflow_contract import WorkflowStep
 
 
@@ -28,6 +30,18 @@ async def create_lpar(
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
     validate_partition_type(creation.partition_type)
+    if roles_requested(creation.settings) and (
+        assignments.dedicated or assignments.sriov
+    ):
+        caps = await read_role_capabilities(
+            hmc,
+            await resolve_system_uuid(hmc, system_name_or_uuid),
+            need_kvm=creation.settings.kvm_capable is not None,
+        )
+        if caps.controller_mode:
+            raise ValueError(
+                "Dedicated and SR-IOV profile assignments require classic management mode"
+            )
     if creation.physical_io.requested:
         overlap = {s.drc_index for s in creation.physical_io.io_slots} & {
             s.drc_index for s in assignments.dedicated

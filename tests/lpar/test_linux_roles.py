@@ -599,3 +599,484 @@ async def test_combined_roles_submit_once(role_boundary, management, kvm):
     )
     assert result.status == "verified"
     b.write.assert_awaited_once_with(CONFIG, "system", "owned", settings)
+
+
+@pytest.fixture
+def creation_boundary(monkeypatch):
+    from hmcpctl.operations.lpar import core, workflows
+
+    entry = {"UUID": PARTITION, "Resource": {"PartitionName": "owned"}}
+    resource = eligible_resource()
+    resource["KvmCapable"] = "true"
+    hmc = SimpleNamespace(
+        config=CONFIG,
+        find_partition_by_name=AsyncMock(side_effect=[None, entry]),
+        get_logical_partition=AsyncMock(
+            return_value={"UUID": PARTITION, "Resource": resource}
+        ),
+        create_logical_partition=AsyncMock(),
+    )
+    caps = AsyncMock(return_value=CAPS)
+    create, apply, io, memory = AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()
+    compat = AsyncMock(return_value={"profile_mode": "POWER10"})
+    stamp = AsyncMock(return_value=(True, ()))
+    for name, mock in (
+        ("resolve_system_uuid", AsyncMock(return_value=SYSTEM)),
+        ("resolve_system_cli_name", AsyncMock(return_value="system")),
+        ("read_role_capabilities", caps),
+        ("create_lpar_via_cli", create),
+        ("apply_lpar_profile_via_cli", apply),
+        ("get_lpar_settings", AsyncMock(return_value=BASE)),
+        ("get_lpar_proc_compat", compat),
+        ("stamp_created_lpar_ownership", stamp),
+        ("admit_creation_io", io),
+        ("require_memory_within_system", memory),
+        ("created_io_step", AsyncMock(return_value=None)),
+    ):
+        monkeypatch.setattr(core, name, mock, raising=False)
+    monkeypatch.setattr(
+        workflows, "resolve_system_uuid", AsyncMock(return_value=SYSTEM), raising=False
+    )
+    monkeypatch.setattr(workflows, "read_role_capabilities", caps, raising=False)
+    prevalidate = AsyncMock()
+    assign = AsyncMock(return_value=SimpleNamespace(workflow_completed=True, steps=()))
+    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
+    monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", assign)
+    creation = core.LparCreation(
+        "owned",
+        "AIX/Linux",
+        LparResources(dedicated=True, desired_procs=2),
+        settings=LparSettings(kvm_capable=True),
+    )
+    return SimpleNamespace(
+        hmc=hmc,
+        creation=creation,
+        resource=resource,
+        entry=entry,
+        caps=caps,
+        create=create,
+        apply=apply,
+        io=io,
+        memory=memory,
+        compat=compat,
+        stamp=stamp,
+        assign=assign,
+        prevalidate=prevalidate,
+    )
+
+
+@pytest.mark.parametrize(
+    "resources",
+    [
+        LparResources(),
+        LparResources(dedicated=True),
+        LparResources(desired_memory=1024),
+        LparResources(dedicated=False, desired_procs=1),
+        LparResources(dedicated=True, desired_procs=1, sharing_mode="share_idle_procs"),
+        LparResources(dedicated=True, desired_procs=1.5),
+    ],
+)
+@pytest.mark.asyncio
+async def test_creation_does_not_rewrite_cpus(creation_boundary, resources):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    b = creation_boundary
+    with pytest.raises((ValueError, HMCError)):
+        await create_and_stamp_lpar(
+            b.hmc, SYSTEM, replace(b.creation, resources=resources)
+        )
+    b.create.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
+    assert b.creation.resources == LparResources(dedicated=True, desired_procs=2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "controller,value",
+    [(True, True), (True, False), (True, None), (False, True), (False, False)],
+)
+async def test_controller_apply_rejected_and_classic_preserved(
+    creation_boundary, controller, value
+):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    b = creation_boundary
+    b.caps.return_value = replace(CAPS, controller_mode=controller)
+    creation = replace(b.creation, apply_profile=value)
+    if controller and value is True:
+        with pytest.raises(ValueError, match="apply.*False|apply.*false"):
+            await create_and_stamp_lpar(b.hmc, SYSTEM, creation)
+        b.create.assert_not_awaited()
+        b.apply.assert_not_awaited()
+        return
+    result = await create_and_stamp_lpar(b.hmc, SYSTEM, creation)
+    assert result.settings_step.status == "ok"
+    assert b.create.await_args.kwargs["resources"] is creation.resources
+    assert b.create.await_args.kwargs.get("profile_name", DEFAULT_PROFILE_NAME) == (
+        None if controller else DEFAULT_PROFILE_NAME
+    )
+    if controller:
+        b.apply.assert_not_awaited()
+        b.compat.assert_not_awaited()
+        assert not result.warnings
+        if value is False:
+            assert result.apply_step.status == "skipped"
+            assert "current configuration" in result.apply_step.result
+    else:
+        b.compat.assert_awaited_once_with(
+            CONFIG, "system", "owned", DEFAULT_PROFILE_NAME
+        )
+        assert b.apply.await_count == (1 if value else 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["keylock", "physical", "creation-sriov", "keystore"])
+async def test_profile_io_admission_before_effects(creation_boundary, kind):
+    from decimal import Decimal
+
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+    from hmcpctl.operations.lpar.assignments import SriovLogicalPortAssignment
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    b = creation_boundary
+    b.caps.return_value = replace(CAPS, controller_mode=True)
+    changes = {
+        "keylock": {"keylock": "normal"},
+        "physical": {"physical_io": LparPhysicalIO(console_slot="hmc")},
+        "creation-sriov": {
+            "creation_sriov": (
+                SriovLogicalPortAssignment(
+                    DEFAULT_PROFILE_NAME, "1", "0", "27004002", Decimal(2)
+                ),
+            )
+        },
+        "keystore": {"security_policy": LparSecurityPolicy(keystore_kbytes=8)},
+    }
+    with pytest.raises(ValueError):
+        await create_and_stamp_lpar(b.hmc, SYSTEM, replace(b.creation, **changes[kind]))
+    b.create.assert_not_awaited()
+    b.apply.assert_not_awaited()
+    b.io.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["dedicated", "sriov"])
+async def test_profile_assignment_rejected_before_create(creation_boundary, kind):
+    from decimal import Decimal
+
+    from hmcpctl.operations.lpar.assignments import (
+        DedicatedPcieAssignment,
+        LparPcieAssignments,
+        SriovLogicalPortAssignment,
+    )
+    from hmcpctl.operations.lpar.workflows import create_lpar
+
+    b = creation_boundary
+    b.caps.return_value = replace(CAPS, controller_mode=True)
+    item = (
+        DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, "21010010")
+        if kind == "dedicated"
+        else SriovLogicalPortAssignment(
+            DEFAULT_PROFILE_NAME, "1", "0", "27004002", Decimal(2)
+        )
+    )
+    with pytest.raises(ValueError, match="classic"):
+        await create_lpar(
+            b.hmc, SYSTEM, b.creation, LparPcieAssignments(**{kind: (item,)})
+        )
+    b.create.assert_not_awaited()
+    b.assign.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("controller", [False, True])
+@pytest.mark.parametrize("mode", ["wrong", "missing", "error"])
+async def test_companion_mismatch_is_failed_settings_step(
+    creation_boundary, controller, mode
+):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    b = creation_boundary
+    b.caps.return_value = replace(CAPS, controller_mode=controller)
+    b.resource["PendingProcessorCompatibilityMode"] = (
+        MARKER if mode == "wrong" else None
+    )
+    b.compat.return_value = {"profile_mode": MARKER} if mode == "wrong" else {}
+    if mode == "error":
+        b.compat.side_effect = HMCError(MARKER)
+        if controller:
+            b.hmc.get_logical_partition.side_effect = HMCError(MARKER)
+    result = await create_and_stamp_lpar(b.hmc, SYSTEM, b.creation)
+    assert result.resource_created and result.ownership_stamped
+    assert result.settings_step.status == "error"
+    assert MARKER not in repr(result)
+    b.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "missing-role",
+        "role-malformed",
+        "settings-read",
+        "resource",
+        "entry",
+        "mismatch",
+        "read",
+        "identity",
+        "name",
+        "created-identity",
+        "created-name",
+        "no-body",
+    ],
+)
+async def test_role_failed_creation_stops_assignments(
+    creation_boundary, failure, monkeypatch
+):
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.workflows import create_lpar
+
+    b = creation_boundary
+    if failure == "role-malformed":
+        b.resource["KvmCapable"] = MARKER
+    elif failure == "settings-read":
+        monkeypatch.setattr(
+            "hmcpctl.operations.lpar.core.get_lpar_settings",
+            AsyncMock(side_effect=HMCError(MARKER)),
+        )
+    elif failure == "resource":
+        b.hmc.get_logical_partition.return_value["Resource"] = MARKER
+    elif failure == "entry":
+        b.hmc.get_logical_partition.return_value = None
+    elif failure == "missing-role":
+        b.resource.pop("KvmCapable")
+    elif failure == "mismatch":
+        b.resource["KvmCapable"] = "false"
+    elif failure == "read":
+        b.hmc.get_logical_partition.side_effect = HMCError(MARKER)
+    elif failure == "identity":
+        b.hmc.get_logical_partition.return_value["UUID"] = SYSTEM
+    elif failure == "name":
+        b.resource["PartitionName"] = MARKER
+    elif failure == "created-identity":
+        b.entry["UUID"] = MARKER
+    elif failure == "created-name":
+        b.entry["Resource"]["PartitionName"] = MARKER
+    else:
+        b.hmc.find_partition_by_name.side_effect = [None, HMCError(MARKER)]
+    result = await create_lpar(
+        b.hmc, SYSTEM, replace(b.creation, apply_profile=True), LparPcieAssignments()
+    )
+    assert result.resource_created and not result.workflow_completed
+    assert (
+        next(step for step in result.steps if step.step == "settings").status == "error"
+    )
+    b.assign.assert_not_awaited()
+    b.apply.assert_not_awaited()
+    assert MARKER not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_role_native_creation_error_is_uncertain_and_safe(creation_boundary):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    b = creation_boundary
+    b.create.side_effect = HMCError(MARKER)
+    with pytest.raises(HMCError) as error:
+        await create_and_stamp_lpar(b.hmc, SYSTEM, b.creation)
+    assert MARKER not in str(error.value)
+    assert "unknown" in str(error.value)
+    b.create.assert_awaited_once()
+    b.stamp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_classic_role_physical_io_is_preserved(creation_boundary, monkeypatch):
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    b = creation_boundary
+    io = LparPhysicalIO(console_slot="hmc")
+    monkeypatch.setattr(
+        core,
+        "created_io_step",
+        AsyncMock(return_value=WorkflowStep("physical_io", "ok")),
+    )
+    result = await core.create_and_stamp_lpar(
+        b.hmc, SYSTEM, replace(b.creation, physical_io=io, apply_profile=True)
+    )
+    assert (
+        result.settings_step.status
+        == result.physical_io_step.status
+        == result.apply_step.status
+        == "ok"
+    )
+    assert b.create.await_args.kwargs["physical_io"] is io
+    b.apply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("powervm_mgmt_capable", False),
+        ("powervm_mgmt_capable", True),
+        ("kvm_capable", False),
+    ],
+)
+async def test_creation_selected_false_and_management_need_no_companion(
+    creation_boundary, name, value
+):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    b = creation_boundary
+    b.resource[roles.ROLE_FIELDS[name]] = str(value).lower()
+    b.resource.pop("PendingProcessorCompatibilityMode")
+    settings = LparSettings(**{name: value})
+    creation = replace(b.creation, settings=settings, resources=LparResources())
+    result = await create_and_stamp_lpar(b.hmc, SYSTEM, creation)
+    assert result.settings_step.status == "ok"
+    assert getattr(result.settings_step.result, name) is value
+    assert b.create.await_args.kwargs["settings"] is settings
+    b.compat.assert_not_awaited()
+    b.caps.assert_awaited_once_with(b.hmc, SYSTEM, need_kvm=name == "kvm_capable")
+
+
+@pytest.mark.asyncio
+async def test_controller_vnic_not_blanket_rejected(creation_boundary):
+    from decimal import Decimal
+
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments, VnicAssignment
+    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
+
+    b = creation_boundary
+    b.caps.return_value = replace(CAPS, controller_mode=True)
+    backing = VnicBackingSelector("vios", "1", "1", "0", Decimal(2))
+    assignments = LparPcieAssignments(vnics=(VnicAssignment(backing, 0),))
+    result = await create_lpar(b.hmc, SYSTEM, b.creation, assignments)
+    assert result.workflow_completed
+    b.prevalidate.assert_awaited_once_with(b.hmc, SYSTEM, assignments)
+    b.assign.assert_awaited_once_with(b.hmc, SYSTEM, "owned", assignments)
+
+
+@pytest.mark.asyncio
+async def test_role_creation_verifies_reporting_before_apply(
+    creation_boundary, monkeypatch
+):
+    from hmcpctl.documents.lpar import LparReportingSettings
+    from hmcpctl.operations.lpar import core
+
+    b = creation_boundary
+    reporting = LparReportingSettings(work_group_id=0)
+    read = AsyncMock(return_value=reporting)
+    monkeypatch.setattr(core, "get_lpar_reporting_settings", read)
+    result = await core.create_and_stamp_lpar(
+        b.hmc,
+        SYSTEM,
+        replace(b.creation, reporting_settings=reporting, apply_profile=True),
+    )
+    assert result.reporting_step.status == result.apply_step.status == "ok"
+    read.assert_awaited_once()
+    b.apply.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"kvm": False},
+        {"hmc_version": None},
+        {"hmc_version": (10, 3, 1060, 0)},
+        {"firmware": None},
+        {"firmware": (1060, 9)},
+        {"power11": True},
+    ],
+)
+def test_creation_capability_prerequisites(changes):
+    from hmcpctl.operations.lpar.core import LparCreation
+
+    creation = LparCreation(
+        "owned",
+        "AIX/Linux",
+        LparResources(dedicated=True, desired_procs=2),
+        settings=LparSettings(kvm_capable=True),
+    )
+    with pytest.raises(ValueError):
+        roles.admit_role_creation(creation, replace(CAPS, **changes))
+    roles.admit_role_creation(creation, CAPS)
+    roles.admit_role_creation(creation, replace(CAPS, power11=True, firmware=(1110, 0)))
+    with pytest.raises(ValueError):
+        roles.admit_role_creation(replace(creation, partition_type="OS400"), CAPS)
+    with pytest.raises(ValueError):
+        roles.admit_role_creation(
+            replace(creation, partition_type="Virtual IO Server"), CAPS
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize(
+    "domain", ["reporting", "vtpm", "physical_io", "apply_profile"]
+)
+async def test_mixed_creation_remote_errors_are_safe_for_roles(
+    creation_boundary, monkeypatch, selected, domain
+):
+    from hmcpctl.documents.lpar import LparReportingSettings
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+    from hmcpctl.operations.lpar import core, physical_io
+    from hmcpctl.operations.lpar.vtpm import VtpmCapabilities
+
+    b = creation_boundary
+    changes = {"apply_profile": True}
+    if not selected:
+        changes["settings"] = LparSettings(time_ref=False)
+    if domain == "reporting":
+        changes["reporting_settings"] = LparReportingSettings(work_group_id=0)
+        monkeypatch.setattr(
+            core, "get_lpar_reporting_settings", AsyncMock(side_effect=HMCError(MARKER))
+        )
+    elif domain == "vtpm":
+        changes["vtpm_settings"] = LparVtpmSettings(False)
+        monkeypatch.setattr(
+            core,
+            "read_vtpm_capabilities",
+            AsyncMock(return_value=VtpmCapabilities(("1.2",), (), False)),
+        )
+        monkeypatch.setattr(
+            core, "get_lpar_vtpm_state", AsyncMock(side_effect=HMCError(MARKER))
+        )
+    elif domain == "physical_io":
+        changes["physical_io"] = LparPhysicalIO(console_slot="hmc")
+        monkeypatch.setattr(core, "created_io_step", physical_io.created_io_step)
+        monkeypatch.setattr(
+            physical_io,
+            "read_partition_profile",
+            AsyncMock(side_effect=HMCError(MARKER)),
+        )
+    else:
+        b.apply.side_effect = HMCCLIError(MARKER)
+    result = await core.create_and_stamp_lpar(
+        b.hmc, SYSTEM, replace(b.creation, **changes)
+    )
+    step = getattr(
+        result,
+        {
+            "reporting": "reporting_step",
+            "vtpm": "vtpm_step",
+            "physical_io": "physical_io_step",
+            "apply_profile": "apply_step",
+        }[domain],
+    )
+    assert result.resource_created and result.ownership_stamped
+    assert step.status == "error"
+    assert (MARKER in repr(result)) is (not selected)
+    if selected:
+        assert "inspect" in step.result.lower()
+        assert result.lpar is b.entry
+        assert result.settings_step.result.kvm_capable is True
+    if domain != "apply_profile" and (selected or domain == "physical_io"):
+        b.apply.assert_not_awaited()
