@@ -240,7 +240,9 @@ async def _update(
 
 async def _creation_mode(hmc: HMCClient, system: str) -> tuple[bool, bool]:
     """Require management authority; KVM evidence selects only the full variant."""
-    caps = await read_role_capabilities(hmc, system, need_kvm=False)
+    caps = await read_role_capabilities(
+        hmc, system, need_kvm=False, need_management=True
+    )
     creation = LparCreation(
         "eligibility-only",
         partition_type="AIX/Linux",
@@ -250,7 +252,9 @@ async def _creation_mode(hmc: HMCClient, system: str) -> tuple[bool, bool]:
     )
     admit_role_creation(creation, caps)
     try:
-        full_caps = await read_role_capabilities(hmc, system, need_kvm=True)
+        full_caps = await read_role_capabilities(
+            hmc, system, need_kvm=True, need_management=True
+        )
         admit_role_creation(
             replace(
                 creation,

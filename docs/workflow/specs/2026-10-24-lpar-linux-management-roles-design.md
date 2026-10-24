@@ -69,14 +69,26 @@ known preserved roles; a missing requested role is unavailable verification.
 Selection of either field, including false, declares Linux intent on AIX/Linux
 (C6); OS400/VIOS are refused. No installed-OS classifier or intent parameter.
 
+Native authority source: P10/P11 `installios.md:34` and `lpar-netboot.md:57`
+identify `is_controller=1` from lscomgmt as co-management with omitted/blank
+profiles; `chcomgmt.md:24` identifies this HMC as the controller owner. The
+retained native management-create false refusal and null status invalidate the
+previous classic-management admission promise. This does not define XML flags
+generally or establish a KVM-specific controller requirement.
+
 ## Admission and effects
 
 1. Validate typed values, nonempty update, environment and encodable record.
    Resolve selected-system containment and ownership before update reads/writes.
    Creation retains duplicate-name, memory, I/O and ownership-stamping behavior.
-2. Read selected-system management authority. Classic mode is admitted only
-   from explicit true; otherwise require explicit current-HMC controller true.
-   Unknown/contradictory evidence fails before effects. Never acquire authority.
+2. Read native `lscomgmt -m <quoted selected SystemName> -F is_controller` once
+   per role admission. Exact scalar `1` establishes controller/profileless mode.
+   Management-field selection, including false, requires that positive value.
+   Native `null` plus the observed classic true/current-HMC-controller false
+   and PowerVM-controller false tuple classifies legacy profile grammar only,
+   available for KVM-only requests.
+   Other/unknown/malformed evidence fails before effects. Never acquire authority.
+   No-role requests add no query; management-only requests add no KVM queries.
 3. A supplied KVM field requires positive selected-system KVM advertisement
    and usable console release >=10.3.1060.1 (retain the fix level from
    `VersionInfo/Minor`, not `Maintenance`). Positive enablement additionally
@@ -102,8 +114,8 @@ Selection of either field, including false, declares Linux intent on AIX/Linux
    The same controller admission rejects `LparPhysicalIO` (whose public contract
    is initial-profile I/O), creation SR-IOV and explicit dedicated/SR-IOV
    assignments (whose inputs require `profile_name`) before creation/assignment.
-   Guidance names existing apply=false inputs or classic management mode. Keep
-   classic mode with role flags and physical I/O supported; do not blanket-reject
+   Guidance names existing apply=false inputs. Management-role requests cannot
+   use classic profile-dependent I/O; preserve KVM-only classic physical I/O; do not blanket-reject
    vNIC inputs, which carry no profile name, or invent current-I/O support.
 7. Update writes only requested role fields in one `chsyscfg -r lpar` record.
    No activation, reboot, software deployment or controller transfer follows.
@@ -163,7 +175,8 @@ readiness is never inferred from these configuration postconditions (C3/C4).
 
 Behavioral tests cover both booleans/omission, strict invalid types/extra keys,
 all eight bindings, classic/controller creation, no-create/no-assignment profile denials, positive
-classic role-plus-I/O preservation, authorized/foreign selectors,
+KVM-only classic role-plus-I/O preservation, management authority refusal,
+authorized/foreign selectors,
 capability/release/state/CPU/compatibility/PKS/vPMEM negatives, source-shape
 parsing, requested/preserved readback, fixed companion, and every uncertain
 outcome. Test a bounded malicious remote-error marker to prove result warnings omit it.

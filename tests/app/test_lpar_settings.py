@@ -214,6 +214,8 @@ def role_app_boundary(monkeypatch):
     state = {"error": None, "description": ""}
 
     async def remote(config, command, **kwargs):
+        if command == "lscomgmt -m sys-R1 -F is_controller":
+            return "1\n"  # Synthetic positive native authority, not captured hardware.
         if command.startswith(("chsyscfg ", "mksyscfg ")):
             writes.append(command)
             if state["error"] is not None:
@@ -249,6 +251,7 @@ def role_app_boundary(monkeypatch):
 
     monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", remote)
     monkeypatch.setattr("hmcpctl.ssh.profiles.run_hmc_command", remote)
+    monkeypatch.setattr("hmcpctl.operations.lpar.linux_roles.run_hmc_command", remote)
     for module in (configuration, lifecycle_create):
         monkeypatch.setattr(module, "with_client", lambda f, **kw: asyncio.run(f(hmc)))
     monkeypatch.setenv("HMC_HOST", "hmc.test")
@@ -280,6 +283,7 @@ async def test_mcp_role_invalid_values_before_remote(role_app_boundary, creation
             name,
             {
                 "system_name_or_uuid": SYSTEM,
+                **({"apply_partition_profile": False} if creation else {}),
                 "name" if creation else "lpar_name_or_uuid": PARTITION,
                 "settings": {"unexpected_role": False},
             },
@@ -348,6 +352,7 @@ async def test_mcp_capability_false_denial_has_reason(role_app_boundary, creatio
             name,
             {
                 "system_name_or_uuid": SYSTEM,
+                **({"apply_partition_profile": False} if creation else {}),
                 "name" if creation else "lpar_name_or_uuid": "new"
                 if creation
                 else PARTITION,
@@ -429,6 +434,7 @@ async def test_mcp_role_remote_diagnostic_privacy(
             name,
             {
                 "system_name_or_uuid": SYSTEM,
+                **({"apply_partition_profile": False} if creation else {}),
                 "name" if creation else "lpar_name_or_uuid": "new"
                 if creation
                 else PARTITION,
@@ -584,6 +590,7 @@ async def test_mcp_role_preflight_remote_diagnostic_privacy(
             name,
             {
                 "system_name_or_uuid": SYSTEM,
+                **({"apply_partition_profile": False} if creation else {}),
                 "name" if creation else "lpar_name_or_uuid": "new"
                 if creation
                 else PARTITION,

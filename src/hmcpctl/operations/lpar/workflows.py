@@ -37,10 +37,11 @@ async def create_lpar(
             hmc,
             await resolve_system_uuid(hmc, system_name_or_uuid),
             need_kvm=creation.settings.kvm_capable is not None,
+            need_management=creation.settings.powervm_mgmt_capable is not None,
         )
         if caps.controller_mode:
             raise ValueError(
-                "Dedicated and SR-IOV profile assignments require classic management mode"
+                "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
             )
     if creation.physical_io.requested:
         overlap = {s.drc_index for s in creation.physical_io.io_slots} & {

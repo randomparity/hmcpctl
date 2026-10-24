@@ -493,7 +493,8 @@ def hmc_configure_lpar(
     proving the installed OS. KVM selection requires inactivity and no operation
     in progress; enablement requires existing POWER10, dedicated never-share CPUs,
     zero keystore and no persistent memory. CPUs and compatibility are unchanged.
-    Management authority must be classic or held by this HMC; no takeover occurs.
+    Management selection, including false, requires native is_controller=1 for
+    this HMC; classic profile support alone does not authorize it. No takeover occurs.
     Readback proves configuration only, not KVM/NovaLink guest deployment.
     Inspect unknown, unavailable or mismatching outcomes before retrying.
 

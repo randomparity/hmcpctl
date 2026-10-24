@@ -170,31 +170,52 @@ def source_boundary(monkeypatch):
     )
     modes = AsyncMock(return_value=["POWER9", "POWER10"])
     monkeypatch.setattr(roles, "get_proc_compat_modes", modes)
-    return SimpleNamespace(hmc=hmc, system=system, console=console, modes=modes)
+    status = AsyncMock(return_value="null\n")
+    monkeypatch.setattr(roles, "run_hmc_command", status, raising=False)
+    return SimpleNamespace(
+        hmc=hmc, system=system, console=console, modes=modes, status=status
+    )
 
 
 @pytest.mark.asyncio
 async def test_capability_source_decoding(source_boundary):
     b = source_boundary
-    assert await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True) == CAPS
+    assert (
+        await roles.read_role_capabilities(
+            b.hmc, SYSTEM, need_kvm=True, need_management=False
+        )
+        == CAPS
+    )
     b.modes.return_value = ["POWER10", "POWER11"]
     b.system["SystemFirmware"] = {"text": "FW1110_FW1110.00 (1)"}
-    assert (await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)).power11
+    assert (
+        await roles.read_role_capabilities(
+            b.hmc, SYSTEM, need_kvm=True, need_management=False
+        )
+    ).power11
     for field in ("Version", "Release", "ServicePackName", "Minor"):
         old = b.console["VersionInfo"].pop(field)
         assert (
-            await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+            await roles.read_role_capabilities(
+                b.hmc, SYSTEM, need_kvm=True, need_management=False
+            )
         ).hmc_version is None
         b.console["VersionInfo"][field] = old
     for bad in (None, "bad", "-1", "1.0", True):
         b.console["VersionInfo"]["Minor"] = bad
         assert (
-            await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+            await roles.read_role_capabilities(
+                b.hmc, SYSTEM, need_kvm=True, need_management=False
+            )
         ).hmc_version is None
     b.system["IsClassicHMCManagement"] = "false"
     b.system["IsHMCPowerVMManagementController"] = "true"
-    caps = await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=False)
+    b.status.return_value = "1\n"
+    caps = await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=False, need_management=False
+    )
     assert caps.controller_mode and caps.hmc_version is None
+    b.status.return_value = "null\n"
     for classic, controller in (
         (None, "true"),
         ("true", None),
@@ -206,7 +227,9 @@ async def test_capability_source_decoding(source_boundary):
             IsClassicHMCManagement=classic, IsHMCPowerVMManagementController=controller
         )
         with pytest.raises(ValueError):
-            await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=False)
+            await roles.read_role_capabilities(
+                b.hmc, SYSTEM, need_kvm=False, need_management=False
+            )
 
 
 @pytest.mark.asyncio
@@ -220,7 +243,9 @@ async def test_captured_console_fix_level(source_boundary):
     b.hmc.get_console_info.return_value = {"Resource": console}
     b.system.clear()
     b.system.update(captured("rest-ms-entry-mtms-pair.json")["Resource"])
-    caps = await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+    caps = await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=True, need_management=False
+    )
     assert caps.hmc_version == (10, 3, 1060, 3)
     assert not caps.kvm and caps.firmware == (950, 0)
 
@@ -237,7 +262,9 @@ async def test_source_fix_level_admission(
 
     b = source_boundary
     b.console["VersionInfo"].update(Maintenance=maintenance, Minor=minor)
-    caps = await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+    caps = await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=True, need_management=False
+    )
     assert caps.hmc_version == (10, 3, 1060, int(minor))
     settings = LparSettings(kvm_capable=selected)
     creation = LparCreation(
@@ -261,7 +288,9 @@ async def test_captured_source_shape(source_boundary):
     b = source_boundary
     b.system.clear()
     b.system.update(captured("rest-ms-entry-mtms-pair.json")["Resource"])
-    caps = await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+    caps = await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=True, need_management=False
+    )
     assert not caps.kvm and not caps.controller_mode and caps.firmware == (950, 0)
     resource = captured("rest-lpar-entry.json")["Resource"]
     evidence = roles.with_role_evidence(BASE, resource, LparSettings(kvm_capable=False))
@@ -270,7 +299,9 @@ async def test_captured_source_shape(source_boundary):
         roles.admit_role_update(LparSettings(kvm_capable=True), caps, resource)
     b.hmc.get_console_info.reset_mock()
     b.modes.reset_mock()
-    await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=False)
+    await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=False, need_management=False
+    )
     b.hmc.get_console_info.assert_not_awaited()
     b.modes.assert_not_awaited()
 
@@ -458,7 +489,10 @@ async def test_selected_boolean_write_and_preservation(role_boundary, name, valu
     assert result.status == "verified"
     assert getattr(result.observed, name) is value
     b.write.assert_awaited_once_with(CONFIG, "system", "owned", settings)
-    assert b.caps.await_args.kwargs == {"need_kvm": name == "kvm_capable"}
+    assert b.caps.await_args.kwargs == {
+        "need_kvm": name == "kvm_capable",
+        "need_management": name == "powervm_mgmt_capable",
+    }
 
 
 @pytest.mark.asyncio
@@ -469,11 +503,19 @@ async def test_false_kvm_does_not_require_generation_evidence(source_boundary, u
         b.modes.side_effect = HMCError(MARKER)
     elif unknown == "name":
         b.system.pop("SystemName")
+        with pytest.raises(ValueError, match="selected-system name"):
+            await roles.read_role_capabilities(
+                b.hmc, SYSTEM, need_kvm=True, need_management=False
+            )
+        b.status.assert_not_awaited()
+        return
     elif unknown == "unsupported":
         b.modes.return_value = ["POWER9"]
     else:
         b.system["SystemFirmware"] = "bad"
-    caps = await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+    caps = await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=True, need_management=False
+    )
     roles.admit_role_update(LparSettings(kvm_capable=False), caps, eligible_resource())
     with pytest.raises(ValueError):
         roles.admit_role_update(
@@ -830,7 +872,7 @@ async def test_profile_assignment_rejected_before_create(creation_boundary, kind
             DEFAULT_PROFILE_NAME, "1", "0", "27004002", Decimal(2)
         )
     )
-    with pytest.raises(ValueError, match="classic"):
+    with pytest.raises(ValueError, match="controller mode"):
         await create_lpar(
             b.hmc, SYSTEM, b.creation, LparPcieAssignments(**{kind: (item,)})
         )
@@ -1042,7 +1084,12 @@ async def test_creation_selected_false_and_management_need_no_companion(
     assert getattr(result.settings_step.result, name) is value
     assert b.create.await_args.kwargs["settings"] is settings
     b.compat.assert_not_awaited()
-    b.caps.assert_awaited_once_with(b.hmc, SYSTEM, need_kvm=name == "kvm_capable")
+    b.caps.assert_awaited_once_with(
+        b.hmc,
+        SYSTEM,
+        need_kvm=name == "kvm_capable",
+        need_management=name == "powervm_mgmt_capable",
+    )
 
 
 @pytest.mark.asyncio
@@ -1196,7 +1243,9 @@ async def test_role_preflight_error_preserves_type_and_status(
         b.hmc, "get_managed_system" if stage == "system" else "get_console_info"
     ).side_effect = original
     with pytest.raises(error_type) as caught:
-        await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+        await roles.read_role_capabilities(
+            b.hmc, SYSTEM, need_kvm=True, need_management=False
+        )
     assert type(caught.value) is error_type
     assert caught.value.status_code == 503
     assert caught.value.body is None
@@ -1369,3 +1418,96 @@ async def test_role_preflight_sibling_read_diagnostics(role_boundary, stage):
         caught.value
     )
     b.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "null\n",
+        "0\n",
+        "",
+        "1\n1\n",
+        "true",
+        "is_controller=1",
+        "1,1",
+        "01",
+        "\n1\n",
+        "1\n\n",
+        " 1",
+        "1 ",
+    ],
+)
+async def test_management_requires_positive_native_controller(source_boundary, raw):
+    b = source_boundary
+    b.status.return_value = raw
+    with pytest.raises(ValueError, match="controller"):
+        await roles.read_role_capabilities(
+            b.hmc, SYSTEM, need_kvm=False, need_management=True
+        )
+    b.hmc.get_console_info.assert_not_awaited()
+    b.modes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_controller_and_classic_grammar_are_separate(source_boundary):
+    b = source_boundary
+    b.system["SystemName"] = "selected system; quoted"
+    b.status.return_value = "1\n"
+    caps = await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=False, need_management=True
+    )
+    assert caps.controller_mode
+    b.status.assert_awaited_once_with(
+        CONFIG, "lscomgmt -m 'selected system; quoted' -F is_controller"
+    )
+    b.status.return_value = "null\n"
+    caps = await roles.read_role_capabilities(
+        b.hmc, SYSTEM, need_kvm=True, need_management=False
+    )
+    assert not caps.controller_mode and caps.kvm
+    b.status.return_value = "0\n"
+    with pytest.raises(ValueError, match="controller"):
+        await roles.read_role_capabilities(
+            b.hmc, SYSTEM, need_kvm=True, need_management=False
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type", [HMCError, HMCTransportError, HMCTLSFingerprintError, HMCCLIError]
+)
+async def test_native_controller_error_is_private(source_boundary, error_type):
+    b = source_boundary
+    b.status.side_effect = error_type(MARKER, status_code=503, body=MARKER)
+    with pytest.raises(error_type) as caught:
+        await roles.read_role_capabilities(
+            b.hmc, SYSTEM, need_kvm=False, need_management=True
+        )
+    assert type(caught.value) is error_type
+    assert caught.value.status_code == 503
+    assert caught.value.body is None
+    assert "no changes were submitted" in str(caught.value)
+    assert MARKER not in "".join(traceback.format_exception(caught.value))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field",
+    [
+        "IsClassicHMCManagement",
+        "IsHMCPowerVMManagementController",
+        "IsPowerVMManagementController",
+    ],
+)
+@pytest.mark.parametrize("bad", [None, "unknown", "true"])
+async def test_native_null_needs_known_classic_tuple(source_boundary, field, bad):
+    b = source_boundary
+    if field == "IsClassicHMCManagement" and bad == "true":
+        bad = "false"
+    b.system[field] = bad
+    with pytest.raises(ValueError, match="controller"):
+        await roles.read_role_capabilities(
+            b.hmc, SYSTEM, need_kvm=True, need_management=False
+        )
+    b.hmc.get_console_info.assert_not_awaited()

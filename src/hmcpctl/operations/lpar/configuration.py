@@ -283,7 +283,10 @@ async def configure_lpar_settings(
                 )
             resource = await _role_resource(hmc, uuid, name)
             caps = await read_role_capabilities(
-                hmc, system_uuid, need_kvm=settings.kvm_capable is not None
+                hmc,
+                system_uuid,
+                need_kvm=settings.kvm_capable is not None,
+                need_management=settings.powervm_mgmt_capable is not None,
             )
             admit_role_update(settings, caps, resource)
         build_attribute_record([("name", name), *settings.pairs()])

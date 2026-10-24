@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,7 @@ from ...documents.lpar import LparSettings
 from ...errors import HMCError
 from ...ssh.lpar import complete_create_resources
 from ...ssh.profiles import get_proc_compat_modes
+from ...ssh.transport import run_hmc_command
 from ...xmlutil import leaf_text
 
 if TYPE_CHECKING:
@@ -57,7 +59,7 @@ def _role_console_version(resource: object) -> tuple[int, int, int, int] | None:
 
 
 async def read_role_capabilities(
-    hmc: HMCClient, system_uuid: str, *, need_kvm: bool
+    hmc: HMCClient, system_uuid: str, *, need_kvm: bool, need_management: bool
 ) -> RoleCapabilities:
     """Read authority first; management-only selection adds no KVM queries."""
     try:
@@ -73,16 +75,40 @@ async def read_role_capabilities(
         raise ValueError(  # noqa: TRY004 — malformed remote evidence, not caller input
             "Linux roles require readable selected-system authority"
         )
-    authority = tuple(
-        leaf_text(resource.get(name))
-        for name in ("IsClassicHMCManagement", "IsHMCPowerVMManagementController")
-    )
-    if authority not in (("true", "false"), ("false", "true")):
+    system = leaf_text(resource.get("SystemName"))
+    if not isinstance(system, str) or not system.strip():
         raise ValueError(
-            "Linux roles require explicit classic or current-HMC controller authority; "
-            "inspect selected-system management mode"
+            "Linux role controller preflight requires a readable selected-system name"
         )
-    controller = authority == ("false", "true")
+    try:
+        raw = await run_hmc_command(
+            hmc.config, f"lscomgmt -m {shlex.quote(system)} -F is_controller"
+        )
+    except HMCError as error:
+        raise type(error)(
+            "Linux role preflight could not read native controller authority; "
+            "no changes were submitted. Check connectivity and read permissions, then retry.",
+            status_code=error.status_code,
+        ) from None
+    # IBM installios/lpar-netboot document exact 1 as co-management/profileless.
+    # Native null plus this observed classic tuple classifies legacy grammar only.
+    records = raw.splitlines()
+    status = records[0] if len(records) == 1 else ""
+    controller = status == "1"
+    classic = status == "null" and tuple(
+        leaf_text(resource.get(name))
+        for name in (
+            "IsClassicHMCManagement",
+            "IsHMCPowerVMManagementController",
+            "IsPowerVMManagementController",
+        )
+    ) == ("true", "false", "false")
+    if not controller and (need_management or not classic):
+        raise ValueError(
+            "Linux role controller preflight requires native is_controller=1 for "
+            "management-role selection, or known classic profile evidence for KVM-only selection; "
+            "no changes were submitted. Inspect controller status; this operation never acquires it."
+        )
     if not need_kvm:
         return RoleCapabilities(controller, False, None, None, False)
     caps = resource.get("AssociatedSystemCapabilities")
@@ -196,11 +222,11 @@ def admit_role_creation(creation: LparCreation, caps: RoleCapabilities) -> None:
     if caps.controller_mode:
         if creation.apply_profile is True:
             raise ValueError(
-                "Controller creation requires apply_profile=False; use classic management mode for profile apply"
+                "Controller creation requires apply_profile=False; named profile apply is unavailable in controller mode"
             )
         if creation.physical_io.requested or creation.creation_sriov:
             raise ValueError(
-                "Initial-profile physical I/O and creation SR-IOV require classic management mode"
+                "Initial-profile physical I/O and creation SR-IOV are unavailable in controller mode"
             )
     if creation.settings.kvm_capable is None:
         return

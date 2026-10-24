@@ -1779,9 +1779,10 @@ The opt-in `lpar-linux-roles` arm creates one owned, inactive AIX/Linux fixture
 with explicit dedicated never-share CPUs (minimum/desired/maximum one processor)
 and memory (1024/2048/4096 MiB). When KVM prerequisites are admitted, creation
 selects management false and KVM true with POWER10 in the same native record.
-Classic management explicitly applies the initial profile after verification;
-current-HMC controller mode passes
-explicit false and omits the profile. The full variant independently reads roles,
+Both variants select the management field, including false, and require native
+`lscomgmt -m <selected system> -F is_controller` value `1`. Controller mode passes
+explicit apply false and omits the profile; classic profile support does not
+authorize management-role selection. The full variant independently reads roles,
 compatibility and resources, disables KVM, then changes management false→true→false
 while KVM remains false. It does not activate a guest, install software, manage
 keys, change the controller or rewrite an existing partition's resources.
@@ -1798,11 +1799,13 @@ The full KVM branch and its three catalog observations remain separate.
 
 The committed captured system reports KVM capability false and FW950; it cannot
 establish an eligible positive KVM run. Mocked eligible variants are synthetic.
-No native C05 lifecycle has been executed by adding this procedure.
+A retained native management-false creation attempt on a null-controller target
+was refused before any fixture was confirmed; recovery was clean and independent
+baselines matched. This is refusal evidence, not a positive lifecycle claim.
 
 A later, separately authorized finite execution packet must bind the exact
 candidate HEAD and imported source provenance, target, explicit resources,
-management mode and classic-apply effect, transport deadlines, cleanup/recovery
+native controller authority and profileless effects, transport deadlines, cleanup/recovery
 reserves and baseline facts before dispatch. Follow the shared preflight and
 source-provenance procedure; private raw captures stay outside repositories.
 The wrapper's maximum effects are one creation, three role updates and guarded

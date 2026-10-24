@@ -339,10 +339,10 @@ def _lpar_linux_roles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-linux-roles",
         True,
-        "configuration validated; management authority required; KVM evidence selects the full variant",
+        "configuration validated; native is_controller=1 required for management selection; KVM evidence selects the full variant",
         (
             f"one owned inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit dedicated never-share, 2 GiB desired memory/one CPU; management-only creation omits KVM and POWER10; full KVM creation adds same-record POWER10",
-            "classic: explicit profile apply; controller: explicit false and no profile; management-only: two management updates false-to-true-to-false; full KVM: KVM true-to-false then management false-to-true-to-false (three updates)",
+            "both variants: native controller=1, explicit apply false and no profile; management-only: two management updates false-to-true-to-false; full KVM: KVM true-to-false then management false-to-true-to-false (three updates)",
             "independent known roles/compatibility/resource reads, inactive-only matching-token deletion, baseline comparison and mandatory recovery; management-only has no catalog promotion; no activation, guest, key or controller-takeover effects",
         ),
         config.system_name,

@@ -864,7 +864,7 @@ def test_linux_roles_preflight_discloses_both_finite_variants(
     assert preflight.main(["--group", "lpar-linux-roles", "--skip-hardware"]) == 0
     output = " ".join(capsys.readouterr().out.split())
     for disclosure in (
-        "management authority required",
+        "native is_controller=1 required for management selection",
         "management-only creation omits KVM and POWER10",
         "two management updates",
         "three updates",

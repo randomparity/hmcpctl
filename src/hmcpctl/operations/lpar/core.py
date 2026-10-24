@@ -272,7 +272,10 @@ async def create_and_stamp_lpar(
     controller_mode = False
     if role_requested:
         role_caps = await read_role_capabilities(
-            hmc, system_uuid, need_kvm=creation.settings.kvm_capable is not None
+            hmc,
+            system_uuid,
+            need_kvm=creation.settings.kvm_capable is not None,
+            need_management=creation.settings.powervm_mgmt_capable is not None,
         )
         admit_role_creation(creation, role_caps)
         controller_mode = role_caps.controller_mode

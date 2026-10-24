@@ -40,7 +40,10 @@ def external_hmc(monkeypatch):
     system = captured("rest-ms-entry-mtms-pair.json")
     system["UUID"] = SYSTEM
     system["Resource"].update(
-        SystemName="sys-R1", SystemFirmware="VL1060_FW1060.10 (1)"
+        SystemName="sys-R1",
+        SystemFirmware="VL1060_FW1060.10 (1)",
+        IsClassicHMCManagement="false",
+        IsHMCPowerVMManagementController="true",
     )
     system["Resource"]["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = "true"
     template = captured("rest-lpar-entry.json")
@@ -73,6 +76,7 @@ def external_hmc(monkeypatch):
         reads=0,
         baseline_reads=0,
         compatibility_probe=None,
+        controller_status="1\n",
     )
 
     async def session(self):
@@ -119,6 +123,8 @@ def external_hmc(monkeypatch):
         if b.failure == "read-transport" and b.updates:
             raise HMCError("synthetic transport unavailable")
         entry = deepcopy(b.entry)
+        if entry is not None and b.failure == "companion":
+            entry["Resource"]["PendingProcessorCompatibilityMode"] = "POWER9"
         if entry is not None and b.compatibility_probe is not None:
             stage, value = b.compatibility_probe
             if stage == "before" or b.updates:
@@ -159,6 +165,10 @@ def external_hmc(monkeypatch):
 
     async def remote(config, command, **kwargs):
         b.commands.append(command)
+        if command.startswith("lscomgmt "):
+            if isinstance(b.controller_status, Exception):
+                raise b.controller_status
+            return b.controller_status
         if command.startswith("mksyscfg "):
             fields = dict(
                 item.split("=", 1) for item in shlex.split(command)[-1].split(",")
@@ -277,7 +287,11 @@ def external_hmc(monkeypatch):
     async def arbitrary(command, config):
         return await remote(config, command)
 
-    for module in ("hmcpctl.ssh.lpar", "hmcpctl.ssh.profiles"):
+    for module in (
+        "hmcpctl.ssh.lpar",
+        "hmcpctl.ssh.profiles",
+        "hmcpctl.operations.lpar.linux_roles",
+    ):
         monkeypatch.setattr(module + ".run_hmc_command", remote)
     monkeypatch.setattr("hmcpctl.server_tools.command.run_hmc_cli", arbitrary)
     monkeypatch.setattr("live_test.lpar_config._COMPARE_REREAD_DELAY_S", 0)
@@ -378,7 +392,7 @@ def test_registration_and_recovery():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("controller", [False, True])
+@pytest.mark.parametrize("controller", [True])
 async def test_eligible_synthetic_success(external_hmc, controller):
     b = external_hmc
     if controller:
@@ -443,7 +457,9 @@ async def test_eligible_synthetic_success(external_hmc, controller):
 @pytest.mark.asyncio
 async def test_ineligible_before_any_fixture(external_hmc):
     b = external_hmc
-    b.system["Resource"].pop("IsClassicHMCManagement")
+    b.controller_status = "null\n"
+    b.system["Resource"] = captured("rest-ms-entry-mtms-pair.json")["Resource"]
+    b.system["Resource"]["SystemName"] = "sys-R1"
     state = await exercise(b)
     assert b.entry is None and b.deletes == []
     assert not any(
@@ -538,6 +554,7 @@ async def test_actual_runstate_toolerror_reason_and_unchanged_guard(external_hmc
             system_name_or_uuid=SYSTEM,
             name="scratch",
             settings={"kvm_capable": False},
+            apply_partition_profile=False,
         )
     assert status == "FAIL" and isinstance(failure, CallFailure)
     assert failure.exception_type == "ToolError"
@@ -548,7 +565,11 @@ async def test_actual_runstate_toolerror_reason_and_unchanged_guard(external_hmc
     assert (
         b.system == before
         and b.entry is None
-        and b.commands == ["lssyscfg -r sys -m sys-R1 -F lpar_proc_compat_modes"]
+        and b.commands
+        == [
+            "lscomgmt -m sys-R1 -F is_controller",
+            "lssyscfg -r sys -m sys-R1 -F lpar_proc_compat_modes",
+        ]
     )
 
 
@@ -574,7 +595,7 @@ async def test_opt_in_precedes_any_external_request(external_hmc):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("controller", [False, True])
+@pytest.mark.parametrize("controller", [True])
 @pytest.mark.parametrize("known_kvm", ["false", "true"])
 @pytest.mark.parametrize("wrapped", [False, True])
 async def test_management_only_fallback_is_nonpromoting(
@@ -741,6 +762,11 @@ async def test_actual_mcp_withheld_role_apply_is_incomplete(
         b.system["Resource"].update(
             IsClassicHMCManagement="false", IsHMCPowerVMManagementController="true"
         )
+    else:
+        b.controller_status = "null\n"
+        b.system["Resource"].update(
+            IsClassicHMCManagement="true", IsHMCPowerVMManagementController="false"
+        )
     async with Client(application()) as client:
         result = await client.call_tool(
             "hmc_create_lpar",
@@ -748,7 +774,9 @@ async def test_actual_mcp_withheld_role_apply_is_incomplete(
                 "system_name_or_uuid": SYSTEM,
                 "name": "part-R1",
                 "resources": arm.RESOURCES,
-                "settings": {"powervm_mgmt_capable": selected},
+                "settings": {
+                    "powervm_mgmt_capable" if controller else "kvm_capable": selected
+                },
                 "apply_partition_profile": apply,
             },
             raise_on_error=False,
@@ -787,8 +815,16 @@ def test_actual_cli_withheld_role_apply_exits_nonzero(
         b.system["Resource"].update(
             IsClassicHMCManagement="false", IsHMCPowerVMManagementController="true"
         )
-    flag = "--powervm-mgmt-capable" if selected else "--no-powervm-mgmt-capable"
+    else:
+        b.controller_status = "null\n"
+        b.system["Resource"].update(
+            IsClassicHMCManagement="true", IsHMCPowerVMManagementController="false"
+        )
+    field = "powervm-mgmt-capable" if controller else "kvm-capable"
+    flag = "--" + ("" if selected else "no-") + field
     args = ["lpars", "create", "part-R1", "--system", SYSTEM, "--yes", flag]
+    if not controller:
+        args.extend(["--dedicated", "--procs", "1"])
     if not apply:
         args.append("--no-apply")
     result = CliRunner().invoke(app, args)
@@ -820,8 +856,102 @@ async def test_management_compatibility_requires_known_evidence(
     assert b.updates == (0 if stage == "before" else 1)
     assert len([cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]) == 1
     assert len([cmd for cmd in b.commands if "description=" in cmd]) == 1
-    assert sum("-o apply" in cmd for cmd in b.commands) == 1
+    assert sum("-o apply" in cmd for cmd in b.commands) == 0
     assert (
         b.entry is None and b.deletes == [PARTITION] and await recovery_findings() == []
     )
     assert rows[0]["data"]["cleanup"] == "passed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "configure"])
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("status", ["null\n", "0\n", "private-error"])
+async def test_actual_mcp_controller_refusal_is_private_and_prewrite(
+    external_hmc, operation, selected, status, caplog
+):
+    b = external_hmc
+    b.system["Resource"].update(
+        IsClassicHMCManagement="true",
+        IsHMCPowerVMManagementController="false",
+        IsPowerVMManagementController="false",
+    )
+    marker = "REMOTE_PRIVATE_CONTROLLER_MARKER"
+    b.controller_status = (
+        HMCError(marker, 503, marker) if status == "private-error" else status
+    )
+    if operation == "configure":
+        b.entry = deepcopy(b.template)
+        b.entry["Resource"]["PartitionName"] = "part-R1"
+    before = deepcopy(b.entry)
+    args = {
+        "system_name_or_uuid": SYSTEM,
+        "settings": {"powervm_mgmt_capable": selected},
+    }
+    if operation == "create":
+        args.update(
+            name="part-R1", resources=arm.RESOURCES, apply_partition_profile=False
+        )
+    else:
+        args.update(lpar_name_or_uuid=PARTITION, ownership_override=True)
+    async with Client(application()) as client:
+        result = await client.call_tool(
+            "hmc_" + operation + "_lpar", args, raise_on_error=False
+        )
+    assert result.is_error
+    reason = "no changes were submitted" if status == "private-error" else "controller"
+    assert reason in str(result)
+    assert marker not in str(result) + caplog.text
+    assert b.entry == before and b.updates == 0 and not b.deletes
+    assert not any(
+        cmd.startswith(("mksyscfg ", "chsyscfg ", "chsysstate ")) for cmd in b.commands
+    )
+    assert b.commands.count("lscomgmt -m sys-R1 -F is_controller") == 1
+
+
+@pytest.mark.parametrize("operation", ["create", "configure"])
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("status", ["null\n", "private-error"])
+def test_actual_cli_controller_refusal_is_private_and_prewrite(
+    external_hmc, operation, selected, status
+):
+    from typer.testing import CliRunner
+
+    from hmcpctl.cli import app
+
+    b = external_hmc
+    b.system["Resource"].update(
+        IsClassicHMCManagement="true",
+        IsHMCPowerVMManagementController="false",
+        IsPowerVMManagementController="false",
+    )
+    marker = "REMOTE_PRIVATE_CONTROLLER_MARKER"
+    b.controller_status = (
+        HMCError(marker, 503, marker) if status == "private-error" else status
+    )
+    flag = "--powervm-mgmt-capable" if selected else "--no-powervm-mgmt-capable"
+    if operation == "create":
+        args = [
+            "lpars",
+            "create",
+            "part-R1",
+            "--system",
+            SYSTEM,
+            "--yes",
+            "--no-apply",
+            flag,
+        ]
+    else:
+        b.entry = deepcopy(b.template)
+        b.entry["Resource"]["PartitionName"] = "part-R1"
+        args = ["lpars", "configure", PARTITION, SYSTEM, "--ownership-override", flag]
+    before = deepcopy(b.entry)
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code != 0
+    reason = "no changes were submitted" if status == "private-error" else "controller"
+    assert reason in result.output and marker not in result.output
+    assert b.entry == before and b.updates == 0 and not b.deletes
+    assert not any(
+        cmd.startswith(("mksyscfg ", "chsyscfg ", "chsysstate ")) for cmd in b.commands
+    )
+    assert b.commands.count("lscomgmt -m sys-R1 -F is_controller") == 1

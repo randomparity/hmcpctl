@@ -31,9 +31,15 @@ record. False/omitted KVM adds no compatibility effect. Preserve caller CPU
 intent; reject incompatible resources instead of silently changing them.
 Controller-mode create omits the prohibited implicit profile name and rejects
 explicit apply and existing profile-dependent I/O requests before effects, with
-existing-option/classic-mode guidance. `LparPhysicalIO` promises initial-profile
+existing apply=false guidance. `LparPhysicalIO` promises initial-profile
 verification; dedicated/SR-IOV assignment inputs require a profile name. Preserve
-classic-mode I/O behavior and do not invent a current-I/O contract.
+KVM-only classic-mode I/O behavior and do not invent a current-I/O contract.
+Management-field selection, including false, requires exact native
+`lscomgmt -m <selected system> -F is_controller` value `1`. Native null plus the
+observed classic tuple classifies legacy profile grammar only; it does not
+authorize the management field. P10/P11 installios and lpar-netboot document
+value 1 as co-management/profileless; the native false-field creation refusal disproved
+the earlier classic-management admission assumption. Unknown evidence refuses.
 Do not transfer controller authority or activate/restart the partition.
 
 Verify requested and known-preserved role values and the creation companion. Represent
