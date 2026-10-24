@@ -256,35 +256,46 @@ async def configure_lpar_settings(
     if not settings.pairs():
         raise ValueError("Supply at least one partition setting")
     role_selection = roles_requested(settings)
-    uuid = None
-    system_uuid = None
-    if role_selection:
-        system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-        uuid = await resolve_lpar_uuid(
-            hmc, lpar_name_or_uuid, system_name_or_uuid=system_uuid
-        )
-    system, name = await resolve_and_authorize_lpar_names(
-        hmc,
-        uuid if uuid is not None else lpar_name_or_uuid,
-        system_name_or_uuid=system_uuid
-        if system_uuid is not None
-        else system_name_or_uuid,
-        ownership_override=ownership_override,
-    )
-    resource = None
-    if uuid is not None and system_uuid is not None:
-        contained = await resolve_lpar_uuid(hmc, name, system_name_or_uuid=system_uuid)
-        if contained.casefold() != uuid.casefold():
-            raise ValueError(
-                "Linux role partition identity changed during authorization"
+    try:
+        uuid = None
+        system_uuid = None
+        if role_selection:
+            system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+            uuid = await resolve_lpar_uuid(
+                hmc, lpar_name_or_uuid, system_name_or_uuid=system_uuid
             )
-        resource = await _role_resource(hmc, uuid, name)
-        caps = await read_role_capabilities(
-            hmc, system_uuid, need_kvm=settings.kvm_capable is not None
+        system, name = await resolve_and_authorize_lpar_names(
+            hmc,
+            uuid if uuid is not None else lpar_name_or_uuid,
+            system_name_or_uuid=system_uuid
+            if system_uuid is not None
+            else system_name_or_uuid,
+            ownership_override=ownership_override,
         )
-        admit_role_update(settings, caps, resource)
-    build_attribute_record([("name", name), *settings.pairs()])
-    before = await get_lpar_settings(hmc.config, system, name)
+        resource = None
+        if uuid is not None and system_uuid is not None:
+            contained = await resolve_lpar_uuid(
+                hmc, name, system_name_or_uuid=system_uuid
+            )
+            if contained.casefold() != uuid.casefold():
+                raise ValueError(
+                    "Linux role partition identity changed during authorization"
+                )
+            resource = await _role_resource(hmc, uuid, name)
+            caps = await read_role_capabilities(
+                hmc, system_uuid, need_kvm=settings.kvm_capable is not None
+            )
+            admit_role_update(settings, caps, resource)
+        build_attribute_record([("name", name), *settings.pairs()])
+        before = await get_lpar_settings(hmc.config, system, name)
+    except HMCError as error:
+        if not role_selection:
+            raise
+        raise type(error)(
+            "Linux role preflight could not read required configuration evidence; "
+            "no changes were submitted. Check connectivity and read permissions, then retry.",
+            status_code=error.status_code,
+        ) from None
     if resource is not None:
         before = with_role_evidence(before, resource, LparSettings())
     expected = replace(

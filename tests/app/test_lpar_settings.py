@@ -242,6 +242,8 @@ def role_app_boundary(monkeypatch):
         if command.endswith("-F name"):
             return "sys-R1"
         if "-F lpar_env,allow_perf_collection," in command:
+            if state.get("baseline_error") is not None:
+                raise state["baseline_error"]
             return "aixlinux,0,0,0,0,0"
         raise AssertionError(f"Unexpected external SSH request: {command}")
 
@@ -593,3 +595,82 @@ async def test_mcp_role_preflight_remote_diagnostic_privacy(
     assert b.writes == []
     assert b.resource == before
     assert marker in str(failure)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["partition", "baseline"])
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"powervm_mgmt_capable": False},
+        {"powervm_mgmt_capable": True},
+        {"kvm_capable": False},
+        {"powervm_mgmt_capable": False, "kvm_capable": False},
+    ],
+)
+async def test_mcp_configuration_preflight_read_privacy(
+    role_app_boundary, stage, settings
+):
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    b = role_app_boundary
+    b.system["AssociatedSystemCapabilities"]["KvmOnPowerVMCapable"] = "true"
+    marker = "PRIVATE-CONFIG-PREFLIGHT-MARKER"
+    kind = HMCError if stage == "partition" else HMCCLIError
+    failure = kind("Remote evidence unavailable", 503, f"<Message>{marker}</Message>")
+    before = deepcopy(b.resource)
+    if stage == "partition":
+        b.hmc.get_logical_partition.side_effect = failure
+    else:
+        b.state["baseline_error"] = failure
+    async with Client(policy_app("hmc_configure_lpar")) as client:
+        result = await client.call_tool(
+            "hmc_configure_lpar",
+            {
+                "system_name_or_uuid": SYSTEM,
+                "lpar_name_or_uuid": PARTITION,
+                "settings": settings,
+            },
+            raise_on_error=False,
+        )
+    assert result.is_error and marker not in str(result)
+    assert "Linux role preflight" in str(
+        result.content
+    ) and "no changes were submitted" in str(result.content)
+    assert "503" in str(result.content)
+    assert not b.writes and b.resource == before
+    assert marker in str(failure)
+
+
+@pytest.mark.parametrize("stage", ["partition", "baseline"])
+@pytest.mark.parametrize("selected", [False, True])
+def test_cli_configuration_preflight_read_privacy(
+    role_app_boundary, monkeypatch, stage, selected
+):
+    from contextlib import asynccontextmanager
+
+    from hmcpctl.cli_commands import runtime
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    b = role_app_boundary
+    marker = "PRIVATE-CLI-PREFLIGHT-MARKER"
+    kind = HMCError if stage == "partition" else HMCCLIError
+    failure = kind("Remote evidence unavailable", 503, f"<Message>{marker}</Message>")
+    before = deepcopy(b.resource)
+    if stage == "partition":
+        b.hmc.get_logical_partition.side_effect = failure
+    else:
+        b.state["baseline_error"] = failure
+
+    @asynccontextmanager
+    async def client_boundary():
+        yield b.hmc
+
+    monkeypatch.setattr(runtime, "client", client_boundary)
+    flag = "--powervm-mgmt-capable" if selected else "--no-powervm-mgmt-capable"
+    result = CliRunner().invoke(app, ["lpars", "configure", PARTITION, SYSTEM, flag])
+    assert result.exit_code == 1 and marker not in result.output
+    output = " ".join(result.output.split())
+    assert "Linux role preflight" in output and "no changes were submitted" in output
+    assert "503" in result.output
+    assert not b.writes and b.resource == before

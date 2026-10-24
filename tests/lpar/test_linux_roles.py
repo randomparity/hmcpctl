@@ -1238,3 +1238,82 @@ async def test_no_role_best_effort_stamp_behavior_is_unchanged(
     else:
         b.apply.assert_not_awaited()
     b.assign.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type", [HMCError, HMCTransportError, HMCTLSFingerprintError, HMCCLIError]
+)
+@pytest.mark.parametrize("stage", ["partition", "baseline"])
+async def test_configuration_role_preflight_error_type(
+    role_boundary, error_type, stage
+):
+    b = role_boundary
+    failure = error_type("Remote evidence failed", 503, f"<Message>{MARKER}</Message>")
+    if stage == "partition":
+        b.hmc.get_logical_partition.side_effect = failure
+    else:
+        b.read.side_effect = failure
+    with pytest.raises(error_type) as caught:
+        await operation.configure_lpar_settings(
+            b.hmc,
+            "owned",
+            LparSettings(powervm_mgmt_capable=False),
+            system_name_or_uuid=SYSTEM,
+        )
+    assert type(caught.value) is error_type and caught.value.status_code == 503
+    assert (
+        caught.value.body is None
+        and caught.value.__cause__ is None
+        and caught.value.__suppress_context__
+    )
+    assert "no changes were submitted" in str(caught.value) and MARKER not in str(
+        caught.value
+    )
+    assert MARKER in str(failure)
+    b.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type", [HMCError, HMCTransportError, HMCTLSFingerprintError, HMCCLIError]
+)
+async def test_no_role_preflight_error_is_unchanged(role_boundary, error_type):
+    b = role_boundary
+    failure = error_type(MARKER, 503, f"<Message>{MARKER}</Message>")
+    b.read.side_effect = failure
+    with pytest.raises(error_type) as caught:
+        await operation.configure_lpar_settings(
+            b.hmc, "owned", LparSettings(time_ref=False), system_name_or_uuid=SYSTEM
+        )
+    assert caught.value is failure and MARKER in str(caught.value)
+    b.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stage", ["system", "partition", "authorization", "containment", "capabilities"]
+)
+async def test_role_preflight_sibling_read_diagnostics(role_boundary, stage):
+    b = role_boundary
+    failure = HMCError(MARKER, 503, f"<Message>{MARKER}</Message>")
+    boundary = {
+        "system": b.system,
+        "partition": b.partition,
+        "authorization": b.authorize,
+        "containment": b.partition,
+        "capabilities": b.caps,
+    }[stage]
+    boundary.side_effect = [PARTITION, failure] if stage == "containment" else failure
+    with pytest.raises(HMCError) as caught:
+        await operation.configure_lpar_settings(
+            b.hmc,
+            "owned",
+            LparSettings(powervm_mgmt_capable=False),
+            system_name_or_uuid=SYSTEM,
+        )
+    assert caught.value.body is None and caught.value.status_code == 503
+    assert MARKER not in str(caught.value) and "no changes were submitted" in str(
+        caught.value
+    )
+    b.write.assert_not_awaited()
