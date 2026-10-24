@@ -81,10 +81,14 @@ def _move_targets(
         delta = -move.quantity_mib if operation == "remove" else move.quantity_mib
         quantity = before["current_memory_mib"] + delta
         minimum, maximum = before["current_minimum_mib"], before["current_maximum_mib"]
-        if operation == "add" and maximum == 0 and before["state"] == "not activated":
-            minimum, maximum = (
-                before["minimum_memory_mib"],
-                before["maximum_memory_mib"],
+        if (
+            move.quantity_mib
+            and operation == "add"
+            and maximum == 0
+            and before["state"] == "not activated"
+        ):
+            raise ValueError(
+                "Memory move cannot verify an inactive destination with a zero current envelope"
             )
         if move.quantity_mib and not minimum <= quantity <= maximum:
             raise ValueError(

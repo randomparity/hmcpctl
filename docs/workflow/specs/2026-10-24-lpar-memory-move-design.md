@@ -98,8 +98,11 @@ prints structured evidence and exits nonzero. No stable-facade export is added.
    MemoryRegionSize and ConfigurableSystemMemory. Quantity and both resulting
    current quantities must align. Source current minus quantity must remain at or
    above its current minimum; destination current plus quantity must fit its
-   current maximum and system total. An inactive zero current envelope uses D01's
-   established configured envelope for destination admission, including its minimum.
+   current maximum and system total. A positive move to an inactive destination
+   with a zero current envelope refuses before submission: the published contract
+   does not establish resulting bounds that this operation can verify. This is a
+   client verification limit, not a claim that native HMC rejects the case. Zero
+   requests and nonzero-envelope inactive destinations keep their existing admission.
    A source below its current minimum is not admitted as a coupled CPU reset:
    the reference's shutdown reset wording describes removal, not a proved move.
 5. Before sending, recheck containment and snapshots for both endpoints, system

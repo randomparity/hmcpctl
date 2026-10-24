@@ -356,6 +356,32 @@ async def test_inactive_stays_native_admission(boundary):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("quantity", [0, 1024])
+@pytest.mark.parametrize("force", [False, True])
+async def test_inactive_zero_envelope_has_no_native_submission(
+    boundary, quantity, force
+):
+    destination = boundary.before[TARGET]
+    destination["Resource"]["PartitionState"] = "not activated"
+    destination["Resource"]["ResourceMonitoringControlState"] = "inactive"
+    for field in (
+        "CurrentMemory",
+        "CurrentMinimumMemory",
+        "CurrentMaximumMemory",
+        "RuntimeMemory",
+    ):
+        mem(destination)[field] = "0"
+    if quantity:
+        with pytest.raises(ValueError, match="cannot verify.*zero current envelope"):
+            await move(boundary, quantity=quantity, force=force)
+    else:
+        result = await move(boundary, quantity=quantity, force=force)
+        assert result["outcome"] == "noop" and result["workflow_completed"]
+        assert result["destination"]["before"] == result["destination"]["after"]
+    boundary.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_zero(boundary):
     result = await move(boundary, quantity=0)
     assert result["outcome"] == "noop" and result["workflow_completed"]
