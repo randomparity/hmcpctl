@@ -1,4 +1,4 @@
-"""Owned inactive native memory quantities with independent current readback."""
+"""Owned inactive memory-removal hypothesis with independent current readback."""
 
 from __future__ import annotations
 
@@ -145,31 +145,16 @@ async def _cases(client: Client, state: RunState, run: fixture._Run) -> list[Ass
         raise ValueError(
             "Memory fixture bounds do not align with a positive system region"
         )
-    if current + 2 * run.region > maximum:
-        raise ValueError(
-            "Memory fixture lacks headroom for the bounded set/add/remove proof"
-        )
+    if current - run.region < minimum:
+        raise ValueError("Memory fixture lacks room for removal above its minimum")
+    reduced = (minimum, current - run.region, maximum)
     cases = [
-        (
-            "set",
-            current + run.region,
-            (minimum, current + run.region, maximum),
-            "applied",
-            "native-set-read-back",
-        ),
-        (
-            "add",
-            run.region,
-            (minimum, current + 2 * run.region, maximum),
-            "applied",
-            "native-add-read-back",
-        ),
-        ("remove", 2 * run.region, initial, "applied", "native-remove-read-back"),
-        ("add", 0, initial, "noop", "zero-delta-noop"),
+        ("remove", run.region, reduced, "applied", "native-remove-read-back"),
+        ("add", 0, reduced, "noop", "zero-delta-noop"),
         (
             "add",
             maximum + run.region,
-            initial,
+            reduced,
             "refused",
             "invalid-quantity-refused-unchanged",
         ),
@@ -184,7 +169,7 @@ async def _cases(client: Client, state: RunState, run: fixture._Run) -> list[Ass
 
 
 async def exercise_memory_quantities(client: Client, state: RunState) -> None:
-    """ST50: one inactive owned fixture, setup apply, three native writes, cleanup.
+    """ST50: one inactive owned fixture, bounded removal hypothesis and cleanup.
 
     Creation suppresses profile apply. Only a confirmed owned inactive fixture
     with all-zero current bounds receives one setup apply, followed by readback.
@@ -210,7 +195,7 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
         baseline[1],
         subtask=SUBTASK,
     )
-    assertions = [Assertion("memory-quantity-sequence", False)]
+    assertions = [Assertion("inactive-memory-removal-sequence", False)]
     try:
         run.create_attempted = True
         async with HMCClient(state.hmc_config) as hmc:
@@ -245,8 +230,8 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
         results = await _cases(client, state, run)
         assertions = results + [
             Assertion(
-                "memory-quantity-sequence",
-                len(results) == 5 and all(a.holds for a in results),
+                "inactive-memory-removal-sequence",
+                len(results) == 3 and all(a.holds for a in results),
             )
         ]
     except (HMCError, ValueError, TypeError, PermissionError) as error:
@@ -263,6 +248,8 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
             assertions=assertions,
             cleanup="passed" if run.deleted and same else "failed",
             data={
+                "positive_add": "not-run",
+                "set": "not-run",
                 "guest_effect": "not-run",
                 "AMS": "not-run",
                 "forced_restart": "not-run",

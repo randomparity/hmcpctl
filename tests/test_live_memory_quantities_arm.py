@@ -108,6 +108,8 @@ class ScriptedSystem:
                 None,
                 False,
             )
+        if self.fault == "native-rejected":
+            return "PASS", {"outcome": "rejected", "workflow_completed": False}
         if self.fault != "ignored":
             self.current = {
                 "set": change["quantity_mib"],
@@ -187,13 +189,13 @@ async def run_arm(monkeypatch, system, group="lpar-memory-quantities"):
 
 
 @pytest.mark.asyncio
-async def test_full_inactive_quantity_sequence_independently_reads_and_cleans(
+async def test_inactive_removal_sequence_independently_reads_and_cleans(
     monkeypatch,
 ):
     system = ScriptedSystem()
     state = await run_arm(monkeypatch, system)
     assert system.deleted
-    assert system.current == 2048
+    assert system.current == 1792
     assert system.applies == 0
     assert len(system.creations) == 1
     assert system.creations[0].apply_profile is False
@@ -202,9 +204,7 @@ async def test_full_inactive_quantity_sequence_independently_reads_and_cleans(
         kwargs["change"] for tool, kwargs in system.calls if tool == "hmc_dlpar_mem"
     ]
     assert [(item["operation"], item["quantity_mib"]) for item in changes] == [
-        ("set", 2304),
-        ("add", 256),
-        ("remove", 512),
+        ("remove", 256),
         ("add", 0),
         ("add", 4352),
     ]
@@ -227,6 +227,7 @@ async def test_full_inactive_quantity_sequence_independently_reads_and_cleans(
         "malformed",
         "ignored",
         "partial",
+        "native-rejected",
         "post-read",
         "delete",
         "refusal-read",
@@ -279,7 +280,7 @@ async def test_unconfigured_create_applies_only_after_owned_identity_read(monkey
     system = ScriptedSystem(fault="setup")
     state = await run_arm(monkeypatch, system)
     assert system.applies == 1
-    assert system.native_calls == 5
+    assert system.native_calls == 3
     assert state.observations[0]["observation"]["result"] == "passed"
     assert system.deleted
 
@@ -294,3 +295,34 @@ async def test_unsafe_or_failed_setup_never_submits_quantities(monkeypatch, faul
     assert not any(
         item["observation"]["result"] == "passed" for item in state.observations
     )
+
+
+@pytest.mark.asyncio
+async def test_inactive_removal_never_crosses_minimum(monkeypatch):
+    system = ScriptedSystem(current=1024)
+    state = await run_arm(monkeypatch, system)
+    assert system.native_calls == 0
+    assert system.deleted
+    assert not any(
+        item["observation"]["result"] == "passed" for item in state.observations
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_refusal_stops_inactive_sequence_without_replay(monkeypatch):
+    system = ScriptedSystem(fault="native-rejected")
+    state = await run_arm(monkeypatch, system)
+    changes = [
+        kwargs["change"] for tool, kwargs in system.calls if tool == "hmc_dlpar_mem"
+    ]
+    assert changes == [{"operation": "remove", "quantity_mib": 256}]
+    assert system.current == 2048 and system.deleted
+    assert state.observations[0]["observation"]["result"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_inactive_removal_can_reach_minimum_without_reset(monkeypatch):
+    system = ScriptedSystem(current=1280)
+    state = await run_arm(monkeypatch, system)
+    assert system.current == 1024 and system.deleted
+    assert state.observations[0]["observation"]["result"] == "passed"

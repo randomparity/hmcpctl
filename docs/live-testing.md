@@ -1675,10 +1675,13 @@ transport. Positive current bounds need no apply; mixed, missing or malformed
 bounds stop. A post-apply read must establish positive initialized current bounds.
 This is fixture setup, not evidence that desired/profile memory equals current memory.
 
-The sequence sets current memory up by one system region, adds one region, removes
-two regions, verifies a zero-add no-op and refuses an over-maximum add. Each result
-requires separate current min/current/max readback. Three native writes are expected;
-there is no replay, force, below-minimum/full removal, activation or guest operation.
+The sequence attempts removal of one system region while remaining at or above the
+current minimum, verifies a zero-add no-op and refuses an over-maximum add. Each result
+requires separate current min/current/max readback. The reference explicitly describes
+shutdown removal and its below-minimum coupled reset. Ordinary removal above minimum
+is a test hypothesis for this environment, not an acceptance guarantee: native refusal
+fails the arm and stops the sequence. There is one possible native quantity write and
+no replay, force, below-minimum/full removal, activation or guest operation.
 The caller-token check and normal owning operation guard every quantity call; cleanup
 only deletes the matching-token inactive fixture and independently checks absence and
 restored names/free resources. These reads cannot atomically fence another administrator.
@@ -1704,4 +1707,28 @@ is not hardware authorization. Generate public matrices only through the evidenc
 script, scan the complete output for private identifiers, and retain its exact commit.
 Do not hand-stamp missing provenance or publish raw results. Arm50 never proves AMS,
 automatic/numeric entitlement, active RMC, IBM i or forced restart; those remain unrun
-unless separately authorized and exercised. No native run has yet been recorded for D01.
+unless separately authorized and exercised. At candidate `5f1317cb`, the first native
+positive inactive set returned `HSCL7016 The partition must be running to perform this
+operation.` Current memory remained unchanged; the arm failed, owned cleanup passed,
+and independent before/after baselines matched. That attempt did not exercise add,
+remove, no-op or over-maximum refusal. It is not a passing quantity matrix.
+
+### Positive add/set validation — unrun
+
+The inactive wrapper does not dispatch positive add/set. Those operation contexts remain
+implemented and require their own approved candidate-bound window on an eligible owned
+running AIX/Linux/VIOS partition with active RMC and reported dynamic-memory capability.
+A separately authorized forced/no-RMC path may use explicit `--force`; a successful
+current readback then does not establish guest effect, and the documented operating-system
+restart remains necessary. Do not activate a fixture, supply force, switch targets or
+replace a failed attempt automatically to satisfy this procedure.
+
+For an authorized running fixture, independently record current min/current/max,
+runtime memory and region size, and require at least two regions of maximum/capacity
+headroom. Through the existing `lpars memory` command or `hmc_dlpar_mem` change input,
+set the total to current plus one region, add one region, then remove two regions.
+Independently verify each expected current value and, for an ordinary running operation,
+runtime convergence before advancing. Preserve ownership/containment checks, no replay,
+per-call/window bounds and independent before/after evidence. Any partial, rejected or
+unverified outcome stops the sequence for the approved recovery procedure. This is a
+validation procedure, not a second implemented live wrapper or an authorization to run it.

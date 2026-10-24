@@ -389,9 +389,14 @@ def _result(
         else [location.summary()]
     )
     if targets["deferred"]:
-        warnings.append(
-            "No running-guest effect was verified; the current configuration requires a later activation or operating-system restart."
-        )
+        if before["state"] == "not activated":
+            warnings.append(
+                "No running-guest effect was verified; inactive current-configuration readback does not establish a later activation or restart."
+            )
+        else:
+            warnings.append(
+                "No running-guest effect was verified; a successful forced no-RMC change requires an operating-system restart."
+            )
     if targets["reset"]:
         warnings.append(
             "Shutdown memory reset also clears processor assignments; inspect memory and CPU values before activation."

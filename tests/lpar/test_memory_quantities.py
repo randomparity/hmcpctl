@@ -903,3 +903,49 @@ async def test_vios_quantities_use_contained_vios_http_resource(
     assert right.call_count >= 3
     description.assert_awaited_once()
     command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_inactive_positive_set_native_running_requirement_is_rejected(
+    quantity_boundary,
+):
+    import asyncssh
+
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    b = quantity_boundary
+    resource = b.before["Resource"]
+    resource["PartitionCapabilities"]["DynamicLogicalPartitionMemoryCapable"] = "false"
+    resource["PartitionMemoryConfiguration"].update(
+        CurrentMemory="2048",
+        CurrentMinimumMemory="1024",
+        CurrentMaximumMemory="4096",
+        DesiredMemory="2048",
+        MinimumMemory="1024",
+        MaximumMemory="4096",
+        RuntimeMemory="256",
+    )
+    b.after = deepcopy(b.before)
+    b.system["Resource"]["AssociatedSystemMemoryConfiguration"]["MemoryRegionSize"] = (
+        "16"
+    )
+    message = "HSCL7016 The partition must be running to perform this operation."
+    error = HMCCLIError(message)
+    error.__cause__ = asyncssh.ProcessError(
+        None, "chhwres", None, 1, None, 1, message, ""
+    )
+    b.submit_error = error
+    result = await change(b, operation="set", quantity_mib=2064)
+    assert result["outcome"] == "rejected" and result["workflow_completed"] is False
+    assert (
+        result["before"]["current_memory_mib"]
+        == result["after"]["current_memory_mib"]
+        == 2048
+    )
+    assert result["submission_error"] == message
+    b.command.assert_awaited_once()
+    assert "-o s --id 7 -q 2064" in b.command.await_args.args[1]
+    assert "--force" not in b.command.await_args.args[1]
+    assert not any(
+        "requires a later activation" in warning for warning in result["warnings"]
+    )

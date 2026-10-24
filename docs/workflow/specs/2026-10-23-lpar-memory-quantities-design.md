@@ -82,10 +82,14 @@ not invent automatic demand. Capacity races can still cause native refusal/parti
 
 Admit stable running or not-activated/shutdown state; refuse transitional/unknown states.
 Running AIX/Linux/VIOS requests require active RMC and DLPAR memory capability, except
-explicit force permits the documented no-RMC next-activation/restart path. Force is
+explicit force permits the documented no-RMC path requiring an operating-system restart
+when the command succeeds. This does not establish inactive growth acceptance. Force is
 not admitted for IBM i memory. IBM i running admission uses reported dynamic-memory
-capability rather than an invented RMC prerequisite. Inactive changes never claim a
-running-guest effect. Re-read target identity and decision-relevant memory/state/mode/
+capability rather than an invented RMC prerequisite. Inactive requests remain subject to
+native admission: the command reference explicitly describes shutdown removal and coupled
+reset, not universal inactive growth acceptance. A successful inactive readback never
+establishes running-guest or later activation effects. Re-read target identity and
+decision-relevant memory/state/mode/
 profile-sync fields immediately before submitting; changed evidence refuses before write.
 
 Submit exactly one fixed `chhwres -r mem -m SYSTEM -o a|r|s --id ID` command with only
@@ -149,12 +153,23 @@ The transient plan maps executable contracts to focused tests, including control
 Final verification is `just verify` plus pinned `uv run --no-sync prek run --all-files` and
 all hosted CI legs. Existing absolute memory tests remain the reuse/compatibility proof.
 
-Reserved named arm 50 uses one newly created, owned inactive Linux fixture, reads initialized
-current bounds, performs bounded native set/add/remove and no-op/refusal cases, verifies
-independent readback and deletes only that fixture. It runs named preflight, the arm, mandatory
-recovery, independent before/after comparison and generated commit-bound evidence. It never
-activates a guest or invents AMS support. AMS/active/forced cases remain explicit gaps if not run.
-No hardware access is granted by this design. Root must grant each candidate-bound window.
+Reserved named arm 50 uses one newly created, owned inactive Linux fixture and independently
+reads initialized current bounds. It tests one-region removal while remaining at or above
+minimum, then a zero-add no-op and over-maximum refusal. Shutdown removal/reset is documented;
+this bounded non-reset removal is an environment hypothesis until independently read back,
+not a promised native acceptance. A refusal fails the arm and stops the sequence without replay.
+Cleanup deletes only that fixture. Named preflight, mandatory read-only recovery, independent
+before/after comparison and generated commit-bound evidence remain required.
+
+The first native attempt at candidate 5f1317cb rejected positive inactive set with HSCL7016;
+current memory stayed unchanged, cleanup completed and independent baselines matched. It proves
+refusal handling, not positive set/add/remove. The implementation still supports all D01 add,
+remove and set contexts. Positive add/set validation requires a separately authorized eligible
+running partition with active RMC and dynamic-memory capability, or an explicitly authorized
+forced/no-RMC case whose current readback cannot establish guest effect. The procedure in
+`docs/live-testing.md` retains those positive cases as unrun. No activation, force or hardware
+access is granted by this design; root grants each candidate-bound window. AMS/IBM i/VIOS and
+running/forced variants remain unrun unless exercised.
 
 The shared integration prerequisite #1773 has landed; arm49 remains registered beside arm50.
 Fixture setup creates with apply disabled and required ownership stamp. Only an independently
