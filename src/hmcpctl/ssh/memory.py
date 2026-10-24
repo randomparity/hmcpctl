@@ -1,4 +1,4 @@
-"""Shared-memory-pool commands over the SSH transport."""
+"""Fixed memory-resource commands over the SSH transport."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..config import HMCConfig
+from ..documents.lpar_memory import LparMemoryChange
 from .commands import _parse_lshwres_output, hmc_error_code
 from .transport import HMCCLIError, run_hmc_command
 
@@ -101,4 +102,37 @@ async def remove_memory_pool(config: HMCConfig, system_name: str) -> str:
     return await run_hmc_command(config, f"chhwres -r mempool -m {system} -o r")
 
 
-# LPAR description and MSP (lssyscfg / chsyscfg — no REST equivalent)
+async def change_lpar_memory_quantity(
+    config: HMCConfig,
+    system_name: str,
+    partition_id: int,
+    change: LparMemoryChange,
+) -> str:
+    """Submit one fixed native quantity command; admission belongs to the operation.
+
+    This function never retries. A transport failure may follow partial effects;
+    its caller independently reads the contained partition before reporting an outcome.
+    """
+    if type(partition_id) is not int or partition_id < 1:
+        raise ValueError("partition_id must be a positive integer; nothing was sent")
+    if not isinstance(change, LparMemoryChange):
+        raise TypeError("change must be a typed LparMemoryChange; nothing was sent")
+    operation = {"add": "a", "remove": "r", "set": "s"}[change.operation]
+    parts = [
+        "chhwres",
+        "-r",
+        "mem",
+        "-m",
+        shlex.quote(system_name),
+        "-o",
+        operation,
+        "--id",
+        str(partition_id),
+    ]
+    if change.quantity_mib is not None:
+        parts.extend(("-q", str(change.quantity_mib)))
+    if change.entitled_mib is not None:
+        parts.extend(("--entitled", str(change.entitled_mib)))
+    if change.force:
+        parts.append("--force")
+    return await run_hmc_command(config, " ".join(parts), include_stderr=True)
