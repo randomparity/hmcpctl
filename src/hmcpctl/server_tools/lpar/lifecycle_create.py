@@ -11,6 +11,7 @@ from ...documents.lpar import (
     PartitionType,
     validate_partition_type,
 )
+from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
@@ -55,6 +56,8 @@ def hmc_create_lpar(
     reporting_settings: LparReportingSettings | None = None,
     vtpm_settings: LparVtpmSettings | None = None,
     security_policy: LparSecurityPolicy | None = None,
+    hardware_mem_encryption: HardwareMemoryFlag | None = None,
+    hardware_mem_expansion: HardwareMemoryFlag | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -79,6 +82,10 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        hardware_mem_encryption: Optional hardware memory encryption access;
+            omission preserves defaults, false explicitly disables access.
+        hardware_mem_expansion: Optional hardware memory expansion access;
+            omission preserves defaults, false explicitly disables access.
         security_policy: Optional strict pending secure-boot/keystore policy.
             Signed enablement is irreversible; store requires inactivity and HMC
             bounds. Linux selection declares intent, not guest proof. No key
@@ -138,6 +145,8 @@ def hmc_create_lpar(
                 if physical_io is not None
                 else LparPhysicalIO(),
                 apply_profile=apply_partition_profile,
+                hardware_mem_encryption=hardware_mem_encryption,
+                hardware_mem_expansion=hardware_mem_expansion,
                 security_policy=security_policy
                 if security_policy is not None
                 else LparSecurityPolicy(),

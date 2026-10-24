@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -128,6 +129,20 @@ def lpars_create(
         help="Inline strict policy JSON (64 KiB); signed/Linux enablement irreversible, Linux selection declares intent only",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    hardware_mem_encryption: Annotated[
+        bool | None,
+        typer.Option(
+            "--hardware-mem-encryption/--no-hardware-mem-encryption",
+            help="Hardware memory encryption access; omitted preserves defaults",
+        ),
+    ] = None,
+    hardware_mem_expansion: Annotated[
+        bool | None,
+        typer.Option(
+            "--hardware-mem-expansion/--no-hardware-mem-expansion",
+            help="Hardware memory expansion access; omitted preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.
 
@@ -208,6 +223,8 @@ def lpars_create(
                 reporting_settings=reporting,
                 vtpm_settings=vtpm,
                 security_policy=policy,
+                hardware_mem_encryption=hardware_mem_encryption,
+                hardware_mem_expansion=hardware_mem_expansion,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,
