@@ -17,6 +17,7 @@ from hmcpctl.operations.systems.fleet import (
 )
 
 from ...documents.lpar import LparResources, build_vios_document
+from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...errors import HMCError
@@ -37,6 +38,7 @@ from ...ssh.lpar import complete_create_resources, create_lpar_via_cli
 from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
+from ..lpar.hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from ..lpar.memory_bound import require_memory_within_system
 from ..lpar.ownership import _resolve_system_name
 from ..lpar.security_policy import (
@@ -112,6 +114,8 @@ async def create_vios(
     *,
     vtpm_settings: LparVtpmSettings | None = None,
     security_policy: LparSecurityPolicy | None = None,
+    hardware_mem_encryption: bool | None = None,
+    hardware_mem_expansion: bool | None = None,
 ) -> dict[str, Any] | None:
     """Create a VIOS partition on a managed system and return its entry.
 
@@ -119,6 +123,9 @@ async def create_vios(
     VirtualIOServer document; V10R3 refuses one sent as a LogicalPartition
     (#1214).
     """
+    hardware_requested = bool(
+        hardware_memory_pairs(hardware_mem_encryption, hardware_mem_expansion)
+    )
     if security_policy is not None and not isinstance(
         security_policy, LparSecurityPolicy
     ):
@@ -129,15 +136,15 @@ async def create_vios(
     if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
     vtpm_requested = vtpm_settings is not None and bool(vtpm_settings.pairs())
-    if vtpm_requested or policy_requested:
+    if vtpm_requested or policy_requested or hardware_requested:
         completed = complete_create_resources(resources)
         if completed is None:
             raise ValueError(
-                f"VIOS {'native' if policy_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
+                f"VIOS {'native' if policy_requested or hardware_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
             )
         resources = completed
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    if not vtpm_requested and not policy_requested:
+    if not vtpm_requested and not policy_requested and not hardware_requested:
         return await hmc.create_vios(
             system_uuid, build_vios_document(name=name, resources=resources)
         )
@@ -156,6 +163,9 @@ async def create_vios(
             await read_security_policy_capabilities(hmc, system_uuid),
             environment="Virtual IO Server",
         )
+    await admit_hardware_memory(
+        hmc, system_uuid, hardware_mem_encryption, hardware_mem_expansion
+    )
     system = await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
     try:
         await create_lpar_via_cli(
@@ -166,9 +176,11 @@ async def create_vios(
             resources,
             vtpm_settings=vtpm_settings,
             security_policy=security_policy,
+            hardware_mem_encryption=hardware_mem_encryption,
+            hardware_mem_expansion=hardware_mem_expansion,
         )
     except HMCError as error:
-        if not policy_requested:
+        if not policy_requested and not hardware_requested:
             raise
         raise HMCError(
             "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
@@ -177,10 +189,11 @@ async def create_vios(
         entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
         if entry is None or not entry.get("UUID"):
             raise ValueError("Created VIOS identity was not confirmed")
-        if policy_requested and (
+        if (policy_requested or hardware_requested) and (
             not isinstance(entry.get("UUID"), str)
             or not is_uuid(entry["UUID"])
-            or (entry.get("Resource") or {}).get("PartitionName") != name
+            or not isinstance(entry.get("Resource"), dict)
+            or entry["Resource"].get("PartitionName") != name
         ):
             raise ValueError("Created VIOS identity unconfirmed")
         if vtpm_settings is not None and vtpm_requested:
@@ -204,13 +217,30 @@ async def create_vios(
                     "Created VIOS policy readback differs from requested fields"
                 )
     except (HMCError, ValueError, PermissionError) as error:
-        if policy_requested:
+        if policy_requested or hardware_requested:
             raise HMCError(
-                "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
+                "VIOS exists or may exist; hardware memory access readback-unavailable. Inspect before retrying. No second create or rollback performed"
+                if hardware_requested
+                else "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
             ) from error
         raise HMCError(
             f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
         ) from error
+    hardware_step = await created_hardware_memory_step(
+        hmc,
+        system_uuid,
+        entry,
+        name,
+        "Virtual IO Server",
+        hardware_mem_encryption,
+        hardware_mem_expansion,
+        vios=True,
+    )
+    if hardware_step is not None and hardware_step.status != "ok":
+        raise HMCError(
+            f"VIOS exists or may exist; hardware memory access {hardware_step.result['status']}. "
+            "Inspect before retrying. No second create or rollback performed"
+        )
     return entry
 
 

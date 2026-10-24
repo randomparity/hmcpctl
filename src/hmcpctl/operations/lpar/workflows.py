@@ -7,6 +7,7 @@ from dataclasses import replace
 from hmcpctl.client.core import HMCClient
 
 from ...documents.lpar import validate_partition_type
+from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...errors import HMCError
 from .assignments import (
     LparPcieAssignments,
@@ -27,6 +28,15 @@ async def create_lpar(
     assignments: LparPcieAssignments,
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
+    hardware_requested = bool(
+        hardware_memory_pairs(
+            creation.hardware_mem_encryption, creation.hardware_mem_expansion
+        )
+    )
+    if hardware_requested and creation.keylock is not None:
+        raise ValueError(
+            "Hardware memory settings cannot be combined with explicit keylock"
+        )
     validate_partition_type(creation.partition_type)
     if creation.physical_io.requested:
         overlap = {s.drc_index for s in creation.physical_io.io_slots} & {
@@ -54,7 +64,7 @@ async def create_lpar(
     if created.physical_io_step is not None:
         steps.append(created.physical_io_step)
     policy_requested = bool(creation.security_policy.pairs())
-    if created.apply_step is not None and not policy_requested:
+    if created.apply_step is not None and not (policy_requested or hardware_requested):
         steps.append(created.apply_step)
     if created.settings_step is not None:
         steps.append(created.settings_step)
@@ -64,15 +74,17 @@ async def create_lpar(
         steps.append(created.vtpm_step)
     if created.security_policy_step is not None:
         steps.append(created.security_policy_step)
-    if created.apply_step is not None and policy_requested:
+    if created.hardware_memory_step is not None:
+        steps.append(created.hardware_memory_step)
+    if created.apply_step is not None and (policy_requested or hardware_requested):
         steps.append(created.apply_step)
-    policy_failed = policy_requested and (
-        created.security_policy_step is None
-        or created.security_policy_step.status != "ok"
-        or created.ownership_stamped is not True
+    verification_failed = (policy_requested or hardware_requested) and (
+        created.ownership_stamped is not True
         or any(
             requested and (step is None or step.status != "ok")
             for requested, step in (
+                (policy_requested, created.security_policy_step),
+                (hardware_requested, created.hardware_memory_step),
                 (creation.settings.pairs(), created.settings_step),
                 (creation.reporting_settings.pairs(), created.reporting_step),
                 (creation.vtpm_settings.pairs(), created.vtpm_step),
@@ -104,7 +116,7 @@ async def create_lpar(
         or reporting_failed
         or io_failed
         or vtpm_failed
-        or policy_failed
+        or verification_failed
     )
     if assignments_skipped:
         steps.extend(
