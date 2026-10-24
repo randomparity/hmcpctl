@@ -25,7 +25,10 @@ CONFIG = HMCConfig.from_mapping({})
 
 def test_c01_field_contract_and_explicit_values():
     # Four cited command contexts each own these same five scalar bindings.
-    assert tuple(f.name for f in fields(LparSettings)) == NAMES
+    assert tuple(f.name for f in fields(LparSettings)) == NAMES + (
+        "powervm_mgmt_capable",
+        "kvm_capable",
+    )
     assert LparSettings().pairs() == []
     assert LparSettings(allow_perf_collection=False, lpar_avail_priority=0).pairs() == [
         ("allow_perf_collection", 0),
@@ -340,3 +343,29 @@ async def test_all_resources_settings_creation_preserves_max_slots(monkeypatch):
     assert "all_resources=1" in record
     assert "max_virtual_slots=32" in record
     assert "time_ref=0" in record
+
+
+@pytest.mark.parametrize("name", ["powervm_mgmt_capable", "kvm_capable"])
+@pytest.mark.parametrize("value", [0, 1, -1, "true", "false", 1.0, [], {}])
+def test_role_strict_values(name, value):
+    from pydantic import TypeAdapter, ValidationError
+
+    with pytest.raises(ValueError, match=name):
+        LparSettings(**{name: value})
+    with pytest.raises(ValidationError):
+        TypeAdapter(LparSettings).validate_python({name: value})
+
+
+@pytest.mark.parametrize("name", ["powervm_mgmt_capable", "kvm_capable"])
+@pytest.mark.parametrize("value", [None, False, True])
+def test_role_false_and_omission(name, value):
+    from pydantic import TypeAdapter, ValidationError
+
+    expected = [] if value is None else [(name, int(value))]
+    settings = LparSettings(**{name: value})
+    assert getattr(settings, name) is value
+    assert settings.pairs() == expected
+    assert TypeAdapter(LparSettings).validate_python({name: value}) == settings
+    assert getattr(TypeAdapter(LparSettings).validate_python({}), name) is None
+    with pytest.raises(ValidationError):
+        TypeAdapter(LparSettings).validate_python({name: value, "extra": False})

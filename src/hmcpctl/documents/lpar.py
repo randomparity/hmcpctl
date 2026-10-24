@@ -71,7 +71,7 @@ def lpar_envelope(body: str) -> str:
 
 @dataclass(frozen=True)
 class LparSettings:
-    """Optional C01 settings; None preserves HMC defaults/current configuration.
+    """Optional partition settings; None preserves HMC defaults/current configuration.
 
     A running time_ref partition can govern hypervisor/service-processor time.
     These configure capabilities, not a guest clock or migration/restart readiness.
@@ -108,6 +108,9 @@ class LparSettings:
             "description": "Disable partition migration on AIX/Linux or IBM i; does not perform a migration."
         },
     )
+
+    powervm_mgmt_capable: StrictBool | None = None
+    kvm_capable: StrictBool | None = None
 
     def __post_init__(self) -> None:
         for item in fields(self):
