@@ -1733,6 +1733,45 @@ per-call/window bounds and independent before/after evidence. Any partial, rejec
 unverified outcome stops the sequence for the approved recovery procedure. This is a
 validation procedure, not a second implemented live wrapper or an authorization to run it.
 
+## Native two-partition memory move (D02, opt-in subtask 54)
+
+The `lpar-memory-move` arm uses two preexisting owned AIX/Linux partitions that
+are running with active RMC and dedicated memory. The authorized controller selects
+the exact candidate commit and fixtures, assigns `LIVE_TEST_LPAR_NAME` and
+`LIVE_TEST_SCRATCH_LPAR_NAME`, and approves an exclusive window without DPO and
+its deadline. Both fixtures must report dynamic-memory capability, disabled or
+suspended profile sync, matching current/runtime memory, and one region of source
+minimum and destination maximum headroom. No setup creates or activates guests.
+
+The bounded sequence moves one region forward, independently verifies both peers,
+then freshly checks identity, ownership, state and quantities before the separate
+reverse operation. Before either effect, the arm durably checkpoints its private
+intent and observations. There are at most two effects. Any partial, unknown or
+changed baseline stops writes and leaves both fixtures in place for the controller's
+separate recovery decision. Neither fixture is deleted, and recovery reads only.
+
+Verify deployed HEAD equals the selected candidate. Set `RUN_DIR` to an existing
+mode-0700 directory outside every repository, use `umask 077`, and capture each
+command's stdout/stderr there. The named wrapper rejects reused output and exposed
+or repository destinations. Run with bounded controller-session and transport
+deadlines and mandatory logout/reaping. Run recovery after every attempted arm,
+including a failed or apparently successful run:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-memory-move
+uv run --no-sync python scripts/live_lpar_memory_move.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+Read-only recovery requires the same clean candidate revision and HMC destination,
+and independently confirms both original memory baselines and system resources.
+Missing or mismatched observations cannot attest CLEAN. Force, inactive, IBM i and
+VIOS variants remain unrun; this proof arm does not narrow their product support.
+Generate public evidence only through the evidence script, redact the complete
+matrix and retain its commit binding. Raw results remain private. A skipped or
+failed arm supplies no positive evidence and makes no maturity promotion.
+
 ## Inactive partition security policy (arm 52)
 
 The opt-in `lpar-security-policy` arm requires a positive selected-system secure
