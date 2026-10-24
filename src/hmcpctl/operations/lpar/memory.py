@@ -233,7 +233,11 @@ def _targets(
         and target >= before["current_memory_mib"]
     ):
         raise ValueError("Requested memory growth is below the partition minimum")
-    reset = target is not None and not noop and (target < minimum or target == 0)
+    reset = target is not None and (
+        (change.operation == "set" and target == 0)
+        or target < before["current_memory_mib"]
+        and target < minimum
+    )
     if reset:
         if before["state"] != "not activated":
             raise ValueError("Running memory cannot be reduced below its minimum")

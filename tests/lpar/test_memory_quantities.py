@@ -710,6 +710,28 @@ async def test_growth_from_zero_at_minimum_preserves_requested_target(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["add", "remove"])
+async def test_zero_logical_delta_with_entitlement_does_not_infer_reset(
+    quantity_boundary, operation
+):
+    b = quantity_boundary
+    b.before["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentMemory="0",
+        CurrentMinimumMemory="0",
+        CurrentMaximumMemory="0",
+        SharedMemoryEnabled="true",
+    )
+    b.after = deepcopy(b.before)
+    b.after["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentEntitledMemory="175", AutoEntitledMemoryEnabled="true"
+    )
+    result = await change(b, operation=operation, quantity_mib=0, entitled_mib="auto")
+    assert result["outcome"] == "applied"
+    assert not result["expected"]["reset"]
+    b.command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_duplicate_partition_name_across_kinds_refuses(quantity_boundary):
     b = quantity_boundary
     b.hmc.list_vios.return_value = [deepcopy(b.before)]
