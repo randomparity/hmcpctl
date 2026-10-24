@@ -42,14 +42,15 @@ def lpars_memory(
     and reports where it persists. Inactive changes do not verify a running guest.
     """
     try:
+        entitlement: int | Literal["auto"] | None = None
+        if entitled == "auto":
+            entitlement = "auto"
+        elif entitled is not None:
+            entitlement = int(entitled)
         change = LparMemoryChange(
             operation=operation,
             quantity_mib=quantity,
-            entitled_mib=None
-            if entitled is None
-            else "auto"
-            if entitled == "auto"
-            else int(entitled),
+            entitled_mib=entitlement,
             force=force,
         )
         if not system.strip():
