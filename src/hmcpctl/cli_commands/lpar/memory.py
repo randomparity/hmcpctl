@@ -6,8 +6,9 @@ from typing import Literal
 
 import typer
 
-from ...documents.lpar_memory import LparMemoryChange
+from ...documents.lpar_memory import LparMemoryChange, LparMemoryMove
 from ...operations.lpar.memory import change_lpar_memory
+from ...operations.lpar.memory_move import move_lpar_memory
 from ..output import print_json, terminal_field, usage_error
 from ..runtime import with_client
 
@@ -77,6 +78,49 @@ def lpars_memory(
         raise typer.Exit(code=1)
 
 
+def lpars_memory_move(
+    source: str = typer.Argument(..., help="Source partition name or UUID"),
+    destination: str = typer.Argument(..., help="Destination partition name or UUID"),
+    system: str = typer.Option(..., "--system", "-s", help="Containing managed system"),
+    quantity: int = typer.Option(..., "--quantity", help="MiB to transfer"),
+    force: bool = typer.Option(
+        False, "--force", help="Allow documented no-RMC deferred effect"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    ownership_override: bool = typer.Option(
+        False,
+        "--ownership-override",
+        help="Explicit operator override for both ownership checks",
+    ),
+) -> None:
+    """Move dedicated memory once; report both actual outcomes and persistence."""
+    try:
+        move = LparMemoryMove(quantity_mib=quantity, force=force)
+        if any(not value.strip() for value in (source, destination, system)):
+            raise ValueError("Source, destination and --system must be nonblank")
+    except ValueError as error:
+        usage_error(str(error))
+    if not yes and not typer.confirm(
+        f"Move {quantity} MiB from '{terminal_field(source)}' to '{terminal_field(destination)}'? "
+        "Partial/uncertain effects require inspection; force may require an OS restart"
+    ):
+        return
+    result = with_client(
+        lambda hmc: move_lpar_memory(
+            hmc,
+            source,
+            destination,
+            move,
+            system_name_or_uuid=system,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(result)
+    if not result["workflow_completed"]:
+        raise typer.Exit(code=1)
+
+
 def register_commands(group: typer.Typer) -> None:
     """Register native memory changes on the existing LPAR group."""
     group.command("memory", short_help="Adjust.")(lpars_memory)
+    group.command("memory-move", short_help="Move.")(lpars_memory_move)
