@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
@@ -44,9 +45,32 @@ async def system_oracle(hmc, system: str) -> list[str]:
         f"lshwres -r proc -m {quoted} --level sys -F curr_avail_sys_proc_units",
         f"lshwres -r mem -m {quoted} --level sys -F curr_avail_sys_mem,mem_region_size",
     )
-    return [
+    observed = [
         (await run_hmc_command(hmc.config, command)).strip() for command in commands
     ]
+    names = observed[0].splitlines()
+    if not names or any(not name.strip() for name in names):
+        raise ValueError("Independent system oracle requires a nonempty name inventory")
+    try:
+        units = Decimal(observed[1])
+    except InvalidOperation as error:
+        raise ValueError(
+            "Independent system oracle requires numeric processor units"
+        ) from error
+    if len(observed[1].splitlines()) != 1 or not units.is_finite() or units < 0:
+        raise ValueError(
+            "Independent system oracle requires finite nonnegative processor units"
+        )
+    memory = observed[2].split(",")
+    if (
+        len(memory) != 2
+        or any(not value.isascii() or not value.isdecimal() for value in memory)
+        or int(memory[1]) == 0
+    ):
+        raise ValueError(
+            "Independent system oracle requires available memory and a positive region"
+        )
+    return observed
 
 
 async def oracle(hmc, system: str, peers: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -470,3 +470,107 @@ def test_recovery_route_is_read_only(live_boundary, monkeypatch, tmp_path, capsy
     assert recovery.main(["--results", str(path)]) == 2
     assert "CLEAN:" not in capsys.readouterr().out
     assert state.effects == before
+
+
+@pytest.fixture
+def system_observation_boundary(live_boundary, monkeypatch):
+    state, _, _ = live_boundary
+    original = arm.run_hmc_command
+    fault = {}
+
+    async def observed(config, command):
+        if "--level lpar" not in command:
+            key = (
+                "names"
+                if "-r lpar" in command
+                else "cpu"
+                if "-r proc" in command
+                else "memory"
+            )
+            if key in fault and (not fault.get("after_effect") or state.effects):
+                return fault[key]
+        return await original(config, command)
+
+    monkeypatch.setattr(arm, "run_hmc_command", AsyncMock(side_effect=observed))
+    return state, fault
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("names", ""),
+        ("names", "source-R1\n\ntarget-R2"),
+        ("cpu", ""),
+        ("cpu", "NaN"),
+        ("cpu", "Infinity"),
+        ("cpu", "-1"),
+        ("cpu", "1\n1"),
+        ("cpu", "unavailable"),
+        ("memory", ""),
+        ("memory", "0"),
+        ("memory", "0,256,1"),
+        ("memory", "-1,256"),
+        ("memory", "０,256"),
+        ("memory", "0,0"),
+    ],
+)
+async def test_system_observation_invalid_baseline_prevents_effects(
+    system_observation_boundary, field, value
+):
+    state, fault = system_observation_boundary
+    fault[field] = value
+    await arm.exercise_memory_move(None, state)
+    assert state.effects == 0
+    assert not hasattr(state, "verified")
+    assert any(row["status"] == "FAIL" for row in state.results)
+
+
+@pytest.mark.parametrize("field", ["names", "cpu", "memory"])
+def test_system_observation_failure_after_effect_cannot_attest_clean(
+    system_observation_boundary, field, monkeypatch, tmp_path, capsys
+):
+    import json
+
+    import live_test_recovery as recovery
+
+    state, fault = system_observation_boundary
+    fault.update({field: "", "after_effect": True})
+    asyncio.run(arm.exercise_memory_move(None, state))
+    assert state.effects == 2
+    assert state.verified["cleanup"] == "failed"
+    baseline = next(row["data"] for row in state.results if row["tool"] == arm.BASELINE)
+    baseline["system_oracle"][["names", "cpu", "memory"].index(field)] = ""
+    document = {
+        "run": {
+            "group": arm.GROUP,
+            "subtasks": [54],
+            "tree_clean": True,
+            "tested_commit": "c" * 40,
+        },
+        "hmc": {
+            "host": CONFIG.host,
+            "port": CONFIG.port,
+            "user": CONFIG.user,
+            "verify_ssl": CONFIG.verify_ssl,
+        },
+        "results": state.results,
+    }
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    assert recovery.main(["--results", str(path)]) == 2
+    assert "CLEAN:" not in capsys.readouterr().out
+    assert state.effects == 2
+
+
+@pytest.mark.asyncio
+async def test_system_observation_zero_available_capacities_are_valid(
+    system_observation_boundary,
+):
+    state, fault = system_observation_boundary
+    fault.update(cpu="0", memory="0,256")
+    await arm.exercise_memory_move(None, state)
+    assert state.effects == 2
+    assert state.verified["cleanup"] == "passed"
