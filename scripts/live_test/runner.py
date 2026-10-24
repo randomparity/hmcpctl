@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 51 (50 is reserved); 26 to 36 are other arms' row ids.
-With no selection the original subtasks through 43 run; 44–51 require their named groups.
+Registered subtasks span 0 through 52 (50 is reserved); 26 to 36 are other arms' row ids.
+With no selection the original subtasks through 43 run; 44–52 require their named groups.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -97,6 +97,7 @@ from live_test.lpar_config import (
 )
 from live_test.lpar_physical_io import exercise_lpar_physical_io
 from live_test.lpar_power import exercise_lpar_power
+from live_test.lpar_security_policy import exercise_lpar_security_policy
 from live_test.lpar_vtpm import exercise_lpar_vtpm
 from live_test.metrics import (
     exercise_pcm_preferences,
@@ -690,6 +691,7 @@ SUBTASKS = {
     48: exercise_lpar_reporting,
     49: exercise_lpar_physical_io,
     51: exercise_lpar_vtpm,
+    52: exercise_lpar_security_policy,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -734,6 +736,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-reporting": [48],
     "lpar-physical-io": [49],
     "lpar-vtpm": [51],
+    "lpar-security-policy": [52],
     # ST40 mutates the VIOS's storage, so only its own arm dispatches it (#1348).
     "storage": [0, 3, 40, 42],
     # Not in "all": the arm creates, powers, provisions and deletes its own
@@ -998,7 +1001,7 @@ async def main(
             print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
             return 1
     else:
-        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46})
+        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46, 52})
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]

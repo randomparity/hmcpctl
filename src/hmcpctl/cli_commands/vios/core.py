@@ -7,6 +7,15 @@ from dataclasses import asdict
 import typer
 from pydantic import TypeAdapter
 
+from hmcpctl.cli_commands.lpar.assignment_input import (
+    SECURITY_POLICY_WARNING,
+    load_security_policy,
+)
+from hmcpctl.operations.lpar.security_policy import (
+    configure_lpar_security_policy,
+    read_lpar_security_policy,
+)
+
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
@@ -16,6 +25,7 @@ from ...operations.vios.core import create_vios, list_vios, power_vios
 from ..output import (
     InventoryFormat,
     console,
+    err_console,
     inventory_field,
     print_inventory,
     print_json,
@@ -158,6 +168,12 @@ def register_commands(group: typer.Typer) -> None:
     group.command("list")(vios_list)
     group.command("create")(vios_create)
     group.command("get-vtpm-settings")(vios_get_vtpm_settings)
+    group.command("get-security-policy", short_help="Read policy.")(
+        vios_get_security_policy
+    )
+    group.command("configure-security-policy", short_help="Set policy.")(
+        vios_configure_security_policy
+    )
     group.command("configure-vtpm")(vios_configure_vtpm)
     group.command("power-on")(vios_power_on)
     group.command("power-off")(vios_power_off)
@@ -172,9 +188,25 @@ def vios_create(
     vtpm_settings: str | None = typer.Option(
         None, "--vtpm-settings", help="Three-field typed vTPM JSON"
     ),
+    security_policy: str | None = typer.Option(
+        None,
+        "--security-policy",
+        help="Inline strict policy JSON (64 KiB); signed enablement irreversible; no guest/key proof",
+    ),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
     """Create an inactive VIOS through its existing owner."""
+    policy = load_security_policy(security_policy)
+    try:
+        policy.validate_creation("Virtual IO Server")
+    except ValueError as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--security-policy"
+        ) from None
+    if policy.pairs():
+        err_console.print(
+            terminal_field(SECURITY_POLICY_WARNING, err=True), markup=False
+        )
     try:
         resource_values = (
             VIOS_DEFAULT_RESOURCES
@@ -195,7 +227,12 @@ def vios_create(
         )
     result = with_client(
         lambda hmc: create_vios(
-            hmc, system, name, resource_values, vtpm_settings=settings
+            hmc,
+            system,
+            name,
+            resource_values,
+            vtpm_settings=settings,
+            security_policy=policy,
         )
     )
     print_json(result)
@@ -240,6 +277,63 @@ def vios_configure_vtpm(
             vios=True,
             acknowledge_data_loss=acknowledge_data_loss,
             ownership_override=ownership_override,
+        )
+    )
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(1)
+
+
+def vios_get_security_policy(
+    vios_name: str = typer.Argument(...), system_name: str = typer.Argument(...)
+) -> None:
+    """Read pending security policy and separate current secure boot; no runtime proof."""
+    result = with_client(
+        lambda hmc: read_lpar_security_policy(
+            hmc, vios_name, system_name_or_uuid=system_name, vios=True
+        )
+    )
+    print_json(asdict(result))
+
+
+def vios_configure_security_policy(
+    vios_name: str = typer.Argument(...),
+    system_name: str = typer.Argument(...),
+    security_policy: str = typer.Option(
+        ...,
+        "--security-policy",
+        help="Strict inline policy JSON (64 KiB maximum); no filename",
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Confirm the security-policy consequences"
+    ),
+) -> None:
+    """Configure security policy without power, profile or key actions.
+
+    Secure boot may be weakened. Signed/Linux enables are irreversible; store
+    enable/increase requires inactivity, nonzero shrink requires Power11, and
+    disabling a store requires HMC emptiness checks. PK bypass skips old-PK
+    authentication. Linux selection declares intent only, without guest proof.
+    Pending policy may require restart; readback proves no runtime enforcement.
+    """
+    settings = load_security_policy(security_policy)
+    if not settings.pairs():
+        raise typer.BadParameter("Supply at least one security policy setting")
+    err_console.print(terminal_field(SECURITY_POLICY_WARNING, err=True), markup=False)
+    if not yes:
+        typer.confirm(
+            "Change security policy on the selected partition?",
+            abort=True,
+        )
+    result = with_client(
+        lambda hmc: configure_lpar_security_policy(
+            hmc,
+            vios_name,
+            settings,
+            system_name_or_uuid=system_name,
+            ownership_override=ownership_override,
+            vios=True,
         )
     )
     print_json(asdict(result))

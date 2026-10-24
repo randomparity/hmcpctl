@@ -17,6 +17,7 @@ from hmcpctl.operations.systems.fleet import (
 )
 
 from ...documents.lpar import LparResources, build_vios_document
+from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...errors import HMCError
 from ...jobs import (
@@ -38,6 +39,11 @@ from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
 from ..lpar.memory_bound import require_memory_within_system
 from ..lpar.ownership import _resolve_system_name
+from ..lpar.security_policy import (
+    admit_security_policy,
+    read_lpar_security_policy,
+    read_security_policy_capabilities,
+)
 from ..lpar.vtpm import admit_vtpm, read_vtpm_capabilities
 
 
@@ -105,6 +111,7 @@ async def create_vios(
     resources: LparResources,
     *,
     vtpm_settings: LparVtpmSettings | None = None,
+    security_policy: LparSecurityPolicy | None = None,
 ) -> dict[str, Any] | None:
     """Create a VIOS partition on a managed system and return its entry.
 
@@ -112,49 +119,95 @@ async def create_vios(
     VirtualIOServer document; V10R3 refuses one sent as a LogicalPartition
     (#1214).
     """
+    if security_policy is not None and not isinstance(
+        security_policy, LparSecurityPolicy
+    ):
+        raise TypeError("security_policy must be LparSecurityPolicy")
+    policy_requested = security_policy is not None and bool(security_policy.pairs())
+    if security_policy is not None:
+        security_policy.validate_creation("Virtual IO Server")
     if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
-    if vtpm_settings is not None and vtpm_settings.pairs():
+    vtpm_requested = vtpm_settings is not None and bool(vtpm_settings.pairs())
+    if vtpm_requested or policy_requested:
         completed = complete_create_resources(resources)
         if completed is None:
             raise ValueError(
-                "VIOS vTPM creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
+                f"VIOS {'native' if policy_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
             )
         resources = completed
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    if vtpm_settings is None or not vtpm_settings.pairs():
+    if not vtpm_requested and not policy_requested:
         return await hmc.create_vios(
             system_uuid, build_vios_document(name=name, resources=resources)
         )
-    vtpm_settings.validate_creation("Virtual IO Server")
+    if vtpm_settings is not None:
+        vtpm_settings.validate_creation("Virtual IO Server")
     if await hmc.find_vios_by_name(name, system_uuid=system_uuid):
         raise ValueError(
             "A VIOS with that name already exists on the selected system; nothing was created"
         )
     await require_memory_within_system(hmc, system_uuid, resources)
-    admit_vtpm(vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid))
+    if vtpm_settings is not None and vtpm_requested:
+        admit_vtpm(vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid))
+    if security_policy is not None and policy_requested:
+        admit_security_policy(
+            security_policy,
+            await read_security_policy_capabilities(hmc, system_uuid),
+            environment="Virtual IO Server",
+        )
     system = await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
-    await create_lpar_via_cli(
-        hmc.config,
-        system,
-        name,
-        "Virtual IO Server",
-        resources,
-        vtpm_settings=vtpm_settings,
-    )
+    try:
+        await create_lpar_via_cli(
+            hmc.config,
+            system,
+            name,
+            "Virtual IO Server",
+            resources,
+            vtpm_settings=vtpm_settings,
+            security_policy=security_policy,
+        )
+    except HMCError as error:
+        if not policy_requested:
+            raise
+        raise HMCError(
+            "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
+        ) from error
     try:
         entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
         if entry is None or not entry.get("UUID"):
             raise ValueError("Created VIOS identity was not confirmed")
-        observed = await get_lpar_vtpm_state(hmc.config, system, name, vios=True)
-        if any(
-            getattr(observed.settings, field) != getattr(vtpm_settings, field)
-            for field, _ in vtpm_settings.pairs()
+        if policy_requested and (
+            not isinstance(entry.get("UUID"), str)
+            or not is_uuid(entry["UUID"])
+            or (entry.get("Resource") or {}).get("PartitionName") != name
         ):
-            raise ValueError(
-                "Created VIOS vTPM readback differs from the requested fields"
+            raise ValueError("Created VIOS identity unconfirmed")
+        if vtpm_settings is not None and vtpm_requested:
+            observed = await get_lpar_vtpm_state(hmc.config, system, name, vios=True)
+            if any(
+                getattr(observed.settings, field) != getattr(vtpm_settings, field)
+                for field, _ in vtpm_settings.pairs()
+            ):
+                raise ValueError(
+                    "Created VIOS vTPM readback differs from the requested fields"
+                )
+        if security_policy is not None and policy_requested:
+            policy = await read_lpar_security_policy(
+                hmc, entry["UUID"], system_name_or_uuid=system_uuid, vios=True
             )
+            if any(
+                getattr(policy.settings, field) != getattr(security_policy, field)
+                for field, _ in security_policy.pairs()
+            ):
+                raise ValueError(
+                    "Created VIOS policy readback differs from requested fields"
+                )
     except (HMCError, ValueError, PermissionError) as error:
+        if policy_requested:
+            raise HMCError(
+                "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
+            ) from error
         raise HMCError(
             f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
         ) from error

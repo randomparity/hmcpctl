@@ -1,4 +1,4 @@
-"""CLI boundary helpers for loading LPAR assignment input."""
+"""CLI boundaries for typed assignments and inline security-policy input."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
 
 from ...documents.lpar_io import LparPhysicalIO
+from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...operations.lpar.assignments import LparPcieAssignments
 from ..output import terminal_field, usage_error
 
@@ -35,3 +36,31 @@ def load_physical_io(path: Path | None) -> LparPhysicalIO:
         return TypeAdapter(LparPhysicalIO).validate_json(data)
     except (OSError, ValueError) as error:
         usage_error(f"Cannot load --physical-io: {terminal_field(error, err=True)}")
+
+
+SECURITY_POLICY_WARNING = (
+    "Secure boot may weaken; signed/Linux enables are irreversible. Store enable/increase "
+    "requires inactivity; nonzero shrink requires Power11; disable requires HMC emptiness "
+    "checks. PK bypass skips old-PK authentication. Linux selection declares intent only. "
+    "Pending policy may require restart; no guest, key-readiness or runtime proof."
+)
+
+
+def load_security_policy(value: str | None) -> LparSecurityPolicy:
+    """Parse inline policy only, without reflecting untrusted JSON or file paths."""
+    if value is None:
+        return LparSecurityPolicy()
+    if len(value) > 65536 or len(value.encode("utf-8")) > 65536:
+        usage_error("Invalid --security-policy: inline JSON exceeds 64 KiB")
+    try:
+        payload = json.loads(value)
+    except (ValueError, RecursionError):
+        usage_error("Invalid --security-policy: expected an inline JSON object")
+    try:
+        return TypeAdapter(LparSecurityPolicy).validate_python(payload)
+    except ValidationError as error:
+        details = ", ".join(
+            ".".join(str(part) for part in item["loc"]) or item["type"]
+            for item in error.errors()
+        )
+        usage_error(f"Invalid --security-policy: {details}")

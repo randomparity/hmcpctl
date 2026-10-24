@@ -27,9 +27,11 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.lpar_io import LparPhysicalIO
+from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...errors import HMCError
 from ...resource_identity import (
+    is_uuid,
     resolve_system_uuid,
 )
 from ...ssh.lpar import (
@@ -48,6 +50,11 @@ from ...xmlutil import escape_xml
 from .assignments import SriovLogicalPortAssignment
 from .configuration import configure_lpar_settings
 from .physical_io import admit_creation_io, created_io_step
+from .security_policy import (
+    admit_security_policy,
+    read_lpar_security_policy,
+    read_security_policy_capabilities,
+)
 from .vtpm import admit_vtpm, read_vtpm_capabilities
 
 _logger = logging.getLogger(__name__)
@@ -76,6 +83,7 @@ class LparCreation:
         default_factory=LparReportingSettings
     )
     vtpm_settings: LparVtpmSettings = field(default_factory=LparVtpmSettings)
+    security_policy: LparSecurityPolicy = field(default_factory=LparSecurityPolicy)
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,7 @@ class LparCreationResult:
     physical_io_step: WorkflowStep | None = None
     reporting_step: WorkflowStep | None = None
     vtpm_step: WorkflowStep | None = None
+    security_policy_step: WorkflowStep | None = None
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -145,10 +154,13 @@ async def _create_via_cli(
         vtpm_settings=creation.vtpm_settings,
         physical_io=creation.physical_io,
         creation_sriov=creation.creation_sriov,
+        security_policy=creation.security_policy,
     )
     apply_step = (
         await _apply_created_profile(hmc, system_name, creation)
-        if creation.apply_profile is not None and not creation.physical_io.requested
+        if creation.apply_profile is not None
+        and not creation.physical_io.requested
+        and not creation.security_policy.pairs()
         else None
     )
     try:
@@ -191,6 +203,10 @@ async def create_and_stamp_lpar(
         # stamp's best-effort catch: no create can precede rejection, and a
         # malformed token can never discard the ownership stamp (ADR 0064).
         validate_caller_token(creation.caller_token)
+    if not isinstance(creation.security_policy, LparSecurityPolicy):
+        raise TypeError("security_policy must be LparSecurityPolicy")
+    creation.security_policy.validate_creation(creation.partition_type)
+    policy_requested = bool(creation.security_policy.pairs())
     if not isinstance(creation.vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
     creation.vtpm_settings.validate_creation(creation.partition_type)
@@ -200,6 +216,17 @@ async def create_and_stamp_lpar(
         )
     if not isinstance(creation.settings, LparSettings):
         raise TypeError("settings must be LparSettings")
+    if (
+        creation.settings.simplified_remote_restart_capable is True
+        and creation.security_policy.keystore_kbytes is not None
+        and creation.security_policy.keystore_kbytes > 0
+    ):
+        raise ValueError(
+            "Creation combining simplified remote restart with a nonzero keystore "
+            "requires a supported positive user-defined system-key check. "
+            "Select only one of these features for this creation. "
+            "Nothing was created."
+        )
     if not isinstance(creation.physical_io, LparPhysicalIO):
         raise TypeError("physical_io must be LparPhysicalIO")
     validate_partition_type(creation.partition_type)
@@ -225,14 +252,28 @@ async def create_and_stamp_lpar(
         admit_vtpm(
             creation.vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid)
         )
+    if policy_requested:
+        admit_security_policy(
+            creation.security_policy,
+            await read_security_policy_capabilities(
+                hmc,
+                system_uuid,
+                need_power11=creation.partition_type == "OS400"
+                and creation.security_policy.secure_boot is not None,
+            ),
+            environment=creation.partition_type,
+        )
     await admit_creation_io(hmc, system_uuid, creation)
     await require_memory_within_system(hmc, system_uuid, creation.resources)
     system_name: str | None = None
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
     resources = complete_create_resources(creation.resources)
+    if policy_requested and resources is not None:
+        await require_memory_within_system(hmc, system_uuid, resources)
     if (
         resources is None
+        or policy_requested
         or creation.reporting_settings.pairs()
         or creation.vtpm_settings.pairs()
         or creation.physical_io.requested
@@ -247,10 +288,12 @@ async def create_and_stamp_lpar(
                 readback_error,
             ) = await _create_via_cli(hmc, system_uuid, system_name_or_uuid, creation)
         except HMCError as error:
-            if not creation.physical_io.requested:
+            if not creation.physical_io.requested and not policy_requested:
                 raise
             raise HMCError(
-                "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                if policy_requested
+                else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
             ) from error
     else:
         document = build_lpar_document(
@@ -286,6 +329,12 @@ async def create_and_stamp_lpar(
     apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
 
     if created_lpar is None:
+        if policy_requested and creation.stamp_policy == "required":
+            raise HMCError(
+                "Policy creation may have succeeded, but created identity readback is "
+                "unavailable and ownership was not stamped. Inspect the contained "
+                "partition before retrying; no rollback performed."
+            ) from None
         if creation.stamp_policy == "required" and readback_error is not None:
             raise HMCError(
                 f"stamp_policy='required': mksyscfg created LPAR {creation.name!r} "
@@ -302,11 +351,12 @@ async def create_and_stamp_lpar(
                 "retrying; a created partition can be re-stamped with "
                 "set_lpar_ownership_description."
             )
-        skipped = (
-            "create returned no LPAR body"
-            if readback_error is None
-            else f"read-back after mksyscfg failed: {readback_error}"
-        )
+        if policy_requested:
+            skipped = "created identity readback unavailable; inspect the contained partition before retrying"
+        elif readback_error is None:
+            skipped = "create returned no LPAR body"
+        else:
+            skipped = f"read-back after mksyscfg failed: {readback_error}"
         return LparCreationResult(
             resource_created=True,
             lpar=None,
@@ -316,6 +366,13 @@ async def create_and_stamp_lpar(
                 f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
             ),
             apply_step=apply_step,
+            security_policy_step=WorkflowStep(
+                "security_policy",
+                "error",
+                "Created partition identity unavailable; policy unverified",
+            )
+            if policy_requested
+            else None,
             physical_io_step=WorkflowStep(
                 "physical_io",
                 "error",
@@ -347,6 +404,28 @@ async def create_and_stamp_lpar(
                 else None
             ),
         )
+    if policy_requested and (
+        not isinstance(created_lpar.get("UUID"), str)
+        or not is_uuid(created_lpar["UUID"])
+        or (created_lpar.get("Resource") or {}).get("PartitionName") != creation.name
+    ):
+        if creation.stamp_policy == "required":
+            raise HMCError(
+                "stamp_policy='required': creation may have occurred, but partition "
+                "identity and ownership are unconfirmed. Inspect the contained "
+                "partition before retrying; no rollback performed."
+            )
+        return LparCreationResult(
+            True,
+            created_lpar,
+            None,
+            (),
+            security_policy_step=WorkflowStep(
+                "security_policy",
+                "error",
+                "Created partition identity unconfirmed; inspect before retrying",
+            ),
+        )
     ownership_stamped, warnings = await stamp_created_lpar_ownership(
         hmc,
         system_uuid,
@@ -373,7 +452,50 @@ async def create_and_stamp_lpar(
             "error",
             "Partition exists but ownership stamp unconfirmed; I/O workflow stopped before apply",
         )
-    if creation.physical_io.requested and creation.apply_profile is not None:
+    settings_step = (
+        await _created_settings_step(
+            hmc, system_uuid, system_name, creation, created_lpar
+        )
+        if policy_requested
+        else None
+    )
+    reporting_step = (
+        await _created_reporting_step(hmc, system_name, creation)
+        if policy_requested
+        else None
+    )
+    vtpm_step = (
+        await _created_vtpm_step(hmc, system_name, creation)
+        if policy_requested
+        else None
+    )
+    policy_step = await _created_security_policy_step(
+        hmc, system_uuid, creation, created_lpar
+    )
+    if policy_requested and creation.apply_profile is not None:
+        required = [
+            (creation.settings.pairs(), settings_step),
+            (creation.reporting_settings.pairs(), reporting_step),
+            (creation.vtpm_settings.pairs(), vtpm_step),
+            (creation.physical_io.requested, io_step),
+            (True, policy_step),
+        ]
+        verified = ownership_stamped is True and all(
+            not requested or (step is not None and step.status == "ok")
+            for requested, step in required
+        )
+        apply_step = (
+            await _apply_created_profile(
+                hmc, system_name or system_name_or_uuid, creation
+            )
+            if verified
+            else WorkflowStep(
+                "apply_profile",
+                "skipped",
+                "Creation verification incomplete; profile not applied",
+            )
+        )
+    elif creation.physical_io.requested and creation.apply_profile is not None:
         apply_step = (
             await _apply_created_profile(
                 hmc, system_name or system_name_or_uuid, creation
@@ -385,7 +507,7 @@ async def create_and_stamp_lpar(
                 "I/O readback unverified; profile not applied",
             )
         )
-    if creation.physical_io.requested:
+    if creation.physical_io.requested or policy_requested:
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
     return LparCreationResult(
         True,
@@ -393,13 +515,53 @@ async def create_and_stamp_lpar(
         ownership_stamped,
         (*apply_warnings, *warnings),
         apply_step,
-        await _created_settings_step(
+        settings_step
+        if policy_requested
+        else await _created_settings_step(
             hmc, system_uuid, system_name, creation, created_lpar
         ),
         io_step,
-        await _created_reporting_step(hmc, system_name, creation),
-        await _created_vtpm_step(hmc, system_name, creation),
+        reporting_step
+        if policy_requested
+        else await _created_reporting_step(hmc, system_name, creation),
+        vtpm_step
+        if policy_requested
+        else await _created_vtpm_step(hmc, system_name, creation),
+        policy_step,
     )
+
+
+async def _created_security_policy_step(
+    hmc: HMCClient,
+    system_uuid: str,
+    creation: LparCreation,
+    created_lpar: dict[str, Any],
+) -> WorkflowStep | None:
+    if not creation.security_policy.pairs():
+        return None
+    try:
+        uuid = created_lpar.get("UUID")
+        if (
+            not isinstance(uuid, str)
+            or not is_uuid(uuid)
+            or (created_lpar.get("Resource") or {}).get("PartitionName")
+            != creation.name
+        ):
+            raise ValueError("Created partition identity unconfirmed")
+        observed = await read_lpar_security_policy(
+            hmc, uuid, system_name_or_uuid=system_uuid
+        )
+        matches = observed.environment == creation.partition_type and all(
+            getattr(observed.settings, name) == getattr(creation.security_policy, name)
+            for name, _ in creation.security_policy.pairs()
+        )
+    except (HMCError, ValueError, PermissionError):
+        return WorkflowStep(
+            "security_policy",
+            "error",
+            "Partition exists or may exist; policy unverified. Inspect before retrying",
+        )
+    return WorkflowStep("security_policy", "ok" if matches else "error", observed)
 
 
 async def _created_vtpm_step(
