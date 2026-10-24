@@ -1923,7 +1923,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         print(
-            "CLEAN: both original memory baselines independently confirmed; no writes"
+            "CLEAN: finite memory-move success and both original baselines confirmed; no writes"
         )
         return 0
 

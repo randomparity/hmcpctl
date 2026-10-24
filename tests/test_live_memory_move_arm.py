@@ -113,6 +113,8 @@ def live_boundary(monkeypatch, boundary):  # noqa: F811 — pytest injects the i
         checkpoint_count=0,
         fault=None,
         checkpoint_failure=None,
+        result_changes={},
+        missing_submission_error=False,
         skip=lambda *args: None,
     )
 
@@ -141,10 +143,16 @@ def live_boundary(monkeypatch, boundary):  # noqa: F811 — pytest injects the i
                 mem(boundary.before[uuid])[field] = str(
                     int(mem(boundary.before[uuid])[field]) + delta
                 )
-        return "PASS", {
+        result = {
             "outcome": "partial" if state.fault else "applied",
             "workflow_completed": not state.fault,
+            "quantity_mib": 256,
+            "submission_error": None,
+            **state.result_changes,
         }
+        if state.missing_submission_error:
+            del result["submission_error"]
+        return "PASS", result
 
     state.record = record
     state.checkpoint = checkpoint
@@ -181,6 +189,7 @@ async def test_recovery_compares_both_without_writes(live_boundary):
             "group": arm.GROUP,
             "subtasks": [54],
             "tree_clean": True,
+            "partial": False,
             "tested_commit": "c" * 40,
         },
         "hmc": {
@@ -220,6 +229,7 @@ async def test_recovery_rejects_provenance(live_boundary, fault):
             "group": arm.GROUP,
             "subtasks": [54],
             "tree_clean": True,
+            "partial": False,
             "tested_commit": "c" * 40,
         },
         "hmc": {
@@ -440,6 +450,7 @@ def test_recovery_route_is_read_only(live_boundary, monkeypatch, tmp_path, capsy
             "group": arm.GROUP,
             "subtasks": [54],
             "tree_clean": True,
+            "partial": False,
             "tested_commit": "c" * 40,
         },
         "hmc": {
@@ -546,6 +557,7 @@ def test_system_observation_failure_after_effect_cannot_attest_clean(
             "group": arm.GROUP,
             "subtasks": [54],
             "tree_clean": True,
+            "partial": False,
             "tested_commit": "c" * 40,
         },
         "hmc": {
@@ -574,3 +586,253 @@ async def test_system_observation_zero_available_capacities_are_valid(
     await arm.exercise_memory_move(None, state)
     assert state.effects == 2
     assert state.verified["cleanup"] == "passed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["submission", "missing", "unverified", "partial"])
+async def test_uncertain_forward_never_authorizes_reverse(live_boundary, fault):
+    state, peers, initial = live_boundary
+    if fault == "submission":
+        state.result_changes = {"submission_error": "transport completion unknown"}
+    elif fault == "missing":
+        state.missing_submission_error = True
+    else:
+        state.result_changes = {"outcome": fault, "workflow_completed": False}
+    await arm.exercise_memory_move(None, state)
+    assert state.effects == 1 and peers != initial
+    observed = next(
+        r for r in state.results if r["tool"] == "memory-move forward observed"
+    )
+    assert observed["status"] == "FAIL"
+    assert [p["values"][2] for p in observed["data"]["independent"]] == [1792, 2304]
+    assert not any(r["tool"] == "memory-move reverse intent" for r in state.results)
+    assert not all(a.holds for a in state.verified["assertions"])
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_generated_result_allows_both_phases(live_boundary):
+    state, peers, initial = live_boundary
+    original = state.call
+
+    async def generated(*args, **kwargs):
+        status, data = await original(*args, **kwargs)
+        return status, SimpleNamespace(**data)
+
+    state.call = generated
+    await arm.exercise_memory_move(None, state)
+    assert state.effects == 2 and peers == initial
+    assert all(a.holds for a in state.verified["assertions"])
+
+
+def incomplete_proof(document, fault):
+    rows = document["results"]
+    if fault.startswith("partial-"):
+        value = {
+            "true": True,
+            "missing": None,
+            "null": None,
+            "zero": 0,
+            "string": "false",
+        }[fault.removeprefix("partial-")]
+        document["run"]["partial"] = value
+        if fault == "partial-missing":
+            del document["run"]["partial"]
+    elif fault in {"baseline-only", "forward-pending", "reverse-pending"}:
+        del rows[
+            {"baseline-only": 1, "forward-pending": 2, "reverse-pending": 4}[fault] :
+        ]
+    elif fault.startswith("missing-"):
+        del rows[int(fault.removeprefix("missing-"))]
+    elif fault.startswith("duplicate-"):
+        index = int(fault.removeprefix("duplicate-"))
+        rows.insert(index, deepcopy(rows[index]))
+    elif fault == "out-of-bounds":
+        rows[0]["data"]["peers"][0]["current_minimum_mib"] = 2048
+        rows[0]["data"]["oracle"][0]["values"][1] = 2048
+        rows[5]["data"][0]["values"][1] = 2048
+        for index in (1, 3):
+            rows[index]["data"]["before"][0]["current_minimum_mib"] = 2048
+            rows[index + 1]["data"]["independent"][0]["values"][1] = 2048
+    elif fault == "malformed-row":
+        rows.append(None)
+    elif fault == "reordered":
+        rows[2], rows[3] = rows[3], rows[2]
+    elif fault.startswith("refused-"):
+        rows[int(fault.removeprefix("refused-"))]["status"] = "FAIL"
+    elif fault.startswith("intent-"):
+        index, key = fault.removeprefix("intent-").split(":")
+        intent = rows[int(index)]["data"]
+        if key == "before":
+            intent[key][0]["current_memory_mib"] += 256
+        else:
+            intent[key] = {
+                "source": TARGET,
+                "destination": SOURCE,
+                "quantity_mib": 512,
+            }[key]
+            if index == "3" and key in {"source", "destination"}:
+                intent[key] = SOURCE if key == "source" else TARGET
+    elif fault.startswith("observed-"):
+        index, key = fault.removeprefix("observed-").split(":")
+        data = rows[int(index)]["data"]
+        if key == "independent":
+            data[key][0]["values"][2] += 256
+        elif key == "missing-submission":
+            del data["result"]["submission_error"]
+        else:
+            data["result"][key] = {
+                "submission_error": "unknown completion",
+                "workflow_completed": False,
+                "outcome": "unverified",
+                "quantity_mib": 512,
+            }[key]
+    else:
+        assert fault == "final-mismatch"
+        rows[5]["data"][0]["values"][2] += 256
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        *[f"partial-{flag}" for flag in ("true", "missing", "null", "zero", "string")],
+        "baseline-only",
+        "forward-pending",
+        "reverse-pending",
+        *[f"missing-{index}" for index in range(1, 6)],
+        *[f"duplicate-{index}" for index in range(1, 6)],
+        "reordered",
+        "malformed-row",
+        "out-of-bounds",
+        *[f"refused-{index}" for index in range(1, 6)],
+        *[
+            f"intent-{index}:{key}"
+            for index in (1, 3)
+            for key in ("source", "destination", "quantity_mib", "before")
+        ],
+        *[
+            f"observed-{index}:{key}"
+            for index in (2, 4)
+            for key in (
+                "submission_error",
+                "missing-submission",
+                "outcome",
+                "workflow_completed",
+                "quantity_mib",
+                "independent",
+            )
+        ],
+        "final-mismatch",
+    ],
+)
+def test_incomplete_proof_never_clears_matching_baselines(
+    live_boundary, monkeypatch, tmp_path, capsys, fault
+):
+    import json
+
+    import live_test_recovery as recovery
+
+    state, peers, initial = live_boundary
+    asyncio.run(arm.exercise_memory_move(None, state))
+    assert state.effects == 2 and peers == initial
+    document = {
+        "run": {
+            "group": arm.GROUP,
+            "subtasks": [54],
+            "tree_clean": True,
+            "tested_commit": "c" * 40,
+            "partial": False,
+        },
+        "hmc": {
+            "host": CONFIG.host,
+            "port": CONFIG.port,
+            "user": CONFIG.user,
+            "verify_ssl": CONFIG.verify_ssl,
+        },
+        "results": deepcopy(state.results),
+    }
+    incomplete_proof(document, fault)
+    if fault == "out-of-bounds":
+        mem(peers[SOURCE])["CurrentMinimumMemory"] = "2048"
+        mem(initial[SOURCE])["CurrentMinimumMemory"] = "2048"
+    command = arm.run_hmc_command
+    command.reset_mock()
+    with pytest.raises(ValueError, match="finite|partial"):
+        asyncio.run(arm.recover_document(CONFIG, document))
+    assert command.await_count == 5
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    command.reset_mock()
+    assert recovery.main(["--results", str(path)]) == 2
+    captured = capsys.readouterr()
+    assert "CLEAN:" not in captured.out
+    assert "unconfirmed" in captured.err
+    assert command.await_count == 5
+    assert all(
+        call.args[1].startswith(("lshwres ", "lssyscfg "))
+        for call in command.await_args_list
+    )
+    assert state.effects == 2 and peers == initial
+
+
+@pytest.mark.parametrize(
+    "failure", ["baseline-checkpoint", "intent-checkpoint", "refused"]
+)
+def test_stopped_arm_with_unchanged_state_remains_unconfirmed(live_boundary, failure):
+    state, peers, initial = live_boundary
+    if failure == "refused":
+        state.call = AsyncMock(return_value=("FAIL", {"error": "native refusal"}))
+    else:
+        state.checkpoint_failure = 1 if failure == "baseline-checkpoint" else 2
+    asyncio.run(arm.exercise_memory_move(None, state))
+    assert state.effects == 0 and peers == initial
+    assert not all(a.holds for a in state.verified["assertions"])
+    document = {
+        "run": {
+            "group": arm.GROUP,
+            "subtasks": [54],
+            "tree_clean": True,
+            "tested_commit": "c" * 40,
+            "partial": False,
+        },
+        "hmc": {
+            "host": CONFIG.host,
+            "port": CONFIG.port,
+            "user": CONFIG.user,
+            "verify_ssl": CONFIG.verify_ssl,
+        },
+        "results": state.results,
+    }
+    arm.run_hmc_command.reset_mock()
+    with pytest.raises(ValueError, match="finite"):
+        asyncio.run(arm.recover_document(CONFIG, document))
+    assert arm.run_hmc_command.await_count == 5
+    assert state.effects == 0 and peers == initial
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("drift", ["identity", "state", "quantity", "ownership"])
+async def test_reverse_requires_fresh_admission(live_boundary, monkeypatch, drift):
+    state, peers, _ = live_boundary
+    original = state.checkpoint
+
+    def checkpoint():
+        original()
+        if state.checkpoint_count != 3:
+            return
+        if drift == "identity":
+            peers[TARGET]["Resource"]["PartitionName"] = "changed-R2"
+        elif drift == "state":
+            peers[TARGET]["Resource"]["ResourceMonitoringControlState"] = "inactive"
+        elif drift == "quantity":
+            mem(peers[TARGET])["CurrentMemory"] = "2560"
+            mem(peers[TARGET])["RuntimeMemory"] = "2560"
+        else:
+            monkeypatch.setattr(arm, "get_lpar_description", AsyncMock(return_value=""))
+
+    state.checkpoint = checkpoint
+    await arm.exercise_memory_move(None, state)
+    assert state.effects == 1
+    assert not any(r["tool"] == "memory-move reverse intent" for r in state.results)
+    assert not all(a.holds for a in state.verified["assertions"])

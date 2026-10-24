@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -160,6 +161,28 @@ async def admit(hmc, system_uuid, system_name, selectors, protected_names):
     return peers
 
 
+def phase_succeeded(status, data, observed, expected):
+    has_submission = (
+        "submission_error" in data
+        if isinstance(data, Mapping)
+        else hasattr(data, "submission_error")
+    )
+    return (
+        status == "PASS"
+        and has_submission
+        and field(data, "submission_error") is None
+        and field(data, "workflow_completed") is True
+        and field(data, "outcome") == "applied"
+        and observed == expected_oracle(expected)
+        and all(
+            peer["current_minimum_mib"]
+            <= peer["current_memory_mib"]
+            <= peer["current_maximum_mib"]
+            for peer in expected
+        )
+    )
+
+
 async def exercise_memory_move(client, state):
     if state.group != GROUP or state.hmc_config is None:
         state.skip(
@@ -248,12 +271,7 @@ async def exercise_memory_move(client, state):
                     peer["current_memory_mib"] += delta
                     peer["runtime_memory_mib"] += delta
                 observed = await oracle(hmc, system, expected)
-                held = (
-                    status == "PASS"
-                    and field(data, "workflow_completed") is True
-                    and field(data, "outcome") == "applied"
-                    and observed == expected_oracle(expected)
-                )
+                held = phase_succeeded(status, data, observed, expected)
                 assertions.append(Assertion(f"{phase}-both-independent", held))
                 state.record(
                     SUBTASK,
@@ -298,6 +316,69 @@ async def exercise_memory_move(client, state):
         )
 
 
+def validate_finished(document, baseline):
+    if document["run"].get("partial") is not False:
+        raise ValueError(
+            "Memory move run remains partial or has no explicit completion flag"
+        )
+    if any(not isinstance(row, Mapping) for row in document["results"]):
+        raise ValueError("Memory move finite proof contains a malformed row")
+    rows = [
+        row
+        for row in document["results"]
+        if row.get("subtask") == SUBTASK and row.get("tool") != "hmc_move_lpar_memory"
+    ]
+    names = [
+        BASELINE,
+        "memory-move forward intent",
+        "memory-move forward observed",
+        "memory-move reverse intent",
+        "memory-move reverse observed",
+        "memory-move final baseline",
+    ]
+    if [row.get("tool") for row in rows] != names or any(
+        row.get("status") != "PASS" for row in rows
+    ):
+        raise ValueError("Memory move finite successful sequence is incomplete")
+    expected = deepcopy(baseline["peers"])
+    if len(expected) != 2 or baseline["oracle"] != expected_oracle(expected):
+        raise ValueError("Memory move finite proof has inconsistent original baselines")
+    region = int(baseline["system_oracle"][2].split(",")[1])
+    for index, order, deltas in (
+        (1, (0, 1), (-region, region)),
+        (3, (1, 0), (region, -region)),
+    ):
+        intent = rows[index]["data"]
+        if type(intent.get("quantity_mib")) is not int or intent != {
+            "source": expected[order[0]]["uuid"],
+            "destination": expected[order[1]]["uuid"],
+            "quantity_mib": region,
+            "before": expected,
+        }:
+            raise ValueError(
+                "Memory move finite intent identity, quantity or before-state differs"
+            )
+        for peer, delta in zip(expected, deltas, strict=True):
+            peer["current_memory_mib"] += delta
+            peer["runtime_memory_mib"] += delta
+        observed = rows[index + 1]["data"]
+        result = observed.get("result")
+        if (
+            type(field(result, "quantity_mib")) is not int
+            or field(result, "quantity_mib") != region
+            or not phase_succeeded(
+                "PASS", result, observed.get("independent"), expected
+            )
+        ):
+            raise ValueError(
+                "Memory move finite phase lacks successful submission and observation"
+            )
+    if rows[-1]["data"] != baseline["oracle"]:
+        raise ValueError(
+            "Memory move finite proof lacks final original-baseline confirmation"
+        )
+
+
 async def recover_document(hmc_config, document):
     run = document.get("run", {})
     if (
@@ -325,7 +406,8 @@ async def recover_document(hmc_config, document):
     baselines = [
         row["data"]
         for row in document.get("results", [])
-        if row.get("subtask") == SUBTASK
+        if isinstance(row, Mapping)
+        and row.get("subtask") == SUBTASK
         and row.get("tool") == BASELINE
         and row.get("status") == "PASS"
     ]
@@ -350,3 +432,4 @@ async def recover_document(hmc_config, document):
         raise ValueError(
             "Memory move baselines differ; no recovery write was attempted"
         )
+    validate_finished(document, baseline)

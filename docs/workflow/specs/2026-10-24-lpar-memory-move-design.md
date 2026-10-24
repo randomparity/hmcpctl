@@ -220,17 +220,30 @@ and system free-resource/name baseline before effects. Checkpoint the baseline a
 each finite intended operation through the existing private runner results sink.
 Attempt one memory-region move. A separate native CLI oracle must confirm source
 minus region and destination plus region, current/runtime convergence and unchanged
-bounds. Only after that pair is verified, recheck exact identity/ownership/state and
-expected current/runtime quantities, then attempt one explicit reverse test operation.
+bounds. Before proceeding, the forward result must report PASS, workflow_completed true,
+outcome applied and an explicitly present null submission_error; absent is not null.
+Only after that submission-and-observation proof, recheck exact identity/ownership/state
+and expected current/runtime quantities, then attempt one explicit reverse test operation.
 Verify both original baselines and system free resources independently. The reverse
 is the second finite case, never rollback after a failed or uncertain submission.
 Stop writes on rejection, partial/unverified effect, drift, failed oracle or checkpoint.
 
 The named recovery path reads both stored endpoints and original baselines without
-writing, creating, stopping or deleting anything. It returns nonzero on missing or
-changed evidence and requires the coordinator to decide later recovery. Positive arm
-proof covers ordinary running AIX/Linux dedicated memory only; other product types,
-inactive and forced variants remain unevidenced until separately exercised.
+writing, creating, stopping or deleting anything. CLEAN requires run.partial explicitly
+false, the ordered baseline → forward intent → successful forward observation → reverse
+intent → successful reverse observation → final original-baseline confirmation, and
+fresh equality of both original endpoint and system baselines. Both phase results must
+meet the same submission-and-observation predicate, including explicit null submission
+errors. Intents, quantities, before-states and independent observations must match the
+original fixtures and their one-region forward/reverse requests within original bounds;
+missing, duplicate, reordered or mismatched stages cannot clear recovery. Fresh read-only
+witnesses still run for readable valid baselines when journal completion cannot
+authorize CLEAN.
+Partial, incomplete, refused and pre-effect runs return nonzero/unconfirmed even when
+current baselines match; the coordinator decides any later recovery. These rules do
+not change native product outcome semantics. Positive arm proof covers ordinary running
+AIX/Linux dedicated memory only; other product types, inactive and forced variants
+remain unevidenced until separately exercised.
 
 The procedure names preflight, wrapper, recovery and evidence commands, candidate
 revision, external mode0700 evidence directory/mode0600 files, a two-move budget,
