@@ -153,7 +153,9 @@ readiness is never inferred from these configuration postconditions (C3/C4).
   is not trusted as evidence merely because PartitionType is AIX/Linux.
 - Controls: strict booleans/no extra keys, fixed role-admission errors,
   required system scope, existing ownership authorization, fixed encoded keys,
-  positive prerequisite evidence, one submission, redacted result/error handling.
+  positive prerequisite evidence, one submission, redacted role-specific
+  admission/submission/readback diagnostics and role-update preflight errors.
+  Shared creation target and duplicate-name reads retain existing error behavior.
 - Covered elsewhere: credential/session transport and adversarial administrators
   changing state after admission. No new cross-system mutation or takeover right.
 
