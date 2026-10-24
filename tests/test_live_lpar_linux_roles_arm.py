@@ -430,22 +430,9 @@ async def test_eligible_synthetic_success(external_hmc, controller):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("admission", ["authority"])
-async def test_ineligible_before_any_fixture(external_hmc, admission, monkeypatch):
+async def test_ineligible_before_any_fixture(external_hmc):
     b = external_hmc
-    if admission == "captured":
-        b.system["Resource"] = captured("rest-ms-entry-mtms-pair.json")["Resource"]
-        b.system["Resource"]["SystemName"] = "sys-R1"
-    elif admission == "authority":
-        b.system["Resource"].pop("IsClassicHMCManagement")
-    elif admission == "firmware":
-        b.system["Resource"]["SystemFirmware"] = "unknown"
-    else:
-
-        async def unknown(self):
-            return {"Resource": {}}
-
-        monkeypatch.setattr(HMCClient, "get_console_info", unknown)
+    b.system["Resource"].pop("IsClassicHMCManagement")
     state = await exercise(b)
     assert b.entry is None and b.deletes == []
     assert not any(
