@@ -7717,6 +7717,9 @@ def _live_repo(tmp_path: Path) -> Path:
     (package / "__init__.py").write_text("", encoding="utf-8")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "placeholder.py").write_text("", encoding="utf-8")
+    source = tmp_path / "scripts" / "live_test" / "evidence.py"
+    source.parent.mkdir()
+    source.write_text("", encoding="utf-8")
     subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
     subprocess.run(
         [
@@ -8034,7 +8037,9 @@ def test_the_repository_root_is_resolved_from_git_not_the_working_directory(
     """From a subdirectory, `Path.cwd()` would fingerprint no files at all."""
     repo = _live_repo(tmp_path)
     subdirectory = repo / "scripts"
-    monkeypatch.setattr(evidence, "__file__", str(subdirectory / "placeholder.py"))
+    monkeypatch.setattr(
+        evidence, "__file__", str(subdirectory / "live_test" / "evidence.py")
+    )
     monkeypatch.chdir(subdirectory)
 
     assert evidence.repository_root() == repo
@@ -8705,7 +8710,7 @@ def test_provenance_uses_executed_checkout_from_any_cwd(
     else:
         executing = owner
     try:
-        module = executing / "scripts" / "placeholder.py"
+        module = executing / "scripts" / "live_test" / "evidence.py"
         monkeypatch.setattr(evidence, "__file__", str(module))
         outside = tmp_path / "outside"
         outside.mkdir()
@@ -8767,7 +8772,9 @@ def test_runner_writes_publishable_source_provenance_outside_checkout(
     owner = tmp_path / "owner"
     owner.mkdir()
     _live_repo(owner)
-    monkeypatch.setattr(evidence, "__file__", str(owner / "scripts" / "placeholder.py"))
+    monkeypatch.setattr(
+        evidence, "__file__", str(owner / "scripts" / "live_test" / "evidence.py")
+    )
     output = tmp_path / "output"
     output.mkdir()
     repositories = [owner]
@@ -8867,3 +8874,81 @@ def test_emission_admits_actual_destination_independently_of_source(
             ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
         ).strip()
         assert written[0]["observation"]["tested_commit"] == expected
+
+
+def test_ignored_nested_copy_cannot_borrow_outer_source_identity(tmp_path, monkeypatch):
+    owner = _live_repo(tmp_path)
+    copied = owner / ".scratch" / "scripts" / "live_test" / "evidence.py"
+    copied.parent.mkdir(parents=True)
+    copied.write_text("copied_source = True\n", encoding="utf-8")
+    (owner / ".gitignore").write_text(".scratch/\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(owner), "add", ".gitignore"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(owner),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.test",
+            "commit",
+            "-qm",
+            "ignore scratch",
+        ],
+        check=True,
+    )
+    monkeypatch.setattr(evidence, "__file__", str(copied))
+    assert evidence._tree_is_clean(owner)
+    assert evidence.repository_root() is None
+
+
+@pytest.mark.parametrize("placement", ["untracked-ignored", "symlink", "missing"])
+def test_canonical_evidence_source_must_be_regular_and_tracked(
+    tmp_path, monkeypatch, placement
+):
+    owner = _live_repo(tmp_path)
+    source = owner / "scripts" / "live_test" / "evidence.py"
+    if placement == "untracked-ignored":
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(owner),
+                "rm",
+                "--cached",
+                "scripts/live_test/evidence.py",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        (owner / ".gitignore").write_text(
+            "/scripts/live_test/evidence.py\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "-C", str(owner), "add", ".gitignore"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(owner),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.test",
+                "commit",
+                "-qm",
+                "ignore copied source",
+            ],
+            check=True,
+        )
+        assert evidence._tree_is_clean(owner)
+    elif placement == "symlink":
+        copied = owner / ".scratch" / "evidence.py"
+        copied.parent.mkdir()
+        copied.write_text("copied_source = True\n", encoding="utf-8")
+        source.unlink()
+        source.symlink_to(copied)
+    else:
+        source.unlink()
+    monkeypatch.setattr(evidence, "__file__", str(source))
+    assert evidence.repository_root() is None

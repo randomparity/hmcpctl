@@ -107,14 +107,26 @@ def _git(repo_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 def repository_root() -> Path | None:
     """The repository the runner is checked out in, whatever directory it ran from.
 
-    The caller's directory can be outside Git or inside another checkout. Anchor
-    HEAD, cleanliness and import closures to the executing module's source.
+    The caller's directory can be outside Git or inside another checkout. Only
+    the canonical tracked source can identify HEAD, cleanliness and closures.
     """
-    result = _git(Path(__file__).resolve().parent, "rev-parse", "--show-toplevel")
+    module = Path(__file__).resolve()
+    result = _git(module.parent, "rev-parse", "--show-toplevel")
     if result.returncode != 0:
         return None
-    root = Path(result.stdout.strip())
-    return root if (root / "src" / "hmcpctl").is_dir() else None
+    root = Path(result.stdout.strip()).resolve()
+    canonical = root / "scripts" / "live_test" / "evidence.py"
+    if (
+        module != canonical
+        or canonical.is_symlink()
+        or not canonical.is_file()
+        or not (root / "src" / "hmcpctl").is_dir()
+    ):
+        return None
+    tracked = _git(
+        root, "ls-files", "--error-unmatch", "--", "scripts/live_test/evidence.py"
+    )
+    return root if tracked.returncode == 0 else None
 
 
 def run_provenance(

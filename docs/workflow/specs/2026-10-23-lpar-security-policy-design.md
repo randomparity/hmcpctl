@@ -152,6 +152,14 @@ limit. No extra consent or Linux-intent metadata is added.
 - Controls: strict finite keys/scalars and64KiB CLI bound; containment and target
   grants plus ownership; existing fixed CSV encoder/quoting; typed allowlisted
   XML scalars and sanitized results; one write with explicit uncertainty. Test each.
+- Live evidence crossing: the configured operator's source/output choices feed
+  private artifacts and allowlisted export. Resolve the canonical regular,
+  nonsymlink tracked evidence module; use that checkout's HEAD/source cleanliness,
+  independently check destination eligibility in its actual parent (file ignored
+  or outside Git), and retain private atomic writes with mode0600. Unknown source
+  cannot supply attribution; dirty source is refused for catalog observations. Matrices refuse a missing
+  commit and retain dirty/unknown-cleanliness qualifiers. Campaign raw artifacts
+  remain outside every repository; public output uses the existing allowlist.
 - Outside threats: compromised HMC/credentials and guest key lifecycle remain with
   platform/guest owners; an external writer racing reads is the accepted class above.
 
