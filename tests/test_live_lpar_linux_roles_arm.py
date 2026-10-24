@@ -181,6 +181,8 @@ def external_hmc(monkeypatch):
                 item.split("=", 1) for item in shlex.split(command)[-1].split(",")
             )
             if "description" in fields:
+                if b.failure == "stamp-failed":
+                    raise HMCCLIError("synthetic ownership stamp transport failure")
                 b.description = fields["description"]
                 return ""
             b.updates += 1
@@ -705,3 +707,74 @@ async def test_management_fallback_requires_both_readable_roles(external_hmc, mi
         for row in state.results
     )
     assert b.entry is None and b.deletes == [PARTITION]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize(
+    "controller,apply", [(False, True), (False, False), (True, False)]
+)
+async def test_actual_mcp_withheld_role_apply_is_incomplete(
+    external_hmc, selected, controller, apply
+):
+    b = external_hmc
+    b.failure = "stamp-failed"
+    if controller:
+        b.system["Resource"].update(
+            IsClassicHMCManagement="false", IsHMCPowerVMManagementController="true"
+        )
+    async with Client(application()) as client:
+        result = await client.call_tool(
+            "hmc_create_lpar",
+            {
+                "system_name_or_uuid": SYSTEM,
+                "name": "part-R1",
+                "resources": arm.RESOURCES,
+                "settings": {"powervm_mgmt_capable": selected},
+                "apply_partition_profile": apply,
+            },
+            raise_on_error=False,
+        )
+    assert not result.is_error, result
+    data = result.structured_content
+    assert data["resource_created"] is True and data["workflow_completed"] is (
+        not apply
+    )
+    assert data["ownership_stamped"] is False
+    assert (
+        next(step for step in data["steps"] if step["step"] == "apply_profile")[
+            "status"
+        ]
+        == "skipped"
+    )
+    assert len([cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]) == 1
+    assert not any("-o apply" in cmd for cmd in b.commands)
+    assert b.entry is not None and not b.deletes
+
+
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize(
+    "controller,apply", [(False, True), (False, False), (True, False)]
+)
+def test_actual_cli_withheld_role_apply_exits_nonzero(
+    external_hmc, selected, controller, apply
+):
+    from typer.testing import CliRunner
+
+    from hmcpctl.cli import app
+
+    b = external_hmc
+    b.failure = "stamp-failed"
+    if controller:
+        b.system["Resource"].update(
+            IsClassicHMCManagement="false", IsHMCPowerVMManagementController="true"
+        )
+    flag = "--powervm-mgmt-capable" if selected else "--no-powervm-mgmt-capable"
+    args = ["lpars", "create", "part-R1", "--system", SYSTEM, "--yes", flag]
+    if not apply:
+        args.append("--no-apply")
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == (1 if apply else 0), result.output
+    assert b.entry is not None and not b.deletes
+    assert len([cmd for cmd in b.commands if cmd.startswith("mksyscfg ")]) == 1
+    assert not any("-o apply" in cmd for cmd in b.commands)

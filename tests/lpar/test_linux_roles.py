@@ -1153,3 +1153,88 @@ async def test_role_preflight_error_preserves_type_and_status(
     assert "no changes were submitted" in str(caught.value)
     assert MARKER in str(original)
     assert original.body is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stamped", [False, None])
+@pytest.mark.parametrize("selected", [False, True])
+async def test_requested_role_apply_withheld_stops_workflow(
+    creation_boundary, stamped, selected
+):
+    """Consume unit-boundary stamp results; None is not a native reachability claim."""
+    from decimal import Decimal
+
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments, VnicAssignment
+    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
+
+    b = creation_boundary
+    b.stamp.return_value = (stamped, ("ownership stamp unavailable",))
+    b.resource["PowerVMManagementCapable"] = str(selected).lower()
+    creation = replace(
+        b.creation,
+        settings=LparSettings(powervm_mgmt_capable=selected),
+        apply_profile=True,
+    )
+    backing = VnicBackingSelector("vios", "1", "1", "0", Decimal(2))
+    assignments = LparPcieAssignments(vnics=(VnicAssignment(backing, 0),))
+    result = await create_lpar(b.hmc, SYSTEM, creation, assignments)
+    assert result.resource_created and not result.workflow_completed
+    assert result.ownership_stamped is stamped
+    assert result.warnings
+    assert (
+        next(step for step in result.steps if step.step == "apply_profile").status
+        == "skipped"
+    )
+    b.apply.assert_not_awaited()
+    b.assign.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stamped", [False, None])
+@pytest.mark.parametrize("apply", [False, None])
+@pytest.mark.parametrize("controller", [False, True])
+@pytest.mark.parametrize("selected", [False, True])
+async def test_intentional_role_no_apply_preserves_completion(
+    creation_boundary, stamped, apply, controller, selected
+):
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.workflows import create_lpar
+
+    b = creation_boundary
+    b.stamp.return_value = (stamped, ("ownership stamp unavailable",))
+    b.caps.return_value = replace(CAPS, controller_mode=controller)
+    b.resource["PowerVMManagementCapable"] = str(selected).lower()
+    creation = replace(
+        b.creation,
+        settings=LparSettings(powervm_mgmt_capable=selected),
+        apply_profile=apply,
+    )
+    result = await create_lpar(b.hmc, SYSTEM, creation, LparPcieAssignments())
+    assert result.resource_created and result.workflow_completed
+    assert result.ownership_stamped is stamped
+    b.apply.assert_not_awaited()
+    b.assign.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stamped", [False, None])
+@pytest.mark.parametrize("native", [False, True])
+async def test_no_role_best_effort_stamp_behavior_is_unchanged(
+    creation_boundary, stamped, native
+):
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.workflows import create_lpar
+
+    b = creation_boundary
+    b.stamp.return_value = (stamped, ("ownership stamp unavailable",))
+    b.hmc.create_logical_partition.return_value = b.entry
+    settings = LparSettings(time_ref=False) if native else LparSettings()
+    creation = replace(b.creation, settings=settings, apply_profile=True)
+    result = await create_lpar(b.hmc, SYSTEM, creation, LparPcieAssignments())
+    assert result.resource_created and result.workflow_completed
+    if native:
+        b.apply.assert_awaited_once()
+    else:
+        b.apply.assert_not_awaited()
+    b.assign.assert_awaited_once()

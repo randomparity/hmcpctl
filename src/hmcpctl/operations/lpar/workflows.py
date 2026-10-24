@@ -110,6 +110,10 @@ async def create_lpar(
     # stops the ordered workflow; the partition (if created) stays created.
     apply_failed = (
         created.apply_step is not None and created.apply_step.status == "error"
+    ) or (
+        roles_requested(creation.settings)
+        and creation.apply_profile is True
+        and (created.apply_step is None or created.apply_step.status != "ok")
     )
     assignments_skipped = (
         created.lpar is None
