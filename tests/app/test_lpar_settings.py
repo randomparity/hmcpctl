@@ -506,3 +506,53 @@ async def test_mcp_role_target_denial_before_remote(role_app_boundary):
     b.hmc.get_logical_partition.assert_not_awaited()
     b.hmc.get_managed_system.assert_not_awaited()
     assert b.writes == []
+
+
+@pytest.mark.parametrize("creation", [False, True])
+@pytest.mark.parametrize(
+    ("settings", "stage"),
+    [
+        ({"powervm_mgmt_capable": False}, "system"),
+        ({"powervm_mgmt_capable": True}, "system"),
+        ({"kvm_capable": False}, "system"),
+        ({"kvm_capable": True}, "system"),
+        ({"kvm_capable": False}, "console"),
+        ({"kvm_capable": True}, "console"),
+        ({"powervm_mgmt_capable": False, "kvm_capable": False}, "console"),
+        ({"powervm_mgmt_capable": True, "kvm_capable": True}, "console"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_mcp_role_preflight_remote_diagnostic_privacy(
+    role_app_boundary, creation, settings, stage
+):
+    b = role_app_boundary
+    marker = "PRIVATE-ROLE-PREFLIGHT-MARKER"
+    failure = HMCError("Remote evidence failed", 503, f"<Message>{marker}</Message>")
+    before = deepcopy(b.resource)
+    getattr(
+        b.hmc, "get_managed_system" if stage == "system" else "get_console_info"
+    ).side_effect = failure
+    if creation:
+        b.hmc.find_partition_by_name.return_value = None
+    name = "hmc_create_lpar" if creation else "hmc_configure_lpar"
+    async with Client(policy_app(name)) as client:
+        result = await client.call_tool(
+            name,
+            {
+                "system_name_or_uuid": SYSTEM,
+                "name" if creation else "lpar_name_or_uuid": "new"
+                if creation
+                else PARTITION,
+                "settings": settings,
+            },
+            raise_on_error=False,
+        )
+    assert result.is_error
+    assert marker not in str(result)
+    assert "Linux role preflight" in str(result.content)
+    assert "no changes were submitted" in str(result.content)
+    assert "503" in str(result.content)
+    assert b.writes == []
+    assert b.resource == before
+    assert marker in str(failure)

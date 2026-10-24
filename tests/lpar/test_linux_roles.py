@@ -12,7 +12,7 @@ import pytest
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources, LparSettings
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.lpar import configuration as operation
 from hmcpctl.operations.lpar import linux_roles as roles
 from hmcpctl.ssh.lpar import (
@@ -1080,3 +1080,28 @@ async def test_mixed_creation_remote_errors_are_safe_for_roles(
         assert result.settings_step.result.kvm_capable is True
     if domain != "apply_profile" and (selected or domain == "physical_io"):
         b.apply.assert_not_awaited()
+
+
+@pytest.mark.parametrize("stage", ["system", "console"])
+@pytest.mark.parametrize(
+    "error_type", [HMCError, HMCTransportError, HMCTLSFingerprintError, HMCCLIError]
+)
+@pytest.mark.asyncio
+async def test_role_preflight_error_preserves_type_and_status(
+    source_boundary, stage, error_type
+):
+    b = source_boundary
+    original = error_type("Remote evidence failed", 503, f"<Message>{MARKER}</Message>")
+    getattr(
+        b.hmc, "get_managed_system" if stage == "system" else "get_console_info"
+    ).side_effect = original
+    with pytest.raises(error_type) as caught:
+        await roles.read_role_capabilities(b.hmc, SYSTEM, need_kvm=True)
+    assert type(caught.value) is error_type
+    assert caught.value.status_code == 503
+    assert caught.value.body is None
+    assert MARKER not in str(caught.value)
+    assert "Linux role preflight" in str(caught.value)
+    assert "no changes were submitted" in str(caught.value)
+    assert MARKER in str(original)
+    assert original.body is not None

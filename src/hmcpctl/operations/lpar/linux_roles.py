@@ -60,7 +60,14 @@ async def read_role_capabilities(
     hmc: HMCClient, system_uuid: str, *, need_kvm: bool
 ) -> RoleCapabilities:
     """Read authority first; management-only selection adds no KVM queries."""
-    entry = await hmc.get_managed_system(system_uuid)
+    try:
+        entry = await hmc.get_managed_system(system_uuid)
+    except HMCError as error:
+        raise type(error)(
+            "Linux role preflight could not read selected-system authority; "
+            "no changes were submitted. Check connectivity and read permissions, then retry.",
+            status_code=error.status_code,
+        ) from None
     resource = (entry or {}).get("Resource")
     if not isinstance(resource, dict):
         raise ValueError(  # noqa: TRY004 — malformed remote evidence, not caller input
@@ -82,7 +89,14 @@ async def read_role_capabilities(
     kvm = (
         isinstance(caps, dict) and leaf_text(caps.get("KvmOnPowerVMCapable")) == "true"
     )
-    console = await hmc.get_console_info()
+    try:
+        console = await hmc.get_console_info()
+    except HMCError as error:
+        raise type(error)(
+            "Linux role preflight could not read console release evidence; "
+            "no changes were submitted. Check connectivity and read permissions, then retry.",
+            status_code=error.status_code,
+        ) from None
     version = _role_console_version((console or {}).get("Resource"))
     firmware = leaf_text(resource.get("SystemFirmware"))
     match = (
