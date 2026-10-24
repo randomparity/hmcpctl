@@ -188,7 +188,8 @@ No delegated hardware, login, deploy or source-probe call is authorized by this 
   configured credential/transport authentication and native HMC reservation admission.
 - Controls: strict model, explicit scalar selectors, one-grant authorization, two
   ownership checks, same-system/distinct-ID checks, D01 numeric/state validation,
-  shell quoting, bounded SSH timeout/output, independent readbacks, no automatic replay.
+  shell quoting, bounded SSH timeout and retained submission/read-error diagnostics,
+  independent readbacks, no automatic replay. No transport-output cap is provided.
 - Out of scope threats: a compromised HMC or authorized native administrator can race
   these reads; transport authentication and existing audit own their respective layers.
   No client guarantee turns that race into a transaction or a false completed result.
