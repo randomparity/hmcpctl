@@ -14,7 +14,8 @@ must be visible in policy, ownership admission, readback and the result.
 
 ## Reference contract
 
-- Local P10/P11 `commands/chhwres.md:90–96,215–219,224–225,234–236` describe
+- Local P10 `commands/chhwres.md:90–96,215–219,224–225,234–236` and P11
+  `commands/chhwres.md:90–96,217–221,228–229,237–239` describe
   source `--id`, destination `--tid`, MiB quantity aligned to the system region,
   no shared-memory moves, and the AIX/Linux/VIOS no-RMC force path. The D02
   synopsis selector in each corpus has SHA256
@@ -106,8 +107,9 @@ prints structured evidence and exits nonzero. No stable-facade export is added.
    refuses. These are observations, not an atomic lock on native administrators.
 6. Zero quantity returns a dual verified no-op after the same admission/rechecks;
    otherwise issue the one fixed move. Catch the existing transport error, retain
-   its bounded message and distinguish definite native process refusal from lost
-   transport. Do not automatically retry or compensate any submitted request.
+   its bounded message and distinguish a normal positive native exit status without
+   an exit signal from lost transport, missing status or signal termination. Do not
+   automatically retry or compensate any submitted request.
 
 DPO, guest reservation availability and other native concurrent operations can
 still reject or partially apply after the final reads. No absence of a reported
@@ -124,8 +126,9 @@ bounded read error. Reuse D01's per-endpoint expected current/runtime checks and
 change-location reporting. For a normal running endpoint, runtime must converge;
 for inactive or forced/no-RMC endpoints, report current-configuration effect and
 its deferred guest effect separately. Both current min/max envelopes and processor
-vectors must remain unchanged; a changed identity/state/mode or malformed snapshot
-cannot verify that endpoint.
+vectors must be valid numeric observations and remain unchanged; invalid baseline
+CPU evidence refuses before submission and invalid postread CPU evidence is unverified.
+A changed identity/state/mode or malformed snapshot cannot verify that endpoint.
 
 The aggregate result contains `outcome`, `workflow_completed`, `quantity_mib`,
 `submission_error`, `source`, and `destination`. Each endpoint uses the D01 result
@@ -204,7 +207,8 @@ Add opt-in arm54/group `lpar-memory-move`, assigned by the coordinator for C6,
 with named `scripts/live_lpar_memory_move.py`, preflight and read-only recovery.
 Reuse existing `LiveTestConfig.lp3_name` and `scratch_name` as the explicitly
 configured source and destination; neither is created or deleted. Require unique
-UUIDs, owned AIX/Linux running guests, active RMC, dedicated memory, dynamic-memory
+UUIDs and non-protected resolved names at each admission (including UUID aliases),
+owned AIX/Linux running guests, active RMC, dedicated memory, dynamic-memory
 capability and profile sync Disabled/Suspended. These are the proof arm's positive
 prerequisites, not restrictions on the full product. No force/activation/OS deployment
 is used to manufacture eligibility. An unavailable prerequisite stops without
