@@ -7,7 +7,7 @@ and maximum huge-page counts, HPT ratio, PPT ratio, and KVM reservation percenta
 The [frozen scope](https://github.com/randomparity/hmcpctl/issues/1767#issuecomment-6383900644)
 has empty exclusions. It retains M/full-spec/250; implementation waits for campaign
 reconciliation of the shared #1765/#1766 creation interfaces.
-[ADR 0279](../../adr/0279-lpar-creation-memory-layout.md) records the boundary.
+[ADR 0295](../../adr/0295-lpar-creation-memory-layout.md) records the boundary.
 
 ## Source contract
 

@@ -1,4 +1,4 @@
-# ADR 0279: LPAR creation memory layout
+# ADR 0295: LPAR creation memory layout
 
 ## Status
 
