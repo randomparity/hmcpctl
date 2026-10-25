@@ -985,3 +985,32 @@ async def test_an_on_sync_carries_no_warning(mock_hmc):
 
     assert result["change_location"]["lives_in"] == "current-configuration-and-profile"
     assert "warnings" not in result
+
+
+@pytest.mark.asyncio
+async def test_native_mode_does_not_replace_absolute_setter(mock_hmc, monkeypatch):
+    from hmcpctl.server_tools.lpar import lifecycle
+
+    _mock_lpar_detail(mock_hmc)
+    _mock_system_detail(mock_hmc)
+    route = _mock_modify(mock_hmc)
+    native = AsyncMock(
+        side_effect=AssertionError("resources mode reached native mutation")
+    )
+    monkeypatch.setattr(lifecycle, "change_lpar_processors", native, raising=False)
+    with patch(
+        "hmcpctl.operations.lpar.ownership.get_lpar_description",
+        new=_owned_by("hmcpctl"),
+    ):
+        async with HMCClient(make_config()) as hmc:
+            monkeypatch.setattr(lifecycle, "with_client", lambda fn, **kwargs: fn(hmc))
+            await lifecycle.hmc_dlpar_proc(
+                LPAR_UUID,
+                LparResources(desired_procs=1.5, desired_vcpus=3),
+                system_name_or_uuid=SYSTEM_UUID,
+            )
+    request = route.calls.last.request
+    assert request.headers["If-Match"] == "etag-1"
+    assert "<DesiredProcessingUnits>1.5<" in request.content.decode()
+    assert "<DesiredVirtualProcessors>3<" in request.content.decode()
+    native.assert_not_awaited()
