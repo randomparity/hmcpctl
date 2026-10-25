@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed for #1771; design only. No implementation or native creation proof yet.
+Proposed for #1771; implemented on the feature branch.
+Candidate-bound native creation proof remains unrun.
 
 ## Context
 
