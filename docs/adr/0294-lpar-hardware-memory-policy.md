@@ -3,7 +3,9 @@
 ## Status
 
 Proposed for #1771; implemented on the feature branch.
-Candidate-bound native creation proof remains unrun.
+ST55 passed on candidate `534789755f64acea6b7831dce1192f5421f8e8f9` for an inactive
+AIX/Linux LPAR with both flags true, including access readback and clean recovery.
+No guest/runtime, VIOS, false/mixed-field or mixed-role proof is claimed.
 
 ## Context
 
