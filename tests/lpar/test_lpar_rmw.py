@@ -14,6 +14,7 @@ import pytest
 from conftest import make_config, mock_system_summaries
 from defusedxml import ElementTree as DET
 
+from hmcpctl import errors as hmc_errors
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents import lpar as lpar_documents
 from hmcpctl.documents.lpar import LparResources, partition_updates
@@ -1001,3 +1002,344 @@ def test_sharing_context_helpers_return_effective_mode_without_mapping_it():
     assert lpar_documents.reject_update_weight_on_create(LparResources()) is None
     with pytest.raises(ValueError, match="uncapped_weight.*update"):
         lpar_documents.reject_update_weight_on_create(resources)
+
+
+WEIGHT = f"{SHARED}/UncappedWeight"
+
+
+@pytest.mark.parametrize("missing", [False, True])
+@pytest.mark.parametrize("weight", [0, 255])
+@pytest.mark.asyncio
+async def test_sharing_xml_insert(mock_hmc, missing, weight):
+    lpar = _lpar(_entry())
+    shared = _find(lpar, SHARED)
+    anchor = _find(lpar, f"{SHARED}/SharedProcessorPoolID")
+    anchor.set("preserve", "anchor")
+    ET.SubElement(shared, f"{{{UOM}}}Untouched", {"keep": "yes"}).text = "tail"
+    if missing:
+        shared.remove(_find(lpar, WEIGHT))
+    original = ET.tostring(lpar, encoding="unicode")
+    _, post = _routes(mock_hmc, entry=original)
+    await _update(
+        lambda node: partition_updates(
+            node, resources=LparResources(uncapped_weight=weight)
+        )
+    )
+    expected = _lpar(original)
+    parent = _find(expected, SHARED)
+    if missing:
+        leaf = ET.Element(f"{{{UOM}}}UncappedWeight", {"kxe": "false", "kb": "CUD"})
+        parent.insert(
+            list(parent).index(_find(expected, f"{SHARED}/SharedProcessorPoolID")) + 1,
+            leaf,
+        )
+    else:
+        leaf = _find(expected, WEIGHT)
+    leaf.text = str(weight)
+    assert post.call_count == 1
+    assert _canonical(_lpar(post.calls.last.request.content)) == _canonical(expected)
+
+
+def _damaged_transport_lpar(damage):
+    lpar = _lpar(_entry())
+    shared = _find(lpar, SHARED)
+    if damage.startswith("missing-weight"):
+        shared.remove(_find(lpar, WEIGHT))
+        if damage.endswith("capped"):
+            _find(lpar, f"{PPC}/SharingMode").text = "capped"
+        elif damage.endswith("dedicated"):
+            _find(lpar, f"{PPC}/HasDedicatedProcessors").text = "true"
+        elif damage.endswith("mode"):
+            _find(lpar, f"{PPC}/SharingMode").text = "Unknown"
+        return lpar
+    target_path = {
+        "container": SHARED,
+        "ppc": PPC,
+        "leaf": WEIGHT,
+        "anchor": f"{SHARED}/SharedProcessorPoolID",
+        "ordinary": "PartitionName",
+    }
+    kind, target = damage.split(":")
+    node = _find(lpar, target_path[target])
+    parent = next(parent for parent in lpar.iter() if node in list(parent))
+    if kind == "duplicate":
+        parent.append(DET.fromstring(ET.tostring(node)))
+    elif kind == "namespace":
+        node.tag = "{urn:wrong}" + localname(node.tag)
+    elif kind == "scalar":
+        ET.SubElement(node, f"{{{UOM}}}Child").text = "decoy"
+    elif kind == "missing":
+        parent.remove(node)
+        if target == "anchor":
+            shared.remove(_find(lpar, WEIGHT))
+    return lpar
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "duplicate:container",
+        "namespace:container",
+        "duplicate:ppc",
+        "namespace:ppc",
+        "duplicate:leaf",
+        "namespace:leaf",
+        "scalar:leaf",
+        "duplicate:anchor",
+        "namespace:anchor",
+        "scalar:anchor",
+        "missing:anchor",
+        "missing:container",
+        "duplicate:ordinary",
+        "namespace:ordinary",
+        "scalar:ordinary",
+        "missing:ordinary",
+        "missing-weight-capped",
+        "missing-weight-dedicated",
+        "missing-weight-mode",
+    ],
+)
+@pytest.mark.asyncio
+async def test_sharing_xml_insert_refuses(mock_hmc, damage):
+    lpar = _damaged_transport_lpar(damage)
+    _, post = _routes(mock_hmc, entry=ET.tostring(lpar, encoding="unicode"))
+    path = "PartitionName" if damage.endswith(":ordinary") else WEIGHT
+    with pytest.raises((HMCError, ValueError)) as caught:
+        await _update(lambda _node: {path: "0"})
+    assert not isinstance(caught.value, getattr(hmc_errors, "LparUpdateError", ()))
+    assert not post.called
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"{SHARED}/NoSuchField",
+        f"{PPC}/CurrentSharingMode",
+        f"{PPC}/CurrentSharedProcessorConfiguration/CurrentUncappedWeight",
+        f"{PPC}/CurrentSharedProcessorConfiguration/RuntimeUncappedWeight",
+    ],
+)
+@pytest.mark.asyncio
+async def test_sharing_xml_insert_refuses_decoys(mock_hmc, path):
+    lpar = _observed_lpar()
+    _find(lpar, SHARED).remove(_find(lpar, WEIGHT))
+    _, post = _routes(mock_hmc, entry=ET.tostring(lpar, encoding="unicode"))
+    with pytest.raises((HMCError, ValueError)):
+        await _update(lambda _node: {path: "0"})
+    assert not post.called
+
+
+@pytest.mark.asyncio
+async def test_sharing_xml_insert_uses_effective_mode_and_preserves_decoys(mock_hmc):
+    lpar = _observed_lpar()
+    _find(lpar, SHARED).remove(_find(lpar, WEIGHT))
+    _find(lpar, f"{PPC}/SharingMode").text = "capped"
+    _find(lpar, f"{PPC}/CurrentSharingMode").text = "capped"
+    original = ET.tostring(lpar, encoding="unicode")
+    _, post = _routes(mock_hmc, entry=original)
+    await _update(
+        lambda node: partition_updates(
+            node, resources=LparResources(sharing_mode="uncapped", uncapped_weight=0)
+        )
+    )
+    written = _lpar(post.calls.last.request.content)
+    assert _find(written, WEIGHT).text == "0"
+    assert _find(written, f"{PPC}/SharingMode").text == "uncapped"
+    for field in [
+        "CurrentSharingMode",
+        "RuntimeSharingMode",
+        "CurrentSharedProcessorConfiguration",
+    ]:
+        assert _canonical(_find(written, f"{PPC}/{field}")) == _canonical(
+            _find(lpar, f"{PPC}/{field}")
+        )
+
+
+@pytest.mark.parametrize("require_etag", [False, True])
+@pytest.mark.asyncio
+async def test_sharing_write_stage_read_etag(mock_hmc, require_etag):
+    get, post = _routes(mock_hmc, etag=None)
+    async with HMCClient(make_config()) as hmc:
+        assert callable(getattr(hmc, "read_logical_partition_document", None))
+        if require_etag:
+            with pytest.raises(HMCError, match="no ETag") as caught:
+                await hmc.read_logical_partition_document(LPAR, require_etag=True)
+            assert not isinstance(caught.value, hmc_errors.LparUpdateError)
+        else:
+            lpar, etag = await hmc.read_logical_partition_document(LPAR)
+            assert etag is None
+            assert _canonical(lpar) == _canonical(_lpar(_entry()))
+    assert get.call_count == 1 and not post.called
+    assert "X-HMC-Schema-Version" not in get.calls.last.request.headers
+
+
+@pytest.mark.parametrize("bad", ["../ManagedSystem", "not-a-uuid"])
+@pytest.mark.asyncio
+async def test_sharing_write_stage_read_uuid(mock_hmc, bad):
+    async with HMCClient(make_config()) as hmc:
+        assert callable(getattr(hmc, "read_logical_partition_document", None))
+        with pytest.raises(ValueError, match="UUID"):
+            await hmc.read_logical_partition_document(bad)
+    assert not any(
+        "LogicalPartition" in str(call.request.url) for call in mock_hmc.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_sharing_write_stage(mock_hmc):
+    get, post = _routes(mock_hmc, etag='W/"original-etag"')
+    result = await _update(
+        lambda node: partition_updates(node, resources=LparResources(uncapped_weight=0))
+    )
+    assert result is not None
+    assert get.call_count == 1 and post.call_count == 1
+    assert post.calls.last.request.headers["If-Match"] == 'W/"original-etag"'
+    assert "X-HMC-Schema-Version" not in post.calls.last.request.headers
+    assert _find(_lpar(post.calls.last.request.content), WEIGHT).text == "0"
+
+
+@pytest.mark.parametrize("stage", ["etag", "parse", "mapper", "structure", "get"])
+@pytest.mark.asyncio
+async def test_sharing_write_stage_refusals(mock_hmc, stage):
+    kwargs = {"etag": None} if stage == "etag" else {}
+    if stage == "parse":
+        kwargs["entry"] = "<broken"
+    if stage == "get":
+        kwargs["get_status"] = 500
+    _, post = _routes(mock_hmc, **kwargs)
+    updates = (
+        _raise
+        if stage == "mapper"
+        else lambda node: {"Missing" if stage == "structure" else WEIGHT: "0"}
+    )
+    with pytest.raises((HMCError, ValueError)) as caught:
+        await _update(updates)
+    assert not isinstance(caught.value, getattr(hmc_errors, "LparUpdateError", ()))
+    assert not post.called
+
+
+@pytest.mark.parametrize(
+    "status,body,submission",
+    [
+        (200, "<broken", "acknowledged"),
+        (201, "<broken", "acknowledged"),
+        (202, "<broken", "acknowledged"),
+        (299, "<broken", "acknowledged"),
+        (412, "concurrent change", "rejected"),
+        (400, "refused", "unknown"),
+        (500, "failed", "unknown"),
+        (302, "redirect", "unknown"),
+        (None, "transport", "unknown"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_post_transport_and_parse_certainty(mock_hmc, status, body, submission):
+    get, post = _routes(mock_hmc)
+    if status is None:
+        post.mock(side_effect=httpx.ReadTimeout("synthetic timeout"))
+    else:
+        post.mock(return_value=httpx.Response(status, text=body))
+    with pytest.raises(HMCError) as caught:
+        await _update(lambda _node: {WEIGHT: "0"})
+    assert hasattr(hmc_errors, "LparUpdateError")
+    assert isinstance(caught.value, hmc_errors.LparUpdateError)
+    assert caught.value.submission == submission
+    assert caught.value.status_code == status
+    if submission == "acknowledged":
+        assert "Failed to parse" in str(caught.value)
+        assert isinstance(caught.value.__cause__, HMCError)
+    if status == 412:
+        assert "If-Match mismatch" in str(caught.value)
+        assert "Nothing was written" in str(caught.value)
+    assert get.call_count == 1 and post.call_count == 1
+
+
+@pytest.mark.parametrize("status", [200, 201, 202, 204, 299])
+@pytest.mark.asyncio
+async def test_post_transport_and_parse_certainty_empty_success(mock_hmc, status):
+    _, post = _routes(mock_hmc)
+    post.mock(return_value=httpx.Response(status))
+    assert await _update(lambda _node: {WEIGHT: "0"}) is None
+    assert post.call_count == 1
+
+
+@pytest.mark.parametrize("missing", [False, True])
+@pytest.mark.asyncio
+async def test_update_preflight_edits_only_a_detached_read(mock_hmc, missing):
+    lpar = _lpar(_entry())
+    if missing:
+        _find(lpar, SHARED).remove(_find(lpar, WEIGHT))
+    original = ET.tostring(lpar, encoding="unicode")
+    get, post = _routes(mock_hmc, entry=original)
+    seen = []
+
+    def updates(node):
+        seen.append(node)
+        return partition_updates(node, resources=LparResources(uncapped_weight=0))
+
+    async with HMCClient(make_config()) as hmc:
+        assert callable(getattr(hmc, "validate_logical_partition_update", None))
+        assert (
+            await hmc.validate_logical_partition_update(LPAR, updates, "weight") is None
+        )
+        assert _find(seen[0], WEIGHT).text == "0"
+        assert not post.called
+        await hmc.update_logical_partition(LPAR, updates, "weight")
+    assert get.call_count == 2 and post.call_count == 1
+    assert seen[0] is not seen[1]
+    assert _canonical(_lpar(get.calls[0].response.text)) == _canonical(lpar)
+
+
+@pytest.mark.asyncio
+async def test_update_preflight_edits_only_a_detached_read_refuses(mock_hmc):
+    lpar = _damaged_transport_lpar("duplicate:anchor")
+    _, post = _routes(mock_hmc, entry=ET.tostring(lpar, encoding="unicode"))
+    async with HMCClient(make_config()) as hmc:
+        assert callable(getattr(hmc, "validate_logical_partition_update", None))
+        with pytest.raises(HMCError):
+            await hmc.validate_logical_partition_update(
+                LPAR, lambda node: {WEIGHT: "0"}, "weight"
+            )
+        with pytest.raises(HMCError):
+            await hmc.update_logical_partition(
+                LPAR, lambda node: {WEIGHT: "0"}, "weight"
+            )
+    assert not post.called
+
+
+@pytest.mark.parametrize(
+    "status,submission",
+    [(200, "acknowledged"), (202, "acknowledged"), (412, "rejected"), (500, "unknown")],
+)
+@pytest.mark.asyncio
+async def test_post_transport_and_parse_certainty_buffer_refusal(
+    mock_hmc, status, submission
+):
+    _, post = _routes(mock_hmc)
+    post.mock(
+        return_value=httpx.Response(
+            status, text="bounded", headers={"Content-Length": str(1 << 30)}
+        )
+    )
+    with pytest.raises(HMCError) as caught:
+        await _update(lambda node: {WEIGHT: "0"})
+    assert isinstance(caught.value, hmc_errors.LparUpdateError)
+    assert caught.value.submission == submission
+    assert caught.value.status_code == status
+    assert "exceeds limit" in str(caught.value)
+    if status == 412:
+        assert "If-Match mismatch" in str(caught.value)
+        assert "Nothing was written" in str(caught.value)
+    assert post.call_count == 1
+
+
+def test_post_transport_and_parse_certainty_error_compatibility():
+    assert hasattr(hmc_errors, "LparUpdateError")
+    body = "<Message>" + "é" * 5000 + "</Message>"
+    ordinary = HMCError("write failed", 500, body)
+    error = hmc_errors.LparUpdateError("write failed", "unknown", 500, body)
+    assert isinstance(error, HMCError)
+    assert str(error) == str(ordinary)
+    assert error.body == ordinary.body
+    assert len(error.body.encode("utf-8")) <= hmc_errors.MAX_ERROR_BODY_BYTES
+    assert error.status_code == 500

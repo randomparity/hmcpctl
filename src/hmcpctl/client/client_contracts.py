@@ -208,6 +208,17 @@ class LparsClient(Protocol):
 
     async def get_managed_system(self, uuid: str) -> dict[str, Any] | None: ...
 
+    async def read_logical_partition_document(
+        self, lpar_uuid: str, *, require_etag: bool = False
+    ) -> tuple[Element, str | None]: ...
+
+    async def validate_logical_partition_update(
+        self,
+        lpar_uuid: str,
+        updates: Callable[[Element], Mapping[str, str | None]],
+        subject: str,
+    ) -> None: ...
+
     async def update_logical_partition(
         self,
         lpar_uuid: str,
