@@ -178,6 +178,15 @@ async def _create_via_cli(
         )
     except HMCError as exc:
         return system_name, apply_step, None, exc
+    except ValueError:
+        if (
+            creation.hardware_mem_encryption is None
+            and creation.hardware_mem_expansion is None
+        ):
+            raise
+        # Native creation succeeded, but ambiguous identity evidence is unavailable.
+        # Do not retain provider details in the partial result or exception chain.
+        return system_name, apply_step, None, None
     return system_name, apply_step, created_lpar, None
 
 

@@ -621,3 +621,121 @@ async def test_hardware_exception_chain_preserves_legacy_diagnostics(target, cas
     assert b.events.count("create") == 1
     assert "apply" not in b.events
     b.assign.assert_not_awaited()
+
+
+@pytest.fixture
+def identity_conflict(target, monkeypatch):
+    """Serve conflicting post-create identities through the real lookup provider."""
+    b = target
+    b.hmc.list_system_summaries.return_value[0]["SystemName"] = PRIVATE
+    original_read = b.hmc._get.side_effect
+    b.conflict = "ambiguous"
+    b.before_create = False
+    for method in ("find_partition_by_name", "list_logical_partitions"):
+        monkeypatch.setattr(b.hmc, method, getattr(HMCClient, method).__get__(b.hmc))
+
+    async def read(path, kind, **kwargs):
+        if path == f"/rest/api/uom/ManagedSystem/{SYSTEM}/LogicalPartition":
+            if "create" not in b.events and not b.before_create:
+                return ""
+            other = dict(b.entry)
+            other["UUID"] = (
+                "00000003-abcd-4ef0-8abc-000000000003"
+                if b.conflict == "ambiguous"
+                else PARTITION
+            )
+            return (
+                f'<feed xmlns="{ATOM_NS}">'
+                + xml_entry(kind, b.entry)
+                + xml_entry(kind, other)
+                + "</feed>"
+            )
+        return await original_read(path, kind, **kwargs)
+
+    b.hmc._get.side_effect = read
+    return b
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stamp_policy", ["required", "best-effort"])
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("field", ["hardware_mem_encryption", "hardware_mem_expansion"])
+@pytest.mark.parametrize("value", [False, True])
+@pytest.mark.parametrize("conflict", ["ambiguous", "duplicate"])
+async def test_post_create_identity_conflict_is_bounded(
+    identity_conflict, stamp_policy, direct, field, value, conflict
+):
+    b = identity_conflict
+    b.conflict = conflict
+    result = None
+    error = None
+    try:
+        result = await invoke(
+            b,
+            direct=direct,
+            stamp_policy=stamp_policy,
+            apply_profile=True,
+            **{field: value},
+        )
+    except (HMCError, ValueError) as caught:
+        error = caught
+    if stamp_policy == "required":
+        assert PRIVATE not in "".join(traceback.format_exception(error))
+        assert isinstance(error, HMCError)
+        assert "creation may have succeeded" in str(error)
+        assert "Inspect the contained partition before retrying" in str(error)
+        assert error.__cause__ is None and error.__context__ is None
+    else:
+        assert error is None
+        assert result.resource_created and result.lpar is None
+        assert result.ownership_stamped is None
+        step = (
+            result.hardware_memory_step
+            if direct
+            else next(step for step in result.steps if step.step == "hardware_memory")
+        )
+        assert step.status == "error"
+        assert step.result["status"] == "readback-unavailable"
+        assert "inspect the contained partition before retrying" in " ".join(
+            result.warnings
+        )
+        assert PRIVATE not in repr(result)
+        if not direct:
+            assert not result.workflow_completed
+    assert b.events.count("create") == 1
+    assert "stamp" not in b.events and "apply" not in b.events
+    b.assign.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
+    b.hmc.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stamp_policy", ["required", "best-effort"])
+async def test_omitted_hardware_preserves_lookup_value_error(
+    identity_conflict, stamp_policy
+):
+    b = identity_conflict
+    with pytest.raises(ValueError, match="Ambiguous LPAR") as raised:
+        await core.create_and_stamp_lpar(
+            b.hmc,
+            SYSTEM,
+            core.LparCreation(
+                "part-R1", "AIX/Linux", LparResources(), stamp_policy=stamp_policy
+            ),
+        )
+    assert PRIVATE in str(raised.value)
+    assert b.events.count("create") == 1
+    assert "stamp" not in b.events and "apply" not in b.events
+
+
+@pytest.mark.asyncio
+async def test_pre_create_lookup_conflict_stays_pre_effect(identity_conflict):
+    b = identity_conflict
+    b.before_create = True
+    with pytest.raises(ValueError, match="Ambiguous LPAR") as raised:
+        await invoke(b, hardware_mem_encryption=False, apply_profile=True)
+    assert "may" not in str(raised.value)
+    assert b.events == []
+    b.command.assert_not_awaited()
+    b.assign.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
