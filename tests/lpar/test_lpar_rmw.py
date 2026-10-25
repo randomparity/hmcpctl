@@ -15,6 +15,7 @@ from conftest import make_config, mock_system_summaries
 from defusedxml import ElementTree as DET
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.documents import lpar as lpar_documents
 from hmcpctl.documents.lpar import LparResources, partition_updates
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.assignments import LparPcieAssignments
@@ -56,10 +57,11 @@ def _processors(dedicated: bool, has_dedicated: bool) -> str:
     flag = (
         _el("HasDedicatedProcessors", str(dedicated).lower()) if has_dedicated else ""
     )
-    mode = "keep_idle_procs" if dedicated else "uncapped"
+    mode = "keep idle procs" if dedicated else "uncapped"
     return f"""<{PPC} kb="CUD" kxe="false" schemaVersion="V1_0">
         <Metadata><Atom/></Metadata>
-        {flag}{config}{_el("SharingMode", mode)}
+        {flag}{_el("CurrentHasDedicatedProcessors", str(dedicated).lower(), "ROR")}
+        {config}{_el("SharingMode", mode)}
         {_el("CurrentSharingMode", mode, "ROR")}
     </{PPC}>"""
 
@@ -361,12 +363,11 @@ def test_partition_updates_maps_nothing_for_dedicated_alone():
     )
 
 
-def test_partition_updates_names_has_dedicated_for_a_mode_only_request():
-    updates = partition_updates(
-        _lpar(_entry(has_dedicated=False)), resources=LparResources(uncapped=False)
-    )
-
-    assert f"{PPC}/HasDedicatedProcessors" in updates
+def test_partition_updates_refuses_missing_context_for_a_mode_only_request():
+    with pytest.raises(ValueError, match="HasDedicatedProcessors"):
+        partition_updates(
+            _lpar(_entry(has_dedicated=False)), resources=LparResources(uncapped=False)
+        )
 
 
 @pytest.mark.parametrize(
@@ -407,7 +408,7 @@ def test_partition_updates_refuses_what_the_read_cannot_carry(
 async def test_a_mode_only_request_on_a_read_without_the_mode_is_refused(mock_hmc):
     _, post = _routes(mock_hmc, entry=_entry(has_dedicated=False))
 
-    with pytest.raises(HMCError, match=f"has no {PPC}/HasDedicatedProcessors"):
+    with pytest.raises(ValueError, match="HasDedicatedProcessors"):
         await _update(
             lambda lpar: partition_updates(lpar, resources=LparResources(uncapped=True))
         )
@@ -621,3 +622,382 @@ async def test_dlpar_processors_write_only_processor_fields(mock_hmc, authorized
     assert _canonical(_lpar(post.calls.last.request.content)) == _expected(
         _entry(), {f"{SHARED}/DesiredProcessingUnits": "0.4"}
     )
+
+
+@pytest.mark.parametrize("value", [-1, 256, True, False, 1.0, "0"])
+def test_sharing_input_rejects_invalid_weight(value):
+    with pytest.raises(ValueError, match="uncapped_weight"):
+        partition_updates(
+            _lpar(_entry()), resources=LparResources(uncapped_weight=value)
+        )
+
+
+@pytest.mark.parametrize("value", [0, 1, "true"])
+def test_sharing_input_rejects_non_boolean_alias(value):
+    with pytest.raises(ValueError, match="uncapped.*boolean"):
+        partition_updates(_lpar(_entry()), resources=LparResources(uncapped=value))
+
+
+@pytest.mark.parametrize(
+    ("mode", "alias"),
+    [("capped", True), ("uncapped", False), ("keep_idle_procs", True)],
+)
+def test_sharing_input_refuses_weight_bearing_contradictions(mode, alias):
+    with pytest.raises(ValueError, match="sharing_mode.*uncapped|shared"):
+        partition_updates(
+            _lpar(_entry()),
+            resources=LparResources(
+                sharing_mode=mode, uncapped=alias, uncapped_weight=0
+            ),
+        )
+
+
+@pytest.mark.parametrize("weight", [None, 0, 255])
+def test_sharing_zero_and_bounds_preserve_presence(weight):
+    resources = LparResources(uncapped_weight=weight)
+    updates = partition_updates(_lpar(_entry()), resources=resources)
+    if weight is None:
+        assert updates == {}
+    else:
+        assert updates == {
+            f"{SHARED}/UncappedWeight": str(weight),
+            f"{PPC}/HasDedicatedProcessors": "false",
+        }
+    assert callable(getattr(lpar_documents, "has_sharing_change", None))
+    assert lpar_documents.has_sharing_change(resources) is (weight is not None)
+
+
+@pytest.mark.parametrize("weight", [0, 255])
+@pytest.mark.parametrize("procs", [None, 0.5])
+def test_sharing_zero_and_bounds_reject_create_before_empty_block(weight, procs):
+    resources = LparResources(uncapped_weight=weight, desired_procs=procs)
+    with pytest.raises(ValueError, match="uncapped_weight.*update"):
+        lpar_documents.build_lpar_document("example", resources=resources)
+    with pytest.raises(ValueError, match="uncapped_weight.*update"):
+        lpar_documents.build_vios_document("example", resources=resources)
+
+
+@pytest.mark.parametrize(
+    ("alias", "mode", "expected"),
+    [
+        (True, "capped", "uncapped"),
+        (False, "uncapped", "uncapped"),
+        (False, None, "capped"),
+        (None, "capped", "capped"),
+        (None, None, None),
+    ],
+)
+def test_sharing_exact_legacy_alias(alias, mode, expected):
+    resources = LparResources(uncapped=alias, sharing_mode=mode)
+    updates = partition_updates(_lpar(_entry()), resources=resources)
+    assert updates.get(f"{PPC}/SharingMode") == expected
+
+
+def _context_lpar(**values):
+    lpar = _lpar(_entry())
+    for name, value in values.items():
+        node = _find(lpar, f"{PPC}/{name}")
+        if value is None:
+            _find(lpar, PPC).remove(node)
+        else:
+            node.text = value
+    return lpar
+
+
+@pytest.mark.parametrize(
+    "field", ["HasDedicatedProcessors", "CurrentHasDedicatedProcessors"]
+)
+@pytest.mark.parametrize("value", [None, "TRUE", "1", "", "true"])
+def test_sharing_context_refuses_unresolved_flags(field, value):
+    with pytest.raises(ValueError, match="dedicated|DedicatedProcessors"):
+        partition_updates(
+            _context_lpar(**{field: value}), resources=LparResources(uncapped=True)
+        )
+
+
+@pytest.mark.parametrize("field", ["SharingMode", "CurrentSharingMode"])
+@pytest.mark.parametrize("value", [None, "Unknown", "keep idle procs", "capped"])
+def test_sharing_context_refuses_unresolved_modes(field, value):
+    with pytest.raises(ValueError, match="mode|SharingMode"):
+        partition_updates(
+            _context_lpar(**{field: value}), resources=LparResources(uncapped=True)
+        )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "keep_idle_procs",
+        "share_idle_procs",
+        "share_idle_procs_active",
+        "share_idle_procs_always",
+    ],
+)
+def test_sharing_dedicated_modes_reject_shared_context(mode):
+    with pytest.raises(ValueError, match="shared"):
+        partition_updates(_lpar(_entry()), resources=LparResources(sharing_mode=mode))
+
+
+@pytest.mark.parametrize("mode", ["capped", "uncapped"])
+def test_sharing_dedicated_modes_reject_shared_request(mode):
+    with pytest.raises(ValueError, match="dedicated|shared-processor"):
+        partition_updates(
+            _lpar(_entry(dedicated=True)), resources=LparResources(sharing_mode=mode)
+        )
+
+
+@pytest.mark.parametrize("weight", [0, 255])
+def test_sharing_dedicated_modes_refuse_weight(weight):
+    with pytest.raises(ValueError, match="dedicated|shared-processor"):
+        partition_updates(
+            _lpar(_entry(dedicated=True)),
+            resources=LparResources(uncapped_weight=weight),
+        )
+
+
+def test_sharing_context_retains_quantity_only_fallback():
+    updates = partition_updates(
+        _lpar(_entry(has_dedicated=False)), resources=LparResources(desired_procs=0.5)
+    )
+    assert updates[f"{SHARED}/DesiredProcessingUnits"] == "0.5"
+
+
+@pytest.mark.parametrize("weight", [0, 255])
+@pytest.mark.parametrize("mode", [None, "capped"])
+def test_existing_capped_weight_refusal(weight, mode):
+    lpar = _context_lpar(SharingMode="capped", CurrentSharingMode="capped")
+    with pytest.raises(ValueError, match="uncapped"):
+        partition_updates(
+            lpar, resources=LparResources(sharing_mode=mode, uncapped_weight=weight)
+        )
+
+
+@pytest.mark.parametrize("weight", [0, 255])
+def test_sharing_context_explicit_uncapping_and_weight(weight):
+    lpar = _context_lpar(SharingMode="capped", CurrentSharingMode="capped")
+    updates = partition_updates(
+        lpar, resources=LparResources(uncapped=True, uncapped_weight=weight)
+    )
+    assert updates == {
+        f"{PPC}/SharingMode": "uncapped",
+        f"{SHARED}/UncappedWeight": str(weight),
+        f"{PPC}/HasDedicatedProcessors": "false",
+    }
+
+
+@pytest.mark.parametrize("mode", ["capped", "uncapped"])
+@pytest.mark.parametrize("previous", [None, "0", "128", "255"])
+def test_mode_only_transition_does_not_synthesize_weight(mode, previous):
+    lpar = _lpar(_entry())
+    node = _find(lpar, f"{SHARED}/UncappedWeight")
+    if previous is None:
+        _find(lpar, SHARED).remove(node)
+    else:
+        node.text = previous
+    updates = partition_updates(lpar, resources=LparResources(sharing_mode=mode))
+    assert updates == {
+        f"{PPC}/SharingMode": mode,
+        f"{PPC}/HasDedicatedProcessors": "false",
+    }
+
+
+CURRENT_SHARED = f"{PPC}/CurrentSharedProcessorConfiguration"
+
+
+def _observed_lpar():
+    lpar = _lpar(_entry())
+    ppc = _find(lpar, PPC)
+    ET.SubElement(ppc, f"{{{UOM}}}RuntimeHasDedicatedProcessors").text = "false"
+    ET.SubElement(ppc, f"{{{UOM}}}RuntimeSharingMode").text = "uncapped"
+    current = ET.SubElement(ppc, f"{{{UOM}}}CurrentSharedProcessorConfiguration")
+    ET.SubElement(current, f"{{{UOM}}}CurrentUncappedWeight").text = "64"
+    ET.SubElement(current, f"{{{UOM}}}RuntimeUncappedWeight").text = "0"
+    return lpar
+
+
+def _observe(lpar, paths=()):
+    assert callable(getattr(lpar_documents, "sharing_observation", None))
+    return lpar_documents.sharing_observation(lpar, paths)
+
+
+def test_sharing_observation_separates_exact_configured_current_runtime_paths():
+    lpar = _observed_lpar()
+    # Similar names at the wrong depth must never replace the exact schema paths.
+    ET.SubElement(_find(lpar, PPC), f"{{{UOM}}}CurrentUncappedWeight").text = "255"
+    observed = _observe(lpar, (f"{SHARED}/DesiredProcessingUnits",))
+    assert observed == {
+        "uuid": LPAR,
+        "configured": {
+            "dedicated": False,
+            "mode": "uncapped",
+            "weight": 128,
+            "weight_status": "valid",
+            "raw_weight": "128",
+        },
+        "current": {
+            "dedicated": False,
+            "mode": "uncapped",
+            "weight": 64,
+            "weight_status": "valid",
+            "raw_weight": "64",
+        },
+        "runtime": {
+            "dedicated": False,
+            "mode": "uncapped",
+            "weight": 0,
+            "weight_status": "valid",
+            "raw_weight": "0",
+        },
+        "requested": {f"{SHARED}/DesiredProcessingUnits": "0.3"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "status", "weight"),
+    [
+        (None, "missing", None),
+        ("", "malformed", None),
+        ("-1", "malformed", None),
+        ("256", "malformed", None),
+        ("1.0", "malformed", None),
+        ("１２", "malformed", None),
+        ("0", "valid", 0),
+        ("255", "valid", 255),
+    ],
+)
+def test_sharing_observation_weight_status_preserves_raw(text, status, weight):
+    lpar = _observed_lpar()
+    node = _find(lpar, f"{SHARED}/UncappedWeight")
+    if text is None:
+        _find(lpar, SHARED).remove(node)
+    else:
+        node.text = text
+    configured = _observe(lpar)["configured"]
+    assert configured["weight_status"] == status
+    assert configured["weight"] == weight
+    assert configured["raw_weight"] == text
+
+
+@pytest.mark.parametrize("dedicated", [False, True])
+def test_sharing_observation_capped_dedicated_weight_is_inapplicable(dedicated):
+    lpar = _lpar(_entry(dedicated=dedicated))
+    if not dedicated:
+        _find(lpar, f"{PPC}/SharingMode").text = "capped"
+        _find(lpar, f"{PPC}/CurrentSharingMode").text = "capped"
+    observed = _observe(lpar)
+    for branch in ("configured", "current"):
+        assert observed[branch]["weight_status"] == "inapplicable"
+        assert observed[branch]["weight"] is None
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "root-namespace",
+        "root-name",
+        "missing-id",
+        "bad-id",
+        "duplicate-id",
+        "foreign-id",
+        "nested-id",
+    ],
+)
+def test_sharing_observation_refuses_untrusted_identity(kind):
+    lpar = _observed_lpar()
+    identity = _find(lpar, "Metadata/Atom/AtomID")
+    if kind == "root-namespace":
+        lpar.tag = "{urn:other}LogicalPartition"
+    elif kind == "root-name":
+        lpar.tag = f"{{{UOM}}}VirtualIOServer"
+    elif kind == "missing-id":
+        _find(lpar, "Metadata/Atom").remove(identity)
+    elif kind == "bad-id":
+        identity.text = "not-a-uuid"
+    elif kind == "duplicate-id":
+        ET.SubElement(_find(lpar, "Metadata/Atom"), f"{{{UOM}}}AtomID").text = LPAR
+    elif kind == "foreign-id":
+        identity.tag = "{urn:other}AtomID"
+    else:
+        ET.SubElement(identity, f"{{{UOM}}}AtomID").text = LPAR
+    with pytest.raises(ValueError):
+        _observe(lpar)
+
+
+@pytest.mark.parametrize("branch", ["configured", "current", "runtime"])
+@pytest.mark.parametrize(
+    "damage", ["missing", "duplicate", "foreign", "nested", "invalid"]
+)
+def test_sharing_observation_unavailable_branch_preserves_other_evidence(
+    branch, damage
+):
+    lpar = _observed_lpar()
+    name = {
+        "configured": "SharingMode",
+        "current": "CurrentSharingMode",
+        "runtime": "RuntimeSharingMode",
+    }[branch]
+    node = _find(lpar, f"{PPC}/{name}")
+    if damage == "missing":
+        _find(lpar, PPC).remove(node)
+    elif damage == "duplicate":
+        ET.SubElement(_find(lpar, PPC), node.tag).text = node.text
+    elif damage == "foreign":
+        node.tag = f"{{urn:other}}{name}"
+    elif damage == "nested":
+        ET.SubElement(node, f"{{{UOM}}}Unexpected").text = "uncapped"
+    else:
+        node.text = "Unknown"
+    observed = _observe(lpar, (f"{SHARED}/DesiredProcessingUnits",))
+    assert observed[branch] is None
+    assert observed["requested"] == {f"{SHARED}/DesiredProcessingUnits": "0.3"}
+    other = "current" if branch == "configured" else "configured"
+    assert observed[other]["mode"] == "uncapped"
+    assert observed[other]["weight"] == (64 if other == "current" else 128)
+
+
+@pytest.mark.parametrize("damage", ["duplicate", "foreign", "nested"])
+def test_sharing_observation_rejects_ambiguous_requested_scalar(damage):
+    lpar = _observed_lpar()
+    path = f"{SHARED}/DesiredProcessingUnits"
+    node = _find(lpar, path)
+    if damage == "duplicate":
+        ET.SubElement(_find(lpar, SHARED), node.tag).text = "0.3"
+    elif damage == "foreign":
+        node.tag = "{urn:other}DesiredProcessingUnits"
+    else:
+        ET.SubElement(node, f"{{{UOM}}}Unexpected").text = "0.3"
+    assert _observe(lpar, (path,))["requested"][path] is None
+
+
+@pytest.mark.parametrize("damage", ["duplicate", "foreign", "nested"])
+def test_sharing_observation_ambiguous_weight_is_malformed(damage):
+    lpar = _observed_lpar()
+    node = _find(lpar, f"{CURRENT_SHARED}/CurrentUncappedWeight")
+    if damage == "duplicate":
+        ET.SubElement(_find(lpar, CURRENT_SHARED), node.tag).text = "64"
+    elif damage == "foreign":
+        node.tag = "{urn:other}CurrentUncappedWeight"
+    else:
+        ET.SubElement(node, f"{{{UOM}}}Unexpected").text = "64"
+    observed = _observe(lpar)
+    assert observed["current"]["weight_status"] == "malformed"
+    assert observed["current"]["weight"] is None
+    assert observed["configured"]["weight"] == 128
+
+
+def test_sharing_context_helpers_return_effective_mode_without_mapping_it():
+    assert callable(getattr(lpar_documents, "validate_sharing_update", None))
+    assert callable(getattr(lpar_documents, "validate_resource_inputs", None))
+    assert callable(getattr(lpar_documents, "reject_update_weight_on_create", None))
+    resources = LparResources(uncapped_weight=0)
+    assert lpar_documents.validate_resource_inputs(resources) is None
+    assert lpar_documents.validate_sharing_update(_lpar(_entry()), resources) == (
+        False,
+        "uncapped",
+    )
+    assert lpar_documents.validate_sharing_update(
+        _lpar(_entry(has_dedicated=False)), LparResources()
+    ) == (False, None)
+    assert lpar_documents.reject_update_weight_on_create(LparResources()) is None
+    with pytest.raises(ValueError, match="uncapped_weight.*update"):
+        lpar_documents.reject_update_weight_on_create(resources)
