@@ -90,11 +90,17 @@ def hmc_create_lpar(
             before effects. Omitted values retain HMC defaults; false/zero/"none"
             are explicit. Readback failure leaves the created partition and stops
             assignments. Configuration does not prove guest-runtime behavior.
-        settings: Optional five C01 partition settings. Omitted values retain HMC
-            defaults; False/0 are explicit. A running time_ref partition can govern
+        settings: Optional partition settings, including two Linux roles. Omitted
+            values retain HMC defaults; False/0 are explicit. A running time_ref partition can govern
             hypervisor/service-processor time. Settings select documented CLI creation
             unless explicit keylock requires REST plus a separate configuration step.
             A failed settings step leaves the partition created and stops assignments.
+            Role field selection, including false, declares Linux intent, not
+            installed OS proof. True KVM adds fixed POWER10 in the same record;
+            explicit dedicated never-share CPUs are required and never rewritten.
+            Roles reject explicit keylock before creation. Controller mode requires apply_partition_profile=False and rejects
+            initial-profile I/O and profile-bearing assignments. No controller
+            takeover occurs. Readback proves configuration, not KVM/NovaLink deployment.
         partition_type: Partition type: AIX/Linux or OS400. A Virtual I/O Server
             cannot be created here; use hmc_create_vios.
         partition_id: Optional numeric partition ID; the HMC assigns one when omitted.

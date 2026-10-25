@@ -1,0 +1,30 @@
+{
+ "firmware": "v10r3-controller-status-source",
+ "sources": [
+  "2026-10-24 authorized #1766 two-SSH SOURCE window; exact named lscomgmt status record projected from immutable f890b1f0 producer, terminal receipts and saved stdout. Observed is_controller=null only; historical prior version10.3.1060.3 context, no fresh status-window version read. No -F selector capture, positive authority or product/maturity proof. Private projection receipt retains full hashes and normalization."
+ ],
+ "rest": {
+  "endpoints": [],
+  "errors": [],
+  "values": {},
+  "element_enums": {}
+ },
+ "cli": {
+  "commands": [
+   {
+    "command": "lscomgmt -m {}",
+    "exit_status": [
+     0
+    ],
+    "codes": [],
+    "outputs": [],
+    "error_streams": []
+   }
+  ],
+  "values": {
+   "lscomgmt :: is_controller": [
+    "null"
+   ]
+  }
+ }
+}

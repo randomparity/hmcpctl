@@ -1,4 +1,4 @@
-"""Shared-memory-pool commands over the SSH transport."""
+"""Fixed memory-resource commands over the SSH transport."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..config import HMCConfig
+from ..documents.lpar_memory import LparMemoryChange, LparMemoryMove
 from .commands import _parse_lshwres_output, hmc_error_code
 from .transport import HMCCLIError, run_hmc_command
 
@@ -101,4 +102,62 @@ async def remove_memory_pool(config: HMCConfig, system_name: str) -> str:
     return await run_hmc_command(config, f"chhwres -r mempool -m {system} -o r")
 
 
-# LPAR description and MSP (lssyscfg / chsyscfg — no REST equivalent)
+async def change_lpar_memory_quantity(
+    config: HMCConfig,
+    system_name: str,
+    partition_id: int,
+    change: LparMemoryChange,
+) -> str:
+    """Submit one fixed native quantity command; admission belongs to the operation.
+
+    This function never retries. A transport failure may follow partial effects;
+    its caller independently reads the contained partition before reporting an outcome.
+    """
+    if type(partition_id) is not int or partition_id < 1:
+        raise ValueError("partition_id must be a positive integer; nothing was sent")
+    if not isinstance(change, LparMemoryChange):
+        raise TypeError("change must be a typed LparMemoryChange; nothing was sent")
+    operation = {"add": "a", "remove": "r", "set": "s"}[change.operation]
+    parts = [
+        "chhwres",
+        "-r",
+        "mem",
+        "-m",
+        shlex.quote(system_name),
+        "-o",
+        operation,
+        "--id",
+        str(partition_id),
+    ]
+    if change.quantity_mib is not None:
+        parts.extend(("-q", str(change.quantity_mib)))
+    if change.entitled_mib is not None:
+        parts.extend(("--entitled", str(change.entitled_mib)))
+    if change.force:
+        parts.append("--force")
+    return await run_hmc_command(config, " ".join(parts), include_stderr=True)
+
+
+async def move_lpar_memory_quantity(
+    config: HMCConfig,
+    system_name: str,
+    source_id: int,
+    target_id: int,
+    move: LparMemoryMove,
+) -> str:
+    """Submit one native move without replay; the operation owns admission/readback."""
+    if any(type(value) is not int or value < 1 for value in (source_id, target_id)):
+        raise ValueError(
+            "Move partition IDs must be positive integers; nothing was sent"
+        )
+    if source_id == target_id:
+        raise ValueError("Move requires distinct partition IDs; nothing was sent")
+    if not isinstance(move, LparMemoryMove):
+        raise TypeError("move must be a typed LparMemoryMove; nothing was sent")
+    command = (
+        f"chhwres -r mem -m {shlex.quote(system_name)} -o m "
+        f"--id {source_id} --tid {target_id} -q {move.quantity_mib}"
+    )
+    if move.force:
+        command += " --force"
+    return await run_hmc_command(config, command, include_stderr=True)

@@ -484,11 +484,18 @@ def hmc_configure_lpar(
     ownership_override: bool = False,
     profile: str | None = None,
 ) -> LparSettingsResult:
-    """Configure five C01 partition settings and verify preserved/supplied values.
+    """Configure partition settings and verify preserved/supplied values.
 
     A running time-reference partition can govern hypervisor/service-processor
     time. This changes partition configuration, without activating it or changing
     a guest clock. Migration/restart capability flags do not prove readiness.
+    Linux role field selection, including false, declares Linux intent without
+    proving the installed OS. KVM selection requires inactivity and no operation
+    in progress; enablement requires existing POWER10, dedicated never-share CPUs,
+    zero keystore and no persistent memory. CPUs and compatibility are unchanged.
+    Management selection, including false, requires native is_controller=1 for
+    this HMC; classic profile support alone does not authorize it. No takeover occurs.
+    Readback proves configuration only, not KVM/NovaLink guest deployment.
     Inspect unknown, unavailable or mismatching outcomes before retrying.
 
     Args:

@@ -48,6 +48,7 @@ from live_test import (
     dedicated_pcie,
     lpar_config,
     lpar_power,
+    memory_move,
     partition_profile_contract,
     partition_profiles,
     profiles,
@@ -335,6 +336,52 @@ def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _lpar_linux_roles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-linux-roles",
+        True,
+        "configuration validated; native is_controller=1 required for management selection; KVM evidence selects the full variant",
+        (
+            f"one owned inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit dedicated never-share, 2 GiB desired memory/one CPU; management-only creation omits KVM and POWER10; full KVM creation adds same-record POWER10",
+            "both variants: native controller=1, explicit apply false and no profile; management-only: two management updates false-to-true-to-false; full KVM: KVM true-to-false then management false-to-true-to-false (three updates)",
+            "independent known roles/compatibility/resource reads, inactive-only matching-token deletion, baseline comparison and mandatory recovery; management-only has no catalog promotion; no activation, guest, key or controller-takeover effects",
+        ),
+        config.system_name,
+    )
+
+
+def _memory_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        memory_move.configured(config)
+    except ValueError as error:
+        return ArmVerdict("lpar-memory-move", False, str(error), (), config.system_name)
+    return ArmVerdict(
+        "lpar-memory-move",
+        True,
+        "configuration validated",
+        (
+            "two existing owned running AIX/Linux RMC dedicated-memory fixtures; no creation or deletion",
+            "exclusive no-DPO window; one-region forward then separately verified reverse; stop writes on uncertainty",
+            "independent dual baselines and mandatory read-only recovery; no force/activation or automatic rollback",
+        ),
+        config.system_name,
+    )
+
+
+def _memory_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-memory-quantities",
+        True,
+        "configuration validated",
+        (
+            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create without apply; optional once-only default-profile apply after identity/ownership confirmation",
+            "one native removal hypothesis at or above minimum, zero-delta no-op and over-maximum refusal; matching-token deletion and independent resource comparison",
+            "no activation, force, full removal, AMS or foreign resources; current bounds must be independently positive before quantity calls",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_security_policy_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-security-policy",
@@ -591,8 +638,11 @@ _ARM_VERDICTS = {
     "lpar-settings": _lpar_settings_verdict,
     "lpar-reporting": _lpar_reporting_verdict,
     "lpar-physical-io": _lpar_physical_io_verdict,
+    "lpar-memory-quantities": _memory_quantities_verdict,
+    "lpar-memory-move": _memory_move_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
+    "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,

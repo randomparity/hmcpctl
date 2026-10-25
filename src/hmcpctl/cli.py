@@ -75,6 +75,9 @@ from .cli_commands.lpar import (
     lifecycle as lpar_lifecycle,
 )
 from .cli_commands.lpar import (
+    memory as lpar_memory,
+)
+from .cli_commands.lpar import (
     migration as lpar_migration,
 )
 from .cli_commands.lpar import (
@@ -113,6 +116,7 @@ def _register_commands() -> None:
         (lpar_migration, lpars_app),
         (lpar_config, lpars_app),
         (lpar_modify, lpars_app),
+        (lpar_memory, lpars_app),
         (lpar_profiles, lpars_app),
         (lpar_provision, lpars_app),
         (memory_pools, memory_pools_app),
@@ -140,6 +144,7 @@ def _register_commands() -> None:
         lpar_migration: "Migration",
         lpar_config: "Configuration",
         lpar_modify: "Configuration",
+        lpar_memory: "Configuration",
         lpar_profiles: "Configuration",
     }
     for module, group in registrations:
