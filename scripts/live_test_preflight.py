@@ -349,6 +349,20 @@ def _memory_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict
     )
 
 
+def _lpar_hardware_memory_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-hardware-memory",
+        True,
+        "configuration validated; selected-system tuple and positive capabilities required at dispatch",
+        (
+            f"one inactive owned AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: true/true hardware memory access create without profile apply",
+            "2 GiB desired memory/0.5 shared units; independent contained access read and matching-token inactive-only deletion",
+            "no activation or runtime proof; baseline comparison and separate read-only recovery required even after apparent success",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_security_policy_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-security-policy",
@@ -608,6 +622,7 @@ _ARM_VERDICTS = {
     "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
+    "lpar-hardware-memory": _lpar_hardware_memory_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
     "storage": _storage_verdict,
