@@ -230,3 +230,154 @@ def test_zero_is_canonical_before_fixed_formatting(monkeypatch):
     assert LparMemoryLayout(kvm_reserved_mem_percent=Decimal("0E-1000")).pairs() == [
         ("kvm_reserved_mem_percent", "0")
     ]
+
+
+def native_table(columns, *rows):
+    import csv
+    import io
+
+    output = io.StringIO()
+    csv.writer(output, lineterminator="\n").writerows([columns, *rows])
+    return output.getvalue()
+
+
+@pytest.fixture
+def native_layout(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.config import HMCConfig
+    from hmcpctl.ssh import lpar_memory_layout as native
+
+    transport = AsyncMock()
+    monkeypatch.setattr(native, "run_hmc_command", transport)
+    return native, transport, HMCConfig.from_mapping({})
+
+
+@pytest.mark.asyncio
+async def test_advertised_membership_and_no_unneeded_read(native_layout):
+    native, transport, config = native_layout
+    await native.admit_memory_layout(
+        config, "sys-R1", LparMemoryLayout(min_num_huge_pages=0)
+    )
+    transport.assert_not_awaited()
+    transport.return_value = native_table(
+        ["possible_hpt_ratios", "possible_ppt_ratios"], ["128,256", "1:64,future-1"]
+    )
+    await native.admit_memory_layout(
+        config, "sys R1", LparMemoryLayout(hpt_ratio="128", ppt_ratio="future-1")
+    )
+    assert transport.await_args.args == (
+        config,
+        "lshwres -r mem -m 'sys R1' --level sys -F possible_hpt_ratios,possible_ppt_ratios --header",
+    )
+    await native.admit_memory_layout(
+        config, "sys-R1", LparMemoryLayout(hpt_ratio="128")
+    )
+    with pytest.raises(ValueError, match="advertised"):
+        await native.admit_memory_layout(
+            config, "sys-R1", LparMemoryLayout(hpt_ratio="64")
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        "No results were found.",
+        "wrong\n128\n",
+        native_table(
+            ["possible_hpt_ratios", "possible_ppt_ratios"], ["128", "64"], ["128", "64"]
+        ),
+        *[
+            native_table(["possible_hpt_ratios", "possible_ppt_ratios"], [value, "64"])
+            for value in ["", "null", "none", "unknown", "128,128", "128,", "a b"]
+        ],
+    ],
+)
+async def test_missing_or_ambiguous_advertisement(native_layout, output):
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    native, transport, config = native_layout
+    transport.return_value = output
+    with pytest.raises((ValueError, HMCCLIError)):
+        await native.admit_memory_layout(
+            config, "sys-R1", LparMemoryLayout(hpt_ratio="128")
+        )
+
+
+PROFILE_COLUMNS = [
+    "lpar_name",
+    "name",
+    *COUNT_FIELDS,
+    "hpt_ratio",
+    "ppt_ratio",
+    "kvm_reserved_mem_percent",
+]
+
+
+@pytest.mark.asyncio
+async def test_strict_profile_read_and_filter(native_layout):
+    native, transport, config = native_layout
+    transport.return_value = native_table(
+        PROFILE_COLUMNS,
+        [
+            "part R1",
+            "default_profile",
+            "0",
+            "null",
+            "2",
+            "128",
+            "null",
+            "12345678901234567890.12",
+        ],
+    )
+    result = await native.get_lpar_memory_layout(config, "sys R1", "part R1")
+    assert result == LparMemoryLayout(
+        0, None, 2, "128", None, Decimal("12345678901234567890.12")
+    )
+    assert transport.await_args.args == (
+        config,
+        "lssyscfg -r prof -m 'sys R1' --filter 'lpar_names=part R1,profile_names=default_profile' -F "
+        + ",".join(PROFILE_COLUMNS)
+        + " --header",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "index,value",
+    [
+        (0, "foreign"),
+        (1, "other"),
+        (2, "-1"),
+        (2, "1.0"),
+        (2, "١"),
+        (2, "unknown"),
+        (3, "0"),
+        (5, "unknown"),
+        (5, "a b"),
+        (7, "NaN"),
+        (7, "1.001"),
+        (7, "1E+65536"),
+        (7, "garbage"),
+    ],
+)
+async def test_profile_identity_and_malformed_values(native_layout, index, value):
+    native, transport, config = native_layout
+    row = ["part-R1", "default_profile", "1", "2", "3", "128", "64", "0"]
+    row[index] = value
+    transport.return_value = native_table(PROFILE_COLUMNS, row)
+    with pytest.raises(ValueError):
+        await native.get_lpar_memory_layout(config, "sys-R1", "part-R1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rows", [[], [["part-R1", "default_profile", *(["null"] * 6)]] * 2]
+)
+async def test_profile_requires_single_row(native_layout, rows):
+    native, transport, config = native_layout
+    transport.return_value = native_table(PROFILE_COLUMNS, *rows)
+    with pytest.raises(ValueError, match="exactly one"):
+        await native.get_lpar_memory_layout(config, "sys-R1", "part-R1")
