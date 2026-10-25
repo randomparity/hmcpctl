@@ -8,12 +8,71 @@ named-arm, private output, recovery and evidence requirements.
 
 ## Current checkpoint
 
-There is no registered C06 memory-layout arm in the current live runner. Stop at
-that prerequisite: do not substitute an unrelated arm, an ad-hoc native write or
-an invented runner invocation. An operator must separately approve a concrete
-registered arm, exact field/context matrix, disposable resources, call/time
-budgets and recovery boundary before this procedure can produce live evidence.
-The procedure and offline tests do not satisfy that missing hardware proof.
+The registered opt-in ST58 group is `creation-memory-layout`, dispatched only by
+`scripts/live_creation_memory_layout.py --results-file <fresh-private-path>`.
+It is excluded from default and `all`. Registration and offline tests are not
+native evidence. Obtain a separate exclusive root window, current tool policy,
+and a composed physical request/deadline/session budget before running it.
+
+Set these optional keys in the authoritative local `.env`; ambient exports do not
+arm it. Both ratio values must be admitted by the selected system's advertisements.
+Empty ratios or false conditional permission skip the whole arm before writes.
+
+```dotenv
+LIVE_TEST_CREATION_MEMORY_LAYOUT_HPT_RATIO=1:128
+LIVE_TEST_CREATION_MEMORY_LAYOUT_PPT_RATIO=1:256
+LIVE_TEST_CREATION_MEMORY_LAYOUT_FRESH_VIOS_DELETE_AUTHORIZED=false
+```
+
+The ratios above are examples, not platform defaults. Set the boolean true only
+under a current separate grant covering this invocation's successful returned
+fresh VIOS UUID, conditional on prior absence, baseline exclusion, selected-system
+containment and exact fresh name/type/inactive checks. Existing `vios.delete`
+policy must separately allow the delete; creation permission is insufficient.
+
+Run these as separate invocations after deployment/import attestation. `$PRIVATE`
+must name an existing owner-only directory outside the checkout. Both results
+and the `-observations.json` sidecar must be absent before bootstrap.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group creation-memory-layout
+uv run --no-sync python scripts/live_creation_memory_layout.py --results-file "$PRIVATE/test-results-creation-memory-layout.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$PRIVATE/test-results-creation-memory-layout.json"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/test-results-creation-memory-layout.json"
+```
+
+Recovery is mandatory after failure, cancellation and apparent success. Preserve
+its private findings before generating filtered evidence. Neither software
+rollback nor read-only recovery removes resources, pending intent or archives.
+
+The finite matrix first creates a fresh owned inactive AIX/Linux partition with
+huge-page count0/0/0, both supplied ratios and Decimal0 reservation, without apply.
+Only after independent readback, token-bound inactive cleanup and baseline equality
+does it create a fresh ratio-only VIOS with explicit resources. Each uses2GiB
+desired memory/0.5shared units. Maximum effects:2creates,1LPAR stamp,2deletes.
+There are no roles, hardware flags, activation, storage, adapter, pool or
+existing-VIOS effects, retries or fallback. Uncertainty stops the next fixture.
+
+The journal is closed, candidate/HMC/system/invocation-bound and checkpointed
+before each mutating tool. Prior ST58 output/artifacts are refused rather than
+restored; round2/vmedia context is never borrowed. Saved booleans do not authorize
+current cleanup. A partial/unknown VIOS without a successful returned UUID stays
+an orphan intent: same-name rediscovery is diagnostic only. Root must separately
+reconcile and authorize any later exact-UUID cleanup.
+
+The independent oracle calls only the fixed native `lssyscfg -r prof` projection
+through `hmc_run_command`, with exact fresh-name/default-profile identity and
+literal eight-column header/order/width. It shares no product getter/field mapping.
+Fresh mode and UUID/name/inactive checks surround each read. Controller/unknown
+mode never triggers a profile query. A product success cannot override honest raw
+mismatch; raw equality cannot repair incomplete product creation. Only independent
+assertions plus cleanup/baseline equality produce the two configured observations.
+
+Physical feasibility is not established by the logical effect count. A baseline
+pair can already require42SSH before oracle/product/admission/cleanup/auth/recovery
+costs.40SSH is not a valid whole-window bound. Root must derive finite per-call
+budgets, staggered absolute deadlines and own-session/reaping reserve before a
+physical allocation; no cap expansion is authorized mid-window.
 
 The tokenized memory-source vocabulary fixture records read-only source answers
 from a separately identified source client. It proves vocabulary availability in
@@ -58,8 +117,8 @@ C06 live observations.
 
 ## Submission, identity and outcomes
 
-Run the applicable preflight from live-testing.md, inspect its actual mutation
-list, then dispatch only the separately approved named arm. That arm must use the
+Run the ST58 preflight above, inspect its actual mutation list, then dispatch
+only the separately approved named arm. That arm must use the
 existing `hmc_create_lpar`/LPAR CLI or `hmc_create_vios`/VIOS CLI entry point and
 retain the single native creation record without exposing private identifiers.
 Omitted layout must retain its existing path with no extra layout reads or steps.

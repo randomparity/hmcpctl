@@ -8,7 +8,11 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
+from pydantic import TypeAdapter
+
+from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.storage import VIRTUAL_DISK_NAME_MAX
+from hmcpctl.resource_identity import is_uuid
 
 ENV_FILE = Path(".env")
 
@@ -26,6 +30,9 @@ _VIOS_OBJECT_NAME = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*")
 class LiveTestConfig:
     """Validated operator configuration for live-test executions."""
 
+    creation_memory_layout_hpt_ratio: str = ""
+    creation_memory_layout_ppt_ratio: str = ""
+    creation_memory_layout_fresh_vios_delete_authorized: bool = False
     system_name: str = "example-lt-609-system"
     lp3_name: str = "example-lt-609-lpar"
     scratch_name: str = "example-lt-609-scratch"
@@ -159,6 +166,9 @@ class LiveTestConfig:
     #: export cannot redirect an arm that creates and deletes partitions
     #: (ADR 0115).
     _OPTIONAL_CONFIG_FIELDS: ClassVar[dict[str, str]] = {
+        "LIVE_TEST_CREATION_MEMORY_LAYOUT_HPT_RATIO": "creation_memory_layout_hpt_ratio",
+        "LIVE_TEST_CREATION_MEMORY_LAYOUT_PPT_RATIO": "creation_memory_layout_ppt_ratio",
+        "LIVE_TEST_CREATION_MEMORY_LAYOUT_FRESH_VIOS_DELETE_AUTHORIZED": "creation_memory_layout_fresh_vios_delete_authorized",
         "LIVE_TEST_PARTITION_PROFILE_TARGET": "partition_profile_target",
         "LIVE_TEST_PARTITION_PROFILE_KIND": "partition_profile_kind",
         "LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW": "partition_profile_writer_window",
@@ -244,6 +254,7 @@ class LiveTestConfig:
                     parsed["partition_profile_memory_mib"]
                 )
             for field_name in (
+                "creation_memory_layout_fresh_vios_delete_authorized",
                 "partition_profile_writer_window",
                 "system_profile_writer_window",
                 "system_profile_continue_on_error",
@@ -397,6 +408,7 @@ class LiveTestConfig:
 class LiveTestArtifacts:
     """Mutable discoveries and recovery state owned by one live-test invocation."""
 
+    creation_memory_layout: dict = field(default_factory=dict)
     partition_profile_lifecycle: dict = field(default_factory=dict)
     system_profile_names: list[str] = field(default_factory=list)
     system_profile_baseline: dict = field(default_factory=dict)
@@ -505,6 +517,9 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
     parsed.setdefault("scratch_vg_name", "")
     parsed.setdefault("profile_artifact_suffix_hex_length", 16)
     for name in (
+        "creation_memory_layout_hpt_ratio",
+        "creation_memory_layout_ppt_ratio",
+        "creation_memory_layout_fresh_vios_delete_authorized",
         "partition_profile_target",
         "partition_profile_kind",
         "partition_profile_writer_window",
@@ -537,6 +552,10 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
         raise ValueError(
             "results config profile_artifact_suffix_hex_length must be 12 or 16"
         )
+    LparMemoryLayout(
+        hpt_ratio=parsed["creation_memory_layout_hpt_ratio"] or None,
+        ppt_ratio=parsed["creation_memory_layout_ppt_ratio"] or None,
+    )
     return LiveTestConfig(**parsed)
 
 
@@ -551,6 +570,8 @@ def decode_artifacts(value: Any) -> LiveTestArtifacts:
     # configured user, never this run's, so it is dropped rather than restored.
     # Every other field difference remains a mismatch.
     parsed.pop("test_user_uuid", None)
+    parsed.setdefault("creation_memory_layout", {})
+    _validate_creation_memory_layout(parsed["creation_memory_layout"])
     parsed.setdefault("partition_profile_lifecycle", {})
     if not isinstance(parsed["partition_profile_lifecycle"], dict):
         raise TypeError("partition-profile lifecycle must be an object")
@@ -604,3 +625,180 @@ def decode_artifacts(value: Any) -> LiveTestArtifacts:
     parsed["lp3_baseline"] = dict(baseline)
     parsed["vmedia_orig_boot_order"] = list(boot_order)
     return LiveTestArtifacts(**parsed)
+
+
+_CREATION_MEMORY_LAYOUT_PHASES = frozenset(
+    {
+        "preflight",
+        "lpar-create-pending",
+        "lpar-create-returned",
+        "lpar-delete-pending",
+        "lpar-deleted",
+        "vios-create-pending",
+        "vios-create-returned",
+        "vios-delete-pending",
+        "vios-deleted",
+        "complete",
+        "stopped-uncertain",
+    }
+)
+
+
+def _validate_creation_memory_layout(value: Any) -> None:
+    """A closed intent record; persisted permission never supplies current authority."""
+    if not isinstance(value, dict):
+        raise TypeError("creation memory layout journal must be an object")
+    if not value:
+        return
+    keys = {
+        "invocation_id",
+        "candidate_commit",
+        "system_uuid",
+        "hmc_identity",
+        "phase",
+        "lpar_name",
+        "lpar_token",
+        "lpar_uuid",
+        "vios_name",
+        "vios_uuid",
+        "preabsence",
+        "create_returned",
+        "fresh_vios_delete_authorized",
+        "requested",
+        "baseline",
+        "outcome",
+        "deletion",
+    }
+    if set(value) != keys or value["phase"] not in _CREATION_MEMORY_LAYOUT_PHASES:
+        raise ValueError("creation memory layout journal fields/phase are invalid")
+    for key, pattern in (
+        ("invocation_id", r"[0-9a-f]{32}"),
+        ("candidate_commit", r"[0-9a-f]{40}"),
+        ("lpar_name", r"hmcpctl-live-lpar-[0-9a-f]{8}"),
+        ("lpar_token", r"lparcfg-[0-9a-f]{8}"),
+        ("vios_name", r"hmcpctl-live-c06-vios-[0-9a-f]{8}"),
+    ):
+        if not isinstance(value[key], str) or re.fullmatch(pattern, value[key]) is None:
+            raise ValueError(f"creation memory layout {key} is invalid")
+    if value["lpar_name"].removeprefix("hmcpctl-live-lpar-") != value[
+        "lpar_token"
+    ].removeprefix("lparcfg-"):
+        raise ValueError("creation memory layout name/token disagree")
+    for key in ("system_uuid", "lpar_uuid", "vios_uuid"):
+        identity = value[key]
+        if identity is None and key != "system_uuid":
+            continue
+        if (
+            not isinstance(identity, str)
+            or not is_uuid(identity)
+            or identity != identity.lower()
+        ):
+            raise ValueError(f"creation memory layout {key} must be a canonical UUID")
+    hmc = value["hmc_identity"]
+    if (
+        not isinstance(hmc, dict)
+        or set(hmc) != {"host", "port", "user", "verify_ssl"}
+        or any(
+            type(hmc[k]) is not t
+            for k, t in (
+                ("host", str),
+                ("port", int),
+                ("user", str),
+                ("verify_ssl", bool),
+            )
+        )
+    ):
+        raise TypeError("creation memory layout HMC identity is invalid")
+    for key in ("preabsence", "create_returned"):
+        if (
+            not isinstance(value[key], dict)
+            or set(value[key]) != {"lpar", "vios"}
+            or any(type(v) is not bool for v in value[key].values())
+        ):
+            raise TypeError(f"creation memory layout {key} must contain two booleans")
+    if type(value["fresh_vios_delete_authorized"]) is not bool:
+        raise TypeError("creation memory layout saved authority must be boolean")
+    for key, choices in (
+        (
+            "outcome",
+            {
+                "not-attempted",
+                "rejected",
+                "created-verified",
+                "partial",
+                "unknown",
+                "unavailable",
+                "mismatch",
+            },
+        ),
+        (
+            "deletion",
+            {"not-attempted", "pending", "confirmed-absent", "unknown", "refused"},
+        ),
+    ):
+        if (
+            not isinstance(value[key], dict)
+            or set(value[key]) != {"lpar", "vios"}
+            or any(
+                not isinstance(v, str) or v not in choices for v in value[key].values()
+            )
+        ):
+            raise ValueError(f"creation memory layout {key} is invalid")
+    requested = value["requested"]
+    if not isinstance(requested, dict) or set(requested) != {"lpar", "vios"}:
+        raise ValueError("creation memory layout requests are invalid")
+    for kind, names in (
+        (
+            "lpar",
+            {
+                "min_num_huge_pages",
+                "desired_num_huge_pages",
+                "max_num_huge_pages",
+                "hpt_ratio",
+                "ppt_ratio",
+                "kvm_reserved_mem_percent",
+            },
+        ),
+        ("vios", {"hpt_ratio", "ppt_ratio"}),
+    ):
+        if not isinstance(requested[kind], dict) or set(requested[kind]) != names:
+            raise ValueError("creation memory layout request fields are invalid")
+        TypeAdapter(LparMemoryLayout).validate_python(
+            requested[kind]
+        ).validate_creation("AIX/Linux" if kind == "lpar" else "Virtual IO Server")
+    baseline = value["baseline"]
+    if not isinstance(baseline, dict) or set(baseline) != {"pools", "vios"}:
+        raise ValueError("creation memory layout baseline is invalid")
+    pools = baseline["pools"]
+    if (
+        not isinstance(pools, dict)
+        or set(pools)
+        != {"partitions", "available_processing_units", "available_memory_mib"}
+        or (
+            not isinstance(pools["partitions"], list)
+            or any(not isinstance(n, str) for n in pools["partitions"])
+            or any(
+                not isinstance(pools[k], str)
+                for k in ("available_processing_units", "available_memory_mib")
+            )
+        )
+    ):
+        raise TypeError("creation memory layout pool baseline is invalid")
+    rows = baseline["vios"]
+    if not isinstance(rows, list) or any(
+        not isinstance(row, dict)
+        or set(row) != {"uuid", "name"}
+        or not isinstance(row["uuid"], str)
+        or not is_uuid(row["uuid"])
+        or row["uuid"] != row["uuid"].lower()
+        or not isinstance(row["name"], str)
+        or not row["name"]
+        for row in rows
+    ):
+        raise ValueError("creation memory layout VIOS baseline is invalid")
+    if (
+        rows != sorted(rows, key=lambda row: row["uuid"])
+        or len({r["uuid"] for r in rows}) != len(rows)
+        or len({r["name"] for r in rows}) != len(rows)
+    ):
+        raise ValueError("creation memory layout VIOS baseline is ambiguous")

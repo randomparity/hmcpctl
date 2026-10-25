@@ -8952,3 +8952,104 @@ def test_canonical_evidence_source_must_be_regular_and_tracked(
         source.unlink()
     monkeypatch.setattr(evidence, "__file__", str(source))
     assert evidence.repository_root() is None
+
+
+_ST58_CONFIG = (
+    "creation_memory_layout_hpt_ratio",
+    "creation_memory_layout_ppt_ratio",
+    "creation_memory_layout_fresh_vios_delete_authorized",
+)
+
+
+@pytest.mark.parametrize("missing", [_ST58_CONFIG, _ST58_CONFIG[:1]])
+def test_pre_st58_saved_config_defaults_only_missing_keys(missing):
+    saved = json.loads(json.dumps(asdict(live_config.LiveTestConfig())))
+    for key in missing:
+        saved.pop(key, None)
+    decoded = live_config.decode_saved_config(saved)
+    assert [getattr(decoded, key, None) for key in _ST58_CONFIG] == ["", "", False]
+
+
+def test_pre_st58_artifacts_default_missing_journal_empty():
+    saved = asdict(live_config.LiveTestArtifacts())
+    saved.pop("creation_memory_layout", None)
+    assert (
+        getattr(live_config.decode_artifacts(saved), "creation_memory_layout", None)
+        == {}
+    )
+    saved["creation_memory_layout"] = {}
+    assert live_config.decode_artifacts(saved).creation_memory_layout == {}
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        (_ST58_CONFIG[0], 1),
+        (_ST58_CONFIG[1], "bad token"),
+        (_ST58_CONFIG[2], "true"),
+        ("unknown", False),
+    ],
+)
+def test_saved_new_values_and_unknown_keys_still_refuse(key, value):
+    saved = json.loads(json.dumps(asdict(live_config.LiveTestConfig())))
+    saved[key] = value
+    with pytest.raises((ValueError, TypeError)):
+        live_config.decode_saved_config(saved)
+
+
+def test_st58_is_isolated_and_refuses_saved_context(tmp_path):
+    assert runner.SUBTASK_GROUPS.get("creation-memory-layout") == [58]
+    assert 58 not in runner.SUBTASK_GROUPS["all"]
+    hmc = _live_hmc_config()
+    config = live_config.LiveTestConfig()
+    saved = _result_document(config, hmc)
+    saved["run"] = {"subtasks": [58], "group": "creation-memory-layout"}
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(saved))
+    assert not runner._restore_artifacts_from_results(runner.RunState(), hmc, str(path))
+    saved.pop("run")
+    path.write_text(json.dumps(saved))
+    assert not runner._restore_artifacts_from_results(
+        runner.RunState(group="creation-memory-layout"), hmc, str(path)
+    )
+
+
+def test_st58_optional_settings_are_dotenv_only(tmp_path, monkeypatch):
+    path = tmp_path / ".env"
+    defaults = live_config.LiveTestConfig()
+    values = {}
+    for key, field_name in defaults._CONFIG_FIELDS.items():
+        value = getattr(defaults, field_name)
+        values[key] = ",".join(value) if isinstance(value, tuple) else str(value)
+    for field_name in _ST58_CONFIG:
+        monkeypatch.setenv("LIVE_TEST_" + field_name.upper(), "true")
+    path.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+    loaded = live_config.LiveTestConfig.from_env_file(path)
+    assert [getattr(loaded, key, None) for key in _ST58_CONFIG] == ["", "", False]
+    values.update(
+        {
+            "LIVE_TEST_" + _ST58_CONFIG[0].upper(): "1:128",
+            "LIVE_TEST_" + _ST58_CONFIG[1].upper(): "1:256",
+            "LIVE_TEST_" + _ST58_CONFIG[2].upper(): "true",
+        }
+    )
+    path.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+    loaded = live_config.LiveTestConfig.from_env_file(path)
+    assert [getattr(loaded, key) for key in _ST58_CONFIG] == ["1:128", "1:256", True]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("artifacts", None), ("artifacts", []), ("run", []), ("run", {"subtasks": 58})],
+)
+def test_st58_restore_malformed_context_refuses_without_partial_state(
+    tmp_path, field, value
+):
+    config, hmc = live_config.LiveTestConfig(), _live_hmc_config()
+    document = _result_document(config, hmc)
+    document[field] = value
+    path = tmp_path / "malformed.json"
+    path.write_text(json.dumps(document))
+    state = runner.RunState()
+    assert not runner._restore_artifacts_from_results(state, hmc, str(path))
+    assert state.artifacts == live_config.LiveTestArtifacts()

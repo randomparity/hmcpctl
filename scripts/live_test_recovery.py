@@ -66,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import (
+    creation_memory_layout,
     lpar_config,
     lpar_hardware_memory,
     lpar_linux_roles,
@@ -122,6 +123,8 @@ _READ_ONLY_TOOLS = frozenset(
         "hmc_list_users",
         "hmc_list_optical_media",
         "hmc_list_vios_backups",
+        "hmc_list_vios",
+        "hmc_get_system",
         "hmc_list_virtual_networks",
         "hmc_list_adapters",
         "hmc_list_vios_fc_port_labels",
@@ -180,6 +183,7 @@ _WITNESSED_SUBTASKS = (
         memory_quantities.SUBTASK,
         lpar_security_policy.SUBTASK,
         lpar_hardware_memory.SUBTASK,
+        creation_memory_layout.SUBTASK,
         lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
     }
@@ -352,6 +356,7 @@ def lpar_config_inputs_from_document(
             memory_quantities.SUBTASK,
             lpar_security_policy.SUBTASK,
             lpar_hardware_memory.SUBTASK,
+            creation_memory_layout.SUBTASK,
             lpar_linux_roles.SUBTASK,
         }.intersection(subtasks)
         or not system
@@ -388,6 +393,112 @@ async def check_lpar_config(call, inputs: LparConfigInputs) -> list[Finding]:
                     "any run-added slot only after confirming the saved baseline"
                 ),
                 remedy=f"{shutdown}rmsyscfg -r lpar -m {system} -n {quoted}",
+            )
+        )
+    return findings
+
+
+@dataclass(frozen=True)
+class CreationMemoryLayoutInputs:
+    system_name: str
+    journal: dict
+
+
+def creation_memory_layout_inputs_from_document(document, subtasks):
+    if creation_memory_layout.SUBTASK not in subtasks:
+        return None
+    config = live_config.decode_saved_config(document.get("config"))
+    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    journal = artifacts.creation_memory_layout
+    if (
+        not journal
+        or document.get("hmc") != journal["hmc_identity"]
+        or document.get("run", {}).get("tested_commit") != journal["candidate_commit"]
+    ):
+        raise ValueError("ST58 recovery lacks candidate/HMC-bound journal")
+    return CreationMemoryLayoutInputs(config.system_name, journal)
+
+
+async def check_creation_memory_layout(
+    call, inputs: CreationMemoryLayoutInputs
+) -> list[Finding]:
+    """Reconcile every phase read-only; intent and saved grants never authorize delete."""
+    journal = inputs.journal
+    if runner._hmc_identity(HMCConfig()) != journal["hmc_identity"]:
+        raise StateUnreadable("ST58 current HMC identity differs from its journal")
+    status, entry = await call(
+        "hmc_get_system", system_name_or_uuid=journal["system_uuid"]
+    )
+    name = (
+        (entry.get("Resource") or {}).get("SystemName")
+        if isinstance(entry, dict)
+        else None
+    )
+    if (
+        status != "PASS"
+        or lpar_config._uuid_of(entry) != journal["system_uuid"]
+        or not isinstance(name, str)
+        or not name
+    ):
+        raise StateUnreadable("ST58 selected-system UUID/name unreadable")
+    system = shlex.quote(name)
+    current = {}
+    for key, command in (
+        ("partitions", f"lssyscfg -r lpar -m {system} -F name"),
+        (
+            "available_processing_units",
+            f"lshwres -r proc -m {system} --level sys -F curr_avail_sys_proc_units",
+        ),
+        (
+            "available_memory_mib",
+            f"lshwres -r mem -m {system} --level sys -F curr_avail_sys_mem,mem_region_size",
+        ),
+    ):
+        status, data = await call("hmc_run_command", cmd=command)
+        if status != "PASS" or not isinstance(data, str):
+            raise StateUnreadable("ST58 pool/partition baseline unreadable")
+        current[key] = (
+            sorted(data.splitlines())
+            if key == "partitions"
+            else data.strip().split(",")[0]
+        )
+    status, data = await call(
+        "hmc_list_vios", system_name_or_uuid=journal["system_uuid"]
+    )
+    raw = data if isinstance(data, list) else getattr(data, "entries", None)
+    if isinstance(data, dict):
+        raw = data.get("entries")
+    if status != "PASS" or not isinstance(raw, list):
+        raise StateUnreadable("ST58 VIOS feed unreadable")
+    rows = []
+    for row in raw:
+        identity = lpar_config._uuid_of(row)
+        name = (
+            (row.get("Resource") or {}).get("PartitionName")
+            if isinstance(row, dict)
+            else None
+        )
+        if not identity or not isinstance(name, str) or not name:
+            raise StateUnreadable("ST58 VIOS identity unreadable")
+        rows.append({"uuid": identity, "name": name})
+    rows.sort(key=lambda row: row["uuid"])
+    findings = []
+    if current != journal["baseline"]["pools"] or rows != journal["baseline"]["vios"]:
+        findings.append(
+            Finding(
+                "ST58 baseline/orphan",
+                "partition/pool/VIOS baseline differs; diagnostic identities are not adopted",
+                "root must independently reconcile the exact UUID and authorize any later cleanup",
+            )
+        )
+    if journal["phase"] != "complete" or any(
+        v != "confirmed-absent" for v in journal["deletion"].values()
+    ):
+        findings.append(
+            Finding(
+                "ST58 interrupted intent",
+                f"phase {journal['phase']}; saved delete permission is not current authority",
+                "retain the journal; root must reconcile each pending create/delete UUID without replay",
             )
         )
     return findings
@@ -1947,6 +2058,14 @@ def main(argv: list[str] | None = None) -> int:
         round2_inputs = round2_inputs_from_document(document, subtasks)
     except (ValueError, TypeError, KeyError) as error:
         round2_error = str(error)
+    creation_inputs = None
+    creation_error = None
+    try:
+        creation_inputs = creation_memory_layout_inputs_from_document(
+            document, subtasks
+        )
+    except (ValueError, TypeError, KeyError) as error:
+        creation_error = str(error)
     witnessed = _WITNESSED_SUBTASKS | (
         set(runner.SUBTASK_GROUPS["round2"]) if round2_inputs else set()
     )
@@ -1973,6 +2092,7 @@ def main(argv: list[str] | None = None) -> int:
             (check_network, network_inputs),
             (check_lpar_config, lpar_config_inputs),
             (check_lpar_power, lpar_power_inputs),
+            (check_creation_memory_layout, creation_inputs),
             (check_round2, round2_inputs),
             (check_profile_artifacts, artifact_system),
         )
@@ -1980,7 +2100,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     findings: list[Finding] = []
-    unread: list[str] = [round2_error] if round2_error else []
+    unread: list[str] = [error for error in (round2_error, creation_error) if error]
     try:
         users = users_witnessed(document, subtasks)
     except ValueError as error:
