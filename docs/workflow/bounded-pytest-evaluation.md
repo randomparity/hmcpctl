@@ -199,3 +199,18 @@ The capability table test now uses an isolated fixed-width console: an import-ti
 preserves every existing assertion and restores the original shared console.
 Final delivery requires the unchanged eight native verification, eight wheel and
 two library legs after removal of the temporary workflow.
+
+
+## Current test and CI allowances (#1775)
+
+The operator separately approved a 25-minute test-runner deadline and a 30-minute
+budget for the named `ci` job. Their five-minute difference is allowance for the
+surrounding job lifecycle. Other job budgets, the four-version matrix, worker
+selection, coverage requirements and interrupt/termination graces are unchanged.
+ADR 0129's readiness and interrupt-collection decisions, as subsequently qualified
+by ADR 0130, remain separate from these overall test and job allowances.
+
+This policy change does not establish the cause of the earlier 1,020-second
+Python 3.12 timeout. A bounded observed run completed, but lacked a corresponding
+per-node trace from the failed run; no performance fix is claimed. The historical
+evaluation and measurements above retain their original scope and provenance.

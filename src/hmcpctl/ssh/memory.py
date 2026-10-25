@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..config import HMCConfig
-from ..documents.lpar_memory import LparMemoryChange
+from ..documents.lpar_memory import LparMemoryChange, LparMemoryMove
 from .commands import _parse_lshwres_output, hmc_error_code
 from .transport import HMCCLIError, run_hmc_command
 
@@ -136,3 +136,28 @@ async def change_lpar_memory_quantity(
     if change.force:
         parts.append("--force")
     return await run_hmc_command(config, " ".join(parts), include_stderr=True)
+
+
+async def move_lpar_memory_quantity(
+    config: HMCConfig,
+    system_name: str,
+    source_id: int,
+    target_id: int,
+    move: LparMemoryMove,
+) -> str:
+    """Submit one native move without replay; the operation owns admission/readback."""
+    if any(type(value) is not int or value < 1 for value in (source_id, target_id)):
+        raise ValueError(
+            "Move partition IDs must be positive integers; nothing was sent"
+        )
+    if source_id == target_id:
+        raise ValueError("Move requires distinct partition IDs; nothing was sent")
+    if not isinstance(move, LparMemoryMove):
+        raise TypeError("move must be a typed LparMemoryMove; nothing was sent")
+    command = (
+        f"chhwres -r mem -m {shlex.quote(system_name)} -o m "
+        f"--id {source_id} --tid {target_id} -q {move.quantity_mib}"
+    )
+    if move.force:
+        command += " --force"
+    return await run_hmc_command(config, command, include_stderr=True)

@@ -4,7 +4,7 @@
 
 Proposed design for #1778, native child of #638, frozen scope q1778-1db8f45e
 in issue comment 6395185550. All seven Expected criteria remain binding; the
-operator-approved exclusion/owner set is empty. [ADR 0289](../../adr/0289-lpar-processor-delta-operations.md)
+operator-approved exclusion/owner set is empty. [ADR 0296](../../adr/0296-lpar-processor-delta-operations.md)
 records the proposed boundary. The operator approved the contract-plan format on 2026-10-25;
 design approval and implementation remain separate gates. No live access is authorized here.
 
@@ -260,7 +260,7 @@ exercise flow control and cleanup without hardware. Overflow must prevent author
 processor commands; default callers, denial and override audit behavior stay covered.
 
 The implementation PR adds change_lpar_processors as Reconfiguring in ADR0092§3.2, with
-its real guard citation and #1778/ADR0289 provenance, as required by §6; policy is unchanged.
+its real guard citation and #1778/ADR0296 provenance, as required by §6; policy is unchanged.
 Implementation updates operations/maturity/reference bindings, generated tool docs/runtime
 projection, CHANGELOG and a reproducible named arm56 (`lpar-processor-quantities`,
 `st56-lpar-processor-quantities`) under existing preflight/wrapper/recovery architecture.

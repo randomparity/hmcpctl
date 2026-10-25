@@ -25,6 +25,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   (#1778). The opt-in arm 56 has offline coverage; native quantity contexts remain
   unverified on hardware. Existing absolute resource setters retain their behavior.
 
+- Native two-target dedicated-memory moves are available through
+  `hmc_move_lpar_memory` and `lpars memory-move`, with strict admission and
+  authorization for both partitions, independent dual observation, and explicit
+  partial/unverified outcomes without automatic replay or compensation (#1775).
+  Live hardware contexts remain unevidenced.
+
 - Native LPAR memory add/remove/set quantities and shared I/O entitlement inputs
   are available through `hmc_dlpar_mem(change=...)` and `lpars memory`, with
   guarded admission and independent applied/partial/uncertain readback (#1774).

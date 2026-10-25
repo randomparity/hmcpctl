@@ -1,4 +1,4 @@
-# ADR 0289: LPAR processor delta operations
+# ADR 0296: LPAR processor delta operations
 
 ## Status
 

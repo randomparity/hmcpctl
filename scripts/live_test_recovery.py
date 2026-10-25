@@ -67,6 +67,7 @@ from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import (
     lpar_config,
+    lpar_linux_roles,
     lpar_physical_io,
     lpar_power,
     lpar_security_policy,
@@ -179,6 +180,7 @@ _WITNESSED_SUBTASKS = (
         memory_quantities.SUBTASK,
         processor_quantities.SUBTASK,
         lpar_security_policy.SUBTASK,
+        lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
     }
 )
@@ -350,6 +352,7 @@ def lpar_config_inputs_from_document(
             memory_quantities.SUBTASK,
             processor_quantities.SUBTASK,
             lpar_security_policy.SUBTASK,
+            lpar_linux_roles.SUBTASK,
         }.intersection(subtasks)
         or not system
     ):
@@ -1904,6 +1907,29 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(
             "CLEAN: system-profile original baseline and finite terminal sequence confirmed"
+        )
+        return 0
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "lpar-memory-move"
+    ):
+        from live_test import memory_move
+
+        if not runner._bootstrap_config():
+            print("memory-move recovery: credentials unavailable", file=sys.stderr)
+            return 2
+        try:
+            asyncio.run(memory_move.recover_document(HMCConfig(), document))
+        except Exception as error:  # noqa: BLE001 — unreadable state never attests CLEAN
+            print(
+                f"memory-move recovery unconfirmed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: finite memory-move success and both original baselines confirmed; no writes"
         )
         return 0
 

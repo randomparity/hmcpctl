@@ -186,8 +186,9 @@ wildcard records the operation's actual scope.
 | `set_minimum_affinity_policy` | `operations/affinity/ssh.py::set_minimum_affinity_policy` | guarded (`operations/affinity/ssh.py::set_minimum_affinity_policy`) | — |
 | `set_lpar_processors` | `operations/lpar/dlpar.py::set_lpar_processors` | guarded (`operations/lpar/dlpar.py::set_lpar_processors`, via `_apply_dlpar_document` → `_resolve_and_authorize_lpar`) | — |
 | `set_lpar_memory` | `operations/lpar/dlpar.py::set_lpar_memory` | guarded (`operations/lpar/dlpar.py::set_lpar_memory`, via `_apply_dlpar_document`) | — |
-| `change_lpar_processors` | `operations/lpar/processors.py::change_lpar_processors` | guarded (`operations/lpar/processors.py::change_lpar_processors`, via `authorize_lpar_mutation` after selected-system containment) | #1778 / ADR 0289 |
+| `change_lpar_processors` | `operations/lpar/processors.py::change_lpar_processors` | guarded (`operations/lpar/processors.py::change_lpar_processors`, via `authorize_lpar_mutation` after selected-system containment) | #1778 / ADR 0296 |
 | `change_lpar_memory` | `operations/lpar/memory.py::change_lpar_memory` | guarded (`operations/lpar/memory.py::change_lpar_memory`, via `authorize_lpar_mutation` after selected-system containment) | #1774 / ADR 0285 |
+| `move_lpar_memory` | `operations/lpar/memory_move.py::move_lpar_memory` | guarded (`operations/lpar/memory_move.py::move_lpar_memory`, via `authorize_lpar_mutation` for both contained endpoints) | #1775 / ADR 0286 |
 | `apply_lpar_pcie_assignments` | `operations/lpar/assignments.py::apply_lpar_pcie_assignments` | guarded (`operations/lpar/assignments.py::apply_lpar_pcie_assignments`) | — |
 | `add_network_adapter` | `operations/virtualization/adapters.py::add_network_adapter` | guarded (`operations/virtualization/adapters.py::add_network_adapter`) | #372 |
 | `add_vscsi_adapter` | `operations/virtualization/adapters.py::add_vscsi_adapter` | guarded (`operations/virtualization/adapters.py::add_vscsi_adapter`) | #372 |

@@ -46,3 +46,16 @@ class LparMemoryChange(BaseModel):
         if self.quantity_mib is None and self.entitled_mib is None:
             raise ValueError("Pass quantity_mib or entitled_mib; nothing was requested")
         return self
+
+
+class LparMemoryMove(BaseModel):
+    """One native dedicated-memory transfer; both identities are separate arguments."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    quantity_mib: Annotated[StrictInt, Field(ge=0)] = Field(
+        description="MiB to move; align to the managed system memory region. Zero is a verified no-op."
+    )
+    force: StrictBool = Field(
+        default=False,
+        description="Permit documented AIX/Linux/VIOS no-RMC deferred effects; never IBM i.",
+    )
