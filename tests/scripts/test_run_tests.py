@@ -341,13 +341,15 @@ def test_the_reap_is_the_smaller_of_the_two_bounds() -> None:
 def test_timeout_is_below_the_ci_leg_budget() -> None:
     """The script's timeout must fire before the CI leg budget expires.
 
-    `.github/workflows/ci.yml` sets `timeout-minutes: 20` (1200 s) for the
-    ``ci`` job. When the two are equal the runner cancels the job before the
-    script's timeout arm can fire, so the diagnostic output and exit code 124
-    are lost. This guard keeps a margin for the replay to complete.
+    The approved #1775 allowances are 25 minutes for tests and 30 minutes for
+    the named ``ci`` job, whose actual workflow value is pinned by the CI-shape
+    tests. Preserve five minutes for the surrounding job lifecycle; this is an
+    allowance change, not evidence that the earlier timeout's cause was fixed.
+    Interrupt and termination grace decisions remain separate (ADR 0129/0130).
     """
-    _CI_LEG_BUDGET_SECONDS = 20 * 60  # timeout-minutes: 20 in ci.yml
-    assert run_tests.TEST_TIMEOUT_SECONDS < _CI_LEG_BUDGET_SECONDS
+    _CI_LEG_BUDGET_SECONDS = 30 * 60
+    assert run_tests.TEST_TIMEOUT_SECONDS == 25 * 60
+    assert _CI_LEG_BUDGET_SECONDS - run_tests.TEST_TIMEOUT_SECONDS == 5 * 60
 
 
 @pytest.mark.parametrize(("interrupts", "killed"), [(2, False), (3, True), (4, True)])
