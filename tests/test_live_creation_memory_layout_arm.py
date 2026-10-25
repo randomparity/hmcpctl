@@ -577,6 +577,12 @@ async def test_product_getter_false_positive_disagrees_with_raw_oracle(
     await run(target)
     getter.assert_awaited_once()
     assert target.product_status == "verified"
+    oracle_rows = [
+        row
+        for row in target.state.results
+        if row["tool"] == "hmc_run_command (independent memory layout)"
+    ]
+    assert len(oracle_rows) == 1 and ",1:64,1:256," in oracle_rows[0]["data"]
     assert (
         target.state.artifacts.creation_memory_layout["outcome"]["lpar"] == "mismatch"
     )
@@ -661,4 +667,19 @@ async def test_unknown_vios_delete_never_reports_cleanup_success(target):
     )
     assert (
         target.state.artifacts.creation_memory_layout["deletion"]["vios"] == "unknown"
+    )
+
+
+def test_existing_operation_test_bindings_include_the_isolated_arm():
+    root = Path(__file__).parents[1]
+    operations = json.loads((root / "docs/capabilities/operations.json").read_text())
+    selected = [
+        row
+        for row in operations["operations"]
+        if row["tool"] in {"hmc_create_lpar", "hmc_create_vios"}
+    ]
+    assert len(selected) == 2
+    assert all(
+        "tests/test_live_creation_memory_layout_arm.py" in row["tests"]
+        for row in selected
     )

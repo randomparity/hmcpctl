@@ -166,6 +166,7 @@ async def _profile(
         "-F lpar_name,name,min_num_huge_pages,desired_num_huge_pages,max_num_huge_pages,hpt_ratio,ppt_ratio,kvm_reserved_mem_percent --header"
     )
     status, data = await state.call(client, "hmc_run_command", cmd=command)
+    state.record(SUBTASK, "hmc_run_command (independent memory layout)", status, data)
     if status != "PASS" or not isinstance(data, str):
         return {"status": "unavailable", "observed": {}}
     try:
