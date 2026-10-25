@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +16,7 @@ from ...documents.lpar import (
     LparSettings,
     validate_partition_type,
 )
+from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
@@ -153,6 +155,48 @@ def lpars_create(
             help="Hardware memory expansion access; omitted preserves defaults",
         ),
     ] = None,
+    min_num_huge_pages: Annotated[
+        int | None,
+        typer.Option(
+            "--min-num-huge-pages",
+            help="AIX/Linux huge-page count; separate pool, capacity checked at activation",
+        ),
+    ] = None,
+    desired_num_huge_pages: Annotated[
+        int | None,
+        typer.Option(
+            "--desired-num-huge-pages",
+            help="AIX/Linux huge-page count; separate pool, capacity checked at activation",
+        ),
+    ] = None,
+    max_num_huge_pages: Annotated[
+        int | None,
+        typer.Option(
+            "--max-num-huge-pages",
+            help="AIX/Linux huge-page count; separate pool, capacity checked at activation",
+        ),
+    ] = None,
+    hpt_ratio: Annotated[
+        str | None,
+        typer.Option(
+            "--hpt-ratio",
+            help="Advertised selected-system ratio; omission preserves defaults",
+        ),
+    ] = None,
+    ppt_ratio: Annotated[
+        str | None,
+        typer.Option(
+            "--ppt-ratio",
+            help="Advertised selected-system ratio; omission preserves defaults",
+        ),
+    ] = None,
+    kvm_reserved_mem_percent: Annotated[
+        str | None,
+        typer.Option(
+            "--kvm-reserved-mem-percent",
+            help="Exact finite reservation, at most two decimals; <=65536 canonical ASCII bytes; selecting zero also declares Linux intent; HMC decides numeric limits",
+        ),
+    ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.
 
@@ -167,6 +211,22 @@ def lpars_create(
     use initial-profile I/O or profile-bearing assignments. Readback proves only
     configuration, not KVM or NovaLink deployment.
     """
+    try:
+        layout = LparMemoryLayout(
+            min_num_huge_pages=min_num_huge_pages,
+            desired_num_huge_pages=desired_num_huge_pages,
+            max_num_huge_pages=max_num_huge_pages,
+            hpt_ratio=hpt_ratio,
+            ppt_ratio=ppt_ratio,
+            kvm_reserved_mem_percent=None
+            if kvm_reserved_mem_percent is None
+            else Decimal(kvm_reserved_mem_percent),
+        )
+        layout.validate_creation(partition_type)
+    except (ValueError, InvalidOperation) as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="memory layout"
+        ) from None
     policy = load_security_policy(security_policy)
     try:
         policy.validate_creation(partition_type)
@@ -240,6 +300,7 @@ def lpars_create(
                 security_policy=policy,
                 hardware_mem_encryption=hardware_mem_encryption,
                 hardware_mem_expansion=hardware_mem_expansion,
+                memory_layout=layout,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,
