@@ -674,20 +674,68 @@ async def test_layout_controller_apply_denial_precedes_create(layout_creation_ta
 @pytest.mark.parametrize(
     ("failure", "absent_outcome"),
     [
-        ("HSCLA4A0: private-provider-detail", "rejected"),
-        ("private-provider-detail", "unknown"),
-        ("SSH transport lost: private-provider-detail", "unknown"),
+        ("stderr", "rejected"),
+        ("stdout", "rejected"),
+        ("timeout", "unknown"),
+        ("connection", "unknown"),
+        ("opaque", "unknown"),
+        ("uncoded", "unknown"),
+        ("command-only", "unknown"),
+        ("signal", "unknown"),
+        ("missing-status", "unknown"),
+        ("zero-status", "unknown"),
     ],
 )
 async def test_layout_reconciliation_never_retries_or_stamps(
     layout_creation_target, outcome, failure, absent_outcome
 ):
+    from dataclasses import replace
+
+    import asyncssh
+
     from hmcpctl.errors import HMCError
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
-    from hmcpctl.ssh.transport import HMCCLIError
+    from hmcpctl.ssh.transport import (
+        HMCCLIError,
+        _command_connection_error,
+        _command_timeout_error,
+        _process_error,
+    )
 
     target = layout_creation_target
-    target.write.side_effect = HMCCLIError(failure)
+    name = "part-R1" if failure == "uncoded" else "part: HSCLA4A0"
+    target.entry["Resource"]["PartitionName"] = name
+
+    async def fail(config, command):
+        if failure == "timeout":
+            raise _command_timeout_error(config, command)
+        if failure == "connection":
+            raise _command_connection_error(command, ConnectionError("transport lost"))
+        if failure == "opaque":
+            raise HMCCLIError("HSCLA4A0: private-provider-detail")
+        response = (
+            "private-provider-detail"
+            if failure in {"uncoded", "command-only"}
+            else "HSCLA4A0: private-provider-detail"
+        )
+        status = {"signal": None, "missing-status": None, "zero-status": 0}.get(
+            failure, 1
+        )
+        raise _process_error(
+            command,
+            asyncssh.ProcessError(
+                env={},
+                command=command,
+                subsystem=None,
+                exit_status=status,
+                exit_signal="TERM" if failure == "signal" else None,
+                returncode=-15 if failure == "signal" else status,
+                stdout=response if failure == "stdout" else "",
+                stderr="" if failure == "stdout" else response,
+            ),
+        )
+
+    target.write.side_effect = fail
     second = (
         None
         if outcome == "rejected"
@@ -699,9 +747,13 @@ async def test_layout_reconciliation_never_retries_or_stamps(
     expected = absent_outcome if outcome == "rejected" else outcome
     with pytest.raises(HMCError, match=expected) as caught:
         await create_and_stamp_lpar(
-            target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+            target.hmc,
+            "selector",
+            replace(layout_creation(LparMemoryLayout(hpt_ratio="1:128")), name=name),
         )
     assert "private-provider-detail" not in str(caught.value)
+    assert "HSCLA4A0" not in str(caught.value)
+    assert "Inspect scoped identity before retrying" in str(caught.value)
     assert target.hmc.find_partition_by_name.await_count == 2
     target.write.assert_awaited_once()
     target.hmc.create_logical_partition.assert_not_awaited()
@@ -1056,11 +1108,25 @@ async def test_layout_mixed_native_error_retains_code_without_provider_chain(
 ):
     import traceback
 
+    import asyncssh
+
     from hmcpctl.ssh.lpar import create_lpar_via_cli
-    from hmcpctl.ssh.transport import HMCCLIError
+    from hmcpctl.ssh.transport import HMCCLIError, _process_error
 
     target = layout_creation_target
-    target.write.side_effect = HMCCLIError("HSCLA4A0: private-provider-detail")
+    target.write.side_effect = _process_error(
+        "mksyscfg",
+        asyncssh.ProcessError(
+            env={},
+            command="mksyscfg",
+            subsystem=None,
+            exit_status=1,
+            exit_signal=None,
+            returncode=1,
+            stdout="",
+            stderr="HSCLA4A0: private-provider-detail",
+        ),
+    )
     with pytest.raises(HMCCLIError, match="HSCLA4A0") as caught:
         await create_lpar_via_cli(
             target.hmc.config,
@@ -1073,6 +1139,7 @@ async def test_layout_mixed_native_error_retains_code_without_provider_chain(
         traceback.format_exception(caught.value)
     )
     assert caught.value.__context__ is None
+    assert caught.value.remote_refusal_code == "HSCLA4A0"
     target.write.assert_awaited_once()
 
 

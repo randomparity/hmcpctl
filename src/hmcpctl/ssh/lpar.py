@@ -29,7 +29,7 @@ from ..documents.lpar import (
     shared_units_over_vcpus,
     shared_vcpu_defaults,
 )
-from .commands import build_attribute_record, build_filter, hmc_error_code
+from .commands import build_attribute_record, build_filter
 from .description_validation import validate_lpar_description
 from .profiles import set_lpar_description
 from .transport import HMCCLIError, run_hmc_command
@@ -237,11 +237,12 @@ async def create_lpar_via_cli(
         config_str += "," + extra
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
     layout_error = None
+    code = None
     try:
         return await run_hmc_command(config, cmd)
     except HMCCLIError as error:
         if layout_pairs:
-            code = hmc_error_code(error)
+            code = error.remote_refusal_code
             layout_error = f"{code}: " if code else ""
             layout_error += (
                 "Native layout creation outcome requires scoped identity reconciliation"
@@ -251,7 +252,7 @@ async def create_lpar_via_cli(
                 f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
             ) from error
     if layout_error is not None:
-        raise _LayoutCreateSubmissionError(layout_error)
+        raise _LayoutCreateSubmissionError(layout_error, remote_refusal_code=code)
     raise HMCCLIError(
         "Hardware memory creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run."
     )

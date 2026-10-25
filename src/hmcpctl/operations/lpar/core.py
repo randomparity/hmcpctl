@@ -36,7 +36,6 @@ from ...resource_identity import (
     is_uuid,
     resolve_system_uuid,
 )
-from ...ssh.commands import hmc_error_code
 from ...ssh.lpar import (
     DEFAULT_PROFILE_NAME,
     _LayoutCreateSubmissionError,
@@ -783,7 +782,7 @@ async def _raise_layout_create_failure(
         if (
             found is None
             and isinstance(error, HMCCLIError)
-            and hmc_error_code(error) is not None
+            and error.remote_refusal_code is not None
         ):
             outcome = "rejected; scoped lookup observed no partition"
         elif (
