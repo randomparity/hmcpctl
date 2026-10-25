@@ -201,6 +201,15 @@ are uppercase field names. Invalid/empty ratios or false separate fresh-delete
 permission SKIP the full arm before writes; actual advertisements still gate each
 product creation. These are test settings, not product intent/override parameters.
 
+Saved-document compatibility: decode_saved_config backfills ONLY missing new keys
+with empty HPT, empty PPT and False BEFORE its exact-key comparison; constructor
+defaults alone are insufficient. decode_artifacts defaults a missing journal to{},
+a valid unarmed empty record. Explicit malformed values/types or unknown keys still
+refuse; never replace explicit values with defaults. Preserve valid non-ST58
+round2_inputs_from_document, runner restoration and read-only recovery. ST58 prior
+output/current-or-old artifact restoration remains refused before effects; a saved
+boolean never grants current VIOS deletion authority. No migration engine/new API.
+
 LiveTestArtifacts.creation_memory_layout is a closed dictionary. Keys:
 invocation_id,candidate_commit,system_uuid,hmc_identity,phase,lpar_name,lpar_token,
 lpar_uuid,vios_name,vios_uuid,preabsence,create_returned,
