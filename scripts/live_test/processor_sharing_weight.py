@@ -349,22 +349,30 @@ async def _fixture(
     cleanup = "passed" if run.deleted and same else "failed"
     checkpoint()
     if run.created and not skipped:
-        state.record_verified(
-            SUBTASK,
-            "hmc_dlpar_proc-dedicated-sharing"
-            if dedicated
-            else "hmc_dlpar_proc-shared-weight",
-            operation="lpar.dlpar_proc",
-            scenario="st59-lpar-dedicated-sharing"
-            if dedicated
-            else "st59-lpar-shared-weight",
-            assertions=assertions,
-            cleanup=cleanup,
-            data={
-                "runtime": "separately observed; no guest proof",
-                "profile_persistence": "not-proven",
-            },
-        )
+        data = {
+            "runtime": "separately observed; no guest proof",
+            "profile_persistence": "not-proven",
+        }
+        if dedicated:
+            state.record_verified(
+                5901,
+                "hmc_dlpar_proc (dedicated-sharing)",
+                operation="lpar.dlpar_proc",
+                scenario="st59-lpar-dedicated-sharing",
+                assertions=assertions,
+                cleanup=cleanup,
+                data=data,
+            )
+        else:
+            state.record_verified(
+                SUBTASK,
+                "hmc_dlpar_proc (shared-weight)",
+                operation="lpar.dlpar_proc",
+                scenario="st59-lpar-shared-weight",
+                assertions=assertions,
+                cleanup=cleanup,
+                data=data,
+            )
     return cleanup == "passed" and (skipped or all(a.holds for a in assertions))
 
 

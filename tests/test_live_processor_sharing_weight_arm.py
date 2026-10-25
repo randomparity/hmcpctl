@@ -4,6 +4,7 @@ import importlib
 import sys
 import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -299,8 +300,8 @@ async def test_sharing_arm(target, monkeypatch):
     }
     ids = [item["observation"]["id"] for item in observations]
     assert ids == [
-        "st59-hmc-dlpar-proc-shared-weight",
-        "st59-hmc-dlpar-proc-dedicated-sharing",
+        "st59-hmc-dlpar-proc",
+        "st5901-hmc-dlpar-proc",
     ]
     assert all(item["observation"]["cleanup"] == "passed" for item in observations)
     assert target.events.count("raw") == 26
@@ -322,6 +323,28 @@ async def test_sharing_arm(target, monkeypatch):
         for item in observations
         for assertion in item["observation"]["assertions"]
     )
+
+
+@pytest.mark.asyncio
+async def test_sharing_observations_match_source_sites_and_actual_invocation(
+    target, monkeypatch
+):
+    import check_capability_inventory as inventory
+    import promote_live_observations as promotion
+
+    state = await exercise(target, monkeypatch)
+    sites = inventory.discover_observation_sites()
+    assert sites[("lpar.dlpar_proc", 59)] == "st59-lpar-shared-weight"
+    assert sites[("lpar.dlpar_proc", 5901)] == "st59-lpar-dedicated-sharing"
+    run = {
+        "group": GROUP,
+        "subtasks": runner.SUBTASK_GROUPS[GROUP],
+        "results": state.results,
+        "finished_time": datetime.now(UTC),
+    }
+    for observation in passed(state):
+        promotion._invocation(observation, run, sites)
+    assert len(passed(state)) == 2
 
 
 @pytest.mark.parametrize(
