@@ -1822,3 +1822,58 @@ Capability-false, other secure-boot values, VIOS, OS400/Power11, irreversible
 enables and keystore variants remain unrun. Mocks and scenario registration add
 no maturity evidence. Generate public summaries only with
 `scripts/live_test_evidence.py`; raw result documents remain private.
+
+### Linux management roles (C05, arm 53)
+
+The opt-in `lpar-linux-roles` arm creates one owned, inactive AIX/Linux fixture
+with explicit dedicated never-share CPUs (minimum/desired/maximum one processor)
+and memory (1024/2048/4096 MiB). When KVM prerequisites are admitted, creation
+selects management false and KVM true with POWER10 in the same native record.
+Both variants select the management field, including false, and require native
+`lscomgmt -m <selected system> -F is_controller` value `1`. Controller mode passes
+explicit apply false and omits the profile; classic profile support does not
+authorize management-role selection. The full variant independently reads roles,
+compatibility and resources, disables KVM, then changes management false→true→false
+while KVM remains false. It does not activate a guest, install software, manage
+keys, change the controller or rewrite an existing partition's resources.
+
+Unknown management authority stops before fixture creation. If KVM evidence
+is unavailable or ineligible but management-only admission succeeds, the same
+arm omits KVM and POWER10 selection, verifies management false, and performs only
+the two management updates. Independent reads must still expose both role values;
+the known KVM value, compatibility and resources are preserved. Cleanup and
+baseline comparison remain mandatory. This subset records explicitly labelled
+management-only PASS/FAIL rows and emits no catalog observation or maturity
+promotion. Generated matrices require context stating that KVM was not run.
+The full KVM branch and its three catalog observations remain separate.
+
+The committed captured system reports KVM capability false and FW950; it cannot
+establish an eligible positive KVM run. Mocked eligible variants are synthetic.
+A retained native management-false creation attempt on a null-controller target
+was refused before any fixture was confirmed; recovery was clean and independent
+baselines matched. This is refusal evidence, not a positive lifecycle claim.
+
+A later, separately authorized finite execution packet must bind the exact
+candidate HEAD and imported source provenance, target, explicit resources,
+native controller authority and profileless effects, transport deadlines, cleanup/recovery
+reserves and baseline facts before dispatch. Follow the shared preflight and
+source-provenance procedure; private raw captures stay outside repositories.
+The wrapper's maximum effects are one creation, three role updates and guarded
+inactive-only matching-token deletion. Containment, ownership, admission and
+independent verification add physical reads; these effect counts are not a
+transport-request cap. Run only the named group:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-linux-roles
+uv run --no-sync python scripts/live_lpar_linux_roles.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-linux-roles.json
+```
+
+Always run recovery, including after success, cancellation, transport failure or
+unknown completion. The arm attempts owned inactive cleanup in `finally` and
+compares independent before/after partition names and free processor/memory
+inventory. Active, foreign-owned or unreadable fixtures remain untouched and
+require operator inspection. An unconfirmed cleanup or baseline mismatch cannot
+produce passing evidence. Generate any public, redacted, HEAD-bound evidence
+through `scripts/live_test_evidence.py`; never publish raw result JSON or treat
+configuration readback as Linux, KVM or management-controller deployment proof.

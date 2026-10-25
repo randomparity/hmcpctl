@@ -854,3 +854,22 @@ def test_memory_group_preflight_declares_bounded_owned_setup(workspace, monkeypa
     (workspace / ".env").write_text(_env_text(), encoding="utf-8")
     _credentials(monkeypatch)
     assert preflight.main(["--group", "lpar-memory-quantities", "--skip-hardware"]) == 0
+
+
+def test_linux_roles_preflight_discloses_both_finite_variants(
+    workspace, monkeypatch, capsys
+):
+    (workspace / ".env").write_text(_env_text(), encoding="utf-8")
+    _credentials(monkeypatch)
+    assert preflight.main(["--group", "lpar-linux-roles", "--skip-hardware"]) == 0
+    output = " ".join(capsys.readouterr().out.split())
+    for disclosure in (
+        "native is_controller=1 required for management selection",
+        "management-only creation omits KVM and POWER10",
+        "two management updates",
+        "three updates",
+        "same-record POWER10",
+        "no catalog promotion",
+        "mandatory recovery",
+    ):
+        assert disclosure in output

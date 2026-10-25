@@ -538,12 +538,26 @@ def lpars_configure(
     migration_disabled: bool | None = typer.Option(
         None, "--migration-disabled/--no-migration-disabled"
     ),
+    powervm_mgmt_capable: bool | None = typer.Option(
+        None,
+        "--powervm-mgmt-capable/--no-powervm-mgmt-capable",
+        help="Linux management capability; selecting either value declares intent, not installed OS proof",
+    ),
+    kvm_capable: bool | None = typer.Option(
+        None,
+        "--kvm-capable/--no-kvm-capable",
+        help="Linux KVM eligibility; configuration only, requires system capability and HMC >=10.3.1060.1",
+    ),
     ownership_override: bool = typer.Option(False, "--ownership-override"),
 ) -> None:
-    """Configure C01 settings and verify readback; unknown outcomes exit nonzero.
+    """Configure partition settings and verify readback; unknown outcomes exit nonzero.
 
     A running time-reference partition may govern hypervisor/service-processor
-    time. Omitted values are preserved. No power or guest clock action is taken.
+    time. Omitted values are preserved. Role selection declares Linux intent.
+    KVM selection requires inactivity; enabling also requires existing POWER10,
+    dedicated never-share CPUs, zero keystore and no persistent-memory volumes.
+    CPUs and compatibility are unchanged. Readback proves configuration only;
+    no power, guest clock or controller-transfer action is taken.
     """
     settings = LparSettings(
         allow_perf_collection=allow_perf_collection,
@@ -551,6 +565,8 @@ def lpars_configure(
         time_ref=time_ref,
         simplified_remote_restart_capable=simplified_remote_restart_capable,
         migration_disabled=migration_disabled,
+        powervm_mgmt_capable=powervm_mgmt_capable,
+        kvm_capable=kvm_capable,
     )
     result = with_client(
         lambda hmc: configure_lpar_settings(

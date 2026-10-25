@@ -217,3 +217,21 @@ reads are not published. This proves only the captured empty collection route,
 with no positive shared-memory pool capacity, AMS mutation or running-guest proof.
 The raw capture, extracted unchanged collection record, corpus and reproduction
 script remain in the operator's private campaign evidence archive for #638/#1774.
+
+`vocabulary/v10r3-controller-status-source.json` is a narrow #1766 SOURCE
+export of the actual named-output `lscomgmt -m <selected system>` read from an
+authorized 2026-10-24 two-SSH status/help window. Only the status record is
+projected into the existing exporter's input shape; help remains private. Command
+and stdout are unchanged, and exit 0 follows the immutable producer's checked
+zero-exit requirement plus its completed receipt. No timestamp or extra transport
+record is synthesized. The observed value is `is_controller=null`; this does not
+establish positive controller authority. HMC 10.3.1060.3 is historical context
+from the preceding schema-source window, not a new version read in this window.
+The exported command has no `-F`: command-family matching ignores projection
+flags, so it does not prove that a native `-F is_controller` call ran. No product
+lifecycle or maturity observation follows. Existing tokenizer/exporter output
+contains no REST values; the required enum input contributes none. Original raw
+captures, the deterministic projection, corpus, reproduction commands and complete
+receipt hashes remain in the private campaign evidence archive for #638/#1766.
+Status stdout SHA-256: `ed42916acb488c60b6283beb94ce6a0b3943a0a2a10ce57ecf74d96e165dbbc7`.
+Projection SHA-256: `1e27f0aa19563f059c2737ddc2112fbe9d3940afb86f18046b45b8ece533a565`.

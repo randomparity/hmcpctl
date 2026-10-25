@@ -1220,6 +1220,19 @@
                 "constraint": "four typed creation fields: secure_boot, keystore_kbytes, keystore_signed_updates, linux_dynamic_key_secure_boot; selected-system admission and requested readback; keystore_signed_updates_without_verification is update-only, including false"
               }
             ]
+          },
+          {
+            "variant": "c05-linux-management-roles",
+            "parameters": [
+              {
+                "name": "settings.kvm_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system capability/release and enablement prerequisites; fixed same-record POWER10 on true creation, unchanged CPUs; configuration readback only"
+              },
+              {
+                "name": "settings.powervm_mgmt_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system authority and contained configuration readback, not NovaLink deployment"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -5669,6 +5682,19 @@
           {
             "variant": "c01-five-partition-settings",
             "parameters": []
+          },
+          {
+            "variant": "c05-linux-management-roles",
+            "parameters": [
+              {
+                "name": "settings.kvm_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system capability/release and enablement prerequisites; inactive state for selection and existing POWER10 on enablement, unchanged CPUs; configuration readback only"
+              },
+              {
+                "name": "settings.powervm_mgmt_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system authority and contained configuration readback, not NovaLink deployment"
+              }
+            ]
           }
         ],
         "missing_scope": []

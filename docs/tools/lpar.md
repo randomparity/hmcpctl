@@ -9,7 +9,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `hmc_capture_lpar_console` | `mutate` | `lpar.capture_console` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Capture a bounded snapshot of an LPAR's virtual console (mkvterm). |
-| `hmc_configure_lpar` | `mutate` | `lpar.configure` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure five C01 partition settings and verify preserved/supplied values. |
+| `hmc_configure_lpar` | `mutate` | `lpar.configure` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure partition settings and verify preserved/supplied values. |
 | `hmc_configure_lpar_reporting` | `mutate` | `lpar.configure_reporting` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure partition reporting once and verify applicable readback. |
 | `hmc_configure_lpar_security_policy` | `destructive` | `lpar.configure_security_policy` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure security policy once; verify pending policy separately from current boot. |
 | `hmc_configure_lpar_vtpm` | `destructive` | `lpar.configure_vtpm` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure an inactive AIX/Linux partition's advertised vTPM settings. |
