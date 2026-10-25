@@ -18,6 +18,15 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR and VIOS creation through CLI/MCP accept optional strict booleans
+  `hardware_mem_encryption` and `hardware_mem_expansion`, preserving omission and
+  explicit false. Selected-system admission guards native creation; independent
+  inactive REST readback compares the named hardware access fields and reports
+  uncertain or mismatched outcomes without replay. This establishes access
+  availability, not runtime encryption or expansion. Opt-in arm 55 documents one
+  owned AIX/Linux true/true fixture; implementation maturity is separate from live
+  evidence ([#1771](https://github.com/randomparity/hmcpctl/issues/1771)).
+
 - Native two-target dedicated-memory moves are available through
   `hmc_move_lpar_memory` and `lpars memory-move`, with strict admission and
   authorization for both partitions, independent dual observation, and explicit

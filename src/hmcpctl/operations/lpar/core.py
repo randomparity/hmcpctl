@@ -26,6 +26,7 @@ from ...documents.lpar import (
     validate_keylock,
     validate_partition_type,
 )
+from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
@@ -50,6 +51,7 @@ from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml, leaf_text
 from .assignments import SriovLogicalPortAssignment
 from .configuration import configure_lpar_settings
+from .hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from .linux_roles import (
     admit_role_creation,
     read_role_capabilities,
@@ -91,6 +93,8 @@ class LparCreation:
     )
     vtpm_settings: LparVtpmSettings = field(default_factory=LparVtpmSettings)
     security_policy: LparSecurityPolicy = field(default_factory=LparSecurityPolicy)
+    hardware_mem_encryption: bool | None = None
+    hardware_mem_expansion: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,7 @@ class LparCreationResult:
     reporting_step: WorkflowStep | None = None
     vtpm_step: WorkflowStep | None = None
     security_policy_step: WorkflowStep | None = None
+    hardware_memory_step: WorkflowStep | None = None
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -169,6 +174,8 @@ async def _create_via_cli(
         physical_io=creation.physical_io,
         creation_sriov=creation.creation_sriov,
         security_policy=creation.security_policy,
+        hardware_mem_encryption=creation.hardware_mem_encryption,
+        hardware_mem_expansion=creation.hardware_mem_expansion,
         **({"profile_name": None} if controller_mode else {}),
     )
     apply_step = (
@@ -176,6 +183,8 @@ async def _create_via_cli(
         if creation.apply_profile is not None
         and not creation.physical_io.requested
         and not creation.security_policy.pairs()
+        and creation.hardware_mem_encryption is None
+        and creation.hardware_mem_expansion is None
         and not roles_requested(creation.settings)
         else None
     )
@@ -189,6 +198,15 @@ async def _create_via_cli(
         )
     except HMCError as exc:
         return system_name, apply_step, None, exc
+    except Exception:
+        if (
+            creation.hardware_mem_encryption is None
+            and creation.hardware_mem_expansion is None
+        ):
+            raise
+        # Native creation succeeded, but the identity lookup is unavailable.
+        # Do not retain provider details in the partial result or exception chain.
+        return system_name, apply_step, None, None
     return system_name, apply_step, created_lpar, None
 
 
@@ -213,6 +231,15 @@ async def create_and_stamp_lpar(
       :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
       delete it to release its resources.
     """
+    hardware_requested = bool(
+        hardware_memory_pairs(
+            creation.hardware_mem_encryption, creation.hardware_mem_expansion
+        )
+    )
+    if hardware_requested and creation.keylock is not None:
+        raise ValueError(
+            "Hardware memory settings cannot be combined with explicit keylock: native creation cannot represent keylock. Nothing was created"
+        )
     if creation.stamp_policy not in ("best-effort", "required"):
         raise ValueError(
             f"stamp_policy must be 'best-effort' or 'required', "
@@ -294,23 +321,31 @@ async def create_and_stamp_lpar(
             ),
             environment=creation.partition_type,
         )
+    await admit_hardware_memory(
+        hmc,
+        system_uuid,
+        creation.hardware_mem_encryption,
+        creation.hardware_mem_expansion,
+    )
     await admit_creation_io(hmc, system_uuid, creation)
     await require_memory_within_system(hmc, system_uuid, creation.resources)
     system_name: str | None = None
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
     resources = complete_create_resources(creation.resources)
-    if policy_requested and resources is not None:
+    if (policy_requested or hardware_requested) and resources is not None:
         await require_memory_within_system(hmc, system_uuid, resources)
     if (
         resources is None
         or policy_requested
+        or hardware_requested
         or creation.reporting_settings.pairs()
         or creation.vtpm_settings.pairs()
         or creation.physical_io.requested
         or (creation.settings.pairs() and creation.keylock is None)
     ):
         # Only mksyscfg's all_resources=1 expresses a create with no resource values.
+        native_failed = False
         try:
             (
                 system_name,
@@ -325,19 +360,28 @@ async def create_and_stamp_lpar(
                 controller_mode=controller_mode,
             )
         except HMCError as error:
-            if (
+            if hardware_requested:
+                native_failed = True
+            elif (
                 not creation.physical_io.requested
                 and not policy_requested
                 and not role_requested
             ):
                 raise
+            else:
+                raise HMCError(
+                    "Native role creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+                    if role_requested
+                    else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                    if policy_requested
+                    else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                ) from (None if role_requested else error)
+        if native_failed:
             raise HMCError(
-                "Native role creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
-                if role_requested
-                else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                if policy_requested
-                else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-            ) from (None if role_requested else error)
+                "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+                if controller_mode
+                else "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+            )
     else:
         document = build_lpar_document(
             name=creation.name,
@@ -372,10 +416,11 @@ async def create_and_stamp_lpar(
     apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
 
     if created_lpar is None:
-        if (policy_requested or role_requested) and creation.stamp_policy == "required":
+        if (
+            policy_requested or hardware_requested or role_requested
+        ) and creation.stamp_policy == "required":
             raise HMCError(
-                f"{'Role' if role_requested else 'Policy'} creation may have succeeded, "
-                "but created identity readback is "
+                f"{'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
                 "unavailable and ownership was not stamped. Inspect the contained "
                 "partition before retrying; no rollback performed."
             ) from None
@@ -395,7 +440,7 @@ async def create_and_stamp_lpar(
                 "retrying; a created partition can be re-stamped with "
                 "set_lpar_ownership_description."
             )
-        if policy_requested or role_requested:
+        if policy_requested or hardware_requested or role_requested:
             skipped = "created identity readback unavailable; inspect the contained partition before retrying"
         elif readback_error is None:
             skipped = "create returned no LPAR body"
@@ -410,6 +455,15 @@ async def create_and_stamp_lpar(
                 f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
             ),
             apply_step=apply_step,
+            hardware_memory_step=await created_hardware_memory_step(
+                hmc,
+                system_uuid,
+                created_lpar,
+                creation.name,
+                creation.partition_type,
+                creation.hardware_mem_encryption,
+                creation.hardware_mem_expansion,
+            ),
             security_policy_step=WorkflowStep(
                 "security_policy",
                 "error",
@@ -448,7 +502,7 @@ async def create_and_stamp_lpar(
                 else None
             ),
         )
-    if (policy_requested or role_requested) and (
+    if (policy_requested or hardware_requested or role_requested) and (
         not isinstance(created_lpar.get("UUID"), str)
         or not is_uuid(created_lpar["UUID"])
         or not isinstance(created_lpar.get("Resource"), dict)
@@ -479,6 +533,15 @@ async def create_and_stamp_lpar(
             )
             if policy_requested
             else None,
+            hardware_memory_step=await created_hardware_memory_step(
+                hmc,
+                system_uuid,
+                created_lpar,
+                creation.name,
+                creation.partition_type,
+                creation.hardware_mem_encryption,
+                creation.hardware_mem_expansion,
+            ),
         )
     ownership_stamped, warnings = await stamp_created_lpar_ownership(
         hmc,
@@ -499,6 +562,15 @@ async def create_and_stamp_lpar(
             "with set_lpar_ownership_description (issue #376) or delete it to "
             "release its resources."
         )
+    hardware_step = await created_hardware_memory_step(
+        hmc,
+        system_uuid,
+        created_lpar,
+        creation.name,
+        creation.partition_type,
+        creation.hardware_mem_encryption,
+        creation.hardware_mem_expansion,
+    )
     io_step = await created_io_step(hmc, system_uuid, creation, created_lpar)
     if io_step is not None and ownership_stamped is not True:
         io_step = WorkflowStep(
@@ -515,29 +587,32 @@ async def create_and_stamp_lpar(
             created_lpar,
             **({"controller_mode": True} if controller_mode else {}),
         )
-        if policy_requested or role_requested
+        if policy_requested or hardware_requested or role_requested
         else None
     )
     reporting_step = (
         await _created_reporting_step(hmc, system_name, creation)
-        if policy_requested or role_requested
+        if policy_requested or hardware_requested or role_requested
         else None
     )
     vtpm_step = (
         await _created_vtpm_step(hmc, system_name, creation)
-        if policy_requested or role_requested
+        if policy_requested or hardware_requested or role_requested
         else None
     )
     policy_step = await _created_security_policy_step(
         hmc, system_uuid, creation, created_lpar
     )
-    if (policy_requested or role_requested) and creation.apply_profile is not None:
+    if (
+        policy_requested or hardware_requested or role_requested
+    ) and creation.apply_profile is not None:
         required = [
             (creation.settings.pairs(), settings_step),
             (creation.reporting_settings.pairs(), reporting_step),
             (creation.vtpm_settings.pairs(), vtpm_step),
             (creation.physical_io.requested, io_step),
             (policy_requested, policy_step),
+            (hardware_requested, hardware_step),
         ]
         verified = ownership_stamped is True and all(
             not requested or (step is not None and step.status == "ok")
@@ -568,7 +643,12 @@ async def create_and_stamp_lpar(
                 "I/O readback unverified; profile not applied",
             )
         )
-    if creation.physical_io.requested or policy_requested or role_requested:
+    if (
+        creation.physical_io.requested
+        or policy_requested
+        or hardware_requested
+        or role_requested
+    ):
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
     result = LparCreationResult(
         True,
@@ -577,7 +657,7 @@ async def create_and_stamp_lpar(
         (*apply_warnings, *warnings),
         apply_step,
         settings_step
-        if policy_requested or role_requested
+        if policy_requested or hardware_requested or role_requested
         else await _created_settings_step(
             hmc,
             system_uuid,
@@ -588,16 +668,24 @@ async def create_and_stamp_lpar(
         ),
         io_step,
         reporting_step
-        if policy_requested or role_requested
+        if policy_requested or hardware_requested or role_requested
         else await _created_reporting_step(hmc, system_name, creation),
         vtpm_step
-        if policy_requested or role_requested
+        if policy_requested or hardware_requested or role_requested
         else await _created_vtpm_step(hmc, system_name, creation),
         policy_step,
+        hardware_step,
     )
-    if role_requested:
+    if role_requested or hardware_requested:
         safe_steps = {}
-        for name in ("apply_step", "physical_io_step", "reporting_step", "vtpm_step"):
+        step_names = ("apply_step", "physical_io_step", "reporting_step", "vtpm_step")
+        if hardware_requested:
+            step_names += (
+                "settings_step",
+                "security_policy_step",
+                "hardware_memory_step",
+            )
+        for name in step_names:
             step = getattr(result, name)
             if (
                 step is not None
