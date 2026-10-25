@@ -854,3 +854,13 @@ def test_memory_group_preflight_declares_bounded_owned_setup(workspace, monkeypa
     (workspace / ".env").write_text(_env_text(), encoding="utf-8")
     _credentials(monkeypatch)
     assert preflight.main(["--group", "lpar-memory-quantities", "--skip-hardware"]) == 0
+
+
+def test_processor_quantities_preflight(workspace, monkeypatch):
+    (workspace / ".env").write_text(_env_text(), encoding="utf-8")
+    _credentials(monkeypatch)
+    assert (
+        preflight.main(["--group", "lpar-processor-quantities", "--skip-hardware"]) == 0
+    )
+    assert runner.SUBTASK_GROUPS["lpar-processor-quantities"] == [56]
+    assert 56 not in runner.SUBTASK_GROUPS["all"]

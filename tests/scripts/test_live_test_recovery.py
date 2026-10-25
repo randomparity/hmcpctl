@@ -1487,6 +1487,7 @@ async def test_lpar_config_unreadable_listing_is_not_clean():
         (47, "lpar-settings"),
         (49, "lpar-physical-io"),
         (50, "lpar-memory-quantities"),
+        (56, "lpar-processor-quantities"),
     ],
 )
 def test_lpar_config_run_is_witnessed(tmp_path, monkeypatch, capsys, subtask, group):
