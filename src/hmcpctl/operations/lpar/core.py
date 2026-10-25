@@ -676,9 +676,16 @@ async def create_and_stamp_lpar(
         policy_step,
         hardware_step,
     )
-    if role_requested:
+    if role_requested or hardware_requested:
         safe_steps = {}
-        for name in ("apply_step", "physical_io_step", "reporting_step", "vtpm_step"):
+        step_names = ("apply_step", "physical_io_step", "reporting_step", "vtpm_step")
+        if hardware_requested:
+            step_names += (
+                "settings_step",
+                "security_policy_step",
+                "hardware_memory_step",
+            )
+        for name in step_names:
             step = getattr(result, name)
             if (
                 step is not None

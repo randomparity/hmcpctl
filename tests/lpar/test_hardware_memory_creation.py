@@ -2,8 +2,10 @@
 
 import asyncio
 import itertools
+import json
 import shlex
 import traceback
+from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -1042,3 +1044,96 @@ async def test_mixed_selected_hardware_retains_chain_free_failure(
     assert b.events.count("create") == 1
     assert "apply" not in b.events
     b.assign.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,selected",
+    [
+        (None, None),
+        ("hardware_mem_encryption", False),
+        ("hardware_mem_encryption", True),
+        ("hardware_mem_expansion", False),
+        ("hardware_mem_expansion", True),
+    ],
+)
+@pytest.mark.parametrize(
+    "failure",
+    ["apply_profile", "settings", "reporting_settings", "vtpm", "physical_io"],
+)
+async def test_hardware_postcreate_diagnostics_are_bounded(
+    target, monkeypatch, field, selected, failure
+):
+    from hmcpctl.documents.lpar import LparReportingSettings
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+
+    b = target
+    original = b.command.side_effect
+    environment = "OS400" if failure == "physical_io" else "AIX/Linux"
+    native_environment = "os400" if environment == "OS400" else "aixlinux"
+    b.entry["Resource"]["PartitionType"] = environment
+    b.entry["Resource"]["PartitionMemoryConfiguration"] = {
+        ENCRYPTION: str(bool(selected)).lower(),
+        EXPANSION: str(bool(selected)).lower(),
+    }
+    options = {
+        "settings": LparSettings(allow_perf_collection=False),
+        "apply_profile": True,
+    }
+    if field:
+        options[field] = selected
+    if failure == "reporting_settings":
+        options["reporting_settings"] = LparReportingSettings(work_group_id=1)
+    elif failure == "vtpm":
+        options["vtpm_settings"] = LparVtpmSettings(vtpm_enabled=False)
+        b.system["Resource"]["AssociatedSystemCapabilities"][
+            "VirtualTrustedPlatformModuleCapable"
+        ] = "true"
+    elif failure == "physical_io":
+        options["physical_io"] = LparPhysicalIO(console_slot="hmc")
+        b.system["Resource"]["AssociatedSystemCapabilities"]["IBMiCapable"] = "true"
+        b.hmc.get_uom.side_effect = HMCError(PRIVATE)
+    elif failure == "apply_profile":
+        b.fault = "apply"
+
+    async def command(config, cmd):
+        if "supported_vtpm_versions" in cmd:
+            return "2.0,AES256"
+        if cmd.startswith("lssyscfg -r lpar"):
+            b.events.append("readback")
+            phase = (
+                "vtpm"
+                if "vtpm_enabled" in cmd
+                else "settings"
+                if "allow_perf_collection" in cmd
+                else "reporting_settings"
+            )
+            if phase == failure:
+                raise HMCCLIError(PRIVATE)
+            assert phase == "settings"
+            return f"{native_environment},0,127,0,0,0"
+        return await original(config, cmd)
+
+    b.command.side_effect = command
+    monkeypatch.setattr("hmcpctl.ssh.lpar_vtpm.run_hmc_command", b.command)
+    result = await workflows.create_lpar(
+        b.hmc,
+        SYSTEM,
+        core.LparCreation(
+            "part-R1", environment, LparResources(desired_memory=1024), **options
+        ),
+        LparPcieAssignments(),
+    )
+    step = next(step for step in result.steps if step.step == failure)
+    assert step.status == "error"
+    assert result.resource_created and not result.workflow_completed
+    assert result.lpar is b.entry and result.ownership_stamped is True
+    assert (PRIVATE in repr(result)) is (field is None)
+    assert (PRIVATE in json.dumps(asdict(result))) is (field is None)
+    assert b.events.count("create") == 1
+    if field:
+        assert b.events.count("apply") == int(failure == "apply_profile")
+    b.assign.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
+    b.hmc.delete_logical_partition.assert_not_awaited()
