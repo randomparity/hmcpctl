@@ -5856,6 +5856,20 @@
         "missing_scope": []
       },
       "evidence": []
+    },
+    {
+      "operation": "lpar.move_memory",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "native-dedicated-memory-move",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
     }
   ]
 }

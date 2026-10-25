@@ -48,6 +48,7 @@ from live_test import (
     dedicated_pcie,
     lpar_config,
     lpar_power,
+    memory_move,
     partition_profile_contract,
     partition_profiles,
     profiles,
@@ -330,6 +331,24 @@ def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
         (
             f"one inactive OS400 partition {lpar_config.NAME_PREFIX}<8 hex>: explicit console_slot=hmc; verify native profile; delete matching-token fixture",
             "no activation, profile apply, physical/SR-IOV assignment, foreign partition or retry; independent recovery and resource comparison required",
+        ),
+        config.system_name,
+    )
+
+
+def _memory_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        memory_move.configured(config)
+    except ValueError as error:
+        return ArmVerdict("lpar-memory-move", False, str(error), (), config.system_name)
+    return ArmVerdict(
+        "lpar-memory-move",
+        True,
+        "configuration validated",
+        (
+            "two existing owned running AIX/Linux RMC dedicated-memory fixtures; no creation or deletion",
+            "exclusive no-DPO window; one-region forward then separately verified reverse; stop writes on uncertainty",
+            "independent dual baselines and mandatory read-only recovery; no force/activation or automatic rollback",
         ),
         config.system_name,
     )
@@ -620,6 +639,7 @@ _ARM_VERDICTS = {
     "lpar-reporting": _lpar_reporting_verdict,
     "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-memory-quantities": _memory_quantities_verdict,
+    "lpar-memory-move": _memory_move_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
     "lpar-hardware-memory": _lpar_hardware_memory_verdict,

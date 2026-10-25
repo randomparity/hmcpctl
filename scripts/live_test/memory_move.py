@@ -1,0 +1,454 @@
+"""Two existing owned running fixtures, two bounded cases and read-only recovery."""
+
+from __future__ import annotations
+
+import shlex
+from collections.abc import Mapping
+from copy import deepcopy
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.lpar.memory_move import _read_endpoint, _system_bounds
+from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
+from hmcpctl.resource_identity import (
+    is_uuid,
+    resolve_system_uuid,
+    system_name_from_uuid,
+)
+from hmcpctl.ssh.profiles import get_lpar_description
+from hmcpctl.ssh.transport import run_hmc_command
+
+from . import evidence
+from .observation import Assertion
+from .results import field
+
+SUBTASK = 54
+GROUP = "lpar-memory-move"
+SCENARIO = "st54-lpar-memory-move"
+BASELINE = "memory-move baseline"
+
+
+def configured(config) -> tuple[str, str]:
+    names = (config.lp3_name, config.scratch_name)
+    if (
+        any(not value.strip() or value.startswith("example-") for value in names)
+        or names[0] == names[1]
+        or any(n in config.protected_lpar_names for n in names)
+    ):
+        raise ValueError(
+            "Configure two distinct owned non-protected memory-move fixtures"
+        )
+    return names
+
+
+async def system_oracle(hmc, system: str) -> list[str]:
+    quoted = shlex.quote(system)
+    commands = (
+        f"lssyscfg -r lpar -m {quoted} -F name",
+        f"lshwres -r proc -m {quoted} --level sys -F curr_avail_sys_proc_units",
+        f"lshwres -r mem -m {quoted} --level sys -F curr_avail_sys_mem,mem_region_size",
+    )
+    observed = [
+        (await run_hmc_command(hmc.config, command)).strip() for command in commands
+    ]
+    names = observed[0].splitlines()
+    if not names or any(not name.strip() for name in names):
+        raise ValueError("Independent system oracle requires a nonempty name inventory")
+    try:
+        units = Decimal(observed[1])
+    except InvalidOperation as error:
+        raise ValueError(
+            "Independent system oracle requires numeric processor units"
+        ) from error
+    if len(observed[1].splitlines()) != 1 or not units.is_finite() or units < 0:
+        raise ValueError(
+            "Independent system oracle requires finite nonnegative processor units"
+        )
+    memory = observed[2].split(",")
+    if (
+        len(memory) != 2
+        or any(not value.isascii() or not value.isdecimal() for value in memory)
+        or int(memory[1]) == 0
+    ):
+        raise ValueError(
+            "Independent system oracle requires available memory and a positive region"
+        )
+    return observed
+
+
+async def oracle(hmc, system: str, peers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results = []
+    for peer in peers:
+        try:
+            number = peer["partition_id"]
+            if type(number) is not int or number < 1:
+                raise ValueError("Independent oracle requires a positive numeric ID")
+            command = (
+                f"lshwres -r mem -m {shlex.quote(system)} --level lpar "
+                f"--filter lpar_ids={number} -F lpar_id,curr_min_mem,curr_mem,curr_max_mem,run_mem,mem_mode"
+            )
+            raw = (await run_hmc_command(hmc.config, command)).strip().splitlines()
+            cells = raw[0].split(",") if len(raw) == 1 else []
+            if (
+                len(cells) != 6
+                or cells[-1] != "ded"
+                or any(not c.isascii() or not c.isdecimal() for c in cells[:5])
+            ):
+                raise ValueError(
+                    "Independent memory oracle has malformed or non-dedicated row"
+                )
+            values = [int(c) for c in cells[:5]]
+            if values[0] != number or not values[1] <= values[2] <= values[3]:
+                raise ValueError("Independent memory oracle identity/bounds differ")
+            results.append({"uuid": peer["uuid"], "values": values, "error": None})
+        except (HMCError, ValueError) as error:
+            results.append(
+                {"uuid": peer["uuid"], "values": None, "error": str(error)[:2048]}
+            )
+    return results
+
+
+def expected_oracle(peers):
+    return [
+        {
+            "uuid": p["uuid"],
+            "values": [
+                p["partition_id"],
+                p["current_minimum_mib"],
+                p["current_memory_mib"],
+                p["current_maximum_mib"],
+                p["runtime_memory_mib"],
+            ],
+            "error": None,
+        }
+        for p in peers
+    ]
+
+
+async def admit(hmc, system_uuid, system_name, selectors, protected_names):
+    peers = []
+    for selector in selectors:
+        kind, peer = await _read_endpoint(hmc, system_uuid, selector)
+        if peer["name"] in protected_names:
+            raise ValueError(
+                "Arm54 resolved a protected fixture; no effect is authorized"
+            )
+        if (
+            kind != "LogicalPartition"
+            or peer["partition_type"] != "AIX/Linux"
+            or peer["state"] != "running"
+            or peer["rmc"] != "active"
+            or peer["shared"]
+            or peer["dynamic_memory"] not in (True, "true", "1")
+            or peer["operation_in_progress"]
+            or peer["change_location"]["current_profile_sync"]
+            not in ("Disabled", "Suspended")
+            or peer["current_memory_mib"] != peer["runtime_memory_mib"]
+        ):
+            raise ValueError(
+                "Arm54 requires ordinary owned running RMC dedicated-memory fixtures"
+            )
+        description = await get_lpar_description(hmc.config, system_name, peer["name"])
+        owner = authorize_lpar_ownership_description(
+            hmc, system_name, peer["name"], description, operation="lpar-mutation"
+        )
+        if owner != (hmc.config.agent_id or "hmcpctl"):
+            raise ValueError("Arm54 requires an explicit matching ownership stamp")
+        peers.append(peer)
+    if (
+        peers[0]["uuid"] == peers[1]["uuid"]
+        or peers[0]["partition_id"] == peers[1]["partition_id"]
+    ):
+        raise ValueError("Arm54 requires distinct fixtures")
+    return peers
+
+
+def phase_succeeded(status, data, observed, expected):
+    has_submission = (
+        "submission_error" in data
+        if isinstance(data, Mapping)
+        else hasattr(data, "submission_error")
+    )
+    return (
+        status == "PASS"
+        and has_submission
+        and field(data, "submission_error") is None
+        and field(data, "workflow_completed") is True
+        and field(data, "outcome") == "applied"
+        and observed == expected_oracle(expected)
+        and all(
+            peer["current_minimum_mib"]
+            <= peer["current_memory_mib"]
+            <= peer["current_maximum_mib"]
+            for peer in expected
+        )
+    )
+
+
+async def exercise_memory_move(client, state):
+    if state.group != GROUP or state.hmc_config is None:
+        state.skip(
+            SUBTASK, GROUP, "requires named opt-in group and configured credentials"
+        )
+        return
+    baseline = None
+    assertions = []
+    cleanup = "failed"
+    try:
+        selectors = configured(state.config)
+        if state.checkpoint is None:
+            raise ValueError("Private durable checkpoint is required before effects")
+        async with HMCClient(state.hmc_config) as hmc:
+            system_uuid = await resolve_system_uuid(hmc, state.config.system_name)
+            system = await system_name_from_uuid(hmc, system_uuid)
+            if not system:
+                raise ValueError("Arm54 system name is unresolved")
+            peers = await admit(
+                hmc, system_uuid, system, selectors, state.config.protected_lpar_names
+            )
+            region, _ = await _system_bounds(hmc, system_uuid, system)
+            if (
+                peers[0]["current_memory_mib"] - region
+                < peers[0]["current_minimum_mib"]
+                or peers[1]["current_memory_mib"] + region
+                > peers[1]["current_maximum_mib"]
+            ):
+                raise ValueError(
+                    "Arm54 requires one region of source and destination headroom"
+                )
+            original = await oracle(hmc, system, peers)
+            if original != expected_oracle(peers):
+                raise ValueError(
+                    "Arm54 independent baseline does not match both fixtures"
+                )
+            baseline = {
+                "system_uuid": system_uuid,
+                "system": system,
+                "peers": peers,
+                "oracle": original,
+                "system_oracle": await system_oracle(hmc, system),
+                "protected_names": list(state.config.protected_lpar_names),
+            }
+            state.record(SUBTASK, BASELINE, "PASS", baseline)
+            state.checkpoint()
+            expected = deepcopy(peers)
+            for phase, order, deltas in (
+                ("forward", (0, 1), (-region, region)),
+                ("reverse", (1, 0), (region, -region)),
+            ):
+                fresh = await admit(
+                    hmc,
+                    system_uuid,
+                    system,
+                    [p["uuid"] for p in expected],
+                    state.config.protected_lpar_names,
+                )
+                if fresh != expected or await oracle(
+                    hmc, system, expected
+                ) != expected_oracle(expected):
+                    raise ValueError(
+                        "Arm54 drift before effect; stop for read-only recovery"
+                    )
+                state.record(
+                    SUBTASK,
+                    f"memory-move {phase} intent",
+                    "PASS",
+                    {
+                        "source": expected[order[0]]["uuid"],
+                        "destination": expected[order[1]]["uuid"],
+                        "quantity_mib": region,
+                        "before": fresh,
+                    },
+                )
+                state.checkpoint()
+                status, data = await state.call(
+                    client,
+                    "hmc_move_lpar_memory",
+                    lpar_name_or_uuid=expected[order[0]]["uuid"],
+                    target_lpar_name_or_uuid=expected[order[1]]["uuid"],
+                    system_name_or_uuid=system_uuid,
+                    move={"quantity_mib": region},
+                )
+                for peer, delta in zip(expected, deltas, strict=True):
+                    peer["current_memory_mib"] += delta
+                    peer["runtime_memory_mib"] += delta
+                observed = await oracle(hmc, system, expected)
+                held = phase_succeeded(status, data, observed, expected)
+                assertions.append(Assertion(f"{phase}-both-independent", held))
+                state.record(
+                    SUBTASK,
+                    f"memory-move {phase} observed",
+                    "PASS" if held else "FAIL",
+                    {"result": data, "independent": observed},
+                )
+                state.checkpoint()
+                if not held:
+                    break
+            final = await oracle(hmc, system, peers)
+            same = (
+                final == original
+                and await system_oracle(hmc, system) == baseline["system_oracle"]
+            )
+            cleanup = "passed" if same else "failed"
+            state.record(
+                SUBTASK, "memory-move final baseline", "PASS" if same else "FAIL", final
+            )
+    except (HMCError, ValueError, TypeError, PermissionError, OSError) as error:
+        state.record(SUBTASK, GROUP, "FAIL", str(error))
+    if baseline is not None:
+        state.record_verified(
+            SUBTASK,
+            "hmc_move_lpar_memory",
+            operation="lpar.move_memory",
+            scenario=SCENARIO,
+            assertions=[
+                *assertions,
+                Assertion(
+                    "two-case-sequence",
+                    len(assertions) == 2 and all(a.holds for a in assertions),
+                ),
+            ],
+            cleanup=cleanup,
+            data={
+                "inactive": "not-run",
+                "force": "not-run",
+                "IBM_i": "not-run",
+                "VIOS": "not-run",
+            },
+        )
+
+
+def validate_finished(document, baseline):
+    if document["run"].get("partial") is not False:
+        raise ValueError(
+            "Memory move run remains partial or has no explicit completion flag"
+        )
+    if any(not isinstance(row, Mapping) for row in document["results"]):
+        raise ValueError("Memory move finite proof contains a malformed row")
+    rows = [
+        row
+        for row in document["results"]
+        if row.get("subtask") == SUBTASK and row.get("tool") != "hmc_move_lpar_memory"
+    ]
+    names = [
+        BASELINE,
+        "memory-move forward intent",
+        "memory-move forward observed",
+        "memory-move reverse intent",
+        "memory-move reverse observed",
+        "memory-move final baseline",
+    ]
+    if [row.get("tool") for row in rows] != names or any(
+        row.get("status") != "PASS" for row in rows
+    ):
+        raise ValueError("Memory move finite successful sequence is incomplete")
+    expected = deepcopy(baseline["peers"])
+    if len(expected) != 2 or baseline["oracle"] != expected_oracle(expected):
+        raise ValueError("Memory move finite proof has inconsistent original baselines")
+    region = int(baseline["system_oracle"][2].split(",")[1])
+    for index, order, deltas in (
+        (1, (0, 1), (-region, region)),
+        (3, (1, 0), (region, -region)),
+    ):
+        intent = rows[index]["data"]
+        if type(intent.get("quantity_mib")) is not int or intent != {
+            "source": expected[order[0]]["uuid"],
+            "destination": expected[order[1]]["uuid"],
+            "quantity_mib": region,
+            "before": expected,
+        }:
+            raise ValueError(
+                "Memory move finite intent identity, quantity or before-state differs"
+            )
+        for peer, delta in zip(expected, deltas, strict=True):
+            peer["current_memory_mib"] += delta
+            peer["runtime_memory_mib"] += delta
+        observed = rows[index + 1]["data"]
+        result = observed.get("result")
+        if (
+            type(field(result, "quantity_mib")) is not int
+            or field(result, "quantity_mib") != region
+            or not phase_succeeded(
+                "PASS", result, observed.get("independent"), expected
+            )
+        ):
+            raise ValueError(
+                "Memory move finite phase lacks successful submission and observation"
+            )
+    if rows[-1]["data"] != baseline["oracle"]:
+        raise ValueError(
+            "Memory move finite proof lacks final original-baseline confirmation"
+        )
+
+
+async def recover_document(hmc_config, document):
+    run = document.get("run", {})
+    if (
+        run.get("group") != GROUP
+        or run.get("subtasks") != [SUBTASK]
+        or run.get("tree_clean") is not True
+    ):
+        raise ValueError("Exact clean arm54 provenance is required")
+    current = evidence.run_provenance(
+        [SUBTASK], GROUP, evidence.repository_root(), "", False
+    )
+    if (
+        not current["tested_commit"]
+        or current["tested_commit"] != run.get("tested_commit")
+        or current["tree_clean"] is not True
+    ):
+        raise ValueError("Recovery requires the same clean candidate revision")
+    if document.get("hmc") != {
+        "host": hmc_config.host,
+        "port": hmc_config.port,
+        "user": hmc_config.user,
+        "verify_ssl": hmc_config.verify_ssl,
+    }:
+        raise ValueError("Recovery HMC destination differs")
+    baselines = [
+        row["data"]
+        for row in document.get("results", [])
+        if isinstance(row, Mapping)
+        and row.get("subtask") == SUBTASK
+        and row.get("tool") == BASELINE
+        and row.get("status") == "PASS"
+    ]
+    if len(baselines) != 1:
+        raise ValueError("One original dual baseline is required")
+    baseline = baselines[0]
+    stored_peers = baseline.get("peers") if isinstance(baseline, Mapping) else None
+    if (
+        not isinstance(stored_peers, list)
+        or len(stored_peers) != 2
+        or any(
+            not isinstance(peer, Mapping)
+            or not isinstance(peer.get("uuid"), str)
+            or not is_uuid(peer["uuid"])
+            for peer in stored_peers
+        )
+    ):
+        raise ValueError("Recovery requires two valid UUID baseline peers")
+    selectors = [peer["uuid"] for peer in stored_peers]
+    if selectors[0].lower() == selectors[1].lower():
+        raise ValueError("Recovery requires distinct UUID baseline peers")
+    async with HMCClient(hmc_config) as hmc:
+        peers = await admit(
+            hmc,
+            baseline["system_uuid"],
+            baseline["system"],
+            selectors,
+            baseline["protected_names"],
+        )
+        observed = await oracle(hmc, baseline["system"], baseline["peers"])
+        pools = await system_oracle(hmc, baseline["system"])
+    if (
+        peers != baseline["peers"]
+        or observed != baseline["oracle"]
+        or pools != baseline["system_oracle"]
+    ):
+        raise ValueError(
+            "Memory move baselines differ; no recovery write was attempted"
+        )
+    validate_finished(document, baseline)

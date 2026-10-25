@@ -18,8 +18,8 @@ Usage:
 stops importing (AGENTS.md).
 
 Registered subtasks span 0 through 55; 26 to 36 are other arms' row ids,
-and 53/54 are reserved and unregistered here.
-ST55 requires its named group and is excluded from default and all selections.
+and 53 is reserved and unregistered here.
+ST54 and ST55 require their named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -101,6 +101,7 @@ from live_test.lpar_physical_io import exercise_lpar_physical_io
 from live_test.lpar_power import exercise_lpar_power
 from live_test.lpar_security_policy import exercise_lpar_security_policy
 from live_test.lpar_vtpm import exercise_lpar_vtpm
+from live_test.memory_move import exercise_memory_move
 from live_test.memory_quantities import exercise_memory_quantities
 from live_test.metrics import (
     exercise_pcm_preferences,
@@ -696,6 +697,7 @@ SUBTASKS = {
     50: exercise_memory_quantities,
     51: exercise_lpar_vtpm,
     52: exercise_lpar_security_policy,
+    54: exercise_memory_move,
     55: exercise_lpar_hardware_memory,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
@@ -741,6 +743,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-reporting": [48],
     "lpar-physical-io": [49],
     "lpar-memory-quantities": [50],
+    "lpar-memory-move": [54],
     "lpar-vtpm": [51],
     "lpar-security-policy": [52],
     "lpar-hardware-memory": [55],
@@ -1008,7 +1011,7 @@ async def main(
             print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
             return 1
     else:
-        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46, 52, 55})
+        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46, 52, 54, 55})
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]

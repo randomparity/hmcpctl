@@ -75,6 +75,15 @@ class CLIGroup(TyperGroup):
         usage_error(exc.format_message(), guidance=guidance, ctx=exc.ctx)
 
 
+class _LparHelpGroup(TyperGroup):
+    """Keep LPAR discovery compact when Rich's name column crowds its descriptions."""
+
+    def format_help(self, ctx: _click.Context, formatter: _click.HelpFormatter) -> None:
+        if formatter.width < 60:
+            return _click.core.Command.format_help(self, ctx, formatter)
+        return super().format_help(ctx, formatter)
+
+
 app = typer.Typer(
     name="hmcpctl",
     cls=CLIGroup,
@@ -83,7 +92,9 @@ app = typer.Typer(
 )
 
 systems_app = typer.Typer(help="Managed systems (Power servers).", no_args_is_help=True)
-lpars_app = typer.Typer(help="Logical partitions (LPARs).", no_args_is_help=True)
+lpars_app = typer.Typer(
+    help="Logical partitions (LPARs).", no_args_is_help=True, cls=_LparHelpGroup
+)
 adapters_app = typer.Typer(
     help="Virtual adapters (network/storage) on LPARs.", no_args_is_help=True
 )
