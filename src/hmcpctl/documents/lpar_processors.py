@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
-from typing import Annotated, Literal, Self
+import sys
+from decimal import Context, Decimal, Inexact, InvalidOperation
+from typing import Annotated, Literal, Self, cast
 
 from pydantic import (
     BaseModel,
@@ -14,6 +15,45 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+# Two maximal shared snapshots (30 numeric values each) plus two expected quantities.
+PROCESSOR_NUMERIC_TOKEN_BYTES = 65536 // 62
+
+
+def bounded_processor_number(value: object, *, whole: bool = False) -> Decimal | int:
+    """Bound encoded numeric values before conversion, normalization or rendering."""
+    budget = PROCESSOR_NUMERIC_TOKEN_BYTES
+    integer_limit = sys.get_int_max_str_digits()
+    digits = min(budget, integer_limit or budget) if whole else budget - 5
+    if isinstance(value, bool) or not isinstance(value, (Decimal, int, float, str)):
+        raise ValueError("Processor quantity must be numeric")  # noqa: TRY004 — Pydantic validation error
+    if isinstance(value, str) and (
+        len(value) > budget or len(value.encode("utf-8")) > budget
+    ):
+        raise ValueError("Processor numeric token exceeds the encoded byte budget")
+    if isinstance(value, int) and (value < 0 or value >= 10**digits):
+        raise ValueError("Processor integer exceeds the numeric representation budget")
+    try:
+        number = (
+            Decimal(str(value)) if isinstance(value, (str, float)) else Decimal(value)
+        )
+        if not number.is_finite() or number < 0:
+            raise ValueError("Processor quantity must be finite and nonnegative")
+        if number.is_zero():
+            return 0 if whole else Decimal(0)
+        if not (0 if whole else -2) <= number.adjusted() < digits:
+            raise ValueError(
+                "Processor quantity exceeds representation or precision bounds"
+            )
+        number = number.quantize(
+            Decimal(1) if whole else Decimal("0.01"),
+            context=Context(prec=budget, traps=[Inexact, InvalidOperation]),
+        )
+    except (InvalidOperation, Inexact) as error:
+        raise ValueError(
+            "Processor quantity must have exact integral or hundredth precision"
+        ) from error
+    return int(number) if whole else number
 
 
 class LparProcessorChange(BaseModel):
@@ -40,21 +80,14 @@ class LparProcessorChange(BaseModel):
     def exact_units(cls, value: object) -> Decimal | None:
         if value is None:
             return None
-        if isinstance(value, bool) or not isinstance(value, (Decimal, int, float, str)):
-            raise ValueError("processing_units must be a decimal quantity")  # noqa: TRY004 — Pydantic validation error
-        try:
-            units = Decimal(str(value))
-        except InvalidOperation as error:
-            raise ValueError("processing_units must be a decimal quantity") from error
-        if not units.is_finite() or units < 0:
-            raise ValueError("processing_units must be finite and nonnegative")
-        digits = units.as_tuple()
-        fractional = -int(digits.exponent) - 2
-        if fractional > 0 and any(digits.digits[-fractional:]):
-            raise ValueError(
-                "processing_units must be exactly representable in hundredths"
-            )
-        return units
+        return cast("Decimal", bounded_processor_number(value))
+
+    @field_validator("processors")
+    @classmethod
+    def bounded_processors(cls, value: int | None) -> int | None:
+        if value is not None:
+            bounded_processor_number(value, whole=True)
+        return value
 
     @model_validator(mode="after")
     def require_quantity(self) -> Self:

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any
 
 import asyncssh
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.documents.lpar_processors import LparProcessorChange
+from hmcpctl.documents.lpar_processors import (
+    PROCESSOR_NUMERIC_TOKEN_BYTES,
+    LparProcessorChange,
+    bounded_processor_number,
+)
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.resource_identity import (
@@ -35,12 +39,10 @@ _MEMORY = ("current_minimum_mib", "current_memory_mib", "current_maximum_mib")
 
 
 def _number(value: object, label: str, *, whole: bool = False) -> Decimal | int:
-    number = LparProcessorChange.exact_units(leaf_text(value))
-    if number is None or (whole and number != number.to_integral_value()):
-        raise ValueError(f"Processor change requires valid {label}")
-    if number.is_zero():
-        number = Decimal(0)
-    return int(number) if whole else number
+    try:
+        return bounded_processor_number(leaf_text(value), whole=whole)
+    except ValueError as error:
+        raise ValueError(f"Processor change requires valid {label}: {error}") from error
 
 
 def _mode(value: object) -> str:
@@ -52,10 +54,45 @@ def _mode(value: object) -> str:
     raise ValueError("Processor change requires explicit processor mode")
 
 
+def _bounded_memory_snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[str, Any]:
+    resource = resource_container(entry or {}, "Resource")
+    _number(resource.get("PartitionID"), "PartitionID", whole=True)
+    memory_config = resource_container(resource, "PartitionMemoryConfiguration")
+    for field in memory._MEMORY_FIELDS.values():
+        _number(memory_config.get(field), field, whole=True)
+    for field in ("CurrentEntitledMemory", "RuntimeEntitledMemory"):
+        value = leaf_text(memory_config.get(field))
+        if value not in (None, "auto"):
+            _number(value, field, whole=True)
+    config = resource_container(resource, "PartitionProcessorConfiguration")
+    dedicated = _mode(config.get("CurrentHasDedicatedProcessors")) == "ded"
+    current = resource_container(
+        config,
+        "CurrentDedicatedProcessorConfiguration"
+        if dedicated
+        else "CurrentSharedProcessorConfiguration",
+    )
+    fields = (
+        ("CurrentMinimumProcessors", "CurrentProcessors", "CurrentMaximumProcessors")
+        if dedicated
+        else (
+            "CurrentMinimumVirtualProcessors",
+            "AllocatedVirtualProcessors",
+            "CurrentMaximumVirtualProcessors",
+            "CurrentMinimumProcessingUnits",
+            "CurrentProcessingUnits",
+            "CurrentMaximumProcessingUnits",
+        )
+    )
+    for field in fields:
+        _number(current.get(field), field, whole="Units" not in field)
+    return memory._snapshot(entry, uuid)
+
+
 def _snapshot(
     entry: dict[str, Any] | None, uuid: str, row: dict[str, str]
 ) -> dict[str, Any]:
-    before = memory._snapshot(entry, uuid)
+    before = _bounded_memory_snapshot(entry, uuid)
     resource = resource_container(entry or {}, "Resource")
     progress = leaf_text(resource.get("IsOperationInProgress"))
     if progress not in (True, False, "true", "false", "1", "0"):
@@ -265,9 +302,12 @@ def _targets(
         if amount is None:
             continue
         current = before[f"current_{quantity}"]
-        target = {"add": current + amount, "remove": current - amount, "set": amount}[
-            change.operation
-        ]
+        with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
+            target = {
+                "add": current + amount,
+                "remove": current - amount,
+                "set": amount,
+            }[change.operation]
         if target < 0:
             raise ValueError("Processor subtraction exceeds current quantity")
         minimum, maximum = (
@@ -311,7 +351,9 @@ def _targets(
             raise ValueError(
                 "Processor target exceeds applicable system or OS count limit"
             )
-        if units is not None and not capacity["floor"] * count <= units <= count:
+        with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
+            minimum_units = None if units is None else capacity["floor"] * count
+        if units is not None and not minimum_units <= units <= count:
             raise ValueError(
                 "Shared processor entitlement violates units per virtual processor bounds"
             )
@@ -321,15 +363,19 @@ def _targets(
             if units is None
             else before["current_processing_units"]
         )
-        if (
-            allocated > capacity["total"]
-            or allocated - previous > capacity["available"]
-        ):
+        with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
+            additional = allocated - previous
+        if allocated > capacity["total"] or additional > capacity["available"]:
             raise ValueError("Processor target exceeds available system capacity")
         targets["noop"] = all(
             targets[key] == before.get(f"current_{key}")
             for key in ("processors", "processing_units")
         )
+    for quantity in ("processors", "processing_units"):
+        if targets[quantity] is not None:
+            targets[quantity] = _number(
+                targets[quantity], quantity, whole=quantity == "processors"
+            )
     return targets
 
 
@@ -397,7 +443,11 @@ def _result(
             None
             if values is None
             else {
-                key: f"{value:.2f}" if isinstance(value, Decimal) else value
+                key: f"{_number(value, key):.2f}"
+                if isinstance(value, Decimal)
+                else _number(value, key, whole=True)
+                if type(value) is int
+                else value
                 for key, value in values.items()
             }
         )
@@ -434,7 +484,7 @@ async def change_lpar_processors(
     kind, uuid = await memory._contained_partition(hmc, system_uuid, lpar_name_or_uuid)
     read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
     entry = await read(uuid)
-    identity = memory._snapshot(entry, uuid)
+    identity = _bounded_memory_snapshot(entry, uuid)
     if not is_uuid(lpar_name_or_uuid) and identity["name"] != lpar_name_or_uuid:
         raise ValueError("Processor target name changed after containment resolution")
     if (identity["partition_type"] == "Virtual IO Server") != (

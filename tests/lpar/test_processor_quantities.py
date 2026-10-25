@@ -1096,3 +1096,400 @@ def test_independent_zero_units_have_one_canonical_spelling():
     evidence = _snapshot(entry, LPAR_UUID, row)
     assert evidence["processors"]["CurrentProcessingUnits"] == "0.00"
     assert f"{evidence['current_processing_units']:.2f}" == "0.00"
+
+
+@pytest.mark.parametrize(
+    "value,whole,accepted",
+    [
+        ("1e2", False, True),
+        ("1.000", False, True),
+        ("0e999999", False, True),
+        ("-0.00", False, True),
+        ("1e1051", False, True),
+        ("1e1052", False, False),
+        ("1e1056", True, True),
+        ("1e1057", True, False),
+        ("0" * 1057, False, True),
+        ("0" * 1058, False, False),
+        ("٠" * 529, False, False),
+        (Decimal("1e1052"), False, False),
+        (10**1057, True, False),
+        ("0.001", False, False),
+        ("1e-999999", False, False),
+        ("NaN", False, False),
+        ("Infinity", False, False),
+        (True, True, False),
+    ],
+    ids=[
+        "small-exponent",
+        "trailing-zeros",
+        "extreme-zero",
+        "negative-zero",
+        "unit-limit",
+        "unit-over",
+        "whole-limit",
+        "whole-over",
+        "raw-limit",
+        "raw-over",
+        "utf8-over",
+        "decimal-over",
+        "integer-over",
+        "fraction",
+        "tiny-exponent",
+        "nan",
+        "infinite",
+        "boolean",
+    ],
+)
+def test_numeric_representation_before_conversion(value, whole, accepted):
+    import json
+
+    from hmcpctl.operations.lpar.processors import _number
+
+    if not accepted:
+        with pytest.raises(ValueError):
+            _number(value, "quantity", whole=whole)
+        return
+    number = _number(value, "quantity", whole=whole)
+    token = json.dumps(number if whole else f"{number:.2f}")
+    assert len(token.encode()) <= 65536 // 62
+    if not number:
+        assert token == ("0" if whole else '"0.00"')
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"processing_units": "1e1052"},
+        {"processing_units": Decimal("1e1052")},
+        {"processing_units": "0" * 1058},
+        {"processors": 10**1057},
+    ],
+    ids=["unit-exponent", "decimal-exponent", "raw-size", "whole-size"],
+)
+def test_numeric_representation_typed_request(values):
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+
+    with pytest.raises(ValueError):
+        LparProcessorChange(operation="add", **values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["processing_units", "processors", "partition_id"])
+async def test_numeric_representation_native_builder(monkeypatch, field):
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+    from hmcpctl.ssh.processors import change_lpar_processor_quantity
+
+    command = AsyncMock()
+    monkeypatch.setattr("hmcpctl.ssh.processors.run_hmc_command", command)
+    # Deliberately bypass the model to verify the command boundary independently.
+    change = LparProcessorChange.model_construct(
+        operation="set", processing_units=Decimal("1e1052")
+    )
+    if field != "processing_units":
+        change = LparProcessorChange.model_construct(
+            operation="set", processors=10**1057 if field == "processors" else 1
+        )
+    with pytest.raises(ValueError):
+        await change_lpar_processor_quantity(
+            CONFIG, "sys-R1", 10**1057 if field == "partition_id" else 7, change
+        )
+    command.assert_not_awaited()
+
+
+NUMERIC_SITES = [
+    *(("native", field) for field in FIELDS if field.endswith(("procs", "proc_units"))),
+    ("resource", "PartitionID"),
+    *(
+        ("memory", field)
+        for field in (
+            "CurrentMemory",
+            "CurrentMinimumMemory",
+            "CurrentMaximumMemory",
+            "DesiredMemory",
+            "MinimumMemory",
+            "MaximumMemory",
+            "RuntimeMemory",
+            "CurrentEntitledMemory",
+            "RuntimeEntitledMemory",
+        )
+    ),
+    *(
+        ("current", field)
+        for field in processor_entry()["Resource"]["PartitionProcessorConfiguration"][
+            "CurrentSharedProcessorConfiguration"
+        ]
+    ),
+    *(
+        ("pending", field)
+        for field in processor_entry()["Resource"]["PartitionProcessorConfiguration"][
+            "SharedProcessorConfiguration"
+        ]
+    ),
+    *(
+        ("capacity", field)
+        for field in (
+            "ConfigurableSystemProcessorUnits",
+            "CurrentAvailableSystemProcessorUnits",
+            "MaximumAllowedVirtualProcessorsPerPartition",
+            "CurrentMaximumVirtualProcessorsPerAIXOrLinuxPartition",
+            "MinimumProcessorUnitsPerVirtualProcessor",
+        )
+    ),
+]
+
+
+def pad_numeric_observation(b, site, field, *, after=False):
+    entry = b.after if after else b.before
+    resource = entry["Resource"]
+    containers = {
+        "native": b.after_row if after else b.row,
+        "resource": resource,
+        "memory": resource["PartitionMemoryConfiguration"],
+        "current": resource["PartitionProcessorConfiguration"][
+            "CurrentSharedProcessorConfiguration"
+        ],
+        "pending": resource["PartitionProcessorConfiguration"][
+            "SharedProcessorConfiguration"
+        ],
+        "capacity": b.system["Resource"]["AssociatedSystemProcessorConfiguration"],
+    }
+    container = containers[site]
+    container[field] = "0" * 1057 + container.get(field, "1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site,field", NUMERIC_SITES)
+async def test_numeric_representation_noop_refuses_all_readers(
+    processor_boundary, site, field
+):
+    b = processor_boundary
+    pad_numeric_observation(b, site, field)
+    with pytest.raises(ValueError):
+        await cpu_change(b, operation="add", processing_units="0")
+    b.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site,field", [s for s in NUMERIC_SITES if s[0] != "capacity"])
+async def test_numeric_representation_postread_is_unverified(
+    processor_boundary, site, field
+):
+    b = processor_boundary
+    pad_numeric_observation(b, site, field, after=True)
+    result = await cpu_change(b, operation="add", processing_units=".10")
+    assert result["outcome"] == "unverified" and result["after"] is None
+    assert not result["workflow_completed"] and b.write.await_count == 1
+    assert all("0" * 30 not in warning for warning in result["warnings"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "token,accepted", [("1e2", True), ("1e1051", True), ("1e1052", False)]
+)
+async def test_numeric_representation_actual_noop_result(
+    processor_boundary, token, accepted
+):
+    import json
+
+    b = processor_boundary
+    b.row["run_proc_units"] = token
+    if not accepted:
+        with pytest.raises(ValueError):
+            await cpu_change(b, operation="add", processing_units="0")
+    else:
+        result = await cpu_change(b, operation="add", processing_units="0")
+        assert result["outcome"] == "noop"
+        assert len(json.dumps(result["before"]["runtime_processing_units"])) <= 1057
+        assert result["before"] == result["after"]
+    b.write.assert_not_awaited()
+
+
+def test_numeric_representation_result_budget_and_guard():
+    import json
+
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+    from hmcpctl.operations.lpar.processors import _result, _snapshot, _targets
+
+    entry = processor_entry()
+    entry["Resource"]["PartitionMemoryConfiguration"].update(
+        CurrentEntitledMemory="1", RuntimeEntitledMemory="1"
+    )
+    before = _snapshot(entry, LPAR_UUID, processor_row())
+    expected = _targets(
+        before, LparProcessorChange(operation="add", processors=0), processor_system()
+    )
+    result = _result(before, before, expected, "noop")
+    numeric_tokens = []
+    for key, original in [
+        ("before", before),
+        ("after", before),
+        ("expected", expected),
+    ]:
+        numeric_tokens.extend(
+            json.dumps(result[key][name])
+            for name, value in original.items()
+            if type(value) in (int, Decimal)
+        )
+        if isinstance(result[key].get("processors"), dict):
+            numeric_tokens.extend(
+                json.dumps(value) for value in result[key]["processors"].values()
+            )
+    assert len(numeric_tokens) == 62
+    assert sum(len(token.encode()) for token in numeric_tokens) <= 65536
+
+
+def large_processor_capacity():
+    before, system = snapshot(), processor_system()
+    before.update(
+        current_processors=10**31,
+        current_processing_units=Decimal("1e30"),
+        current_maximum_processing_units=Decimal("1e31"),
+        pending_maximum_processing_units=Decimal("1e31"),
+    )
+    system["Resource"]["AssociatedSystemProcessorConfiguration"].update(
+        ConfigurableSystemProcessorUnits="1e32",
+        CurrentAvailableSystemProcessorUnits="1e32",
+        MaximumAllowedVirtualProcessorsPerPartition="1e32",
+        CurrentMaximumVirtualProcessorsPerAIXOrLinuxPartition="1e32",
+    )
+    return before, system
+
+
+def test_numeric_representation_arithmetic_is_exact_and_local():
+    from decimal import getcontext
+
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+    from hmcpctl.operations.lpar.processors import _targets
+
+    before, system = large_processor_capacity()
+    old_precision = getcontext().prec
+    target = _targets(
+        before, LparProcessorChange(operation="add", processing_units=".10"), system
+    )
+    assert target["processing_units"] == Decimal("1000000000000000000000000000000.10")
+    assert not target["noop"] and getcontext().prec == old_precision
+
+
+def test_numeric_representation_respects_integer_json_limit():
+    import os
+    import subprocess
+    import sys
+
+    code = """
+import json
+from hmcpctl.documents.lpar_processors import LparProcessorChange
+from hmcpctl.operations.lpar.processors import _number
+assert len(json.dumps(_number('1e639', 'count', whole=True))) == 640
+for call in [lambda: _number('1e640', 'count', whole=True),
+             lambda: LparProcessorChange(operation='add', processors=10**640)]:
+    try: call()
+    except ValueError: pass
+    else: raise AssertionError('numeric boundary ignored configured JSON integer limit')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env={**os.environ, "PYTHONINTMAXSTRDIGITS": "640"},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("constraint", ["floor", "capacity"])
+def test_numeric_representation_arithmetic_constraints(constraint):
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+    from hmcpctl.operations.lpar.processors import _targets
+
+    before, system = large_processor_capacity()
+    if constraint == "floor":
+        before["current_processors"] = 2 * 10**30 + 1
+        units = "100000000000000000000000000000.04"
+        message = "units per virtual processor"
+    else:
+        units = "2000000000000000000000000000000.10"
+        system["Resource"]["AssociatedSystemProcessorConfiguration"][
+            "CurrentAvailableSystemProcessorUnits"
+        ] = "1000000000000000000000000000000.05"
+        message = "available system capacity"
+    with pytest.raises(ValueError, match=message):
+        _targets(
+            before, LparProcessorChange(operation="set", processing_units=units), system
+        )
+
+
+@pytest.mark.parametrize("site", ["current", "pending", "count-limit", "os-limit"])
+def test_numeric_representation_dedicated_readers(site):
+    from hmcpctl.operations.lpar.processors import _capacity, _snapshot
+
+    entry, row, system = processor_entry(True), processor_row(True), processor_system()
+    if site in ("current", "pending"):
+        config = entry["Resource"]["PartitionProcessorConfiguration"]
+        name, field = (
+            ("CurrentDedicatedProcessorConfiguration", "CurrentProcessors")
+            if site == "current"
+            else ("DedicatedProcessorConfiguration", "DesiredProcessors")
+        )
+        config[name][field] = "0" * 1057 + config[name][field]
+    else:
+        config = system["Resource"]["AssociatedSystemProcessorConfiguration"]
+        field = (
+            "CurrentMaximumAllowedProcessorsPerPartition"
+            if site == "count-limit"
+            else "CurrentMaximumProcessorsPerAIXOrLinuxPartition"
+        )
+        config[field] = "0" * 1057 + config[field]
+    with pytest.raises(ValueError):
+        _capacity(system, _snapshot(entry, LPAR_UUID, row))
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("runtime_processors", 10**1057), ("runtime_processing_units", Decimal("1e1052"))],
+)
+def test_numeric_representation_result_rechecks_observations(field, value):
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+    from hmcpctl.operations.lpar.processors import _result, _targets
+
+    before = snapshot()
+    expected = _targets(
+        before, LparProcessorChange(operation="add", processors=0), processor_system()
+    )
+    before[field] = value
+    with pytest.raises(ValueError):
+        _result(before, before, expected, "noop")
+
+
+@pytest.mark.parametrize("site", ["id", "memory", "cpu"])
+def test_numeric_representation_precedes_inherited_snapshot(monkeypatch, site):
+    from unittest.mock import Mock
+
+    from hmcpctl.operations.lpar import processors
+
+    entry = processor_entry()
+    resource = entry["Resource"]
+    if site == "id":
+        container, field = resource, "PartitionID"
+    elif site == "memory":
+        container, field = resource["PartitionMemoryConfiguration"], "RuntimeMemory"
+    else:
+        container = resource["PartitionProcessorConfiguration"][
+            "CurrentSharedProcessorConfiguration"
+        ]
+        field = "CurrentProcessingUnits"
+    container[field] = "0" * 1057 + container[field]
+    inherited = Mock(wraps=processors.memory._snapshot)
+    monkeypatch.setattr(processors.memory, "_snapshot", inherited)
+    with pytest.raises(ValueError):
+        processors._snapshot(entry, LPAR_UUID, processor_row())
+    inherited.assert_not_called()
+
+
+@pytest.mark.parametrize("value,whole", [("1.001", False), ("1.5", True)])
+def test_numeric_representation_never_rounds(value, whole):
+    from hmcpctl.operations.lpar.processors import _number
+
+    with pytest.raises(ValueError):
+        _number(value, "quantity", whole=whole)

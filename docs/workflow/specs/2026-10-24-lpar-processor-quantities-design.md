@@ -45,8 +45,8 @@ Add frozen, extra-forbidden `LparProcessorChange` in `documents/lpar_processors.
   shared virtual processors according to the observed CURRENT mode.
 - `processing_units: Decimal | None = None`, nonnegative, is shared entitlement.
   Accept Decimal, decimal string, JSON number or integer, but reject booleans,
-  nonfinite values and values not exactly representable in hundredths. Convert with
-  Decimal(str(value)); never round. Extra trailing zeros are numerically harmless.
+  nonfinite values and values not exactly representable in hundredths. Bound numeric
+  representation before exact conversion/quantization; never round. Trailing zeros are harmless.
 - `force: StrictBool = False`; at least one quantity must be supplied.
 
 Keep Decimal internally and serialize entitlement evidence as canonical fixed-point
@@ -103,6 +103,15 @@ Current and pending min/assigned/max envelopes are validated independently; pend
 values may differ from current. Native current values must equal the REST mode-specific
 current CPU vector; desired fields must equal pending values. A mismatch is stale or
 unsupported evidence and refuses before mutation. Runtime values are separate observations.
+
+Bound numeric input tokens and normalized JSON numeric values to B=65536//62=1057 bytes:
+30 values per maximum shared snapshot, twice, plus two expected quantities. Include unit-string
+quotes; whole decimal digits are at most B (or Python's smaller active integer serialization
+limit), unit integer digits at most B-5. This covers requests, runtime/capacity and inherited
+identity/memory readers before conversion/arithmetic/rendering. Finite/sign/zero and exponent
+checks precede bounded exact quantization; local arithmetic precision 2*B+2 preserves hundredths.
+Invalid preeffect evidence refuses; invalid post-read is unverified. This is a numeric-value
+budget, not a hardware limit or a total JSON/RSS bound; source limits and failure model remain.
 
 Admit only stable `running` and `not activated` states and supported AIX/Linux, VIOS or
 OS400 partition types. Running AIX/Linux/VIOS requires active RMC and reported

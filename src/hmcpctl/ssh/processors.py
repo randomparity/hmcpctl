@@ -7,7 +7,7 @@ import io
 import shlex
 
 from ..config import HMCConfig
-from ..documents.lpar_processors import LparProcessorChange
+from ..documents.lpar_processors import LparProcessorChange, bounded_processor_number
 from .transport import HMCCLIError, run_hmc_command
 
 _FIELDS = [
@@ -35,6 +35,7 @@ _FIELDS = [
 def _require_id(partition_id: int) -> None:
     if type(partition_id) is not int or partition_id < 1:
         raise ValueError("partition_id must be a positive integer; nothing was sent")
+    bounded_processor_number(partition_id, whole=True)
 
 
 async def read_lpar_processor_quantities(
@@ -84,9 +85,13 @@ async def change_lpar_processor_quantity(
         str(partition_id),
     ]
     if change.processors is not None:
-        parts.extend(("--procs", str(change.processors)))
+        parts.extend(
+            ("--procs", str(bounded_processor_number(change.processors, whole=True)))
+        )
     if change.processing_units is not None:
-        parts.extend(("--procunits", f"{change.processing_units:.2f}"))
+        parts.extend(
+            ("--procunits", f"{bounded_processor_number(change.processing_units):.2f}")
+        )
     if change.force:
         parts.append("--force")
     return await run_hmc_command(
