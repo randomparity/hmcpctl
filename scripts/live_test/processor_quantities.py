@@ -51,19 +51,28 @@ _INITIAL = ("1", "2", "4", "0.10", "0.50", "1.00", "1024", "2048", "4096")
 
 
 def _number(value: object, *, units: bool = False) -> str:
+    # Same encoded numeric budget as processor results; validation stays independent.
+    budget = 65536 // 62
+    token = str(leaf_text(value))
+    if len(token) > budget or len(token.encode("utf-8")) > budget:
+        raise ValueError("Independent processor oracle exceeds numeric token budget")
     try:
-        number = Decimal(str(leaf_text(value)))
+        number = Decimal(token)
     except InvalidOperation as error:
         raise ValueError(
             "Independent processor oracle has malformed quantity"
         ) from error
-    if (
-        not number.is_finite()
-        or number < 0
-        or number * (100 if units else 1)
-        != (number * (100 if units else 1)).to_integral_value()
-    ):
+    if not number.is_finite() or number < 0:
         raise ValueError("Independent processor oracle has invalid quantity precision")
+    sign, digits, exponent = number.as_tuple()
+    fractional = -(int(exponent) + (2 if units else 0))
+    if fractional > 0 and any(digits[-fractional:]):
+        raise ValueError("Independent processor oracle has invalid quantity precision")
+    integer_digits = 1 if number.is_zero() else max(1, number.adjusted() + 1)
+    if sign + integer_digits + (3 if units else 0) + 2 > budget:
+        raise ValueError(
+            "Independent processor oracle exceeds numeric rendering budget"
+        )
     return format(number, ".2f" if units else ".0f")
 
 

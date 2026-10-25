@@ -4,7 +4,7 @@ import asyncio
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -53,6 +53,8 @@ class ScriptedSystem:
             "CurrentSharedProcessorConfiguration"
         ]
         cpu["CurrentProcessingUnits"] = str(self.units)
+        if self.fault == "rest-tail" and self.changes:
+            cpu["CurrentProcessingUnits"] = str(self.units) + "0" * 28 + "1"
         if self.fault in {"setup", "mixed", "setup-refused"} and not self.applies:
             value["PartitionMemoryConfiguration"].update(
                 CurrentMemory="0", CurrentMinimumMemory="0", CurrentMaximumMemory="0"
@@ -168,6 +170,8 @@ async def run_arm(monkeypatch, system, group="lpar-processor-quantities"):
                     if key.startswith("curr_") and key != "curr_proc_mode"
                 }
             )
+        if system.fault == "native-tail" and system.changes:
+            row["curr_proc_units"] = str(system.units) + "0" * 28 + "1"
         if system.fault == "native-drift" and system.changes:
             row["curr_proc_units"] = "0.55"
         return row
@@ -236,6 +240,8 @@ async def test_owned_processor_sequence_and_cleanup(monkeypatch):
         "exception",
         "memory-drift",
         "native-drift",
+        "rest-tail",
+        "native-tail",
         "wrong-refusal",
         "delete",
     ],
@@ -339,6 +345,9 @@ async def test_processor_overmaximum_oracle_through_actual_mcp(
     [
         ("NaN", True),
         ("Infinity", True),
+        ("-Infinity", True),
+        ("sNaN", True),
+        ("1e-1000", True),
         ("-1", True),
         ("0.001", True),
         (None, True),
@@ -374,3 +383,65 @@ async def test_processor_arm_is_not_selected_by_default(monkeypatch, tmp_path):
         == 0
     )
     forbidden.assert_not_awaited()
+
+
+@pytest.mark.parametrize("precision", [1, 28, 60])
+@pytest.mark.parametrize(
+    "value,units",
+    [
+        ("0.400000000000000000000000000001", True),
+        ("1.000000000000000000000000000001", False),
+    ],
+)
+def test_processor_oracle_rejects_exact_fractional_tails(precision, value, units):
+    from live_test import processor_quantities as arm
+
+    with localcontext() as context:
+        context.prec = precision
+        with pytest.raises(ValueError, match="precision"):
+            arm._number(value, units=units)
+
+
+@pytest.mark.parametrize("precision", [1, 28])
+@pytest.mark.parametrize(
+    "value,units,expected",
+    [
+        ("0.400000000000000000000000000000", True, "0.40"),
+        ("1.000000000000000000000000000000", False, "1"),
+        ("4e-1", True, "0.40"),
+        ("1.23e2", False, "123"),
+        ("123.45", True, "123.45"),
+        ("0e1058", True, "0.00"),
+        ("-0e-1058", True, "-0.00"),
+        ("0e1058", False, "0"),
+    ],
+)
+def test_processor_oracle_preserves_exact_representations(
+    precision, value, units, expected
+):
+    from live_test import processor_quantities as arm
+
+    with localcontext() as context:
+        context.prec = precision
+        assert arm._number(value, units=units) == expected
+
+
+@pytest.mark.parametrize("units,digits", [(False, 1055), (True, 1052)])
+def test_processor_oracle_bounds_rendered_numeric_strings(units, digits):
+    from live_test import processor_quantities as arm
+
+    expected = "1" + "0" * (digits - 1) + (".00" if units else "")
+    assert arm._number(f"1e{digits - 1}", units=units) == expected
+    assert len(expected.encode()) + 2 == 1057  # JSON string quotes count too.
+    with pytest.raises(ValueError, match="budget"):
+        arm._number(f"1e{digits}", units=units)
+
+
+@pytest.mark.parametrize("units", [False, True])
+@pytest.mark.parametrize("oversized", ["0" * 1058, "٠" * 529])
+def test_processor_oracle_bounds_input_before_decimal_parse(units, oversized):
+    from live_test import processor_quantities as arm
+
+    assert arm._number("0" * 1057, units=units) == ("0.00" if units else "0")
+    with pytest.raises(ValueError, match="budget"):
+        arm._number(oversized, units=units)
