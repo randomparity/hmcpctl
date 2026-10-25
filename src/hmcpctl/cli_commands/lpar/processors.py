@@ -1,4 +1,4 @@
-"""Native current-processor quantity commands (ADR 0289)."""
+"""Native current-processor quantity commands (ADR 0296)."""
 
 from __future__ import annotations
 

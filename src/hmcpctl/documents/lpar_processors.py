@@ -1,4 +1,4 @@
-"""Typed native non-pool processor quantities (ADR 0289)."""
+"""Typed native non-pool processor quantities (ADR 0296)."""
 
 from __future__ import annotations
 

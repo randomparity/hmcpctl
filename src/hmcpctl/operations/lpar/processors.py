@@ -1,4 +1,4 @@
-"""Guarded native current-processor quantities and independent outcomes (ADR 0289)."""
+"""Guarded native current-processor quantities and independent outcomes (ADR 0296)."""
 
 from __future__ import annotations
 
