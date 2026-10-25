@@ -19,10 +19,13 @@ quantity/move/pool operation, arbitrary proxy, stable facade export or owner ref
 The local `docs/refs/hmc-commands-p10/commands/mksyscfg.md:41` and
 `docs/refs/hmc-commands-p11/commands/mksyscfg.md:49` specify optional
 0/1 fields in the partition section. Enclosing sections do not establish a special OS,
-release floor or mutual exclusion for these flags. The native owner supplies a profile;
-the published controller-mode prohibition on profile_name is a known incompatibility.
-The current owner has no mode guard. Three optional ROO schema booleans have no
-source-established mapping to that published mode; lscomgmt returned is_controller=null.
+release floor or mutual exclusion for these flags. At design time the native owner
+always supplied a profile, which the published controller-mode grammar prohibits.
+The integrated C05 owner omits profile_name when its independent native authority
+check admits controller creation. Selected hardware fields still require their own
+capability and observed-tuple admission; both fieldsets use the same single creation.
+Three optional ROO schema booleans have no source-established mapping to that mode;
+the historical source investigation returned lscomgmt is_controller=null.
 Historical candidate 2a2201b641d5c5e9a1dc40bcec1b54d0d2ad0c16 successfully created
 a native profile on the same selected system whose contemporaneous tuple was true/false/false.
 This establishes an observed profile route, not C10 flag support or general mode semantics.

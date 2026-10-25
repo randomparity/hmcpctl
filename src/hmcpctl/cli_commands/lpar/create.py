@@ -104,6 +104,16 @@ def lpars_create(
     migration_disabled: bool | None = typer.Option(
         None, "--migration-disabled/--no-migration-disabled"
     ),
+    powervm_mgmt_capable: bool | None = typer.Option(
+        None,
+        "--powervm-mgmt-capable/--no-powervm-mgmt-capable",
+        help="Linux management capability; selecting either value declares intent, not installed OS proof",
+    ),
+    kvm_capable: bool | None = typer.Option(
+        None,
+        "--kvm-capable/--no-kvm-capable",
+        help="Linux KVM eligibility; configuration only, requires system capability and HMC >=10.3.1060.1",
+    ),
     os400_restricted_io_mode: bool | None = typer.Option(
         None, "--os400-restricted-io-mode/--no-os400-restricted-io-mode"
     ),
@@ -151,6 +161,11 @@ def lpars_create(
     creates it through mksyscfg, the profile is then applied (an
     ``apply_profile`` step) unless --no-apply is given. Settings preserve omitted
     values; a running time-reference partition can govern system time.
+    Role selection declares Linux intent. KVM enablement adds fixed POWER10 in
+    the creation record and requires explicit dedicated never-share CPUs, which
+    are never changed implicitly. Controller mode requires --no-apply and cannot
+    use initial-profile I/O or profile-bearing assignments. Readback proves only
+    configuration, not KVM or NovaLink deployment.
     """
     policy = load_security_policy(security_policy)
     try:
@@ -231,6 +246,8 @@ def lpars_create(
                     time_ref=time_ref,
                     simplified_remote_restart_capable=simplified_remote_restart_capable,
                     migration_disabled=migration_disabled,
+                    powervm_mgmt_capable=powervm_mgmt_capable,
+                    kvm_capable=kvm_capable,
                 ),
             ),
             assignments,

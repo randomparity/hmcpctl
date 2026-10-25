@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
@@ -46,11 +46,18 @@ from ...ssh.lpar import (
     validate_caller_token,
 )
 from ...ssh.lpar_vtpm import get_lpar_vtpm_state
+from ...ssh.profiles import get_lpar_proc_compat
 from ...ssh.transport import HMCCLIError
-from ...xmlutil import escape_xml
+from ...xmlutil import escape_xml, leaf_text
 from .assignments import SriovLogicalPortAssignment
 from .configuration import configure_lpar_settings
 from .hardware_memory import admit_hardware_memory, created_hardware_memory_step
+from .linux_roles import (
+    admit_role_creation,
+    read_role_capabilities,
+    roles_requested,
+    with_role_evidence,
+)
 from .physical_io import admit_creation_io, created_io_step
 from .security_policy import (
     admit_security_policy,
@@ -127,11 +134,18 @@ _REST_CREATE_CONFIGURED = (
 )
 
 
+_CONTROLLER_CREATE_CONFIGURED = (
+    "native controller creation set the current configuration, so no apply was needed"
+)
+
+
 async def _create_via_cli(
     hmc: HMCClient,
     system_uuid: str,
     system_name_or_uuid: str,
     creation: LparCreation,
+    *,
+    controller_mode: bool = False,
 ) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
     """Create with ``mksyscfg``, apply its profile, and read the partition back.
 
@@ -162,6 +176,7 @@ async def _create_via_cli(
         security_policy=creation.security_policy,
         hardware_mem_encryption=creation.hardware_mem_encryption,
         hardware_mem_expansion=creation.hardware_mem_expansion,
+        **({"profile_name": None} if controller_mode else {}),
     )
     apply_step = (
         await _apply_created_profile(hmc, system_name, creation)
@@ -170,8 +185,13 @@ async def _create_via_cli(
         and not creation.security_policy.pairs()
         and creation.hardware_mem_encryption is None
         and creation.hardware_mem_expansion is None
+        and not roles_requested(creation.settings)
         else None
     )
+    if controller_mode and creation.apply_profile is False:
+        apply_step = WorkflowStep(
+            "apply_profile", "skipped", _CONTROLLER_CREATE_CONFIGURED
+        )
     try:
         created_lpar = await hmc.find_partition_by_name(
             creation.name, system_uuid=system_uuid
@@ -275,6 +295,17 @@ async def create_and_stamp_lpar(
             f"(UUID {existing.get('UUID')!r}). Choose a different name "
             "or delete the existing partition first."
         )
+    role_requested = roles_requested(creation.settings)
+    controller_mode = False
+    if role_requested:
+        role_caps = await read_role_capabilities(
+            hmc,
+            system_uuid,
+            need_kvm=creation.settings.kvm_capable is not None,
+            need_management=creation.settings.powervm_mgmt_capable is not None,
+        )
+        admit_role_creation(creation, role_caps)
+        controller_mode = role_caps.controller_mode
     if creation.vtpm_settings.pairs():
         admit_vtpm(
             creation.vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid)
@@ -321,21 +352,35 @@ async def create_and_stamp_lpar(
                 apply_step,
                 created_lpar,
                 readback_error,
-            ) = await _create_via_cli(hmc, system_uuid, system_name_or_uuid, creation)
+            ) = await _create_via_cli(
+                hmc,
+                system_uuid,
+                system_name_or_uuid,
+                creation,
+                controller_mode=controller_mode,
+            )
         except HMCError as error:
             if hardware_requested:
                 native_failed = True
-            elif not creation.physical_io.requested and not policy_requested:
+            elif (
+                not creation.physical_io.requested
+                and not policy_requested
+                and not role_requested
+            ):
                 raise
             else:
                 raise HMCError(
-                    "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                    "Native role creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+                    if role_requested
+                    else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
                     if policy_requested
                     else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                ) from error
+                ) from (None if role_requested else error)
         if native_failed:
             raise HMCError(
-                "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+                if controller_mode
+                else "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
             )
     else:
         document = build_lpar_document(
@@ -372,10 +417,10 @@ async def create_and_stamp_lpar(
 
     if created_lpar is None:
         if (
-            policy_requested or hardware_requested
+            policy_requested or hardware_requested or role_requested
         ) and creation.stamp_policy == "required":
             raise HMCError(
-                f"{'Hardware memory' if hardware_requested else 'Policy'} creation may have succeeded, but created identity readback is "
+                f"{'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
                 "unavailable and ownership was not stamped. Inspect the contained "
                 "partition before retrying; no rollback performed."
             ) from None
@@ -395,7 +440,7 @@ async def create_and_stamp_lpar(
                 "retrying; a created partition can be re-stamped with "
                 "set_lpar_ownership_description."
             )
-        if policy_requested or hardware_requested:
+        if policy_requested or hardware_requested or role_requested:
             skipped = "created identity readback unavailable; inspect the contained partition before retrying"
         elif readback_error is None:
             skipped = "create returned no LPAR body"
@@ -457,7 +502,7 @@ async def create_and_stamp_lpar(
                 else None
             ),
         )
-    if (policy_requested or hardware_requested) and (
+    if (policy_requested or hardware_requested or role_requested) and (
         not isinstance(created_lpar.get("UUID"), str)
         or not is_uuid(created_lpar["UUID"])
         or not isinstance(created_lpar.get("Resource"), dict)
@@ -471,9 +516,16 @@ async def create_and_stamp_lpar(
             )
         return LparCreationResult(
             True,
-            created_lpar,
+            None if role_requested else created_lpar,
             None,
             (),
+            settings_step=WorkflowStep(
+                "settings",
+                "error",
+                "Created partition identity unconfirmed; roles unverified",
+            )
+            if role_requested
+            else None,
             security_policy_step=WorkflowStep(
                 "security_policy",
                 "error",
@@ -528,25 +580,32 @@ async def create_and_stamp_lpar(
         )
     settings_step = (
         await _created_settings_step(
-            hmc, system_uuid, system_name, creation, created_lpar
+            hmc,
+            system_uuid,
+            system_name,
+            creation,
+            created_lpar,
+            **({"controller_mode": True} if controller_mode else {}),
         )
-        if policy_requested or hardware_requested
+        if policy_requested or hardware_requested or role_requested
         else None
     )
     reporting_step = (
         await _created_reporting_step(hmc, system_name, creation)
-        if policy_requested or hardware_requested
+        if policy_requested or hardware_requested or role_requested
         else None
     )
     vtpm_step = (
         await _created_vtpm_step(hmc, system_name, creation)
-        if policy_requested or hardware_requested
+        if policy_requested or hardware_requested or role_requested
         else None
     )
     policy_step = await _created_security_policy_step(
         hmc, system_uuid, creation, created_lpar
     )
-    if (policy_requested or hardware_requested) and creation.apply_profile is not None:
+    if (
+        policy_requested or hardware_requested or role_requested
+    ) and creation.apply_profile is not None:
         required = [
             (creation.settings.pairs(), settings_step),
             (creation.reporting_settings.pairs(), reporting_step),
@@ -563,11 +622,13 @@ async def create_and_stamp_lpar(
             await _apply_created_profile(
                 hmc, system_name or system_name_or_uuid, creation
             )
-            if verified
+            if verified and not controller_mode
             else WorkflowStep(
                 "apply_profile",
                 "skipped",
-                "Creation verification incomplete; profile not applied",
+                _CONTROLLER_CREATE_CONFIGURED
+                if controller_mode
+                else "Creation verification incomplete; profile not applied",
             )
         )
     elif creation.physical_io.requested and creation.apply_profile is not None:
@@ -582,29 +643,54 @@ async def create_and_stamp_lpar(
                 "I/O readback unverified; profile not applied",
             )
         )
-    if creation.physical_io.requested or policy_requested or hardware_requested:
+    if (
+        creation.physical_io.requested
+        or policy_requested
+        or hardware_requested
+        or role_requested
+    ):
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
-    return LparCreationResult(
+    result = LparCreationResult(
         True,
         created_lpar,
         ownership_stamped,
         (*apply_warnings, *warnings),
         apply_step,
         settings_step
-        if policy_requested or hardware_requested
+        if policy_requested or hardware_requested or role_requested
         else await _created_settings_step(
-            hmc, system_uuid, system_name, creation, created_lpar
+            hmc,
+            system_uuid,
+            system_name,
+            creation,
+            created_lpar,
+            **({"controller_mode": True} if controller_mode else {}),
         ),
         io_step,
         reporting_step
-        if policy_requested or hardware_requested
+        if policy_requested or hardware_requested or role_requested
         else await _created_reporting_step(hmc, system_name, creation),
         vtpm_step
-        if policy_requested or hardware_requested
+        if policy_requested or hardware_requested or role_requested
         else await _created_vtpm_step(hmc, system_name, creation),
         policy_step,
         hardware_step,
     )
+    if role_requested:
+        safe_steps = {}
+        for name in ("apply_step", "physical_io_step", "reporting_step", "vtpm_step"):
+            step = getattr(result, name)
+            if (
+                step is not None
+                and step.status == "error"
+                and isinstance(step.result, str)
+            ):
+                safe_steps[name] = replace(
+                    step,
+                    result="Partition exists or may exist; creation step unverified. Inspect before retrying; no rollback performed.",
+                )
+        result = replace(result, **safe_steps)
+    return result
 
 
 async def _created_security_policy_step(
@@ -696,6 +782,8 @@ async def _created_settings_step(
     cli_system: str | None,
     creation: LparCreation,
     created: dict[str, Any],
+    *,
+    controller_mode: bool = False,
 ) -> WorkflowStep | None:
     if not creation.settings.pairs():
         return None
@@ -711,9 +799,40 @@ async def _created_settings_step(
                 "settings", "ok" if result.status == "verified" else "error", result
             )
         observed = await get_lpar_settings(hmc.config, cli_system, creation.name)
+        if roles_requested(creation.settings):
+            uuid = created.get("UUID")
+            if not isinstance(uuid, str) or not is_uuid(uuid):
+                raise ValueError("Created identity unavailable")
+            entry = await hmc.get_logical_partition(uuid)
+            resource = entry.get("Resource") if isinstance(entry, dict) else None
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(resource, dict)
+                or not isinstance(entry.get("UUID"), str)
+                or entry["UUID"].lower() != uuid.lower()
+                or leaf_text(resource.get("PartitionName")) != creation.name
+            ):
+                raise ValueError("Created identity changed or unavailable")
+            observed = with_role_evidence(observed, resource, creation.settings)
+            if creation.settings.kvm_capable is True:
+                mode = (
+                    leaf_text(resource.get("PendingProcessorCompatibilityMode"))
+                    if controller_mode
+                    else (
+                        await get_lpar_proc_compat(
+                            hmc.config, cli_system, creation.name, DEFAULT_PROFILE_NAME
+                        )
+                    ).get("profile_mode")
+                )
+                if mode != "POWER10":
+                    raise ValueError("Created POWER10 companion unverified")
     except (HMCError, ValueError, PermissionError) as error:
         return WorkflowStep(
-            "settings", "error", f"Partition exists; settings unverified: {error}"
+            "settings",
+            "error",
+            "Partition exists or may exist; Linux roles unverified. Inspect before retrying"
+            if roles_requested(creation.settings)
+            else f"Partition exists; settings unverified: {error}",
         )
     matches = all(
         getattr(observed, name) == getattr(creation.settings, name)
@@ -746,7 +865,7 @@ def _unapplied_profile_warnings(
     if (
         apply_step is None
         or apply_step.status == "ok"
-        or apply_step.result == _REST_CREATE_CONFIGURED
+        or apply_step.result in (_REST_CREATE_CONFIGURED, _CONTROLLER_CREATE_CONFIGURED)
     ):
         return ()
     warning = (

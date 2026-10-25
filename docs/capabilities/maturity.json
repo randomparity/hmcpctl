@@ -1229,6 +1229,19 @@
                 "constraint": "optional strict booleans; omission preserves defaults and false selects 0; positive selected-system capabilities and observed Classic/HMC-controller/PowerVM-controller true/false/false tuple required, not a general mode classifier; native create-only fixed attributes; independent inactive REST MemoryEncryptionHardwareAccessEnabled/MemoryExpansionHardwareAccessEnabled comparison proves access availability only, not desired/current values or runtime encryption/expansion"
               }
             ]
+          },
+          {
+            "variant": "c05-linux-management-roles",
+            "parameters": [
+              {
+                "name": "settings.kvm_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system capability/release and enablement prerequisites; fixed same-record POWER10 on true creation, unchanged CPUs; configuration readback only"
+              },
+              {
+                "name": "settings.powervm_mgmt_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system authority and contained configuration readback, not NovaLink deployment"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -5687,6 +5700,19 @@
           {
             "variant": "c01-five-partition-settings",
             "parameters": []
+          },
+          {
+            "variant": "c05-linux-management-roles",
+            "parameters": [
+              {
+                "name": "settings.kvm_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system capability/release and enablement prerequisites; inactive state for selection and existing POWER10 on enablement, unchanged CPUs; configuration readback only"
+              },
+              {
+                "name": "settings.powervm_mgmt_capable",
+                "constraint": "optional strict Linux intent boolean; false is explicit; selected-system authority and contained configuration readback, not NovaLink deployment"
+              }
+            ]
           }
         ],
         "missing_scope": []

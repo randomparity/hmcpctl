@@ -13,7 +13,7 @@ import pytest
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.common import UOM_NS
-from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import core, workflows
@@ -882,3 +882,163 @@ async def test_lookup_boundary_preserves_other_failures(identity_conflict, vios,
     b.assign.assert_not_awaited()
     b.hmc.create_logical_partition.assert_not_awaited()
     b.hmc.create_vios.assert_not_awaited()
+
+
+@pytest.fixture
+def mixed_target(target, monkeypatch):
+    """Construct independent native authority and hardware observation inputs."""
+    b = target
+    original = b.command.side_effect
+    b.controller_status = "1"
+
+    async def command(config, cmd):
+        if cmd.startswith("lscomgmt"):
+            assert cmd == "lscomgmt -m sys-R1 -F is_controller"
+            b.events.append("controller")
+            return b.controller_status
+        if cmd.startswith("lssyscfg -r lpar"):
+            b.events.append("settings")
+            return "aixlinux,0,127,0,0,0"
+        return await original(config, cmd)
+
+    b.command.side_effect = command
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.linux_roles.run_hmc_command", b.command
+    )
+    b.entry["Resource"]["PowerVMManagementCapable"] = "false"
+    return b
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("management", [False, True])
+@pytest.mark.parametrize("apply_profile", [None, False])
+async def test_mixed_controller_creation_uses_one_profileless_record(
+    mixed_target, selected, management, apply_profile
+):
+    b = mixed_target
+    b.entry["Resource"]["PowerVMManagementCapable"] = str(management).lower()
+    b.entry["Resource"]["PartitionMemoryConfiguration"] = {
+        ENCRYPTION: str(selected).lower(),
+        EXPANSION: str(not selected).lower(),
+    }
+    result = await invoke(
+        b,
+        settings=LparSettings(powervm_mgmt_capable=management),
+        hardware_mem_encryption=selected,
+        hardware_mem_expansion=not selected,
+        apply_profile=apply_profile,
+    )
+    creates = [
+        shlex.split(call.args[1])
+        for call in b.command.await_args_list
+        if call.args[1].startswith("mksyscfg")
+    ]
+    assert len(creates) == 1
+    attrs = dict(pair.split("=", 1) for pair in creates[0][-1].split(","))
+    assert attrs["powervm_mgmt_capable"] == str(int(management))
+    assert attrs["hardware_mem_encryption"] == str(int(selected))
+    assert attrs["hardware_mem_expansion"] == str(int(not selected))
+    assert "profile_name" not in attrs and "sync_curr_profile" not in attrs
+    assert result.workflow_completed and result.ownership_stamped
+    assert next(s for s in result.steps if s.step == "hardware_memory").status == "ok"
+    assert next(s for s in result.steps if s.step == "settings").status == "ok"
+    assert b.events.index("controller") < b.events.index("create")
+    assert b.events.index("ManagedSystem") < b.events.index("create")
+    assert "apply" not in b.events
+    assert not any("-r prof" in call.args[1] for call in b.command.await_args_list)
+    b.hmc.create_logical_partition.assert_not_awaited()
+    b.assign.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure", ["authority", "apply", "capability", "tuple", "malformed"]
+)
+async def test_mixed_creation_keeps_independent_pre_effect_admissions(
+    mixed_target, failure
+):
+    b = mixed_target
+    if failure == "authority":
+        b.controller_status = "null"
+    elif failure == "capability":
+        b.system["Resource"]["AssociatedSystemCapabilities"][
+            "HardwareMemoryEncryptionCapable"
+        ] = "false"
+    elif failure == "tuple":
+        b.system["Resource"][TUPLE_FIELDS[1]] = "true"
+    elif failure == "malformed":
+        b.system["Resource"][TUPLE_FIELDS[0]] = {"child": "true"}
+    with pytest.raises(ValueError):
+        await invoke(
+            b,
+            settings=LparSettings(powervm_mgmt_capable=False),
+            hardware_mem_encryption=False,
+            apply_profile=failure == "apply",
+        )
+    assert not {"create", "stamp", "apply"} & set(b.events)
+    b.assign.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["mismatch", "missing", "read", "role-readback"])
+async def test_mixed_current_readback_failure_blocks_followups(mixed_target, failure):
+    b = mixed_target
+    if failure == "mismatch":
+        b.entry["Resource"]["PartitionMemoryConfiguration"][EXPANSION] = "true"
+    elif failure == "missing":
+        b.entry["Resource"]["PartitionMemoryConfiguration"].pop(EXPANSION)
+    elif failure == "read":
+        b.fault = "read"
+    else:
+        b.entry["Resource"].pop("PowerVMManagementCapable")
+    result = await invoke(
+        b,
+        settings=LparSettings(powervm_mgmt_capable=False),
+        hardware_mem_expansion=False,
+        apply_profile=False,
+    )
+    assert result.resource_created and not result.workflow_completed
+    step = next(
+        s
+        for s in result.steps
+        if s.step == ("settings" if failure == "role-readback" else "hardware_memory")
+    )
+    assert step.status == "error"
+    assert PRIVATE not in repr(result)
+    assert b.events.count("create") == 1
+    assert "apply" not in b.events
+    b.assign.assert_not_awaited()
+    b.hmc.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["create", "identity"])
+@pytest.mark.parametrize("controller", [False, True])
+async def test_mixed_selected_hardware_retains_chain_free_failure(
+    mixed_target, failure, controller
+):
+    b = mixed_target
+    if failure == "create":
+        b.fault = "create"
+    else:
+        b.hmc.find_partition_by_name.side_effect = [None, ValueError(PRIVATE)]
+    with pytest.raises(HMCError) as error:
+        await invoke(
+            b,
+            settings=LparSettings(powervm_mgmt_capable=False)
+            if controller
+            else LparSettings(),
+            hardware_mem_expansion=False,
+            apply_profile=False,
+            stamp_policy="required",
+        )
+    assert error.value.__cause__ is None and error.value.__context__ is None
+    if failure == "create":
+        assert ("profile" in str(error.value)) is (not controller)
+    assert "Inspect its scoped identity" in str(error.value) or failure == "identity"
+    assert PRIVATE not in "".join(traceback.format_exception(error.value))
+    assert b.events.count("create") == 1
+    assert "apply" not in b.events
+    b.assign.assert_not_awaited()

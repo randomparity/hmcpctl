@@ -145,7 +145,7 @@ async def create_lpar_via_cli(
     partition_type: str = "AIX/Linux",
     resources: LparResources = LparResources(),
     max_virtual_slots: int | None = None,
-    profile_name: str = DEFAULT_PROFILE_NAME,
+    profile_name: str | None = DEFAULT_PROFILE_NAME,
     *,
     partition_id: int | None = None,
     settings: LparSettings | None = None,
@@ -195,14 +195,17 @@ async def create_lpar_via_cli(
     config_pairs: list[tuple[str, object]] = [
         ("name", name),
         ("lpar_env", _lpar_environment(partition_type)),
-        ("profile_name", profile_name),
     ]
+    if profile_name is not None:
+        config_pairs.append(("profile_name", profile_name))
     config_pairs.extend(hardware_pairs)
     config_pairs.extend(_lpar_resource_pairs(resources, max_virtual_slots))
     if partition_id is not None:
         config_pairs.append(("lpar_id", partition_id))
     if settings is not None:
         config_pairs.extend(settings.pairs())
+        if settings.kvm_capable is True:
+            config_pairs.append(("lpar_proc_compat_mode", "POWER10"))
     if reporting_settings is not None:
         config_pairs.extend(reporting_settings.pairs())
     if vtpm_settings is not None:
@@ -556,7 +559,13 @@ async def get_lpar_settings(
     config: HMCConfig, system_name: str, lpar_name: str
 ) -> LparSettings:
     """Read one AIX/Linux or IBM i partition's five C01 settings, strictly."""
-    names = tuple(item.name for item in fields(LparSettings))
+    names = (
+        "allow_perf_collection",
+        "lpar_avail_priority",
+        "time_ref",
+        "simplified_remote_restart_capable",
+        "migration_disabled",
+    )
     selector = build_filter([("lpar_names", lpar_name)])
     raw = await run_hmc_command(
         config,
@@ -593,7 +602,7 @@ async def get_lpar_settings(
 async def set_lpar_settings(
     config: HMCConfig, system_name: str, lpar_name: str, settings: LparSettings
 ) -> None:
-    """Write only the supplied canonical C01 fields on one named partition."""
+    """Write only the supplied canonical settings on one named partition."""
     pairs = settings.pairs()
     if not pairs:
         raise ValueError("Supply at least one partition setting")
