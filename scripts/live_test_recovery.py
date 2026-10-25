@@ -508,7 +508,8 @@ async def check_creation_memory_layout(
     )
     if (
         status != "PASS"
-        or lpar_config._uuid_of(entry) != journal["system_uuid"]
+        or creation_memory_layout._canonical_uuid(lpar_config._uuid_of(entry))
+        != journal["system_uuid"]
         or not isinstance(name, str)
         or not name
     ):
@@ -544,7 +545,7 @@ async def check_creation_memory_layout(
         raise StateUnreadable("ST58 VIOS feed unreadable")
     rows = []
     for row in raw:
-        identity = lpar_config._uuid_of(row)
+        identity = creation_memory_layout._canonical_uuid(lpar_config._uuid_of(row))
         name = (
             (row.get("Resource") or {}).get("PartitionName")
             if isinstance(row, dict)

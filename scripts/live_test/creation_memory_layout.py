@@ -102,20 +102,18 @@ def _checkpoint(state: RunState, phase: str) -> None:
     state.checkpoint()
 
 
+def _canonical_uuid(value: object) -> str | None:
+    return value.lower() if isinstance(value, str) and is_uuid(value) else None
+
+
 async def _vios_baseline(hmc, system_uuid: str) -> list[dict]:
     rows = []
     for entry in await hmc.list_vios(system_uuid):
         identity, name = (
-            _uuid_of(entry),
+            _canonical_uuid(_uuid_of(entry)),
             (entry.get("Resource") or {}).get("PartitionName"),
         )
-        if (
-            not identity
-            or not is_uuid(identity)
-            or identity != identity.lower()
-            or not isinstance(name, str)
-            or not name
-        ):
+        if not identity or not isinstance(name, str) or not name:
             raise ValueError("VIOS feed identity unavailable")
         rows.append({"uuid": identity, "name": name})
     if len({row["uuid"] for row in rows}) != len(rows) or len(
@@ -137,7 +135,7 @@ async def _identity(
     )
     resource = (entry or {}).get("Resource") or {}
     if (
-        _uuid_of(entry) != identity
+        _canonical_uuid(_uuid_of(entry)) != identity
         or resource.get("PartitionName") != name
         or resource.get("PartitionType")
         != ("Virtual IO Server" if vios else "AIX/Linux")
@@ -357,8 +355,8 @@ async def _lpar_fixture(
             if current is not None and run.name not in current[0].names:
                 journal["outcome"]["lpar"] = "rejected"
         return False
-    identity = _uuid_of(data.get("lpar"))
-    if not identity or not is_uuid(identity):
+    identity = _canonical_uuid(_uuid_of(data.get("lpar")))
+    if not identity:
         return False
     run.uuid = identity
     journal["lpar_uuid"], journal["create_returned"]["lpar"] = identity, True
@@ -413,11 +411,13 @@ async def _vios_fixture(client: Client, state: RunState, system_uuid: str) -> bo
     data = plain_data(data)
     state.record(SUBTASK, "hmc_create_vios", status, data)
     journal["outcome"]["vios"] = "unknown"
-    identity = _uuid_of(data) if status == "PASS" and isinstance(data, dict) else None
-    if (
-        not identity
-        or not is_uuid(identity)
-        or any(row["uuid"] == identity for row in journal["baseline"]["vios"])
+    identity = (
+        _canonical_uuid(_uuid_of(data))
+        if status == "PASS" and isinstance(data, dict)
+        else None
+    )
+    if not identity or any(
+        row["uuid"] == identity for row in journal["baseline"]["vios"]
     ):
         return False
     journal["vios_uuid"], journal["create_returned"]["vios"] = identity, True
@@ -471,7 +471,11 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
                 "served tools/policy must permit the finite create/read/delete sequence"
             )
         async with HMCClient(state.hmc_config) as hmc:
-            system_uuid = await resolve_system_uuid(hmc, state.config.system_name)
+            system_uuid = _canonical_uuid(
+                await resolve_system_uuid(hmc, state.config.system_name)
+            )
+            if system_uuid is None:
+                raise ValueError("selected-system UUID unavailable")
             system = await resolve_system_name(hmc, system_uuid)
             vios = await _vios_baseline(hmc, system_uuid)
         baseline = await _read_pools(client, state, system)

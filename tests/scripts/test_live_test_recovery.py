@@ -2649,6 +2649,61 @@ async def test_creation_memory_recovery_all_phases_are_read_only(
     assert set(seen) <= {"hmc_get_system", "hmc_run_command", "hmc_list_vios"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uppercase", [False, True])
+async def test_creation_memory_recovery_compares_canonical_observed_uuid(
+    monkeypatch, uppercase
+):
+    from hmcpctl.config import HMCConfig
+
+    document = _creation_memory_document()
+    journal = document["artifacts"]["creation_memory_layout"]
+    system = "aaaaaaaa-0000-0000-0000-000000000001"
+    vios = "bbbbbbbb-0000-0000-0000-000000000002"
+    journal["system_uuid"] = system
+    journal["baseline"]["vios"] = [{"uuid": vios, "name": "existing"}]
+    inputs = recovery.creation_memory_layout_inputs_from_document(document, [58])
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+
+    async def call(tool, **arguments):
+        recovery.guard_read_only(tool, arguments)
+        if tool == "hmc_get_system":
+            return "PASS", {
+                "UUID": system.upper() if uppercase else system,
+                "Resource": {"SystemName": "canonical-system"},
+            }
+        if tool == "hmc_list_vios":
+            return "PASS", [
+                {
+                    "UUID": vios.upper() if uppercase else vios,
+                    "Resource": {"PartitionName": "existing"},
+                }
+            ]
+        command = arguments["cmd"]
+        if command.endswith("-F name"):
+            return "PASS", ""
+        return "PASS", "10.0" if command.endswith(
+            "curr_avail_sys_proc_units"
+        ) else "8192,256"
+
+    assert await recovery.check_creation_memory_layout(call, inputs) == []
+
+
+@pytest.mark.parametrize("field", ["system_uuid", "lpar_uuid", "vios_uuid", "baseline"])
+def test_creation_memory_saved_uuid_case_is_still_strict(field):
+    from live_test import config as settings
+
+    artifacts = _creation_memory_document()["artifacts"]
+    identity = "AAAAAAAA-0000-0000-0000-000000000001"
+    journal = artifacts["creation_memory_layout"]
+    if field == "baseline":
+        journal["baseline"]["vios"] = [{"uuid": identity, "name": "existing"}]
+    else:
+        journal[field] = identity
+    with pytest.raises(ValueError, match="canonical UUID|VIOS baseline"):
+        settings.decode_artifacts(artifacts)
+
+
 def test_creation_memory_journal_unknown_keys_types_and_saved_grant_refuse():
     from copy import deepcopy
 

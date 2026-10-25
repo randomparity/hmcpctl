@@ -25,10 +25,10 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import config as settings
 from live_test import lpar_config, runner
 
-SYSTEM = "00000000-0000-0000-0000-000000000001"
-LPAR = "00000000-0000-0000-0000-000000000002"
-VIOS = "00000000-0000-0000-0000-000000000003"
-OLD = "00000000-0000-0000-0000-000000000004"
+SYSTEM = "aaaaaaaa-0000-0000-0000-000000000001"
+LPAR = "bbbbbbbb-0000-0000-0000-000000000002"
+VIOS = "cccccccc-0000-0000-0000-000000000003"
+OLD = "dddddddd-0000-0000-0000-000000000004"
 HEADER = "lpar_name,name,min_num_huge_pages,desired_num_huge_pages,max_num_huge_pages,hpt_ratio,ppt_ratio,kvm_reserved_mem_percent"
 SIX = {
     "min_num_huge_pages": 0,
@@ -340,6 +340,119 @@ def effects(target):
         if name
         in {"hmc_create_lpar", "hmc_delete_lpar", "hmc_create_vios", "hmc_delete_vios"}
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("boundary", "fault"),
+    [
+        (boundary, "")
+        for boundary in (
+            "system",
+            "baseline",
+            "lpar-return",
+            "lpar-detail",
+            "vios-return",
+            "vios-detail",
+        )
+    ]
+    + [("vios-return", "baseline-uuid")],
+)
+async def test_uuid_ingest_is_canonical_before_journal_and_comparison(
+    target, boundary, fault
+):
+    target.fault = fault
+    if boundary.endswith("-return"):
+        original = target.state.call
+
+        async def call(*args, **kwargs):
+            status, data = await original(*args, **kwargs)
+            if args[1] == "hmc_create_" + boundary.removesuffix("-return"):
+                entry = data["lpar"] if boundary == "lpar-return" else data
+                entry["UUID"] = entry["UUID"].upper()
+            return status, data
+
+        target.state.call = AsyncMock(side_effect=call)
+    else:
+        method = {
+            "system": "list_system_summaries",
+            "baseline": "list_vios",
+            "lpar-detail": "get_logical_partition",
+            "vios-detail": "get_vios",
+        }[boundary]
+        original = getattr(target.hmc, method)
+
+        async def read(*args, **kwargs):
+            result = await original(*args, **kwargs)
+            for entry in result if isinstance(result, list) else [result]:
+                entry["UUID"] = entry["UUID"].upper()
+            return result
+
+        setattr(target.hmc, method, AsyncMock(side_effect=read))
+        if boundary == "system":
+            target.state.config = replace(
+                target.state.config, system_name="canonical-system"
+            )
+    await run(target)
+    journal = target.state.artifacts.creation_memory_layout
+    if fault:
+        assert "hmc_delete_vios" not in effects(target)
+        assert journal["vios_uuid"] is None
+        return
+    assert all(row["status"] == "PASS" for row in target.state.results)
+    assert journal["phase"] == "complete"
+    assert (journal["system_uuid"], journal["lpar_uuid"], journal["vios_uuid"]) == (
+        SYSTEM,
+        LPAR,
+        VIOS,
+    )
+    assert journal["baseline"]["vios"] == [{"uuid": OLD, "name": "existing"}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uppercase", [False, True])
+async def test_vios_baseline_accepts_actual_client_parsed_uuid_case(uppercase):
+    from live_test import creation_memory_layout as arm
+
+    from hmcpctl.client.core import HMCClient
+
+    identity = OLD.upper() if uppercase else OLD
+    body = f"""<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+      <id>urn:uuid:{identity}</id><content type="application/xml">
+      <VirtualIOServer xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">
+      <PartitionName>existing</PartitionName></VirtualIOServer></content></entry></feed>"""
+    hmc = object.__new__(HMCClient)
+    hmc._get = AsyncMock(return_value=body)
+    assert await arm._vios_baseline(hmc, SYSTEM) == [{"uuid": OLD, "name": "existing"}]
+    hmc._get.assert_awaited_once_with(
+        f"/rest/api/uom/ManagedSystem/{SYSTEM}/VirtualIOServer", "VirtualIOServer"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [{"UUID": "bad", "Resource": {"PartitionName": "existing"}}],
+        [{"UUID": 42, "Resource": {"PartitionName": "existing"}}],
+        [{"UUID": OLD, "Resource": {"PartitionName": {"text": "existing"}}}],
+        [
+            {"UUID": identity, "Resource": {"PartitionName": name}}
+            for identity, name in ((OLD, "one"), (OLD.upper(), "two"))
+        ],
+        [
+            {"UUID": identity, "Resource": {"PartitionName": "existing"}}
+            for identity in (OLD, VIOS)
+        ],
+    ],
+)
+async def test_vios_baseline_keeps_malformed_and_ambiguous_refusals(rows):
+    from live_test import creation_memory_layout as arm
+
+    with pytest.raises(ValueError, match="VIOS feed identity"):
+        await arm._vios_baseline(
+            SimpleNamespace(list_vios=AsyncMock(return_value=rows)), SYSTEM
+        )
 
 
 @pytest.mark.asyncio
