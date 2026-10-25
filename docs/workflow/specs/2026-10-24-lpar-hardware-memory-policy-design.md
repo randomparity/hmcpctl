@@ -1,6 +1,6 @@
 # C10 hardware memory access during partition creation
 
-Design proposal for #1771, linked to [ADR 0283](../../adr/0283-lpar-hardware-memory-policy.md).
+Design proposal for #1771, linked to [ADR 0294](../../adr/0294-lpar-hardware-memory-policy.md).
 Base: `40f9f85672dee57c6dcc03d6446534efab93e43e`. Full-spec lane; frozen M denominator 250.
 Authority: [WORK:SCOPE](https://github.com/randomparity/hmcpctl/issues/1771#issuecomment-6389647881),
 token `q1771-65513414`; interactive campaign dispatch. Exclusion/owner pairs `[]`.

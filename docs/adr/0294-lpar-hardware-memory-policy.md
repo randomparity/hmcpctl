@@ -1,4 +1,4 @@
-# ADR 0283: Create-only hardware memory access flags
+# ADR 0294: Create-only hardware memory access flags
 
 ## Status
 

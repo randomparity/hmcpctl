@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import sys
 from dataclasses import replace
@@ -2203,3 +2204,53 @@ def test_configured_host_inventory_has_no_hmc_reference_claim():
     assert record["row_ids"] == []
     assert record["composite_reason"]
     assert "tests/unit/test_server_hosts.py" in record["tests"]
+
+
+@pytest.mark.parametrize("operation", ["lpar.create", "vios.create"])
+def test_hardware_memory_creation_catalog_contract(operation: str) -> None:
+    catalog = ROOT / "docs" / "capabilities"
+    record = next(
+        row
+        for row in inventory.load_json(catalog / "operations.json")["operations"]
+        if row["operation"] == operation
+    )
+    registered = next(
+        tool for tool in inventory.discover_registry() if tool.operation == operation
+    )
+    module, name = registered.handler.rsplit(".", 1)
+    handler = getattr(importlib.import_module(module), name)
+    signature = inspect.signature(handler)
+    fields = {
+        name: parameter
+        for name, parameter in signature.parameters.items()
+        if name.startswith("hardware_mem_")
+    }
+    assert len(fields) == 2
+    assert all(parameter.default is None for parameter in fields.values())
+    assert record["signature"] == registered.signature == str(signature)
+    maturity = next(
+        row
+        for row in inventory.load_json(catalog / "maturity.json")["operations"]
+        if row["operation"] == operation
+    )
+    variants = [
+        row
+        for row in maturity["implementation"]["implemented_scope"]
+        if row["variant"] == "c10-hardware-memory-access-creation"
+    ]
+    assert len(variants) == 1
+    declared = [
+        name
+        for parameter in variants[0]["parameters"]
+        for name in parameter["name"].split(",")
+    ]
+    assert sorted(declared) == sorted(fields)
+    required_tests = {
+        "tests/unit/test_lpar_hardware_memory.py",
+        "tests/lpar/test_hardware_memory_creation.py",
+        "tests/app/test_lpar_hardware_memory.py",
+    }
+    if operation == "lpar.create":
+        required_tests.add("tests/test_live_lpar_hardware_memory_arm.py")
+    assert all((ROOT / path).is_file() for path in required_tests)
+    assert required_tests <= set(record["tests"])
