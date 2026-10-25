@@ -7,6 +7,7 @@ from dataclasses import replace
 from hmcpctl.client.core import HMCClient
 
 from ...documents.lpar import validate_partition_type
+from ...documents.lpar_affinity_group import validate_affinity_group_id
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...errors import HMCError
 from ...resource_identity import resolve_system_uuid
@@ -19,7 +20,11 @@ from .assignments import (
 )
 from .core import LparCreation, create_and_stamp_lpar
 from .errors import translate_lpar_write_error
-from .linux_roles import read_role_capabilities, roles_requested
+from .linux_roles import (
+    read_creation_authority,
+    read_role_capabilities,
+    roles_requested,
+)
 from .workflow_contract import WorkflowStep
 
 
@@ -30,6 +35,11 @@ async def create_lpar(
     assignments: LparPcieAssignments,
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
+    affinity_requested = (
+        validate_affinity_group_id(creation.affinity_group_id) is not None
+    )
+    if affinity_requested and creation.keylock is not None:
+        raise ValueError("Affinity group cannot be combined with explicit keylock")
     hardware_requested = bool(
         hardware_memory_pairs(
             creation.hardware_mem_encryption, creation.hardware_mem_expansion
@@ -50,6 +60,21 @@ async def create_lpar(
             need_management=creation.settings.powervm_mgmt_capable is not None,
         )
         if caps.controller_mode:
+            raise ValueError(
+                "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
+            )
+    if (
+        affinity_requested
+        and not roles_requested(creation.settings)
+        and (assignments.dedicated or assignments.sriov)
+    ):
+        _, controller = await read_creation_authority(
+            hmc,
+            await resolve_system_uuid(hmc, system_name_or_uuid),
+            need_management=False,
+            context="Affinity group",
+        )
+        if controller:
             raise ValueError(
                 "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
             )
@@ -79,7 +104,9 @@ async def create_lpar(
     if created.physical_io_step is not None:
         steps.append(created.physical_io_step)
     policy_requested = bool(creation.security_policy.pairs())
-    if created.apply_step is not None and not (policy_requested or hardware_requested):
+    if created.apply_step is not None and not (
+        policy_requested or hardware_requested or affinity_requested
+    ):
         steps.append(created.apply_step)
     if created.settings_step is not None:
         steps.append(created.settings_step)
@@ -89,17 +116,24 @@ async def create_lpar(
         steps.append(created.vtpm_step)
     if created.security_policy_step is not None:
         steps.append(created.security_policy_step)
+    if created.affinity_group_step is not None:
+        steps.append(created.affinity_group_step)
     if created.hardware_memory_step is not None:
         steps.append(created.hardware_memory_step)
-    if created.apply_step is not None and (policy_requested or hardware_requested):
+    if created.apply_step is not None and (
+        policy_requested or hardware_requested or affinity_requested
+    ):
         steps.append(created.apply_step)
-    verification_failed = (policy_requested or hardware_requested) and (
+    verification_failed = (
+        policy_requested or hardware_requested or affinity_requested
+    ) and (
         created.ownership_stamped is not True
         or any(
             requested and (step is None or step.status != "ok")
             for requested, step in (
                 (policy_requested, created.security_policy_step),
                 (hardware_requested, created.hardware_memory_step),
+                (affinity_requested, created.affinity_group_step),
                 (creation.settings.pairs(), created.settings_step),
                 (creation.reporting_settings.pairs(), created.reporting_step),
                 (creation.vtpm_settings.pairs(), created.vtpm_step),

@@ -15,6 +15,7 @@ from ...documents.lpar import (
     LparSettings,
     validate_partition_type,
 )
+from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
@@ -153,6 +154,13 @@ def lpars_create(
             help="Hardware memory expansion access; omitted preserves defaults",
         ),
     ] = None,
+    affinity_group_id: Annotated[
+        str | None,
+        typer.Option(
+            "--affinity-group-id",
+            help="Native affinity group: 1–255 or none; omitted preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.
 
@@ -167,6 +175,10 @@ def lpars_create(
     use initial-profile I/O or profile-bearing assignments. Readback proves only
     configuration, not KVM or NovaLink deployment.
     """
+    try:
+        affinity = parse_affinity_group_cli(affinity_group_id)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint="--affinity-group-id") from None
     policy = load_security_policy(security_policy)
     try:
         policy.validate_creation(partition_type)
@@ -240,6 +252,7 @@ def lpars_create(
                 security_policy=policy,
                 hardware_mem_encryption=hardware_mem_encryption,
                 hardware_mem_expansion=hardware_mem_expansion,
+                affinity_group_id=affinity,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,

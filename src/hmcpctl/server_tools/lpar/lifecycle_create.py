@@ -11,6 +11,7 @@ from ...documents.lpar import (
     PartitionType,
     validate_partition_type,
 )
+from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
@@ -58,6 +59,7 @@ def hmc_create_lpar(
     security_policy: LparSecurityPolicy | None = None,
     hardware_mem_encryption: HardwareMemoryFlag | None = None,
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
+    affinity_group_id: AffinityGroupID | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -82,6 +84,9 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
+            omission preserves defaults. Separate native partition/profile observations
+            must match before follow-ups; unavailable evidence requires inspection.
         hardware_mem_encryption: Optional hardware memory encryption access;
             omission preserves defaults, false explicitly disables access.
         hardware_mem_expansion: Optional hardware memory expansion access;
@@ -135,6 +140,7 @@ def hmc_create_lpar(
     if caller_token is not None:
         validate_caller_token(caller_token)
     validate_partition_type(partition_type)
+    validate_affinity_group_id(affinity_group_id)
     return with_client(
         lambda hmc: create_lpar(
             hmc,
@@ -153,6 +159,7 @@ def hmc_create_lpar(
                 apply_profile=apply_partition_profile,
                 hardware_mem_encryption=hardware_mem_encryption,
                 hardware_mem_expansion=hardware_mem_expansion,
+                affinity_group_id=affinity_group_id,
                 security_policy=security_policy
                 if security_policy is not None
                 else LparSecurityPolicy(),

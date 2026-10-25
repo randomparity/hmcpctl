@@ -247,7 +247,7 @@ def test_old_positional_adapters_preserve_security_and_yes(
     fn = adapter.handler if surface == "mcp" else adapter.cli
     parameters = inspect.signature(fn).parameters
     names = list(parameters)
-    assert names[-2:] == list(FIELDS)
+    assert names[-3:] == [*FIELDS, "affinity_group_id"]
     last_old = "security_policy" if surface == "mcp" else "yes"
     old_names = [
         name for name in names[: names.index(last_old) + 1] if name not in FIELDS

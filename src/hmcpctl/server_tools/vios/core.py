@@ -10,6 +10,7 @@ from ..._app import (
     with_client,
 )
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_security_policy import (
     LparSecurityPolicy,
@@ -54,6 +55,7 @@ def hmc_create_vios(
     security_policy: LparSecurityPolicy | None = None,
     hardware_mem_encryption: HardwareMemoryFlag | None = None,
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
+    affinity_group_id: AffinityGroupID | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -69,6 +71,9 @@ def hmc_create_vios(
         system_name_or_uuid: Target managed-system name or UUID.
         name: Name for the new VIOS partition.
         resources: Memory and processor settings for the VIOS.
+        affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
+            omission preserves defaults. Separate native partition/profile observations
+            must match before follow-ups; unavailable evidence requires inspection.
         hardware_mem_encryption: Optional hardware memory encryption access;
             omission preserves defaults, false explicitly disables access.
         hardware_mem_expansion: Optional hardware memory expansion access;
@@ -82,6 +87,7 @@ def hmc_create_vios(
             profile; uses environment defaults when omitted.
     """
 
+    validate_affinity_group_id(affinity_group_id)
     return with_client(
         lambda hmc: create_vios(
             hmc,
@@ -92,6 +98,7 @@ def hmc_create_vios(
             security_policy=security_policy,
             hardware_mem_encryption=hardware_mem_encryption,
             hardware_mem_expansion=hardware_mem_expansion,
+            affinity_group_id=affinity_group_id,
         ),
         profile=profile,
     )

@@ -26,6 +26,7 @@ from ...documents.lpar import (
     validate_keylock,
     validate_partition_type,
 )
+from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
@@ -49,11 +50,13 @@ from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.profiles import get_lpar_proc_compat
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml, leaf_text
+from .affinity_group import created_affinity_group_step
 from .assignments import SriovLogicalPortAssignment
 from .configuration import configure_lpar_settings
 from .hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from .linux_roles import (
     admit_role_creation,
+    read_creation_authority,
     read_role_capabilities,
     roles_requested,
     with_role_evidence,
@@ -95,6 +98,7 @@ class LparCreation:
     security_policy: LparSecurityPolicy = field(default_factory=LparSecurityPolicy)
     hardware_mem_encryption: bool | None = None
     hardware_mem_expansion: bool | None = None
+    affinity_group_id: AffinityGroupID | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,7 @@ class LparCreationResult:
     vtpm_step: WorkflowStep | None = None
     security_policy_step: WorkflowStep | None = None
     hardware_memory_step: WorkflowStep | None = None
+    affinity_group_step: WorkflowStep | None = None
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -136,6 +141,9 @@ _REST_CREATE_CONFIGURED = (
 
 _CONTROLLER_CREATE_CONFIGURED = (
     "native controller creation set the current configuration, so no apply was needed"
+)
+_CONTROLLER_AFFINITY_PROFILELESS = (
+    "Native controller creation has no named profile to apply"
 )
 
 
@@ -176,6 +184,7 @@ async def _create_via_cli(
         security_policy=creation.security_policy,
         hardware_mem_encryption=creation.hardware_mem_encryption,
         hardware_mem_expansion=creation.hardware_mem_expansion,
+        affinity_group_id=creation.affinity_group_id,
         **({"profile_name": None} if controller_mode else {}),
     )
     apply_step = (
@@ -185,12 +194,17 @@ async def _create_via_cli(
         and not creation.security_policy.pairs()
         and creation.hardware_mem_encryption is None
         and creation.hardware_mem_expansion is None
+        and creation.affinity_group_id is None
         and not roles_requested(creation.settings)
         else None
     )
     if controller_mode and creation.apply_profile is False:
         apply_step = WorkflowStep(
-            "apply_profile", "skipped", _CONTROLLER_CREATE_CONFIGURED
+            "apply_profile",
+            "skipped",
+            _CONTROLLER_AFFINITY_PROFILELESS
+            if creation.affinity_group_id is not None
+            else _CONTROLLER_CREATE_CONFIGURED,
         )
     try:
         created_lpar = await hmc.find_partition_by_name(
@@ -202,6 +216,7 @@ async def _create_via_cli(
         if (
             creation.hardware_mem_encryption is None
             and creation.hardware_mem_expansion is None
+            and creation.affinity_group_id is None
         ):
             raise
         # Native creation succeeded, but the identity lookup is unavailable.
@@ -231,6 +246,13 @@ async def create_and_stamp_lpar(
       :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
       delete it to release its resources.
     """
+    affinity_requested = (
+        validate_affinity_group_id(creation.affinity_group_id) is not None
+    )
+    if affinity_requested and creation.keylock is not None:
+        raise ValueError(
+            "Affinity group cannot be combined with explicit keylock in native creation"
+        )
     hardware_requested = bool(
         hardware_memory_pairs(
             creation.hardware_mem_encryption, creation.hardware_mem_expansion
@@ -306,6 +328,17 @@ async def create_and_stamp_lpar(
         )
         admit_role_creation(creation, role_caps)
         controller_mode = role_caps.controller_mode
+    elif affinity_requested:
+        _, controller_mode = await read_creation_authority(
+            hmc, system_uuid, need_management=False, context="Affinity group"
+        )
+    if affinity_requested and controller_mode:
+        if creation.apply_profile is True:
+            raise ValueError(
+                "Controller affinity creation requires apply_profile=False"
+            )
+        if creation.physical_io.requested or creation.creation_sriov:
+            raise ValueError("Initial-profile I/O is unavailable in controller mode")
     if creation.vtpm_settings.pairs():
         admit_vtpm(
             creation.vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid)
@@ -339,6 +372,7 @@ async def create_and_stamp_lpar(
         resources is None
         or policy_requested
         or hardware_requested
+        or affinity_requested
         or creation.reporting_settings.pairs()
         or creation.vtpm_settings.pairs()
         or creation.physical_io.requested
@@ -360,7 +394,7 @@ async def create_and_stamp_lpar(
                 controller_mode=controller_mode,
             )
         except HMCError as error:
-            if hardware_requested:
+            if hardware_requested or affinity_requested:
                 native_failed = True
             elif (
                 not creation.physical_io.requested
@@ -378,9 +412,9 @@ async def create_and_stamp_lpar(
                 ) from (None if role_requested else error)
         if native_failed:
             raise HMCError(
-                "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+                f"Native {'affinity group' if affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
                 if controller_mode
-                else "Native hardware memory creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                else f"Native {'affinity group' if affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
             )
     else:
         document = build_lpar_document(
@@ -417,10 +451,13 @@ async def create_and_stamp_lpar(
 
     if created_lpar is None:
         if (
-            policy_requested or hardware_requested or role_requested
+            policy_requested
+            or hardware_requested
+            or role_requested
+            or affinity_requested
         ) and creation.stamp_policy == "required":
             raise HMCError(
-                f"{'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
+                f"{'Affinity group' if affinity_requested else 'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
                 "unavailable and ownership was not stamped. Inspect the contained "
                 "partition before retrying; no rollback performed."
             ) from None
@@ -440,7 +477,12 @@ async def create_and_stamp_lpar(
                 "retrying; a created partition can be re-stamped with "
                 "set_lpar_ownership_description."
             )
-        if policy_requested or hardware_requested or role_requested:
+        if (
+            policy_requested
+            or hardware_requested
+            or role_requested
+            or affinity_requested
+        ):
             skipped = "created identity readback unavailable; inspect the contained partition before retrying"
         elif readback_error is None:
             skipped = "create returned no LPAR body"
@@ -455,6 +497,15 @@ async def create_and_stamp_lpar(
                 f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
             ),
             apply_step=apply_step,
+            affinity_group_step=await created_affinity_group_step(
+                hmc,
+                system_uuid,
+                None,
+                creation.name,
+                creation.partition_type,
+                creation.affinity_group_id,
+                controller_mode=controller_mode,
+            ),
             hardware_memory_step=await created_hardware_memory_step(
                 hmc,
                 system_uuid,
@@ -502,7 +553,9 @@ async def create_and_stamp_lpar(
                 else None
             ),
         )
-    if (policy_requested or hardware_requested or role_requested) and (
+    if (
+        policy_requested or hardware_requested or role_requested or affinity_requested
+    ) and (
         not isinstance(created_lpar.get("UUID"), str)
         or not is_uuid(created_lpar["UUID"])
         or not isinstance(created_lpar.get("Resource"), dict)
@@ -516,7 +569,7 @@ async def create_and_stamp_lpar(
             )
         return LparCreationResult(
             True,
-            None if role_requested else created_lpar,
+            None if role_requested or affinity_requested else created_lpar,
             None,
             (),
             settings_step=WorkflowStep(
@@ -533,6 +586,15 @@ async def create_and_stamp_lpar(
             )
             if policy_requested
             else None,
+            affinity_group_step=await created_affinity_group_step(
+                hmc,
+                system_uuid,
+                None,
+                creation.name,
+                creation.partition_type,
+                creation.affinity_group_id,
+                controller_mode=controller_mode,
+            ),
             hardware_memory_step=await created_hardware_memory_step(
                 hmc,
                 system_uuid,
@@ -562,6 +624,15 @@ async def create_and_stamp_lpar(
             "with set_lpar_ownership_description (issue #376) or delete it to "
             "release its resources."
         )
+    affinity_step = await created_affinity_group_step(
+        hmc,
+        system_uuid,
+        created_lpar,
+        creation.name,
+        creation.partition_type,
+        creation.affinity_group_id,
+        controller_mode=controller_mode,
+    )
     hardware_step = await created_hardware_memory_step(
         hmc,
         system_uuid,
@@ -587,24 +658,33 @@ async def create_and_stamp_lpar(
             created_lpar,
             **({"controller_mode": True} if controller_mode else {}),
         )
-        if policy_requested or hardware_requested or role_requested
+        if policy_requested
+        or hardware_requested
+        or role_requested
+        or affinity_requested
         else None
     )
     reporting_step = (
         await _created_reporting_step(hmc, system_name, creation)
-        if policy_requested or hardware_requested or role_requested
+        if policy_requested
+        or hardware_requested
+        or role_requested
+        or affinity_requested
         else None
     )
     vtpm_step = (
         await _created_vtpm_step(hmc, system_name, creation)
-        if policy_requested or hardware_requested or role_requested
+        if policy_requested
+        or hardware_requested
+        or role_requested
+        or affinity_requested
         else None
     )
     policy_step = await _created_security_policy_step(
         hmc, system_uuid, creation, created_lpar
     )
     if (
-        policy_requested or hardware_requested or role_requested
+        policy_requested or hardware_requested or role_requested or affinity_requested
     ) and creation.apply_profile is not None:
         required = [
             (creation.settings.pairs(), settings_step),
@@ -613,6 +693,7 @@ async def create_and_stamp_lpar(
             (creation.physical_io.requested, io_step),
             (policy_requested, policy_step),
             (hardware_requested, hardware_step),
+            (affinity_requested, affinity_step),
         ]
         verified = ownership_stamped is True and all(
             not requested or (step is not None and step.status == "ok")
@@ -626,7 +707,11 @@ async def create_and_stamp_lpar(
             else WorkflowStep(
                 "apply_profile",
                 "skipped",
-                _CONTROLLER_CREATE_CONFIGURED
+                (
+                    _CONTROLLER_AFFINITY_PROFILELESS
+                    if affinity_requested
+                    else _CONTROLLER_CREATE_CONFIGURED
+                )
                 if controller_mode
                 else "Creation verification incomplete; profile not applied",
             )
@@ -647,6 +732,7 @@ async def create_and_stamp_lpar(
         creation.physical_io.requested
         or policy_requested
         or hardware_requested
+        or affinity_requested
         or role_requested
     ):
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
@@ -657,7 +743,10 @@ async def create_and_stamp_lpar(
         (*apply_warnings, *warnings),
         apply_step,
         settings_step
-        if policy_requested or hardware_requested or role_requested
+        if policy_requested
+        or hardware_requested
+        or role_requested
+        or affinity_requested
         else await _created_settings_step(
             hmc,
             system_uuid,
@@ -668,18 +757,25 @@ async def create_and_stamp_lpar(
         ),
         io_step,
         reporting_step
-        if policy_requested or hardware_requested or role_requested
+        if policy_requested
+        or hardware_requested
+        or role_requested
+        or affinity_requested
         else await _created_reporting_step(hmc, system_name, creation),
         vtpm_step
-        if policy_requested or hardware_requested or role_requested
+        if policy_requested
+        or hardware_requested
+        or role_requested
+        or affinity_requested
         else await _created_vtpm_step(hmc, system_name, creation),
         policy_step,
         hardware_step,
+        affinity_step,
     )
-    if role_requested or hardware_requested:
+    if role_requested or hardware_requested or affinity_requested:
         safe_steps = {}
         step_names = ("apply_step", "physical_io_step", "reporting_step", "vtpm_step")
-        if hardware_requested:
+        if hardware_requested or affinity_requested:
             step_names += (
                 "settings_step",
                 "security_policy_step",
@@ -872,7 +968,12 @@ def _unapplied_profile_warnings(
     if (
         apply_step is None
         or apply_step.status == "ok"
-        or apply_step.result in (_REST_CREATE_CONFIGURED, _CONTROLLER_CREATE_CONFIGURED)
+        or apply_step.result
+        in (
+            _REST_CREATE_CONFIGURED,
+            _CONTROLLER_CREATE_CONFIGURED,
+            _CONTROLLER_AFFINITY_PROFILELESS,
+        )
     ):
         return ()
     warning = (

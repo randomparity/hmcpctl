@@ -18,6 +18,7 @@ from hmcpctl.operations.lpar.security_policy import (
 )
 
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
 from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
@@ -209,8 +210,19 @@ def vios_create(
             help="Hardware memory expansion access; omitted preserves defaults",
         ),
     ] = None,
+    affinity_group_id: Annotated[
+        str | None,
+        typer.Option(
+            "--affinity-group-id",
+            help="Native affinity group: 1–255 or none; omitted preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner."""
+    try:
+        affinity = parse_affinity_group_cli(affinity_group_id)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint="--affinity-group-id") from None
     policy = load_security_policy(security_policy)
     try:
         policy.validate_creation("Virtual IO Server")
@@ -250,6 +262,7 @@ def vios_create(
             security_policy=policy,
             hardware_mem_encryption=hardware_mem_encryption,
             hardware_mem_expansion=hardware_mem_expansion,
+            affinity_group_id=affinity,
         )
     )
     print_json(result)
