@@ -218,10 +218,10 @@ requires later independent reconciliation; aborting SSH cannot promise remote co
 
 After native return or HMC/SSH failure, re-resolve containment and independently read the
 kind-specific REST entry and native CPU row. Missing/malformed/changed identity, mode or
-state yields unverified. Require exact targets; preserve unrequested CPU/memory and limits.
-Only inactive, previously all-zero triplets with positive non-reset targets accept newly observed
-coherent limits; no configured-limit mapping is asserted. Active nondeferred changes also require
-run_procs and shared run_proc_units to match the whole resulting CPU target.
+state yields unverified. Require exact targets; preserve untouched current CPU values/limits and
+the current memory triplet. Only inactive all-zero triplets with positive non-reset targets accept
+coherent observed limits; no configured-limit mapping. Other memory values are not postconditions.
+Active nondeferred run_procs and shared run_proc_units must match full resulting CPU targets.
 Reset success requires the complete CPU and memory current triplets to be zero; a partial
 reset is never applied. Native and REST current values must still agree.
 
