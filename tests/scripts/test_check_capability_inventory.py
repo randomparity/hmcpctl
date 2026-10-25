@@ -2248,7 +2248,7 @@ def test_hardware_memory_creation_catalog_contract(operation: str) -> None:
     required_tests = {
         "tests/unit/test_lpar_hardware_memory.py",
         "tests/lpar/test_hardware_memory_creation.py",
-        "tests/app/test_lpar_hardware_memory.py",
+        "tests/app/test_app_lpar_hardware_memory.py",
     }
     if operation == "lpar.create":
         required_tests.add("tests/test_live_lpar_hardware_memory_arm.py")
