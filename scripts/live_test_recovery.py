@@ -67,6 +67,7 @@ from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import (
     lpar_config,
+    lpar_hardware_memory,
     lpar_linux_roles,
     lpar_physical_io,
     lpar_power,
@@ -178,6 +179,7 @@ _WITNESSED_SUBTASKS = (
         lpar_vtpm.SUBTASK,
         memory_quantities.SUBTASK,
         lpar_security_policy.SUBTASK,
+        lpar_hardware_memory.SUBTASK,
         lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
     }
@@ -349,6 +351,7 @@ def lpar_config_inputs_from_document(
             lpar_vtpm.SUBTASK,
             memory_quantities.SUBTASK,
             lpar_security_policy.SUBTASK,
+            lpar_hardware_memory.SUBTASK,
             lpar_linux_roles.SUBTASK,
         }.intersection(subtasks)
         or not system
