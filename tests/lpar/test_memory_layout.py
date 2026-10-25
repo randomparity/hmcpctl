@@ -562,6 +562,73 @@ async def test_layout_postcondition_distinguishes_missing_and_mismatch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["null", "unknown", "malformed"])
+async def test_layout_contradiction_requires_a_valid_row_before_workflow_promotion(
+    layout_creation_target, missing
+):
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.workflows import create_lpar
+
+    target = layout_creation_target
+    target.read.side_effect = None
+    target.read.return_value = native_table(
+        PROFILE_COLUMNS,
+        ["part-R1", "default_profile", "2", missing, "null", "null", "null", "null"],
+    )
+    result = await create_lpar(
+        target.hmc,
+        "selector",
+        layout_creation(
+            LparMemoryLayout(min_num_huge_pages=0, desired_num_huge_pages=1),
+            apply_profile=True,
+        ),
+        LparPcieAssignments(),
+    )
+    step = next(step for step in result.steps if step.step == "memory_layout")
+    assert step.status == "error"
+    observation = step.result
+    assert observation.status == ("mismatch" if missing == "null" else "unavailable")
+    assert observation.observed == (
+        {"min_num_huge_pages": 2} if missing == "null" else {}
+    )
+    assert observation.unavailable == (
+        ("desired_num_huge_pages",)
+        if missing == "null"
+        else ("min_num_huge_pages", "desired_num_huge_pages")
+    )
+    assert result.resource_created is True
+    assert result.workflow_completed is False
+    target.write.assert_awaited_once()
+    target.apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["bad,name", "bad=name", 'bad"name'])
+async def test_layout_invalid_record_preserves_reason_without_reconciliation(
+    layout_creation_target, name
+):
+    from dataclasses import replace
+
+    from hmcpctl.operations.lpar.core import _create_via_cli
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    target = layout_creation_target
+    creation = replace(
+        layout_creation(LparMemoryLayout(min_num_huge_pages=0)), name=name
+    )
+    with pytest.raises(HMCCLIError, match="attribute 'name'.*contains") as caught:
+        await _create_via_cli(target.hmc, LAYOUT_SYSTEM, "selector", creation)
+    assert name in str(caught.value)
+    assert "Remove" in str(caught.value)
+    target.write.assert_not_awaited()
+    target.hmc.find_partition_by_name.assert_not_awaited()
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+    target.apply.assert_not_awaited()
+    target.hmc.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_layout_controller_omits_profile_and_reports_unavailable(
     layout_creation_target,
 ):
@@ -604,15 +671,23 @@ async def test_layout_controller_apply_denial_precedes_create(layout_creation_ta
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["rejected", "partial", "unknown"])
+@pytest.mark.parametrize(
+    ("failure", "absent_outcome"),
+    [
+        ("HSCLA4A0: private-provider-detail", "rejected"),
+        ("private-provider-detail", "unknown"),
+        ("SSH transport lost: private-provider-detail", "unknown"),
+    ],
+)
 async def test_layout_reconciliation_never_retries_or_stamps(
-    layout_creation_target, outcome
+    layout_creation_target, outcome, failure, absent_outcome
 ):
     from hmcpctl.errors import HMCError
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
     from hmcpctl.ssh.transport import HMCCLIError
 
     target = layout_creation_target
-    target.write.side_effect = HMCCLIError("HSCLA4A0: private-provider-detail")
+    target.write.side_effect = HMCCLIError(failure)
     second = (
         None
         if outcome == "rejected"
@@ -621,11 +696,13 @@ async def test_layout_reconciliation_never_retries_or_stamps(
         else HMCError("lookup unavailable")
     )
     target.hmc.find_partition_by_name.side_effect = [None, second]
-    with pytest.raises(HMCError, match=outcome) as caught:
+    expected = absent_outcome if outcome == "rejected" else outcome
+    with pytest.raises(HMCError, match=expected) as caught:
         await create_and_stamp_lpar(
             target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
         )
     assert "private-provider-detail" not in str(caught.value)
+    assert target.hmc.find_partition_by_name.await_count == 2
     target.write.assert_awaited_once()
     target.hmc.create_logical_partition.assert_not_awaited()
     target.stamp.assert_not_awaited()

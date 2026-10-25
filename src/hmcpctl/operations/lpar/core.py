@@ -39,6 +39,7 @@ from ...resource_identity import (
 from ...ssh.commands import hmc_error_code
 from ...ssh.lpar import (
     DEFAULT_PROFILE_NAME,
+    _LayoutCreateSubmissionError,
     apply_lpar_profile_via_cli,
     complete_create_resources,
     create_lpar_via_cli,
@@ -204,9 +205,7 @@ async def _create_via_cli(
                 else {}
             ),
         )
-    except HMCError as error:
-        if not creation.memory_layout.pairs():
-            raise
+    except _LayoutCreateSubmissionError as error:
         await _raise_layout_create_failure(hmc, system_uuid, creation, error)
     apply_step = (
         await _apply_created_profile(hmc, system_name, creation)

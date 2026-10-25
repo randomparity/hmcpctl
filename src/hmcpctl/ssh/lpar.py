@@ -46,6 +46,10 @@ _DEDICATED_SHARING_MODES = (
 )
 
 
+class _LayoutCreateSubmissionError(HMCCLIError):
+    """A native layout create failed after entering transport submission."""
+
+
 def validate_caller_token(token: str) -> None:
     """Raise ``ValueError`` if *token* cannot be embedded as ``[caller <token>]``.
 
@@ -247,7 +251,7 @@ async def create_lpar_via_cli(
                 f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
             ) from error
     if layout_error is not None:
-        raise HMCCLIError(layout_error)
+        raise _LayoutCreateSubmissionError(layout_error)
     raise HMCCLIError(
         "Hardware memory creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run."
     )

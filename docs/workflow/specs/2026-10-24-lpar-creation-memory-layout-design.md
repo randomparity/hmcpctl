@@ -64,7 +64,9 @@ require one well-formed CSV row, parse counts/percentage strictly, and compare o
 supplied values using numeric equivalence for percentage. Missing identity/readback, malformed output, or a mismatch produces an error
 memory-layout workflow step and stops later assignments. A typed verification
 result distinguishes `verified`, `mismatch` and `unavailable`; observed contradictory
-values remain mismatch even if other requested fields are unavailable. Existing profile application semantics stay explicit;
+values in a strictly valid row remain mismatch when other requested fields are null
+(missing); unknown tokens or malformed rows make the whole observation unavailable.
+Existing profile application semantics stay explicit;
 readback verifies saved configuration, not guest behavior or bootability.
 
 Controller mode is admitted: P11 `mksyscfg.md:39` forbids profile_name and
@@ -161,8 +163,10 @@ observed model validation. No pool reservation inference or new transport.
 LparCreation.memory_layout defaults empty; LparCreationResult.memory_layout_step
 is optional. Native create receives optional layout and emits one existing record.
 MemoryLayoutVerification retains status verified/mismatch/unavailable, requested,
-observed, unavailable and warnings; contradictions take precedence over missing
-fields. Empty layout adds no reads/steps/native selection. Mode-only context never
+observed, unavailable and warnings; contradictions in a strictly valid row take
+precedence over null (missing) requested fields. Unknown tokens or malformed rows
+make the whole observation unavailable. Empty layout adds no reads/steps/native
+selection. Mode-only context never
 borrows KVM/management prerequisites; real roles retain independent admission.
 Controller apply/profile-I/O/profile-assignment denials are preserved. Ownership,
 C04/C10/vTPM/reporting/settings/I/O verification independently gates application and
