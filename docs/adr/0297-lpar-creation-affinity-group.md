@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for #1769; format exception approved; design review/audit pending.
+Accepted for #1769 after design, scope, product and security review.
 
 ## Context
 
