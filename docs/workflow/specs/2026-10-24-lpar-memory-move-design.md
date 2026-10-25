@@ -252,3 +252,15 @@ The procedure names preflight, wrapper, recovery and evidence commands, candidat
 revision, external mode0700 evidence directory/mode0600 files, a two-move budget,
 per-call SSH/HMC deadlines and the controller's bounded session/logout/reaping.
 Actual execution stays with the root's separately approved candidate-bound window.
+
+
+## Separately approved test and CI allowances
+
+The operator approved a 25-minute `scripts/run_tests.py` test deadline and a
+30-minute allowance for the named `ci` job, leaving a five-minute difference for
+its surrounding lifecycle. This is a policy allowance change, not a performance
+fix: the earlier 1,020-second timeout remains unexplained. Existing coverage,
+worker admission, matrix, permissions, other jobs and interrupt/termination graces
+stay unchanged. Existing runner and CI-shape tests pin the exact values and margin;
+the CI guard reads the named active job so unrelated or commented jobs cannot pass
+it. ADR 0129/0130 interrupt decisions and historical measurements remain unchanged.
