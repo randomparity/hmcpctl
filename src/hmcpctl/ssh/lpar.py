@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from ..documents.lpar_hardware_memory import hardware_memory_pairs
 from ..documents.lpar_io import LparPhysicalIO
+from ..documents.lpar_memory_layout import LparMemoryLayout
 from ..documents.lpar_security_policy import LparSecurityPolicy
 from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
@@ -28,7 +29,7 @@ from ..documents.lpar import (
     shared_units_over_vcpus,
     shared_vcpu_defaults,
 )
-from .commands import build_attribute_record, build_filter
+from .commands import build_attribute_record, build_filter, hmc_error_code
 from .description_validation import validate_lpar_description
 from .profiles import set_lpar_description
 from .transport import HMCCLIError, run_hmc_command
@@ -156,6 +157,7 @@ async def create_lpar_via_cli(
     creation_sriov: tuple[SriovLogicalPortAssignment, ...] = (),
     hardware_mem_encryption: bool | None = None,
     hardware_mem_expansion: bool | None = None,
+    memory_layout: LparMemoryLayout | None = None,
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -179,6 +181,11 @@ async def create_lpar_via_cli(
     processor mode's ``sharing_mode``. Omitted values take the defaults of
     :func:`complete_create_resources`, which the REST create uses too.
     """
+    if memory_layout is not None:
+        if not isinstance(memory_layout, LparMemoryLayout):
+            raise TypeError("memory_layout must be LparMemoryLayout")
+        memory_layout.validate_creation(partition_type)
+    layout_pairs = memory_layout.pairs() if memory_layout is not None else []
     hardware_pairs = hardware_memory_pairs(
         hardware_mem_encryption, hardware_mem_expansion
     )
@@ -199,6 +206,7 @@ async def create_lpar_via_cli(
     if profile_name is not None:
         config_pairs.append(("profile_name", profile_name))
     config_pairs.extend(hardware_pairs)
+    config_pairs.extend(layout_pairs)
     config_pairs.extend(_lpar_resource_pairs(resources, max_virtual_slots))
     if partition_id is not None:
         config_pairs.append(("lpar_id", partition_id))
@@ -224,13 +232,22 @@ async def create_lpar_via_cli(
     if extra:
         config_str += "," + extra
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
+    layout_error = None
     try:
         return await run_hmc_command(config, cmd)
     except HMCCLIError as error:
-        if not hardware_pairs:
+        if layout_pairs:
+            code = hmc_error_code(error)
+            layout_error = f"{code}: " if code else ""
+            layout_error += (
+                "Native layout creation outcome requires scoped identity reconciliation"
+            )
+        elif not hardware_pairs:
             raise HMCCLIError(
                 f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
             ) from error
+    if layout_error is not None:
+        raise HMCCLIError(layout_error)
     raise HMCCLIError(
         "Hardware memory creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run."
     )

@@ -381,3 +381,754 @@ async def test_profile_requires_single_row(native_layout, rows):
     transport.return_value = native_table(PROFILE_COLUMNS, *rows)
     with pytest.raises(ValueError, match="exactly one"):
         await native.get_lpar_memory_layout(config, "sys-R1", "part-R1")
+
+
+LAYOUT_SYSTEM = "00000001-abcd-4ef0-8abc-000000000001"
+LAYOUT_PARTITION = "00000002-abcd-4ef0-8abc-000000000002"
+
+
+@pytest.fixture
+def layout_creation_target(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.config import HMCConfig
+    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
+
+    hmc = AsyncMock(spec=HMCClient)
+    hmc.config = HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
+    entry = {
+        "UUID": LAYOUT_PARTITION,
+        "Resource": {"PartitionName": "part-R1", "PartitionType": "AIX/Linux"},
+    }
+    hmc.find_partition_by_name.side_effect = [None, entry]
+    hmc.create_logical_partition.return_value = entry
+    hmc.get_managed_system.return_value = {
+        "UUID": LAYOUT_SYSTEM,
+        "Resource": {
+            "SystemName": "sys-R1",
+            "AssociatedSystemMemoryConfiguration": {"ConfigurableSystemMemory": "8192"},
+        },
+    }
+    monkeypatch.setattr(
+        core, "resolve_system_uuid", AsyncMock(return_value=LAYOUT_SYSTEM)
+    )
+    monkeypatch.setattr(
+        core, "resolve_system_cli_name", AsyncMock(return_value="sys-R1")
+    )
+    mode = AsyncMock(return_value=RoleCapabilities(False, False, None, None, False))
+    monkeypatch.setattr(core, "read_role_capabilities", mode)
+    stamp = AsyncMock(return_value=(True, ()))
+    monkeypatch.setattr(core, "stamp_created_lpar_ownership", stamp)
+    apply = AsyncMock()
+    monkeypatch.setattr(core, "apply_lpar_profile_via_cli", apply)
+    write = AsyncMock(return_value="")
+    monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", write)
+    read = AsyncMock()
+
+    def response(config, command):
+        if command.startswith("lshwres"):
+            return native_table(
+                ["possible_hpt_ratios", "possible_ppt_ratios"],
+                ["1:64,1:128", "1:128,1:256"],
+            )
+        return native_table(
+            PROFILE_COLUMNS,
+            ["part-R1", "default_profile", "0", "1", "2", "1:128", "1:256", "0.00"],
+        )
+
+    read.side_effect = response
+    monkeypatch.setattr("hmcpctl.ssh.lpar_memory_layout.run_hmc_command", read)
+    return SimpleNamespace(
+        hmc=hmc,
+        entry=entry,
+        mode=mode,
+        stamp=stamp,
+        apply=apply,
+        write=write,
+        read=read,
+    )
+
+
+def layout_creation(layout=None, **kwargs):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.core import LparCreation
+
+    return LparCreation(
+        "part-R1",
+        "AIX/Linux",
+        LparResources(
+            desired_memory=1024,
+            min_memory=1024,
+            max_memory=1024,
+            desired_procs=1,
+            dedicated=True,
+        ),
+        memory_layout=layout or LparMemoryLayout(),
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_layout_single_native_record_contains_six_fields(layout_creation_target):
+    import shlex
+
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    layout = LparMemoryLayout(0, 1, 2, "1:128", "1:256", Decimal("0.00"))
+    result = await create_and_stamp_lpar(
+        target.hmc, "selector", layout_creation(layout)
+    )
+    record = shlex.split(target.write.await_args.args[1])[-1]
+    assert all(f"{name}={value}" in record.split(",") for name, value in layout.pairs())
+    target.write.assert_awaited_once()
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.mode.assert_awaited_once_with(
+        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+    )
+    assert result.memory_layout_step.status == "ok"
+    assert result.memory_layout_step.result.status == "verified"
+
+
+@pytest.mark.asyncio
+async def test_layout_omission_preserves_rest_without_reads_or_steps(
+    layout_creation_target,
+):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    result = await create_and_stamp_lpar(target.hmc, "selector", layout_creation())
+    target.hmc.create_logical_partition.assert_awaited_once()
+    target.mode.assert_not_awaited()
+    target.read.assert_not_awaited()
+    target.write.assert_not_awaited()
+    assert result.memory_layout_step is None
+
+
+@pytest.mark.asyncio
+async def test_layout_keylock_rejected_without_traffic(layout_creation_target):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    with pytest.raises(ValueError, match="keylock"):
+        await create_and_stamp_lpar(
+            target.hmc,
+            "selector",
+            layout_creation(LparMemoryLayout(hpt_ratio="1:128"), keylock="normal"),
+        )
+    assert target.hmc.mock_calls == []
+    target.mode.assert_not_awaited()
+    target.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["missing", "mismatch", "error"])
+async def test_layout_postcondition_distinguishes_missing_and_mismatch(
+    layout_creation_target, mode
+):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    request = LparMemoryLayout(min_num_huge_pages=0, desired_num_huge_pages=1)
+    if mode == "error":
+        target.read.side_effect = HMCError("unavailable")
+    else:
+        target.read.side_effect = None
+        target.read.return_value = native_table(
+            PROFILE_COLUMNS,
+            [
+                "part-R1",
+                "default_profile",
+                "2" if mode == "mismatch" else "0",
+                "null",
+                "null",
+                "null",
+                "null",
+                "null",
+            ],
+        )
+    result = await create_and_stamp_lpar(
+        target.hmc, "selector", layout_creation(request, apply_profile=True)
+    )
+    assert result.memory_layout_step.status == "error"
+    observation = result.memory_layout_step.result
+    assert observation.status == ("mismatch" if mode == "mismatch" else "unavailable")
+    assert "desired_num_huge_pages" in observation.unavailable
+    target.apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_controller_omits_profile_and_reports_unavailable(
+    layout_creation_target,
+):
+    import shlex
+
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
+
+    target = layout_creation_target
+    target.mode.return_value = RoleCapabilities(True, False, None, None, False)
+    result = await create_and_stamp_lpar(
+        target.hmc,
+        "selector",
+        layout_creation(LparMemoryLayout(hpt_ratio="1:128"), apply_profile=False),
+    )
+    assert "profile_name=" not in shlex.split(target.write.await_args.args[1])[-1]
+    assert result.memory_layout_step.result.status == "unavailable"
+    assert result.memory_layout_step.result.unavailable == ("hpt_ratio",)
+    assert all(
+        not c.args[1].startswith("lssyscfg") for c in target.read.await_args_list
+    )
+    target.apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_controller_apply_denial_precedes_create(layout_creation_target):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
+
+    target = layout_creation_target
+    target.mode.return_value = RoleCapabilities(True, False, None, None, False)
+    with pytest.raises(ValueError, match="[Cc]ontroller"):
+        await create_and_stamp_lpar(
+            target.hmc,
+            "selector",
+            layout_creation(LparMemoryLayout(hpt_ratio="1:128"), apply_profile=True),
+        )
+    target.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["rejected", "partial", "unknown"])
+async def test_layout_reconciliation_never_retries_or_stamps(
+    layout_creation_target, outcome
+):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    target = layout_creation_target
+    target.write.side_effect = HMCCLIError("HSCLA4A0: private-provider-detail")
+    second = (
+        None
+        if outcome == "rejected"
+        else target.entry
+        if outcome == "partial"
+        else HMCError("lookup unavailable")
+    )
+    target.hmc.find_partition_by_name.side_effect = [None, second]
+    with pytest.raises(HMCError, match=outcome) as caught:
+        await create_and_stamp_lpar(
+            target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+        )
+    assert "private-provider-detail" not in str(caught.value)
+    target.write.assert_awaited_once()
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+    target.apply.assert_not_awaited()
+    target.hmc.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_identity", [None, "wrong-name", "bad-uuid", "wrong-type"])
+async def test_layout_identity_unavailable_never_stamps_or_reads_profile(
+    layout_creation_target, bad_identity
+):
+    from copy import deepcopy
+
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    entry = deepcopy(target.entry)
+    if bad_identity is None:
+        entry = None
+    elif bad_identity == "wrong-name":
+        entry["Resource"]["PartitionName"] = "other-partition"
+    elif bad_identity == "bad-uuid":
+        entry["UUID"] = "not-a-uuid"
+    else:
+        entry = []
+    target.hmc.find_partition_by_name.side_effect = [None, entry]
+    result = await create_and_stamp_lpar(
+        target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+    )
+    assert result.resource_created is True and result.lpar is None
+    assert result.memory_layout_step.result.status == "unavailable"
+    target.stamp.assert_not_awaited()
+    assert all(
+        not c.args[1].startswith("lssyscfg") for c in target.read.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_layout_successful_native_write_with_lookup_error_is_unavailable(
+    layout_creation_target,
+):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    target.hmc.find_partition_by_name.side_effect = [
+        None,
+        RuntimeError("private-provider-detail"),
+    ]
+    result = await create_and_stamp_lpar(
+        target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+    )
+    assert (
+        result.resource_created
+        and result.memory_layout_step.result.status == "unavailable"
+    )
+    target.stamp.assert_not_awaited()
+    target.write.assert_awaited_once()
+    assert "private-provider-detail" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_layout_uncoded_native_failure_with_absence_remains_unknown(
+    layout_creation_target,
+):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    target = layout_creation_target
+    target.write.side_effect = HMCCLIError("transport lost")
+    target.hmc.find_partition_by_name.side_effect = [None, None]
+    with pytest.raises(HMCError, match="unknown"):
+        await create_and_stamp_lpar(
+            target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+        )
+    target.write.assert_awaited_once()
+    target.stamp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_percentage_zero_adds_no_kvm_role_or_companion(
+    layout_creation_target,
+):
+    import shlex
+
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    result = await create_and_stamp_lpar(
+        target.hmc,
+        "selector",
+        layout_creation(LparMemoryLayout(kvm_reserved_mem_percent=Decimal(0))),
+    )
+    record = shlex.split(target.write.await_args.args[1])[-1]
+    assert "kvm_reserved_mem_percent=0" in record
+    assert "kvm_capable=" not in record and "lpar_proc_compat_mode=" not in record
+    target.hmc.get_console_info.assert_not_awaited()
+    target.mode.assert_awaited_once_with(
+        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+    )
+    assert result.memory_layout_step.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_layout_ratio_admission_refuses_before_single_create(
+    layout_creation_target,
+):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    with pytest.raises(ValueError, match="not advertised"):
+        await create_and_stamp_lpar(
+            target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:512"))
+        )
+    target.write.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_controller_initial_profile_io_denied(layout_creation_target):
+    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
+
+    target = layout_creation_target
+    target.mode.return_value = RoleCapabilities(True, False, None, None, False)
+    with pytest.raises(ValueError, match="initial-profile"):
+        await create_and_stamp_lpar(
+            target.hmc,
+            "selector",
+            layout_creation(
+                LparMemoryLayout(hpt_ratio="1:128"),
+                physical_io=LparPhysicalIO(console_slot="hmc"),
+            ),
+        )
+    target.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_role_selection_retains_independent_kvm_admission(
+    layout_creation_target,
+):
+    from hmcpctl.documents.lpar import LparSettings
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    with pytest.raises(ValueError, match="KVM selection requires"):
+        await create_and_stamp_lpar(
+            target.hmc,
+            "selector",
+            layout_creation(
+                LparMemoryLayout(kvm_reserved_mem_percent=Decimal(0)),
+                settings=LparSettings(kvm_capable=False),
+            ),
+        )
+    target.mode.assert_awaited_once_with(
+        target.hmc, LAYOUT_SYSTEM, need_kvm=True, need_management=False
+    )
+    target.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["ok", "error", None])
+async def test_layout_workflow_assignment_barrier(
+    layout_creation_target, monkeypatch, status
+):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.lpar import workflows
+    from hmcpctl.operations.lpar.assignments import (
+        AssignmentResult,
+        LparPcieAssignments,
+    )
+    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    target = layout_creation_target
+    creation = layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+    step = None if status is None else WorkflowStep("memory_layout", status)
+    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
+    monkeypatch.setattr(
+        workflows,
+        "create_and_stamp_lpar",
+        AsyncMock(
+            return_value=LparCreationResult(
+                True, target.entry, True, (), memory_layout_step=step
+            )
+        ),
+    )
+    apply = AsyncMock(return_value=AssignmentResult(True, True, ()))
+    monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", apply)
+    result = await workflows.create_lpar(
+        target.hmc, "selector", creation, LparPcieAssignments()
+    )
+    assert result.resource_created is True
+    assert result.workflow_completed is (status == "ok")
+    if status == "ok":
+        apply.assert_awaited_once()
+    else:
+        apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failed",
+    ["hardware_memory", "security_policy", "settings", "reporting_settings", "vtpm"],
+)
+async def test_layout_preserves_each_mixed_workflow_barrier(
+    layout_creation_target, monkeypatch, failed
+):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.documents.lpar import LparReportingSettings, LparSettings
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+    from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+    from hmcpctl.operations.lpar import workflows
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    target = layout_creation_target
+    creation = layout_creation(
+        LparMemoryLayout(hpt_ratio="1:128"),
+        hardware_mem_encryption=False,
+        security_policy=LparSecurityPolicy(secure_boot=0),
+        settings=LparSettings(allow_perf_collection=False),
+        reporting_settings=LparReportingSettings(work_group_id=0),
+        vtpm_settings=LparVtpmSettings(vtpm_enabled=False),
+    )
+    steps = {
+        key: WorkflowStep(name, "error" if name == failed else "ok")
+        for key, name in [
+            ("hardware_memory_step", "hardware_memory"),
+            ("security_policy_step", "security_policy"),
+            ("settings_step", "settings"),
+            ("reporting_step", "reporting_settings"),
+            ("vtpm_step", "vtpm"),
+            ("memory_layout_step", "memory_layout"),
+        ]
+    }
+    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
+    monkeypatch.setattr(
+        workflows,
+        "create_and_stamp_lpar",
+        AsyncMock(
+            return_value=LparCreationResult(True, target.entry, True, (), **steps)
+        ),
+    )
+    apply = AsyncMock()
+    monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", apply)
+    result = await workflows.create_lpar(
+        target.hmc, "selector", creation, LparPcieAssignments()
+    )
+    assert result.resource_created and not result.workflow_completed
+    apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_admission_read_failure_is_not_create_uncertainty(
+    layout_creation_target,
+):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    target.read.side_effect = HMCError("advertisement read unavailable")
+    with pytest.raises(HMCError, match="advertisement read unavailable"):
+        await create_and_stamp_lpar(
+            target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+        )
+    assert target.hmc.find_partition_by_name.await_count == 1
+    target.write.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_os400_ratios_do_not_borrow_linux_role_prerequisites(
+    layout_creation_target,
+):
+    import shlex
+    from dataclasses import replace
+
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    target.entry["Resource"]["PartitionType"] = "OS400"
+    creation = replace(
+        layout_creation(LparMemoryLayout(hpt_ratio="1:128")), partition_type="OS400"
+    )
+    result = await create_and_stamp_lpar(target.hmc, "selector", creation)
+    assert "lpar_env=os400" in shlex.split(target.write.await_args.args[1])[-1]
+    assert result.memory_layout_step.status == "ok"
+    target.mode.assert_awaited_once_with(
+        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+    )
+
+
+@pytest.mark.asyncio
+async def test_layout_invalid_os400_count_refused_before_traffic(
+    layout_creation_target,
+):
+    from dataclasses import replace
+
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    creation = replace(
+        layout_creation(LparMemoryLayout(min_num_huge_pages=0)), partition_type="OS400"
+    )
+    with pytest.raises(ValueError, match="AIX/Linux"):
+        await create_and_stamp_lpar(target.hmc, "selector", creation)
+    assert target.hmc.mock_calls == []
+    target.mode.assert_not_awaited()
+    target.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_native_record_composes_existing_owners(layout_creation_target):
+    import shlex
+
+    from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
+    from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+    from hmcpctl.ssh.lpar import create_lpar_via_cli
+
+    target = layout_creation_target
+    await create_lpar_via_cli(
+        target.hmc.config,
+        "sys-R1",
+        "part-R1",
+        memory_layout=LparMemoryLayout(hpt_ratio="1:128"),
+        hardware_mem_encryption=False,
+        security_policy=LparSecurityPolicy(secure_boot=0),
+        vtpm_settings=LparVtpmSettings(vtpm_enabled=False),
+    )
+    parts = shlex.split(target.write.await_args.args[1])
+    assert parts[:3] == ["mksyscfg", "-r", "lpar"]
+    record = parts[-1].split(",")
+    assert {
+        "hpt_ratio=1:128",
+        "hardware_mem_encryption=0",
+        "secure_boot=0",
+        "vtpm_enabled=0",
+    } <= set(record)
+    target.write.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_layout_mixed_native_error_retains_code_without_provider_chain(
+    layout_creation_target,
+):
+    import traceback
+
+    from hmcpctl.ssh.lpar import create_lpar_via_cli
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    target = layout_creation_target
+    target.write.side_effect = HMCCLIError("HSCLA4A0: private-provider-detail")
+    with pytest.raises(HMCCLIError, match="HSCLA4A0") as caught:
+        await create_lpar_via_cli(
+            target.hmc.config,
+            "sys-R1",
+            "part-R1",
+            memory_layout=LparMemoryLayout(hpt_ratio="1:128"),
+            hardware_mem_encryption=False,
+        )
+    assert "private-provider-detail" not in "".join(
+        traceback.format_exception(caught.value)
+    )
+    assert caught.value.__context__ is None
+    target.write.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_layout_workflow_controller_assignment_denial_before_prevalidation(
+    layout_creation_target, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.lpar import workflows
+    from hmcpctl.operations.lpar.assignments import (
+        DedicatedPcieAssignment,
+        LparPcieAssignments,
+    )
+    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
+
+    target = layout_creation_target
+    mode = AsyncMock(return_value=RoleCapabilities(True, False, None, None, False))
+    monkeypatch.setattr(
+        workflows, "resolve_system_uuid", AsyncMock(return_value=LAYOUT_SYSTEM)
+    )
+    monkeypatch.setattr(workflows, "read_role_capabilities", mode)
+    prevalidate = AsyncMock()
+    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
+    create = AsyncMock()
+    monkeypatch.setattr(workflows, "create_and_stamp_lpar", create)
+    assignments = LparPcieAssignments(
+        dedicated=(DedicatedPcieAssignment("default_profile", "21010010"),)
+    )
+    with pytest.raises(ValueError, match="controller mode"):
+        await workflows.create_lpar(
+            target.hmc,
+            "selector",
+            layout_creation(LparMemoryLayout(hpt_ratio="1:128")),
+            assignments,
+        )
+    mode.assert_awaited_once_with(
+        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+    )
+    prevalidate.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_workflow_keylock_refused_before_assignment_preflight(
+    layout_creation_target, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.lpar import workflows
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+
+    target = layout_creation_target
+    prevalidate = AsyncMock()
+    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
+    with pytest.raises(ValueError, match="keylock"):
+        await workflows.create_lpar(
+            target.hmc,
+            "selector",
+            layout_creation(LparMemoryLayout(hpt_ratio="1:128"), keylock="normal"),
+            LparPcieAssignments(),
+        )
+    prevalidate.assert_not_awaited()
+    assert target.hmc.mock_calls == []
+
+
+@pytest.mark.asyncio
+async def test_layout_stamp_failure_blocks_apply(layout_creation_target):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    target.stamp.return_value = (False, ("stamp unavailable",))
+    result = await create_and_stamp_lpar(
+        target.hmc,
+        "selector",
+        layout_creation(LparMemoryLayout(hpt_ratio="1:128"), apply_profile=True),
+    )
+    assert result.resource_created and result.ownership_stamped is False
+    assert result.memory_layout_step.status == "ok"
+    assert result.apply_step.status == "skipped"
+    target.apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_layout_does_not_prevalidate_current_huge_pool(layout_creation_target):
+    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+
+    target = layout_creation_target
+    target.hmc.get_managed_system.return_value["Resource"][
+        "AssociatedSystemMemoryConfiguration"
+    ].update(CurrentAvailableHugePages="0")
+    result = await create_and_stamp_lpar(
+        target.hmc,
+        "selector",
+        layout_creation(LparMemoryLayout(desired_num_huge_pages=1)),
+    )
+    assert result.memory_layout_step.status == "ok"
+    target.write.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_layout_workflow_stamp_failure_blocks_assignments(
+    layout_creation_target, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.lpar import workflows
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    target = layout_creation_target
+    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
+    monkeypatch.setattr(
+        workflows,
+        "create_and_stamp_lpar",
+        AsyncMock(
+            return_value=LparCreationResult(
+                True,
+                target.entry,
+                False,
+                (),
+                memory_layout_step=WorkflowStep("memory_layout", "ok"),
+            )
+        ),
+    )
+    apply = AsyncMock()
+    monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", apply)
+    result = await workflows.create_lpar(
+        target.hmc,
+        "selector",
+        layout_creation(LparMemoryLayout(hpt_ratio="1:128")),
+        LparPcieAssignments(),
+    )
+    assert result.resource_created and not result.workflow_completed
+    apply.assert_not_awaited()
