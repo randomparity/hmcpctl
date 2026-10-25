@@ -476,10 +476,18 @@ async def _authorize_system_lpar_profile_restore(
 
 
 async def _read_lpar_description_for_authorization(
-    hmc: HMCClient, system_name: str, lpar_name: str
+    hmc: HMCClient,
+    system_name: str,
+    lpar_name: str,
+    *,
+    max_output_bytes: int | None = None,
 ) -> str:
     """Read ownership metadata with a remedy for an unavailable SSH precheck."""
     try:
+        if max_output_bytes is not None:
+            return await get_lpar_description(
+                hmc.config, system_name, lpar_name, max_output_bytes=max_output_bytes
+            )
         return await get_lpar_description(hmc.config, system_name, lpar_name)
     except HMCCLIError as exc:
         raise HMCCLIError(
@@ -495,14 +503,20 @@ async def authorize_lpar_mutation(
     lpar_name: str,
     *,
     ownership_override: bool = False,
+    max_output_bytes: int | None = None,
 ) -> None:
     """Reject mutations of foreign-owned or malformed ownership-stamped LPARs."""
     if ownership_override:
         _audit_lpar_ownership_override(hmc, system_name, lpar_name)
         return
-    description = await _read_lpar_description_for_authorization(
-        hmc, system_name, lpar_name
-    )
+    if max_output_bytes is None:
+        description = await _read_lpar_description_for_authorization(
+            hmc, system_name, lpar_name
+        )
+    else:
+        description = await _read_lpar_description_for_authorization(
+            hmc, system_name, lpar_name, max_output_bytes=max_output_bytes
+        )
     authorize_lpar_ownership_description(
         hmc, system_name, lpar_name, description, operation="lpar-mutation"
     )

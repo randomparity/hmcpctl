@@ -1450,3 +1450,60 @@ def test_required_rejects_unknown_policy_before_traffic():
     with pytest.raises(ValueError, match="stamp_policy"):
         _run_create(hmc, _creation(stamp_policy="mandatory"))  # type: ignore[arg-type]
     hmc.find_partition_by_name.assert_not_awaited()
+
+
+@pytest.mark.parametrize("limit", [None, 65536])
+def test_ownership_output_limit(limit):
+    """The normal guard keeps the real description path and optional transport budget."""
+    hmc = type("StubHMC", (), {"config": _config()})()
+    with patch("hmcpctl.ssh.profiles.run_hmc_command", new_callable=AsyncMock) as run:
+        run.return_value = "legacy partition"
+        asyncio.run(
+            authorize_lpar_mutation(
+                hmc, "system-A", "partition-A", max_output_bytes=limit
+            )
+        )
+    expected = {} if limit is None else {"max_output_bytes": limit}
+    assert run.await_args.kwargs == expected
+    assert run.await_args.args[1] == (
+        "lssyscfg -r lpar -m system-A --filter lpar_names=partition-A -F description"
+    )
+
+
+def test_ownership_output_limit_overflow_prevents_authorization():
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    hmc = type("StubHMC", (), {"config": _config()})()
+    with (
+        patch("hmcpctl.ssh.profiles.run_hmc_command", new_callable=AsyncMock) as run,
+        patch.object(
+            lpar_ownership, "authorize_lpar_ownership_description"
+        ) as authorize,
+    ):
+        run.side_effect = HMCCLIError("output limit exceeded; completion unknown")
+        with pytest.raises(HMCCLIError, match="ownership precheck failed"):
+            asyncio.run(
+                authorize_lpar_mutation(
+                    hmc, "system-A", "partition-A", max_output_bytes=65536
+                )
+            )
+    authorize.assert_not_called()
+
+
+def test_ownership_output_limit_override_keeps_audit(caplog):
+    hmc = type("StubHMC", (), {"config": _config()})()
+    with (
+        patch("hmcpctl.ssh.profiles.run_hmc_command", new_callable=AsyncMock) as run,
+        caplog.at_level(logging.WARNING),
+    ):
+        asyncio.run(
+            authorize_lpar_mutation(
+                hmc,
+                "system-A",
+                "partition-A",
+                ownership_override=True,
+                max_output_bytes=65536,
+            )
+        )
+    run.assert_not_awaited()
+    assert "ownership-override" in caplog.text
