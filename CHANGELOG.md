@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR processor updates and combined modify through CLI/MCP accept sharing
+  modes and strict integer `uncapped_weight` values from 0–255, preserving zero
+  and omission. Independent configured/current readback determines completion;
+  runtime is observed separately. Existing HMC/context guards still apply; new
+  variants remain unevidenced on hardware
+  ([#1780](https://github.com/randomparity/hmcpctl/issues/1780)).
+
 - LPAR and VIOS creation through CLI/MCP accept optional strict booleans
   `hardware_mem_encryption` and `hardware_mem_expansion`, preserving omission and
   explicit false. Selected-system admission guards native creation; independent

@@ -3698,6 +3698,10 @@
           {
             "variant": "delegated-pcie-assignments",
             "parameters": []
+          },
+          {
+            "variant": "sharing-and-uncapped-weight-current-configuration",
+            "parameters": []
           }
         ],
         "missing_scope": []
@@ -3785,6 +3789,10 @@
         "implemented_scope": [
           {
             "variant": "processor-read-modify-write",
+            "parameters": []
+          },
+          {
+            "variant": "sharing-and-uncapped-weight-current-configuration",
             "parameters": []
           }
         ],
