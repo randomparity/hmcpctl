@@ -1772,3 +1772,49 @@ Capability-false, other secure-boot values, VIOS, OS400/Power11, irreversible
 enables and keystore variants remain unrun. Mocks and scenario registration add
 no maturity evidence. Generate public summaries only with
 `scripts/live_test_evidence.py`; raw result documents remain private.
+
+## Inactive processor quantities (arm 56)
+
+The opt-in `lpar-processor-quantities` group runs scenario
+`st56-lpar-processor-quantities`. It creates one token-owned inactive AIX/Linux
+fixture with 0.1/0.5/1.0 shared processing units, 1/2/4 virtual processors and
+1024/2048/4096 MiB memory. Creation suppresses profile application. Independent
+REST/native reads must agree on the complete current CPU and memory bounds. If
+all current bounds are zero, the arm rechecks contained identity, ownership and
+inactive state before applying the default profile once; mixed or malformed
+bounds stop. Setup must establish positive current bounds before quantity calls.
+
+The sequence removes 0.10 processing units, verifies zero-add as a no-op,
+refuses an over-maximum add of 1.10 and sets entitlement back to 0.50. Separate
+readback compares all CPU and memory bounds after each step; the first failed
+assertion stops the sequence. Native inactive removal/set is a bounded test
+hypothesis: refusal fails the arm and does not authorize activation, force,
+replay or a substitute target. The arm does not change pools or sharing mode.
+Cleanup deletes only the matching-token inactive fixture and checks absence and
+the independent names/free-resource baseline. Concurrent administrators cannot
+be atomically fenced by these reads; use an exclusive approved window.
+
+Deploy the exact candidate commit and verify that the executing build matches
+it. Obtain a separate live window authorization and retain a clean independent
+baseline. Set `RUN_DIR` to an already-created mode-0700 private directory outside
+every repository and use `umask 077`. From the deployed repository, run:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-processor-quantities
+uv run --no-sync python scripts/live_lpar_processor_quantities.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+The window controller retains stdout/stderr privately and bounds its requests,
+deadlines and cleanup. Always run recovery after the wrapper, including failure
+or apparent success, and compare the independent before/after baseline. Generate
+public matrices only through the evidence script, scan their complete contents
+for private identifiers and retain the exact tested commit. Never publish raw
+results or invent a passing matrix.
+
+Arm 56 has offline tests but has not run on hardware. Its bounded sequence does
+not prove dedicated CPUs, shared virtual-processor changes, active/RMC operation,
+forced/no-RMC restart behavior, IBM i, or coupled inactive CPU-and-memory reset.
+Those product contexts retain their typed contracts and offline tests, and need
+separate candidate-bound authorization and evidence; no fallback run is implied.

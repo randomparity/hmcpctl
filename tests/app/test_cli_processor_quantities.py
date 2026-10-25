@@ -191,3 +191,51 @@ def test_cli_confirmation_names_coupled_reset_and_decline_stops(monkeypatch):
         and "restart" in result.output
     )
     client.assert_not_called()
+
+
+def test_processor_quantity_metadata_binding():
+    import inspect
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    operations = json.loads((root / "docs/capabilities/operations.json").read_text())[
+        "operations"
+    ]
+    operation = next(row for row in operations if row["operation"] == "lpar.dlpar_proc")
+    assert set(operation["row_ids"]) == {
+        "rest:managed-system/logical-partition",
+        "cli:commands/chhwres",
+        "cli:commands/lshwres",
+    }
+    assert operation["signature"] == str(inspect.signature(lifecycle.hmc_dlpar_proc))
+    assert {
+        "tests/lpar/test_processor_quantities.py",
+        "tests/app/test_cli_processor_quantities.py",
+    } <= set(operation["tests"])
+    maturity = json.loads((root / "docs/capabilities/maturity.json").read_text())[
+        "operations"
+    ]
+    entry = next(row for row in maturity if row["operation"] == "lpar.dlpar_proc")
+    variants = {
+        item["variant"]: item for item in entry["implementation"]["implemented_scope"]
+    }
+    assert set(variants) == {
+        "processor-read-modify-write",
+        "native-current-processor-quantities",
+    }
+    parameters = variants["native-current-processor-quantities"]["parameters"]
+    assert {item["name"] for item in parameters} == {
+        "operation",
+        "processors",
+        "processing_units",
+        "force",
+    }
+    assert all(item["constraint"].strip() for item in parameters)
+    assert {item["scenario"] for item in entry["evidence"]} == {"st39-lpar-config"}
+    projection = json.loads(
+        (root / "src/hmcpctl/_operation_maturity.json").read_text()
+    )["operations"]
+    current = next(row for row in projection if row["operation"] == "lpar.dlpar_proc")
+    assert current["implementation"] == "implemented"
+    assert current["verification"] == "stale" and current["reason"] == "closure-changed"

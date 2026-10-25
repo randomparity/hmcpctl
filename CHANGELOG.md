@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Native LPAR processor add/remove/set quantities through `hmc_dlpar_proc(change=...)`
+  and `lpars processors` distinguish whole dedicated CPUs/shared virtual processors
+  from shared entitlement. Ownership, capacity and state checks precede mutation;
+  independent readback reports applied, partial or uncertain outcomes without replay
+  (#1778). The opt-in arm 56 has offline coverage; native quantity contexts remain
+  unverified on hardware. Existing absolute resource setters retain their behavior.
+
 - Native LPAR memory add/remove/set quantities and shared I/O entitlement inputs
   are available through `hmc_dlpar_mem(change=...)` and `lpars memory`, with
   guarded admission and independent applied/partial/uncertain readback (#1774).
