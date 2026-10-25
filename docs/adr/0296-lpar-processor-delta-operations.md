@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for #1778, frozen scope q1778-1db8f45e; implementation awaits design gates.
+Accepted for #1778, frozen scope q1778-1db8f45e; native evidence remains separately qualified.
 
 ## Context
 
