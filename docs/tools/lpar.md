@@ -2,7 +2,7 @@
 
 # `lpar` tools
 
-45 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+46 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -41,6 +41,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_migrate_recover_lpar` | `mutate` | `lpar.migrate_recover` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Recover an LPAR after a failed LPM migration. |
 | `hmc_migrate_validate_lpar` | `mutate` | `lpar.migrate_validate` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Validate whether an LPM migration of an LPAR to target_system would succeed. |
 | `hmc_modify_lpar` | `mutate` | `lpar.modify` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Modify an LPAR's memory or CPU resource assignment. |
+| `hmc_move_lpar_memory` | `mutate` | `lpar.move_memory` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Move dedicated memory once and independently observe both partitions. |
 | `hmc_plan_lpar` | `read` | `lpar.plan` | `console` | `implemented` | `unevidenced` | `existing-runtime-guards` | Plan provisioning an LPAR on one connection: fit, targets, blockers and changes. |
 | `hmc_plan_lpar_memopt_scores` | `read` | `lpar.plan_memopt_scores` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return predicted LPAR affinity scores without applying optimization. |
 | `hmc_power_lpar` | `destructive` | `lpar.power` | `console` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Start, stop or restart one LPAR, wait a bounded time, and verify its state. |
