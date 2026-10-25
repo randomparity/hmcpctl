@@ -29,7 +29,9 @@ data or scope mismatches fail closed. Every other
 subtask the run dispatched is listed as NOT WITNESSED, to be checked by hand
 (docs/live-testing.md, step 4).
 
-Exit 0 means every dispatched subtask was witnessed and nothing is stranded.
+Exit 0 means every dispatched subtask was witnessed and nothing is stranded,
+or a complete unarmed ST58 record was classified SKIPPED with no fixture work.
+That SKIPPED disposition is not independent baseline or live verification.
 Exit 1 means something is, and the output names it with the command that
 clears it. Exit 2 means some state could not be read, or the run dispatched a
 subtask this script does not witness, which is not the same as clean. A run
@@ -57,7 +59,8 @@ import shlex
 import sys
 from collections.abc import Awaitable, Callable
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -402,6 +405,75 @@ async def check_lpar_config(call, inputs: LparConfigInputs) -> list[Finding]:
 class CreationMemoryLayoutInputs:
     system_name: str
     journal: dict
+
+
+def creation_memory_layout_skip_reason(document, subtasks) -> str | None:
+    """Recognize only the runner's complete pre-effect configuration rejection."""
+    if subtasks != [creation_memory_layout.SUBTASK]:
+        return None
+    config = live_config.decode_saved_config(document.get("config"))
+    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    run = document["run"]
+    if (
+        set(document) != {"run", "config", "hmc", "artifacts", "results"}
+        or set(run)
+        != {
+            "group",
+            "subtasks",
+            "partial",
+            "tested_commit",
+            "tree_clean",
+            "schema_version",
+            "finished",
+        }
+        or run.get("group") != creation_memory_layout.GROUP
+        or run.get("partial") is not False
+        or not isinstance(run.get("tested_commit"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", run["tested_commit"]) is None
+        or type(run.get("tree_clean")) is not bool
+        or not isinstance(run.get("schema_version"), str)
+        or document["artifacts"].get("creation_memory_layout") != {}
+        or artifacts != live_config.LiveTestArtifacts()
+        or document["artifacts"] != asdict(artifacts)
+    ):
+        return None
+    hmc = document.get("hmc")
+    expected_hmc = runner._hmc_identity(HMCConfig.from_mapping({}))
+    if (
+        not isinstance(hmc, dict)
+        or set(hmc) != set(expected_hmc)
+        or any(type(hmc[key]) is not type(value) for key, value in expected_hmc.items())
+    ):
+        return None
+    rows = document.get("results")
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        return None
+    row = rows[0]
+    if (
+        set(row) != {"subtask", "tool", "status", "result", "timestamp", "note", "data"}
+        or type(row["subtask"]) is not int
+        or row["subtask"] != creation_memory_layout.SUBTASK
+        or row["tool"] != creation_memory_layout.GROUP
+        or row["status"] != "SKIP"
+        or row["result"] != "skipped"
+        # RunState.record serializes scalar None as this string, not JSON null.
+        or row["data"] != "None"
+    ):
+        return None
+    for value in (run.get("finished"), row["timestamp"]):
+        if not isinstance(value, str):
+            return None
+        try:
+            if datetime.fromisoformat(value).tzinfo is None:
+                return None
+        except ValueError:
+            return None
+    try:
+        creation_memory_layout.configured(config)
+    except (ValueError, TypeError) as error:
+        reason = str(error)
+        return reason if reason and row["note"] == reason else None
+    return None
 
 
 def creation_memory_layout_inputs_from_document(document, subtasks):
@@ -2061,6 +2133,13 @@ def main(argv: list[str] | None = None) -> int:
     creation_inputs = None
     creation_error = None
     try:
+        skip_reason = creation_memory_layout_skip_reason(document, subtasks)
+        if skip_reason:
+            print(f"SKIPPED  ST58 no fixture work: {skip_reason}")
+            print(
+                "Saved unarmed result only; not baseline, configured-value or runtime proof."
+            )
+            return 0
         creation_inputs = creation_memory_layout_inputs_from_document(
             document, subtasks
         )

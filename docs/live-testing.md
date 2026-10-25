@@ -1908,7 +1908,10 @@ uv run --no-sync python scripts/live_test_recovery.py --results "$PRIVATE/test-r
 uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/test-results-creation-memory-layout.json"
 ```
 
-Recovery is always read-only and mandatory even after apparent success. The
+Recovery is always read-only and mandatory even after apparent success. A complete
+unarmed pre-effect ST58 record reports `SKIPPED` / no fixture work with exit0;
+it supplies no baseline, configured-value or runtime proof. Partial, missing,
+malformed or contradictory evidence still refuses confirmation. The
 closed journal checkpoints before mutation; interrupted intent/baseline drift
 requires root reconciliation. Prior ST58 witnesses never restore or authorize
 cleanup. No retry, power fallback or new fixture follows uncertainty. Logical

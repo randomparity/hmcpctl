@@ -7,12 +7,15 @@ every case rather than one.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import shlex
 import sys
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import click
 import pytest
@@ -37,6 +40,202 @@ _DRC = "21010020"
 _BASELINE = "none"
 #: The one profile read ADR 0165 Decision 1 admits, as a literal.
 _PROFILE_READ = f"lssyscfg -r prof -m {_SYSTEM} -F lpar_name,name,io_slots --header"
+
+
+@pytest.fixture
+def unarmed_creation_results(monkeypatch, tmp_path, request):
+    """Use the real ST58 arm and runner writer; replace only the MCP boundary."""
+    from live_test import config as settings
+    from live_test import creation_memory_layout as arm
+
+    from hmcpctl.config import HMCConfig
+
+    @asynccontextmanager
+    async def served_client():
+        yield object()
+
+    def no_hmc(*_args, **_kwargs):
+        pytest.fail("unarmed ST58 must not construct an HMC client")
+
+    monkeypatch.setattr(arm, "HMCClient", no_hmc)
+    monkeypatch.setattr(recovery.runner, "served_client", served_client)
+    monkeypatch.setattr(recovery.runner, "served_schemas", AsyncMock(return_value={}))
+    emitted = []
+    original_emit = recovery.runner.evidence.emit_observations
+
+    def emit(state, *args):
+        emitted.extend(state.observations)
+        return original_emit(state, *args)
+
+    monkeypatch.setattr(recovery.runner.evidence, "emit_observations", emit)
+    destination = tmp_path / "results.json"
+    config = settings.LiveTestConfig(**getattr(request, "param", {}))
+    assert (
+        asyncio.run(
+            recovery.runner.main(
+                group=arm.GROUP,
+                results_path=str(destination),
+                config=config,
+                hmc_config=HMCConfig.from_mapping({}),
+            )
+        )
+        == 0
+    )
+    assert not emitted
+    assert not destination.with_name("results-observations.json").exists()
+    document = json.loads(destination.read_text())
+    assert set(document) == {"run", "config", "hmc", "artifacts", "results"}
+    assert document["artifacts"] == dataclasses.asdict(settings.LiveTestArtifacts())
+    assert len(document["results"]) == 1
+    assert document["results"][0]["data"] == "None"
+    assert document["results"][0]["result"] == "skipped"
+    return destination, document
+
+
+@pytest.mark.parametrize(
+    "unarmed_creation_results",
+    [
+        {},
+        {"creation_memory_layout_hpt_ratio": "1:128"},
+        {"creation_memory_layout_fresh_vios_delete_authorized": True},
+        {
+            "creation_memory_layout_fresh_vios_delete_authorized": True,
+            "creation_memory_layout_hpt_ratio": "1:128",
+        },
+        {
+            "creation_memory_layout_hpt_ratio": "1:128",
+            "creation_memory_layout_ppt_ratio": "1:256",
+        },
+    ],
+    indirect=True,
+)
+def test_finished_unarmed_creation_recovery_is_skipped(
+    unarmed_creation_results, monkeypatch, capsys
+):
+    destination, document = unarmed_creation_results
+    original = destination.read_bytes()
+    capsys.readouterr()
+
+    def no_checks(*_args, **_kwargs):
+        pytest.fail("unarmed recovery must not bootstrap or read an HMC")
+
+    bootstrap = Mock(return_value=False)
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", bootstrap)
+    monkeypatch.setattr(recovery, "_run_checks", no_checks)
+    assert recovery.main(["--results", str(destination)]) == 0
+    bootstrap.assert_not_called()
+    output = capsys.readouterr()
+    assert "SKIPPED" in output.out
+    assert "no fixture work" in output.out
+    assert "not baseline, configured-value or runtime proof" in output.out
+    assert "CLEAN" not in output.out + output.err
+    assert destination.read_bytes() == original
+    assert json.loads(original) == document
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("run", "partial"), True),
+        (("run", "partial"), None),
+        (("run", "partial"), 0),
+        (("run", "partial"), "missing"),
+        (("run", "finished"), "missing"),
+        (("run", "finished"), None),
+        (("run", "finished"), "unfinished"),
+        (("run", "finished"), "2026-10-25T12:00:00"),
+        (("run", "tested_commit"), "missing"),
+        (("run", "tested_commit"), "not-a-commit"),
+        (("run", "tree_clean"), "missing"),
+        (("run", "schema_version"), None),
+        (("run", "detach_probe"), True),
+        (("run", "group"), "all"),
+        (("run", "subtasks"), [58, 1]),
+        (("run", "subtasks"), [58, 58]),
+        (("run", "subtasks"), [58.0]),
+        (("run",), "missing"),
+        (("artifacts", "creation_memory_layout"), "missing"),
+        (("artifacts", "creation_memory_layout"), None),
+        (("artifacts", "creation_memory_layout"), {"phase": "intent"}),
+        (("artifacts", "system_uuid"), "prior-system"),
+        (("artifacts", "lp3_baseline"), {"attempted": True}),
+        (("artifacts", "test_user_uuid"), "prior-user"),
+        (("artifacts",), []),
+        (("config", "creation_memory_layout_hpt_ratio"), "bad token"),
+        (("config", "creation_memory_layout_ppt_ratio"), "bad token"),
+        (("config", "creation_memory_layout_fresh_vios_delete_authorized"), "false"),
+        (("config",), {}),
+        (("hmc",), None),
+        (("hmc", "port"), "443"),
+        (("results",), []),
+        (("results", 0, "subtask"), 58.0),
+        (("results", 0, "tool"), "other"),
+        (("results", 0, "status"), "PASS"),
+        (("results", 0, "status"), "FAIL"),
+        (("results", 0, "data"), None),
+        (("results", 0, "data"), {}),
+        (("results", 0, "data"), "missing"),
+        (("results", 0, "timestamp"), None),
+        (("results", 0, "timestamp"), "unfinished"),
+        (("results", 0, "extra"), True),
+        (
+            ("results", 0, "note"),
+            "requires named group, HMC configuration and durable checkpoint",
+        ),
+        (("results", 0, "note"), "prior invocation/restored journal refused"),
+        (("results", 0, "note"), ""),
+        (("results", 0, "result"), "passed"),
+        (("extra",), True),
+    ],
+)
+def test_unarmed_creation_recovery_refuses_incomplete_or_contradictory_record(
+    unarmed_creation_results, monkeypatch, capsys, path, value
+):
+    destination, document = unarmed_creation_results
+    changed = deepcopy(document)
+    parent = changed
+    for key in path[:-1]:
+        parent = parent[key]
+    if value == "missing":
+        del parent[path[-1]]
+    else:
+        parent[path[-1]] = value
+    destination.write_text(json.dumps(changed))
+    original = destination.read_bytes()
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "_run_checks", AsyncMock(return_value=[]))
+    capsys.readouterr()
+    assert recovery.main(["--results", str(destination)]) == 2
+    output = capsys.readouterr()
+    assert "CLEAN" not in output.out + output.err
+    assert "SKIPPED" not in output.out
+    assert destination.read_bytes() == original
+
+
+@pytest.mark.parametrize("fault", ["armed", "extra-skip", "extra-attempt"])
+def test_unarmed_creation_recovery_refuses_armed_or_extra_work(
+    unarmed_creation_results, monkeypatch, capsys, fault
+):
+    destination, document = unarmed_creation_results
+    if fault == "armed":
+        document["config"].update(
+            creation_memory_layout_hpt_ratio="1:128",
+            creation_memory_layout_ppt_ratio="1:256",
+            creation_memory_layout_fresh_vios_delete_authorized=True,
+        )
+    else:
+        row = dict(document["results"][0])
+        if fault == "extra-attempt":
+            row.update(tool="hmc_create_lpar", status="FAIL", data="unknown")
+        document["results"].append(row)
+    destination.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "_run_checks", AsyncMock(return_value=[]))
+    capsys.readouterr()
+    assert recovery.main(["--results", str(destination)]) == 2
+    output = capsys.readouterr()
+    assert "CLEAN" not in output.out + output.err
+    assert "SKIPPED" not in output.out
 
 
 def _readback(io_slots: str, profile: str = "default") -> str:

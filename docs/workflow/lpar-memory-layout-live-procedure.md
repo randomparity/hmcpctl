@@ -44,6 +44,9 @@ uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/test-results-cre
 Recovery is mandatory after failure, cancellation and apparent success. Preserve
 its private findings before generating filtered evidence. Neither software
 rollback nor read-only recovery removes resources, pending intent or archives.
+A complete unarmed pre-effect ST58 record reports `SKIPPED` / no fixture work
+with exit0. This is not baseline, configured-value or runtime proof. Partial,
+missing, malformed or contradictory evidence still refuses confirmation.
 
 The finite matrix first creates a fresh owned inactive AIX/Linux partition with
 huge-page count0/0/0, both supplied ratios and Decimal0 reservation, without apply.
