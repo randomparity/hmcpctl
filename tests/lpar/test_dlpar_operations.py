@@ -985,3 +985,37 @@ async def test_an_on_sync_carries_no_warning(mock_hmc):
 
     assert result["change_location"]["lives_in"] == "current-configuration-and-profile"
     assert "warnings" not in result
+
+
+@pytest.mark.asyncio
+async def test_sharing_modify_barrier_processor_filter_precedes_validation(mock_hmc):
+    _mock_lpar_detail(mock_hmc)
+    post = _mock_modify(mock_hmc)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(
+            hmc,
+            LPAR_UUID,
+            LparResources(desired_procs=1, desired_memory=-1),
+            ownership_override=True,
+        )
+    assert result["Resource"]["PartitionName"] == LPAR_NAME
+    assert post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sharing_modify_barrier_weight_is_a_processor_field(mock_hmc):
+    _mock_lpar_detail(mock_hmc)
+    _mock_system_detail(mock_hmc)
+    post = _mock_modify(mock_hmc)
+    with patch(
+        "hmcpctl.operations.lpar.ownership.get_lpar_description", new=_owned_by("other")
+    ):
+        async with HMCClient(make_config(agent_id="mine")) as hmc:
+            with pytest.raises(PermissionError, match="ownership_override=true"):
+                await set_lpar_processors(
+                    hmc,
+                    LPAR_UUID,
+                    LparResources(uncapped_weight=0),
+                    system_name_or_uuid=SYSTEM_UUID,
+                )
+    assert not post.called

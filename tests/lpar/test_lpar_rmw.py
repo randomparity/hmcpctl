@@ -503,7 +503,7 @@ async def test_modify_writes_rename_then_resources_as_two_read_modify_writes(
         ("rename", "ok"),
         ("resources", "ok"),
     ]
-    assert get.call_count == 2
+    assert get.call_count == 3  # whole-resource preflight precedes rename
     rename, resources = (_canonical(_lpar(body)) for body in _posted(post))
     assert rename == _expected(_entry(), {"PartitionName": "lpar-b"})
     assert resources == _expected(
@@ -525,21 +525,13 @@ async def test_modify_refuses_desired_memory_above_configurable_before_any_write
 
 
 @pytest.mark.asyncio
-async def test_modify_reports_the_rename_when_the_resources_leg_is_refused(
+async def test_modify_refuses_known_invalid_resources_before_rename(
     mock_hmc, authorized
 ):
     _, post = _routes(mock_hmc)
-
-    result = await _modify(
-        LparResources(dedicated=True, desired_procs=2), new_name="lpar-b"
-    )
-
-    assert [(step.step, step.status) for step in result.steps] == [
-        ("rename", "ok"),
-        ("resources", "error"),
-    ]
-    assert "switch the partition" in result.warnings[0]
-    assert post.call_count == 1
+    with pytest.raises(ValueError, match="switch the partition"):
+        await _modify(LparResources(dedicated=True, desired_procs=2), new_name="lpar-b")
+    assert not post.called
 
 
 @pytest.mark.asyncio
@@ -1343,3 +1335,527 @@ def test_post_transport_and_parse_certainty_error_compatibility():
     assert error.body == ordinary.body
     assert len(error.body.encode("utf-8")) <= hmc_errors.MAX_ERROR_BODY_BYTES
     assert error.status_code == 500
+
+
+# Independent sharing verification uses real XML mapping, editor and transport.
+def _sharing_snapshot(weight="128", current=None, runtime=None, **changes):
+    node = _observed_lpar()
+    for path, text in {
+        f"{PPC}/SharedProcessorConfiguration/UncappedWeight": weight,
+        f"{CURRENT_SHARED}/CurrentUncappedWeight": current
+        if current is not None
+        else weight,
+        f"{CURRENT_SHARED}/RuntimeUncappedWeight": runtime
+        if runtime is not None
+        else weight,
+        **changes,
+    }.items():
+        _find(node, path).text = text
+    ET.SubElement(node, f"{{{UOM}}}CurrentProfileSync").text = "On"
+    return node
+
+
+def _sharing_routes(router, before, after, *, status=200, body=None, fresh=None):
+    responses = [
+        httpx.Response(
+            200, text=ET.tostring(node, encoding="unicode"), headers={"ETag": ETAG}
+        )
+        for node in (before, fresh if fresh is not None else before)
+    ]
+    if isinstance(after, ET.Element):
+        responses.append(
+            httpx.Response(200, text=ET.tostring(after, encoding="unicode"))
+        )
+    else:
+        responses.append(httpx.Response(503, text="independent read unavailable"))
+    get = router.get(LPAR_PATH, params={"group": "Advanced"}).mock(
+        side_effect=responses
+    )
+    post = router.post(LPAR_PATH, params={"group": "Advanced"}).mock(
+        return_value=httpx.Response(status, text=body if body is not None else _entry())
+    )
+    return get, post
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("weight", [0, 255, None])
+@pytest.mark.parametrize("runtime", ["matched", "mismatched", "unavailable"])
+async def test_sharing_outcome_independent_configuration(
+    mock_hmc, authorized, weight, runtime
+):
+    after = _sharing_snapshot(str(weight if weight is not None else 73))
+    if runtime == "mismatched":
+        _find(after, f"{CURRENT_SHARED}/RuntimeUncappedWeight").text = "19"
+    elif runtime == "unavailable":
+        _find(after, f"{PPC}/RuntimeSharingMode").text = "invalid"
+    get, post = _sharing_routes(mock_hmc, _sharing_snapshot(), after)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(
+            hmc, LPAR, LparResources(sharing_mode="uncapped", uncapped_weight=weight)
+        )
+    assert result["outcome"] == "applied"
+    assert result["workflow_completed"] is True
+    assert result["configuration_verification"] == "matched"
+    assert result["runtime_verification"] == runtime
+    assert result["UUID"] == LPAR
+    assert result["Resource"][PPC]
+    assert result["completion_scope"] == "current-configuration"
+    assert result["expected"] == {
+        "configured": {
+            f"{PPC}/SharingMode": "uncapped",
+            f"{PPC}/HasDedicatedProcessors": "false",
+            **(
+                {f"{PPC}/SharedProcessorConfiguration/UncappedWeight": str(weight)}
+                if weight is not None
+                else {}
+            ),
+        },
+        "effective_mode": "uncapped",
+        "weight": weight,
+    }
+    assert result["change_location"]["lives_in"] == "current-configuration-and-profile"
+    assert bool(result["warnings"]) is (runtime != "matched")
+    assert get.call_count == 3 and post.call_count == 1
+    assert post.calls.last.request.headers["If-Match"] == ETAG
+    assert set(result) == {
+        "UUID",
+        "Resource",
+        "completion_scope",
+        "outcome",
+        "workflow_completed",
+        "submission_status",
+        "configuration_verification",
+        "runtime_verification",
+        "before",
+        "after",
+        "expected",
+        "submission_error",
+        "read_error",
+        "change_location",
+        "warnings",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "change", "outcome"),
+    [
+        (200, "none", "unverified"),
+        (412, "none", "rejected"),
+        (503, "none", "unverified"),
+        (200, "partial", "partial"),
+        (412, "partial", "partial"),
+        (503, "partial", "partial"),
+        (200, "complete", "applied"),
+        (412, "complete", "applied"),
+        (503, "complete", "applied"),
+    ],
+)
+async def test_sharing_outcome_submission_precedence(
+    mock_hmc, authorized, status, change, outcome
+):
+    before = _sharing_snapshot()
+    after = _sharing_snapshot(
+        "0" if change != "none" else "128",
+        current="0" if change == "complete" else "128",
+    )
+    _, post = _sharing_routes(mock_hmc, before, after, status=status, body="not XML")
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
+    assert result["outcome"] == outcome
+    assert (
+        result["submission_status"]
+        == {200: "acknowledged", 412: "rejected", 503: "unknown"}[status]
+    )
+    assert result["submission_error"]
+    assert result["Resource"]["CurrentProfileSync"] == "On"
+    assert post.call_count == 1
+    if outcome == "applied" and status != 200:
+        assert any("causality" in warning for warning in result["warnings"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "read",
+        "uuid",
+        "missing_uuid",
+        "malformed_uuid",
+        "context",
+        "namespace",
+        "duplicate",
+        "weight",
+    ],
+)
+async def test_sharing_outcome_unavailable_or_malformed_evidence(
+    mock_hmc, authorized, damage
+):
+    after = _sharing_snapshot("0")
+    if damage in {"uuid", "malformed_uuid"}:
+        _find(after, "Metadata/Atom/AtomID").text = (
+            SYSTEM if damage == "uuid" else "invalid"
+        )
+    elif damage == "missing_uuid":
+        atom = _find(after, "Metadata/Atom")
+        atom.remove(_find(after, "Metadata/Atom/AtomID"))
+    elif damage == "context":
+        _find(after, f"{PPC}/CurrentSharingMode").text = "invalid"
+    elif damage == "namespace":
+        _find(after, f"{PPC}/CurrentSharingMode").tag = "{wrong}CurrentSharingMode"
+    elif damage == "duplicate":
+        ET.SubElement(
+            _find(after, PPC), f"{{{UOM}}}CurrentSharingMode"
+        ).text = "uncapped"
+    elif damage == "weight":
+        _find(after, f"{CURRENT_SHARED}/CurrentUncappedWeight").text = "NaN"
+    _sharing_routes(mock_hmc, _sharing_snapshot(), None if damage == "read" else after)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
+    assert result["workflow_completed"] is False
+    if damage in {"read", "uuid", "missing_uuid", "malformed_uuid"}:
+        assert result["outcome"] == "unverified"
+        assert result["Resource"] == {} and result["after"] is None
+        assert result["read_error"] and result["warnings"]
+        assert result["change_location"]["lives_in"] == "unknown"
+    else:
+        assert result["outcome"] == "partial"
+    assert result["UUID"] == LPAR
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("numeric", ["0.30", "3e-1", "0.300", "NaN", "０.３", "0.4"])
+async def test_mixed_requested_configured_fields_and_runtime_are_independent(
+    mock_hmc, authorized, numeric
+):
+    after = _sharing_snapshot(
+        "0",
+        **{
+            f"{PPC}/SharedProcessorConfiguration/DesiredProcessingUnits": numeric,
+            "PartitionMemoryConfiguration/DesiredMemory": "4096.0",
+        },
+    )
+    _find(after, f"{PPC}/RuntimeSharingMode").text = "unknown"
+    _sharing_routes(mock_hmc, _sharing_snapshot(), after)
+    async with HMCClient(make_config()) as hmc:
+        result = await modify_lpar(
+            hmc,
+            LPAR,
+            LparResources(uncapped_weight=0, desired_procs=0.3, desired_memory=4096),
+            LparPcieAssignments(),
+        )
+    matched = numeric in {"0.30", "3e-1", "0.300"}
+    assert result.workflow_completed is matched
+    verification = (
+        "matched" if matched else ("mismatched" if numeric == "0.4" else "unavailable")
+    )
+    assert result.lpar["configuration_verification"] == verification
+    assert result.lpar["runtime_verification"] == "unavailable"
+    assert result.steps[0].status == ("ok" if matched else "error")
+    assert result.steps[0].result == result.lpar
+
+
+@pytest.mark.asyncio
+async def test_sharing_outcome_full_comparison_before_multibyte_diagnostic_bounds(
+    mock_hmc, authorized
+):
+    before = _sharing_snapshot("界" * 2000 + "a")
+    after = _sharing_snapshot("界" * 2000 + "b")
+    _sharing_routes(mock_hmc, before, after)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
+    assert result["outcome"] == "partial"
+    assert result["configuration_verification"] != "matched"
+    assert result["expected"]["weight"] == 0
+    for observed in (result["before"], result["after"]):
+        assert len(observed["configured"]["raw_weight"].encode()) <= 4096
+        assert len(next(iter(observed["requested"].values())).encode()) <= 4096
+    assert any("truncat" in warning for warning in result["warnings"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("race", [False, True])
+async def test_real_sharing_context_barrier_before_rename_and_post(
+    mock_hmc, authorized, race
+):
+    before = _sharing_snapshot()
+    invalid = _sharing_snapshot(**{f"{PPC}/CurrentSharingMode": "capped"})
+    get, post = _routes(mock_hmc)
+    documents = (
+        [before, before, invalid, _sharing_snapshot("0")]
+        if race
+        else [invalid, invalid, invalid]
+    )
+    get.mock(
+        side_effect=[
+            httpx.Response(
+                200, text=ET.tostring(node, encoding="unicode"), headers={"ETag": ETAG}
+            )
+            for node in documents
+        ]
+    )
+    if race:
+        result = await _modify(LparResources(uncapped_weight=0), new_name="renamed")
+        assert result.workflow_completed is False
+        assert [(s.step, s.status) for s in result.steps] == [
+            ("rename", "ok"),
+            ("resources", "error"),
+        ]
+        assert result.lpar["Resource"]["PartitionName"] == "lpar-a"
+        assert post.call_count == 1
+    else:
+        with pytest.raises(ValueError, match="CurrentSharingMode disagree"):
+            await _modify(LparResources(uncapped_weight=0), new_name="renamed")
+        assert not post.called
+
+
+@pytest.mark.asyncio
+async def test_sharing_modify_barrier_incomplete_skips_pcie(mock_hmc, authorized):
+    from hmcpctl.operations.lpar.assignments import DedicatedPcieAssignment
+
+    get, post = _sharing_routes(mock_hmc, _sharing_snapshot(), _sharing_snapshot())
+    # Preflight, rename RMW, resources RMW, then independent observation.
+    get.mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                text=ET.tostring(_sharing_snapshot(), encoding="unicode"),
+                headers={"ETag": ETAG},
+            )
+            for _ in range(4)
+        ]
+    )
+    async with HMCClient(make_config()) as hmc:
+        result = await modify_lpar(
+            hmc,
+            LPAR,
+            LparResources(uncapped_weight=0),
+            LparPcieAssignments(dedicated=(DedicatedPcieAssignment("profile", "123"),)),
+            new_name="renamed",
+            system_name_or_uuid=SYSTEM,
+        )
+    assert result.workflow_completed is False
+    assert [(s.step, s.status) for s in result.steps] == [
+        ("rename", "ok"),
+        ("resources", "error"),
+        ("dedicated[0]", "skipped"),
+    ]
+    assert result.steps[0].result["Resource"]["PartitionName"] == "lpar-a"
+    assert result.steps[1].result == result.lpar
+    assert result.lpar["outcome"] == "unverified"
+    assert post.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested", "rest", "dedicated"),
+    [
+        ("capped", "capped", False),
+        ("uncapped", "uncapped", False),
+        ("keep_idle_procs", "keep idle procs", True),
+        ("share_idle_procs", "sre idle proces", True),
+        ("share_idle_procs_active", "sre idle procs active", True),
+        ("share_idle_procs_always", "sre idle procs always", True),
+    ],
+)
+async def test_sharing_outcome_all_modes_and_inapplicable_weights(
+    mock_hmc, authorized, requested, rest, dedicated
+):
+    before = _sharing_snapshot()
+    if dedicated:
+        for prefix in ("", "Current", "Runtime"):
+            _find(before, f"{PPC}/{prefix}HasDedicatedProcessors").text = "true"
+            _find(before, f"{PPC}/{prefix}SharingMode").text = "keep idle procs"
+    after = DET.fromstring(ET.tostring(before))
+    for prefix in ("", "Current", "Runtime"):
+        _find(after, f"{PPC}/{prefix}SharingMode").text = rest
+    if dedicated or requested == "capped":
+        _find(
+            after, f"{PPC}/SharedProcessorConfiguration/UncappedWeight"
+        ).text = "malformed"
+        _find(after, f"{CURRENT_SHARED}/CurrentUncappedWeight").text = "stale"
+    _sharing_routes(mock_hmc, before, after)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(
+            hmc, LPAR, LparResources(sharing_mode=requested)
+        )
+    assert result["outcome"] == "applied"
+    assert result["runtime_verification"] == "matched"
+    assert result["expected"]["effective_mode"] == rest
+    assert result["expected"]["weight"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "path", "value", "rendered"),
+    [
+        ("min_memory", "PartitionMemoryConfiguration/MinimumMemory", 1024, "1024.00"),
+        (
+            "desired_memory",
+            "PartitionMemoryConfiguration/DesiredMemory",
+            4096,
+            "4096e0",
+        ),
+        ("max_memory", "PartitionMemoryConfiguration/MaximumMemory", 8192, "8192.0"),
+        (
+            "min_procs",
+            f"{PPC}/SharedProcessorConfiguration/MinimumProcessingUnits",
+            0.1,
+            "0.10",
+        ),
+        (
+            "desired_procs",
+            f"{PPC}/SharedProcessorConfiguration/DesiredProcessingUnits",
+            0.3,
+            "3e-1",
+        ),
+        (
+            "max_procs",
+            f"{PPC}/SharedProcessorConfiguration/MaximumProcessingUnits",
+            2,
+            "2.00",
+        ),
+        (
+            "min_vcpus",
+            f"{PPC}/SharedProcessorConfiguration/MinimumVirtualProcessors",
+            1,
+            "1e0",
+        ),
+        (
+            "desired_vcpus",
+            f"{PPC}/SharedProcessorConfiguration/DesiredVirtualProcessors",
+            3,
+            "3.0",
+        ),
+        (
+            "max_vcpus",
+            f"{PPC}/SharedProcessorConfiguration/MaximumVirtualProcessors",
+            6,
+            "6.00",
+        ),
+    ],
+)
+@pytest.mark.parametrize("stale", [False, True])
+async def test_mixed_requested_configured_fields_every_mapping(
+    mock_hmc, authorized, field, path, value, rendered, stale
+):
+    after = _sharing_snapshot("0", **{path: "99" if stale else rendered})
+    _sharing_routes(mock_hmc, _sharing_snapshot(), after)
+    async with HMCClient(make_config()) as hmc:
+        result = await modify_lpar(
+            hmc,
+            LPAR,
+            LparResources(uncapped_weight=0, **{field: value}),
+            LparPcieAssignments(),
+        )
+    assert result.workflow_completed is not stale
+    assert result.lpar["configuration_verification"] == (
+        "mismatched" if stale else "matched"
+    )
+    assert result.lpar["runtime_verification"] == "matched"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error", [httpx.ReadTimeout("timed out"), httpx.ConnectError("界" * 3000)]
+)
+async def test_sharing_outcome_transport_unknown_and_bounded_diagnostics(
+    mock_hmc, authorized, error
+):
+    _, post = _sharing_routes(mock_hmc, _sharing_snapshot(), None)
+    post.mock(side_effect=error)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
+    assert result["outcome"] == "unverified"
+    assert result["submission_status"] == "unknown"
+    assert len(result["submission_error"].encode()) <= 4096
+    assert result["read_error"]
+    assert result["Resource"] == {}
+    assert any("truncat" in warning for warning in result["warnings"]) is isinstance(
+        error, httpx.ConnectError
+    )
+    assert post.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["missing", "duplicate", "namespace"])
+async def test_sharing_modify_barrier_whole_mapping_structure_before_rename(
+    mock_hmc, authorized, damage
+):
+    node = _sharing_snapshot()
+    memory = _find(node, "PartitionMemoryConfiguration")
+    desired = _find(node, "PartitionMemoryConfiguration/DesiredMemory")
+    if damage == "missing":
+        memory.remove(desired)
+    elif damage == "duplicate":
+        ET.SubElement(memory, f"{{{UOM}}}DesiredMemory").text = "3072"
+    else:
+        desired.tag = "{wrong}DesiredMemory"
+    get, post = _routes(mock_hmc, entry=ET.tostring(node, encoding="unicode"))
+    with pytest.raises(HMCError, match="DesiredMemory"):
+        await _modify(
+            LparResources(desired_memory=4096, uncapped_weight=0), new_name="renamed"
+        )
+    assert get.call_count == 1 and not post.called
+
+
+@pytest.mark.asyncio
+async def test_sharing_outcome_rejection_ignores_numeric_formatting(
+    mock_hmc, authorized
+):
+    after = _sharing_snapshot("0128", current="00128")
+    _sharing_routes(mock_hmc, _sharing_snapshot(), after, status=412)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(
+            hmc, LPAR, LparResources(sharing_mode="capped")
+        )
+    assert result["outcome"] == "rejected"
+    assert result["workflow_completed"] is False
+
+
+@pytest.mark.asyncio
+async def test_sharing_outcome_omitted_weight_requires_configured_current_agreement(
+    mock_hmc, authorized
+):
+    _sharing_routes(
+        mock_hmc, _sharing_snapshot(), _sharing_snapshot("73", current="74")
+    )
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(
+            hmc, LPAR, LparResources(sharing_mode="uncapped")
+        )
+    assert result["configuration_verification"] == "mismatched"
+    assert result["workflow_completed"] is False
+    assert result["outcome"] == "partial"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identity", [SYSTEM, None])
+async def test_sharing_modify_barrier_preflight_identity_before_rename(
+    mock_hmc, authorized, identity
+):
+    before = _sharing_snapshot()
+    atom = _find(before, "Metadata/Atom")
+    if identity is None:
+        atom.remove(_find(before, "Metadata/Atom/AtomID"))
+    else:
+        _find(before, "Metadata/Atom/AtomID").text = identity
+    _, post = _routes(mock_hmc, entry=ET.tostring(before, encoding="unicode"))
+    with pytest.raises(ValueError, match="UUID"):
+        await _modify(LparResources(uncapped_weight=0), new_name="renamed")
+    assert not post.called
+
+
+@pytest.mark.asyncio
+async def test_sharing_outcome_before_uses_actual_fresh_callback(mock_hmc, authorized):
+    _sharing_routes(
+        mock_hmc,
+        _sharing_snapshot(),
+        _sharing_snapshot("0"),
+        fresh=_sharing_snapshot("64"),
+    )
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
+    assert result["before"]["configured"]["weight"] == 64
+    assert result["before"]["current"]["weight"] == 64
+    assert result["outcome"] == "applied"

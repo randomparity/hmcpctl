@@ -187,3 +187,22 @@ async def test_modify_lpar_warns_when_the_profile_did_not_change(
     assert bool(result.warnings) is warned
     if warned:
         assert "CurrentProfileSync" in result.warnings[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "resources",
+    [LparResources(desired_memory=-1), LparResources(desired_procs=float("nan"))],
+)
+async def test_sharing_modify_barrier_pure_validation_precedes_client_use(resources):
+    hmc = AsyncMock()
+    with pytest.raises(ValueError, match="finite, non-negative"):
+        await modify_lpar(
+            hmc,
+            "lpar-1",
+            resources,
+            LparPcieAssignments(),
+            new_name="renamed",
+            system_name_or_uuid="system-1",
+        )
+    assert hmc.mock_calls == []
