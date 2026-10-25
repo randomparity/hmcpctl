@@ -296,6 +296,34 @@ def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _processor_sharing_weight_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "processor-sharing-weight",
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            (
+                "two sequential inactive AIX/Linux fixtures hmcpctl-live-lpar-<8 hex>; "
+                "at most one retained allocation, conditional on confirmed cleanup"
+            ),
+            (
+                "each: memory 1024/2048/4096 MiB min/desired/max; shared: "
+                "0.1/0.5/1.0 processing units and 1/1/2 vCPUs; dedicated: 1 CPU min/desired/max"
+            ),
+            (
+                "12 resource calls: 8 positive and 4 refusal cases; two creates and at most "
+                "two guarded deletions; HMC admission may refuse; no profile apply, no activation"
+            ),
+            (
+                "configured/current context unavailable means SKIP; no RMC or guest/runtime guarantee; "
+                "partition names and free CPU/memory must return to baseline; read-only recovery follows"
+            ),
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_settings_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-settings",
@@ -649,6 +677,7 @@ _ARM_VERDICTS = {
     "network": _network_verdict,
     "users": _users_verdict,
     "lpar-config": _lpar_config_verdict,
+    "processor-sharing-weight": _processor_sharing_weight_verdict,
     "lpar-settings": _lpar_settings_verdict,
     "lpar-reporting": _lpar_reporting_verdict,
     "lpar-physical-io": _lpar_physical_io_verdict,

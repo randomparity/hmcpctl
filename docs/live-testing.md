@@ -1931,3 +1931,63 @@ require operator inspection. An unconfirmed cleanup or baseline mismatch cannot
 produce passing evidence. Generate any public, redacted, HEAD-bound evidence
 through `scripts/live_test_evidence.py`; never publish raw result JSON or treat
 configuration readback as Linux, KVM or management-controller deployment proof.
+
+## Processor sharing and uncapped weight (ST59, named opt-in)
+
+The `processor-sharing-weight` group and `scripts/live_lpar_sharing_weight.py`
+run ST59 only. Neither the default selection nor `all` dispatches it. It creates
+and deletes two sequential owned inactive AIX/Linux fixtures named
+`hmcpctl-live-lpar-<8 hex>`. Each requests 1024/2048/4096 MiB minimum/desired/maximum
+memory. The shared fixture requests 0.1/0.5/1.0 processing units and 1/1/2 vCPUs;
+the dedicated fixture requests one CPU for each processor bound. At most one
+allocation is retained at a time, conditional on confirmed cleanup. These small
+requests describe the code, and do not guarantee HMC admission or available resources.
+
+The shared sequence requests uncapped weight 64, explicit weight 0, capped mode,
+and explicit uncapped weight 255, then requires capped+0 and weight256 refusals
+with unchanged independent state. The dedicated sequence requests `keep_idle_procs`,
+`share_idle_procs`, `share_idle_procs_active`, and `share_idle_procs_always`, then
+requires weight256 and weight0 refusals with unchanged independent state. This
+is 12 resource calls (eight positive and four refusal cases), two creates and at
+most two guarded deletions, plus bounded reads. No mutation is automatically retried.
+
+Creation requires this run's ownership stamp and suppresses profile apply.
+Every submission requires a fresh token and independently contained UUID, name,
+AIX/Linux type, inactive state and compatible configured/current sharing context.
+Initial unavailable context means SKIP after safe cleanup; no setup apply or
+activation initializes it. The arm independently reads configured/current mode
+and each applicable weight after every case. Runtime availability is recorded
+separately; no RMC, guest execution, profile persistence, default/reset weight or
+state/release matrix is established. A later context mismatch stops that fixture.
+
+Partial results are checkpointed before creation and every submission and after
+known independent observations. A checkpoint failure stops forward effects and
+the next fixture; only fresh-token, inactive-only cleanup of an attempted create
+remains. Cleanup refusal or baseline drift cannot promote either scenario to
+passed. The second fixture starts only after confirmed cleanup and restoration
+of original partition names and free CPU/memory. The scenario IDs are
+`st59-lpar-shared-weight` and `st59-lpar-dedicated-sharing`; skipped, incomplete
+or unrun variants supply no verified evidence.
+
+After separate operator hardware allocation and authorization, confirm that the
+deployed candidate matches the commit being evaluated. Use existing credentials
+and `system_name` configuration, and an absolute results path in an external
+private directory. Run read-only recovery even after apparent success or failure:
+
+```sh
+umask 077
+RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/hmcpctl-st59.XXXXXXXX")
+chmod 700 "$RUN_DIR"
+uv run --no-sync python scripts/live_test_preflight.py --group processor-sharing-weight
+uv run --no-sync python scripts/live_lpar_sharing_weight.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+```
+
+Recovery selects the shared scratch-prefix sweep from the existing ST59 run
+header and system name, including pre-UUID/partial phases. Missing or unreadable
+scope, partial execution and unreadable state cannot attest CLEAN. Recovery only
+reads; inspect any reported residue before manual remediation. Keep raw results
+and captures private; later public evidence must use `live_test_evidence.py`
+with matching-commit and redaction checks. The proposed 20-minute budget is
+unmeasured and is not an enforced timeout. ST59 has offline proof only until a
+separately authorized matching-commit hardware run establishes live evidence.

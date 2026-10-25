@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 55; 26 to 36 are other arms' row ids.
-ST53, ST54 and ST55 require their named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 59; 26 to 36 are other arms' row ids.
+ST53, ST54, ST55 and ST59 require their named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -120,6 +120,7 @@ from live_test.observation import (
 )
 from live_test.partition_profile_contract import exercise as exercise_profile_contract
 from live_test.partition_profiles import exercise_partition_profiles
+from live_test.processor_sharing_weight import exercise_processor_sharing_weight
 from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
 from live_test.provisioning import (
     exercise_storage_provisioning,
@@ -700,6 +701,7 @@ SUBTASKS = {
     53: exercise_lpar_linux_roles,
     54: exercise_memory_move,
     55: exercise_lpar_hardware_memory,
+    59: exercise_processor_sharing_weight,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -744,6 +746,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-reporting": [48],
     "lpar-physical-io": [49],
     "lpar-memory-quantities": [50],
+    "processor-sharing-weight": [59],
     "lpar-memory-move": [54],
     "lpar-vtpm": [51],
     "lpar-security-policy": [52],
@@ -1013,7 +1016,7 @@ async def main(
             print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
             return 1
     else:
-        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46, 52, 53, 54, 55})
+        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46, 52, 53, 54, 55, 59})
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]
