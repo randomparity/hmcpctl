@@ -66,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import (
+    lpar_affinity_group,
     lpar_config,
     lpar_hardware_memory,
     lpar_linux_roles,
@@ -180,6 +181,7 @@ _WITNESSED_SUBTASKS = (
         memory_quantities.SUBTASK,
         lpar_security_policy.SUBTASK,
         lpar_hardware_memory.SUBTASK,
+        lpar_affinity_group.SUBTASK,
         lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
     }
@@ -352,6 +354,7 @@ def lpar_config_inputs_from_document(
             memory_quantities.SUBTASK,
             lpar_security_policy.SUBTASK,
             lpar_hardware_memory.SUBTASK,
+            lpar_affinity_group.SUBTASK,
             lpar_linux_roles.SUBTASK,
         }.intersection(subtasks)
         or not system

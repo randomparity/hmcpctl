@@ -846,6 +846,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "add_vnic_backing",
     }
     assert by_label["--filter"] == {
+        "_read",
         "created_affinity_group_step",
         "facts",
         "_facts",

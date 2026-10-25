@@ -1242,6 +1242,15 @@
                 "constraint": "optional strict Linux intent boolean; false is explicit; selected-system authority and contained configuration readback, not NovaLink deployment"
               }
             ]
+          },
+          {
+            "variant": "c08-affinity-group-creation",
+            "parameters": [
+              {
+                "name": "affinity_group_id",
+                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority and contained labelled native-partition/named-profile equality or explicit unavailable/mismatch; no XML mapping or current/runtime equivalence claim"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -4981,6 +4990,15 @@
               {
                 "name": "hardware_mem_encryption,hardware_mem_expansion",
                 "constraint": "optional strict booleans; omission preserves defaults and false selects 0; positive selected-system capabilities and observed Classic/HMC-controller/PowerVM-controller true/false/false tuple required, not a general mode classifier; native create-only fixed attributes; independent inactive REST MemoryEncryptionHardwareAccessEnabled/MemoryExpansionHardwareAccessEnabled comparison proves access availability only, not desired/current values or runtime encryption/expansion"
+              }
+            ]
+          },
+          {
+            "variant": "c08-affinity-group-creation",
+            "parameters": [
+              {
+                "name": "affinity_group_id",
+                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority and contained labelled native-partition/named-profile equality or explicit unavailable/mismatch; no XML mapping or current/runtime equivalence claim"
               }
             ]
           }

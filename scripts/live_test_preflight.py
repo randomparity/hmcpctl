@@ -382,6 +382,20 @@ def _memory_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict
     )
 
 
+def _lpar_affinity_group_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        "lpar-affinity-group",
+        True,
+        "configuration validated; native authority required at dispatch",
+        (
+            f"two serial owned inactive AIX/Linux creations {lpar_config.NAME_PREFIX}<8 hex>, affinity none then 1; at most one fixture at a time",
+            "2 GiB desired memory/0.5 shared units; no profile apply or activation; independent labelled native partition/profile observations",
+            "matching-token inactive-only deletion and baseline equality before the second create; separate read-only recovery after every attempt",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_hardware_memory_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-hardware-memory",
@@ -657,6 +671,7 @@ _ARM_VERDICTS = {
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
     "lpar-hardware-memory": _lpar_hardware_memory_verdict,
+    "lpar-affinity-group": _lpar_affinity_group_verdict,
     "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
