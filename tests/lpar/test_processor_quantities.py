@@ -1013,7 +1013,7 @@ async def test_admission_containment_and_system_identity(processor_boundary, def
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "dedicated,partial", [(False, False), (True, False), (False, True)]
+    "dedicated,partial", [(False, False), (True, False), (False, True), (True, True)]
 )
 async def test_zero_reset_independent_complete_readback(
     processor_boundary, dedicated, partial
@@ -1493,3 +1493,218 @@ def test_numeric_representation_never_rounds(value, whole):
 
     with pytest.raises(ValueError):
         _number(value, "quantity", whole=whole)
+
+
+def zero_processor_boundary(b, dedicated):
+    b.before, b.after = processor_entry(dedicated), processor_entry(dedicated)
+    b.row, b.after_row = processor_row(dedicated), processor_row(dedicated)
+    b.hmc.list_logical_partitions.return_value = [b.before]
+    name = (
+        "CurrentDedicatedProcessorConfiguration"
+        if dedicated
+        else "CurrentSharedProcessorConfiguration"
+    )
+    current = b.before["Resource"]["PartitionProcessorConfiguration"][name]
+    for field in current:
+        current[field] = "0"
+    for field in b.row:
+        if field.startswith("curr_") and field != "curr_proc_mode":
+            b.row[field] = "" if dedicated and "units" in field else "0"
+    for entry, row in [(b.before, b.row), (b.after, b.after_row)]:
+        for field in (
+            "CurrentMinimumMemory",
+            "CurrentMemory",
+            "CurrentMaximumMemory",
+            "RuntimeMemory",
+        ):
+            entry["Resource"]["PartitionMemoryConfiguration"][field] = "0"
+        row["run_procs"] = "0"
+        if not dedicated:
+            row["run_proc_units"] = "0"
+    return current, b.after["Resource"]["PartitionProcessorConfiguration"][name]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dedicated", [True, False])
+@pytest.mark.parametrize("operation", ["add", "set"])
+@pytest.mark.parametrize(
+    "minimum,maximum,unit_minimum,unit_maximum",
+    [
+        ("1", "4", "0.10", "1.00"),
+        ("2", "3", "0.20", "0.80"),
+        ("0", "5", "0.00", "2.00"),
+    ],
+    ids=["configured-limits", "different-limits", "no-configured-limit-mapping"],
+)
+async def test_independent_zero_envelope_initialization(
+    processor_boundary,
+    dedicated,
+    operation,
+    minimum,
+    maximum,
+    unit_minimum,
+    unit_maximum,
+):
+    b = processor_boundary
+    _, after = zero_processor_boundary(b, dedicated)
+    suffix = "Processors" if dedicated else "VirtualProcessors"
+    after["CurrentMinimum" + suffix] = minimum
+    after["CurrentMaximum" + suffix] = maximum
+    b.after_row.update(curr_min_procs=minimum, curr_max_procs=maximum)
+    if not dedicated:
+        after.update(
+            CurrentMinimumProcessingUnits=unit_minimum,
+            CurrentMaximumProcessingUnits=unit_maximum,
+        )
+        b.after_row.update(
+            curr_min_proc_units=unit_minimum, curr_max_proc_units=unit_maximum
+        )
+    result = await cpu_change(
+        b,
+        operation=operation,
+        processors=2,
+        processing_units=None if dedicated else "0.50",
+    )
+    assert result["outcome"] == "applied" and result["workflow_completed"]
+    assert result["after"]["current_processors"] == 2
+    assert result["after"]["current_minimum_processors"] == int(minimum)
+    assert result["after"]["current_maximum_processors"] == int(maximum)
+    if not dedicated:
+        assert result["after"]["current_processing_units"] == "0.50"
+        assert result["after"]["current_minimum_processing_units"] == unit_minimum
+        assert result["after"]["current_maximum_processing_units"] == unit_maximum
+    assert (
+        result["before"]["current_memory_mib"]
+        == result["after"]["current_memory_mib"]
+        == 0
+    )
+    assert any(
+        "Inactive current configuration only" in warning
+        for warning in result["warnings"]
+    )
+    assert b.write.await_count == 1 and b.read.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dedicated", [True, False])
+@pytest.mark.parametrize(
+    "damage,outcome",
+    [
+        ("assigned", "partial"),
+        ("nonzero-before-maximum", "partial"),
+        ("memory", "partial"),
+        ("unordered", "unverified"),
+        ("negative", "unverified"),
+        ("missing", "unverified"),
+        ("native-mismatch", "unverified"),
+    ],
+)
+async def test_independent_zero_envelope_negative(
+    processor_boundary, dedicated, damage, outcome
+):
+    b = processor_boundary
+    before, after = zero_processor_boundary(b, dedicated)
+    assigned = "CurrentProcessors" if dedicated else "AllocatedVirtualProcessors"
+    suffix = "Processors" if dedicated else "VirtualProcessors"
+    if damage == "assigned":
+        after[assigned] = b.after_row["curr_procs"] = "3"
+    elif damage == "nonzero-before-maximum":
+        before["CurrentMaximum" + suffix] = b.row["curr_max_procs"] = "4"
+        after["CurrentMaximum" + suffix] = b.after_row["curr_max_procs"] = "5"
+    elif damage == "memory":
+        b.after["Resource"]["PartitionMemoryConfiguration"].update(
+            CurrentMemory="128", CurrentMaximumMemory="128"
+        )
+    elif damage in ("unordered", "negative"):
+        after["CurrentMinimum" + suffix] = b.after_row["curr_min_procs"] = (
+            "3" if damage == "unordered" else "-1"
+        )
+    elif damage == "missing":
+        del after["CurrentMaximum" + suffix]
+    else:
+        after["CurrentMaximum" + suffix] = "5"
+    result = await cpu_change(
+        b, operation="add", processors=2, processing_units=None if dedicated else "0.50"
+    )
+    assert result["outcome"] == outcome and not result["workflow_completed"]
+    assert (result["after"] is None) is (outcome == "unverified")
+    assert b.write.await_count == 1 and b.read.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["omitted-count-limits", "wrong-units"])
+async def test_independent_zero_envelope_shared_preservation(
+    processor_boundary, damage
+):
+    b = processor_boundary
+    before, after = zero_processor_boundary(b, False)
+    before.update(
+        CurrentMinimumVirtualProcessors="1",
+        AllocatedVirtualProcessors="2",
+        CurrentMaximumVirtualProcessors="4",
+    )
+    b.row.update(curr_min_procs="1", curr_procs="2", curr_max_procs="4")
+    if damage == "omitted-count-limits":
+        after["CurrentMaximumVirtualProcessors"] = b.after_row["curr_max_procs"] = "5"
+    else:
+        after["CurrentProcessingUnits"] = b.after_row["curr_proc_units"] = "0.60"
+    result = await cpu_change(b, operation="add", processing_units="0.50")
+    assert result["outcome"] == "partial" and not result["workflow_completed"]
+    assert b.write.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dedicated", [True, False])
+@pytest.mark.parametrize("operation", ["add", "remove"])
+async def test_independent_zero_envelope_noop(processor_boundary, dedicated, operation):
+    b = processor_boundary
+    zero_processor_boundary(b, dedicated)
+    result = await cpu_change(b, operation=operation, processors=0)
+    assert result["outcome"] == "noop" and result["before"] == result["after"]
+    assert result["after"]["current_maximum_processors"] == 0
+    b.write.assert_not_awaited()
+    assert b.read.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dedicated", [True, False])
+async def test_independent_zero_envelope_running_refuses(processor_boundary, dedicated):
+    b = processor_boundary
+    zero_processor_boundary(b, dedicated)
+    b.before["Resource"].update(
+        PartitionState="running", ResourceMonitoringControlState="active"
+    )
+    with pytest.raises(ValueError, match="maximum"):
+        await cpu_change(
+            b,
+            operation="add",
+            processors=2,
+            processing_units=None if dedicated else "0.50",
+        )
+    b.write.assert_not_awaited()
+
+
+@pytest.mark.parametrize("guard", ["zero-target", "running", "reset"])
+def test_independent_zero_envelope_postcondition_guards(processor_boundary, guard):
+    from hmcpctl.operations.lpar.processors import _postconditions, _snapshot
+
+    b = processor_boundary
+    _, after_cpu = zero_processor_boundary(b, True)
+    expected = {
+        "processors": 2,
+        "processing_units": None,
+        "reset": False,
+        "deferred": True,
+    }
+    if guard == "zero-target":
+        expected["processors"] = 0
+        after_cpu.update(CurrentMinimumProcessors="0", CurrentProcessors="0")
+        b.after_row.update(curr_min_procs="0", curr_procs="0")
+    elif guard == "running":
+        for entry in (b.before, b.after):
+            entry["Resource"]["PartitionState"] = "running"
+    else:
+        expected["reset"] = True
+    before = _snapshot(b.before, LPAR_UUID, b.row)
+    after = _snapshot(b.after, LPAR_UUID, b.after_row)
+    assert not _postconditions(before, after, expected)

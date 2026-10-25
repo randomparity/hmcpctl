@@ -402,9 +402,21 @@ def _postconditions(
         checks.append(after[f"current_{key}"] == expected[key])
         if not expected["deferred"]:
             checks.append(after[f"runtime_{key}"] == expected[key])
+        initializes = (
+            before["state"] == "not activated"
+            and not expected["reset"]
+            and expected[key] > 0
+            and all(
+                before[f"current_{bound}{key}"] == 0
+                for bound in ("minimum_", "", "maximum_")
+            )
+        )
         for bound in ("minimum_", "maximum_"):
             field = f"current_{bound}{key}"
-            checks.append(after[field] == (0 if expected["reset"] else before[field]))
+            checks.append(
+                initializes
+                or after[field] == (0 if expected["reset"] else before[field])
+            )
     checks.extend(
         after[key] == (0 if expected["reset"] else before[key]) for key in _MEMORY
     )
