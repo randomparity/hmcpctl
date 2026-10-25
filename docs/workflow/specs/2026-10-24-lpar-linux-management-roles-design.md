@@ -5,7 +5,7 @@
 Issue [#1766](https://github.com/randomparity/hmcpctl/issues/1766) adds two
 partition flags in eight P10/P11 creation/update bindings. The frozen
 [scope](https://github.com/randomparity/hmcpctl/issues/1766#issuecomment-6378396996)
-provides C1–C7; [ADR 0278](../../adr/0278-lpar-linux-management-roles.md) records
+provides C1–C7; [ADR 0293](../../adr/0293-lpar-linux-management-roles.md) records
 transport and intent decisions. Exclusions are empty. This is full-spec M250.
 Implementation was released after #1765 landed. Its existing security-policy
 parser supplies keystore admission evidence; no duplicate policy owner is added.

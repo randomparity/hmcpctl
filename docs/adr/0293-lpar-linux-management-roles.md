@@ -1,4 +1,4 @@
-# ADR 0278: Linux partition management roles and KVM eligibility
+# ADR 0293: Linux partition management roles and KVM eligibility
 
 ## Status
 
