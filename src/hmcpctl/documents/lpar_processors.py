@@ -61,7 +61,9 @@ class LparProcessorChange(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-    operation: Literal["add", "remove", "set"]
+    operation: Literal["add", "remove", "set"] = Field(
+        description="Add/remove a current quantity, or set its absolute value."
+    )
     processors: Annotated[StrictInt, Field(ge=0)] | None = Field(
         default=None,
         description="Whole dedicated processors or shared virtual processors.",
