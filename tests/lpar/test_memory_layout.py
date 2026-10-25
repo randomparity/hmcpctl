@@ -1196,3 +1196,70 @@ async def test_layout_ancillary_provider_errors_are_private(
         assignments.assert_not_awaited()
     else:
         assert "private-provider-marker" in str(result)
+
+
+@pytest.mark.parametrize("generation,line", [("p10", 41), ("p11", 49)])
+@pytest.mark.parametrize(
+    "selector", [*COUNT_FIELDS, "hpt_ratio", "ppt_ratio", "kvm_reserved_mem_percent"]
+)
+def test_twelve_creation_reference_bindings(generation, line, selector):
+    import hashlib
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    source = (
+        root
+        / "docs"
+        / "refs"
+        / f"hmc-commands-{generation}"
+        / "commands"
+        / "mksyscfg.md"
+    )
+    if not source.is_file():
+        pytest.skip(
+            f"Local {generation} mksyscfg corpus absent; source binding is unevidenced"
+        )
+    inventory = json.loads((root / "docs/capabilities/corpora.json").read_text())
+    topic_id = f"commands-{generation}:commands/mksyscfg"
+    topic = next(item for item in inventory["topics"] if item["id"] == topic_id)
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == topic["sha256"].replace(
+        "-", ""
+    )
+    unit = next(
+        item
+        for item in inventory["source_units"]
+        if item["id"] == f"{topic_id}:L{line:05}:command-option"
+    )
+    assert unit["line"] == line and unit["text"] == "-f"
+    assert unit["accounting"] == {"id": "cli:commands/mksyscfg", "kind": "row"}
+    text = source.read_text().splitlines()[line - 1]
+    assert text.startswith("| **-f** |")
+    assert f"[**{selector}**]" in text
+
+
+def test_memory_layout_exact_field_scope():
+    import json
+    from pathlib import Path
+
+    expected = {*COUNT_FIELDS, "hpt_ratio", "ppt_ratio", "kvm_reserved_mem_percent"}
+    assert {item.name for item in fields(LparMemoryLayout)} == expected
+    root = Path(__file__).resolve().parents[2]
+    catalog = json.loads((root / "docs/capabilities/maturity.json").read_text())
+    variants = {
+        row["operation"]: {
+            scope["variant"]: scope
+            for scope in row["implementation"]["implemented_scope"]
+        }
+        for row in catalog["operations"]
+        if row["operation"] in {"lpar.create", "vios.create"}
+    }
+    lpar = variants["lpar.create"]["c06-creation-memory-layout"]
+    vios = variants["vios.create"]["c06-vios-page-table-ratios"]
+    assert {item["name"] for item in lpar["parameters"]} == {
+        f"memory_layout.{name}" for name in expected
+    }
+    assert {item["name"] for item in vios["parameters"]} == {
+        "memory_layout.hpt_ratio",
+        "memory_layout.ppt_ratio",
+    }
