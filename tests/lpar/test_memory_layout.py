@@ -169,3 +169,64 @@ def test_schema_preserves_decimal_and_zero():
         ("min_num_huge_pages", 0),
         ("kvm_reserved_mem_percent", str(value)),
     ]
+
+
+@pytest.mark.parametrize("sign", ["", "-"])
+@pytest.mark.parametrize("length", [65535, 65536, 65537])
+def test_reservation_encoded_boundary(sign, length):
+    value = Decimal(sign + "1E+" + str(length - len(sign) - 1))
+    if length > 65536:
+        with pytest.raises(ValueError, match="65536 ASCII bytes"):
+            LparMemoryLayout(kvm_reserved_mem_percent=value)
+    else:
+        text = LparMemoryLayout(kvm_reserved_mem_percent=value).pairs()[0][1]
+        assert len(text.encode("ascii")) == length
+        assert Decimal(text) == value
+
+
+@pytest.mark.parametrize(
+    "token,expected", [("0E-1000", "0"), ("-0E-1000", "-0"), ("1200.0000", "1200")]
+)
+def test_reservation_canonicalizes_without_context_rounding(token, expected):
+    with localcontext() as context:
+        context.prec = 1
+        assert LparMemoryLayout(kvm_reserved_mem_percent=Decimal(token)).pairs() == [
+            ("kvm_reserved_mem_percent", expected)
+        ]
+
+
+@pytest.mark.asyncio
+async def test_typed_mcp_rejects_compact_oversized_reservation():
+    from fastmcp import FastMCP
+    from fastmcp.exceptions import ValidationError as MCPValidationError
+
+    mcp = FastMCP("offline-layout-boundary")
+
+    @mcp.tool
+    def prospective_create(memory_layout: LparMemoryLayout) -> str:
+        return memory_layout.pairs()[0][1]
+
+    tool = await mcp.get_tool("prospective_create")
+    with pytest.raises(MCPValidationError, match="65536 ASCII bytes"):
+        await tool.run({"memory_layout": {"kvm_reserved_mem_percent": "1E+65536"}})
+    boundary = await tool.run(
+        {"memory_layout": {"kvm_reserved_mem_percent": "1E+65535"}}
+    )
+    assert len(boundary.content[0].text) == 65536
+    result = await tool.run({"memory_layout": {"kvm_reserved_mem_percent": "0E-1000"}})
+    assert result.content[0].text == "0"
+
+
+def test_zero_is_canonical_before_fixed_formatting(monkeypatch):
+    import builtins
+
+    import hmcpctl.documents.lpar_memory_layout as module
+
+    def checked_format(value, specification):
+        assert value.as_tuple().exponent == 0
+        return builtins.format(value, specification)
+
+    monkeypatch.setattr(module, "format", checked_format, raising=False)
+    assert LparMemoryLayout(kvm_reserved_mem_percent=Decimal("0E-1000")).pairs() == [
+        ("kvm_reserved_mem_percent", "0")
+    ]

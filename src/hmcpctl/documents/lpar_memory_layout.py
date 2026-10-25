@@ -30,7 +30,30 @@ def _reservation(value: object) -> Decimal:
             raise ValueError(
                 "kvm_reserved_mem_percent accepts at most two decimal places"
             )
-    return number
+    return _canonical_reservation(number)
+
+
+def _canonical_reservation(number: Decimal) -> Decimal:
+    """Bound fixed-point output before expansion, without Decimal context rounding."""
+    sign, digits, exponent = number.as_tuple()
+    assert isinstance(exponent, int)  # The caller has rejected nonfinite values.
+    if not any(digits):
+        return Decimal((sign, (0,), 0))
+    end = len(digits)
+    while digits[end - 1] == 0:
+        end -= 1
+    exponent += len(digits) - end
+    digits = digits[:end]
+    if exponent >= 0:
+        length = sign + len(digits) + exponent
+    else:
+        length = sign + max(len(digits), -exponent) + 1
+        length += len(digits) + exponent <= 0
+    if length > 65536:
+        raise ValueError(
+            "kvm_reserved_mem_percent canonical encoding exceeds 65536 ASCII bytes"
+        )
+    return Decimal((sign, digits, exponent))
 
 
 @dataclass(frozen=True)
@@ -62,7 +85,8 @@ class LparMemoryLayout:
         default=None,
         metadata={
             "description": "Finite reservation with at most two fractional decimal places; "
-            "selection including zero declares Linux intent. HMC decides undocumented numeric limits."
+            "canonical encoding is limited to 65536 ASCII bytes. Selection including zero declares "
+            "Linux intent. HMC decides undocumented numeric limits."
         },
     )
 

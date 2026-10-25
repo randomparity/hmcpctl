@@ -126,3 +126,10 @@ prerequisites and cleanup disposition; no live command runs during design.
 Run focused tests during implementation, relevant static gates before commits,
 `just verify` and `uv run --no-sync prek run --all-files` before push. Shipping also
 requires the existing product/security review workflow and CI version matrix.
+
+The operator approved a software representation boundary on 2026-10-25:
+canonical fixed-point KVM reservation encoding must be at most 65536 ASCII bytes,
+checked before expansion. Canonicalize signed zero and coefficient trailing zeros
+without ambient Decimal context rounding. This is a software resource policy,
+not an HMC numeric interval or permission to use native scientific notation.
+Authority: issue #1767 comment 6397876848. Existing D1/A1 and M250 remain retained.
