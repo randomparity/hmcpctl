@@ -173,7 +173,11 @@ def target(monkeypatch):
     def raw(name, product=False):
         values = [name, "default_profile", "0", "0", "0", "1:128", "1:256", "0.00"]
         fault = env.fault
-        if fault in {"raw-mismatch", "false-product"} and not product:
+        if (
+            fault in {"raw-mismatch", "false-product"}
+            or fault == "vios-raw-mismatch"
+            and env.vios
+        ) and not product:
             values[5] = "1:64"
         if fault == "product-mismatch" and product:
             values[5] = "1:64"
@@ -185,6 +189,8 @@ def target(monkeypatch):
             values[7] = "NaN"
         if fault == "raw-missing" and not product:
             values[7] = "null"
+        if fault == "vios-raw-missing" and env.vios and not product:
+            values[5] = "null"
         if fault == "raw-both" and not product:
             values[5], values[7] = "1:64", "null"
         if fault == "foreign-row" and not product:
@@ -247,7 +253,12 @@ def target(monkeypatch):
             assert command.endswith("curr_avail_sys_mem,mem_region_size")
             return (
                 "PASS",
-                "4096,256" if env.fault == "pool-drift" and env.name else "8192,256",
+                "4096,256"
+                if env.fault == "pool-drift"
+                and env.name
+                or env.fault == "vios-pool-drift"
+                and env.vname
+                else "8192,256",
             )
         if tool == "hmc_create_lpar":
             assert env.checkpoints[-1]["phase"] == "lpar-create-pending"
@@ -345,23 +356,36 @@ async def test_group_absence_or_missing_transport_skips_before_effects(target, f
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["hpt", "ppt", "bad", "grant", "create-only"])
+@pytest.mark.parametrize(
+    "fault", ["hpt", "ppt", "bad", "bad-ppt", "grant", "create-only"]
+)
 async def test_unarmed_or_invalid_config_has_zero_mutations(target, fault):
     key, value = {
         "hpt": ("creation_memory_layout_hpt_ratio", ""),
         "ppt": ("creation_memory_layout_ppt_ratio", ""),
         "bad": ("creation_memory_layout_hpt_ratio", "bad token"),
+        "bad-ppt": ("creation_memory_layout_ppt_ratio", "bad token"),
         "grant": ("creation_memory_layout_fresh_vios_delete_authorized", False),
         "create-only": ("creation_memory_layout_fresh_vios_delete_authorized", False),
     }[fault]
     target.state.config = replace(target.state.config, **{key: value})
     await run(target)
     assert effects(target) == []
+    assert target.calls == []
+    assert target.state.artifacts.creation_memory_layout == {}
+    assert len(target.state.results) == 1
+    row = target.state.results[0]
+    assert row["status"] == "SKIP"
+    assert row["note"]
+    assert (
+        "ratio" if fault in {"hpt", "ppt", "bad", "bad-ppt"} else "permission"
+    ) in row["note"]
 
 
 @pytest.mark.asyncio
 async def test_six_fields_pass_exactly_without_role_or_hardware_admission(target):
     await run(target)
+    assert all(row["status"] == "PASS" for row in target.state.results)
     arguments = dict(target.calls)["hmc_create_lpar"]
     assert arguments["memory_layout"] == SIX
     assert type(arguments["memory_layout"]["min_num_huge_pages"]) is int
@@ -413,6 +437,7 @@ async def test_six_fields_pass_exactly_without_role_or_hardware_admission(target
 async def test_lpar_independent_readback_gates_vios(target, fault):
     target.fault = fault
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     assert "hmc_create_vios" not in effects(target)
     assert not target.state.observations
     if fault in {"controller", "oracle-controller", "mode-unknown"}:
@@ -432,6 +457,7 @@ async def test_lpar_independent_readback_gates_vios(target, fault):
 async def test_lpar_uncertainty_stops_next_fixture(target, fault):
     target.fault = fault
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     assert "hmc_create_vios" not in effects(target)
     assert "hmc_delete_lpar" not in effects(target)
     assert not target.state.observations
@@ -445,6 +471,7 @@ async def test_lpar_uncertainty_stops_next_fixture(target, fault):
 async def test_lpar_cleanup_stays_inactive_and_owned(target, fault):
     target.fault = fault
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     assert "hmc_create_vios" not in effects(target)
     assert not target.state.observations
     if fault in {"active", "unreadable", "token"}:
@@ -458,6 +485,7 @@ async def test_lpar_cleanup_stays_inactive_and_owned(target, fault):
 async def test_vios_requires_fresh_delete_authority_and_returned_uuid(target, fault):
     target.fault = fault
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     assert "hmc_delete_vios" not in effects(target)
     assert len(target.state.observations) == 1
     if fault == "baseline-uuid":
@@ -471,6 +499,7 @@ async def test_vios_requires_fresh_delete_authority_and_returned_uuid(target, fa
 async def test_vios_partial_name_rediscovery_is_never_adopted(target, fault):
     target.fault = fault
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     assert target.vios == VIOS
     assert "hmc_delete_vios" not in effects(target)
     journal = target.state.artifacts.creation_memory_layout
@@ -493,6 +522,7 @@ async def test_vios_delete_uses_supported_uuid_scoped_tool(target):
 async def test_vios_delete_never_retries_or_powers_off(target, fault):
     target.fault = fault
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     assert effects(target).count("hmc_delete_vios") <= 1
     assert not any("power" in name for name, _ in target.calls)
     assert not any(o["operation"] == "vios.create" for o in target.state.observations)
@@ -575,6 +605,7 @@ async def test_product_getter_false_positive_disagrees_with_raw_oracle(
     )
     monkeypatch.setattr(core, "get_lpar_memory_layout", getter)
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     getter.assert_awaited_once()
     assert target.product_status == "verified"
     oracle_rows = [
@@ -594,6 +625,7 @@ async def test_product_getter_false_positive_disagrees_with_raw_oracle(
 async def test_raw_oracle_match_never_overrides_failed_creation(target):
     target.fault = "product-mismatch"
     await run(target)
+    assert any(row["status"] == "FAIL" for row in target.state.results)
     assert target.product_status == "mismatch"
     assert "hmc_create_vios" not in effects(target)
     assert not target.state.observations
@@ -685,3 +717,67 @@ def test_existing_operation_test_bindings_include_the_isolated_arm():
         "tests/test_live_creation_memory_layout_arm.py" in row["tests"]
         for row in selected
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "raw-mismatch",
+        "raw-missing",
+        "no-uuid",
+        "unstamped",
+        "pool-drift",
+        "vios-incomplete",
+        "vios-raw-mismatch",
+        "vios-raw-missing",
+        "vios-absence",
+        "vios-pool-drift",
+    ],
+)
+async def test_unsuccessful_fixture_exits_actual_runner_nonzero(
+    target, monkeypatch, tmp_path, fault
+):
+    target.fault = fault
+    fixture_checkpoint = target.state.checkpoint
+
+    @asynccontextmanager
+    async def served_client():
+        runner_checkpoint = target.state.checkpoint
+
+        def checkpoint():
+            fixture_checkpoint()
+            runner_checkpoint()
+
+        target.state.checkpoint = checkpoint
+        yield object()
+
+    # Reuse the fixture's tool/HMC boundaries; the real runner owns dispatch, checkpoint,
+    # result serialization, summary and exit status.
+    monkeypatch.setattr(runner, "served_client", served_client)
+    monkeypatch.setattr(
+        runner, "served_schemas", AsyncMock(return_value=target.state.schemas)
+    )
+    monkeypatch.setattr(runner, "RunState", lambda **_kwargs: target.state)
+    monkeypatch.setattr(runner.evidence, "emit_observations", lambda *_args: None)
+    destination = tmp_path / "results.json"
+    result = await runner.main(
+        group=target.arm.GROUP,
+        results_path=str(destination),
+        config=target.state.config,
+        hmc_config=target.state.hmc_config,
+    )
+    assert result == 1
+    saved = json.loads(destination.read_text())
+    assert any(row["status"] == "FAIL" for row in saved["results"])
+    assert saved["artifacts"]["creation_memory_layout"]["phase"] == "stopped-uncertain"
+    if fault.startswith("vios-"):
+        assert [row["operation"] for row in target.state.observations] == [
+            "lpar.create"
+        ]
+    else:
+        assert "hmc_create_vios" not in effects(target)
+        assert not target.state.observations
+    assert effects(target).count("hmc_create_lpar") == 1
+    assert effects(target).count("hmc_create_vios") <= 1
+    assert effects(target).count("hmc_delete_vios") <= 1

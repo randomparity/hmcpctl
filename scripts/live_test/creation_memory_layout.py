@@ -451,6 +451,10 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
         return
     try:
         layout = configured(state.config)
+    except (ValueError, TypeError) as error:
+        state.skip(SUBTASK, GROUP, str(error))
+        return
+    try:
         if (
             not {
                 "hmc_run_command",
@@ -533,6 +537,12 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
         _checkpoint(state, "preflight")
         lpar_ok = await _lpar_fixture(client, state, run, system_uuid, layout)
         if not lpar_ok or not await _compare(client, state, run, baseline[0]):
+            state.record(
+                SUBTASK,
+                GROUP,
+                "FAIL",
+                "LPAR fixture verification, cleanup or baseline unconfirmed",
+            )
             _checkpoint(state, "stopped-uncertain")
             return
         state.record_verified(
@@ -546,6 +556,12 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
         )
         vios_ok = await _vios_fixture(client, state, system_uuid)
         if not vios_ok or not await _compare(client, state, run, baseline[0]):
+            state.record(
+                SUBTASK,
+                GROUP,
+                "FAIL",
+                "VIOS fixture verification, cleanup or baseline unconfirmed",
+            )
             _checkpoint(state, "stopped-uncertain")
             return
         state.record_verified(
