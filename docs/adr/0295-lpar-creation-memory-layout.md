@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for #1767; implementation held for shared creation-interface reconciliation.
+Accepted (2026-10-25) for #1767.
 
 ## Context
 
