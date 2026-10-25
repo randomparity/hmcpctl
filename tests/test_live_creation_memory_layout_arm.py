@@ -649,6 +649,8 @@ async def test_saved_journal_without_current_invocation_never_starts(target):
         "hmc_create_vios",
         "hmc_delete_lpar",
         "hmc_delete_vios",
+        "hmc_get_lpar_description",
+        "hmc_get_lpar_state",
     ],
 )
 async def test_missing_served_tool_or_policy_stops_before_mutation(target, tool):

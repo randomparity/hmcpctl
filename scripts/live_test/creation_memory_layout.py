@@ -458,6 +458,8 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
                 "hmc_create_vios",
                 "hmc_delete_lpar",
                 "hmc_delete_vios",
+                "hmc_get_lpar_description",
+                "hmc_get_lpar_state",
             }
             <= state.schemas.keys()
         ):
