@@ -54,17 +54,17 @@ def hmc_modify_lpar(
 
     lpar_name_or_uuid: accepts either a PartitionName or a UUID
     (find it with hmc_list_lpars). Only the fields you pass are changed.
-    Memory values are in MiB. For a running partition these are dynamic
-    (DLPAR) operations and require an active RMC connection. The write
-    changes the partition's current configuration, not a partition profile:
-    otherwise it applies on next activation only if that activation uses the
-    current configuration, and activating a profile discards it unless
-    CurrentProfileSync is On (see warnings). The partition is read whole and
-    written back under If-Match. dedicated must match the partition's
-    current mode (True for whole CPUs, False for shared processing units +
-    virtual processors) or be omitted; a switch between them is refused.
-    Uncapping a capped partition leaves its uncapped weight 0; no field sets
-    the weight.
+    Memory values are in MiB. Sharing mode and uncapped_weight update the
+    current configuration; runtime effects are independently observed and may
+    remain unverified. Weight is an integer 0–255 and zero is explicit. HMC
+    admission may refuse a change. Inspect completion_scope, workflow_completed,
+    change_location and warnings; incomplete outcomes must not be replayed
+    automatically. Activating a profile may replace current-configuration changes;
+    location observations do not independently prove profile persistence.
+    The partition is read whole and written back under If-Match. dedicated must
+    match the partition's current mode (True for whole CPUs, False for shared
+    processing units + virtual processors) or be omitted; a switch is refused.
+    No activation, restart or compensation is performed.
 
     Use hmc_rename_lpar for a name change, which requires a managed-system
     selector for ownership authorization.
@@ -138,7 +138,7 @@ def hmc_dlpar_proc(
     system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
 ) -> dict[str, Any] | None:
-    """DLPAR processor hot-plug: change CPU resources on a running LPAR.
+    """Update processor resources in an LPAR's current configuration.
 
     lpar_name_or_uuid: accepts either a PartitionName or a UUID.
     Reads the whole partition and writes it back under If-Match with only
@@ -146,18 +146,20 @@ def hmc_dlpar_proc(
     units (may be fractional, e.g. 0.5); vcpus are virtual processor counts
     (ints). For dedicated partitions, procs are whole CPUs and vcpus and
     uncapped are refused. dedicated must match the partition's current mode
-    or be omitted; a switch between dedicated and shared is refused.
-    Uncapping a capped partition leaves its uncapped weight 0; no field sets
-    the weight.
+    or be omitted; a switch between dedicated and shared is refused. sharing_mode
+    accepts the six supported shared/dedicated sharing modes within that current
+    processor mode. uncapped_weight is an update-only integer 0–255; zero is explicit.
 
-    The write changes the partition's current configuration, not a partition
-    profile. With no active RMC connection it applies on next activation only if
-    that activation uses the current configuration; activating a profile discards
-    it unless CurrentProfileSync is On. The result's change_location and warnings
-    say which. No reboot is triggered.
+    Sharing and weight results describe current-configuration completion and
+    separately observed runtime effects, which may remain unverified. HMC admission
+    may refuse a change. Inspect workflow_completed, change_location and warnings;
+    incomplete outcomes must not be replayed automatically. A profile activation
+    may replace current-configuration changes; location observations do not
+    independently prove profile persistence. No activation, restart or compensation
+    is performed.
 
     Args:
-        lpar_name_or_uuid: PartitionName or UUID of the running logical partition.
+        lpar_name_or_uuid: PartitionName or UUID of the logical partition.
         resources: Processor fields to change; omitted fields stay unchanged.
         profile: Optional configured HMC profile name; uses the default when omitted.
         system_name_or_uuid: Optional SystemName or UUID that disambiguates the

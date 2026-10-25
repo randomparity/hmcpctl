@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from ...documents.lpar import (
     LparResources,
     PartitionType,
+    reject_update_weight_on_create,
     shared_units_over_vcpus,
     validate_partition_type,
 )
@@ -442,6 +443,7 @@ def check_request(request: PlanRequest) -> PlanRequest:
 
     Messages never echo a key, URL or producer-result content.
     """
+    reject_update_weight_on_create(request.resources)
     request = _normalized(request)
     if not request.name:
         raise ValueError("name: must not be empty")

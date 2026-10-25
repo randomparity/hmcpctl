@@ -23,6 +23,7 @@ from ...documents.lpar import (
     PartitionType,
     build_lpar_document,
     partition_updates,
+    reject_update_weight_on_create,
     validate_keylock,
     validate_partition_type,
 )
@@ -231,6 +232,7 @@ async def create_and_stamp_lpar(
       :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
       delete it to release its resources.
     """
+    reject_update_weight_on_create(creation.resources)
     hardware_requested = bool(
         hardware_memory_pairs(
             creation.hardware_mem_encryption, creation.hardware_mem_expansion

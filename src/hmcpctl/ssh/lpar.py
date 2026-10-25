@@ -25,6 +25,7 @@ from ..documents.lpar import (
     LparReportingSettings,
     LparResources,
     LparSettings,
+    reject_update_weight_on_create,
     shared_units_over_vcpus,
     shared_vcpu_defaults,
 )
@@ -279,6 +280,7 @@ def complete_create_resources(resources: LparResources) -> LparResources | None:
     processing units -- defaulted or explicit -- the requested virtual processors
     cannot use.
     """
+    reject_update_weight_on_create(resources)
     mode = resources.sharing_mode
     if mode is not None and (not isinstance(mode, str) or mode not in SHARING_MODES):
         raise ValueError(
