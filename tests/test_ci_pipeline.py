@@ -1464,14 +1464,29 @@ def verification_route(tmp_path: Path):
     uv.chmod(0o755)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    commands = re.findall(
-        r"^        run: (.+)$", _job_body(workflow, "ci"), re.MULTILINE
-    )
-    assert commands[0] == "just setup"
-    hosted = commands[1:]
 
-    def run(route: str, failure: str = ""):
+    def run(route: str, failure: str = "", workflow: str | None = None):
+        if workflow is None:
+            workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        names = ("Run static gates through hooks", "Run runtime verification suite")
+        steps = list(
+            re.finditer(
+                r"^      - name: (?P<name>[^\n]+)\n(?P<body>.*?)"
+                r"(?=^      - |\Z)",
+                _job_body(workflow, "ci"),
+                re.MULTILINE | re.DOTALL,
+            )
+        )
+        for name in names:
+            assert sum(step["name"] == name for step in steps) == 1, name
+        hosted = []
+        for step in steps:
+            if step["name"] in names:
+                commands = re.findall(
+                    r"^        run: (.+)$", step["body"], re.MULTILINE
+                )
+                assert len(commands) == 1 and not commands[0].startswith(("|", ">"))
+                hosted.append(commands[0])
         command = "just verify" if route == "local" else "\n".join(hosted)
         result = subprocess.run(
             ["bash", "-e", "-c", command],
@@ -1512,3 +1527,65 @@ def test_verification_routes_propagate_gate_failure(
         assert not (set(trace) & RUNTIME_GATES)
     else:
         assert trace[-1] == failure
+
+
+def test_hosted_verification_ignores_multiline_preparation(verification_route) -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    preparation = """      - name: Prepare observation
+        run: |
+          printf 'preparation is not a verification gate\\n'
+"""
+    workflow = workflow.replace(
+        "      - name: Run runtime verification suite\n",
+        preparation + "      - name: Run runtime verification suite\n",
+        1,
+    )
+
+    result, trace = verification_route("hosted", workflow=workflow)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(trace) == sorted(STATIC_GATES | RUNTIME_GATES)
+    assert trace.index("scenario-gap") < trace.index("test")
+    assert trace.index("build") < trace.index("verify-artifacts")
+
+
+@pytest.mark.parametrize(
+    "step_name,command",
+    [
+        (
+            "Run static gates through hooks",
+            "UV_NO_SYNC=1 uv run --no-sync prek run --all-files",
+        ),
+        ("Run runtime verification suite", "just verify-runtime"),
+    ],
+)
+@pytest.mark.parametrize("copies", [0, 2])
+def test_hosted_verification_rejects_missing_or_duplicate_steps(
+    verification_route, step_name: str, command: str, copies: int
+) -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    step = f"      - name: {step_name}\n        run: {command}\n"
+    assert workflow.count(step) == 1
+    workflow = workflow.replace(step, step * copies)
+
+    with pytest.raises(AssertionError, match=step_name):
+        verification_route("hosted", workflow=workflow)
+
+
+def test_hosted_verification_preserves_workflow_order(verification_route) -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    static = (
+        "      - name: Run static gates through hooks\n"
+        "        run: UV_NO_SYNC=1 uv run --no-sync prek run --all-files\n"
+    )
+    runtime = "      - name: Run runtime verification suite\n        run: just verify-runtime\n"
+    assert workflow.count(static) == workflow.count(runtime) == 1
+    workflow = workflow.replace(static, "GATE_PLACEHOLDER\n").replace(runtime, static)
+    workflow = workflow.replace("GATE_PLACEHOLDER\n", runtime)
+
+    result, trace = verification_route("hosted", workflow=workflow)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(trace) == sorted(STATIC_GATES | RUNTIME_GATES)
+    assert trace.index("cli-groups") < trace.index("lint")
+    assert trace.index("build") < trace.index("verify-artifacts")
