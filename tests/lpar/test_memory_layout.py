@@ -1132,3 +1132,67 @@ async def test_layout_workflow_stamp_failure_blocks_assignments(
     )
     assert result.resource_created and not result.workflow_completed
     apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setting", ["settings", "reporting", "vtpm"])
+@pytest.mark.parametrize("selected", [True, False])
+async def test_layout_ancillary_provider_errors_are_private(
+    layout_creation_target, monkeypatch, setting, selected
+):
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.documents.lpar import (
+        LparReportingSettings,
+        LparResources,
+        LparSettings,
+    )
+    from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.lpar import core, workflows
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.vtpm import VtpmCapabilities
+
+    target = layout_creation_target
+    options = {
+        "settings": {"settings": LparSettings(allow_perf_collection=False)},
+        "reporting": {"reporting_settings": LparReportingSettings(work_group_id=0)},
+        "vtpm": {"vtpm_settings": LparVtpmSettings(vtpm_enabled=False)},
+    }
+    getters = {
+        "settings": "get_lpar_settings",
+        "reporting": "get_lpar_reporting_settings",
+        "vtpm": "get_lpar_vtpm_state",
+    }
+    monkeypatch.setattr(
+        core,
+        getters[setting],
+        AsyncMock(side_effect=HMCError("private-provider-marker")),
+    )
+    monkeypatch.setattr(
+        core,
+        "read_vtpm_capabilities",
+        AsyncMock(return_value=VtpmCapabilities(("1.2",), ("RSA2048",), False)),
+    )
+    creation = replace(
+        layout_creation(
+            LparMemoryLayout(hpt_ratio="1:128") if selected else None,
+            apply_profile=True if selected else None,
+            **options[setting],
+        ),
+        resources=LparResources(),
+    )
+    assignments = AsyncMock()
+    monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", assignments)
+    result = await workflows.create_lpar(
+        target.hmc, "selector", creation, LparPcieAssignments()
+    )
+    assert result.resource_created and not result.workflow_completed
+    assert any(step.status == "error" for step in result.steps)
+    if selected:
+        assert "private-provider-marker" not in str(result)
+        target.apply.assert_not_awaited()
+        assignments.assert_not_awaited()
+    else:
+        assert "private-provider-marker" in str(result)

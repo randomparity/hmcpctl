@@ -749,10 +749,10 @@ async def create_and_stamp_lpar(
         hardware_step,
         memory_layout_step=layout_step,
     )
-    if role_requested or hardware_requested:
+    if role_requested or hardware_requested or layout_requested:
         safe_steps = {}
         step_names = ("apply_step", "physical_io_step", "reporting_step", "vtpm_step")
-        if hardware_requested:
+        if hardware_requested or layout_requested:
             step_names += (
                 "settings_step",
                 "security_policy_step",
