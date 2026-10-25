@@ -195,7 +195,13 @@ async def create_vios(
         )
     verification_failed = False
     try:
-        entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
+        try:
+            entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
+        except Exception:
+            if not hardware_requested:
+                raise
+            # Native creation succeeded; discard unavailable lookup diagnostics.
+            entry = None
         if entry is None or not entry.get("UUID"):
             raise ValueError("Created VIOS identity was not confirmed")
         if (policy_requested or hardware_requested) and (

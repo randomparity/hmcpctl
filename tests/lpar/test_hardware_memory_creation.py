@@ -1,5 +1,6 @@
 """Creation owners enforce hardware admission and independent follow-up barriers."""
 
+import asyncio
 import itertools
 import shlex
 import traceback
@@ -631,13 +632,36 @@ def identity_conflict(target, monkeypatch):
     original_read = b.hmc._get.side_effect
     b.conflict = "ambiguous"
     b.before_create = False
-    for method in ("find_partition_by_name", "list_logical_partitions"):
+    b.lookup_failure = None
+    for method in (
+        "find_partition_by_name",
+        "list_logical_partitions",
+        "find_vios_by_name",
+        "list_vios",
+    ):
         monkeypatch.setattr(b.hmc, method, getattr(HMCClient, method).__get__(b.hmc))
 
     async def read(path, kind, **kwargs):
-        if path == f"/rest/api/uom/ManagedSystem/{SYSTEM}/LogicalPartition":
+        if path == f"/rest/api/uom/ManagedSystem/{SYSTEM}/{kind}":
             if "create" not in b.events and not b.before_create:
                 return ""
+            if b.lookup_failure is not None:
+                raise b.lookup_failure
+            if b.conflict in {"scalar", "empty", "attributes", "name-list"}:
+                resource = {
+                    "scalar": f'<{kind} xmlns="{UOM_NS}">{PRIVATE}</{kind}>',
+                    "empty": f'<{kind} xmlns="{UOM_NS}"/>',
+                    "attributes": f'<{kind} xmlns="{UOM_NS}" detail="{PRIVATE}"/>',
+                    "name-list": (
+                        f'<{kind} xmlns="{UOM_NS}">'
+                        "<PartitionName>part-R1</PartitionName>"
+                        f"<PartitionName>{PRIVATE}</PartitionName></{kind}>"
+                    ),
+                }[b.conflict]
+                return (
+                    f'<entry xmlns="{ATOM_NS}"><id>{PARTITION}</id>'
+                    f"<content>{resource}</content></entry>"
+                )
             other = dict(b.entry)
             other["UUID"] = (
                 "00000003-abcd-4ef0-8abc-000000000003"
@@ -739,3 +763,122 @@ async def test_pre_create_lookup_conflict_stays_pre_effect(identity_conflict):
     b.command.assert_not_awaited()
     b.assign.assert_not_awaited()
     b.hmc.create_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "caller",
+    [
+        "vios",
+        "direct-required",
+        "direct-best-effort",
+        "workflow-required",
+        "workflow-best-effort",
+    ],
+)
+@pytest.mark.parametrize(
+    "shape", ["scalar", "empty", "attributes", "name-list", "transport"]
+)
+async def test_unavailable_post_create_lookup_is_bounded(
+    identity_conflict, caller, shape
+):
+    b = identity_conflict
+    b.conflict = shape
+    if shape == "transport":
+        b.lookup_failure = RuntimeError(PRIVATE)
+    vios = caller == "vios"
+    required = caller.endswith("required")
+    options = (
+        {}
+        if vios
+        else {
+            "stamp_policy": "required" if required else "best-effort",
+            "apply_profile": True,
+        }
+    )
+    error = None
+    result = None
+    try:
+        result = await invoke(
+            b,
+            vios,
+            direct=caller.startswith("direct"),
+            hardware_mem_expansion=False,
+            **options,
+        )
+    except (HMCError, AttributeError, RuntimeError) as caught:
+        error = caught
+    if vios or required:
+        assert isinstance(error, HMCError)
+        assert "may" in str(error) and "inspect" in str(error).lower()
+        if vios:
+            assert "readback-unavailable" in str(error)
+        assert PRIVATE not in "".join(traceback.format_exception(error))
+        assert error.__cause__ is None and error.__context__ is None
+    else:
+        assert error is None
+        assert result.resource_created and result.lpar is None
+        assert result.ownership_stamped is None
+        step = (
+            result.hardware_memory_step
+            if caller.startswith("direct")
+            else next(step for step in result.steps if step.step == "hardware_memory")
+        )
+        assert step.status == "error"
+        assert step.result["status"] == "readback-unavailable"
+        assert "inspect" in " ".join(result.warnings).lower()
+        assert PRIVATE not in repr(result)
+        if caller.startswith("workflow"):
+            assert not result.workflow_completed
+    assert b.events.count("create") == 1
+    assert "stamp" not in b.events and "apply" not in b.events
+    b.assign.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
+    b.hmc.create_vios.assert_not_awaited()
+    b.hmc.delete_logical_partition.assert_not_awaited()
+    b.hmc.delete_vios.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vios", [False, True])
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "omitted",
+        "pre-create",
+        "cancel-before",
+        "cancel-after",
+        "native-failure",
+        "native-cancel",
+    ],
+)
+async def test_lookup_boundary_preserves_other_failures(identity_conflict, vios, phase):
+    b = identity_conflict
+    b.conflict = "scalar"
+    b.before_create = phase in {"pre-create", "cancel-before"}
+    expected = AttributeError
+    options = {"hardware_mem_expansion": False}
+    if phase == "omitted":
+        options = {"security_policy": LparSecurityPolicy(secure_boot=0)}
+    if phase.startswith("cancel"):
+        b.lookup_failure = asyncio.CancelledError(PRIVATE)
+        expected = asyncio.CancelledError
+    elif phase.startswith("native"):
+        original_command = b.command.side_effect
+        expected = asyncio.CancelledError if phase == "native-cancel" else RuntimeError
+
+        async def fail_native(config, command):
+            if command.startswith("mksyscfg"):
+                b.events.append("create")
+                raise expected(PRIVATE)
+            return await original_command(config, command)
+
+        b.command.side_effect = fail_native
+    with pytest.raises(expected) as raised:
+        await invoke(b, vios, **options)
+    assert "may" not in str(raised.value)
+    assert b.events.count("create") == int(not b.before_create)
+    assert "stamp" not in b.events and "apply" not in b.events
+    b.assign.assert_not_awaited()
+    b.hmc.create_logical_partition.assert_not_awaited()
+    b.hmc.create_vios.assert_not_awaited()
