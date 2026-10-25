@@ -10,6 +10,7 @@ from ..._app import (
     with_client,
 )
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_security_policy import (
     LparSecurityPolicy,
     SecurityPolicyResult,
@@ -51,6 +52,8 @@ def hmc_create_vios(
     profile: str | None = None,
     vtpm_settings: LparVtpmSettings | None = None,
     security_policy: LparSecurityPolicy | None = None,
+    hardware_mem_encryption: HardwareMemoryFlag | None = None,
+    hardware_mem_expansion: HardwareMemoryFlag | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -66,6 +69,10 @@ def hmc_create_vios(
         system_name_or_uuid: Target managed-system name or UUID.
         name: Name for the new VIOS partition.
         resources: Memory and processor settings for the VIOS.
+        hardware_mem_encryption: Optional hardware memory encryption access;
+            omission preserves defaults, false explicitly disables access.
+        hardware_mem_expansion: Optional hardware memory expansion access;
+            omission preserves defaults, false explicitly disables access.
         security_policy: Optional strict pending secure-boot/keystore policy.
             Signed enablement is irreversible; store requires inactivity and HMC
             bounds. Linux selection declares intent, not guest proof. No key
@@ -83,6 +90,8 @@ def hmc_create_vios(
             resources,
             vtpm_settings=vtpm_settings,
             security_policy=security_policy,
+            hardware_mem_encryption=hardware_mem_encryption,
+            hardware_mem_expansion=hardware_mem_expansion,
         ),
         profile=profile,
     )

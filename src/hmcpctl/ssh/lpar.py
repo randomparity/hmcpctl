@@ -8,6 +8,7 @@ import shlex
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
+from ..documents.lpar_hardware_memory import hardware_memory_pairs
 from ..documents.lpar_io import LparPhysicalIO
 from ..documents.lpar_security_policy import LparSecurityPolicy
 from ..documents.lpar_vtpm import LparVtpmSettings
@@ -153,6 +154,8 @@ async def create_lpar_via_cli(
     security_policy: LparSecurityPolicy | None = None,
     physical_io: LparPhysicalIO | None = None,
     creation_sriov: tuple[SriovLogicalPortAssignment, ...] = (),
+    hardware_mem_encryption: bool | None = None,
+    hardware_mem_expansion: bool | None = None,
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -176,6 +179,9 @@ async def create_lpar_via_cli(
     processor mode's ``sharing_mode``. Omitted values take the defaults of
     :func:`complete_create_resources`, which the REST create uses too.
     """
+    hardware_pairs = hardware_memory_pairs(
+        hardware_mem_encryption, hardware_mem_expansion
+    )
     if reporting_settings is not None:
         reporting_settings.validate_context("create", partition_type)
     if vtpm_settings is not None:
@@ -192,6 +198,7 @@ async def create_lpar_via_cli(
     ]
     if profile_name is not None:
         config_pairs.append(("profile_name", profile_name))
+    config_pairs.extend(hardware_pairs)
     config_pairs.extend(_lpar_resource_pairs(resources, max_virtual_slots))
     if partition_id is not None:
         config_pairs.append(("lpar_id", partition_id))
@@ -220,9 +227,13 @@ async def create_lpar_via_cli(
     try:
         return await run_hmc_command(config, cmd)
     except HMCCLIError as error:
-        raise HMCCLIError(
-            f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
-        ) from error
+        if not hardware_pairs:
+            raise HMCCLIError(
+                f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
+            ) from error
+    raise HMCCLIError(
+        "Hardware memory creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run."
+    )
 
 
 async def apply_lpar_profile_via_cli(

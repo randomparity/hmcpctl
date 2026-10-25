@@ -1823,6 +1823,60 @@ enables and keystore variants remain unrun. Mocks and scenario registration add
 no maturity evidence. Generate public summaries only with
 `scripts/live_test_evidence.py`; raw result documents remain private.
 
+
+## Hardware memory access at creation (C10, opt-in arm 55)
+
+LPAR and VIOS creation expose optional strict booleans `hardware_mem_encryption`
+and `hardware_mem_expansion` through their existing CLI/MCP adapters. CLI options
+are `--hardware-mem-encryption` / `--no-hardware-mem-encryption` and
+`--hardware-mem-expansion` / `--no-hardware-mem-expansion`. Omission preserves
+existing defaults; explicit false selects native 0. These are fixed creation-only
+attributes, with no update operation or implicit expansion-factor change.
+
+Each supplied field requires its positive selected-system capability advertisement.
+Admission also requires observed `IsClassicHMCManagement=true`,
+`IsHMCPowerVMManagementController=false` and `IsPowerVMManagementController=false`
+on that same system. This tuple bounds admission to an observed native creation
+configuration; it is not a general controller-mode classifier or a release floor.
+Unknown or other tuples refuse before submission. Existing authorization, ownership,
+resource and partition-environment restrictions still apply.
+
+The named `lpar-hardware-memory` arm creates exactly one inactive owned AIX/Linux
+fixture with both flags true and profile application disabled. Independent contained
+identity, caller-token and inactive-state checks precede comparison of
+`PartitionMemoryConfiguration/MemoryEncryptionHardwareAccessEnabled` and
+`MemoryExpansionHardwareAccessEnabled` with the requested values. Missing, malformed,
+mismatched or unavailable readback fails the proof. These optional read-only REST
+fields establish access availability only: they do not identify desired/current
+settings, guest encryption, physical-memory protection or active memory expansion.
+
+Use a separately authorized exclusive window and deploy its exact candidate commit.
+Verify deployed HEAD and imported package source before running these commands as
+separate invocations; neither configuration nor preflight authorizes hardware writes:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-hardware-memory
+uv run --no-sync python scripts/live_lpar_hardware_memory.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-hardware-memory.json
+```
+
+The wrapper accepts no `--results-file` option. Keep its default run files private
+and run recovery after every attempt, including failure or apparent success. A
+failed returned ownership-stamp flag blocks access proof; existing shared cleanup
+may still delete only after its own fresh matching-token and inactive-state proof.
+Unknown, foreign or active residue stays for manual inspection. There is no
+activation, profile application, VIOS mutation, second create or automatic retry.
+Require independent before/after partition and free-resource equality plus recovery
+absence confirmation before treating cleanup as successful.
+
+Scenario `st55-lpar-hardware-memory-creation` is evidence only after an actual
+authorized candidate-bound run. Generate public evidence through
+`scripts/live_test_evidence.py`, retain its exact commit and scan the complete
+filtered output before publication; never publish raw results. Implementation,
+offline tests, source observations and scenario registration add no positive native
+proof. False/mixed combinations, VIOS and other environments remain unrun until
+separately authorized windows; their product acceptance criteria remain in scope.
+
 ### Linux management roles (C05, arm 53)
 
 The opt-in `lpar-linux-roles` arm creates one owned, inactive AIX/Linux fixture

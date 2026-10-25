@@ -1222,6 +1222,15 @@
             ]
           },
           {
+            "variant": "c10-hardware-memory-access-creation",
+            "parameters": [
+              {
+                "name": "hardware_mem_encryption,hardware_mem_expansion",
+                "constraint": "optional strict booleans; omission preserves defaults and false selects 0; positive selected-system capabilities and observed Classic/HMC-controller/PowerVM-controller true/false/false tuple required, not a general mode classifier; native create-only fixed attributes; independent inactive REST MemoryEncryptionHardwareAccessEnabled/MemoryExpansionHardwareAccessEnabled comparison proves access availability only, not desired/current values or runtime encryption/expansion"
+              }
+            ]
+          },
+          {
             "variant": "c05-linux-management-roles",
             "parameters": [
               {
@@ -4984,6 +4993,15 @@
               {
                 "name": "security_policy",
                 "constraint": "four typed creation fields: secure_boot, keystore_kbytes, keystore_signed_updates, linux_dynamic_key_secure_boot; selected-system admission and requested readback; keystore_signed_updates_without_verification is update-only, including false"
+              }
+            ]
+          },
+          {
+            "variant": "c10-hardware-memory-access-creation",
+            "parameters": [
+              {
+                "name": "hardware_mem_encryption,hardware_mem_expansion",
+                "constraint": "optional strict booleans; omission preserves defaults and false selects 0; positive selected-system capabilities and observed Classic/HMC-controller/PowerVM-controller true/false/false tuple required, not a general mode classifier; native create-only fixed attributes; independent inactive REST MemoryEncryptionHardwareAccessEnabled/MemoryExpansionHardwareAccessEnabled comparison proves access availability only, not desired/current values or runtime encryption/expansion"
               }
             ]
           }

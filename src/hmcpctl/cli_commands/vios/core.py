@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Annotated
 
 import typer
 from pydantic import TypeAdapter
@@ -194,6 +195,20 @@ def vios_create(
         help="Inline strict policy JSON (64 KiB); signed enablement irreversible; no guest/key proof",
     ),
     yes: bool = typer.Option(False, "--yes", "-y"),
+    hardware_mem_encryption: Annotated[
+        bool | None,
+        typer.Option(
+            "--hardware-mem-encryption/--no-hardware-mem-encryption",
+            help="Hardware memory encryption access; omitted preserves defaults",
+        ),
+    ] = None,
+    hardware_mem_expansion: Annotated[
+        bool | None,
+        typer.Option(
+            "--hardware-mem-expansion/--no-hardware-mem-expansion",
+            help="Hardware memory expansion access; omitted preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner."""
     policy = load_security_policy(security_policy)
@@ -233,6 +248,8 @@ def vios_create(
             resource_values,
             vtpm_settings=settings,
             security_policy=policy,
+            hardware_mem_encryption=hardware_mem_encryption,
+            hardware_mem_expansion=hardware_mem_expansion,
         )
     )
     print_json(result)
