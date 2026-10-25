@@ -846,6 +846,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "add_vnic_backing",
     }
     assert by_label["--filter"] == {
+        "_profile",
         "get_lpar_memory_layout",
         "facts",
         "_facts",
