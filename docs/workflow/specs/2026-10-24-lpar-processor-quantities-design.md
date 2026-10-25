@@ -15,7 +15,7 @@ Source inspection at `40f9f85672dee57c6dcc03d6446534efab93e43e` established:
 | Native non-pool add/remove/set grammar | `docs/refs/hmc-commands-p10/commands/chhwres.md:142`; P11 equivalent `:133` |
 | Whole dedicated CPUs or shared virtual processors; current-based arithmetic | P10 `chhwres.md:226`; P11 `:230` |
 | Shared entitlement, at most two decimal places | P10 `chhwres.md:227`; P11 `:231` |
-| Shutdown below-minimum removal couples CPU and memory reset | P10 `chhwres.md:206`; P11 `:210` |
+| Shutdown below-minimum removal couples CPU and memory reset | P10 `chhwres.md:206`; P11 `:208` |
 | Explicit no-RMC force and deferred operating-system effect | P10 `chhwres.md:236`; P11 `:239` |
 | Processor read, level, filter and field selection | P10 `lshwres.md:62,97,102,103`; P11 corresponding processor synopsis/options |
 | Current/configured dedicated CPU and shared entitlement/vCPU REST paths | `tests/fixtures/partition_profile_contract/partition-resource.json:216`; `tests/fixtures/live/rest-lpar-entry.json`; `rest-vios-entry.json` |
@@ -75,7 +75,10 @@ no dependency on the unlanded memory-move implementation, and no ownership migra
 
 Resolve selected system UUID, contained partition kind/UUID and unique CLI system name;
 use the kind-specific REST reader. Confirm partition UUID/name/positive numeric ID,
-then call existing `authorize_lpar_mutation` before SSH processor reads or mutations.
+then call existing `authorize_lpar_mutation(..., max_output_bytes=65536)` before processor
+reads or mutations. Its required ownership-description SSH read uses the same aggregate cap;
+overflow prevents an authorization decision and all processor commands. The audited override
+keeps its existing no-read behavior; no caller-supplied description substitutes for the guard.
 The full REST read supplies state, partition type, RMC, operation-in-progress, profile
 sync, memory envelope, current mode and configured processor bounds. Require explicit
 operation-in-progress and mode evidence rather than the memory helper's absent-field fallback.
@@ -151,6 +154,7 @@ names are shell quoted. There is no `-a`, pool selector, target partition, autom
 profile update, mode switch, guest activation or compensating mutation. Native deltas are
 performed by HMC; a preflight read is not a cross-transport transaction or ETag guarantee.
 Native CPU command budget is two pre-write reads, zero or one mutation, one post-write read;
+add one ownership-description read unless the explicit audited override skips it.
 REST calls are bounded by that single-pass sequence, without polling or discovery retries.
 
 ## Bounded SSH option
@@ -160,6 +164,9 @@ insufficient. Extend only existing `ssh.transport.run_hmc_command(config, cmd, *
 include_stderr=False, secrets=(), max_output_bytes: int | None = None) -> str`.
 None preserves its existing connection.run path; a positive exact integer selects bounded
 output. Reject zero, negative, bool and noninteger limits before credentials/connect/exec.
+Thread the optional keyword through ownership.authorize_lpar_mutation, its private
+_read_lpar_description_for_authorization and ssh.profiles.get_lpar_description. Their None
+defaults preserve existing callers and guard/audit policy; only this operation supplies65536.
 No CLI/MCP limit parameter, dependency, arbitrary proxy or global caller policy is added.
 
 Installed AsyncSSH 2.24.1 has no cumulative output cap: connection.py:4650 delegates run
@@ -245,19 +252,15 @@ an exit code, command text or generated schema. No profile-sync mode is enabled 
 
 ## Validation and live evidence
 
-Focused tests cover each Expected criterion: strict request schema, dedicated/shared mapping,
-exact native grammar/CSV shape, current-versus-pending arithmetic, decimal precision,
-min/max and system limits, vCPU entitlement ratio, zero/no-op and coupled shutdown reset,
-state/RMC/capability/ownership/containment refusals, races, native refusal, uncertain transport,
-partial/unavailable/mismatched readback, and unchanged original setter dispatch/If-Match.
-Transport proofs cover stdout/stderr/combined byte overflow, exact boundaries, nonzero exits,
-UTF-8, timeouts/cancellation/cleanup, secret redaction, mutation uncertainty and omitted-limit
-compatibility using bounded mocks and real local AsyncSSH peers, without hardware.
-Fixture provenance distinguishes captured shape from deliberately constructed edge values;
-controlled faults must turn the newly added tests red before their restoration/green run.
-CLI/MCP contract tests cover confirmation, connection-profile forwarding, mutually exclusive
-modes, error exit codes, security identity and absence of a stable-facade addition.
+The plan's per-contract Verification inventories cover quantities, admission, readback,
+transport and required ownership-read closure, CLI/MCP routing and the retained absolute setter.
+Each new/suspect test must fail under its named controlled fault before restoration/green.
+Fixtures distinguish captured shapes from constructed edge values; real local AsyncSSH peers
+exercise flow control and cleanup without hardware. Overflow must prevent authorization and
+processor commands; default callers, denial and override audit behavior stay covered.
 
+The implementation PR adds change_lpar_processors as Reconfiguring in ADR0092§3.2, with
+its real guard citation and #1778/ADR0289 provenance, as required by §6; policy is unchanged.
 Implementation updates operations/maturity/reference bindings, generated tool docs/runtime
 projection, CHANGELOG and a reproducible named arm56 (`lpar-processor-quantities`,
 `st56-lpar-processor-quantities`) under existing preflight/wrapper/recovery architecture.

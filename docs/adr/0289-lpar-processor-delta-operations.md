@@ -20,8 +20,9 @@ processor operation, fixed native grammar in SSH and reuse landed containment/me
 helpers. Use a native filtered CPU row to verify current/pending/runtime counts alongside
 REST identity, memory, capacity and profile-sync observations. Submit once, then independently
 classify applied, no-op, rejected, partial or unverified; never replay or compensate.
-Add an optional byte limit on the existing SSH transport; only the new processor commands
-opt in. Drain both binary streams under one budget with fixed reads and native backpressure;
+Add an optional byte limit on the existing SSH transport; the processor commands and their
+required ownership-description read opt in through the existing authorization guard. Drain
+both binary streams under one budget with fixed reads and native backpressure;
 abort on overflow and preserve uncertain-effect semantics. Existing callers retain defaults.
 
 ## Consequences
@@ -53,5 +54,6 @@ Live evidence remains separate from offline correctness and source coverage.
   disables stream backpressure inside communicate before collecting output; a later parser
   size check cannot bound that allocation.
 - **Make every SSH caller bounded now.** judgment: unnecessary compatibility expansion;
-  the parent criterion requires the new processor route to enforce its own finite budget.
+  the new processor route and its required read dependency enforce a finite budget; unrelated
+  callers retain their defaults.
 - **Do nothing.** judgment: leaves #1778's requested native quantity gap unresolved.
