@@ -30,6 +30,7 @@ _BACKTICKED = re.compile(r"`([^`]+)`")
 _MINIMUM_ROWS = 40
 
 _MUTATOR_PREFIXES = (
+    "change_lpar_processors",
     "add_",
     "apply_",
     "assign_",
@@ -71,6 +72,7 @@ _INVENTORY_PATHS = tuple(
         "operations/lpar/core.py",
         "operations/lpar/decommission.py",
         "operations/lpar/dlpar.py",
+        "operations/lpar/processors.py",
         "operations/lpar/migration.py",
         "operations/lpar/ownership.py",
         "operations/lpar/provision.py",
@@ -115,6 +117,7 @@ _CLASSIFIED_MUTATORS = frozenset(
         "decommission_lpar",
         "modify_lpar",
         "set_lpar_processors",
+        "change_lpar_processors",
         "set_lpar_memory",
         "migrate_lpar",
         "migrate_lpar_with_affinity_preflight",
@@ -393,3 +396,23 @@ def test_malformed_symbol_citations_are_rejected() -> None:
     malformed = "`operations/lpar/core.py:403`"
     assert _LINE_CITATION.fullmatch(malformed)
     assert not _SYMBOL_CITATION.fullmatch(malformed)
+
+
+def test_processor_quantity_row_and_guard() -> None:
+    section = _ADR_PATH.read_text().split("#### 3.2 ", 1)[1].split("#### 3.3 ", 1)[0]
+    rows = [
+        line
+        for line in section.splitlines()
+        if line.startswith("| `change_lpar_processors` |")
+    ]
+    assert len(rows) == 1
+    citations = [
+        citation
+        for row, locations, guards in _ROWS
+        if row == "`change_lpar_processors`"
+        for citation in (*locations, *guards)
+    ]
+    assert citations and all(c.symbol == "change_lpar_processors" for c in citations)
+    assert _reaches_guard(
+        _SOURCE_ROOT / "operations/lpar/processors.py", "change_lpar_processors"
+    )
