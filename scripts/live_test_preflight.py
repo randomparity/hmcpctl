@@ -375,7 +375,7 @@ def _processor_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerd
         "configuration validated",
         (
             f"one inactive shared AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create without apply; once-only setup apply requires all-zero CPU AND memory",
-            "remove0.10 entitlement, zero delta, over-maximum refusal, explicit set0.50; independent REST/native CPU and memory readback; matching-token deletion and recovery",
+            "remove0.10 entitlement, zero delta, over-maximum refusal; positive add/set unrun; independent REST/native CPU and memory readback; matching-token deletion and recovery",
             "vCPU1/2/4 and entitlement0.10/0.50/1.00 require admitted system floor/capacity; no activation, force, pool policy or foreign resource mutation",
         ),
         config.system_name,

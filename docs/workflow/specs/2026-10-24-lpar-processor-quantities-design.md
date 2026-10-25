@@ -279,10 +279,10 @@ no activation, no force and no foreign-resource mutation. Existing guarded setup
 its own default profile once only when both CPU and memory current vectors are all zero;
 contradictory/mixed setup refuses. Use minimum/desired/maximum entitlement 0.1/0.5/1.0 and
 vCPUs 1/2/4 only if the selected system's minimum units/vCPU admits them, with 1024/2048/4096
-MiB memory aligned to its region. The sequence attempts remove 0.1 units (target 0.4),
-a zero delta, an over-maximum refusal, then explicit set to original 0.5 units, stopping
-on the first unexpected outcome. Independent REST/native reads verify each step.
-Inactive positive operations are hypotheses; native refusal fails the arm without replay.
+MiB memory aligned to its region. Remove 0.1 units (target 0.4), then zero-add and
+over-maximum refusal, stopping on unexpected outcomes; independent REST/native reads verify each.
+Positive add/set remain unrun by this arm. Original inactive set failed HSCL7016 at 4dc91a1e.
+Native refusal fails the arm without replay; it never authorizes activation or force.
 Finally delete only the matching-token inactive fixture and compare names/free resources;
 recovery runs even after apparent success. Output stays in a private external directory.
 

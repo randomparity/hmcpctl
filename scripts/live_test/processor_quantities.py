@@ -223,7 +223,6 @@ async def _cases(client: Client, state: RunState, run: fixture._Run) -> list[Ass
         ("remove", "0.10", reduced, "applied", "native-remove-read-back"),
         ("add", "0.00", reduced, "noop", "zero-delta-noop"),
         ("add", "1.10", reduced, "refused", "invalid-quantity-refused-unchanged"),
-        ("set", "0.50", initial, "applied", "explicit-set-read-back"),
     ]
     assertions = []
     for operation, units, expected, outcome, name in cases:
@@ -334,7 +333,7 @@ async def exercise_processor_quantities(client: Client, state: RunState) -> None
         assertions = results + [
             Assertion(
                 "inactive-processor-quantity-sequence",
-                len(results) == 4 and all(a.holds for a in results),
+                len(results) == 3 and all(a.holds for a in results),
             )
         ]
     except (HMCError, ValueError, TypeError, PermissionError) as error:
@@ -351,6 +350,8 @@ async def exercise_processor_quantities(client: Client, state: RunState) -> None
             assertions=assertions,
             cleanup="passed" if run.deleted and same else "failed",
             data={
+                "positive_add": "not-run",
+                "set": "not-run",
                 "dedicated": "not-run",
                 "vcpu_only": "not-run",
                 "active_rmc": "not-run",

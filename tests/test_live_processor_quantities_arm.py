@@ -104,7 +104,7 @@ class ScriptedSystem:
                 None,
                 False,
             )
-        if self.fault == "rejected":
+        if self.fault == "rejected" or change["operation"] == "set":
             return "PASS", {"outcome": "rejected", "workflow_completed": False}
         if self.fault == "exception":
             raise HMCError("transport lost")
@@ -112,7 +112,6 @@ class ScriptedSystem:
             self.units = {
                 "add": self.units + amount,
                 "remove": self.units - amount,
-                "set": amount,
             }[change["operation"]]
         outcome = (
             "partial"
@@ -209,9 +208,8 @@ async def test_owned_processor_sequence_and_cleanup(monkeypatch):
         ("remove", Decimal("0.10")),
         ("add", 0),
         ("add", Decimal("1.10")),
-        ("set", Decimal("0.50")),
     ]
-    assert system.units == Decimal("0.50") and system.deleted and system.reads >= 5
+    assert system.units == Decimal("0.40") and system.deleted and system.reads >= 5
     assert (
         system.creations[0].stamp_policy == "required"
         and system.creations[0].apply_profile is False
@@ -222,6 +220,33 @@ async def test_owned_processor_sequence_and_cleanup(monkeypatch):
     )
     observation = state.observations[0]["observation"]
     assert observation["result"] == observation["cleanup"] == "passed"
+    assert state.results[-1]["data"]["positive_add"] == "not-run"
+    assert state.results[-1]["data"]["set"] == "not-run"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expected_units", ["0.50", "0.40"])
+async def test_inactive_set_rejection_never_becomes_positive_evidence(
+    monkeypatch, expected_units
+):
+    from live_test import processor_quantities as arm
+
+    # The first native arm rejected set0.50 and independently remained at0.40.
+    current = (*arm._INITIAL[:4], "0.40", *arm._INITIAL[5:])
+    expected = (*arm._INITIAL[:4], expected_units, *arm._INITIAL[5:])
+    run = SimpleNamespace(uuid=UUID, token="caller-R1", system="sys-R1")
+    data = {"outcome": "rejected", "workflow_completed": False}
+    state = runner.RunState(hmc_config=HMCConfig.from_mapping({}))
+    call = AsyncMock(return_value=("PASS", data))
+    read = AsyncMock(return_value=current)
+    monkeypatch.setattr(state, "call", call)
+    monkeypatch.setattr(arm.fixture, "_token_of", AsyncMock(return_value=run.token))
+    monkeypatch.setattr(arm, "_read_current", read)
+
+    assert not await arm._case(None, state, run, "set", "0.50", expected, "applied")
+    assert state.results[-1]["status"] == "FAIL"
+    assert call.await_count == 1 and read.await_count == 2
+    assert data == {"outcome": "rejected", "workflow_completed": False}
 
 
 @pytest.mark.asyncio

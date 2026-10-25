@@ -1943,13 +1943,13 @@ all current bounds are zero, the arm rechecks contained identity, ownership and
 inactive state before applying the default profile once; mixed or malformed
 bounds stop. Setup must establish positive current bounds before quantity calls.
 
-The sequence removes 0.10 processing units, verifies zero-add as a no-op,
-refuses an over-maximum add of 1.10 and sets entitlement back to 0.50. Separate
-readback compares all CPU and memory bounds after each step; the first failed
-assertion stops the sequence. Native inactive removal/set is a bounded test
-hypothesis: refusal fails the arm and does not authorize activation, force,
-replay or a substitute target. The arm does not change pools or sharing mode.
-Cleanup deletes only the matching-token inactive fixture and checks absence and
+The sequence removes 0.10 processing units, verifies zero-add as a no-op and
+refuses an over-maximum add of 1.10. Separate readback compares all CPU and
+memory bounds after each step; the first failed assertion stops the sequence.
+Native refusal fails the arm and does not authorize activation, force, replay
+or a substitute target. Positive add/set remain unrun by this wrapper; it does
+not change pools or sharing mode. Cleanup deletes the matching-token inactive
+fixture at 0.40 processing units and checks absence and
 the independent names/free-resource baseline. Concurrent administrators cannot
 be atomically fenced by these reads; use an exclusive approved window.
 
@@ -1972,8 +1972,34 @@ public matrices only through the evidence script, scan their complete contents
 for private identifiers and retain the exact tested commit. Never publish raw
 results or invent a passing matrix.
 
-Arm 56 has offline tests but has not run on hardware. Its bounded sequence does
-not prove dedicated CPUs, shared virtual-processor changes, active/RMC operation,
-forced/no-RMC restart behavior, IBM i, or coupled inactive CPU-and-memory reset.
-Those product contexts retain their typed contracts and offline tests, and need
-separate candidate-bound authorization and evidence; no fallback run is implied.
+At candidate `4dc91a1e`, the original four-case arm failed: removal to 0.40,
+zero-add and over-maximum refusal passed, but the final inactive set to 0.50
+returned `HSCL295A` / `HSCL7016 The partition must be running to perform this operation.`
+The product reported rejected with unchanged before/after quantities of 0.40.
+Six result rows passed and two failed; owned cleanup passed and independent
+before/after baselines matched. This is not a passing complete native matrix.
+The revised three-case arm has not yet run on hardware; it does not reclassify
+that failed attempt or claim positive add/set evidence.
+
+The bounded sequence does not prove dedicated CPUs, shared virtual-processor
+changes, active/RMC operation, forced/no-RMC restart behavior, IBM i, or coupled
+inactive CPU-and-memory reset. Those product contexts retain their typed contracts
+and offline tests and need separate candidate-bound authorization and evidence.
+
+### Positive processor add/set validation — unrun
+
+Use a separately authorized candidate-bound window on an eligible owned running
+shared AIX/Linux or VIOS partition with active RMC and dynamic-processor capability.
+Independently record the current CPU/memory bounds, current and runtime quantities,
+and system capacity; require at least 0.20 units of partition/system headroom and
+valid entitlement/vCPU ratios. Through the existing `lpars processors` command or
+`hmc_dlpar_proc` change input, set entitlement to current plus 0.10, add 0.10,
+then remove 0.20. Check the complete resulting current and runtime CPU targets and
+preserved current memory after each step before advancing. This separate procedure
+is unrun, not another implemented wrapper or authorization to run one.
+
+Retain ownership, containment, state, per-call/window bounds and independent baseline
+checks. Partial, rejected or unverified outcomes stop for independent reconciliation
+and approved recovery; no automatic inverse, activation, force, target substitution
+or replay is implied. Forced/no-RMC, dedicated and other contexts need their own
+explicit procedures and evidence; successful current readback alone is not guest proof.
