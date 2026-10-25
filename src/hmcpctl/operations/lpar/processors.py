@@ -38,6 +38,8 @@ def _number(value: object, label: str, *, whole: bool = False) -> Decimal | int:
     number = LparProcessorChange.exact_units(leaf_text(value))
     if number is None or (whole and number != number.to_integral_value()):
         raise ValueError(f"Processor change requires valid {label}")
+    if number.is_zero():
+        number = Decimal(0)
     return int(number) if whole else number
 
 
@@ -157,6 +159,14 @@ def _snapshot(
     before["runtime_processing_units"] = (
         None if dedicated else _number(row.get("run_proc_units"), "run_proc_units")
     )
+    # The inherited vector participates in equality too; XML decimal spelling
+    # must not turn unchanged quantities into a partial outcome.
+    before["processors"] = {
+        name: f"{_number(value, name):.2f}"
+        if "Units" in name
+        else str(_number(value, name, whole=True))
+        for name, value in before["processors"].items()
+    }
     return before
 
 

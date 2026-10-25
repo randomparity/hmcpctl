@@ -1047,3 +1047,52 @@ async def test_zero_reset_independent_complete_readback(
     assert result["outcome"] == ("partial" if partial else "applied")
     assert any("CPU and memory" in warning for warning in result["warnings"])
     assert b.write.await_count == 1 and b.read.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spelling", ["0.5", "0.500"])
+async def test_independent_equivalent_decimal_spelling_is_unchanged(
+    processor_boundary, spelling
+):
+    import asyncssh
+
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    b = processor_boundary
+    b.before["Resource"]["PartitionProcessorConfiguration"][
+        "CurrentSharedProcessorConfiguration"
+    ]["CurrentProcessingUnits"] = spelling
+    b.after["Resource"]["PartitionProcessorConfiguration"][
+        "CurrentSharedProcessorConfiguration"
+    ]["CurrentProcessingUnits"] = "0.50"
+    b.after_row["curr_proc_units"] = "0.50"
+
+    async def reject(*args, **kwargs):
+        b.changed = True
+        raise HMCCLIError("native refusal") from asyncssh.ProcessError(
+            {}, "chhwres", None, 3, None, 3, "", "refusal"
+        )
+
+    b.write.side_effect = reject
+    result = await cpu_change(b, operation="add", processing_units="0.10")
+    assert result["outcome"] == "rejected"
+    assert result["before"]["processors"]["CurrentProcessingUnits"] == "0.50"
+    assert result["before"] == result["after"]
+    assert b.write.await_count == 1
+
+
+def test_independent_zero_units_have_one_canonical_spelling():
+    from hmcpctl.operations.lpar.processors import _snapshot
+
+    entry, row = processor_entry(), processor_row()
+    cpu = entry["Resource"]["PartitionProcessorConfiguration"][
+        "CurrentSharedProcessorConfiguration"
+    ]
+    for field in cpu:
+        cpu[field] = "-0.00" if "Units" in field else "0"
+    for field in row:
+        if field.startswith("curr_") and field != "curr_proc_mode":
+            row[field] = "0"
+    evidence = _snapshot(entry, LPAR_UUID, row)
+    assert evidence["processors"]["CurrentProcessingUnits"] == "0.00"
+    assert f"{evidence['current_processing_units']:.2f}" == "0.00"
