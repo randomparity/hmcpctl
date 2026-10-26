@@ -758,10 +758,12 @@ async def _ssh(hmc: CountedHMC, p: dict, kind: str, case: dict | None = None) ->
         pairs = [("lpar_names", case["name"])]
         if kind == "profile":
             pairs.append(("profile_names", "default_profile"))
-        query = shlex.quote(build_filter(pairs))
+        query = build_filter(pairs)
         level = "prof" if kind == "profile" else "lpar"
         suffix = "" if kind == "profile" else " -F description"
-        command = f"lssyscfg -r {level} -m {system} --filter {query}{suffix}"
+        command = (
+            f"lssyscfg -r {level} -m {system} --filter {shlex.quote(query)}{suffix}"
+        )
     elif kind == "create" and case is not None and case in p["cases"]:
         if (
             hmc.budget.stage != "capture"
@@ -773,7 +775,8 @@ async def _ssh(hmc: CountedHMC, p: dict, kind: str, case: dict | None = None) ->
         hmc.create_case = None
         hmc.created_names.add(case["name"])
         seconds = 60
-        command = f"mksyscfg -r lpar -m {system} -i {shlex.quote(_record(case))}"
+        record = build_attribute_record(_record_pairs(case))
+        command = f"mksyscfg -r lpar -m {system} -i {shlex.quote(record)}"
     else:
         raise Held("unknown finite source command")
     seconds = hmc.budget.timeout(seconds)
@@ -793,7 +796,7 @@ async def _ssh(hmc: CountedHMC, p: dict, kind: str, case: dict | None = None) ->
     return result
 
 
-def _record(case: dict) -> str:
+def _record_pairs(case: dict) -> list[tuple[str, object]]:
     pairs = [
         ("name", case["name"]),
         ("lpar_env", "vioserver"),
@@ -807,7 +810,11 @@ def _record(case: dict) -> str:
             ("mem_expansion", case["mem_expansion"]),
         ]
     )
-    return build_attribute_record(pairs)
+    return pairs
+
+
+def _record(case: dict) -> str:
+    return build_attribute_record(_record_pairs(case))
 
 
 def _projection(resource: dict, fields: tuple[str, ...]) -> dict:
