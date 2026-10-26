@@ -393,6 +393,8 @@ def _save(directory: Path, document: dict, name_out: str = "results.json") -> No
 
 def _receipt(p: dict, stage: str, packet_sha: str, output: Path) -> None:
     window = Path(p["window"]["directory"])
+    if window != window.resolve() or output != output.resolve():
+        raise Held("canonical absolute window/output paths required")
     _private(window, directory=True)
     root = _root()
     if window == root or root in window.parents or output != window / stage:

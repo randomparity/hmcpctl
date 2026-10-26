@@ -7,6 +7,8 @@ import time
 from copy import deepcopy
 from html import escape
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -513,14 +515,83 @@ def test_record_has_one_atomic_marker_and_exact_finite_pairs(tmp_path):
         }
 
 
-def test_receipt_is_once_only(tmp_path, monkeypatch):
-    p = packet(tmp_path)
-    monkeypatch.setattr(source, "_root", lambda: tmp_path / "checkout")
-    output = Path(p["window"]["directory"]) / "capture"
-    source._receipt(p, "capture", "d" * 64, output)
+@pytest.mark.parametrize("stage", list(source.LIMITS))
+def test_receipt_is_once_only(tmp_path, stage):
+    p = packet(tmp_path.resolve())
+    window = Path(p["window"]["directory"])
+    assert window.is_absolute() and source._root() not in window.parents
+    output = window / stage
+    source._receipt(p, stage, "d" * 64, output)
     assert output.stat().st_mode & 0o077 == 0
+    claim = window / (stage + ".claim")
+    assert claim.read_text() == "d" * 64 and claim.stat().st_mode & 0o077 == 0
     with pytest.raises((ValueError, OSError)):
-        source._receipt(p, "capture", "d" * 64, output)
+        source._receipt(p, stage, "d" * 64, output)
+
+
+def test_relative_checkout_window_refused_before_receipt_or_transport(
+    tmp_path, monkeypatch, request
+):
+    p = packet(tmp_path.resolve())
+    root = source._root()
+    monkeypatch.chdir(root)
+    p["imported_source_sha256"] = {
+        name: source.hashlib.sha256((root / name).read_bytes()).hexdigest()
+        for name in source.SOURCE_PATHS
+    }
+    monkeypatch.setattr(source.sys, "version_info", (3, 11, 15))
+    monkeypatch.setattr(
+        source,
+        "_git_read",
+        lambda root, args: {
+            ("rev-parse", "HEAD"): p["tested_commit"],
+            ("rev-parse", "HEAD^{tree}"): p["tested_tree"],
+            (
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--ignore-submodules=all",
+            ): "",
+        }[args],
+    )
+    config = HMCConfig.from_mapping(
+        {
+            **p["hmc_identity"],
+            "password": "test",  # pragma: allowlist secret -- mocked credential
+            "agent_id": "source-test",
+        }
+    )
+    monkeypatch.setattr(source, "load_profile", lambda name: config)
+    transport = Mock(
+        side_effect=AssertionError("transport entered before path refusal")
+    )
+    monkeypatch.setattr(source.HMCClient, "_new_http_client", transport)
+    ignored = root / "docs/workflow/plans"
+    if not ignored.exists():
+        ignored.mkdir()
+        request.addfinalizer(ignored.rmdir)
+    with TemporaryDirectory(prefix="private-window-", dir=ignored) as name:
+        window = Path(name)
+        p["window"]["directory"] = str(window.relative_to(root))
+        packet_path = tmp_path / "packet.json"
+        packet_path.write_bytes(source.encode(p))
+        packet_path.chmod(0o600)
+        packet_sha = source.hashlib.sha256(packet_path.read_bytes()).hexdigest()
+        with pytest.raises(source.Held, match="canonical absolute"):
+            source._main(
+                [
+                    "preflight",
+                    "--packet",
+                    str(packet_path),
+                    "--packet-sha256",
+                    packet_sha,
+                    "--output",
+                    str(Path(p["window"]["directory"]) / "preflight-initial"),
+                ],
+                time.monotonic(),
+            )
+        assert list(window.iterdir()) == []
+        transport.assert_not_called()
 
 
 def test_budget_refuses_dispatch_and_keeps_failed_payload_charge(tmp_path):
