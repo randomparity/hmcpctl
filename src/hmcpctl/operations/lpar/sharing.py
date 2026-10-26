@@ -120,28 +120,34 @@ def _verify(
     )
 
 
-def _changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
+def _configuration_comparison(before: dict[str, Any], after: dict[str, Any]) -> str:
+    checks: list[bool | None] = []
     for path, value in after["requested"].items():
-        previous = before["requested"][path]
-        if (
-            value is not None
-            and value != previous
-            and not _equivalent(path, value, previous)
+        # Raw context or weight text cannot establish change without a valid branch.
+        if path in _EXACT_PATHS or path == (
+            f"{_PPC}/SharedProcessorConfiguration/UncappedWeight"
         ):
-            return True
+            continue
+        previous = before["requested"][path]
+        checks.append(
+            _equivalent(path, value, previous)
+            if _number(value) is not None and _number(previous) is not None
+            else None
+        )
     for name in ("configured", "current"):
         previous, observed = before[name], after[name]
-        if previous is None or observed is None:
-            continue
-        keys = ("dedicated", "mode")
-        if any(previous[key] != observed[key] for key in keys):
-            return True
-        if (
-            previous["weight_status"] == observed["weight_status"] == "valid"
-            and previous["weight"] != observed["weight"]
-        ):
-            return True
-    return False
+        if previous is None:
+            checks.append(None)
+        else:
+            checks.extend(
+                _branch_checks(
+                    observed,
+                    previous["dedicated"],
+                    previous["mode"],
+                    previous["weight"],
+                )
+            )
+    return _verification(checks)
 
 
 def _bounded(value: Any, warnings: list[str]) -> Any:
@@ -206,12 +212,15 @@ async def apply_sharing_change(
         resource = element_to_dict(document)
     except (HMCError, ValueError) as exc:
         read_error = str(exc)
+    comparison = (
+        _configuration_comparison(before, after) if after is not None else "unavailable"
+    )
     outcome = "unverified"
     if configuration == "matched":
         outcome = "applied"
-    elif after is not None and _changed(before, after):
+    elif comparison == "mismatched":
         outcome = "partial"
-    elif after is not None and submission == "rejected":
+    elif comparison == "matched" and submission == "rejected":
         outcome = "rejected"
     entry = {"UUID": uuid, "Resource": resource}
     location = change_location_of(entry)

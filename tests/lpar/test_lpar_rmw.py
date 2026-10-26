@@ -1559,14 +1559,34 @@ async def test_mixed_requested_configured_fields_and_runtime_are_independent(
 async def test_sharing_outcome_full_comparison_before_multibyte_diagnostic_bounds(
     mock_hmc, authorized
 ):
-    before = _sharing_snapshot("界" * 2000 + "a")
-    after = _sharing_snapshot("界" * 2000 + "b")
+    before = _sharing_snapshot("0" * 4200 + "128")
+    after = _sharing_snapshot("0" * 4200 + "1")
+    assert _observe(before)["configured"]["weight"] == 128
+    assert _observe(after)["configured"]["weight"] == 1
     _sharing_routes(mock_hmc, before, after)
     async with HMCClient(make_config()) as hmc:
         result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
     assert result["outcome"] == "partial"
     assert result["configuration_verification"] != "matched"
     assert result["expected"]["weight"] == 0
+    for observed in (result["before"], result["after"]):
+        assert len(observed["configured"]["raw_weight"].encode()) <= 4096
+        assert len(next(iter(observed["requested"].values())).encode()) <= 4096
+    assert any("truncat" in warning for warning in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_sharing_malformed_multibyte_diagnostics_do_not_establish_change(
+    mock_hmc, authorized
+):
+    before = _sharing_snapshot("界" * 2000 + "a")
+    after = _sharing_snapshot("界" * 2000 + "b")
+    _sharing_routes(mock_hmc, before, after)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
+    assert result["outcome"] == "unverified"
+    assert result["configuration_verification"] == "unavailable"
+    assert result["workflow_completed"] is False
     for observed in (result["before"], result["after"]):
         assert len(observed["configured"]["raw_weight"].encode()) <= 4096
         assert len(next(iter(observed["requested"].values())).encode()) <= 4096
@@ -1811,6 +1831,69 @@ async def test_sharing_outcome_rejection_ignores_numeric_formatting(
         )
     assert result["outcome"] == "rejected"
     assert result["workflow_completed"] is False
+
+
+@pytest.mark.asyncio
+async def test_sharing_rejected_submission_with_uuid_only_read_is_unverified(
+    mock_hmc, authorized
+):
+    after = _sharing_snapshot()
+    for child in list(after):
+        if localname(child.tag) != "Metadata":
+            after.remove(child)
+    _, post = _sharing_routes(mock_hmc, _sharing_snapshot(), after, status=412)
+    async with HMCClient(make_config()) as hmc:
+        result = await set_lpar_processors(hmc, LPAR, LparResources(uncapped_weight=0))
+    assert result["submission_status"] == "rejected"
+    assert result["configuration_verification"] == "unavailable"
+    assert result["outcome"] == "unverified"
+    assert result["workflow_completed"] is False
+    assert post.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize(
+    ("path", "damage"),
+    [
+        (PPC, "missing"),
+        (f"{PPC}/SharingMode", "missing"),
+        (f"{PPC}/SharingMode", "invalid"),
+        (f"{SHARED}/UncappedWeight", "missing"),
+        (f"{SHARED}/UncappedWeight", "NaN"),
+        (f"{SHARED}/UncappedWeight", "256"),
+        (f"{PPC}/CurrentSharingMode", "missing"),
+        (f"{PPC}/CurrentSharingMode", "invalid"),
+        (f"{CURRENT_SHARED}/CurrentUncappedWeight", "missing"),
+        (f"{CURRENT_SHARED}/CurrentUncappedWeight", "NaN"),
+        (f"{SHARED}/DesiredProcessingUnits", "missing"),
+        (f"{SHARED}/DesiredProcessingUnits", "NaN"),
+    ],
+)
+async def test_sharing_rejected_submission_needs_comparable_unchanged_state(
+    mock_hmc, authorized, path, damage, changed
+):
+    after = _sharing_snapshot()
+    _find(after, "PartitionMemoryConfiguration/DesiredMemory").text = (
+        "4096" if changed else "3072"
+    )
+    if damage == "missing":
+        parent, _, _ = path.rpartition("/")
+        (_find(after, parent) if parent else after).remove(_find(after, path))
+    else:
+        _find(after, path).text = damage
+    _, post = _sharing_routes(mock_hmc, _sharing_snapshot(), after, status=412)
+    async with HMCClient(make_config()) as hmc:
+        result = await modify_lpar(
+            hmc,
+            LPAR,
+            LparResources(uncapped_weight=0, desired_procs=0.5, desired_memory=4096),
+            LparPcieAssignments(),
+        )
+    assert result.lpar["submission_status"] == "rejected"
+    assert result.lpar["outcome"] == ("partial" if changed else "unverified")
+    assert result.workflow_completed is False
+    assert post.call_count == 1
 
 
 @pytest.mark.asyncio
