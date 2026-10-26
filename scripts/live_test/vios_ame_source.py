@@ -1703,7 +1703,10 @@ def _predecessor(p: dict, stage: str, packet_sha: str) -> None:
     document = _read_private(directory / "results.json", 32 * MIB)
     session = _read_private(directory / "session.json", MIB)
     if (
-        document.get("binding_sha256") != _binding(p)
+        type(document.get("schema_version")) is not int
+        or document.get("schema_version") != 1
+        or document.get("source_only") is not True
+        or document.get("binding_sha256") != _binding(p)
         or document.get("phase") != "preflight-complete"
         or document.get("observed_baseline_sha256") != p["baseline_sha256"]
         or document.get("run", {}).get("partial") is not False

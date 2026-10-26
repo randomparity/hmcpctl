@@ -866,7 +866,16 @@ _CLOSEOUT_FAULTS = (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["preflight-final", "capture"])
-@pytest.mark.parametrize("key,value", _CLOSEOUT_FAULTS + [("binding", None)])
+@pytest.mark.parametrize(
+    "key,value",
+    _CLOSEOUT_FAULTS
+    + [("binding", None)]
+    + [
+        ("schema_version", version)
+        for version in (None, True, False, 2, 1.0, "1", {}, [])
+    ]
+    + [("results_source_only", marker) for marker in (None, False, 1)],
+)
 async def test_predecessor_requires_bound_clean_session(
     rig, monkeypatch, stage, key, value
 ):
@@ -887,6 +896,12 @@ async def test_predecessor_requires_bound_clean_session(
     closeout = json.loads((directory / "session.json").read_text())
     if key == "binding":
         p["system"]["name"] = "different"
+    elif key == "schema_version":
+        document.pop(key) if value is None else document.update({key: value})
+    elif key == "results_source_only":
+        document.pop("source_only") if value is None else document.update(
+            source_only=value
+        )
     elif key == "both-digests":
         document.pop("packet_sha256")
         closeout.pop("packet_sha256")
