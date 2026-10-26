@@ -49,7 +49,7 @@ async def _read(client: Client, state: RunState, run: fixture._Run) -> dict[str,
     value = resource(entry)
     if (
         status != "PASS"
-        or field(entry, "UUID") != run.uuid
+        or str(field(entry, "UUID")).casefold() != str(run.uuid).casefold()
         or tuple(value.get(key) for key in _IDENTITY)
         != (run.name, "AIX/Linux", "not activated")
     ):
@@ -60,7 +60,10 @@ async def _read(client: Client, state: RunState, run: fixture._Run) -> dict[str,
     async with HMCClient(state.hmc_config) as hmc:
         system = await resolve_system_uuid(hmc, run.system)
         contained = await hmc.list_logical_partitions(system)
-        if not any(item.get("UUID") == run.uuid for item in contained):
+        if not any(
+            str(item.get("UUID")).casefold() == str(run.uuid).casefold()
+            for item in contained
+        ):
             raise ValueError("Sharing fixture is not contained in the selected system")
         document, _ = await hmc.read_logical_partition_document(run.uuid or "")
     observed = sharing_observation(document, _IDENTITY)

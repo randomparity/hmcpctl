@@ -325,6 +325,37 @@ async def test_sharing_arm(target, monkeypatch):
     )
 
 
+@pytest.mark.parametrize("case_source", ["entry", "feed"])
+@pytest.mark.asyncio
+async def test_sharing_arm_accepts_uuid_case_without_changing_requests(
+    target, monkeypatch, case_source
+):
+    if case_source == "entry":
+        original = runner.RunState.call
+
+        async def call(state, client, tool, **args):
+            status, data = await original(state, client, tool, **args)
+            if tool == "hmc_get_lpar":
+                data = {**data, "UUID": data["UUID"].upper()}
+            return status, data
+
+        monkeypatch.setattr(runner.RunState, "call", call)
+    else:
+        async with target.session(target.state.hmc_config) as hmc:
+
+            async def contained(system):
+                assert system == SYSTEM
+                target.events.append("contained")
+                return [{"UUID": UUID.upper()}]
+
+            monkeypatch.setattr(hmc, "list_logical_partitions", contained)
+
+    state = await exercise(target, monkeypatch)
+    assert len(passed(state)) == 2
+    assert len(target.requests) == 12
+    assert not target.exists
+
+
 @pytest.mark.asyncio
 async def test_sharing_observations_match_source_sites_and_actual_invocation(
     target, monkeypatch
