@@ -2021,3 +2021,75 @@ candidate-bound run and clean recovery. Generate filtered evidence with
 results. Source closure establishes grammar and field availability only. Positive
 creation transitions, controller behavior, VIOS and other hardware contexts remain
 unevidenced until observed in separately authorized runs; acceptance stays in scope.
+
+## Inactive processor quantities (arm 56)
+
+The opt-in `lpar-processor-quantities` group runs scenario
+`st56-lpar-processor-quantities`. It creates one token-owned inactive AIX/Linux
+fixture with 0.1/0.5/1.0 shared processing units, 1/2/4 virtual processors and
+1024/2048/4096 MiB memory. Creation suppresses profile application. Independent
+REST/native reads must agree on the complete current CPU and memory bounds. If
+all current bounds are zero, the arm rechecks contained identity, ownership and
+inactive state before applying the default profile once; mixed or malformed
+bounds stop. Setup must establish positive current bounds before quantity calls.
+
+The sequence removes 0.10 processing units, verifies zero-add as a no-op and
+refuses an over-maximum add of 1.10. Separate readback compares all CPU and
+memory bounds after each step; the first failed assertion stops the sequence.
+Native refusal fails the arm and does not authorize activation, force, replay
+or a substitute target. Positive add/set remain unrun by this wrapper; it does
+not change pools or sharing mode. Cleanup deletes the matching-token inactive
+fixture at 0.40 processing units and checks absence and
+the independent names/free-resource baseline. Concurrent administrators cannot
+be atomically fenced by these reads; use an exclusive approved window.
+
+Deploy the exact candidate commit and verify that the executing build matches
+it. Obtain a separate live window authorization and retain a clean independent
+baseline. Set `RUN_DIR` to an already-created mode-0700 private directory outside
+every repository and use `umask 077`. From the deployed repository, run:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-processor-quantities
+uv run --no-sync python scripts/live_lpar_processor_quantities.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+The window controller retains stdout/stderr privately and bounds its requests,
+deadlines and cleanup. Always run recovery after the wrapper, including failure
+or apparent success, and compare the independent before/after baseline. Generate
+public matrices only through the evidence script, scan their complete contents
+for private identifiers and retain the exact tested commit. Never publish raw
+results or invent a passing matrix.
+
+At candidate `4dc91a1e`, the original four-case arm failed: removal to 0.40,
+zero-add and over-maximum refusal passed, but the final inactive set to 0.50
+returned `HSCL295A` / `HSCL7016 The partition must be running to perform this operation.`
+The product reported rejected with unchanged before/after quantities of 0.40.
+Six result rows passed and two failed; owned cleanup passed and independent
+before/after baselines matched. This is not a passing complete native matrix.
+The revised three-case arm has not yet run on hardware; it does not reclassify
+that failed attempt or claim positive add/set evidence.
+
+The bounded sequence does not prove dedicated CPUs, shared virtual-processor
+changes, active/RMC operation, forced/no-RMC restart behavior, IBM i, or coupled
+inactive CPU-and-memory reset. Those product contexts retain their typed contracts
+and offline tests and need separate candidate-bound authorization and evidence.
+
+### Positive processor add/set validation — unrun
+
+Use a separately authorized candidate-bound window on an eligible owned running
+shared AIX/Linux or VIOS partition with active RMC and dynamic-processor capability.
+Independently record the current CPU/memory bounds, current and runtime quantities,
+and system capacity; require at least 0.20 units of partition/system headroom and
+valid entitlement/vCPU ratios. Through the existing `lpars processors` command or
+`hmc_dlpar_proc` change input, set entitlement to current plus 0.10, add 0.10,
+then remove 0.20. Check the complete resulting current and runtime CPU targets and
+preserved current memory after each step before advancing. This separate procedure
+is unrun, not another implemented wrapper or authorization to run one.
+
+Retain ownership, containment, state, per-call/window bounds and independent baseline
+checks. Partial, rejected or unverified outcomes stop for independent reconciliation
+and approved recovery; no automatic inverse, activation, force, target substitution
+or replay is implied. Forced/no-RMC, dedicated and other contexts need their own
+explicit procedures and evidence; successful current readback alone is not guest proof.

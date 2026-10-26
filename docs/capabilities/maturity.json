@@ -3825,6 +3825,27 @@
           {
             "variant": "processor-read-modify-write",
             "parameters": []
+          },
+          {
+            "variant": "native-current-processor-quantities",
+            "parameters": [
+              {
+                "name": "force",
+                "constraint": "Explicit boolean; eligible non-IBM-i no-RMC paths warn that guest restart is required."
+              },
+              {
+                "name": "operation",
+                "constraint": "add, remove or set of current quantities; coupled inactive CPU and memory reset requires explicit confirmation."
+              },
+              {
+                "name": "processing_units",
+                "constraint": "Shared entitlement only; finite nonnegative decimal with at most two places, subject to advertised bounds and floor."
+              },
+              {
+                "name": "processors",
+                "constraint": "Nonnegative whole dedicated processors or shared virtual processors, subject to current/configured bounds and selected-system capacity."
+              }
+            ]
           }
         ],
         "missing_scope": []

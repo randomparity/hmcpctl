@@ -218,3 +218,18 @@ def test_power_on_partition_profile_states_that_activation_discards_changes():
     for writer in ("hmc_modify_lpar", "hmc_dlpar_mem", "hmc_dlpar_proc"):
         assert writer in description
     assert "CurrentProfileSync" in description
+
+
+def test_processor_modes_keep_distinct_quantity_schemas():
+    properties = _tools_by_name()["hmc_dlpar_proc"].parameters["properties"]
+    native = next(
+        item for item in properties["change"]["anyOf"] if item.get("type") == "object"
+    )
+    assert {item["type"] for item in native["properties"]["processors"]["anyOf"]} == {
+        "integer",
+        "null",
+    }
+    assert "processing_units" in native["properties"]
+    assert "desired_procs" in properties["resources"]["properties"]
+    assert "desired_vcpus" in properties["resources"]["properties"]
+    assert "No replay" in properties["change"]["description"]

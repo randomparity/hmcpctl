@@ -325,6 +325,56 @@ def test_non_secret_attribute_refusal_still_quotes_value():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["exit", "overflow", "timeout", "cancel"])
+async def test_bounded_secret_failure_and_cancellation(monkeypatch, caplog, case):
+    import asyncio
+    from types import SimpleNamespace
+
+    logger = logging.getLogger("asyncssh")
+    before = list(logger.filters)
+    process = SimpleNamespace(
+        stdout=SimpleNamespace(read=AsyncMock(side_effect=[b"", b""])),
+        stderr=SimpleNamespace(read=AsyncMock(side_effect=[SECRET.encode(), b""])),
+        env={},
+        command=CMD,
+        subsystem=None,
+        exit_status=1,
+        exit_signal=None,
+        returncode=1,
+        wait_closed=AsyncMock(),
+        close=MagicMock(),
+    )
+    conn = _conn()
+    conn.abort = MagicMock()
+
+    async def create(*args, **kwargs):
+        logger.warning("exec %s", CMD)
+        if case == "timeout":
+            raise TimeoutError(SECRET)
+        if case == "cancel":
+            raise asyncio.CancelledError
+        return process
+
+    conn.create_process.side_effect = create
+    monkeypatch.setattr(asyncssh, "connect", MagicMock(return_value=conn))
+    limit = 2 if case == "overflow" else 64
+    with (
+        caplog.at_level(logging.WARNING, logger="asyncssh"),
+        pytest.raises(
+            asyncio.CancelledError if case == "cancel" else HMCCLIError
+        ) as caught,
+    ):
+        await run_hmc_command(
+            make_config(), CMD, secrets=[SECRET], max_output_bytes=limit
+        )
+    _assert_no_secret(caplog.text)
+    _assert_no_secret("".join(traceback.format_exception(caught.value)))
+    assert logger.filters == before
+    if case != "cancel":
+        assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("secret", ["private-provider-detail", "HSCL1234"])
 async def test_remote_refusal_metadata_preserves_secret_redaction(secret):
     conn = _conn(_process_error(stderr="HSCL1234 private-provider-detail"))
