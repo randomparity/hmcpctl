@@ -268,11 +268,9 @@ async def set_lpar_processors(
     Current* observations before reporting completion. Runtime is reported
     separately. A request carrying no processor field is refused before any request.
 
-    The write changes the partition's current configuration, not a partition
-    profile. With no active RMC connection it applies on the next activation only
-    if that activation uses the current configuration; activating a profile
-    discards it unless ``CurrentProfileSync`` is ``On``. The result's
-    ``change_location`` and ``warnings`` say which. No reboot is triggered either way.
+    The write targets the partition's current configuration. The result's
+    ``change_location`` and ``warnings`` describe the observed profile-sync context;
+    they do not prove profile persistence or guest effects. No reboot is triggered.
 
     ADR 0092 §3.2 classifies this as Reconfiguring, so
     :func:`authorize_lpar_mutation` runs unconditionally before the write.

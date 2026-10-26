@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for #1780, scope q1780-13ff64e1; pending scope audit.
+Accepted 2026-10-25 for #1780, scope q1780-13ff64e1.
 
 ## Context
 
