@@ -95,9 +95,12 @@ No separate inventory tool or general accelerator-management API is added.
 
 ## Observation and result
 
-Always attempt an independent partition read after submission and classify command
-and observation separately. Reconfirm selected-system containment, UUID/type/name,
-numeric ID and system identity before trusting native readback. Preserve successful
+After normal submission completion or a handled HMCError, attempt an independent
+partition read and classify command and observation separately. Cancellation and
+unexpected exceptions propagate without a readback or result guarantee; callers
+must inspect the target independently before acting. Reconfirm selected-system
+containment, UUID/type/name, numeric ID and system identity before trusting native
+readback. Preserve successful
 current and pending fields even when the other observation is unavailable. Native
 `curr_qos` is called current; `pend_qos` is called pending; neither is called runtime.
 XML collection state is reported separately without synthesizing QoS from emptiness.
