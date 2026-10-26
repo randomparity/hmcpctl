@@ -341,3 +341,111 @@ def test_system_profiles_private_filtered():
     rendered = evidence.render(document)
     assert rendered is not None and _SENTINEL not in rendered
     assert "hmc_create_system_profile" in rendered
+
+
+def _vios_source_document():
+    return {
+        "schema_version": 1,
+        "source_only": True,
+        "run": {
+            "group": "vios-ame-source",
+            "subtasks": [],
+            "tree_clean": True,
+            "tested_commit": "a" * 40,
+            "partial": False,
+        },
+        "cases": [
+            {
+                "outcome": "observed-accepted",
+                "deletion": "confirmed-absent",
+                "native_error": "PRIVATE-SENTINEL",
+                "name": "PRIVATE-SENTINEL",
+            }
+        ],
+        "results": [{"status": "PASS", "tool": "PRIVATE-SENTINEL"}],
+        "hmc": {"host": "PRIVATE-SENTINEL"},
+    }
+
+
+def test_vios_source_is_never_a_product_matrix():
+    rendered = evidence.render(_vios_source_document())
+    assert rendered is not None and "SOURCE ONLY" in rendered
+    assert "PRIVATE-SENTINEL" not in rendered and "PASS" not in rendered
+    assert "observed-accepted" in rendered
+
+
+@pytest.mark.parametrize("version", [None, 2, True, 1.0, "1", "missing"])
+def test_vios_source_requires_supported_schema_version(version):
+    document = _vios_source_document()
+    document.pop("schema_version")
+    if version != "missing":
+        document["schema_version"] = version
+    assert evidence.render(document) is None
+
+
+@pytest.mark.parametrize("fault", ["flag", "group", "subtask", "commit", "outcome"])
+def test_vios_source_contradiction_never_falls_through(fault):
+    document = _vios_source_document()
+    if fault == "flag":
+        document["source_only"] = False
+    elif fault == "group":
+        document["run"]["group"] = "dedicated"
+    elif fault == "subtask":
+        document["run"]["subtasks"] = [58]
+    elif fault == "commit":
+        document["run"]["tested_commit"] = "PRIVATE-SENTINEL"
+    else:
+        document["cases"][0]["outcome"] = "PRIVATE-SENTINEL"
+    assert evidence.render(document) is None
+
+
+@pytest.mark.parametrize("field", ["outcome", "deletion"])
+@pytest.mark.parametrize("value", [None, [], {}, True, 1, "PRIVATE-SENTINEL"])
+def test_vios_source_malformed_observations_are_refused(field, value):
+    document = _vios_source_document()
+    document["cases"][0][field] = value
+    assert evidence.render(document) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run", None),
+        ("run", []),
+        ("cases", None),
+        ("cases", {}),
+        ("cases", [None]),
+        ("cases", [{}, {}, {}]),
+        ("schema_version", 2),
+    ],
+)
+def test_vios_source_malformed_envelope_is_refused(field, value):
+    document = _vios_source_document()
+    document[field] = value
+    assert evidence.render(document) is None
+
+
+@pytest.mark.parametrize(
+    "commit", [None, "A" * 40, "a" * 39, "a" * 41, "a" * 40 + "\n"]
+)
+def test_vios_source_commit_is_strict_lowercase_sha(commit):
+    document = _vios_source_document()
+    document["run"]["tested_commit"] = commit
+    assert evidence.render(document) is None
+
+
+@pytest.mark.parametrize("partial", [True, None, 0, "false"])
+def test_vios_source_only_literal_false_claims_completed(partial):
+    document = _vios_source_document()
+    document["run"]["partial"] = partial
+    rendered = evidence.render(document)
+    assert rendered is not None and "Interrupted/held" in rendered
+    assert "Source observations completed" not in rendered
+
+
+def test_vios_source_empty_observations_remain_source_only():
+    document = _vios_source_document()
+    document["cases"] = []
+    rendered = evidence.render(document)
+    assert rendered is not None and "SOURCE ONLY" in rendered
+    assert "TOTAL" not in rendered and "PASS" not in rendered
