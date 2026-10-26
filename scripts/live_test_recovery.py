@@ -1984,9 +1984,31 @@ def main(argv: list[str] | None = None) -> int:
     source_packets.add_argument("--source-packet", type=Path)
     source_packets.add_argument("--activation-source-packet", type=Path)
     source_packets.add_argument("--serial-procedure", action="store_true")
+    source_packets.add_argument("--vios-ame-source-packet", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.vios_ame_source_packet:
+        from live_test import vios_ame_source
+
+        if not args.packet_sha256 or not args.output:
+            parser.error(
+                "VIOS AME source recovery requires packet digest and private output"
+            )
+        return vios_ame_source.main(
+            [
+                "recover",
+                "--packet",
+                str(args.vios_ame_source_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+                "--output",
+                str(args.output),
+            ]
+        )
+
     if args.serial_procedure:
         from live_test import lpar_serial_adapter
 
