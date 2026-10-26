@@ -977,3 +977,108 @@ def test_processor_move_preflight_uses_named_fixture_admission(
     assert "lpar-processor-move" in output and expected in output
     assert runner.SUBTASK_GROUPS["lpar-processor-move"] == [61]
     assert 61 not in runner.SUBTASK_GROUPS["all"]
+
+
+def test_vios_source_preflight_exact_route(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    assert (
+        preflight.main(
+            [
+                "--group",
+                "vios-ame-source",
+                "--packet",
+                "p.json",
+                "--packet-sha256",
+                "a" * 64,
+                "--output",
+                "private",
+            ]
+        )
+        == 2
+    )
+    route.assert_called_once_with(
+        [
+            "preflight",
+            "--packet",
+            "p.json",
+            "--packet-sha256",
+            "a" * 64,
+            "--output",
+            "private",
+        ]
+    )
+
+
+@pytest.mark.parametrize("extra", [[], ["--skip-hardware"], ["--detach-probe"]])
+def test_vios_source_preflight_refuses_incomplete_or_bypass(monkeypatch, extra):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    args = ["--group", "vios-ame-source"]
+    if extra:
+        args += ["--packet", "p", "--packet-sha256", "a" * 64, "--output", "o"]
+    with pytest.raises(SystemExit) as caught:
+        preflight.main(args + extra)
+    assert caught.value.code == 2
+    route.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["--packet", "--packet-sha256", "--output"])
+def test_vios_source_preflight_requires_each_binding(monkeypatch, missing):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    bindings = {"--packet": "p", "--packet-sha256": "a" * 64, "--output": "o"}
+    args = ["--group", "vios-ame-source"]
+    for flag, value in bindings.items():
+        if flag != missing:
+            args.extend([flag, value])
+    with pytest.raises(SystemExit) as caught:
+        preflight.main(args)
+    assert caught.value.code == 2
+    route.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "--grant-packet-sha256",
+        "--exclusive-writer-window",
+        "--fresh-vios-delete-approved",
+    ],
+)
+def test_vios_source_preflight_rejects_effect_assertions(monkeypatch, flag):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    args = [
+        "--group",
+        "vios-ame-source",
+        "--packet",
+        "p",
+        "--packet-sha256",
+        "a" * 64,
+        "--output",
+        "o",
+        flag,
+    ]
+    if flag == "--grant-packet-sha256":
+        args.append("a" * 64)
+    with pytest.raises(SystemExit) as caught:
+        preflight.main(args)
+    assert caught.value.code == 2
+    route.assert_not_called()

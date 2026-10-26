@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -114,8 +115,73 @@ def _is_partial(run: dict[str, Any]) -> bool:
     return run.get("partial", False) is not False
 
 
+def _render_vios_ame_source(document: dict[str, Any]) -> str | None:
+    run = document.get("run")
+    if (
+        not isinstance(run, dict)
+        or document.get("source_only") is not True
+        or run.get("group") != "vios-ame-source"
+        or run.get("subtasks") != []
+        or run.get("tree_clean") is not True
+        or type(document.get("schema_version")) is not int
+        or document.get("schema_version") != 1
+    ):
+        return None
+    commit = run.get("tested_commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return None
+    cases = document.get("cases")
+    if not isinstance(cases, list) or len(cases) > 2:
+        return None
+    outcomes = {
+        "observed-accepted",
+        "observed-rejected",
+        "unavailable",
+        "mismatch",
+        "unknown",
+    }
+    cleanup = {"not-attempted", "pending", "submitted", "confirmed-absent"}
+    lines = [
+        "SOURCE ONLY — inactive VIOS configuration observations",
+        "",
+        f"Source revision: `{commit}`",
+        "",
+        "This is not product maturity or guest compression evidence.",
+        "",
+        "| Case | Observation | Cleanup |",
+        "| --- | --- | --- |",
+    ]
+    for index, case in enumerate(cases, 1):
+        if not isinstance(case, dict):
+            return None
+        outcome, deleted = case.get("outcome"), case.get("deletion")
+        if (
+            not isinstance(outcome, str)
+            or outcome not in outcomes
+            or not isinstance(deleted, str)
+            or deleted not in cleanup
+        ):
+            return None
+        lines.append(f"| {index} | {outcome} | {deleted} |")
+    lines.extend(
+        [
+            "",
+            "Interrupted/held"
+            if run.get("partial") is not False
+            else "Source observations completed",
+            "Independent recovery and session closeout remain private prerequisites.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render(document: dict[str, Any]) -> str | None:
     """The Markdown matrix, or `None` when the document cannot be attributed."""
+    run = document.get("run")
+    if document.get("source_only") is True or (
+        isinstance(run, dict) and run.get("group") == "vios-ame-source"
+    ):
+        return _render_vios_ame_source(document)
     attribution = _provenance(document)
     if attribution is None:
         return None

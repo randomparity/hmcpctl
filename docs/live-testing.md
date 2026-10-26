@@ -1382,6 +1382,56 @@ exports only allowlisted structural fields. No native evidence or maturity promo
 mocked-boundary tests, preparation or this document. Product scope-audit activation finding remains
 open until source-backed analysis resolves it.
 
+### VIOS AME source diagnostic
+
+The separately registered `vios-ame-source` arm answers whether this target accepts
+fresh inactive VIOS creation with dedicated memory and AME 0/1.10. It is source
+research, not an ordinary product arm or maturity promotion. It references #1768
+without completing its product criteria. No activation, LPAR phase, service VIOS
+mutation, paging/pool change or separate ownership stamp is performed.
+
+Use the closed schema and fixed budgets in the
+[VIOS AME diagnostic spec](workflow/specs/2026-10-26-vios-ame-source-diagnostic-design.md). Root must
+bind the exact clean deployed commit/tree/imported source hashes, Python 3.11.15,
+effective named connection, target, two nonce-derived absent names, initial marker,
+fixed resources and current private window. Source-client deployment evidence for
+an earlier commit does not establish this arm's deployed identity.
+
+Create a private mode-0700 window directory outside the checkout and a mode-0600 initial packet.
+Set its `baseline_sha256` to `null` and record its raw SHA256. Run initial read-only preflight:
+
+    uv run --no-sync python scripts/live_test_preflight.py --group vios-ame-source --packet "$initial_packet" --packet-sha256 "$initial_sha" --output "$window/preflight-initial"
+
+Root reviews its protected baseline and session closeout, then creates the final
+packet with that exact baseline digest and computes the new raw packet SHA256.
+All other bindings stay identical. Run final read-only preflight:
+
+    uv run --no-sync python scripts/live_test_preflight.py --group vios-ame-source --packet "$packet" --packet-sha256 "$packet_sha" --output "$window/preflight-final"
+
+Only after root binds current source/ownership/deletion authority and exclusive
+writer coordination, invoke the named arm once:
+
+    uv run --no-sync python scripts/live_vios_ame_source.py --packet "$packet" --packet-sha256 "$packet_sha" --output "$window/capture" --grant-packet-sha256 "$packet_sha" --exclusive-writer-window --fresh-vios-delete-approved
+
+Always run the registered read-only recovery, including after failure:
+
+    uv run --no-sync python scripts/live_test_recovery.py --vios-ame-source-packet "$packet" --packet-sha256 "$packet_sha" --results "$window/capture/results.json" --output "$window/recover"
+
+Every stage claims its window slot once. Do not remove receipts, repeat a stage,
+refresh a baseline or alter a packet to obtain a clean result. If the window
+expires before recovery, stop for root's new bounded observational authorization;
+no expiry extension or cleanup authority is inferred. Missing capture evidence
+is still observed as unknown, never reconstructed as successful history.
+
+Review both results.json and session.json. Unknown native completion, marker or
+foreign drift, checkpoint failure, budget exhaustion or uncertain logout leaves
+an explicit held disposition. Recovery never deletes. Root must separately resolve
+any exact-UUID residual; a matching name or marker alone grants no cleanup.
+Preserve raw private files. The optional standard evidence renderer emits only
+SOURCE ONLY labels and filtered outcomes, never product PASS or raw target data.
+Acceptance shows configuration behavior for this firmware/input; it does not prove
+guest compression. No source catalog or operation maturity changes automatically.
+
 ### Product system-profile lifecycle arm
 
 The named `system-profiles` arm exercises the product CLI/MCP domain contract. It is
