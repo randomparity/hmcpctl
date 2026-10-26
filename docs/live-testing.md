@@ -1783,6 +1783,57 @@ Generate public evidence only through the evidence script, redact the complete
 matrix and retain its commit binding. Raw results remain private. A skipped or
 failed arm supplies no positive evidence and makes no maturity promotion.
 
+## Native two-partition processor move (D06, opt-in subtask 61)
+
+The `lpar-processor-move` arm requires two existing owned, unprotected AIX/Linux
+partitions running with active RMC, shared processors and dedicated memory.
+The controller selects the exact candidate and fixtures using `LIVE_TEST_LPAR_NAME`
+and `LIVE_TEST_SCRATCH_LPAR_NAME`, and authorizes an exclusive window without DPO
+and bounded controller/transport deadlines. Both fixtures need reported dynamic CPU
+capability, disabled/suspended profile sync, matching full native/REST current and
+runtime baselines, and 0.10-unit source-floor/destination-ceiling headroom.
+This arm creates, activates and deletes nothing; it performs no force or profile setup.
+
+The arm checkpoints both complete CPU/memory/profile and independent system baselines,
+then a forward 0.10-entitlement intent. It calls `hmc_move_lpar_processors` once and
+independently observes both peers. Only complete matching endpoint results with
+PASS, applied, workflow_completed true and explicitly null submission errors permit
+fresh admission and a separately checkpointed reverse 0.10-unit transfer.
+It persists each observation before permitting the next effect. Partial, uncertain,
+missing or failed evidence stops writes; no automatic replay or rollback follows.
+There are at most two effects. Both original full baselines must be restored.
+
+Verify that the deployed clean HEAD matches the selected candidate. Set `RUN_DIR`
+to an existing mode-0700 directory outside all repositories, use `umask 077`, and
+capture command output there. The wrapper requires a new results destination and
+refuses exposed/repository directories or existing result/observation files.
+Run the named preflight first, then the arm, and recovery after every attempted arm,
+including failed and apparently successful attempts. Retain logout/reaping evidence.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-processor-move
+uv run --no-sync python scripts/live_lpar_processor_move.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+Recovery reads only. CLEAN requires the same clean candidate and HMC destination,
+complete canonical baseline/forward-intent/forward-observation/reverse-intent/
+reverse-observation/final-baseline proof, and fresh independent equality with both
+original snapshots and system resources. A matching current state cannot replace
+missing saved proof; complete saved proof cannot replace fresh equality.
+Incomplete or malformed records remain unconfirmed, including pre-effect stops.
+Processor quantities use exact two-place strings in the journal; floats, exponent
+spellings and missing runtime quantities cannot attest cleanup.
+
+Product support includes all four documented processor-mode pairs, with mode-specific
+count/entitlement inputs. Mixed-mode shared vCPUs are observed and bounded without an
+invented count delta. This live arm exercises only running shared/shared AIX/Linux
+without force. It supplies no dedicated, mixed-mode, inactive, forced, IBM i or VIOS
+hardware claim. Skips and failures produce no positive maturity evidence. Generate
+public evidence through the evidence script, retain its commit binding and redact
+its complete output; raw result documents stay private.
+
 ## Inactive partition security policy (arm 52)
 
 The opt-in `lpar-security-policy` arm requires a positive selected-system secure

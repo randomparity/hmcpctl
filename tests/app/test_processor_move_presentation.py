@@ -392,7 +392,11 @@ def test_processor_move_metadata_binding():
     assert {
         "tests/lpar/test_processor_move.py",
         "tests/app/test_processor_move_presentation.py",
-    } <= set(operation["tests"])
+        "tests/test_live_processor_move_arm.py",
+        "tests/scripts/test_live_lpar_processor_move.py",
+        "tests/scripts/test_live_test_preflight.py",
+        "tests/scripts/test_live_test_recovery.py",
+    } == set(operation["tests"])
     assert all((root / test).is_file() for test in operation["tests"])
     maturity = json.loads((root / "docs/capabilities/maturity.json").read_text())[
         "operations"

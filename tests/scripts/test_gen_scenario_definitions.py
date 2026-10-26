@@ -178,3 +178,20 @@ def test_main_writes_output(tmp_path, capsys):
         "scenario"
     )
     assert json.loads(output.read_text(encoding="utf-8"))["format_version"] == 1
+
+
+def test_typed_processor_move_keeps_its_named_hand_written_scenario(generated):
+    from live_test import processor_move, runner
+
+    document, hand_written = generated
+    assert not any(
+        entry["operation"] == "lpar.move_processors"
+        for entry in document["definitions"]
+    )
+    assert (
+        "hand-written: lpar.move_processors: required argument move is not a target selector"
+        in hand_written
+    )
+    assert runner.SUBTASKS[61] is processor_move.exercise_processor_move
+    assert runner.SUBTASK_GROUPS[processor_move.GROUP] == [61]
+    assert processor_move.SCENARIO == "st61-lpar-processor-move"
