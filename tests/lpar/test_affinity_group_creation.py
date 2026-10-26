@@ -482,3 +482,197 @@ async def test_created_identity_unavailable_retains_uncertainty(target, kind):
     assert target.events.count("create") == 1
     assert not {"lpar", "prof", "apply", "stamp"} & set(target.events)
     target.assign.assert_not_awaited()
+
+
+@pytest.fixture
+def mixed_layout(target, monkeypatch):
+    """Construct protocol rows at the external boundary for C06/C08 composition."""
+    import csv
+    import io
+
+    state = SimpleNamespace(fault=None)
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.affinity_group.run_hmc_command", target.command
+    )
+
+    async def read(config, command):
+        columns = shlex.split(command)[shlex.split(command).index("-F") + 1].split(",")
+        if command.startswith("lshwres"):
+            target.events.append("layout-admission")
+            values = ["1:64,1:128", "1:128,1:256"]
+        else:
+            target.events.append("layout-read")
+            if state.fault == "unavailable":
+                raise HMCCLIError("PRIVATE-LAYOUT")
+            values = [
+                "part-R1",
+                "default_profile",
+                "null",
+                "null",
+                "null",
+                "1:64" if state.fault == "mismatch" else "1:128",
+                "null",
+                "null",
+            ]
+        stream = io.StringIO()
+        writer = csv.writer(stream)
+        writer.writerow(columns)
+        writer.writerow(values)
+        return stream.getvalue()
+
+    state.read = AsyncMock(side_effect=read)
+    monkeypatch.setattr("hmcpctl.ssh.lpar_memory_layout.run_hmc_command", state.read)
+    return state
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["direct", "workflow"])
+@pytest.mark.parametrize(
+    "fault,affinity_status,layout_status",
+    [
+        (None, "verified", "verified"),
+        ("affinity-mismatch", "mismatch", "verified"),
+        ("affinity-unavailable", "readback-unavailable", "verified"),
+        ("layout-mismatch", "verified", "mismatch"),
+        ("layout-unavailable", "verified", "unavailable"),
+        ("stamp", "verified", "verified"),
+        ("controller", "verified", "unavailable"),
+    ],
+)
+async def test_mixed_layout_affinity_keeps_independent_results_and_barriers(
+    target, mixed_layout, kind, fault, affinity_status, layout_status
+):
+    from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+
+    b = target
+    if fault == "controller":
+        b.controller = True
+    elif fault == "stamp":
+        b.fault = "stamp"
+    elif fault and fault.startswith("affinity-"):
+        b.fault = "mismatch" if fault.endswith("mismatch") else "read"
+    elif fault:
+        mixed_layout.fault = fault.removeprefix("layout-")
+    result = await invoke(
+        b,
+        kind,
+        memory_layout=LparMemoryLayout(hpt_ratio="1:128"),
+        apply_profile=not b.controller,
+    )
+    assert result.resource_created
+    assert result.ownership_stamped is (fault != "stamp")
+    steps = (
+        {step.step: step for step in result.steps}
+        if kind == "workflow"
+        else {
+            "affinity_group": result.affinity_group_step,
+            "memory_layout": result.memory_layout_step,
+            "apply_profile": result.apply_step,
+        }
+    )
+    assert steps["affinity_group"].result["status"] == affinity_status
+    assert steps["memory_layout"].result.status == layout_status
+    verified = fault is None
+    assert steps["apply_profile"].status == ("ok" if verified else "skipped")
+    if kind == "workflow":
+        assert result.workflow_completed is verified
+        assert b.assign.await_count == int(verified)
+    assert b.events.count("authority") == 1
+    assert b.events.count("create") == 1
+    assert b.events.count("apply") == int(verified)
+    assert "PRIVATE" not in str(result)
+    create = next(
+        call.args[1]
+        for call in b.command.await_args_list
+        if call.args[1].startswith("mksyscfg")
+    )
+    record = shlex.split(create)[-1]
+    assert "affinity_group_id=1" in record and "hpt_ratio=1:128" in record
+    assert ("profile_name=" not in record) is b.controller
+    assert b.events.index("layout-admission") < b.events.index("create")
+    assert b.events.count("layout-read") == int(not b.controller)
+    b.hmc.get_console_info.assert_not_awaited()
+    assert not any(
+        "lpar_proc_compat_mode" in call.args[1] for call in b.command.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("affinity", [None, 1])
+@pytest.mark.parametrize("fault", [None, "mismatch", "unavailable", "controller"])
+async def test_vios_layout_mode_only_and_mixed_share_one_authority(
+    target, mixed_layout, affinity, fault
+):
+    from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+
+    b = target
+    b.entry["Resource"]["PartitionType"] = "Virtual IO Server"
+    b.controller = fault == "controller"
+    mixed_layout.fault = fault if fault != "controller" else None
+    call = create_vios(
+        b.hmc,
+        SYSTEM,
+        "part-R1",
+        LparResources(desired_memory=1024),
+        memory_layout=LparMemoryLayout(hpt_ratio="1:128"),
+        affinity_group_id=affinity,
+    )
+    if fault:
+        with pytest.raises(HMCError, match="VIOS exists or may exist") as caught:
+            await call
+        assert "PRIVATE" not in str(caught.value)
+    else:
+        assert await call == b.entry
+    assert b.events.count("authority") == 1
+    assert b.events.count("create") == 1
+    assert b.events.count("layout-read") == int(not b.controller)
+    assert b.events.count("lpar") == int(affinity is not None and fault is None)
+    b.hmc.get_console_info.assert_not_awaited()
+    b.hmc.create_vios.assert_not_awaited()
+    assert "apply" not in b.events
+    record = shlex.split(
+        next(
+            call.args[1]
+            for call in b.command.await_args_list
+            if call.args[1].startswith("mksyscfg")
+        )
+    )[-1]
+    assert "hpt_ratio=1:128" in record
+    assert ("affinity_group_id=1" in record) is (affinity is not None)
+    assert ("profile_name=" not in record) is b.controller
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["direct", "workflow", "vios"])
+async def test_mixed_affinity_does_not_bypass_layout_admission(
+    target, mixed_layout, kind
+):
+    from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+
+    with pytest.raises(ValueError, match="not advertised"):
+        await invoke(target, kind, memory_layout=LparMemoryLayout(hpt_ratio="1:32"))
+    assert target.events == ["authority", "layout-admission"]
+    target.assign.assert_not_awaited()
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.hmc.create_vios.assert_not_awaited()
+
+
+def test_affinity_appends_after_landed_memory_layout_inputs():
+    import inspect
+    from dataclasses import fields
+
+    from hmcpctl.ssh.lpar import create_lpar_via_cli
+
+    assert [item.name for item in fields(core.LparCreation)][-2:] == [
+        "memory_layout",
+        "affinity_group_id",
+    ]
+    assert [item.name for item in fields(core.LparCreationResult)][-2:] == [
+        "memory_layout_step",
+        "affinity_group_step",
+    ]
+    for function in [create_vios, create_lpar_via_cli]:
+        assert list(inspect.signature(function).parameters)[-2:] == [
+            "memory_layout",
+            "affinity_group_id",
+        ]

@@ -63,7 +63,7 @@ async def read_creation_authority(
     system_uuid: str,
     *,
     need_management: bool,
-    context: Literal["Linux role", "Affinity group"],
+    context: Literal["Linux role", "Affinity group", "Memory layout"],
 ) -> tuple[dict[str, Any], bool]:
     """Classify native controller authority without borrowing feature prerequisites."""
     try:
@@ -79,7 +79,7 @@ async def read_creation_authority(
         raise ValueError(  # noqa: TRY004 — malformed remote evidence, not caller input
             "Linux roles require readable selected-system authority"
             if context == "Linux role"
-            else "Affinity group requires readable selected-system authority"
+            else f"{context} requires readable selected-system authority"
         )
     system = leaf_text(resource.get("SystemName"))
     if not isinstance(system, str) or not system.strip():
@@ -115,7 +115,7 @@ async def read_creation_authority(
             "management-role selection, or known classic profile evidence for KVM-only selection; "
             "no changes were submitted. Inspect controller status; this operation never acquires it."
             if context == "Linux role"
-            else "Affinity group creation requires known native controller or classic profile authority; no changes were submitted. Inspect controller status; this operation never acquires it."
+            else f"{context} creation requires known native controller or classic profile authority; no changes were submitted. Inspect controller status; this operation never acquires it."
         )
     return resource, controller
 

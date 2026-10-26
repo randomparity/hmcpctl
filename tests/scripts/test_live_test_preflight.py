@@ -873,3 +873,49 @@ def test_linux_roles_preflight_discloses_both_finite_variants(
         "mandatory recovery",
     ):
         assert disclosure in output
+
+
+@pytest.mark.parametrize("fault", ["hpt", "ppt", "token", "grant"])
+def test_creation_memory_layout_preflight_is_unarmed_by_default(fault):
+    from dataclasses import replace
+
+    config = live_config.LiveTestConfig(
+        creation_memory_layout_hpt_ratio="1:128",
+        creation_memory_layout_ppt_ratio="1:256",
+        creation_memory_layout_fresh_vios_delete_authorized=True,
+    )
+    change = {
+        "hpt": {"creation_memory_layout_hpt_ratio": ""},
+        "ppt": {"creation_memory_layout_ppt_ratio": ""},
+        "token": {"creation_memory_layout_hpt_ratio": "bad token"},
+        "grant": {"creation_memory_layout_fresh_vios_delete_authorized": False},
+    }[fault]
+    verdict = preflight.arm_verdicts(
+        replace(config, **change), "creation-memory-layout"
+    )[0]
+    assert not verdict.runnable and not verdict.mutates
+
+
+def test_creation_memory_layout_exact_effects_without_hardware_role_prerequisite():
+    config = live_config.LiveTestConfig(
+        creation_memory_layout_hpt_ratio="1:128",
+        creation_memory_layout_ppt_ratio="1:256",
+        creation_memory_layout_fresh_vios_delete_authorized=True,
+    )
+    verdict = preflight.arm_verdicts(config, "creation-memory-layout")[0]
+    assert verdict.runnable
+    effects = " ".join(verdict.mutates)
+    assert all(
+        term in effects
+        for term in (
+            "two",
+            "0/0/0",
+            "Decimal 0",
+            "1:128",
+            "1:256",
+            "UUID",
+            "2 GiB",
+            "read-only recovery",
+        )
+    )
+    assert "KvmOnPowerVM=true" not in effects

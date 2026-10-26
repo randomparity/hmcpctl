@@ -185,3 +185,75 @@ def test_invalid_cli_before_client(adapter, value):
     assert result.exit_code != 0
     adapter.operation.assert_not_awaited()
     assert adapter.connections == []
+
+
+@pytest.mark.asyncio
+async def test_mixed_layout_affinity_forwarding_and_target_authorization(adapter):
+    arguments = {
+        "system_name_or_uuid": "sys-R1",
+        "name": "target-R1",
+        "memory_layout": {"hpt_ratio": "1:128"},
+        "affinity_group_id": 1,
+    }
+    async with Client(application(adapter.name)) as client:
+        result = await client.call_tool(adapter.name, arguments)
+        assert not result.is_error
+        assert forwarded(adapter) == 1
+        call = adapter.operation.await_args
+        layout = (
+            call.args[2].memory_layout
+            if adapter.kind == "lpar"
+            else call.kwargs["memory_layout"]
+        )
+        assert layout.hpt_ratio == "1:128"
+    adapter.operation.reset_mock()
+    adapter.connections.clear()
+    if adapter.kind == "lpar":
+        from hmcpctl.authorization.access_policy import AccessPolicyError
+
+        with pytest.raises(AccessPolicyError, match="has no target selector"):
+            application(adapter.name, targets={"managed_system": ["allowed-R1"]})
+    else:
+        async with Client(
+            application(adapter.name, targets={"managed_system": ["allowed-R1"]})
+        ) as client:
+            result = await client.call_tool(
+                adapter.name, arguments, raise_on_error=False
+            )
+            assert result.is_error
+    other = f"hmc_create_{'vios' if adapter.kind == 'lpar' else 'lpar'}"
+    async with Client(application(other)) as client:
+        result = await client.call_tool(adapter.name, arguments, raise_on_error=False)
+        assert result.is_error
+    adapter.operation.assert_not_awaited()
+    assert adapter.connections == []
+
+
+def test_mixed_cli_forwarding(adapter, monkeypatch):
+    monkeypatch.setattr(
+        adapter.cli_module, "with_client", lambda fn: asyncio.run(fn(adapter.client))
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            adapter.group,
+            "create",
+            "target-R1",
+            "--system",
+            "sys-R1",
+            "--yes",
+            "--hpt-ratio",
+            "1:128",
+            "--affinity-group-id",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert forwarded(adapter) == 1
+    call = adapter.operation.await_args
+    layout = (
+        call.args[2].memory_layout
+        if adapter.kind == "lpar"
+        else call.kwargs["memory_layout"]
+    )
+    assert layout.hpt_ratio == "1:128"

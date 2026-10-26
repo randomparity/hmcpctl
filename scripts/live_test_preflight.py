@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from live_test import (
     bare_cec,
+    creation_memory_layout,
     dedicated_pcie,
     lpar_config,
     lpar_power,
@@ -392,6 +393,25 @@ def _lpar_affinity_group_verdict(config: live_config.LiveTestConfig) -> ArmVerdi
             "2 GiB desired memory/0.5 shared units; no profile apply or activation; independent labelled native partition/profile observations",
             "matching-token inactive-only deletion and baseline equality before the second create; separate read-only recovery after every attempt",
         ),
+    )
+
+
+def _creation_memory_layout_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        creation_memory_layout.configured(config)
+    except (TypeError, ValueError) as error:
+        return ArmVerdict("creation-memory-layout", False, str(error))
+    return ArmVerdict(
+        "creation-memory-layout",
+        True,
+        "separate exclusive root window, request/deadline/session budget and current policy required",
+        (
+            "two sequential fresh inactive fixtures: AIX/Linux count0/0/0 + Decimal 0 reservation, then ratio-only VIOS",
+            f"both request HPT {config.creation_memory_layout_hpt_ratio} / PPT {config.creation_memory_layout_ppt_ratio}; actual advertisements gate creation",
+            "each 2 GiB desired/0.5 shared units; max2 creates/1 LPAR stamp/2 deletes; no apply, activation, roles or hardware selection",
+            "separate fresh-VIOS UUID-only conditional deletion grant; no adoption or retry; private checkpoint before every mutation",
+            "literal independent configured readback, baseline equality and mandatory read-only recovery; no activation/KVM runtime proof",
+        ),
         config.system_name,
     )
 
@@ -672,6 +692,7 @@ _ARM_VERDICTS = {
     "lpar-security-policy": _lpar_security_policy_verdict,
     "lpar-hardware-memory": _lpar_hardware_memory_verdict,
     "lpar-affinity-group": _lpar_affinity_group_verdict,
+    "creation-memory-layout": _creation_memory_layout_verdict,
     "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,

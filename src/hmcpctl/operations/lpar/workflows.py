@@ -9,6 +9,7 @@ from hmcpctl.client.core import HMCClient
 from ...documents.lpar import validate_partition_type
 from ...documents.lpar_affinity_group import validate_affinity_group_id
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
+from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...errors import HMCError
 from ...resource_identity import resolve_system_uuid
 from .assignments import (
@@ -35,6 +36,14 @@ async def create_lpar(
     assignments: LparPcieAssignments,
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
+    if not isinstance(creation.memory_layout, LparMemoryLayout):
+        raise TypeError("memory_layout must be LparMemoryLayout")
+    creation.memory_layout.validate_creation(creation.partition_type)
+    layout_requested = bool(creation.memory_layout.pairs())
+    if layout_requested and creation.keylock is not None:
+        raise ValueError(
+            "Memory layout cannot be combined with keylock in native creation"
+        )
     affinity_requested = (
         validate_affinity_group_id(creation.affinity_group_id) is not None
     )
@@ -64,7 +73,7 @@ async def create_lpar(
                 "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
             )
     if (
-        affinity_requested
+        (affinity_requested or layout_requested)
         and not roles_requested(creation.settings)
         and (assignments.dedicated or assignments.sriov)
     ):
@@ -72,7 +81,7 @@ async def create_lpar(
             hmc,
             await resolve_system_uuid(hmc, system_name_or_uuid),
             need_management=False,
-            context="Affinity group",
+            context="Affinity group" if affinity_requested else "Memory layout",
         )
         if controller:
             raise ValueError(
@@ -105,7 +114,7 @@ async def create_lpar(
         steps.append(created.physical_io_step)
     policy_requested = bool(creation.security_policy.pairs())
     if created.apply_step is not None and not (
-        policy_requested or hardware_requested or affinity_requested
+        policy_requested or hardware_requested or layout_requested or affinity_requested
     ):
         steps.append(created.apply_step)
     if created.settings_step is not None:
@@ -120,12 +129,14 @@ async def create_lpar(
         steps.append(created.affinity_group_step)
     if created.hardware_memory_step is not None:
         steps.append(created.hardware_memory_step)
+    if created.memory_layout_step is not None:
+        steps.append(created.memory_layout_step)
     if created.apply_step is not None and (
-        policy_requested or hardware_requested or affinity_requested
+        policy_requested or hardware_requested or layout_requested or affinity_requested
     ):
         steps.append(created.apply_step)
     verification_failed = (
-        policy_requested or hardware_requested or affinity_requested
+        policy_requested or hardware_requested or layout_requested or affinity_requested
     ) and (
         created.ownership_stamped is not True
         or any(
@@ -133,6 +144,7 @@ async def create_lpar(
             for requested, step in (
                 (policy_requested, created.security_policy_step),
                 (hardware_requested, created.hardware_memory_step),
+                (layout_requested, created.memory_layout_step),
                 (affinity_requested, created.affinity_group_step),
                 (creation.settings.pairs(), created.settings_step),
                 (creation.reporting_settings.pairs(), created.reporting_step),

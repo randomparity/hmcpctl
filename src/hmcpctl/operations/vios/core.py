@@ -19,6 +19,7 @@ from hmcpctl.operations.systems.fleet import (
 from ...documents.lpar import LparResources, build_vios_document
 from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
+from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...errors import HMCError
@@ -36,10 +37,11 @@ from ...resource_identity import (
 )
 from ...ssh.commands import HMC_NO_RESULTS, build_filter
 from ...ssh.lpar import (
-    DEFAULT_PROFILE_NAME,
     complete_create_resources,
     create_lpar_via_cli,
+    resolve_system_cli_name,
 )
+from ...ssh.lpar_memory_layout import admit_memory_layout, get_lpar_memory_layout
 from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
@@ -123,6 +125,7 @@ async def create_vios(
     security_policy: LparSecurityPolicy | None = None,
     hardware_mem_encryption: bool | None = None,
     hardware_mem_expansion: bool | None = None,
+    memory_layout: LparMemoryLayout | None = None,
     affinity_group_id: AffinityGroupID | None = None,
 ) -> dict[str, Any] | None:
     """Create a VIOS partition on a managed system and return its entry.
@@ -131,6 +134,11 @@ async def create_vios(
     VirtualIOServer document; V10R3 refuses one sent as a LogicalPartition
     (#1214).
     """
+    if memory_layout is not None:
+        if not isinstance(memory_layout, LparMemoryLayout):
+            raise TypeError("memory_layout must be LparMemoryLayout")
+        memory_layout.validate_creation("Virtual IO Server")
+    layout_requested = memory_layout is not None and bool(memory_layout.pairs())
     affinity_requested = validate_affinity_group_id(affinity_group_id) is not None
     hardware_requested = bool(
         hardware_memory_pairs(hardware_mem_encryption, hardware_mem_expansion)
@@ -145,19 +153,20 @@ async def create_vios(
     if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
     vtpm_requested = vtpm_settings is not None and bool(vtpm_settings.pairs())
-    if vtpm_requested or policy_requested or hardware_requested:
+    if vtpm_requested or policy_requested or hardware_requested or layout_requested:
         completed = complete_create_resources(resources)
         if completed is None:
             raise ValueError(
-                f"VIOS {'native' if policy_requested or hardware_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
+                f"VIOS {'native' if policy_requested or hardware_requested or layout_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
             )
         resources = completed
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    if (
-        not vtpm_requested
-        and not policy_requested
-        and not hardware_requested
-        and not affinity_requested
+    if not (
+        vtpm_requested
+        or policy_requested
+        or hardware_requested
+        or layout_requested
+        or affinity_requested
     ):
         return await hmc.create_vios(
             system_uuid, build_vios_document(name=name, resources=resources)
@@ -180,12 +189,26 @@ async def create_vios(
     await admit_hardware_memory(
         hmc, system_uuid, hardware_mem_encryption, hardware_mem_expansion
     )
+    system = (
+        await resolve_system_cli_name(hmc.config, system_uuid)
+        if layout_requested
+        else await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
+    )
     controller_mode = False
-    if affinity_requested:
+    if layout_requested or affinity_requested:
         _, controller_mode = await read_creation_authority(
-            hmc, system_uuid, need_management=False, context="Affinity group"
+            hmc,
+            system_uuid,
+            need_management=False,
+            context="Affinity group" if affinity_requested else "Memory layout",
         )
-    system = await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
+    if layout_requested:
+        await admit_memory_layout(hmc.config, system, memory_layout)
+    native_options: dict[str, Any] = {}
+    if layout_requested:
+        native_options["memory_layout"] = memory_layout
+    if controller_mode:
+        native_options["profile_name"] = None
     native_failed = False
     try:
         await create_lpar_via_cli(
@@ -199,10 +222,10 @@ async def create_vios(
             hardware_mem_encryption=hardware_mem_encryption,
             hardware_mem_expansion=hardware_mem_expansion,
             affinity_group_id=affinity_group_id,
-            profile_name=None if controller_mode else DEFAULT_PROFILE_NAME,
+            **native_options,
         )
     except HMCError as error:
-        if hardware_requested or affinity_requested:
+        if hardware_requested or layout_requested or affinity_requested:
             native_failed = True
         elif not policy_requested:
             raise
@@ -219,19 +242,39 @@ async def create_vios(
         try:
             entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
         except Exception:
-            if not hardware_requested and not affinity_requested:
+            if not (hardware_requested or layout_requested or affinity_requested):
                 raise
             # Native creation succeeded; discard unavailable lookup diagnostics.
             entry = None
-        if entry is None or not entry.get("UUID"):
+        if (
+            entry is None
+            or (layout_requested and not isinstance(entry, dict))
+            or not entry.get("UUID")
+        ):
             raise ValueError("Created VIOS identity was not confirmed")
-        if (policy_requested or hardware_requested or affinity_requested) and (
+        if (
+            policy_requested
+            or hardware_requested
+            or layout_requested
+            or affinity_requested
+        ) and (
             not isinstance(entry.get("UUID"), str)
             or not is_uuid(entry["UUID"])
             or not isinstance(entry.get("Resource"), dict)
             or entry["Resource"].get("PartitionName") != name
         ):
             raise ValueError("Created VIOS identity unconfirmed")
+        if layout_requested:
+            if controller_mode:
+                raise ValueError(
+                    "Controller current ratio mappings unavailable; no named profile was read"
+                )
+            observed_layout = await get_lpar_memory_layout(hmc.config, system, name)
+            if any(
+                getattr(observed_layout, field) != value
+                for field, value in memory_layout.pairs()
+            ):
+                raise ValueError("Created VIOS memory ratios unavailable or mismatched")
         if vtpm_settings is not None and vtpm_requested:
             observed = await get_lpar_vtpm_state(hmc.config, system, name, vios=True)
             if any(
@@ -253,7 +296,7 @@ async def create_vios(
                     "Created VIOS policy readback differs from requested fields"
                 )
     except (HMCError, ValueError, PermissionError) as error:
-        if hardware_requested or affinity_requested:
+        if hardware_requested or layout_requested or affinity_requested:
             verification_failed = True
         elif policy_requested:
             raise HMCError(
@@ -265,7 +308,9 @@ async def create_vios(
             ) from error
     if verification_failed:
         raise HMCError(
-            f"VIOS exists or may exist; {'affinity group' if affinity_requested else 'hardware memory access'} readback-unavailable. Inspect before retrying. No second create or rollback performed"
+            "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
+            if layout_requested
+            else f"VIOS exists or may exist; {'affinity group' if affinity_requested else 'hardware memory access'} readback-unavailable. Inspect before retrying. No second create or rollback performed"
         )
     hardware_step = await created_hardware_memory_step(
         hmc,

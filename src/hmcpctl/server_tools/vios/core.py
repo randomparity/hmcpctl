@@ -12,6 +12,7 @@ from ..._app import (
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
 from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
+from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import (
     LparSecurityPolicy,
     SecurityPolicyResult,
@@ -55,6 +56,7 @@ def hmc_create_vios(
     security_policy: LparSecurityPolicy | None = None,
     hardware_mem_encryption: HardwareMemoryFlag | None = None,
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
+    memory_layout: LparMemoryLayout | None = None,
     affinity_group_id: AffinityGroupID | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
@@ -71,6 +73,12 @@ def hmc_create_vios(
         system_name_or_uuid: Target managed-system name or UUID.
         name: Name for the new VIOS partition.
         resources: Memory and processor settings for the VIOS.
+        memory_layout: Optional advertised HPT/PPT creation ratios only.
+            Native single-record creation requires explicit resources; saved
+            identity/ratio verification must succeed. Controller mode has no
+            named profile and returns incomplete verification when current
+            values are unavailable. No huge-page or KVM reservation fields,
+            activation or rollback.
         affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
             omission preserves defaults. Separate native partition/profile observations
             must match before follow-ups; unavailable evidence requires inspection.
@@ -87,6 +95,10 @@ def hmc_create_vios(
             profile; uses environment defaults when omitted.
     """
 
+    if memory_layout is not None:
+        if not isinstance(memory_layout, LparMemoryLayout):
+            raise TypeError("memory_layout must be LparMemoryLayout")
+        memory_layout.validate_creation("Virtual IO Server")
     validate_affinity_group_id(affinity_group_id)
     return with_client(
         lambda hmc: create_vios(
@@ -98,6 +110,7 @@ def hmc_create_vios(
             security_policy=security_policy,
             hardware_mem_encryption=hardware_mem_encryption,
             hardware_mem_expansion=hardware_mem_expansion,
+            memory_layout=memory_layout,
             affinity_group_id=affinity_group_id,
         ),
         profile=profile,

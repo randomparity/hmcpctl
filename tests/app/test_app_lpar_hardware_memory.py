@@ -247,7 +247,35 @@ def test_old_positional_adapters_preserve_security_and_yes(
     fn = adapter.handler if surface == "mcp" else adapter.cli
     parameters = inspect.signature(fn).parameters
     names = list(parameters)
-    assert names[-3:] == [*FIELDS, "affinity_group_id"]
+    hardware_position = names.index("hardware_mem_encryption")
+    assert (
+        hardware_position
+        == {
+            ("lpar", "mcp"): 16,
+            ("vios", "mcp"): 6,
+            ("lpar", "cli"): 35,
+            ("vios", "cli"): 6,
+        }[(adapter.kind, surface)]
+    )
+    assert names[hardware_position : hardware_position + 2] == list(FIELDS)
+    expected_tail = (
+        ["memory_layout"]
+        if surface == "mcp"
+        else (
+            [
+                "min_num_huge_pages",
+                "desired_num_huge_pages",
+                "max_num_huge_pages",
+                "hpt_ratio",
+                "ppt_ratio",
+                "kvm_reserved_mem_percent",
+            ]
+            if adapter.kind == "lpar"
+            else ["hpt_ratio", "ppt_ratio"]
+        )
+    )
+    assert names[hardware_position + 2 :] == [*expected_tail, "affinity_group_id"]
+    assert all(parameters[name].default is None for name in FIELDS)
     last_old = "security_policy" if surface == "mcp" else "yes"
     old_names = [
         name for name in names[: names.index(last_old) + 1] if name not in FIELDS
