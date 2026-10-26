@@ -842,29 +842,95 @@ async def test_session_unknown_is_not_success_and_closes_local_transport(
     assert events == ["logon", "close"]
 
 
-def test_predecessor_requires_bound_clean_session(tmp_path):
-    p = packet(tmp_path)
-    p["baseline_sha256"] = "e" * 64
-    directory = Path(p["window"]["directory"]) / "preflight-final"
+_CLOSEOUT_FAULTS = (
+    [("valid", True)]
+    + [
+        (key, None)
+        for key in ("source_only", "logon", "logoff", "http", "closed", "packet_sha256")
+    ]
+    + [
+        ("source_only", 1),
+        ("logon", "unknown"),
+        ("logoff", "unknown"),
+        ("http", "open"),
+        ("closed", 1),
+        ("closed", False),
+        ("packet_sha256", "e" * 64),
+        ("packet_sha256", "g" * 64),
+        ("packet_sha256", 1),
+        ("both-digests", None),
+        ("both-malformed", "g" * 64),
+    ]
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["preflight-final", "capture"])
+@pytest.mark.parametrize("key,value", _CLOSEOUT_FAULTS + [("binding", None)])
+async def test_predecessor_requires_bound_clean_session(
+    rig, monkeypatch, stage, key, value
+):
+    from types import SimpleNamespace
+
+    p, wire, hmc, output, _before = rig
+    baseline = p["baseline_sha256"]
+    previous = "preflight-initial" if stage == "preflight-final" else "preflight-final"
+    directory = Path(p["window"]["directory"]) / previous
     directory.mkdir(mode=0o700)
-    document = {
-        "binding_sha256": source._binding(p),
-        "packet_sha256": "d" * 64,
-        "phase": "preflight-complete",
-        "observed_baseline_sha256": p["baseline_sha256"],
-        "run": {"partial": False},
-    }
+    if stage == "preflight-final":
+        p["baseline_sha256"] = None
+    old_sha = source.hashlib.sha256(source.encode(p)).hexdigest()
+    monkeypatch.setattr(source, "load_profile", lambda name: hmc.config)
+    args = SimpleNamespace(packet_sha256=old_sha, output=directory)
+    assert await source._run_stage(p, args, previous, time.monotonic()) == 0
+    document = json.loads((directory / "results.json").read_text())
+    closeout = json.loads((directory / "session.json").read_text())
+    if key == "binding":
+        p["system"]["name"] = "different"
+    elif key == "both-digests":
+        document.pop("packet_sha256")
+        closeout.pop("packet_sha256")
+    elif key == "both-malformed":
+        document["packet_sha256"] = closeout["packet_sha256"] = value
+    elif key != "valid":
+        closeout.pop(key) if value is None else closeout.update({key: value})
     source._save(directory, document)
-    source._save(
-        directory, {"packet_sha256": "d" * 64, "closed": False}, "session.json"
-    )
-    with pytest.raises(ValueError):
-        source._predecessor(p, "capture", "d" * 64)
-    source._save(directory, {"packet_sha256": "d" * 64, "closed": True}, "session.json")
-    source._predecessor(p, "capture", "d" * 64)
-    p["system"]["name"] = "different"
-    with pytest.raises(ValueError):
-        source._predecessor(p, "capture", "d" * 64)
+    source._save(directory, closeout, "session.json")
+    p["baseline_sha256"] = baseline
+    packet_path = output / "packet.json"
+    packet_path.write_bytes(source.encode(p))
+    packet_path.chmod(0o600)
+    current_sha = source.hashlib.sha256(packet_path.read_bytes()).hexdigest()
+    assert (old_sha != current_sha) is (stage == "preflight-final" or key == "binding")
+    wire.http.clear()
+    wire.commands.clear()
+    receipt = Mock(side_effect=AssertionError("next stage admitted"))
+    monkeypatch.setattr(source, "_receipt", receipt)
+    if key == "valid":
+        source._predecessor(p, stage, current_sha)
+    else:
+        argv = [
+            "preflight" if stage == "preflight-final" else "capture",
+            "--packet",
+            str(packet_path),
+            "--packet-sha256",
+            current_sha,
+            "--output",
+            str(Path(p["window"]["directory"]) / stage),
+        ]
+        if stage == "capture":
+            argv += [
+                "--grant-packet-sha256",
+                current_sha,
+                "--exclusive-writer-window",
+                "--fresh-vios-delete-approved",
+            ]
+        with pytest.raises(source.Held, match="bound predecessor"):
+            source._main(argv, time.monotonic())
+        assert not (Path(p["window"]["directory"]) / (stage + ".claim")).exists()
+    receipt.assert_not_called()
+    assert wire.http == [] and wire.commands == []
+    assert wire.creates == 0 and wire.deletes == []
 
 
 @pytest.mark.asyncio
@@ -951,9 +1017,10 @@ def test_source_attestation_process_is_bounded_and_reaped(tmp_path, monkeypatch,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("closed", [False, True])
+@pytest.mark.parametrize("key,value", _CLOSEOUT_FAULTS)
 @pytest.mark.parametrize("version", [1, None, 2, True, 1.0, "1", "missing"])
 async def test_recovery_requires_supported_history_and_closed_session(
-    rig, closed, version
+    rig, closed, version, key, value
 ):
     p, wire, hmc, output, _before = rig
     document = await run_capture(rig)
@@ -963,9 +1030,25 @@ async def test_recovery_requires_supported_history_and_closed_session(
     supported = type(version) is int and version == 1
     capture_dir = Path(p["window"]["directory"]) / "capture"
     capture_dir.mkdir(mode=0o700)
-    source._save(
-        capture_dir, {"closed": closed, "packet_sha256": hmc.packet_sha}, "session.json"
-    )
+    closeout = {
+        "source_only": True,
+        "closed": closed,
+        "packet_sha256": hmc.packet_sha,
+        "logon": "acknowledged",
+        "logoff": "acknowledged",
+        "http": "closed",
+    }
+    if key == "both-digests":
+        document.pop("packet_sha256")
+        closeout.pop("packet_sha256")
+    elif key == "both-malformed":
+        document["packet_sha256"] = closeout["packet_sha256"] = value
+    elif key != "valid":
+        closeout.pop(key) if value is None else closeout.update({key: value})
+    source._save(capture_dir, closeout, "session.json")
+    capture_closed = closed and key == "valid"
+    if key in {"both-digests", "both-malformed"}:
+        supported = False
     wire.http.clear()
     wire.commands.clear()
     hmc.budget = source.Budget("recover", p)
@@ -973,11 +1056,13 @@ async def test_recovery_requires_supported_history_and_closed_session(
     assert result["baseline_agrees_now"] is True
     assert result["history_complete"] is supported
     assert source._history_complete(p, document, hmc.packet_sha) is supported
-    assert result["capture_session_closed"] is closed
-    assert result["clean"] is (closed and supported)
-    assert result["run"]["partial"] is (not (closed and supported))
+    assert result["capture_session_closed"] is capture_closed
+    assert result["clean"] is (capture_closed and supported)
+    assert result["run"]["partial"] is (not (capture_closed and supported))
     assert all(method == "GET" for method, url in wire.http)
-    assert all(command.startswith("lscomgmt") for command in wire.commands)
+    assert len(wire.http) == 12  # One snapshot: eight bookend and four contained reads.
+    assert len(wire.commands) == 1 and wire.commands[0].startswith("lscomgmt")
+    assert wire.creates == 2 and len(wire.deletes) == 2
 
 
 _COLLECTION_SLOTS = [

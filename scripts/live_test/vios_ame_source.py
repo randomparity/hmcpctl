@@ -1640,6 +1640,19 @@ def _history_matches(p: dict, document: dict, packet_sha: str) -> bool:
     return cursor == len(snapshots)
 
 
+def _session_closed(closeout: dict, packet_sha: object) -> bool:
+    return (
+        isinstance(packet_sha, str)
+        and HEX64.fullmatch(packet_sha) is not None
+        and closeout.get("source_only") is True
+        and closeout.get("packet_sha256") == packet_sha
+        and closeout.get("closed") is True
+        and closeout.get("logon") == "acknowledged"
+        and closeout.get("logoff") == "acknowledged"
+        and closeout.get("http") == "closed"
+    )
+
+
 async def recover(hmc: CountedHMC, p: dict, document: dict, directory: Path) -> dict:
     result = _new_document(p, hmc.packet_sha, "recover")
     current = await snapshot(hmc, p)
@@ -1652,10 +1665,7 @@ async def recover(hmc: CountedHMC, p: dict, document: dict, directory: Path) -> 
         )
     except (OSError, ValueError, TypeError):
         closeout = {}
-    result["capture_session_closed"] = (
-        closeout.get("closed") is True
-        and closeout.get("packet_sha256") == hmc.packet_sha
-    )
+    result["capture_session_closed"] = _session_closed(closeout, hmc.packet_sha)
     result["clean"] = (
         result["baseline_agrees_now"]
         and result["history_complete"]
@@ -1697,8 +1707,7 @@ def _predecessor(p: dict, stage: str, packet_sha: str) -> None:
         or document.get("phase") != "preflight-complete"
         or document.get("observed_baseline_sha256") != p["baseline_sha256"]
         or document.get("run", {}).get("partial") is not False
-        or session.get("closed") is not True
-        or session.get("packet_sha256") != document.get("packet_sha256")
+        or not _session_closed(session, document.get("packet_sha256"))
     ):
         raise Held("successful bound predecessor is unavailable")
     if stage == "capture" and document.get("packet_sha256") != packet_sha:
