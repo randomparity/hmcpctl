@@ -1276,6 +1276,118 @@ def test_creation_requires_full_remaining_cleanup_and_uncertainty_reserve(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["attestation", "checkpoint"])
+async def test_create_rechecks_reserve_after_local_latency(
+    tmp_path, monkeypatch, boundary
+):
+    import stat
+    from types import SimpleNamespace
+
+    p = packet(tmp_path)
+    wire = Wire(p)
+    checkout = tmp_path / "checkout"
+    for name in source.SOURCE_PATHS:
+        target = checkout / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"source-bound-input")
+        p["imported_source_sha256"][name] = source.hashlib.sha256(
+            target.read_bytes()
+        ).hexdigest()
+    monkeypatch.setattr(source, "_root", lambda: checkout)
+    monkeypatch.setattr(source.sys, "version_info", (3, 11, 15))
+    monkeypatch.setattr(
+        source,
+        "hmcpctl",
+        SimpleNamespace(__file__=str(checkout / "src/hmcpctl/__init__.py")),
+    )
+    elapsed = [0]
+    delay_hits = []
+    git_calls = []
+
+    def git(root, args):
+        assert root == checkout
+        git_calls.append(args)
+        if boundary == "attestation" and len(git_calls) == 4:
+            elapsed[0] += 6
+            delay_hits.append(boundary)
+        return {
+            ("rev-parse", "HEAD"): p["tested_commit"],
+            ("rev-parse", "HEAD^{tree}"): p["tested_tree"],
+            (
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--ignore-submodules=all",
+            ): "",
+        }[args]
+
+    fsync = source.os.fsync
+
+    def delayed_fsync(fd):
+        if (
+            boundary == "checkpoint"
+            and not delay_hits
+            and stat.S_ISREG(source.os.fstat(fd).st_mode)
+        ):
+            document = json.loads(source.os.pread(fd, source.MIB, 0))
+            if document["phase"] == "create-pending":
+                elapsed[0] += 6
+                delay_hits.append(boundary)
+        fsync(fd)
+
+    monkeypatch.setattr(source, "_git_read", git)
+    monkeypatch.setattr(source.os, "fsync", delayed_fsync)
+    monkeypatch.setattr(source, "run_hmc_command", wire.ssh)
+    monkeypatch.setattr(
+        source.HMCClient,
+        "_new_http_client",
+        lambda self, port: httpx.AsyncClient(
+            base_url="https://hmc.test:443", transport=httpx.MockTransport(wire.request)
+        ),
+    )
+    config = HMCConfig.from_mapping(
+        {
+            **p["hmc_identity"],
+            "password": "test",  # pragma: allowlist secret -- mocked credential
+            "agent_id": "source-test",
+        }
+    )
+    hmc = source.CountedHMC(config, source.Budget("capture", p))
+    hmc.packet_sha = "d" * 64
+    output = tmp_path / "capture"
+    output.mkdir(mode=0o700)
+    monotonic, wall = time.monotonic, time.time
+    monkeypatch.setattr(source.time, "monotonic", lambda: monotonic() + elapsed[0])
+    monkeypatch.setattr(source.time, "time", lambda: wall() + elapsed[0])
+    try:
+        before = await source.snapshot(hmc, p)
+        p["baseline_sha256"] = source.digest(before["stable"])
+        hmc.budget = source.Budget("capture", p)
+        hmc.budget.deadline = time.monotonic() + 991
+        with pytest.raises(source.Held, match="time reserve unavailable"):
+            await source.capture(
+                hmc,
+                p,
+                output,
+                grant_packet_sha256=hmc.packet_sha,
+                exclusive_writer_window=True,
+                fresh_vios_delete_approved=True,
+            )
+        assert delay_hits == [boundary] and len(git_calls) == 6
+        assert wire.creates == 0 and wire.deletes == [] and set(wire.nodes) == {V0}
+        assert all(command.startswith("lscomgmt ") for command in wire.commands)
+        assert hmc.create_case is None and hmc.created_names == set()
+        document = json.loads((output / "results.json").read_text())
+        assert document["phase"] == "held-residual" and document["run"]["partial"]
+        assert (
+            len(document["cases"]) == 1 and document["cases"][0]["native"] == "pending"
+        )
+        assert not source._history_complete(p, document, hmc.packet_sha)
+    finally:
+        await hmc._http.aclose()
+
+
+@pytest.mark.asyncio
 async def test_native_timeout_after_submission_leaves_owned_candidate_held(
     rig, monkeypatch
 ):

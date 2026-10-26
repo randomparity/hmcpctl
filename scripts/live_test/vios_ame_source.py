@@ -1483,6 +1483,7 @@ async def capture(
             document["cases"].append(record)
             _checkpoint(directory, document, "create-pending", hmc)
             with hmc.budget.section("create", 0, 1, 65536, 60):
+                hmc.budget.reserve(2 - index)
                 hmc.create_case = case["name"]
                 try:
                     record["native_output"] = await _ssh(hmc, p, "create", case)
