@@ -24,7 +24,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
 
 SYSTEM = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-TARGET = "11111111-2222-3333-4444-555555555555"
+TARGET = "abcdefab-cdef-abcd-efab-cdefabcdefab"
 CONFIG = HMCConfig.from_mapping(
     {"host": "hmc.test", "user": "operator", "agent_id": "arm64"}
 )
@@ -489,6 +489,149 @@ def document(state):
         },
         "results": deepcopy(state.results),
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize(
+    "variant",
+    ["selected-system", "system-detail", "partition-feed", "partition-detail"],
+)
+async def test_live_uuid_case_admission(boundary, kind, variant):
+    state, partition, system, _ = boundary
+    async with arm.HMCClient(CONFIG) as hmc:
+        partition["Resource"]["PartitionType"] = (
+            "Virtual IO Server" if kind == "VirtualIOServer" else "AIX/Linux"
+        )
+        partition["UUID"] = TARGET.upper() if variant == "partition-detail" else TARGET
+
+        async def feed(*args):
+            row = deepcopy(partition)
+            row["UUID"] = TARGET.upper() if variant == "partition-feed" else TARGET
+            return [row]
+
+        if kind == "VirtualIOServer":
+            hmc.list_logical_partitions.side_effect = lambda *args: []
+            hmc.list_vios.side_effect = feed
+            hmc.get_vios = AsyncMock(side_effect=lambda *args: deepcopy(partition))
+        else:
+            hmc.list_logical_partitions.side_effect = feed
+        if variant == "system-detail":
+            system["UUID"] = SYSTEM.upper()
+        observed = await arm.admit(
+            hmc,
+            SYSTEM.upper() if variant == "selected-system" else SYSTEM,
+            "sys-R1",
+            "partition-R1",
+            (),
+            arm.configured(state.config)[1],
+        )
+        assert observed["uuid"] == TARGET and observed["kind"] == kind
+        assert observed["system"]["uuid"] == SYSTEM
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["system", "partition-feed", "partition-detail"])
+@pytest.mark.parametrize(
+    "identity", ["bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", "malformed"]
+)
+async def test_live_uuid_case_different_identity_refused(boundary, source, identity):
+    state, partition, system, _ = boundary
+    async with arm.HMCClient(CONFIG) as hmc:
+        row = deepcopy(partition)
+        hmc.list_logical_partitions.side_effect = lambda *args: [deepcopy(row)]
+        if source == "system":
+            system["UUID"] = identity
+        elif source == "partition-feed":
+            row["UUID"] = identity
+        else:
+            partition["UUID"] = identity
+        with pytest.raises(ValueError):
+            await arm.admit(
+                hmc,
+                SYSTEM,
+                "sys-R1",
+                "partition-R1",
+                (),
+                arm.configured(state.config)[1],
+            )
+        assert state.writes == []
+
+
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("phase", [0, 1])
+@pytest.mark.parametrize("source", ["system", "partition"])
+@pytest.mark.parametrize("different", [False, True])
+def test_live_uuid_case_phase_and_recovery(
+    boundary, monkeypatch, tmp_path, capsys, kind, phase, source, different
+):
+    state, partition, system, _ = boundary
+
+    async def prepare():
+        async with arm.HMCClient(CONFIG) as hmc:
+            if kind == "VirtualIOServer":
+                partition["Resource"]["PartitionType"] = "Virtual IO Server"
+                hmc.list_logical_partitions.side_effect = lambda *args: []
+                hmc.list_vios.side_effect = lambda *args: [deepcopy(partition)]
+                hmc.get_vios = AsyncMock(side_effect=lambda *args: deepcopy(partition))
+
+            def change(s, p, sys, provenance):
+                if s.checkpoints != (1 if phase == 0 else 3):
+                    return
+                value = (
+                    "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"
+                    if different
+                    else (SYSTEM if source == "system" else TARGET).upper()
+                )
+                if source == "system":
+                    sys["UUID"] = value
+                    hmc.list_system_summaries.return_value[0]["UUID"] = value
+                else:
+                    p["UUID"] = value
+
+            state.hook = change
+
+    asyncio.run(prepare())
+    asyncio.run(arm.exercise_accelerator_qos(None, state))
+    if different:
+        assert len(state.writes) == phase
+        assert state.verified["cleanup"] == "failed"
+        return
+    assert state.writes == [REQUEST, {**REQUEST, "qos": 1}]
+    assert state.verified["cleanup"] == "passed"
+    original = state.results[0]["data"]
+    assert original["system_uuid"] == SYSTEM and original["target"]["uuid"] == TARGET
+    assert (
+        state.results[1]["data"]["uuid"] == state.results[3]["data"]["uuid"] == TARGET
+    )
+    system["UUID"], partition["UUID"] = SYSTEM.upper(), TARGET.upper()
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(document(state)))
+    before = path.read_bytes()
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    assert recovery.main(["--results", str(path)]) == 0
+    assert "CLEAN:" in capsys.readouterr().out
+    assert path.read_bytes() == before and len(state.writes) == 2
+
+
+@pytest.mark.parametrize("source", ["system", "partition"])
+def test_live_uuid_case_recovery_different_identity(
+    boundary, monkeypatch, tmp_path, capsys, source
+):
+    state, partition, system, _ = boundary
+    asyncio.run(arm.exercise_accelerator_qos(None, state))
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(document(state)))
+    before = path.read_bytes()
+    (system if source == "system" else partition)["UUID"] = (
+        "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"
+    )
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    assert recovery.main(["--results", str(path)]) == 2
+    assert "CLEAN:" not in capsys.readouterr().out
+    assert path.read_bytes() == before and len(state.writes) == 2
 
 
 @pytest.mark.parametrize(

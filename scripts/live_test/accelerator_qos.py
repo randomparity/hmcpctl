@@ -64,9 +64,14 @@ def candidate(expected: dict | None = None) -> dict:
     return {"tested_commit": current["tested_commit"], "tree_clean": True}
 
 
+def _canonical_uuid(value: object) -> str:
+    if not isinstance(value, str) or not is_uuid(value):
+        raise ValueError("Arm64 requires a valid UUID identity")
+    return value.lower()
+
+
 async def admit(hmc, system_uuid, system_name, selector, protected, change):
-    if not isinstance(system_uuid, str) or not is_uuid(system_uuid):
-        raise ValueError("Arm64 requires a valid selected-system UUID")
+    system_uuid = _canonical_uuid(system_uuid)
     matches = []
     for kind, entries in (
         ("LogicalPartition", await hmc.list_logical_partitions(system_uuid)),
@@ -88,6 +93,7 @@ async def admit(hmc, system_uuid, system_name, selector, protected, change):
     ):
         raise ValueError("Arm64 requires one contained partition with valid UUID")
     kind, uuid = matches[0]
+    uuid = _canonical_uuid(uuid)
     read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
     entry = await read(uuid)
     resource = resource_container(entry or {}, "Resource")
@@ -98,7 +104,7 @@ async def admit(hmc, system_uuid, system_name, selector, protected, change):
     rmc = leaf_text(resource.get("ResourceMonitoringControlState"))
     if (
         not entry
-        or entry.get("UUID") != uuid
+        or _canonical_uuid(entry.get("UUID")) != uuid
         or not isinstance(name, str)
         or not name.strip()
         or name in protected
@@ -146,7 +152,7 @@ async def admit(hmc, system_uuid, system_name, selector, protected, change):
     ]
     if (
         not system_entry
-        or system_entry.get("UUID") != system_uuid
+        or _canonical_uuid(system_entry.get("UUID")) != system_uuid
         or leaf_text(system.get("SystemName")) != system_name
         or leaf_text(system.get("State")) != "operating"
         or leaf_text(caps.get("HardwareAcceleratorCapable")) != "true"
@@ -253,7 +259,9 @@ async def before_effect(hmc, state, baseline, change, quantity):
     }:
         raise ValueError("Arm64 HMC destination changed before effect")
     selector, configured_request = configured(state.config)
-    system_uuid = await resolve_system_uuid(hmc, state.config.system_name)
+    system_uuid = _canonical_uuid(
+        await resolve_system_uuid(hmc, state.config.system_name)
+    )
     system_name = await system_name_from_uuid(hmc, system_uuid)
     if not system_name:
         raise ValueError("Arm64 selected system has no current name")
@@ -301,7 +309,9 @@ async def exercise_accelerator_qos(client, state) -> None:
             )
         provenance = candidate()
         async with HMCClient(state.hmc_config) as hmc:
-            system_uuid = await resolve_system_uuid(hmc, state.config.system_name)
+            system_uuid = _canonical_uuid(
+                await resolve_system_uuid(hmc, state.config.system_name)
+            )
             system_name = await system_name_from_uuid(hmc, system_uuid)
             if not system_name:
                 raise ValueError("Arm64 selected system has no current name")
@@ -598,7 +608,7 @@ async def recover_document(hmc_config: HMCConfig, document: dict[str, Any]) -> N
         raise ValueError("Arm64 requires the original protection inventory")
     change = LparAcceleratorQos.model_validate(baseline["request"], strict=True)
     async with HMCClient(hmc_config) as hmc:
-        uuid = await resolve_system_uuid(hmc, baseline["system_uuid"])
+        uuid = _canonical_uuid(await resolve_system_uuid(hmc, baseline["system_uuid"]))
         name = await system_name_from_uuid(hmc, uuid)
         if not name:
             raise ValueError("Arm64 recovery system has no current name")
