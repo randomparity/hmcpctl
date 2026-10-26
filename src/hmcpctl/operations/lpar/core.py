@@ -192,6 +192,7 @@ async def _create_via_cli(
         native_options["memory_layout"] = creation.memory_layout
     if creation.virtual_serial_adapters:
         native_options["virtual_serial_adapters"] = creation.virtual_serial_adapters
+    serial_submission_failed = False
     try:
         await create_lpar_via_cli(
             hmc.config,
@@ -213,16 +214,17 @@ async def _create_via_cli(
         )
     except _LayoutCreateSubmissionError as error:
         if creation.virtual_serial_adapters:
-            raise HMCError(
-                "Serial creation outcome unknown; partition exists or may exist. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed"
-            ) from None
-        await _raise_layout_create_failure(hmc, system_uuid, creation, error)
+            serial_submission_failed = True
+        else:
+            await _raise_layout_create_failure(hmc, system_uuid, creation, error)
     except Exception:
         if not creation.virtual_serial_adapters:
             raise
+        serial_submission_failed = True
+    if serial_submission_failed:
         raise HMCError(
             "Serial creation outcome unknown; partition exists or may exist. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed"
-        ) from None
+        )
     apply_step = (
         await _apply_created_profile(hmc, system_name, creation)
         if creation.apply_profile is not None

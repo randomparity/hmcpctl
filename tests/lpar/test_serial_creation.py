@@ -292,6 +292,7 @@ async def test_incomplete_creation_never_replays_or_applies(target, fault):
             await invoke(b, **options)
         assert PRIVATE not in str(raised.value)
         assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
     else:
         result = await invoke(b, **options)
         assert not result.workflow_completed
@@ -417,6 +418,7 @@ async def test_source_capability_refusal_or_lost_response_is_one_unknown_attempt
     with pytest.raises(HMCError, match="unknown") as raised:
         await invoke(target)
     assert PRIVATE not in str(raised.value) and raised.value.__cause__ is None
+    assert raised.value.__context__ is None
     assert target.events.count("create") == 1
     assert "stamp" not in target.events
     target.hmc.create_logical_partition.assert_not_awaited()
@@ -580,3 +582,33 @@ async def test_profile_collection_bound_stops_dependent_effects(
     assert "apply" not in target.events
     target.hmc.delete_logical_partition.assert_not_awaited()
     target.hmc.delete_vios.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"memory_layout": LparMemoryLayout(hpt_ratio="1:128")},
+        {"hardware_mem_encryption": False},
+    ],
+)
+async def test_serial_combined_submission_discards_provider_chain(target, options):
+    if target.kind == "VirtualIOServer":
+        pytest.skip("VIOS has a separate submission owner")
+    target.fault = "create"
+    creation = core.LparCreation(
+        "new",
+        target.environment,
+        LparResources(desired_memory=1024),
+        max_virtual_slots=8,
+        virtual_serial_adapters=(ADAPTER,),
+        **options,
+    )
+    with pytest.raises(HMCError, match="Serial creation outcome unknown") as raised:
+        await core._create_via_cli(target.hmc, SYSTEM, "system", creation)
+    assert PRIVATE not in str(raised.value)
+    assert raised.value.__cause__ is None and raised.value.__context__ is None
+    assert target.events.count("create") == 1
+    assert "stamp" not in target.events and "apply" not in target.events
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.hmc.delete_logical_partition.assert_not_awaited()
