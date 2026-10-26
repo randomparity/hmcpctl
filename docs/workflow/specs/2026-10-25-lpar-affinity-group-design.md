@@ -1,6 +1,6 @@
 # Conventional affinity group at partition creation
 
-Design prepared for #1769; format exception approved; review/audit pending.
+Authority consistency amendment for #1769; root D3/A3 and implementation release pending.
 [Scope](https://github.com/randomparity/hmcpctl/issues/1769#issuecomment-6399637239),
 token q1769-1c63e8d1: full-spec, S/100, iterating, one PR, empty exclusions.
 Decision: [ADR 0297](../../adr/0297-lpar-creation-affinity-group.md).
@@ -36,10 +36,24 @@ add no shared-update field, XML mapping, default group or stable-facade export.
 
 Selection forces one native creation record. Validate native keylock incompatibility
 before I/O; retain selected-system containment, duplicate checks and resource intent.
-Reuse C05 native authority evidence without implicit management/KVM selection or its
-Linux/CPU/capability/version prerequisites; reuse role observations already requested.
+One owner-acquired native authority decision governs admitted role/layout/affinity
+creation; reuse selected role evidence without importing Linux/KVM/CPU/release floors
+for layout/affinity-only requests.
+For role/layout/affinity creation with dedicated/SR-IOV follow-ups, workflow passes
+its complete assignment collection as optional internal preflight_assignments data;
+it removes its duplicate authority read and defers collection prevalidation to core.
+Core rejects a non-collection type or unsupported use before I/O: empty/vNIC-only
+collections or collections without a selected role/layout/affinity field are unsupported.
+None preserves direct/default/provision behavior; ordinary and vNIC-only workflows
+retain their existing prevalidation path. This amendment adds no public CLI/MCP,
+creation-input or result contract.
+Core's observed controller decision refuses profile assignments before foreign PCIe/
+SR-IOV/VIOS inventory or creation effects; admitted classic requests then prevalidate
+that complete collection. Physical-I/O normalization preserves it before SR-IOV
+follow-ups are removed. No caller supplies controller/capability permission evidence.
 Classic grammar uses the default profile; controller grammar omits profile_name.
-Controller explicit apply and profile-dependent I/O/assignments fail before submission.
+Controller explicit apply and initial-profile I/O fail before submission. The chosen
+observation governs grammar; it does not atomically fence later controller changes.
 Affinity omission preserves existing routing and causes no extra affinity/authority reads.
 Keep all_resources where independently selected feature contracts permit it.
 C10 capability/readback and other selected-domain restrictions remain independently binding.
@@ -87,8 +101,9 @@ uncertain-resource HMCError. Bound failure text; retain no raw provider payload.
 
 - Added boundaries: none. Widened: typed/CLI/MCP create input, native record, readback.
 - Actors: caller values/HMC replies are untrusted; existing peer trust retains its owner.
-- Controls: strict scalar domain, existing policy/containment/ownership, fixed key,
-  build_attribute_record/shlex.quote, strict rows, existing SSH timeout, private diagnostics.
+- Controls: strict scalar and internal request type/context validation; core-owned
+  authority, existing policy/containment/ownership, fixed-key build_attribute_record/
+  shlex.quote, strict rows, existing SSH timeout and private diagnostics.
 - Covered threats: transport authentication/audit; no management takeover or guest security.
 
 ## Global Constraints

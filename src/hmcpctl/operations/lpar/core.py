@@ -54,7 +54,11 @@ from ...ssh.profiles import get_lpar_proc_compat
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml, leaf_text
 from .affinity_group import created_affinity_group_step
-from .assignments import SriovLogicalPortAssignment
+from .assignments import (
+    LparPcieAssignments,
+    SriovLogicalPortAssignment,
+    prevalidate_lpar_pcie_assignments,
+)
 from .configuration import configure_lpar_settings
 from .hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from .linux_roles import (
@@ -259,6 +263,8 @@ async def create_and_stamp_lpar(
     hmc: HMCClient,
     system_name_or_uuid: str,
     creation: LparCreation,
+    *,
+    preflight_assignments: LparPcieAssignments | None = None,
 ) -> LparCreationResult:
     """Validate and create an LPAR with fallback and ownership stamping.
 
@@ -345,6 +351,18 @@ async def create_and_stamp_lpar(
             "Reporting settings cannot be combined with explicit keylock: CLI creation cannot represent keylock. Nothing was created."
         )
     validate_keylock(creation.keylock)
+    role_requested = roles_requested(creation.settings)
+    if preflight_assignments is not None:
+        if not isinstance(preflight_assignments, LparPcieAssignments):
+            raise TypeError("preflight_assignments must be LparPcieAssignments")
+        if not (
+            (role_requested or affinity_requested or layout_requested)
+            and (preflight_assignments.dedicated or preflight_assignments.sriov)
+        ):
+            raise ValueError(
+                "preflight_assignments requires role, memory layout or affinity selection "
+                "and dedicated or SR-IOV profile assignments"
+            )
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     # Scoped: the HMC-wide search misses partitions on a system it cannot
     # read (#1309), and the scoped feed refuses a non-operating system.
@@ -355,7 +373,6 @@ async def create_and_stamp_lpar(
             f"(UUID {existing.get('UUID')!r}). Choose a different name "
             "or delete the existing partition first."
         )
-    role_requested = roles_requested(creation.settings)
     controller_mode = False
     if role_requested:
         role_caps = await read_role_capabilities(
@@ -372,6 +389,14 @@ async def create_and_stamp_lpar(
             system_uuid,
             need_management=False,
             context="Affinity group" if affinity_requested else "Memory layout",
+        )
+    if preflight_assignments is not None:
+        if controller_mode:
+            raise ValueError(
+                "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
+            )
+        await prevalidate_lpar_pcie_assignments(
+            hmc, system_name_or_uuid, preflight_assignments
         )
     if (affinity_requested or layout_requested) and controller_mode:
         if creation.apply_profile is True:

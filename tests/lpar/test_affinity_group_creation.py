@@ -2,6 +2,8 @@
 
 import shlex
 from copy import deepcopy
+from dataclasses import replace
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -14,8 +16,15 @@ from hmcpctl.documents.common import UOM_NS
 from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.errors import HMCError
+from hmcpctl.operations.lpar import assignments as assignment_ops
 from hmcpctl.operations.lpar import core, workflows
-from hmcpctl.operations.lpar.assignments import AssignmentResult, LparPcieAssignments
+from hmcpctl.operations.lpar.assignments import (
+    AssignmentResult,
+    DedicatedPcieAssignment,
+    LparPcieAssignments,
+    SriovLogicalPortAssignment,
+    VnicAssignment,
+)
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import ATOM_NS
@@ -676,3 +685,225 @@ def test_affinity_appends_after_landed_memory_layout_inputs():
             "memory_layout",
             "affinity_group_id",
         ]
+
+
+@pytest.fixture
+def assignment_target(target, mixed_layout, monkeypatch):
+    """Keep admission real; provide native authority and foreign inventory replies."""
+    from hmcpctl.operations.virtualization import pcie
+
+    b = target
+    b.system["Resource"]["AssociatedSystemCapabilities"] = {
+        "KvmOnPowerVMCapable": "true"
+    }
+    b.entry["Resource"]["KvmCapable"] = "false"
+    b.hmc.get_console_info.return_value = {
+        "Resource": {
+            "VersionInfo": {
+                "Version": "10",
+                "Release": "3",
+                "ServicePackName": "1060",
+                "Minor": "1",
+            }
+        }
+    }
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.linux_roles.get_proc_compat_modes",
+        AsyncMock(return_value=[]),
+    )
+    original = b.command.side_effect
+    b.replies = ["null", "1"]
+
+    async def command(config, cmd):
+        if cmd.startswith("lscomgmt"):
+            observed = b.replies.pop(0)
+            b.events.append("authority:" + observed)
+            return observed
+        if "lpar_env,allow_perf_collection" in cmd:
+            return "aixlinux,1,127,0,0,0"
+        return await original(config, cmd)
+
+    b.command.side_effect = command
+    monkeypatch.setattr(
+        assignment_ops, "resolve_ssh_names", AsyncMock(return_value=("sys-R1", None))
+    )
+
+    async def environment(*args):
+        b.events.append("inventory")
+        return "Version: 10\nRelease: 3\nService Pack: 1060", "8375-42A"
+
+    monkeypatch.setattr(pcie, "read_sriov_environment", environment)
+    for name, items in [
+        ("list_sriov_adapters", [SimpleNamespace(mode="sriov", availability="1")]),
+        (
+            "list_sriov_physical_ports",
+            [
+                SimpleNamespace(
+                    availability="up", minimum_capacity_granularity_percent=Decimal(1)
+                )
+            ],
+        ),
+        ("list_sriov_logical_ports", []),
+    ]:
+        monkeypatch.setattr(
+            assignment_ops,
+            name,
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    capability="available", items=items, system="sys-R1"
+                )
+            ),
+        )
+    for name in ["list_sriov_configured_logical_port_rows", "list_vnic_backing_rows"]:
+        monkeypatch.setattr(assignment_ops, name, AsyncMock(return_value=[]))
+    return b
+
+
+def assignment_creation(domain):
+    from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+
+    selections = {
+        "C05": {"settings": LparSettings(kvm_capable=False)},
+        "C06": {"memory_layout": LparMemoryLayout(hpt_ratio="1:128")},
+        "C08": {"affinity_group_id": 1},
+    }
+    options = (
+        selections[domain]
+        if domain != "mixed"
+        else {k: v for fields in selections.values() for k, v in fields.items()}
+    )
+    return core.LparCreation(
+        "part-R1",
+        "AIX/Linux",
+        LparResources(desired_memory=1024),
+        apply_profile=False,
+        **options,
+    )
+
+
+def profile_assignments(kind):
+    item = (
+        DedicatedPcieAssignment("default_profile", "21010001")
+        if kind == "dedicated"
+        else SriovLogicalPortAssignment(
+            "default_profile", "1", "0", "27004002", Decimal(2)
+        )
+    )
+    return LparPcieAssignments(**{kind: (item,)})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("domain", ["C05", "C06", "C08", "mixed"])
+@pytest.mark.parametrize("kind", ["dedicated", "sriov"])
+@pytest.mark.parametrize("route", ["workflow", "direct"])
+async def test_assignment_authority_is_observed_once(
+    assignment_target, domain, kind, route
+):
+    b = assignment_target
+    if route == "workflow":
+        result = await workflows.create_lpar(
+            b.hmc, SYSTEM, assignment_creation(domain), profile_assignments(kind)
+        )
+        assert result.workflow_completed
+        b.assign.assert_awaited_once_with(
+            b.hmc, SYSTEM, "part-R1", profile_assignments(kind)
+        )
+    else:
+        result = await core.create_and_stamp_lpar(
+            b.hmc,
+            SYSTEM,
+            assignment_creation(domain),
+            preflight_assignments=profile_assignments(kind),
+        )
+        b.assign.assert_not_awaited()
+    assert result.resource_created
+    assert [e for e in b.events if e.startswith("authority:")] == ["authority:null"]
+    assert (
+        b.events.index("authority:null")
+        < b.events.index("inventory")
+        < b.events.index("create")
+    )
+    record = next(
+        c.args[1] for c in b.command.await_args_list if c.args[1].startswith("mksyscfg")
+    )
+    assert "profile_name=default_profile" in record
+    assert b.hmc.get_console_info.await_count == int(domain in ("C05", "mixed"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("domain", ["C05", "C06", "C08", "mixed"])
+@pytest.mark.parametrize("kind", ["dedicated", "sriov"])
+async def test_controller_assignment_denial_precedes_inventory(
+    assignment_target, domain, kind
+):
+    b = assignment_target
+    b.replies = ["1"]
+    with pytest.raises(ValueError, match="controller mode"):
+        await workflows.create_lpar(
+            b.hmc, SYSTEM, assignment_creation(domain), profile_assignments(kind)
+        )
+    assert b.events == ["authority:1"]
+    b.hmc.create_logical_partition.assert_not_awaited()
+    b.assign.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "requested,selected,error",
+    [
+        (False, True, TypeError),
+        (LparPcieAssignments(), True, ValueError),
+        (LparPcieAssignments(vnics=(object(),)), True, ValueError),
+        (profile_assignments("dedicated"), False, ValueError),
+    ],
+)
+async def test_preflight_assignments_rejects_unsupported_direct_use(
+    target, requested, selected, error
+):
+    creation = assignment_creation("C08")
+    if not selected:
+        creation = replace(creation, affinity_group_id=None)
+    with pytest.raises(error, match="preflight_assignments"):
+        await core.create_and_stamp_lpar(
+            target.hmc, SYSTEM, creation, preflight_assignments=requested
+        )
+    assert target.events == [] and target.hmc.mock_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["duplicate", "vnic", "inventory", "initial-sriov"])
+async def test_assignment_prevalidation_survives_authority_owner_move(
+    assignment_target, monkeypatch, fault
+):
+    from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
+
+    b = assignment_target
+    creation = assignment_creation("C08")
+    requested = profile_assignments("dedicated")
+    message = "duplicate"
+    if fault == "duplicate":
+        requested = replace(requested, dedicated=requested.dedicated * 2)
+    elif fault == "vnic":
+        requested = replace(
+            requested,
+            vnics=(
+                VnicAssignment(
+                    VnicBackingSelector("vios-R1", "1", "1", "0", Decimal(2)), 4095
+                ),
+            ),
+        )
+        message = "port_vlan_id"
+    else:
+        requested = profile_assignments("sriov")
+        monkeypatch.setattr(
+            assignment_ops,
+            "list_sriov_adapters",
+            AsyncMock(return_value=SimpleNamespace(capability="unavailable")),
+        )
+        message = "unavailable"
+        if fault == "initial-sriov":
+            creation = replace(creation, physical_io=LparPhysicalIO(console_slot="hmc"))
+    with pytest.raises(ValueError, match=message):
+        await workflows.create_lpar(b.hmc, SYSTEM, creation, requested)
+    assert b.events[0] == "authority:null" and "create" not in b.events
+    b.assign.assert_not_awaited()

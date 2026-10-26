@@ -725,13 +725,10 @@ def creation_boundary(monkeypatch):
         ("created_io_step", AsyncMock(return_value=None)),
     ):
         monkeypatch.setattr(core, name, mock, raising=False)
-    monkeypatch.setattr(
-        workflows, "resolve_system_uuid", AsyncMock(return_value=SYSTEM), raising=False
-    )
-    monkeypatch.setattr(workflows, "read_role_capabilities", caps, raising=False)
     prevalidate = AsyncMock()
     assign = AsyncMock(return_value=SimpleNamespace(workflow_completed=True, steps=()))
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
+    monkeypatch.setattr(core, "prevalidate_lpar_pcie_assignments", prevalidate)
     monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", assign)
     creation = core.LparCreation(
         "owned",
@@ -878,6 +875,8 @@ async def test_profile_assignment_rejected_before_create(creation_boundary, kind
         )
     b.create.assert_not_awaited()
     b.assign.assert_not_awaited()
+    b.prevalidate.assert_not_awaited()
+    b.caps.assert_awaited_once()
 
 
 @pytest.mark.asyncio

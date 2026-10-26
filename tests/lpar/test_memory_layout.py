@@ -1155,22 +1155,16 @@ async def test_layout_workflow_controller_assignment_denial_before_prevalidation
 ):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.lpar import workflows
+    from hmcpctl.operations.lpar import core, workflows
     from hmcpctl.operations.lpar.assignments import (
         DedicatedPcieAssignment,
         LparPcieAssignments,
     )
 
     target = layout_creation_target
-    mode = AsyncMock(return_value=({}, True))
-    monkeypatch.setattr(
-        workflows, "resolve_system_uuid", AsyncMock(return_value=LAYOUT_SYSTEM)
-    )
-    monkeypatch.setattr(workflows, "read_creation_authority", mode)
+    target.mode.return_value = ({}, True)
     prevalidate = AsyncMock()
-    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
-    create = AsyncMock()
-    monkeypatch.setattr(workflows, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(core, "prevalidate_lpar_pcie_assignments", prevalidate)
     assignments = LparPcieAssignments(
         dedicated=(DedicatedPcieAssignment("default_profile", "21010010"),)
     )
@@ -1181,11 +1175,13 @@ async def test_layout_workflow_controller_assignment_denial_before_prevalidation
             layout_creation(LparMemoryLayout(hpt_ratio="1:128")),
             assignments,
         )
-    mode.assert_awaited_once_with(
+    target.mode.assert_awaited_once_with(
         target.hmc, LAYOUT_SYSTEM, need_management=False, context="Memory layout"
     )
     prevalidate.assert_not_awaited()
-    create.assert_not_awaited()
+    target.write.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+    target.apply.assert_not_awaited()
 
 
 @pytest.mark.asyncio

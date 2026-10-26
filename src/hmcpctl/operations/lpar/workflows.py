@@ -11,7 +11,6 @@ from ...documents.lpar_affinity_group import validate_affinity_group_id
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...errors import HMCError
-from ...resource_identity import resolve_system_uuid
 from .assignments import (
     LparPcieAssignments,
     LparPcieWorkflowResult,
@@ -21,11 +20,7 @@ from .assignments import (
 )
 from .core import LparCreation, create_and_stamp_lpar
 from .errors import translate_lpar_write_error
-from .linux_roles import (
-    read_creation_authority,
-    read_role_capabilities,
-    roles_requested,
-)
+from .linux_roles import roles_requested
 from .workflow_contract import WorkflowStep
 
 
@@ -59,34 +54,6 @@ async def create_lpar(
             "Hardware memory settings cannot be combined with explicit keylock"
         )
     validate_partition_type(creation.partition_type)
-    if roles_requested(creation.settings) and (
-        assignments.dedicated or assignments.sriov
-    ):
-        caps = await read_role_capabilities(
-            hmc,
-            await resolve_system_uuid(hmc, system_name_or_uuid),
-            need_kvm=creation.settings.kvm_capable is not None,
-            need_management=creation.settings.powervm_mgmt_capable is not None,
-        )
-        if caps.controller_mode:
-            raise ValueError(
-                "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
-            )
-    if (
-        (affinity_requested or layout_requested)
-        and not roles_requested(creation.settings)
-        and (assignments.dedicated or assignments.sriov)
-    ):
-        _, controller = await read_creation_authority(
-            hmc,
-            await resolve_system_uuid(hmc, system_name_or_uuid),
-            need_management=False,
-            context="Affinity group" if affinity_requested else "Memory layout",
-        )
-        if controller:
-            raise ValueError(
-                "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
-            )
     if creation.physical_io.requested:
         overlap = {s.drc_index for s in creation.physical_io.io_slots} & {
             s.drc_index for s in assignments.dedicated
@@ -99,11 +66,25 @@ async def create_lpar(
             creation, creation_sriov=creation.creation_sriov or assignments.sriov
         )
         assignments = replace(assignments, sriov=creation.creation_sriov)
-    await prevalidate_lpar_pcie_assignments(hmc, system_name_or_uuid, assignments)
+    preflight_assignments = None
+    if (
+        roles_requested(creation.settings) or affinity_requested or layout_requested
+    ) and (assignments.dedicated or assignments.sriov):
+        preflight_assignments = assignments
+    else:
+        await prevalidate_lpar_pcie_assignments(hmc, system_name_or_uuid, assignments)
     if creation.physical_io.requested:
         assignments = replace(assignments, sriov=())
     try:
-        created = await create_and_stamp_lpar(hmc, system_name_or_uuid, creation)
+        if preflight_assignments is None:
+            created = await create_and_stamp_lpar(hmc, system_name_or_uuid, creation)
+        else:
+            created = await create_and_stamp_lpar(
+                hmc,
+                system_name_or_uuid,
+                creation,
+                preflight_assignments=preflight_assignments,
+            )
     except HMCError as exc:
         translated = translate_lpar_write_error(exc)
         if translated is exc:
