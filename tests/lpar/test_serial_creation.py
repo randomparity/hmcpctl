@@ -67,6 +67,10 @@ def profile(name, native_id, serial, profile_name="default_profile", **extra):
             "lpar_id": native_id,
             "max_virtual_slots": 8,
             "virtual_serial_adapters": serial,
+            "virtual_eth_adapters": "none",
+            "virtual_fc_adapters": "none",
+            "virtual_scsi_adapters": "none",
+            "vnic_adapters": "none",
             **extra,
         }.items()
     )
@@ -305,6 +309,51 @@ async def test_incomplete_creation_never_replays_or_applies(target, fault):
     b.hmc.create_vios.assert_not_awaited()
     b.hmc.delete_logical_partition.assert_not_awaited()
     b.hmc.delete_vios.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "family",
+    [
+        "virtual_eth_adapters",
+        "virtual_fc_adapters",
+        "virtual_scsi_adapters",
+        "vnic_adapters",
+    ],
+)
+async def test_missing_local_family_blocks_apply_and_assignments(target, family):
+    target.local_record = profile("new", 9, "2/server/0////0").replace(
+        f",{family}=none", ""
+    )
+    options = {}
+    if target.kind == "LogicalPartition":
+        options = {
+            "apply_profile": True,
+            "assignments": LparPcieAssignments(
+                dedicated=(DedicatedPcieAssignment("default_profile", "21010001"),)
+            ),
+        }
+        result = await invoke(
+            target, adapters=(Adapter(2, "server", False, 0),), **options
+        )
+        assert not result.workflow_completed
+        assert serial_step(target, result)["configuration"] == "unverified"
+        assert [(step.step, step.status) for step in result.steps][-2:] == [
+            ("apply_profile", "skipped"),
+            ("dedicated[0]", "skipped"),
+        ]
+    else:
+        with pytest.raises(HMCError, match="verification"):
+            await invoke(target, adapters=(Adapter(2, "server", False, 0),))
+    assert target.events.count("create") == 1
+    assert "apply" not in target.events
+    assert not [
+        call
+        for call in target.command.await_args_list
+        if call.args[1].startswith("chsyscfg") and "description=" not in call.args[1]
+    ]
+    target.hmc.delete_logical_partition.assert_not_awaited()
+    target.hmc.delete_vios.assert_not_awaited()
 
 
 @pytest.mark.asyncio

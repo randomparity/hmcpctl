@@ -167,7 +167,13 @@ The public result cannot claim running serial traffic, boot or console success.
 3. Controls: bounded strict decoding; source-shaped finite serialization; unique contained
    identity and ownership checks before effects; non-exhaustive grants; independent bounded
    readback with duplicate/multiplicity checks. Sanitize partial-error chains and output.
-4. Outside this change: credential issuance and transport compromise remain with existing
+4. ST63: the local operator controls private packet/preflight/journal custody and explicit
+   current-invocation grant/window assertions. Private bounded files, digest binding, durable
+   pending intent and candidate/connection/expiry checks constrain create/stamp effects and
+   conditional fresh-UUID deletion. Retained files restore no authority; recovery is read-only
+   and never resumes effects. See the existing controls in `scripts/live_test/lpar_serial_adapter.py`
+   and the standalone ST63 procedure in `docs/live-testing.md`.
+5. Outside this change: credential issuance and transport compromise remain with existing
    security owners; guest traffic/boot proof and cross-resource atomicity are not promised.
 
 ## Success and verification

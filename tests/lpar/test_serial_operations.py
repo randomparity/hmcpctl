@@ -39,6 +39,10 @@ def record(name, native, profile, adapters, maximum=8, **extra):
         "lpar_id": str(native),
         "max_virtual_slots": str(maximum),
         "virtual_serial_adapters": adapters,
+        "virtual_eth_adapters": "none",
+        "virtual_fc_adapters": "none",
+        "virtual_scsi_adapters": "none",
+        "vnic_adapters": "none",
         **extra,
     }
     output = io.StringIO()

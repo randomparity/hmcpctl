@@ -20,6 +20,10 @@ def profile_record(serial="14/server/0////0", **changes):
         "lpar_id": "7",
         "max_virtual_slots": "32",
         "virtual_serial_adapters": serial,
+        "virtual_eth_adapters": "none",
+        "virtual_fc_adapters": "none",
+        "virtual_scsi_adapters": "none",
+        "vnic_adapters": "none",
     }
     values.update(changes)
     output = io.StringIO()
@@ -270,6 +274,21 @@ def test_other_families_remain_distinct_observations(family):
     )
     assert parsed.other_virtual_configuration is True
     assert set(parsed.records) == {14}
+
+
+@pytest.mark.parametrize(
+    "family",
+    [
+        "virtual_eth_adapters",
+        "virtual_fc_adapters",
+        "virtual_scsi_adapters",
+        "vnic_adapters",
+    ],
+)
+def test_missing_family_cannot_certify_exclusive_local_configuration(family):
+    observed = profile_record().replace(f",{family}=none", "")
+    parsed = lpar_serial.parse_serial_profile(observed, "new", 7, "default_profile")
+    assert parsed.other_virtual_configuration is True
 
 
 @pytest.mark.parametrize("empty", ["", "none"])

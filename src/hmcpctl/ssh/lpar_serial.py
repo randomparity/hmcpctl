@@ -93,7 +93,7 @@ def parse_serial_profile(
             raise ValueError("unrecognized reserved serial configuration")
         records[slot] = fields
     other = any(
-        values.get(key, "none") not in {"", "none"}
+        values.get(key) not in {"", "none"}
         for key in (
             "virtual_eth_adapters",
             "virtual_fc_adapters",
