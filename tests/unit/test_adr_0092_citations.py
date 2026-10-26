@@ -402,21 +402,25 @@ def test_malformed_symbol_citations_are_rejected() -> None:
     assert not _SYMBOL_CITATION.fullmatch(malformed)
 
 
-def test_processor_quantity_row_and_guard() -> None:
+@pytest.mark.parametrize(
+    ("operation", "raw_path"),
+    [
+        ("change_lpar_processors", "operations/lpar/processors.py"),
+        ("set_lpar_accelerator_qos", "operations/lpar/accelerator.py"),
+    ],
+)
+def test_processor_quantity_row_and_guard(operation: str, raw_path: str) -> None:
     section = _ADR_PATH.read_text().split("#### 3.2 ", 1)[1].split("#### 3.3 ", 1)[0]
     rows = [
-        line
-        for line in section.splitlines()
-        if line.startswith("| `change_lpar_processors` |")
+        line for line in section.splitlines() if line.startswith(f"| `{operation}` |")
     ]
     assert len(rows) == 1
     citations = [
         citation
         for row, _, locations, guards in _ROWS
-        if row == "`change_lpar_processors`"
+        if row == f"`{operation}`"
         for citation in (*locations, *guards)
     ]
-    assert citations and all(c.symbol == "change_lpar_processors" for c in citations)
-    assert _reaches_guard(
-        _SOURCE_ROOT / "operations/lpar/processors.py", "change_lpar_processors"
-    )
+    expected = Citation(operation, _SOURCE_ROOT / raw_path, raw_path)
+    assert citations == [expected, expected]
+    assert _reaches_guard(expected.path, operation)
