@@ -1783,6 +1783,79 @@ Generate public evidence only through the evidence script, redact the complete
 matrix and retain its commit binding. Raw results remain private. A skipped or
 failed arm supplies no positive evidence and makes no maturity promotion.
 
+## Native GZIP accelerator QoS (opt-in subtask 64)
+
+The `lpar-accelerator-qos` group dispatches only ST64, scenario
+`st64-lpar-accelerator-qos`, and is excluded from default/all execution.
+The root controller must bind the deployed clean candidate equal to HEAD, HMC
+destination, existing owned target, exact request, protected inventory, two
+separate effect intents and bounded execution window before running it. This
+procedure neither provisions fixtures nor authorizes a live window.
+
+In the authoritative local configuration file, select `LIVE_TEST_SYSTEM_NAME`,
+`LIVE_TEST_LPAR_NAME`, `LIVE_TEST_PROTECTED_LPAR_NAMES` and the optional setting
+`LIVE_TEST_ACCELERATOR_QOS_REQUEST_JSON`. For example, with anonymous fixture
+names `sys-R1` and `partition-R1`:
+
+```dotenv
+LIVE_TEST_ACCELERATOR_QOS_REQUEST_JSON='{"qos":3,"wait_minutes":0,"detail_level":4,"force":false}'
+```
+
+No QoS is inferred. Missing requests, default/blank fixtures, protected targets
+and malformed or unknown request fields refuse before connection. Ambient exports
+do not supply this setting. Older unrelated saved runs decode the absent setting
+as empty and remain readable; the named arm refuses that empty request.
+Preflight reports the target, exact request and intended set plus separate
+original-baseline restoration. Configuration acceptance never asserts mutation
+eligibility.
+
+The arm independently resolves containment, kind, UUID, numeric partition ID,
+the actual matching ownership stamp, protection, accelerator capability, state
+and RMC. Native current/pending quantities must be equal, numeric and different
+from the requested QoS. It records immutable original REST identity, native
+partition/system rows, request and source commit. Before each setter it repeats
+admission and expected partition quantities, checks the same clean candidate,
+records the exact intent and successfully checkpoints it.
+
+There are at most two MCP effects: the explicit forward request and the
+separately authorized restore request, which changes only QoS to the immutable
+original quantity while retaining wait/detail/force. Each must return PASS,
+submission `completed`, an explicit null `submission_error`,
+`workflow_completed=true`, and outcome `observed`; an independent transport's
+fixed GZIP numeric-ID native read must show both quantities equal to the request.
+Refusal, uncertainty, drift, read or checkpoint failure stops further writes.
+There is no retry, compensating set, activation, restart, profile write or deletion.
+Final cleanup requires original partition identity/current/pending and the
+original native system baseline. Current/pending evidence establishes neither
+effective guest runtime nor profile persistence. The exercised partition
+type/state/force are recorded; every other context remains unrun.
+
+Root provisions an existing mode-0700 `RUN_DIR` outside repositories and binds
+the deadlines and controller/transport cleanup. The wrapper accepts only
+`--results-file`, rejects reused results/observations and unsafe destinations,
+and applies umask 077 while dispatching. Capture each command's stdout/stderr
+privately. Run recovery after every attempted arm, including apparent success:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-accelerator-qos
+uv run --no-sync python scripts/live_lpar_accelerator_qos.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+Read-only recovery requires the same clean commit and HMC destination, exact
+group/ST64, one original baseline, `run.partial=false` and the ordered successful
+baseline, forward-intent, forward-observed, restore-intent, restore-observed,
+final-baseline sequence. Both intents and independently observed outcomes must
+match. Fresh identity and partition/system reads must equal the original
+baselines. Missing, duplicate, reordered, malformed, partial or refused proof
+exits 2/unconfirmed even when current quantities equal baseline. Bounded fresh
+read witnesses are observations in private captured stdout, never permission to
+repair incomplete history; the original checkpoint bytes remain unchanged.
+Recovery has no resource-write path. Generate public evidence only through the
+filtered evidence generator at the exact tested commit; never publish raw results.
+Offline tests and source reading supply no live evidence or maturity promotion.
+
 ## Inactive partition security policy (arm 52)
 
 The opt-in `lpar-security-policy` arm requires a positive selected-system secure

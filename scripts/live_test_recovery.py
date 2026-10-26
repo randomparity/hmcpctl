@@ -2129,6 +2129,29 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "lpar-accelerator-qos"
+    ):
+        from live_test import accelerator_qos
+
+        if not runner._bootstrap_config():
+            print("accelerator-qos recovery: credentials unavailable", file=sys.stderr)
+            return 2
+        try:
+            asyncio.run(accelerator_qos.recover_document(HMCConfig(), document))
+        except Exception as error:  # noqa: BLE001 — malformed or partial evidence never attests CLEAN
+            print(
+                f"accelerator-qos recovery unconfirmed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: finite accelerator-qos proof and original baselines confirmed; no writes"
+        )
+        return 0
+
     subtasks = dispatched_subtasks(document)
     if subtasks is None:
         print(
