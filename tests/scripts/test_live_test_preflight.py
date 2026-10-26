@@ -875,6 +875,21 @@ def test_linux_roles_preflight_discloses_both_finite_variants(
         assert disclosure in output
 
 
+def test_processor_quantities_preflight(workspace, monkeypatch, capsys):
+    (workspace / ".env").write_text(_env_text(), encoding="utf-8")
+    _credentials(monkeypatch)
+    assert (
+        preflight.main(["--group", "lpar-processor-quantities", "--skip-hardware"]) == 0
+    )
+    assert runner.SUBTASK_GROUPS["lpar-processor-quantities"] == [56]
+    assert 56 not in runner.SUBTASK_GROUPS["all"]
+    output = capsys.readouterr().out
+    assert "remove0.10 entitlement, zero delta, over-maximum refusal" in output
+    assert "positive add/set unrun" in output
+    assert "explicit set0.50" not in output
+    assert "matching-token deletion and recovery" in output
+
+
 @pytest.mark.parametrize("fault", ["hpt", "ppt", "token", "grant"])
 def test_creation_memory_layout_preflight_is_unarmed_by_default(fault):
     from dataclasses import replace

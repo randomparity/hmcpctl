@@ -310,3 +310,27 @@ def test_set_lpar_description_accepts_hmc_legal_lpar_name(lpar_name):
         cfg,
         f"chsyscfg -r lpar -m sys -i 'name={lpar_name},description=some description'",
     )
+
+
+@pytest.mark.parametrize("limit", [None, 65536])
+def test_description_output_limit(limit):
+    from hmcpctl.ssh.profiles import get_lpar_description
+
+    config = HMCConfig.from_mapping({})
+    with patch("hmcpctl.ssh.profiles.run_hmc_command", new_callable=AsyncMock) as run:
+        run.return_value = "description\n"
+        assert (
+            asyncio.run(
+                get_lpar_description(
+                    config, "system A", "partition A", max_output_bytes=limit
+                )
+            )
+            == "description\n"
+        )
+    assert run.await_args.kwargs == (
+        {} if limit is None else {"max_output_bytes": limit}
+    )
+    assert (
+        run.await_args.args[1]
+        == "lssyscfg -r lpar -m 'system A' --filter 'lpar_names=partition A' -F description"
+    )
