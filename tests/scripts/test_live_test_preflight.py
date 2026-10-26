@@ -934,3 +934,28 @@ def test_creation_memory_layout_exact_effects_without_hardware_role_prerequisite
         )
     )
     assert "KvmOnPowerVM=true" not in effects
+
+
+def test_sharing_preflight_names_scope():
+    verdicts = preflight.arm_verdicts(live_config.LiveTestConfig(), GROUP_SHARING)
+    assert len(verdicts) == 1
+    text = str(verdicts[0])
+    for literal in (
+        "two sequential",
+        "hmcpctl-live-lpar-",
+        "2048",
+        "1024",
+        "4096",
+        "0.5",
+        "1 CPU",
+        "12",
+        "8 positive",
+        "4 refusal",
+        "no profile apply",
+        "no activation",
+    ):
+        assert literal in text
+    assert "processor-sharing-weight" in text
+
+
+GROUP_SHARING = "processor-sharing-weight"

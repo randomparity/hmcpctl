@@ -7,7 +7,7 @@ from pathlib import Path
 
 import typer
 
-from ...documents.lpar import LparResources
+from ...documents.lpar import LparResources, SharingMode, validate_resource_inputs
 from ...operations.lpar.assignments import LparPcieAssignments
 from ...operations.lpar.dlpar import modify_lpar
 from ..output import (
@@ -49,8 +49,17 @@ def lpars_modify(
     capped: bool | None = typer.Option(
         None,
         "--capped/--uncapped",
-        help="Cap shared CPU; uncapping a capped partition leaves weight 0 "
-        "(default: leave unchanged)",
+        help="Cap or uncap shared CPU (default: leave unchanged)",
+    ),
+    sharing_mode: SharingMode | None = typer.Option(
+        None, "--sharing-mode", help="Processor sharing mode (default: leave unchanged)"
+    ),
+    uncapped_weight: int | None = typer.Option(
+        None,
+        "--uncapped-weight",
+        min=0,
+        max=255,
+        help="Update uncapped sharing weight; zero is explicit",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
     ownership_override: bool = typer.Option(
@@ -66,10 +75,11 @@ def lpars_modify(
 ) -> None:
     """Change an LPAR's name and/or resource assignment (memory / CPU).
 
-    Only options you pass are changed. On a running partition these are
-    dynamic (DLPAR) operations and need RMC up. The write changes the current
-    configuration, not a partition profile: activating a profile discards it
-    unless CurrentProfileSync is On (see the result's warnings).
+    Only options you pass are changed. Sharing mode and weight update the
+    current configuration; runtime effects are observed separately. HMC admission
+    may refuse the change. Inspect change_location and warnings for persistence
+    limitations; a profile activation may replace current-configuration changes.
+    No activation, restart or automatic replay is performed.
     """
     assignments = load_pcie_assignments(pcie_assignments)
     resources = LparResources(
@@ -84,7 +94,13 @@ def lpars_modify(
         desired_vcpus=vcpus,
         max_vcpus=max_vcpus,
         uncapped=None if capped is None else not capped,
+        sharing_mode=sharing_mode,
+        uncapped_weight=uncapped_weight,
     )
+    try:
+        validate_resource_inputs(resources)
+    except ValueError as error:
+        usage_error(str(error))
     if (
         new_name is None
         and resources == LparResources()

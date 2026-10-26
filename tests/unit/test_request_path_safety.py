@@ -1185,6 +1185,7 @@ _UUID_UOM_REQUEST_SITES = {
     "client_lpars.LparsMixin.create_logical_partition": "system_uuid",
     "client_lpars.LparsMixin.delete_logical_partition": "lpar_uuid",
     "client_lpars.LparsMixin.list_logical_partitions": "system_uuid",
+    "client_lpars.LparsMixin.read_logical_partition_document": "lpar_uuid",
     "client_lpars.LparsMixin.update_logical_partition": "lpar_uuid",
     "client_lpm.LpmMixin._lpar_job": "lpar_uuid",
     "client_network.NetworkMixin.create_virtual_network": "system_uuid",

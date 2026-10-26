@@ -52,6 +52,20 @@ class HMCError(Exception):
         super().__init__(detail)
 
 
+class LparUpdateError(HMCError):
+    """A validated partition edit failed during or after its single submission."""
+
+    def __init__(
+        self,
+        message: str,
+        submission: str,
+        status_code: int | None = None,
+        body: str | None = None,
+    ):
+        self.submission = submission
+        super().__init__(message, status_code, body)
+
+
 class HMCTransportError(HMCError):
     """REST request failed before the HMC returned an HTTP response."""
 

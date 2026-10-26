@@ -335,6 +335,14 @@ class FakeHMC:
         self._record("create_logical_partition", system_uuid, xml)
         return self.lpar
 
+    async def validate_logical_partition_update(self, lpar_uuid, updates, subject):
+        partition = ET.fromstring(
+            f'<LogicalPartition xmlns="{UOM_NS}"><PartitionProcessorConfiguration>'
+            "<HasDedicatedProcessors>false</HasDedicatedProcessors>"
+            "</PartitionProcessorConfiguration></LogicalPartition>"
+        )
+        return updates(partition)
+
     async def update_logical_partition(self, lpar_uuid, updates, subject):
         partition = ET.fromstring(
             f'<LogicalPartition xmlns="{UOM_NS}"><PartitionProcessorConfiguration>'
@@ -6063,3 +6071,110 @@ def test_storage_retired_positional_syntax_makes_no_requests(fake_hmc, arguments
     result = RUNNER.invoke(cli.app, ["storage", *arguments])
     assert result.exit_code == 2
     assert fake_hmc.calls == []
+
+
+@pytest.mark.parametrize("weight", [0, 64, 255])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "capped",
+        "uncapped",
+        "keep_idle_procs",
+        "share_idle_procs",
+        "share_idle_procs_active",
+        "share_idle_procs_always",
+    ],
+)
+def test_sharing_presentation_forwards_inputs(weight, mode, monkeypatch, fake_hmc):
+    operation = AsyncMock(
+        return_value=LparPcieWorkflowResult(
+            False, True, {"UUID": LPAR_UUID}, None, (), ()
+        )
+    )
+    monkeypatch.setattr(cli_lpar_modify, "modify_lpar", operation)
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "lpars",
+            "modify",
+            LPAR_UUID,
+            "--sharing-mode",
+            mode,
+            "--uncapped-weight",
+            str(weight),
+            "--yes",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    resources = operation.await_args.args[2]
+    assert resources.sharing_mode == mode
+    assert resources.uncapped_weight == weight
+    assert "Modified LPAR" in result.output
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--uncapped-weight", "-1"],
+        ["--uncapped-weight", "256"],
+        ["--uncapped-weight", "true"],
+        ["--uncapped-weight", "1.5"],
+        ["--sharing-mode", "unknown"],
+        ["--sharing-mode", "capped", "--uncapped", "--uncapped-weight", "0"],
+        ["--sharing-mode", "uncapped", "--capped", "--uncapped-weight", "64"],
+    ],
+)
+def test_sharing_presentation_refuses_before_confirmation(options, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Invalid sharing input reached confirmation/client")
+
+    monkeypatch.setattr(typer, "confirm", forbidden)
+    monkeypatch.setattr(cli_lpar_modify, "with_client", forbidden)
+    result = RUNNER.invoke(cli.app, ["lpars", "modify", LPAR_UUID, *options])
+    assert result.exit_code == 2, result.output
+    assert "Invalid sharing input reached" not in result.output
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_sharing_presentation_preserves_complete_outcome(
+    completed, monkeypatch, fake_hmc
+):
+    outcome = {
+        "UUID": LPAR_UUID,
+        "Resource": {},
+        "completion_scope": "current-configuration",
+        "outcome": "applied" if completed else "unverified",
+        "workflow_completed": completed,
+        "submission_status": "accepted",
+        "configuration_verification": "verified",
+        "runtime_verification": "unverified",
+        "before": {"weight": 64},
+        "after": {"weight": 0},
+        "expected": {
+            "configured": "uncapped",
+            "effective_mode": "uncapped",
+            "weight": 0,
+        },
+        "submission_error": None,
+        "read_error": "independent observation unavailable",
+        "change_location": {"current_configuration": True},
+        "warnings": ["inspect before retry"],
+    }
+    workflow = LparPcieWorkflowResult(
+        False,
+        completed,
+        outcome,
+        None,
+        (WorkflowStep("resources", "ok" if completed else "error", outcome),),
+        ("inspect before retry",),
+    )
+    monkeypatch.setattr(
+        cli_lpar_modify, "modify_lpar", AsyncMock(return_value=workflow)
+    )
+    result = RUNNER.invoke(
+        cli.app, ["lpars", "modify", LPAR_UUID, "--uncapped-weight", "0", "--yes"]
+    )
+    assert result.exit_code == (0 if completed else 1), result.output
+    assert ("Modified LPAR" in result.output) is completed
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert payload == json.loads(json.dumps(asdict(workflow)))

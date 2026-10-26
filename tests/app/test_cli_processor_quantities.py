@@ -31,6 +31,7 @@ def test_mcp_modes_preserve_profile_scope_and_ownership(monkeypatch):
     change = LparProcessorChange(operation="add", processors=1, processing_units="0.10")
     assert lifecycle.hmc_dlpar_proc(
         "lpar-R1",
+        resources=LparResources(),
         profile="profile-R1",
         system_name_or_uuid="sys-R1",
         ownership_override=True,
@@ -56,6 +57,11 @@ def test_mcp_modes_preserve_profile_scope_and_ownership(monkeypatch):
         (" ", LparResources()),
         ("sys-R1", LparResources(desired_procs=0.5)),
         ("sys-R1", LparResources(desired_memory=1024)),
+        ("sys-R1", LparResources(uncapped_weight=0)),
+        ("sys-R1", LparResources(uncapped_weight=64)),
+        ("sys-R1", LparResources(uncapped=False)),
+        ("sys-R1", LparResources(uncapped=True)),
+        ("sys-R1", LparResources(sharing_mode="uncapped")),
     ],
 )
 def test_mcp_invalid_mode_refuses_before_client(monkeypatch, system, resources):
@@ -223,6 +229,7 @@ def test_processor_quantity_metadata_binding():
     assert set(variants) == {
         "processor-read-modify-write",
         "native-current-processor-quantities",
+        "sharing-and-uncapped-weight-current-configuration",
     }
     parameters = variants["native-current-processor-quantities"]["parameters"]
     assert {item["name"] for item in parameters} == {

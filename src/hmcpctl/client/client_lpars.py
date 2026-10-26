@@ -13,7 +13,8 @@ from typing import Any
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
-from ..errors import HMCError
+from ..documents.lpar import sharing_observation
+from ..errors import HMCError, LparUpdateError
 from ..xmlutil import localname
 from .client_contracts import LparsClient, _reject_non_uuid_path_argument
 from .client_parse import _parse_feed
@@ -40,6 +41,73 @@ def _logical_partition_element(root: ET.Element, path: str, raw: str) -> ET.Elem
             f"GET {path} contains no LogicalPartition element", 200, raw[:500]
         )
     return found
+
+
+_WEIGHT_PATH = (
+    "PartitionProcessorConfiguration/SharedProcessorConfiguration/UncappedWeight"
+)
+_SHARED_PATH = "PartitionProcessorConfiguration/SharedProcessorConfiguration"
+
+
+def _exact_partition_path(lpar: ET.Element, path: str) -> ET.Element | None:
+    node = lpar
+    for part in path.split("/"):
+        matches = [child for child in node if localname(child.tag) == part]
+        if not matches:
+            return None
+        if len(matches) != 1 or matches[0].tag != f"{{{_UOM_NS}}}{part}":
+            raise HMCError(f"Ambiguous or wrong-namespace partition path {path}")
+        node = matches[0]
+    return node
+
+
+def _edit_logical_partition(
+    lpar: ET.Element, changes: Mapping[str, str | None], subject: str
+) -> None:
+    """Replace exact scalar paths, with only the configured-weight insertion exception."""
+    if lpar.tag != f"{{{_UOM_NS}}}LogicalPartition":
+        raise HMCError("Expected a UOM LogicalPartition document")
+    if not changes:
+        raise ValueError(f"nothing to write for {subject}; nothing was sent")
+    missing_weight = False
+    for field, text in changes.items():
+        if any(part.startswith(("Current", "Runtime")) for part in field.split("/")):
+            raise HMCError(f"Refusing to write observed partition path {field}")
+        element = _exact_partition_path(lpar, field)
+        if element is None:
+            if field == _WEIGHT_PATH:
+                missing_weight = True
+                continue
+            raise HMCError(f"GET partition has no {field}; refusing to write {subject}")
+        if len(element):
+            raise HMCError(f"Expected a scalar partition path {field}")
+        element.text = text
+    if _WEIGHT_PATH not in changes:
+        return
+    shared = _exact_partition_path(lpar, _SHARED_PATH)
+    if shared is None:
+        raise HMCError(
+            f"GET partition has no {_SHARED_PATH}; refusing to write {subject}"
+        )
+    anchor = _exact_partition_path(lpar, f"{_SHARED_PATH}/SharedProcessorPoolID")
+    if anchor is not None and len(anchor):
+        raise HMCError("Expected a scalar SharedProcessorPoolID anchor")
+    if not missing_weight:
+        return
+    configured = sharing_observation(lpar)["configured"]
+    if (
+        anchor is None
+        or configured is None
+        or configured["dedicated"]
+        or configured["mode"] != "uncapped"
+    ):
+        raise HMCError(
+            "Missing uncapped weight requires shared uncapped context and a "
+            "SharedProcessorPoolID anchor"
+        )
+    weight = ET.Element(f"{{{_UOM_NS}}}UncappedWeight", {"kxe": "false", "kb": "CUD"})
+    weight.text = changes[_WEIGHT_PATH]
+    shared.insert(list(shared).index(anchor) + 1, weight)
 
 
 class LparsMixin:
@@ -159,22 +227,10 @@ class LparsMixin:
             "the boot order",
         )
 
-    async def update_logical_partition(
-        self: LparsClient,
-        lpar_uuid: str,
-        updates: Callable[[ET.Element], Mapping[str, str | None]],
-        subject: str,
-    ) -> dict[str, Any] | None:
-        """Change named partition fields by whole-partition read-modify-write.
-
-        GETs the partition in the ``Advanced`` group, sets the text of each element
-        ``updates(partition)`` names by a slash path relative to the partition, and
-        POSTs the element back to the same URL with ``If-Match`` set to the GET's
-        ETag, on the terms ADR 0171 sets for VolumeGroup writes. Every attribute,
-        sibling and order stays as read. Refuses before any POST when the GET carries
-        no ETag, a named element is missing (no element is ever created), or the
-        mapping is empty.
-        """
+    async def read_logical_partition_document(
+        self: LparsClient, lpar_uuid: str, *, require_etag: bool = False
+    ) -> tuple[ET.Element, str | None]:
+        """Read a detached Advanced document, optionally requiring write protection."""
         _reject_non_uuid_path_argument("lpar_uuid", lpar_uuid)
         path = f"/rest/api/uom/LogicalPartition/{lpar_uuid}?group=Advanced"
         got = await self._request_with_uuid_path_arguments(
@@ -186,7 +242,7 @@ class LparsMixin:
         if got.status_code != 200:
             raise HMCError(f"GET {path} failed", got.status_code, got.text)
         etag = got.headers.get("ETag")
-        if not etag:
+        if require_etag and not etag:
             raise HMCError(
                 f"GET {path} returned no ETag; refusing a whole-partition write "
                 "that could overwrite a concurrent change",
@@ -203,42 +259,83 @@ class LparsMixin:
                 f"GET {path} response is not valid XML", 200, got.text[:500]
             ) from exc
         lpar = _logical_partition_element(root, path, got.text)
-        changes = updates(lpar)
-        if not changes:
-            raise ValueError(f"nothing to write for {subject}; nothing was sent")
-        for field, text in changes.items():
-            element = lpar.find(
-                "/".join(f"{{{_UOM_NS}}}{part}" for part in field.split("/"))
-            )
-            if element is None:
-                raise HMCError(
-                    f"GET {path} has no {field}; refusing to write {subject}",
-                    200,
-                    got.text[:500],
-                )
-            element.text = text
+        return lpar, etag
 
-        response = await self._request_with_uuid_path_arguments(
-            "POST",
-            path,
-            uuid_path_arguments={"lpar_uuid": lpar_uuid},
-            content=ET.tostring(lpar, encoding="unicode"),
-            headers={
-                "Accept": "*/*",
-                "Content-Type": f"{_MEDIA_UOM}; type=LogicalPartition",
-                "If-Match": etag,
-            },
+    async def validate_logical_partition_update(
+        self: LparsClient,
+        lpar_uuid: str,
+        updates: Callable[[ET.Element], Mapping[str, str | None]],
+        subject: str,
+    ) -> None:
+        """Validate the real edit against a detached read without submitting it."""
+        lpar, _ = await self.read_logical_partition_document(lpar_uuid)
+        _edit_logical_partition(lpar, updates(lpar), subject)
+
+    async def update_logical_partition(
+        self: LparsClient,
+        lpar_uuid: str,
+        updates: Callable[[ET.Element], Mapping[str, str | None]],
+        subject: str,
+    ) -> dict[str, Any] | None:
+        """Edit a fresh whole partition and submit once under its original ETag.
+
+        Only configured missing uncapped weight may be inserted. Failures before
+        edit validation refuse normally; later failures retain submission certainty.
+        The returned POST entry is not independent proof of configuration completion.
+        """
+        _reject_non_uuid_path_argument("lpar_uuid", lpar_uuid)
+        path = f"/rest/api/uom/LogicalPartition/{lpar_uuid}?group=Advanced"
+        lpar, etag = await self.read_logical_partition_document(
+            lpar_uuid, require_etag=True
         )
+        _edit_logical_partition(lpar, updates(lpar), subject)
+        body = ET.tostring(lpar, encoding="unicode")
+        try:
+            response = await self._request_with_uuid_path_arguments(
+                "POST",
+                path,
+                uuid_path_arguments={"lpar_uuid": lpar_uuid},
+                content=body,
+                headers={
+                    "Accept": "*/*",
+                    "Content-Type": f"{_MEDIA_UOM}; type=LogicalPartition",
+                    "If-Match": etag,
+                },
+            )
+        except HMCError as exc:
+            submission = "unknown"
+            message = str(exc)
+            if exc.status_code == 412:
+                submission = "rejected"
+                message = (
+                    "The partition changed since it was read (If-Match mismatch). "
+                    f"Nothing was written; re-run the operation. {exc}"
+                )
+            elif exc.status_code is not None and 200 <= exc.status_code < 300:
+                submission = "acknowledged"
+            # The cause already rendered/bounded its status and body. Preserve that
+            # diagnostic once, along with the original structured error metadata.
+            error = LparUpdateError(message, submission)
+            error.status_code, error.body = exc.status_code, exc.body
+            raise error from exc
         if response.status_code == 412:
-            raise HMCError(
+            raise LparUpdateError(
                 f"POST {path} refused: the partition changed since it was read "
                 "(If-Match mismatch). Nothing was written; re-run the operation.",
+                "rejected",
                 412,
                 response.text,
             )
-        if response.status_code not in (200, 201, 202):
-            raise HMCError(f"POST {path} failed", response.status_code, response.text)
-        entries = _parse_feed(response.text, path) if response.text else []
+        if not 200 <= response.status_code < 300:
+            raise LparUpdateError(
+                f"POST {path} failed", "unknown", response.status_code, response.text
+            )
+        try:
+            entries = _parse_feed(response.text, path) if response.text else []
+        except HMCError as exc:
+            raise LparUpdateError(
+                str(exc), "acknowledged", response.status_code, response.text
+            ) from exc
         return entries[0] if entries else None
 
     async def delete_logical_partition(self: LparsClient, lpar_uuid: str) -> None:

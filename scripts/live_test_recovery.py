@@ -80,6 +80,7 @@ from live_test import (
     memory_quantities,
     network,
     processor_quantities,
+    processor_sharing_weight,
     runner,
     storage_lifecycle,
     storage_volume_group,
@@ -186,6 +187,7 @@ _WITNESSED_SUBTASKS = (
         lpar_vtpm.SUBTASK,
         memory_quantities.SUBTASK,
         processor_quantities.SUBTASK,
+        processor_sharing_weight.SUBTASK,
         lpar_security_policy.SUBTASK,
         lpar_hardware_memory.SUBTASK,
         creation_memory_layout.SUBTASK,
@@ -351,6 +353,12 @@ def lpar_config_inputs_from_document(
     """
     config = document.get("config")
     system = config.get("system_name") if isinstance(config, dict) else None
+    if processor_sharing_weight.SUBTASK in subtasks and (
+        not isinstance(system, str) or not system.strip()
+    ):
+        raise ValueError(
+            "ST59 recovery requires a readable nonempty config.system_name"
+        )
     if (
         not {
             lpar_config.SUBTASK,
@@ -360,6 +368,7 @@ def lpar_config_inputs_from_document(
             lpar_vtpm.SUBTASK,
             memory_quantities.SUBTASK,
             processor_quantities.SUBTASK,
+            processor_sharing_weight.SUBTASK,
             lpar_security_policy.SUBTASK,
             lpar_hardware_memory.SUBTASK,
             creation_memory_layout.SUBTASK,
@@ -2157,7 +2166,11 @@ def main(argv: list[str] | None = None) -> int:
     partition = lpar_inputs_from_document(document, subtasks)
     vios = vios_backup_inputs_from_document(document, subtasks)
     network_inputs = network_inputs_from_document(document, subtasks)
-    lpar_config_inputs = lpar_config_inputs_from_document(document, subtasks)
+    try:
+        lpar_config_inputs = lpar_config_inputs_from_document(document, subtasks)
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
     lpar_power_inputs = lpar_power_inputs_from_document(document, subtasks)
 
     artifact_system = None

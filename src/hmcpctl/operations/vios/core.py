@@ -16,7 +16,11 @@ from hmcpctl.operations.systems.fleet import (
     read_fleet,
 )
 
-from ...documents.lpar import LparResources, build_vios_document
+from ...documents.lpar import (
+    LparResources,
+    build_vios_document,
+    reject_update_weight_on_create,
+)
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
@@ -131,6 +135,7 @@ async def create_vios(
     VirtualIOServer document; V10R3 refuses one sent as a LogicalPartition
     (#1214).
     """
+    reject_update_weight_on_create(resources)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")

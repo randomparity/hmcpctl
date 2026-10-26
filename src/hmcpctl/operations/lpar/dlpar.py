@@ -8,7 +8,12 @@ from typing import Any
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
 
-from ...documents.lpar import LparResources, partition_updates
+from ...documents.lpar import (
+    LparResources,
+    has_sharing_change,
+    partition_updates,
+    validate_resource_inputs,
+)
 from ...errors import HMCError
 from ...resource_identity import optional_system_selector
 from ...xmlutil import escape_xml
@@ -25,6 +30,7 @@ from .profile_sync import (
     change_location_of,
     resource_with_change_location,
 )
+from .sharing import apply_sharing_change, prevalidate_sharing_change
 from .workflow_contract import WorkflowStep
 
 _PROCESSOR_FIELDS = (
@@ -37,6 +43,7 @@ _PROCESSOR_FIELDS = (
     "max_vcpus",
     "sharing_mode",
     "uncapped",
+    "uncapped_weight",
 )
 _MEMORY_FIELDS = ("min_memory", "desired_memory", "max_memory")
 
@@ -67,6 +74,7 @@ async def modify_lpar(
     a returned result as success. A failed final readback after recorded steps is
     reported in ``warnings`` without discarding those steps.
     """
+    validate_resource_inputs(resources)
     system_name_or_uuid = optional_system_selector(system_name_or_uuid)
     if (
         assignments != LparPcieAssignments() or new_name is not None
@@ -86,6 +94,8 @@ async def modify_lpar(
         system_name_or_uuid=system_name_or_uuid,
     )
     await require_memory_within_selected_system(hmc, system_name_or_uuid, resources)
+    if resources != LparResources():
+        await prevalidate_sharing_change(hmc, lpar_uuid, resources)
     resource = None
     resource_warnings: tuple[str, ...] = ()
     steps: list[WorkflowStep] = []
@@ -98,11 +108,16 @@ async def modify_lpar(
         steps.append(WorkflowStep("rename", "ok", resource))
     if resources != LparResources():
         try:
-            resource = await hmc.update_logical_partition(
-                lpar_uuid,
-                lambda lpar: partition_updates(lpar, resources=resources),
-                "the partition resources",
-            )
+            if has_sharing_change(resources):
+                resource = await apply_sharing_change(
+                    hmc, lpar_uuid, resources, "the partition resources"
+                )
+            else:
+                resource = await hmc.update_logical_partition(
+                    lpar_uuid,
+                    lambda lpar: partition_updates(lpar, resources=resources),
+                    "the partition resources",
+                )
         except (HMCError, ValueError) as exc:
             # A ValueError is a refusal found after the read (a mode mismatch, say); after
             # a rename it must still return the partial result that reports the rename.
@@ -126,8 +141,21 @@ async def modify_lpar(
                 tuple(steps),
                 (str(translated),),
             )
+        if has_sharing_change(resources):
+            assert resource is not None
+            resource_warnings = tuple(resource["warnings"])
+            if not resource["workflow_completed"]:
+                steps.append(WorkflowStep("resources", "error", resource))
+                steps.extend(
+                    WorkflowStep(step, "skipped")
+                    for step in assignment_step_names(assignments)
+                )
+                return LparPcieWorkflowResult(
+                    False, False, resource, None, tuple(steps), resource_warnings
+                )
+        else:
+            resource_warnings = _profile_scope_warnings(resource)
         steps.append(WorkflowStep("resources", "ok", resource))
-        resource_warnings = _profile_scope_warnings(resource)
 
     assignment_result = await apply_validated_lpar_pcie_assignments(
         hmc,
@@ -181,6 +209,7 @@ async def _apply_dlpar_change(
     The result carries ``change_location`` and, when the change did not reach the
     partition's profile, ``warnings``.
     """
+    validate_resource_inputs(resources)
     lpar_uuid = await resolve_and_authorize_lpar_mutation(
         hmc,
         lpar_name_or_uuid,
@@ -188,6 +217,9 @@ async def _apply_dlpar_change(
         system_name_or_uuid=system_name_or_uuid,
     )
     await require_memory_within_selected_system(hmc, system_name_or_uuid, resources)
+    if has_sharing_change(resources):
+        await prevalidate_sharing_change(hmc, lpar_uuid, resources)
+        return await apply_sharing_change(hmc, lpar_uuid, resources, subject)
     try:
         updated = await hmc.update_logical_partition(
             lpar_uuid,
@@ -231,16 +263,14 @@ async def set_lpar_processors(
     are whole CPUs. ``dedicated`` must match the partition's current mode or be
     left unset: switching between dedicated and shared is refused before any
     write. Virtual processor counts and ``uncapped`` are refused on a dedicated
-    partition. Capping drops the uncapped weight, and uncapping a capped
-    partition leaves its weight 0 (no share of spare capacity); no parameter
-    sets the weight. A request carrying no processor field is refused before
-    any request.
+    partition. Explicit uncapped_weight accepts 0–255; omission preserves the
+    HMC's policy. Sharing changes require independently matched configured and
+    Current* observations before reporting completion. Runtime is reported
+    separately. A request carrying no processor field is refused before any request.
 
-    The write changes the partition's current configuration, not a partition
-    profile. With no active RMC connection it applies on the next activation only
-    if that activation uses the current configuration; activating a profile
-    discards it unless ``CurrentProfileSync`` is ``On``. The result's
-    ``change_location`` and ``warnings`` say which. No reboot is triggered either way.
+    The write targets the partition's current configuration. The result's
+    ``change_location`` and ``warnings`` describe the observed profile-sync context;
+    they do not prove profile persistence or guest effects. No reboot is triggered.
 
     ADR 0092 §3.2 classifies this as Reconfiguring, so
     :func:`authorize_lpar_mutation` runs unconditionally before the write.
@@ -248,11 +278,15 @@ async def set_lpar_processors(
     owning managed system is discovered so the guard can still read the token
     (ADR 0094).
     """
+    resources = replace(
+        resources, min_memory=None, desired_memory=None, max_memory=None
+    )
+    validate_resource_inputs(resources)
     _require_fields(resources, _PROCESSOR_FIELDS, "processor")
     return await _apply_dlpar_change(
         hmc,
         lpar_name_or_uuid,
-        replace(resources, min_memory=None, desired_memory=None, max_memory=None),
+        resources,
         "the processor configuration",
         system_name_or_uuid,
         ownership_override,

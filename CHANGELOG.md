@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR processor updates and combined modify through CLI/MCP accept sharing
+  modes and strict integer `uncapped_weight` values from 0–255, preserving zero
+  and omission. Independent configured/current readback determines completion;
+  runtime is observed separately. Existing HMC/context guards still apply; new
+  variants remain unevidenced on hardware
+  ([#1780](https://github.com/randomparity/hmcpctl/issues/1780)).
+
 - Native LPAR processor add/remove/set quantities through `hmc_dlpar_proc(change=...)`
   and `lpars processors` distinguish whole dedicated CPUs/shared virtual processors
   from shared entitlement. Ownership, capacity and state checks precede mutation;
