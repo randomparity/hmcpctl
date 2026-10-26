@@ -3,7 +3,7 @@
 Authority consistency amendment for #1769; root D3/A3 and implementation release pending.
 [Scope](https://github.com/randomparity/hmcpctl/issues/1769#issuecomment-6399637239),
 token q1769-1c63e8d1: full-spec, S/100, iterating, one PR, empty exclusions.
-Decision: [ADR 0297](../../adr/0297-lpar-creation-affinity-group.md).
+Decision: [ADR 0302](../../adr/0302-lpar-creation-affinity-group.md).
 
 ## Problem and bounded success
 

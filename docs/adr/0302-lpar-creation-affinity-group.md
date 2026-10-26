@@ -1,4 +1,4 @@
-# ADR 0297: Conventional affinity group at partition creation
+# ADR 0302: Conventional affinity group at partition creation
 
 ## Status
 
