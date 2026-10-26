@@ -238,7 +238,9 @@ def lpars_create(
     try:
         affinity = parse_affinity_group_cli(affinity_group_id)
     except ValueError as error:
-        raise typer.BadParameter(str(error), param_hint="--affinity-group-id") from None
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--affinity-group-id"
+        ) from None
     policy = load_security_policy(security_policy)
     try:
         policy.validate_creation(partition_type)
