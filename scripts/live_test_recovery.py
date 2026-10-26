@@ -2129,6 +2129,29 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "lpar-processor-move"
+    ):
+        from live_test import processor_move
+
+        if not runner._bootstrap_config():
+            print("processor-move recovery: credentials unavailable", file=sys.stderr)
+            return 2
+        try:
+            asyncio.run(processor_move.recover_document(HMCConfig(), document))
+        except Exception as error:  # noqa: BLE001 — unreadable state never attests CLEAN
+            print(
+                f"processor-move recovery unconfirmed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: finite processor-move success and both original baselines confirmed; no writes"
+        )
+        return 0
+
     subtasks = dispatched_subtasks(document)
     if subtasks is None:
         print(
