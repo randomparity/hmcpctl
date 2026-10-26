@@ -104,9 +104,18 @@ class LparProcessorMove(BaseModel):
     """Native two-partition transfer; mode applicability is resolved at admission."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-    processors: Annotated[StrictInt, Field(ge=0)] | None = None
-    processing_units: Decimal | None = None
-    force: StrictBool = False
+    processors: Annotated[StrictInt, Field(ge=0)] | None = Field(
+        default=None,
+        description="Whole dedicated processors or shared virtual processors to move, when applicable.",
+    )
+    processing_units: Decimal | None = Field(
+        default=None,
+        description="Shared entitlement to move in exact hundredths; integral for a dedicated destination.",
+    )
+    force: StrictBool = Field(
+        default=False,
+        description="Allow running AIX/Linux/VIOS changes without RMC; runtime effect requires restart.",
+    )
 
     @field_validator("processing_units", mode="before")
     @classmethod
