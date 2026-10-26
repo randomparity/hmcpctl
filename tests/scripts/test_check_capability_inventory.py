@@ -130,6 +130,45 @@ def _operation(
     }
 
 
+@pytest.mark.parametrize(
+    ("operation", "direct_tests"),
+    [
+        (
+            "lpar.dlpar_proc",
+            {
+                "tests/lpar/test_lpar_rmw.py",
+                "tests/lpar/test_dlpar_operations.py",
+                "tests/test_live_processor_sharing_weight_arm.py",
+            },
+        ),
+        (
+            "lpar.modify",
+            {
+                "tests/lpar/test_lpar_rmw.py",
+                "tests/unit/test_lpar_modify_workflow.py",
+                "tests/app/test_cli_commands.py",
+            },
+        ),
+    ],
+)
+def test_sharing_weight_implemented_variant_has_direct_contract_tests(
+    operation, direct_tests
+):
+    maturity = json.loads((ROOT / "docs/capabilities/maturity.json").read_text())
+    records = json.loads((ROOT / "docs/capabilities/operations.json").read_text())
+    record = next(
+        row for row in maturity["operations"] if row["operation"] == operation
+    )
+    assert {
+        "variant": "sharing-and-uncapped-weight-current-configuration",
+        "parameters": [],
+    } in record["implementation"]["implemented_scope"]
+    binding = next(
+        row for row in records["operations"] if row["operation"] == operation
+    )
+    assert direct_tests <= set(binding["tests"])
+
+
 def _confirmed_gap():
     return {
         "variant": "managed-system-pcm",

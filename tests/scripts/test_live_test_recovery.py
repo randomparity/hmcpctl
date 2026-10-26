@@ -2833,3 +2833,101 @@ def test_creation_memory_artifact_explicit_malformed_values_never_default(value)
     artifacts["unknown"] = None
     with pytest.raises(ValueError):
         settings.decode_artifacts(artifacts)
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "before-create",
+        "unknown-create",
+        "post-create",
+        "pre-update",
+        "during-submit",
+        "after-cleanup",
+        "complete",
+    ],
+)
+@pytest.mark.asyncio
+async def test_sharing_recovery_selects_prefix_for_every_phase(phase):
+    document = {
+        "run": {"subtasks": [59], "partial": phase != "complete"},
+        "config": {"system_name": _SYSTEM},
+        "results": [],
+    }
+    inputs = recovery.lpar_config_inputs_from_document(document, [59])
+    assert inputs is not None, (
+        "ST59 header must select the scratch prefix before any UUID is known"
+    )
+    assert 59 in recovery._WITNESSED_SUBTASKS
+    seen = []
+
+    async def call(tool, **arguments):
+        recovery.guard_read_only(tool, arguments)
+        seen.append((tool, arguments))
+        return (
+            "PASS",
+            "hmcpctl-live-lpar-11111111,not activated\nhmcpctl-live-lpar-22222222,not activated\nforeign,not activated",
+        )
+
+    findings = await recovery.check_lpar_config(call, inputs)
+    assert len(findings) == 2
+    assert len(seen) == 1
+    assert all("hmcpctl-live-lpar-" in finding.what for finding in findings)
+
+
+@pytest.mark.parametrize("system", [None, "", 17, [], {}, " \t\n"])
+def test_sharing_recovery_refuses_unreadable_system_before_bootstrap(
+    tmp_path, monkeypatch, capsys, system
+):
+    document = {
+        "run": {"subtasks": [59]},
+        "config": {"system_name": system},
+        "results": [],
+    }
+    with pytest.raises(ValueError, match="system_name"):
+        recovery.lpar_config_inputs_from_document(document, [59])
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(document))
+
+    def forbidden():
+        raise AssertionError("unreadable context must refuse before credentials/HMC")
+
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", forbidden)
+    assert recovery.main(["--results", str(path)]) == 2
+    assert "CLEAN" not in capsys.readouterr().out
+
+
+def test_sharing_recovery_keeps_legacy_decoder():
+    for subtask in (39, 47, 48, 49, 50, 51, 52, 53, 55, 56, 58, 59):
+        inputs = recovery.lpar_config_inputs_from_document(
+            {"config": {"system_name": _SYSTEM}}, [subtask]
+        )
+        assert inputs is not None and inputs.system_name == _SYSTEM
+    assert recovery.lpar_config_inputs_from_document({}, [39]) is None
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {},
+        {"run": {"subtasks": None}},
+        {
+            "run": {"subtasks": [59], "partial": True},
+            "config": {"system_name": _SYSTEM},
+        },
+        "unreadable-json",
+    ],
+)
+def test_sharing_recovery_incomplete_never_claims_clean(
+    tmp_path, monkeypatch, capsys, document
+):
+    path = tmp_path / "results.json"
+    path.write_text(document if isinstance(document, str) else json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+
+    async def clean(checks, *, users=False):
+        return []
+
+    monkeypatch.setattr(recovery, "_run_checks", clean)
+    assert recovery.main(["--results", str(path)]) == 2
+    assert "CLEAN" not in capsys.readouterr().out

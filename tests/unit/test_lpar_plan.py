@@ -676,7 +676,7 @@ def test_plan_digest_changes_with_targets(
 
 def test_plan_digest_is_pinned() -> None:
     # A SHA-256 digest, not a credential.
-    expected = "0ae18fef64bcd92d67a2c7056df8396d774cf8a6ef6dea328feb2ecc4dc9b64e"  # pragma: allowlist secret
+    expected = "faf5f7e440e74edb25fcb76dcb90845046af17d8c138607261c8baafb337bd07"  # pragma: allowlist secret
     assert plan_digest(_request(), _targets(), "lab") == expected
 
 
@@ -1451,3 +1451,14 @@ def test_one_system_named_twice_is_evaluated_once() -> None:
     plan = _plan(FakeHMC(World()), _placement(systems=("sys1", _uuid(1).upper())))
     assert len(plan.candidates) == 1
     assert plan.candidates[0].selector == "sys1"
+
+
+@pytest.mark.parametrize("weight", [0, 64])
+def test_check_request_rejects_update_weight(weight, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Planner reached normalization or digest before rejection")
+
+    monkeypatch.setattr("hmcpctl.operations.lpar.plan._normalized", forbidden)
+    monkeypatch.setattr("hmcpctl.operations.lpar.plan.plan_digest", forbidden)
+    with pytest.raises(ValueError, match="uncapped_weight.*only.*update"):
+        check_request(_request(resources=LparResources(uncapped_weight=weight)))

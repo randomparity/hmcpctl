@@ -335,3 +335,11 @@ def test_blank_selectors_read_as_absent():
     }
     plan = _call(_app(_ALL), _HMC(), arguments)
     assert plan["plan_digest"] is not None
+
+
+@pytest.mark.parametrize("weight", [0, 64])
+def test_update_weight_fails_before_planner_reads(weight):
+    hmc = _HMC()
+    with pytest.raises(ToolError, match="uncapped_weight.*only.*update"):
+        _call(_app(_ALL), hmc, {**_ARGUMENTS, "resources": {"uncapped_weight": weight}})
+    assert hmc.calls == []

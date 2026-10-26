@@ -15,7 +15,12 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_location
 
-from ...documents.lpar import LparResources, PartitionType, validate_partition_type
+from ...documents.lpar import (
+    LparResources,
+    PartitionType,
+    reject_update_weight_on_create,
+    validate_partition_type,
+)
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.storage import StorageKind, validate_virtual_disk
 from ...errors import HMCError
@@ -572,6 +577,7 @@ async def _preflight_provision_request(
     request: ProvisionRequest,
 ) -> None:
     """Validate a provisioning request and every external dependency it names."""
+    reject_update_weight_on_create(request.resources)
     validate_provision_assignments(request.assignments)
     if request.affinity_assessment is not None and (
         request.affinity_assessment.system_name_or_uuid != system_name_or_uuid

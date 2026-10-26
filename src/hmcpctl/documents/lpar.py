@@ -3,7 +3,8 @@ from __future__ import annotations
 import math
 import xml.etree.ElementTree as ET  # nosec B405 - reads an element the caller parsed with defusedxml
 from dataclasses import dataclass, field, fields
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
+from uuid import UUID
 
 from pydantic import ConfigDict, StrictBool, StrictInt
 
@@ -299,6 +300,52 @@ class LparResources:
             "description": "Whether a shared partition may consume spare processing capacity."
         },
     )
+    uncapped_weight: StrictInt | None = field(
+        default=None,
+        metadata={
+            "description": "Uncapped sharing weight, strict integer 0–255; partition update only. Zero is explicit."
+        },
+    )
+
+
+def has_sharing_change(resources: LparResources) -> bool:
+    return any(
+        value is not None
+        for value in (
+            resources.sharing_mode,
+            resources.uncapped,
+            resources.uncapped_weight,
+        )
+    )
+
+
+def validate_resource_inputs(resources: LparResources) -> None:
+    """Validate caller values without needing a partition or a client."""
+    for number in _RESOURCE_NUMBERS:
+        value = getattr(resources, number)
+        if value is not None and not (math.isfinite(value) and value >= 0):
+            raise ValueError(
+                f"{number}={value} must be a finite, non-negative number. Nothing was written."
+            )
+    _validate_sharing_mode(resources.sharing_mode)
+    if resources.uncapped is not None and type(resources.uncapped) is not bool:
+        raise ValueError("uncapped must be a boolean")
+    weight = resources.uncapped_weight
+    if weight is None:
+        return
+    if type(weight) is not int or not 0 <= weight <= 255:
+        raise ValueError("uncapped_weight must be an integer from 0 to 255")
+    if resources.sharing_mode is not None and resources.uncapped is not None:
+        alias_mode = "uncapped" if resources.uncapped else "capped"
+        if resources.sharing_mode != alias_mode:
+            raise ValueError(
+                "sharing_mode and uncapped must agree when uncapped_weight is supplied"
+            )
+
+
+def reject_update_weight_on_create(resources: LparResources) -> None:
+    if resources.uncapped_weight is not None:
+        raise ValueError("uncapped_weight is supported only for a partition update")
 
 
 def _memory_config(resources: LparResources) -> str:
@@ -437,6 +484,7 @@ def _shared_processor_body(resources: LparResources) -> list[str]:
 
 
 def _processor_config(resources: LparResources) -> str:
+    reject_update_weight_on_create(resources)
     _validate_sharing_mode(resources.sharing_mode)
     if not any(
         value is not None
@@ -653,12 +701,158 @@ def _shared_updates(resources: LparResources) -> dict[str, str]:
     return updates
 
 
-def _processor_updates(lpar: ET.Element, resources: LparResources) -> dict[str, str]:
-    _validate_sharing_mode(resources.sharing_mode)
-    current = lpar.findtext(f"{{{UOM_NS}}}{_PPC}/{{{UOM_NS}}}HasDedicatedProcessors")
-    dedicated = current == "true" if current is not None else bool(resources.dedicated)
+def _sharing_scalar(lpar: ET.Element, path: str) -> str | None:
+    """Read one exact UOM scalar; ambiguous structure is never a value."""
+    if lpar.tag != f"{{{UOM_NS}}}LogicalPartition":
+        raise ValueError("Expected a UOM LogicalPartition document")
+    node = lpar
+    for part in path.split("/"):
+        matches = [child for child in node if child.tag.rsplit("}", 1)[-1] == part]
+        if not matches:
+            return None
+        if len(matches) != 1 or matches[0].tag != f"{{{UOM_NS}}}{part}":
+            raise ValueError(f"Ambiguous or wrong-namespace partition path {path}")
+        node = matches[0]
+    if len(node):
+        raise ValueError(f"Expected a scalar partition path {path}")
+    return node.text if node.text is not None else ""
+
+
+def _sharing_context(lpar: ET.Element, prefix: str) -> tuple[bool, str]:
+    flag_name = f"{prefix}HasDedicatedProcessors"
+    flag = _sharing_scalar(lpar, f"{_PPC}/{flag_name}")
+    if flag not in {"true", "false"}:
+        raise ValueError(f"{flag_name} must be present and strictly true or false")
+    dedicated = flag == "true"
+    mode_name = f"{prefix}SharingMode"
+    mode = _sharing_scalar(lpar, f"{_PPC}/{mode_name}")
+    allowed = (
+        set(_REST_SHARING_MODES.values()) - {"capped", "uncapped"}
+        if dedicated
+        else {"capped", "uncapped"}
+    )
+    if mode not in allowed:
+        context = "dedicated" if dedicated else "shared"
+        raise ValueError(
+            f"{mode_name} is not a valid mode for the observed {context} processor context"
+        )
+    assert mode is not None
+    return dedicated, mode
+
+
+def _sharing_branch(lpar: ET.Element, prefix: str) -> dict[str, Any] | None:
+    try:
+        dedicated, mode = _sharing_context(lpar, prefix)
+    except ValueError:
+        return None
+    path = (
+        f"{_PPC}/CurrentSharedProcessorConfiguration/{prefix}UncappedWeight"
+        if prefix
+        else f"{_PPC}/SharedProcessorConfiguration/UncappedWeight"
+    )
+    raw = None
+    try:
+        raw = _sharing_scalar(lpar, path)
+        status = "missing" if raw is None else "malformed"
+        weight = None
+        if raw is not None and raw.isascii() and raw.isdecimal() and int(raw) <= 255:
+            weight, status = int(raw), "valid"
+    except ValueError:
+        weight, status = None, "malformed"
+    if dedicated or mode == "capped":
+        weight, status = None, "inapplicable"
+    return {
+        "dedicated": dedicated,
+        "mode": mode,
+        "weight": weight,
+        "weight_status": status,
+        "raw_weight": raw,
+    }
+
+
+def sharing_observation(
+    lpar: ET.Element, paths: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    """Extract independent branches, preserving valid evidence beside unavailable fields.
+
+    Identity ambiguity invalidates the document. Branch ambiguity is unavailable;
+    a malformed applicable weight retains its status without inventing a value.
+    The caller checks this document's UUID against the selected partition.
+    """
+    identity = _sharing_scalar(lpar, "Metadata/Atom/AtomID")
+    if identity is None:
+        raise ValueError("LogicalPartition has no UUID")
+    try:
+        UUID(identity)
+    except ValueError as exc:
+        raise ValueError("LogicalPartition has a malformed UUID") from exc
+    requested = {}
+    for path in paths:
+        try:
+            requested[path] = _sharing_scalar(lpar, path)
+        except ValueError:
+            requested[path] = None
+    return {
+        "uuid": identity,
+        "configured": _sharing_branch(lpar, ""),
+        "current": _sharing_branch(lpar, "Current"),
+        "runtime": _sharing_branch(lpar, "Runtime"),
+        "requested": requested,
+    }
+
+
+def validate_sharing_update(
+    lpar: ET.Element, resources: LparResources
+) -> tuple[bool, str | None]:
+    """Return actual dedicated context and effective REST mode, not requested edits.
+
+    Weight-only returns the existing uncapped mode. Quantity-only retains the
+    legacy configured-flag/caller fallback and returns no sharing mode.
+    """
+    validate_resource_inputs(resources)
+    if not has_sharing_change(resources):
+        current = lpar.findtext(
+            f"{{{UOM_NS}}}{_PPC}/{{{UOM_NS}}}HasDedicatedProcessors"
+        )
+        dedicated = (
+            current == "true" if current is not None else bool(resources.dedicated)
+        )
+        mode = None
+    else:
+        dedicated, existing = _sharing_context(lpar, "")
+        current_dedicated, current_mode = _sharing_context(lpar, "Current")
+        if dedicated != current_dedicated:
+            raise ValueError(
+                "Configured and current dedicated processor flags disagree"
+            )
+        if existing != current_mode:
+            raise ValueError("Configured and CurrentSharingMode disagree")
+        mode = _shared_sharing_mode(resources)
+        if dedicated:
+            if resources.uncapped is not None or resources.uncapped_weight is not None:
+                raise ValueError(
+                    "Capping and uncapped_weight apply only to a shared-processor partition"
+                )
+            if mode not in set(_REST_SHARING_MODES) - {"capped", "uncapped"}:
+                raise ValueError(
+                    "The requested sharing mode does not apply to dedicated processors"
+                )
+        elif mode is not None and mode not in {"capped", "uncapped"}:
+            raise ValueError(
+                "The requested sharing mode does not apply to shared processors"
+            )
+        mode = _REST_SHARING_MODES[mode] if mode is not None else existing
+        if resources.uncapped_weight is not None and mode != "uncapped":
+            raise ValueError(
+                "uncapped_weight requires uncapped mode; request explicit uncapping"
+            )
     if resources.dedicated is not None and resources.dedicated != dedicated:
         raise ValueError(_MODE_SWITCH_REFUSAL)
+    return dedicated, mode
+
+
+def _processor_updates(lpar: ET.Element, resources: LparResources) -> dict[str, str]:
+    dedicated, _ = validate_sharing_update(lpar, resources)
     if dedicated:
         updates = _dedicated_updates(resources)
         mode = resources.sharing_mode
@@ -667,6 +861,10 @@ def _processor_updates(lpar: ET.Element, resources: LparResources) -> dict[str, 
         mode = _shared_sharing_mode(resources)
     if mode:
         updates[f"{_PPC}/SharingMode"] = _REST_SHARING_MODES[mode]
+    if resources.uncapped_weight is not None:
+        updates[f"{_PPC}/SharedProcessorConfiguration/UncappedWeight"] = str(
+            resources.uncapped_weight
+        )
     if updates:
         updates[f"{_PPC}/HasDedicatedProcessors"] = str(dedicated).lower()
     return updates
@@ -686,16 +884,11 @@ def partition_updates(
     partition's current mode (``HasDedicatedProcessors``); a requested
     ``dedicated`` value that differs from it raises ``ValueError``, because
     switching needs a configuration element the read does not carry.
-    ``UncappedWeight`` is never written: V10R3 drops it on capping and recreates
-    it as 0 on uncapping.
+    An explicit ``uncapped_weight`` writes only the configured shared weight;
+    mode-only transitions leave any HMC weight side effect to observation.
     """
     resources = resources or LparResources()
-    for number in _RESOURCE_NUMBERS:
-        value = getattr(resources, number)
-        if value is not None and not (math.isfinite(value) and value >= 0):
-            raise ValueError(
-                f"{number}={value} must be a finite, non-negative number. Nothing was written."
-            )
+    validate_resource_inputs(resources)
     memory = (
         ("DesiredMemory", resources.desired_memory),
         ("MaximumMemory", resources.max_memory),

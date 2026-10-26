@@ -3737,6 +3737,10 @@
           {
             "variant": "delegated-pcie-assignments",
             "parameters": []
+          },
+          {
+            "variant": "sharing-and-uncapped-weight-current-configuration",
+            "parameters": []
           }
         ],
         "missing_scope": []
@@ -3846,6 +3850,10 @@
                 "constraint": "Nonnegative whole dedicated processors or shared virtual processors, subject to current/configured bounds and selected-system capacity."
               }
             ]
+          },
+          {
+            "variant": "sharing-and-uncapped-weight-current-configuration",
+            "parameters": []
           }
         ],
         "missing_scope": []

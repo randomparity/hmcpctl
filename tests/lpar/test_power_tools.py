@@ -9,7 +9,9 @@ LPAR create/modify and LPAR power-on/off are covered in
 covered in ``tests/app/test_capabilities.py``.
 """
 
-from unittest.mock import AsyncMock, patch
+import asyncio
+from dataclasses import asdict
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -405,3 +407,172 @@ def test_modify_system_invalid_policy_rejected_before_http(monkeypatch, mock_hmc
     with pytest.raises(ValueError, match="power_off_policy"):
         hmc_modify_system(SYSTEM_UUID, power_off_policy=2)
     assert not route.called
+
+
+@pytest.mark.parametrize("tool", ["hmc_dlpar_proc", "hmc_modify_lpar"])
+@pytest.mark.parametrize("weight", [True, False, "0", "64", 0.0, 64.5])
+def test_sharing_mcp_input_is_strict(tool, weight, monkeypatch):
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError
+
+    from hmcpctl.authorization.access_policy import compile_access_policy
+    from hmcpctl.server import TOOL_SECURITY, create_mcp
+
+    app = create_mcp(
+        compile_access_policy(
+            {
+                "policies": {
+                    "test": {
+                        "grants": [
+                            {
+                                "tools": [tool],
+                                "connections": ["<default>"],
+                                "targets": "all-targets",
+                            }
+                        ]
+                    }
+                }
+            },
+            "test",
+            TOOL_SECURITY,
+            "test.toml",
+        )
+    )
+    client = Mock(side_effect=AssertionError("Invalid weight reached client"))
+    monkeypatch.setattr("hmcpctl.server_tools.lpar.lifecycle.with_client", client)
+    monkeypatch.setenv("HMC_HOST", "hmc.test")
+
+    async def call():
+        async with Client(app) as mcp:
+            await mcp.call_tool(
+                tool,
+                {
+                    "lpar_name_or_uuid": LPAR_UUID,
+                    "resources": {"uncapped_weight": weight},
+                },
+            )
+
+    with pytest.raises(ToolError, match="uncapped_weight"):
+        asyncio.run(call())
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "tool,operation",
+    [("hmc_dlpar_proc", "set_lpar_processors"), ("hmc_modify_lpar", "modify_lpar")],
+)
+def test_sharing_mcp_input_keeps_zero(tool, operation, monkeypatch):
+    from fastmcp import Client
+
+    from hmcpctl.authorization.access_policy import compile_access_policy
+    from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
+    from hmcpctl.server import TOOL_SECURITY, create_mcp
+    from hmcpctl.server_tools.lpar import lifecycle
+
+    outcome = {"UUID": LPAR_UUID, "Resource": {}, "workflow_completed": False}
+    result = (
+        outcome
+        if tool == "hmc_dlpar_proc"
+        else LparPcieWorkflowResult(False, False, outcome, None, (), ())
+    )
+    delegate = AsyncMock(return_value=result)
+    monkeypatch.setattr(lifecycle, operation, delegate)
+    monkeypatch.setattr(
+        lifecycle, "with_client", lambda work, **kwargs: asyncio.run(work(object()))
+    )
+    monkeypatch.setenv("HMC_HOST", "hmc.test")
+    app = create_mcp(
+        compile_access_policy(
+            {
+                "policies": {
+                    "test": {
+                        "grants": [
+                            {
+                                "tools": [tool],
+                                "connections": ["<default>"],
+                                "targets": "all-targets",
+                            }
+                        ]
+                    }
+                }
+            },
+            "test",
+            TOOL_SECURITY,
+            "test.toml",
+        )
+    )
+
+    async def call():
+        async with Client(app) as mcp:
+            return await mcp.call_tool(
+                tool,
+                {"lpar_name_or_uuid": LPAR_UUID, "resources": {"uncapped_weight": 0}},
+            )
+
+    served = asyncio.run(call())
+    assert served.structured_content is not None
+    assert delegate.await_args.args[2].uncapped_weight == 0
+    assert type(delegate.await_args.args[2].uncapped_weight) is int
+
+
+@pytest.mark.parametrize("combined", [False, True])
+def test_sharing_mcp_result_propagation(combined, monkeypatch):
+    from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+    from hmcpctl.server_tools.lpar import lifecycle
+
+    outcome = {
+        "UUID": LPAR_UUID,
+        "Resource": {},
+        "completion_scope": "current-configuration",
+        "outcome": "partial",
+        "workflow_completed": False,
+        "submission_status": "accepted",
+        "configuration_verification": "verified",
+        "runtime_verification": "unverified",
+        "before": {"weight": 64},
+        "after": {"weight": 0},
+        "expected": {
+            "configured": "uncapped",
+            "effective_mode": "uncapped",
+            "weight": 0,
+        },
+        "submission_error": None,
+        "read_error": "unavailable",
+        "change_location": {},
+        "warnings": ["inspect before retry"],
+    }
+    workflow = LparPcieWorkflowResult(
+        False,
+        False,
+        outcome,
+        None,
+        (
+            WorkflowStep("resources", "error", outcome),
+            WorkflowStep("vnic[0]", "skipped"),
+        ),
+        ("inspect before retry",),
+    )
+    expected = workflow if combined else outcome
+    delegate = AsyncMock(return_value=expected)
+    monkeypatch.setattr(
+        lifecycle, "modify_lpar" if combined else "set_lpar_processors", delegate
+    )
+    monkeypatch.setattr(
+        lifecycle, "with_client", lambda work, **kwargs: asyncio.run(work(object()))
+    )
+    tool = lifecycle.hmc_modify_lpar if combined else lifecycle.hmc_dlpar_proc
+    result = tool(
+        LPAR_UUID,
+        LparResources(uncapped_weight=0),
+        system_name_or_uuid=SYSTEM_UUID,
+        ownership_override=True,
+        profile="selected",
+    )
+    assert result is expected
+    assert delegate.await_args.kwargs == {
+        "ownership_override": True,
+        "system_name_or_uuid": SYSTEM_UUID,
+    }
+    if combined:
+        assert asdict(result)["steps"][0]["result"] == outcome

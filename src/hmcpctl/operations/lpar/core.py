@@ -23,6 +23,7 @@ from ...documents.lpar import (
     PartitionType,
     build_lpar_document,
     partition_updates,
+    reject_update_weight_on_create,
     validate_keylock,
     validate_partition_type,
 )
@@ -282,6 +283,7 @@ async def create_and_stamp_lpar(
       :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
       delete it to release its resources.
     """
+    reject_update_weight_on_create(creation.resources)
     if not isinstance(creation.memory_layout, LparMemoryLayout):
         raise TypeError("memory_layout must be LparMemoryLayout")
     creation.memory_layout.validate_creation(creation.partition_type)
