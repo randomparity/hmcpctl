@@ -873,6 +873,7 @@ def main(argv: list[str] | None = None) -> int:
             *runner.SUBTASK_GROUPS,
             "system-profile-source",
             "system-profile-activation-source",
+            "vios-ame-source",
         ),
         help="predict one arm instead of every arm",
     )
@@ -890,6 +891,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--packet-sha256")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.group == "vios-ame-source":
+        from live_test import vios_ame_source
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "VIOS AME source preflight requires packet, digest, private output and live read-only checks"
+            )
+        return vios_ame_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
     if args.group == "system-profile-activation-source":
         from live_test import system_profile_activation_source
 
@@ -915,7 +940,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
         )
     if args.output:
-        parser.error("--output requires --group system-profile-activation-source")
+        parser.error("--output requires a registered source group with private output")
     if args.group == "system-profile-source":
         from live_test import system_profile_source
 
