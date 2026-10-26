@@ -363,6 +363,42 @@ async def test_saved_pair_is_independent_of_current_and_caches_unique_peer(servi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "family",
+    [
+        "virtual_eth_adapters",
+        "virtual_fc_adapters",
+        "virtual_scsi_adapters",
+        "vnic_adapters",
+    ],
+)
+@pytest.mark.parametrize(
+    "role,local,peer",
+    [
+        ("client", "2/client//7/peer/3/0", "3/server/0/9/new/2/0"),
+        ("server", "2/server/0/7/peer/3/0", "3/client//9/new/2/0"),
+    ],
+)
+async def test_saved_pair_preserves_unrelated_peer_families(
+    service, family, role, local, peer
+):
+    adapter = Adapter(
+        2, role, False, 0 if role == "server" else None, remote_lpar_id=7, remote_slot=3
+    )
+    service.profiles["new"] = record("new", 9, "default_profile", local)
+    service.profiles["peer"] = record(
+        "peer", 7, "peer_saved", peer, **{family: "opaque"}
+    )
+    original = service.profiles["peer"]
+    admission = await admit(service, (adapter,))
+    step = await serial.serial_creation_step(service.hmc, admission, created(service))
+    assert step.status == "ok"
+    assert step.result["configuration"] == "verified"
+    assert step.result["pairs"] == [{"slot": 2, "status": "verified-saved-pair"}]
+    assert service.profiles["peer"] == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "counterpart",
     [
         "none",

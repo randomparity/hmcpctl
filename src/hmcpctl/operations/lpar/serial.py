@@ -313,10 +313,8 @@ async def _profile(
     observed = await read_serial_profile(
         hmc.config, admission.system_name, target.name, target.partition_id, profile
     )
-    if observed.maximum != target.maximum or observed.other_virtual_configuration:
-        raise ValueError(
-            "serial maximum or exclusive virtual-slot observation is unavailable"
-        )
+    if observed.maximum != target.maximum:
+        raise ValueError("serial maximum observation is unavailable")
     return observed
 
 
@@ -345,6 +343,10 @@ async def serial_creation_step(
         if local.maximum != admission.pending.maximum:
             raise ValueError("serial created maximum differs from requested maximum")
         observed = await _profile(hmc, admission, local, "default_profile")
+        if observed.other_virtual_configuration:
+            raise ValueError(
+                "serial exclusive local virtual-slot observation is unavailable"
+            )
         expected_slots = {a.local_slot for a in admission.adapters}
         if {slot for slot in observed.records if slot >= 2} != expected_slots:
             raise ValueError(
