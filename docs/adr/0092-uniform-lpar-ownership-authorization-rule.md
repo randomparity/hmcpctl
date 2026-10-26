@@ -175,6 +175,7 @@ wildcard records the operation's actual scope.
 |---|---|---|---|
 | `configure_lpar_reporting_settings` | `operations/lpar/configuration.py::configure_lpar_reporting_settings` | guarded (`operations/lpar/configuration.py::configure_lpar_reporting_settings`, via `resolve_and_authorize_lpar_names`) | — |
 | `configure_lpar_settings` | `operations/lpar/configuration.py::configure_lpar_settings` | guarded (`operations/lpar/configuration.py::configure_lpar_settings`, via `resolve_and_authorize_lpar_names`) | — |
+| `set_lpar_accelerator_qos` | `operations/lpar/accelerator.py::set_lpar_accelerator_qos` | guarded (`operations/lpar/accelerator.py::set_lpar_accelerator_qos`, via `authorize_lpar_mutation` after selected-system containment) | #1781 / ADR 0305 |
 | `set_lpar_boot_order` | `operations/lpar/boot_order.py::set_lpar_boot_order` | guarded (`operations/lpar/boot_order.py::set_lpar_boot_order`) | — |
 | `clear_lpar_boot_order` | `operations/lpar/boot_order.py::clear_lpar_boot_order` | guarded (`operations/lpar/boot_order.py::clear_lpar_boot_order`) | — |
 | `assign_dedicated_pcie_slot` | `operations/virtualization/pcie.py::assign_dedicated_pcie_slot` | guarded (`operations/virtualization/pcie.py::assign_dedicated_pcie_slot`, via `_authorize_pcie_profile_request`) | — |
@@ -189,7 +190,7 @@ wildcard records the operation's actual scope.
 | `change_lpar_processors` | `operations/lpar/processors.py::change_lpar_processors` | guarded (`operations/lpar/processors.py::change_lpar_processors`, via `authorize_lpar_mutation` after selected-system containment) | #1778 / ADR 0296 |
 | `change_lpar_memory` | `operations/lpar/memory.py::change_lpar_memory` | guarded (`operations/lpar/memory.py::change_lpar_memory`, via `authorize_lpar_mutation` after selected-system containment) | #1774 / ADR 0285 |
 | `move_lpar_memory` | `operations/lpar/memory_move.py::move_lpar_memory` | guarded (`operations/lpar/memory_move.py::move_lpar_memory`, via `authorize_lpar_mutation` for both contained endpoints) | #1775 / ADR 0286 |
-| `apply_lpar_pcie_assignments` | `operations/lpar/assignments.py::apply_lpar_pcie_assignments` | guarded (`operations/lpar/assignments.py::apply_lpar_pcie_assignments`) | — |
+| `apply_lpar_pcie_assignments` | `operations/lpar/assignments.py::apply_lpar_pcie_assignments` | guarded via `apply_validated_lpar_pcie_assignments` delegates (`operations/virtualization/pcie.py::assign_dedicated_pcie_slot`, `operations/virtualization/pcie.py::assign_sriov_logical_port`, `operations/virtualization/vnic.py::add_vnic`) | — |
 | `add_network_adapter` | `operations/virtualization/adapters.py::add_network_adapter` | guarded (`operations/virtualization/adapters.py::add_network_adapter`) | #372 |
 | `add_vscsi_adapter` | `operations/virtualization/adapters.py::add_vscsi_adapter` | guarded (`operations/virtualization/adapters.py::add_vscsi_adapter`) | #372 |
 | `add_vfc_adapter` | `operations/virtualization/adapters.py::add_vfc_adapter` | guarded (`operations/virtualization/adapters.py::add_vfc_adapter`) | #372 |

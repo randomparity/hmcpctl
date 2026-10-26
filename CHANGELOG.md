@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Native partition GZIP accelerator QoS through `hmc_set_lpar_accelerator_qos`
+  and `lpars accelerator-qos` preserves explicit zero and optional native controls.
+  Selected-system admission and ownership checks precede one submission; independent
+  current/pending readback reports incomplete outcomes without automatic replay.
+  Runtime effectiveness and profile persistence remain unverified. The opt-in arm 64
+  procedure has offline coverage; hardware contexts remain unevidenced (#1781).
+
 - LPAR processor updates and combined modify through CLI/MCP accept sharing
   modes and strict integer `uncapped_weight` values from 0–255, preserving zero
   and omission. Independent configured/current readback determines completion;
