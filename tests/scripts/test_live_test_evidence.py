@@ -374,6 +374,15 @@ def test_vios_source_is_never_a_product_matrix():
     assert "observed-accepted" in rendered
 
 
+@pytest.mark.parametrize("version", [None, 2, True, 1.0, "1", "missing"])
+def test_vios_source_requires_supported_schema_version(version):
+    document = _vios_source_document()
+    document.pop("schema_version")
+    if version != "missing":
+        document["schema_version"] = version
+    assert evidence.render(document) is None
+
+
 @pytest.mark.parametrize("fault", ["flag", "group", "subtask", "commit", "outcome"])
 def test_vios_source_contradiction_never_falls_through(fault):
     document = _vios_source_document()

@@ -951,9 +951,16 @@ def test_source_attestation_process_is_bounded_and_reaped(tmp_path, monkeypatch,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("closed", [False, True])
-async def test_recovery_keeps_capture_session_uncertainty_distinct(rig, closed):
+@pytest.mark.parametrize("version", [1, None, 2, True, 1.0, "1", "missing"])
+async def test_recovery_requires_supported_history_and_closed_session(
+    rig, closed, version
+):
     p, wire, hmc, output, _before = rig
     document = await run_capture(rig)
+    document.pop("schema_version")
+    if version != "missing":
+        document["schema_version"] = version
+    supported = type(version) is int and version == 1
     capture_dir = Path(p["window"]["directory"]) / "capture"
     capture_dir.mkdir(mode=0o700)
     source._save(
@@ -963,9 +970,12 @@ async def test_recovery_keeps_capture_session_uncertainty_distinct(rig, closed):
     wire.commands.clear()
     hmc.budget = source.Budget("recover", p)
     result = await source.recover(hmc, p, document, output)
-    assert result["baseline_agrees_now"] is True and result["history_complete"] is True
+    assert result["baseline_agrees_now"] is True
+    assert result["history_complete"] is supported
+    assert source._history_complete(p, document, hmc.packet_sha) is supported
     assert result["capture_session_closed"] is closed
-    assert result["clean"] is closed and result["run"]["partial"] is (not closed)
+    assert result["clean"] is (closed and supported)
+    assert result["run"]["partial"] is (not (closed and supported))
     assert all(method == "GET" for method, url in wire.http)
     assert all(command.startswith("lscomgmt") for command in wire.commands)
 

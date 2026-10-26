@@ -123,6 +123,7 @@ def _render_vios_ame_source(document: dict[str, Any]) -> str | None:
         or run.get("group") != "vios-ame-source"
         or run.get("subtasks") != []
         or run.get("tree_clean") is not True
+        or type(document.get("schema_version")) is not int
         or document.get("schema_version") != 1
     ):
         return None

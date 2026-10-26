@@ -1541,7 +1541,9 @@ def _history_complete(p: dict, document: dict, packet_sha: str) -> bool:
 
 def _history_matches(p: dict, document: dict, packet_sha: str) -> bool:
     if (
-        document.get("source_only") is not True
+        type(document.get("schema_version")) is not int
+        or document.get("schema_version") != 1
+        or document.get("source_only") is not True
         or document.get("packet_sha256") != packet_sha
         or document.get("phase") != "captured-and-reconciled"
         or "failure" in document
