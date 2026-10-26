@@ -851,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
             *runner.SUBTASK_GROUPS,
             "system-profile-source",
             "system-profile-activation-source",
+            "lpar-serial-adapter",
         ),
         help="predict one arm instead of every arm",
     )
@@ -868,6 +869,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--packet-sha256")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.group == "lpar-serial-adapter":
+        from live_test import lpar_serial_adapter
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "ST63 requires packet, digest, fresh private output and read-only hardware checks"
+            )
+        return lpar_serial_adapter.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
     if args.group == "system-profile-activation-source":
         from live_test import system_profile_activation_source
 

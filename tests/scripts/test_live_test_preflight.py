@@ -959,3 +959,64 @@ def test_sharing_preflight_names_scope():
 
 
 GROUP_SHARING = "processor-sharing-weight"
+
+
+def test_serial_procedure_exact_preflight_dispatch(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock(return_value=2)
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    assert (
+        preflight.main(
+            [
+                "--group",
+                "lpar-serial-adapter",
+                "--packet",
+                "p",
+                "--packet-sha256",
+                "s",
+                "--output",
+                "f",
+            ]
+        )
+        == 2
+    )
+    dispatch.assert_called_once_with(
+        [
+            "preflight",
+            "--packet",
+            "p",
+            "--packet-sha256",
+            "s",
+            "--output",
+            "f",
+        ]
+    )
+
+
+@pytest.mark.parametrize("missing", ["--packet", "--packet-sha256", "--output"])
+def test_serial_preflight_requires_complete_exact_inputs(monkeypatch, missing):
+    from unittest.mock import Mock
+
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock()
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    args = [
+        "--group",
+        "lpar-serial-adapter",
+        "--packet",
+        "p",
+        "--packet-sha256",
+        "s",
+        "--output",
+        "f",
+    ]
+    position = args.index(missing)
+    del args[position : position + 2]
+    with pytest.raises(SystemExit) as result:
+        preflight.main(args)
+    assert result.value.code == 2
+    dispatch.assert_not_called()

@@ -1983,9 +1983,16 @@ def main(argv: list[str] | None = None) -> int:
     source_packets = parser.add_mutually_exclusive_group()
     source_packets.add_argument("--source-packet", type=Path)
     source_packets.add_argument("--activation-source-packet", type=Path)
+    source_packets.add_argument("--serial-procedure", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.serial_procedure:
+        from live_test import lpar_serial_adapter
+
+        if args.output or args.packet_sha256:
+            parser.error("ST63 recovery uses retained results only")
+        return lpar_serial_adapter.main(["recover", "--results", str(args.results)])
     if args.activation_source_packet:
         from live_test import system_profile_activation_source
 

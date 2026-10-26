@@ -18,6 +18,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR and VIOS creation through CLI/MCP accept typed virtual serial adapters
+  and an explicit maximum virtual-slot prerequisite. Contained peer ownership,
+  one native create and independent saved-profile observations distinguish
+  configured, unbound, paired and incomplete outcomes without replay. The
+  standalone ST63 procedure remains unevidenced on hardware (#1772).
+
 - LPAR processor updates and combined modify through CLI/MCP accept sharing
   modes and strict integer `uncapped_weight` values from 0–255, preserving zero
   and omission. Independent configured/current readback determines completion;
