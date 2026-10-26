@@ -10,7 +10,9 @@ from pydantic import TypeAdapter
 
 from hmcpctl.cli_commands.lpar.assignment_input import (
     SECURITY_POLICY_WARNING,
+    SERIAL_INPUT_HELP,
     load_security_policy,
+    load_virtual_serial_adapters,
 )
 from hmcpctl.operations.lpar.security_policy import (
     configure_lpar_security_policy,
@@ -19,6 +21,7 @@ from hmcpctl.operations.lpar.security_policy import (
 
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
 from ...documents.lpar_memory_layout import LparMemoryLayout
+from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
 from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
@@ -195,6 +198,16 @@ def vios_create(
         "--security-policy",
         help="Inline strict policy JSON (64 KiB); signed enablement irreversible; no guest/key proof",
     ),
+    max_virtual_slots: int | None = typer.Option(
+        None,
+        "--max-virtual-slots",
+        help="Maximum virtual I/O slots; required explicitly for serial input",
+    ),
+    virtual_serial_adapters: str | None = typer.Option(
+        None,
+        "--virtual-serial-adapters",
+        help=SERIAL_INPUT_HELP,
+    ),
     yes: bool = typer.Option(False, "--yes", "-y"),
     hardware_mem_encryption: Annotated[
         bool | None,
@@ -226,6 +239,14 @@ def vios_create(
     ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner."""
+    serial = load_virtual_serial_adapters(virtual_serial_adapters)
+    try:
+        validate_serial_input(serial, max_virtual_slots)
+    except (ValueError, TypeError):
+        raise typer.BadParameter(
+            "Unique local slots >=2 must be below explicit --max-virtual-slots; encoded serial collection must fit 64 KiB",
+            param_hint="--virtual-serial-adapters",
+        ) from None
     try:
         layout = LparMemoryLayout(
             hpt_ratio=hpt_ratio,
@@ -276,6 +297,8 @@ def vios_create(
             hardware_mem_encryption=hardware_mem_encryption,
             hardware_mem_expansion=hardware_mem_expansion,
             memory_layout=layout,
+            max_virtual_slots=max_virtual_slots,
+            virtual_serial_adapters=serial,
         )
     )
     print_json(result)

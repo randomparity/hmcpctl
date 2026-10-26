@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Literal
 
@@ -40,13 +40,45 @@ class VirtualSerialAdapter:
     """One creation record; optional server selectors remain independently optional."""
 
     __pydantic_config__ = ConfigDict(extra="forbid")
-    local_slot: StrictInt
-    role: Literal["client", "server"]
-    is_required: StrictBool
-    supports_hmc: StrictInt | None = None
-    remote_lpar_id: StrictInt | None = None
-    remote_lpar_name: StrictStr | None = None
-    remote_slot: StrictInt | None = None
+    local_slot: StrictInt = field(
+        metadata={
+            "description": "Local virtual slot, integer >=2 and below explicit max_virtual_slots; unique in this request."
+        }
+    )
+    role: Literal["client", "server"] = field(
+        metadata={
+            "description": "Native client or server role; client eligibility is decided by HMC in all documented environments."
+        }
+    )
+    is_required: StrictBool = field(
+        metadata={
+            "description": "Explicit boolean required flag; false is retained as native 0."
+        }
+    )
+    supports_hmc: StrictInt | None = field(
+        default=None,
+        metadata={
+            "description": "Server-only optional HMC flag; the only explicit value is integer 0. Omit for clients."
+        },
+    )
+    remote_lpar_id: StrictInt | None = field(
+        default=None,
+        metadata={
+            "description": "Optional native partition ID, distinct from REST UUID. Client requires exactly one ID or exact name; dual server selectors must agree."
+        },
+    )
+    remote_lpar_name: StrictStr | None = field(
+        default=None,
+        metadata={
+            "description": "Optional exact contained partition name; numeric-looking names remain names. Native delimiters and controls are refused."
+        },
+    )
+    remote_slot: StrictInt | None = field(
+        default=None,
+        metadata={
+            "description": "Remote virtual slot; required for clients, optional for servers, below selected peer maximum. No reciprocal adapter is created."
+        },
+    )
 
     def __post_init__(self) -> None:
         serial_integer(self.local_slot, "local_slot", 2)
