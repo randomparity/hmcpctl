@@ -10,7 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
-from hmcpctl.ssh import lpar_serial
+from hmcpctl.ssh import lpar_serial, profiles
 
 
 def profile_record(serial="14/server/0////0", **changes):
@@ -290,10 +290,34 @@ async def test_reader_uses_existing_profile_read_then_binds_identity(monkeypatch
     result = await lpar_serial.read_serial_profile(
         config, "system", "new", 7, "default_profile"
     )
-    reader.assert_awaited_once_with(config, "system", "new", "default_profile")
+    reader.assert_awaited_once_with(
+        config, "system", "new", "default_profile", max_output_bytes=1048576
+    )
     assert result.records[14][1] == "server"
     reader.return_value = profile_record(lpar_name="other")
     with pytest.raises(ValueError):
         await lpar_serial.read_serial_profile(
             config, "system", "new", 7, "default_profile"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "options", [{}, {"max_output_bytes": None}, {"max_output_bytes": 32}]
+)
+async def test_profile_reader_optional_collection_bound(monkeypatch, options):
+    command = AsyncMock(return_value="name=default_profile\n")
+    monkeypatch.setattr(profiles, "run_hmc_command", command)
+    config = HMCConfig.from_mapping({})
+    assert (
+        await profiles.read_lpar_profile_record(
+            config, "system", "new", "default_profile", **options
+        )
+        == "name=default_profile"
+    )
+    expected = {} if options.get("max_output_bytes") is None else options
+    command.assert_awaited_once_with(
+        config,
+        "lssyscfg -r prof -m system --filter lpar_names=new,profile_names=default_profile",
+        **expected,
+    )

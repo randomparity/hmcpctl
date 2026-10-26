@@ -73,7 +73,12 @@ def service(monkeypatch):
     monkeypatch.setattr(
         serial, "resolve_system_cli_name", AsyncMock(return_value="system")
     )
-    reader = AsyncMock(side_effect=lambda config, system, name, profile: profiles[name])
+
+    async def read(config, system, name, profile, *, max_output_bytes):
+        assert max_output_bytes == 1048576
+        return profiles[name]
+
+    reader = AsyncMock(side_effect=read)
     monkeypatch.setattr(lpar_serial, "read_lpar_profile_record", reader)
     return SimpleNamespace(
         hmc=hmc,

@@ -109,7 +109,13 @@ async def read_serial_profile(
 ) -> SerialProfile:
     """Use the existing profile reader, then reject unbound or malformed evidence."""
     return parse_serial_profile(
-        await read_lpar_profile_record(config, system, name, profile_name),
+        await read_lpar_profile_record(
+            config,
+            system,
+            name,
+            profile_name,
+            max_output_bytes=SERIAL_OBSERVATION_BYTES,
+        ),
         name,
         partition_id,
         profile_name,

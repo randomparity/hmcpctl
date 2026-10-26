@@ -31,6 +31,7 @@ from hmcpctl.operations.lpar.ownership import (
 )
 from hmcpctl.operations.lpar.serial import admit_serial_creation, confirm_serial_created
 from hmcpctl.resource_identity import is_uuid
+from hmcpctl.ssh.commands import build_filter
 from hmcpctl.ssh.lpar import create_lpar_via_cli, stamp_lpar_ownership
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import leaf_text, render_mtms
@@ -253,7 +254,9 @@ def kind(packet):
 
 
 async def _command(hmc, command):
-    raw = await run_hmc_command(hmc.config, command, include_stderr=True)
+    raw = await run_hmc_command(
+        hmc.config, command, include_stderr=True, max_output_bytes=LIMIT
+    )
     if (
         not isinstance(raw, str)
         or len(raw.encode()) > LIMIT
@@ -478,7 +481,9 @@ async def verify_fixture(hmc, packet, baseline, identity):
         or parse_lpar_ownership_caller_token(description) != packet["caller_token"]
     ):
         raise ValueError("ST63 current LPAR owner/caller differs")
-    filters = f"lpar_names={packet['name']},profile_names=default_profile"
+    filters = build_filter(
+        [("lpar_names", packet["name"]), ("profile_names", "default_profile")]
+    )
     command = (
         f"lssyscfg -r prof -m {shlex.quote(baseline['system'])} "
         f"--filter {shlex.quote(filters)} -F {','.join(FIELDS)} --header"

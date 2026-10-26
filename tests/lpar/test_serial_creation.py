@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from unit.test_ssh_output_limits import connection
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
@@ -29,7 +30,8 @@ from hmcpctl.operations.lpar.assignments import (
 )
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh import lpar as native
-from hmcpctl.ssh.transport import HMCCLIError
+from hmcpctl.ssh import profiles
+from hmcpctl.ssh.transport import HMCCLIError, run_hmc_command
 
 SYSTEM = "11111111-1111-4111-8111-111111111111"
 LOCAL = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -169,7 +171,8 @@ def target(request, monkeypatch):
             b.events.append("apply")
         return ""
 
-    async def read(config, system, name, profile_name):
+    async def read(config, system, name, profile_name, *, max_output_bytes):
+        assert max_output_bytes == 1048576
         b.events.append("profile:" + name)
         if b.fault == "profile":
             raise HMCError(PRIVATE)
@@ -543,3 +546,37 @@ async def test_serial_keylock_combination_refused_before_reads(target):
         await invoke(target, keylock="normal")
     target.command.assert_not_awaited()
     target.hmc.find_partition_by_name.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+async def test_profile_collection_bound_stops_dependent_effects(
+    target, monkeypatch, stream
+):
+    conn, process = connection(monkeypatch, **{stream: b"x" * (1048576 + 8192)})
+    target.hmc.config = target.hmc.config.model_copy(update={"password": "fixture"})
+
+    async def command(config, text, **kwargs):
+        if text.startswith("lssyscfg -r prof "):
+            return await run_hmc_command(config, text, **kwargs)
+        return await target.command(config, text)
+
+    monkeypatch.setattr(profiles, "run_hmc_command", command)
+    monkeypatch.setattr(
+        "hmcpctl.ssh.lpar_serial.read_lpar_profile_record",
+        profiles.read_lpar_profile_record,
+    )
+    if target.kind == "VirtualIOServer":
+        with pytest.raises(HMCError):
+            await invoke(target)
+    else:
+        result = await invoke(target, apply_profile=True)
+        assert not result.workflow_completed
+    conn.run.assert_not_awaited()
+    conn.abort.assert_called_once()
+    process.close.assert_called_once()
+    assert getattr(process, stream).data
+    assert target.events.count("create") == 1
+    assert "apply" not in target.events
+    target.hmc.delete_logical_partition.assert_not_awaited()
+    target.hmc.delete_vios.assert_not_awaited()

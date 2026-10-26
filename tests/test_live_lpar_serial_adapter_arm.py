@@ -12,6 +12,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from unit.test_ssh_output_limits import connection
+
+from hmcpctl.ssh.transport import HMCCLIError, run_hmc_command
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import lpar_serial_adapter as arm
@@ -662,3 +665,19 @@ async def test_observed_fixture_drift_never_authorizes_cleanup(rig, fault):
         await rig.execute()
     assert rig.effects == ["create", "stamp"]
     assert arm.read(rig.output)["complete"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+async def test_observation_collection_bound_precedes_effects(rig, monkeypatch, stream):
+    conn, process = connection(monkeypatch, **{stream: b"x" * (arm.LIMIT + 8192)})
+    rig.hmc.config = rig.hmc.config.model_copy(update={"password": "fixture"})
+    monkeypatch.setattr(arm, "run_hmc_command", run_hmc_command)
+    with pytest.raises(HMCCLIError, match="exceeded 1048576 output bytes"):
+        await rig.execute()
+    conn.run.assert_not_awaited()
+    conn.abort.assert_called_once()
+    process.close.assert_called_once()
+    assert getattr(process, stream).data
+    assert rig.effects == []
+    assert not rig.output.exists()
