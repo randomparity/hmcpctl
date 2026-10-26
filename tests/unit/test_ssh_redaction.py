@@ -111,6 +111,9 @@ async def test_secret_failure_is_redacted(case):
     assert error.__cause__ is None
     assert error.__context__ is None
     assert kept in str(error)
+    assert getattr(error, "remote_refusal_code", None) == (
+        "HSCL0001" if case == "exit-status-stdout-echo" else None
+    )
     if run_effect is not None:
         conn.run.assert_called_once_with(CMD, check=True, timeout=300.0)
         assert "chhmcusr -u op -t passwd -v" in str(error)
@@ -369,3 +372,22 @@ async def test_bounded_secret_failure_and_cancellation(monkeypatch, caplog, case
     assert logger.filters == before
     if case != "cancel":
         assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("secret", ["private-provider-detail", "HSCL1234"])
+async def test_remote_refusal_metadata_preserves_secret_redaction(secret):
+    conn = _conn(_process_error(stderr="HSCL1234 private-provider-detail"))
+    with (
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn),
+        pytest.raises(HMCCLIError) as raised,
+    ):
+        await run_hmc_command(make_config(), CMD, secrets=[secret, SECRET])
+    error = raised.value
+    assert secret not in str(error)
+    assert getattr(error, "remote_refusal_code", None) == (
+        None
+        if secret == "HSCL1234"  # pragma: allowlist secret - refusal code fixture
+        else "HSCL1234"
+    )
+    assert error.__cause__ is None and error.__context__ is None

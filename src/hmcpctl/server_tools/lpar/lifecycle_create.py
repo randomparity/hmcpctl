@@ -13,6 +13,7 @@ from ...documents.lpar import (
 )
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_io import LparPhysicalIO
+from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
@@ -58,6 +59,7 @@ def hmc_create_lpar(
     security_policy: LparSecurityPolicy | None = None,
     hardware_mem_encryption: HardwareMemoryFlag | None = None,
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
+    memory_layout: LparMemoryLayout | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -82,6 +84,13 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        memory_layout: Optional AIX/Linux huge-page counts, advertised HPT/PPT
+            ratios, and Linux reservation. Reservation selection including zero
+            declares intent, not installed OS proof; finite/two-decimal values,
+            canonical encoding <=65536 ASCII bytes; HMC decides numeric limits.
+            Huge pages use a separate pool; capacity is checked at activation.
+            Saved profile verification does not prove activation or runtime;
+            controller current values may be unavailable, blocking follow-ups.
         hardware_mem_encryption: Optional hardware memory encryption access;
             omission preserves defaults, false explicitly disables access.
         hardware_mem_expansion: Optional hardware memory expansion access;
@@ -135,6 +144,10 @@ def hmc_create_lpar(
     if caller_token is not None:
         validate_caller_token(caller_token)
     validate_partition_type(partition_type)
+    if memory_layout is not None:
+        if not isinstance(memory_layout, LparMemoryLayout):
+            raise TypeError("memory_layout must be LparMemoryLayout")
+        memory_layout.validate_creation(partition_type)
     return with_client(
         lambda hmc: create_lpar(
             hmc,
@@ -153,6 +166,9 @@ def hmc_create_lpar(
                 apply_profile=apply_partition_profile,
                 hardware_mem_encryption=hardware_mem_encryption,
                 hardware_mem_expansion=hardware_mem_expansion,
+                memory_layout=memory_layout
+                if memory_layout is not None
+                else LparMemoryLayout(),
                 security_policy=security_policy
                 if security_policy is not None
                 else LparSecurityPolicy(),

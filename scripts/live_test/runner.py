@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 56; 26 to 36 are other arms' row ids.
-ST53, ST54, ST55 and ST56 require named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 58; 26 to 36 are other arms' row ids.
+ST53, ST54, ST55, ST56 and ST58 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -81,6 +81,7 @@ from live_test.config import (
     decode_saved_config,
 )
 from live_test.connectivity import inventory_connectivity
+from live_test.creation_memory_layout import exercise_creation_memory_layout
 from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
 from live_test.detach_probe import exercise_detach_probe
 from live_test.escape_hatch import exercise_cli_escape_hatch
@@ -452,6 +453,7 @@ class RunState:
     group: str | None = None
     hmc_config: HMCConfig | None = None
     checkpoint: Callable[[], None] | None = None
+    creation_memory_layout_invocation: str | None = None
 
     async def call(
         self,
@@ -702,6 +704,7 @@ SUBTASKS = {
     54: exercise_memory_move,
     55: exercise_lpar_hardware_memory,
     56: exercise_processor_quantities,
+    58: exercise_creation_memory_layout,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -751,6 +754,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-vtpm": [51],
     "lpar-security-policy": [52],
     "lpar-hardware-memory": [55],
+    "creation-memory-layout": [58],
     "lpar-linux-roles": [53],
     # ST40 mutates the VIOS's storage, so only its own arm dispatches it (#1348).
     "storage": [0, 3, 40, 42],
@@ -890,6 +894,19 @@ def _restore_artifacts_from_results(
         saved = json.loads(path.read_text())
         if not isinstance(saved, dict):
             raise TypeError("results document must be a JSON object")
+        saved_run, saved_artifacts = saved.get("run", {}), saved.get("artifacts")
+        if not isinstance(saved_run, dict) or not isinstance(saved_artifacts, dict):
+            raise TypeError("results run/artifacts must be JSON objects")
+        saved_tasks = saved_run.get("subtasks", [])
+        if not isinstance(saved_tasks, list):
+            raise TypeError("results subtasks must be an array")
+        if (
+            state.group == "creation-memory-layout"
+            or saved_run.get("group") == "creation-memory-layout"
+            or 58 in saved_tasks
+            or saved_artifacts.get("creation_memory_layout")
+        ):
+            raise ValueError("creation-memory-layout context cannot be restored")
         # `run` is provenance about the writing run, not state to restore, so it
         # is tolerated rather than required: a document written before the block
         # existed still resumes.
@@ -1016,11 +1033,18 @@ async def main(
             print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
             return 1
     else:
-        tasks = sorted(n for n in SUBTASKS if n not in {44, 45, 46, 52, 53, 54, 55, 56})
+        tasks = sorted(
+            n for n in SUBTASKS if n not in {44, 45, 46, 52, 53, 54, 55, 56, 58}
+        )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]
-    if subtask_filter is not None or group is not None:
+    if 58 in tasks:
+        if state.artifacts.creation_memory_layout or Path(results_path).exists():
+            print("Existing ST58 context refused; use fresh private results")
+            return 1
+        prior_paths = []
+    elif subtask_filter is not None or group is not None:
         prior_paths.extend(["test-results-vmedia.json", "test-results-round2.json"])
     for prior in prior_paths:
         if Path(prior).exists():

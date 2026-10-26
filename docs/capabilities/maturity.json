@@ -1242,6 +1242,35 @@
                 "constraint": "optional strict Linux intent boolean; false is explicit; selected-system authority and contained configuration readback, not NovaLink deployment"
               }
             ]
+          },
+          {
+            "variant": "c06-creation-memory-layout",
+            "parameters": [
+              {
+                "name": "memory_layout.desired_num_huge_pages",
+                "constraint": "optional strict nonnegative AIX/Linux huge-page count; supplied counts ordered; no pool reconfiguration or activation proof; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              },
+              {
+                "name": "memory_layout.hpt_ratio",
+                "constraint": "optional exact selected-system advertised HPT token; AIX/Linux and OS400 LPAR creation; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              },
+              {
+                "name": "memory_layout.kvm_reserved_mem_percent",
+                "constraint": "optional finite Decimal, at most two fractional decimal places, canonical fixed representation <=65536 ASCII bytes; selection including zero declares Linux intent within AIX/Linux, not installed OS; no KVM role prerequisite inferred; HMC decides undocumented numeric limits; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              },
+              {
+                "name": "memory_layout.max_num_huge_pages",
+                "constraint": "optional strict nonnegative AIX/Linux huge-page count; supplied counts ordered without inferred defaults; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              },
+              {
+                "name": "memory_layout.min_num_huge_pages",
+                "constraint": "optional strict nonnegative AIX/Linux huge-page count; supplied minimum/desired/maximum ordered without inferred defaults; separate pool capacity checked at activation, not current free-pool admission; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              },
+              {
+                "name": "memory_layout.ppt_ratio",
+                "constraint": "optional exact selected-system advertised PPT token; AIX/Linux and OS400 LPAR creation; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -5002,6 +5031,19 @@
               {
                 "name": "hardware_mem_encryption,hardware_mem_expansion",
                 "constraint": "optional strict booleans; omission preserves defaults and false selects 0; positive selected-system capabilities and observed Classic/HMC-controller/PowerVM-controller true/false/false tuple required, not a general mode classifier; native create-only fixed attributes; independent inactive REST MemoryEncryptionHardwareAccessEnabled/MemoryExpansionHardwareAccessEnabled comparison proves access availability only, not desired/current values or runtime encryption/expansion"
+              }
+            ]
+          },
+          {
+            "variant": "c06-vios-page-table-ratios",
+            "parameters": [
+              {
+                "name": "memory_layout.hpt_ratio",
+                "constraint": "optional exact selected-system advertised HPT token; VIOS creation only; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              },
+              {
+                "name": "memory_layout.ppt_ratio",
+                "constraint": "optional exact selected-system advertised PPT token; VIOS creation only; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
               }
             ]
           }

@@ -1877,6 +1877,51 @@ offline tests, source observations and scenario registration add no positive nat
 proof. False/mixed combinations, VIOS and other environments remain unrun until
 separately authorized windows; their product acceptance criteria remain in scope.
 
+### Creation memory layout (C06, opt-in arm 58)
+
+Group `creation-memory-layout` is excluded from default and `all`. It runs only
+the fixed fresh AIX/Linux then fresh VIOS matrix described in the
+[creation memory procedure](workflow/lpar-memory-layout-live-procedure.md).
+The local `.env` keys `LIVE_TEST_CREATION_MEMORY_LAYOUT_HPT_RATIO` and
+`LIVE_TEST_CREATION_MEMORY_LAYOUT_PPT_RATIO` default empty. The separate
+`LIVE_TEST_CREATION_MEMORY_LAYOUT_FRESH_VIOS_DELETE_AUTHORIZED` defaults false.
+These unarmed defaults skip before effects; ambient exports cannot arm it.
+Actual selected-system ratio advertisements still gate product creation.
+
+Maximum effects are two creates, one LPAR stamp and two deletes, sequentially.
+The LPAR requests count0/0/0, the supplied ratios and Decimal0 reservation, with
+profile application disabled; the VIOS requests ratios only. Both use explicit
+2GiB desired memory/0.5shared units. No role/hardware/pool/storage/activation or
+existing-VIOS changes occur. Require current separate conditional fresh-VIOS
+UUID deletion authority and existing destructive tool policy, independent
+containment/name/type/inactive checks and baseline exclusion. Name rediscovery
+after an incomplete create is diagnostic only, never adoption or deletion.
+
+After a separate exclusive root allocation and exact candidate/import attestation,
+use these separate invocations; `$PRIVATE` is an existing owner-only directory
+outside the checkout and both result/observation destinations must be fresh:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group creation-memory-layout
+uv run --no-sync python scripts/live_creation_memory_layout.py --results-file "$PRIVATE/test-results-creation-memory-layout.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$PRIVATE/test-results-creation-memory-layout.json"
+uv run --no-sync python scripts/live_test_evidence.py "$PRIVATE/test-results-creation-memory-layout.json"
+```
+
+Recovery is always read-only and mandatory even after apparent success. A complete
+unarmed pre-effect ST58 record reports `SKIPPED` / no fixture work with exit0;
+it supplies no baseline, configured-value or runtime proof. Partial, missing,
+malformed or contradictory evidence still refuses confirmation. The
+closed journal checkpoints before mutation; interrupted intent/baseline drift
+requires root reconciliation. Prior ST58 witnesses never restore or authorize
+cleanup. No retry, power fallback or new fixture follows uncertainty. Logical
+counts do not establish physical feasibility: a baseline pair can already cost
+42SSH. Root must compose finite requests/timeouts, absolute deadlines and
+session/reaping reserve before granting a window. No40SSH feasibility is claimed.
+Scenarios `st58-lpar-memory-layout` and `st58-vios-page-table-ratios` prove only
+asserted configured values plus cleanup. OS400, controller current values,
+activation capacity and positive Linux/KVM runtime remain unevidenced by this arm.
+
 ### Linux management roles (C05, arm 53)
 
 The opt-in `lpar-linux-roles` arm creates one owned, inactive AIX/Linux fixture
