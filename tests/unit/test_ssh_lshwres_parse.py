@@ -65,9 +65,43 @@ async def test_hsc_code_is_read_from_stdout_when_stderr_is_empty():
         )
 
     assert hmc_error_code(raised.value) == "HSCL8012"
+    assert getattr(raised.value, "remote_refusal_code", None) == "HSCL8012"
 
 
 def test_hsc_code_is_absent_from_an_uncoded_refusal():
     """The missing -m refusal carries no HSCL code, so none is invented."""
     message = live_fixture("cli-lpar-no-m")["stdout"]
     assert hmc_error_code(HMCCLIError(f"SSH command failed: {message}")) is None
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        ("HSCLA4A0: refusal", "HSCLA4A0"),
+        ("banner\r\nHSCL1234 refusal", "HSCL1234"),
+        (b"HSCL1234 refusal", "HSCL1234"),
+        (b"\xffHSCL1234", None),
+        ("echoed name: HSCLA4A0", None),
+        ("HSCLA4A00 invalid code", None),
+        ("HSCLA4A0_ invalid code", None),
+    ],
+)
+def test_remote_refusal_code_is_anchored_in_process_response(response, expected):
+    import asyncssh
+
+    from hmcpctl.ssh.transport import _process_error
+
+    error = _process_error(
+        "mksyscfg -i 'name=part: HSCLA4A0'",
+        asyncssh.ProcessError(
+            env={},
+            command="name=part: HSCLA4A0",
+            subsystem=None,
+            exit_status=1,
+            exit_signal=None,
+            returncode=1,
+            stdout=response,
+            stderr="",
+        ),
+    )
+    assert getattr(error, "remote_refusal_code", None) == expected

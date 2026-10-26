@@ -19,6 +19,17 @@ from ..errors import HMCError
 class HMCCLIError(HMCError):
     """An HMC CLI operation failed or was refused before execution."""
 
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        body: str | None = None,
+        *,
+        remote_refusal_code: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code, body)
+        self.remote_refusal_code = remote_refusal_code
+
 
 #: What a declared secret value reads as in any diagnostic (ADR 0246).
 REDACTED: Final = "<redacted>"
@@ -80,9 +91,12 @@ async def run_hmc_command(
             )
         except HMCCLIError as error:
             message = _redact(str(error), declared)
+            code = error.remote_refusal_code
+            if code is not None and _redact(code, declared) != code:
+                code = None
     # Raised outside the handler so the error carries no __cause__/__context__:
     # the asyncssh exception repeats the command and remote output verbatim.
-    raise HMCCLIError(message)
+    raise HMCCLIError(message, remote_refusal_code=code)
 
 
 async def _run_hmc_command(
@@ -215,8 +229,27 @@ def _command_connection_error(cmd: str, error: OSError | ValueError) -> HMCCLIEr
 def _process_error(cmd: str, error: asyncssh.ProcessError) -> HMCCLIError:
     """Build a CLI error retaining the remote command's termination detail."""
     detail = error.stderr or error.stdout or str(error)
+    code = None
+    # Only a completed nonzero remote process can establish a coded refusal.
+    # Command echoes and transport diagnostics are not remote response evidence.
+    if (
+        error.exit_status is not None
+        and error.exit_status > 0
+        and not error.exit_signal
+    ):
+        for stream in (error.stderr, error.stdout):
+            response = (
+                stream.decode(errors="replace")
+                if isinstance(stream, bytes)
+                else stream or ""
+            )
+            match = re.search(r"(?:^|[\r\n])(HSCL[A-Z0-9]{4})\b", response)
+            if match:
+                code = match.group(1)
+                break
     return HMCCLIError(
-        f"SSH command {cmd!r} failed with {_process_termination(error)}: {detail.strip()}"
+        f"SSH command {cmd!r} failed with {_process_termination(error)}: {detail.strip()}",
+        remote_refusal_code=code,
     )
 
 
