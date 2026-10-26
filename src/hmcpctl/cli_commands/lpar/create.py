@@ -143,16 +143,6 @@ def lpars_create(
         "--security-policy",
         help="Inline strict policy JSON (64 KiB); signed/Linux enablement irreversible, Linux selection declares intent only",
     ),
-    max_virtual_slots: int | None = typer.Option(
-        None,
-        "--max-virtual-slots",
-        help="Maximum virtual I/O slots; required explicitly for serial input",
-    ),
-    virtual_serial_adapters: str | None = typer.Option(
-        None,
-        "--virtual-serial-adapters",
-        help=SERIAL_INPUT_HELP,
-    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
     hardware_mem_encryption: Annotated[
         bool | None,
@@ -209,6 +199,17 @@ def lpars_create(
             "--kvm-reserved-mem-percent",
             help="Exact finite reservation, at most two decimals; <=65536 canonical ASCII bytes; selecting zero also declares Linux intent; HMC decides numeric limits",
         ),
+    ] = None,
+    max_virtual_slots: Annotated[
+        int | None,
+        typer.Option(
+            "--max-virtual-slots",
+            help="Maximum virtual I/O slots; required explicitly for serial input",
+        ),
+    ] = None,
+    virtual_serial_adapters: Annotated[
+        str | None,
+        typer.Option("--virtual-serial-adapters", help=SERIAL_INPUT_HELP),
     ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.

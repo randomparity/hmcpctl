@@ -198,16 +198,6 @@ def vios_create(
         "--security-policy",
         help="Inline strict policy JSON (64 KiB); signed enablement irreversible; no guest/key proof",
     ),
-    max_virtual_slots: int | None = typer.Option(
-        None,
-        "--max-virtual-slots",
-        help="Maximum virtual I/O slots; required explicitly for serial input",
-    ),
-    virtual_serial_adapters: str | None = typer.Option(
-        None,
-        "--virtual-serial-adapters",
-        help=SERIAL_INPUT_HELP,
-    ),
     yes: bool = typer.Option(False, "--yes", "-y"),
     hardware_mem_encryption: Annotated[
         bool | None,
@@ -236,6 +226,17 @@ def vios_create(
             "--ppt-ratio",
             help="Advertised selected-system ratio; omission preserves defaults",
         ),
+    ] = None,
+    max_virtual_slots: Annotated[
+        int | None,
+        typer.Option(
+            "--max-virtual-slots",
+            help="Maximum virtual I/O slots; required explicitly for serial input",
+        ),
+    ] = None,
+    virtual_serial_adapters: Annotated[
+        str | None,
+        typer.Option("--virtual-serial-adapters", help=SERIAL_INPUT_HELP),
     ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner."""
