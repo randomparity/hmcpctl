@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import StrictBool
 
 from hmcpctl.operations.lpar.ownership import set_lpar_ownership_description
@@ -11,6 +13,7 @@ from ..._app import (
     with_client,
 )
 from ...documents.lpar import LparReportingSettings, LparSettings
+from ...documents.lpar_accelerator import LparAcceleratorQos
 from ...documents.lpar_security_policy import (
     LparSecurityPolicy,
     SecurityPolicyResult,
@@ -30,6 +33,7 @@ from ...operations.affinity.ssh import (
     plan_system_memopt_score,
     set_minimum_affinity_policy,
 )
+from ...operations.lpar.accelerator import set_lpar_accelerator_qos
 from ...operations.lpar.configuration import (
     LparReportingSettingsResult,
     LparSettingsResult,
@@ -705,6 +709,43 @@ def hmc_configure_lpar_security_policy(
             hmc,
             lpar_name_or_uuid,
             settings,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="lpar.set_accelerator_qos", target_kind="lpar")
+def hmc_set_lpar_accelerator_qos(
+    lpar_name_or_uuid: str,
+    system_name_or_uuid: str,
+    change: LparAcceleratorQos,
+    profile: str | None = None,
+    ownership_override: bool = False,
+) -> dict[str, Any]:
+    """Set native GZIP accelerator QoS once and independently observe the result.
+
+    The HMC decides target-specific limits. QoS zero is an explicit quantity,
+    never an inferred reset or no-op. Omitted wait/detail use HMC defaults;
+    wait zero disables the native deadline, while the SSH deadline still applies.
+    Force without active RMC requires an OS restart after a successful change.
+    completion_scope is native-current-and-pending, proving neither effective
+    guest runtime nor profile persistence. If workflow_completed is false, inspect
+    the target independently before acting; never automatically replay the request.
+
+    Args:
+        lpar_name_or_uuid: Contained partition name or UUID, including VIOS.
+        system_name_or_uuid: Selected containing managed system name or UUID.
+        change: Strict explicit QoS, optional wait minutes/detail 1..4 and force.
+        profile: Configured HMC connection profile, or environment default.
+        ownership_override: Operator-approved ownership bypass, recorded in the audit.
+    """
+    return with_client(
+        lambda hmc: set_lpar_accelerator_qos(
+            hmc,
+            lpar_name_or_uuid,
+            change,
             system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         ),

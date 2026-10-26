@@ -451,6 +451,13 @@
       "observed_at": "2026-10-08T18:52:55Z"
     },
     {
+      "operation": "lpar.set_accelerator_qos",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.set_description",
       "implementation": "implemented",
       "verification": "stale",
