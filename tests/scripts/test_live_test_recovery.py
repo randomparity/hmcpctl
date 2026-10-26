@@ -7,12 +7,15 @@ every case rather than one.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import shlex
 import sys
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import click
 import pytest
@@ -37,6 +40,202 @@ _DRC = "21010020"
 _BASELINE = "none"
 #: The one profile read ADR 0165 Decision 1 admits, as a literal.
 _PROFILE_READ = f"lssyscfg -r prof -m {_SYSTEM} -F lpar_name,name,io_slots --header"
+
+
+@pytest.fixture
+def unarmed_creation_results(monkeypatch, tmp_path, request):
+    """Use the real ST58 arm and runner writer; replace only the MCP boundary."""
+    from live_test import config as settings
+    from live_test import creation_memory_layout as arm
+
+    from hmcpctl.config import HMCConfig
+
+    @asynccontextmanager
+    async def served_client():
+        yield object()
+
+    def no_hmc(*_args, **_kwargs):
+        pytest.fail("unarmed ST58 must not construct an HMC client")
+
+    monkeypatch.setattr(arm, "HMCClient", no_hmc)
+    monkeypatch.setattr(recovery.runner, "served_client", served_client)
+    monkeypatch.setattr(recovery.runner, "served_schemas", AsyncMock(return_value={}))
+    emitted = []
+    original_emit = recovery.runner.evidence.emit_observations
+
+    def emit(state, *args):
+        emitted.extend(state.observations)
+        return original_emit(state, *args)
+
+    monkeypatch.setattr(recovery.runner.evidence, "emit_observations", emit)
+    destination = tmp_path / "results.json"
+    config = settings.LiveTestConfig(**getattr(request, "param", {}))
+    assert (
+        asyncio.run(
+            recovery.runner.main(
+                group=arm.GROUP,
+                results_path=str(destination),
+                config=config,
+                hmc_config=HMCConfig.from_mapping({}),
+            )
+        )
+        == 0
+    )
+    assert not emitted
+    assert not destination.with_name("results-observations.json").exists()
+    document = json.loads(destination.read_text())
+    assert set(document) == {"run", "config", "hmc", "artifacts", "results"}
+    assert document["artifacts"] == dataclasses.asdict(settings.LiveTestArtifacts())
+    assert len(document["results"]) == 1
+    assert document["results"][0]["data"] == "None"
+    assert document["results"][0]["result"] == "skipped"
+    return destination, document
+
+
+@pytest.mark.parametrize(
+    "unarmed_creation_results",
+    [
+        {},
+        {"creation_memory_layout_hpt_ratio": "1:128"},
+        {"creation_memory_layout_fresh_vios_delete_authorized": True},
+        {
+            "creation_memory_layout_fresh_vios_delete_authorized": True,
+            "creation_memory_layout_hpt_ratio": "1:128",
+        },
+        {
+            "creation_memory_layout_hpt_ratio": "1:128",
+            "creation_memory_layout_ppt_ratio": "1:256",
+        },
+    ],
+    indirect=True,
+)
+def test_finished_unarmed_creation_recovery_is_skipped(
+    unarmed_creation_results, monkeypatch, capsys
+):
+    destination, document = unarmed_creation_results
+    original = destination.read_bytes()
+    capsys.readouterr()
+
+    def no_checks(*_args, **_kwargs):
+        pytest.fail("unarmed recovery must not bootstrap or read an HMC")
+
+    bootstrap = Mock(return_value=False)
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", bootstrap)
+    monkeypatch.setattr(recovery, "_run_checks", no_checks)
+    assert recovery.main(["--results", str(destination)]) == 0
+    bootstrap.assert_not_called()
+    output = capsys.readouterr()
+    assert "SKIPPED" in output.out
+    assert "no fixture work" in output.out
+    assert "not baseline, configured-value or runtime proof" in output.out
+    assert "CLEAN" not in output.out + output.err
+    assert destination.read_bytes() == original
+    assert json.loads(original) == document
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("run", "partial"), True),
+        (("run", "partial"), None),
+        (("run", "partial"), 0),
+        (("run", "partial"), "missing"),
+        (("run", "finished"), "missing"),
+        (("run", "finished"), None),
+        (("run", "finished"), "unfinished"),
+        (("run", "finished"), "2026-10-25T12:00:00"),
+        (("run", "tested_commit"), "missing"),
+        (("run", "tested_commit"), "not-a-commit"),
+        (("run", "tree_clean"), "missing"),
+        (("run", "schema_version"), None),
+        (("run", "detach_probe"), True),
+        (("run", "group"), "all"),
+        (("run", "subtasks"), [58, 1]),
+        (("run", "subtasks"), [58, 58]),
+        (("run", "subtasks"), [58.0]),
+        (("run",), "missing"),
+        (("artifacts", "creation_memory_layout"), "missing"),
+        (("artifacts", "creation_memory_layout"), None),
+        (("artifacts", "creation_memory_layout"), {"phase": "intent"}),
+        (("artifacts", "system_uuid"), "prior-system"),
+        (("artifacts", "lp3_baseline"), {"attempted": True}),
+        (("artifacts", "test_user_uuid"), "prior-user"),
+        (("artifacts",), []),
+        (("config", "creation_memory_layout_hpt_ratio"), "bad token"),
+        (("config", "creation_memory_layout_ppt_ratio"), "bad token"),
+        (("config", "creation_memory_layout_fresh_vios_delete_authorized"), "false"),
+        (("config",), {}),
+        (("hmc",), None),
+        (("hmc", "port"), "443"),
+        (("results",), []),
+        (("results", 0, "subtask"), 58.0),
+        (("results", 0, "tool"), "other"),
+        (("results", 0, "status"), "PASS"),
+        (("results", 0, "status"), "FAIL"),
+        (("results", 0, "data"), None),
+        (("results", 0, "data"), {}),
+        (("results", 0, "data"), "missing"),
+        (("results", 0, "timestamp"), None),
+        (("results", 0, "timestamp"), "unfinished"),
+        (("results", 0, "extra"), True),
+        (
+            ("results", 0, "note"),
+            "requires named group, HMC configuration and durable checkpoint",
+        ),
+        (("results", 0, "note"), "prior invocation/restored journal refused"),
+        (("results", 0, "note"), ""),
+        (("results", 0, "result"), "passed"),
+        (("extra",), True),
+    ],
+)
+def test_unarmed_creation_recovery_refuses_incomplete_or_contradictory_record(
+    unarmed_creation_results, monkeypatch, capsys, path, value
+):
+    destination, document = unarmed_creation_results
+    changed = deepcopy(document)
+    parent = changed
+    for key in path[:-1]:
+        parent = parent[key]
+    if value == "missing":
+        del parent[path[-1]]
+    else:
+        parent[path[-1]] = value
+    destination.write_text(json.dumps(changed))
+    original = destination.read_bytes()
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "_run_checks", AsyncMock(return_value=[]))
+    capsys.readouterr()
+    assert recovery.main(["--results", str(destination)]) == 2
+    output = capsys.readouterr()
+    assert "CLEAN" not in output.out + output.err
+    assert "SKIPPED" not in output.out
+    assert destination.read_bytes() == original
+
+
+@pytest.mark.parametrize("fault", ["armed", "extra-skip", "extra-attempt"])
+def test_unarmed_creation_recovery_refuses_armed_or_extra_work(
+    unarmed_creation_results, monkeypatch, capsys, fault
+):
+    destination, document = unarmed_creation_results
+    if fault == "armed":
+        document["config"].update(
+            creation_memory_layout_hpt_ratio="1:128",
+            creation_memory_layout_ppt_ratio="1:256",
+            creation_memory_layout_fresh_vios_delete_authorized=True,
+        )
+    else:
+        row = dict(document["results"][0])
+        if fault == "extra-attempt":
+            row.update(tool="hmc_create_lpar", status="FAIL", data="unknown")
+        document["results"].append(row)
+    destination.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "_run_checks", AsyncMock(return_value=[]))
+    capsys.readouterr()
+    assert recovery.main(["--results", str(destination)]) == 2
+    output = capsys.readouterr()
+    assert "CLEAN" not in output.out + output.err
+    assert "SKIPPED" not in output.out
 
 
 def _readback(io_slots: str, profile: str = "default") -> str:
@@ -1487,6 +1686,7 @@ async def test_lpar_config_unreadable_listing_is_not_clean():
         (47, "lpar-settings"),
         (49, "lpar-physical-io"),
         (50, "lpar-memory-quantities"),
+        (56, "lpar-processor-quantities"),
     ],
 )
 def test_lpar_config_run_is_witnessed(tmp_path, monkeypatch, capsys, subtask, group):
@@ -2323,6 +2523,318 @@ def test_system_profiles_recovery(tmp_path, monkeypatch, capsys):
     check.assert_awaited_once()
 
 
+def _creation_memory_document(phase="complete"):
+    from live_test import config as settings
+
+    from hmcpctl.config import HMCConfig
+
+    system = "00000000-0000-0000-0000-000000000001"
+    journal = {
+        "invocation_id": "a" * 32,
+        "candidate_commit": "b" * 40,
+        "system_uuid": system,
+        "hmc_identity": recovery.runner._hmc_identity(HMCConfig.from_mapping({})),
+        "phase": phase,
+        "lpar_name": "hmcpctl-live-lpar-deadbeef",
+        "lpar_token": "lparcfg-deadbeef",
+        "lpar_uuid": None,
+        "vios_name": "hmcpctl-live-c06-vios-cafefeed",
+        "vios_uuid": None,
+        "preabsence": {"lpar": True, "vios": True},
+        "create_returned": {"lpar": False, "vios": False},
+        "fresh_vios_delete_authorized": True,
+        "requested": {
+            "lpar": {
+                "min_num_huge_pages": 0,
+                "desired_num_huge_pages": 0,
+                "max_num_huge_pages": 0,
+                "hpt_ratio": "1:128",
+                "ppt_ratio": "1:256",
+                "kvm_reserved_mem_percent": "0",
+            },
+            "vios": {"hpt_ratio": "1:128", "ppt_ratio": "1:256"},
+        },
+        "baseline": {
+            "pools": {
+                "partitions": [],
+                "available_processing_units": "10.0",
+                "available_memory_mib": "8192",
+            },
+            "vios": [],
+        },
+        "outcome": {"lpar": "not-attempted", "vios": "not-attempted"},
+        "deletion": {"lpar": "confirmed-absent", "vios": "confirmed-absent"},
+    }
+    artifacts = dataclasses.asdict(
+        settings.LiveTestArtifacts(creation_memory_layout=journal)
+    )
+    return {
+        "run": {
+            "group": "creation-memory-layout",
+            "subtasks": [58],
+            "tested_commit": "b" * 40,
+        },
+        "hmc": journal["hmc_identity"],
+        "config": json.loads(json.dumps(dataclasses.asdict(settings.LiveTestConfig()))),
+        "artifacts": artifacts,
+        "results": [],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "preflight",
+        "lpar-create-pending",
+        "lpar-create-returned",
+        "lpar-delete-pending",
+        "lpar-deleted",
+        "vios-create-pending",
+        "vios-create-returned",
+        "vios-delete-pending",
+        "vios-deleted",
+        "complete",
+        "stopped-uncertain",
+    ],
+)
+@pytest.mark.parametrize(
+    "fault", ["", "orphan", "foreign", "system", "unreadable", "baseline"]
+)
+async def test_creation_memory_recovery_all_phases_are_read_only(
+    monkeypatch, phase, fault
+):
+    document = _creation_memory_document(phase)
+    inputs = recovery.creation_memory_layout_inputs_from_document(document, [58])
+    from hmcpctl.config import HMCConfig
+
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+    seen = []
+
+    async def call(tool, **arguments):
+        recovery.guard_read_only(tool, arguments)
+        seen.append(tool)
+        if fault == "unreadable":
+            return "FAIL", None
+        if tool == "hmc_get_system":
+            return "PASS", {
+                "UUID": "00000000-0000-0000-0000-000000000009"
+                if fault == "system"
+                else inputs.journal["system_uuid"],
+                "Resource": {"SystemName": "canonical-system"},
+            }
+        if tool == "hmc_list_vios":
+            return "PASS", [] if fault != "orphan" else [
+                {
+                    "UUID": "00000000-0000-0000-0000-000000000003",
+                    "Resource": {"PartitionName": "hmcpctl-live-c06-vios-cafefeed"},
+                }
+            ]
+        command = arguments["cmd"]
+        if command.endswith("-F name"):
+            return "PASS", "foreign" if fault == "baseline" else ""
+        return "PASS", "10.0" if command.endswith(
+            "curr_avail_sys_proc_units"
+        ) else "8192,256"
+
+    if fault == "foreign":
+        inputs.journal["hmc_identity"]["host"] = "foreign.test"
+    if fault in {"foreign", "system", "unreadable"}:
+        with pytest.raises(recovery.StateUnreadable):
+            await recovery.check_creation_memory_layout(call, inputs)
+    else:
+        findings = await recovery.check_creation_memory_layout(call, inputs)
+        assert bool(findings) == (
+            phase != "complete" or fault in {"orphan", "baseline"}
+        )
+    assert set(seen) <= {"hmc_get_system", "hmc_run_command", "hmc_list_vios"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uppercase", [False, True])
+async def test_creation_memory_recovery_compares_canonical_observed_uuid(
+    monkeypatch, uppercase
+):
+    from hmcpctl.config import HMCConfig
+
+    document = _creation_memory_document()
+    journal = document["artifacts"]["creation_memory_layout"]
+    system = "aaaaaaaa-0000-0000-0000-000000000001"
+    vios = "bbbbbbbb-0000-0000-0000-000000000002"
+    journal["system_uuid"] = system
+    journal["baseline"]["vios"] = [{"uuid": vios, "name": "existing"}]
+    inputs = recovery.creation_memory_layout_inputs_from_document(document, [58])
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+
+    async def call(tool, **arguments):
+        recovery.guard_read_only(tool, arguments)
+        if tool == "hmc_get_system":
+            return "PASS", {
+                "UUID": system.upper() if uppercase else system,
+                "Resource": {"SystemName": "canonical-system"},
+            }
+        if tool == "hmc_list_vios":
+            return "PASS", [
+                {
+                    "UUID": vios.upper() if uppercase else vios,
+                    "Resource": {"PartitionName": "existing"},
+                }
+            ]
+        command = arguments["cmd"]
+        if command.endswith("-F name"):
+            return "PASS", ""
+        return "PASS", "10.0" if command.endswith(
+            "curr_avail_sys_proc_units"
+        ) else "8192,256"
+
+    assert await recovery.check_creation_memory_layout(call, inputs) == []
+
+
+@pytest.mark.parametrize("field", ["system_uuid", "lpar_uuid", "vios_uuid", "baseline"])
+def test_creation_memory_saved_uuid_case_is_still_strict(field):
+    from live_test import config as settings
+
+    artifacts = _creation_memory_document()["artifacts"]
+    identity = "AAAAAAAA-0000-0000-0000-000000000001"
+    journal = artifacts["creation_memory_layout"]
+    if field == "baseline":
+        journal["baseline"]["vios"] = [{"uuid": identity, "name": "existing"}]
+    else:
+        journal[field] = identity
+    with pytest.raises(ValueError, match="canonical UUID|VIOS baseline"):
+        settings.decode_artifacts(artifacts)
+
+
+def test_creation_memory_journal_unknown_keys_types_and_saved_grant_refuse():
+    from copy import deepcopy
+
+    from live_test import config as settings
+
+    original = _creation_memory_document()["artifacts"]
+    for key, value in [
+        ("unknown", 1),
+        ("phase", "invented"),
+        ("lpar_uuid", "invalid"),
+        ("fresh_vios_delete_authorized", "true"),
+        ("preabsence", {"lpar": True}),
+        ("baseline", {}),
+        ("requested", {}),
+        ("hmc_identity", {}),
+    ]:
+        artifacts = deepcopy(original)
+        artifacts["creation_memory_layout"][key] = value
+        with pytest.raises((ValueError, TypeError)):
+            settings.decode_artifacts(artifacts)
+    assert (
+        settings.decode_artifacts(original).creation_memory_layout[
+            "fresh_vios_delete_authorized"
+        ]
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
+    tmp_path, monkeypatch
+):
+    from live_test import baseline
+    from live_test import config as settings
+
+    from hmcpctl.config import HMCConfig
+
+    config = settings.LiveTestConfig()
+    hmc = HMCConfig.from_mapping({"host": "hmc.test"})
+    tables = {name: [] for name in baseline.TABLES}
+    tables.update(
+        system=[
+            {
+                "name": config.system_name,
+                "type_model": "9009-42A",
+                "serial_num": "REDACTED",
+            }
+        ],
+        partitions=[
+            {
+                "lpar_id": "1",
+                "name": "vios",
+                "lpar_env": "vioserver",
+                "state": "Not Activated",
+            }
+        ],
+        vios=[
+            {"id": "1", "name": "vios", "uuid": "00000000-0000-0000-0000-000000000003"}
+        ],
+    )
+    snapshot = {
+        "version": 1,
+        "scope": {"host": "hmc.test", "system": config.system_name, "vios_ids": [1]},
+        "tables": tables,
+    }
+    artifacts = settings.LiveTestArtifacts(
+        vios_partition_id=1,
+        lp3_baseline={
+            "round2_snapshot": snapshot,
+            "description": "baseline",
+            "proc_compat": {"profile": "default_profile", "profile_mode": "default"},
+        },
+    )
+    document = {
+        "run": {"group": "round2"},
+        "config": json.loads(json.dumps(dataclasses.asdict(config))),
+        "hmc": recovery.runner._hmc_identity(hmc),
+        "artifacts": dataclasses.asdict(artifacts),
+        "results": [],
+    }
+    for key in (
+        "creation_memory_layout_hpt_ratio",
+        "creation_memory_layout_ppt_ratio",
+        "creation_memory_layout_fresh_vios_delete_authorized",
+    ):
+        del document["config"][key]
+    del document["artifacts"]["creation_memory_layout"]
+    inputs = recovery.round2_inputs_from_document(
+        document, recovery.runner.SUBTASK_GROUPS["round2"]
+    )
+    assert inputs.snapshot == snapshot
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(document))
+    state = recovery.runner.RunState(config=config)
+    assert recovery.runner._restore_artifacts_from_results(state, hmc, str(path))
+    assert state.artifacts.creation_memory_layout == {}
+    assert recovery.creation_memory_layout_inputs_from_document(document, [1]) is None
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: hmc)
+    capture = AsyncMock(return_value=snapshot)
+    monkeypatch.setattr(recovery.independent_baseline, "capture", capture)
+
+    async def call(tool, **arguments):
+        recovery.guard_read_only(tool, arguments)
+        return (
+            "PASS",
+            inputs.description
+            if tool == "hmc_get_lpar_description"
+            else inputs.compatibility,
+        )
+
+    assert await recovery.check_round2(call, inputs) == []
+    capture.assert_awaited_once_with(hmc, config.system_name, [1])
+
+
+@pytest.mark.parametrize("value", [None, [], {"unknown": True}])
+def test_creation_memory_artifact_explicit_malformed_values_never_default(value):
+    from live_test import config as settings
+
+    artifacts = _creation_memory_document()["artifacts"]
+    artifacts["creation_memory_layout"] = value
+    with pytest.raises((ValueError, TypeError)):
+        settings.decode_artifacts(artifacts)
+    artifacts = _creation_memory_document()["artifacts"]
+    artifacts["unknown"] = None
+    with pytest.raises(ValueError):
+        settings.decode_artifacts(artifacts)
+
+
 @pytest.mark.parametrize(
     "phase",
     [
@@ -2386,7 +2898,7 @@ def test_sharing_recovery_refuses_unreadable_system_before_bootstrap(
 
 
 def test_sharing_recovery_keeps_legacy_decoder():
-    for subtask in (39, 47, 48, 49, 50, 51, 52, 53, 55):
+    for subtask in (39, 47, 48, 49, 50, 51, 52, 53, 55, 56, 58, 59):
         inputs = recovery.lpar_config_inputs_from_document(
             {"config": {"system_name": _SYSTEM}}, [subtask]
         )

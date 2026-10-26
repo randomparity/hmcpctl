@@ -84,6 +84,9 @@ from .cli_commands.lpar import (
     modify as lpar_modify,
 )
 from .cli_commands.lpar import (
+    processors as lpar_processors,
+)
+from .cli_commands.lpar import (
     profiles as lpar_profiles,
 )
 from .cli_commands.lpar import (
@@ -117,6 +120,7 @@ def _register_commands() -> None:
         (lpar_config, lpars_app),
         (lpar_modify, lpars_app),
         (lpar_memory, lpars_app),
+        (lpar_processors, lpars_app),
         (lpar_profiles, lpars_app),
         (lpar_provision, lpars_app),
         (memory_pools, memory_pools_app),
@@ -145,6 +149,7 @@ def _register_commands() -> None:
         lpar_config: "Configuration",
         lpar_modify: "Configuration",
         lpar_memory: "Configuration",
+        lpar_processors: "Configuration",
         lpar_profiles: "Configuration",
     }
     for module, group in registrations:

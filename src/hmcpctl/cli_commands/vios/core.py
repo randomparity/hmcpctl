@@ -18,6 +18,7 @@ from hmcpctl.operations.lpar.security_policy import (
 )
 
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
 from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
@@ -209,8 +210,32 @@ def vios_create(
             help="Hardware memory expansion access; omitted preserves defaults",
         ),
     ] = None,
+    hpt_ratio: Annotated[
+        str | None,
+        typer.Option(
+            "--hpt-ratio",
+            help="Advertised selected-system ratio; omission preserves defaults",
+        ),
+    ] = None,
+    ppt_ratio: Annotated[
+        str | None,
+        typer.Option(
+            "--ppt-ratio",
+            help="Advertised selected-system ratio; omission preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner."""
+    try:
+        layout = LparMemoryLayout(
+            hpt_ratio=hpt_ratio,
+            ppt_ratio=ppt_ratio,
+        )
+        layout.validate_creation("Virtual IO Server")
+    except ValueError as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="memory layout"
+        ) from None
     policy = load_security_policy(security_policy)
     try:
         policy.validate_creation("Virtual IO Server")
@@ -250,6 +275,7 @@ def vios_create(
             security_policy=policy,
             hardware_mem_encryption=hardware_mem_encryption,
             hardware_mem_expansion=hardware_mem_expansion,
+            memory_layout=layout,
         )
     )
     print_json(result)

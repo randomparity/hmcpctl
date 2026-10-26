@@ -10,6 +10,7 @@ from ..._app import (
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources
 from ...documents.lpar_memory import LparMemoryChange, LparMemoryMove
+from ...documents.lpar_processors import LparProcessorChange
 from ...jobs import BootMode, PowerOnKeylock, PowerOnOperationType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
 from ...operations.lpar.activation import (
@@ -26,6 +27,7 @@ from ...operations.lpar.decommission import DecommissionResult, decommission_lpa
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
 from ...operations.lpar.memory import change_lpar_memory
 from ...operations.lpar.memory_move import move_lpar_memory
+from ...operations.lpar.processors import change_lpar_processors
 from ...tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()
@@ -137,11 +139,21 @@ def hmc_dlpar_proc(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
+    change: LparProcessorChange | None = None,
 ) -> dict[str, Any] | None:
-    """Update processor resources in an LPAR's current configuration.
+    """Change absolute processor resources or native current-processor quantities.
+
+    Choose resources or change. Native change adds, removes or sets current
+    quantities: processors are whole dedicated CPUs or shared virtual processors;
+    processing_units are shared entitlement in exact hundredths. It requires a
+    managed system and independently verifies CPU and memory readback. Shutdown
+    reduction below minimum or set zero clears CPU AND memory assignments.
+    Explicit force permits the documented no-RMC case with deferred restart effect.
+    Partial/unverified outcomes have workflow_completed=false; never replay them.
+    Native change neither writes a profile nor switches mode, pool, sharing or weight.
 
     lpar_name_or_uuid: accepts either a PartitionName or a UUID.
-    Reads the whole partition and writes it back under If-Match with only
+    The resources mode reads the whole partition and writes it back under If-Match with only
     the fields you pass changed. For shared partitions, procs are processing
     units (may be fractional, e.g. 0.5); vcpus are virtual processor counts
     (ints). For dedicated partitions, procs are whole CPUs and vcpus and
@@ -167,7 +179,28 @@ def hmc_dlpar_proc(
             owning system is discovered for the ownership check.
         ownership_override: Bypass ownership rejection only after explicit
             operator approval.
+        change: Native current-quantity request; requires system_name_or_uuid and
+            empty resources. processors are whole CPUs/vCPUs; processing_units
+            are shared entitlement. No replay, compensation or activation.
     """
+
+    if change is not None:
+        if resources != LparResources():
+            raise ValueError("Choose either resources or change for processor updates")
+        if not system_name_or_uuid or not system_name_or_uuid.strip():
+            raise ValueError(
+                "system_name_or_uuid is required for native processor quantities"
+            )
+        return with_client(
+            lambda hmc: change_lpar_processors(
+                hmc,
+                lpar_name_or_uuid,
+                change,
+                system_name_or_uuid=system_name_or_uuid,
+                ownership_override=ownership_override,
+            ),
+            profile=profile,
+        )
 
     return with_client(
         lambda hmc: set_lpar_processors(

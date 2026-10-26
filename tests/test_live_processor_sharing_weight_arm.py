@@ -460,12 +460,23 @@ def test_sharing_runner_registration():
     assert arm.SUBTASK == 59 and arm.GROUP == GROUP
     assert runner.SUBTASKS.get(59) is arm.exercise_processor_sharing_weight
     assert runner.SUBTASK_GROUPS.get(GROUP) == [59]
-    assert 59 not in runner.SUBTASK_GROUPS["all"]
+    for subtask, group in (
+        (56, "lpar-processor-quantities"),
+        (58, "creation-memory-layout"),
+        (59, GROUP),
+    ):
+        assert subtask in runner.SUBTASKS
+        assert runner.SUBTASK_GROUPS[group] == [subtask]
+        assert subtask not in runner.SUBTASK_GROUPS["all"]
+    assert 57 not in runner.SUBTASKS
     assert runner._parse_arguments(["--group", GROUP]).group == GROUP
 
 
 @pytest.mark.asyncio
-async def test_sharing_default_dispatch_excludes_59(monkeypatch, tmp_path):
+@pytest.mark.parametrize("group", [None, "all"])
+async def test_sharing_default_dispatch_excludes_opt_in_arms(
+    monkeypatch, tmp_path, group
+):
     # Run the real dispatcher while replacing its transport boundary and each other arm.
     arm = arm_module()
     seen = []
@@ -474,7 +485,9 @@ async def test_sharing_default_dispatch_excludes_59(monkeypatch, tmp_path):
         seen.append(1)
 
     async def forbidden(client, state):
-        raise AssertionError("ST59 was dispatched without its named group")
+        raise AssertionError(
+            "An opt-in processor/creation arm was dispatched without its named group"
+        )
 
     @asynccontextmanager
     async def client(*args, **kwargs):
@@ -482,7 +495,11 @@ async def test_sharing_default_dispatch_excludes_59(monkeypatch, tmp_path):
 
     monkeypatch.setattr(runner, "served_client", client)
     monkeypatch.setattr(runner, "served_schemas", AsyncMock(return_value={}))
-    monkeypatch.setattr(runner, "SUBTASKS", {1: task, 59: forbidden})
+    monkeypatch.setattr(
+        runner,
+        "SUBTASKS",
+        dict.fromkeys(range(26), task) | dict.fromkeys((56, 58, 59), forbidden),
+    )
     monkeypatch.setattr(
         runner.scenario_validation, "validate_declared_outcomes", lambda _: None
     )
@@ -493,10 +510,11 @@ async def test_sharing_default_dispatch_excludes_59(monkeypatch, tmp_path):
             config=config.LiveTestConfig(),
             hmc_config=HMCConfig.from_mapping({}),
             results_path=str(tmp_path / "results.json"),
+            group=group,
         )
         == 0
     )
-    assert seen == [1]
+    assert seen == [1] * 26
 
 
 @pytest.mark.asyncio

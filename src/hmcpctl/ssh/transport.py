@@ -19,6 +19,17 @@ from ..errors import HMCError
 class HMCCLIError(HMCError):
     """An HMC CLI operation failed or was refused before execution."""
 
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        body: str | None = None,
+        *,
+        remote_refusal_code: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code, body)
+        self.remote_refusal_code = remote_refusal_code
+
 
 #: What a declared secret value reads as in any diagnostic (ADR 0246).
 REDACTED: Final = "<redacted>"
@@ -63,39 +74,65 @@ async def run_hmc_command(
     *,
     include_stderr: bool = False,
     secrets: Collection[str] = (),
+    max_output_bytes: int | None = None,
 ) -> str:
     """Execute one command, optionally retaining labeled successful stderr.
 
     *secrets* are values *cmd* carries that no diagnostic may show (ADR 0246):
     the command runs unchanged, and every error and ``asyncssh`` log record the
     call produces reads each of them, raw or ``shlex.quote``d, as :data:`REDACTED`.
+    A positive *max_output_bytes* bounds combined stdout/stderr payload, including
+    discarded stderr; None preserves the existing collecting path.
     """
+    if max_output_bytes is not None and (
+        type(max_output_bytes) is not int or max_output_bytes <= 0
+    ):
+        raise ValueError("max_output_bytes must be a positive integer or None")
     declared = _validated_secrets(secrets)
     if not declared:
-        return await _run_hmc_command(config, cmd, include_stderr, shown=cmd)
+        return await _run_hmc_command(
+            config, cmd, include_stderr, shown=cmd, max_output_bytes=max_output_bytes
+        )
     with _asyncssh_log_redaction(declared):
         try:
             return await _run_hmc_command(
-                config, cmd, include_stderr, shown=_redact(cmd, declared)
+                config,
+                cmd,
+                include_stderr,
+                shown=_redact(cmd, declared),
+                max_output_bytes=max_output_bytes,
             )
         except HMCCLIError as error:
             message = _redact(str(error), declared)
+            code = error.remote_refusal_code
+            if code is not None and _redact(code, declared) != code:
+                code = None
     # Raised outside the handler so the error carries no __cause__/__context__:
     # the asyncssh exception repeats the command and remote output verbatim.
-    raise HMCCLIError(message)
+    raise HMCCLIError(message, remote_refusal_code=code)
 
 
 async def _run_hmc_command(
-    config: HMCConfig, cmd: str, include_stderr: bool, *, shown: str
+    config: HMCConfig,
+    cmd: str,
+    include_stderr: bool,
+    *,
+    shown: str,
+    max_output_bytes: int | None = None,
 ) -> str:
     """Run *cmd*, naming it as *shown* in every error this builds."""
     connect_kwargs = _connect_kwargs(config)
     try:
         async with asyncio.timeout(config.ssh_timeout):
             async with asyncssh.connect(**connect_kwargs) as connection:
-                result = await connection.run(
-                    cmd, check=True, timeout=config.ssh_timeout
-                )
+                if max_output_bytes is None:
+                    result = await connection.run(
+                        cmd, check=True, timeout=config.ssh_timeout
+                    )
+                else:
+                    result = await _run_bounded_command(
+                        connection, cmd, max_output_bytes, shown=shown
+                    )
                 stdout = _command_stdout(result.stdout)
                 stderr = _command_stdout(result.stderr) if include_stderr else ""
                 if stderr:
@@ -107,13 +144,106 @@ async def _run_hmc_command(
                     )
                 return stdout
     except TimeoutError as exc:
-        raise _command_timeout_error(config, shown) from exc
+        error = _command_timeout_error(config, shown)
+        if max_output_bytes is not None:
+            error = HMCCLIError(
+                f"{error} Command completion is unknown; read back before retrying."
+            )
+        raise error from exc
     except (OSError, ValueError) as exc:
         raise _command_connection_error(shown, exc) from exc
     except asyncssh.ProcessError as exc:
         raise _process_error(shown, exc) from exc
     except asyncssh.Error as exc:
         raise _asyncssh_error(exc) from exc
+
+
+async def _run_bounded_command(
+    connection: asyncssh.SSHClientConnection,
+    cmd: str,
+    max_output_bytes: int,
+    *,
+    shown: str,
+) -> asyncssh.SSHCompletedProcess:
+    """Retain a finite aggregate payload without disabling native backpressure."""
+    process = None
+    readers: list[asyncio.Task[bytes]] = []
+    received = 0
+    aborted = False
+
+    async def read(reader: asyncssh.SSHReader[bytes]) -> bytes:
+        nonlocal received, aborted
+        chunks = bytearray()
+        while chunk := await reader.read(4096):
+            if received + len(chunk) > max_output_bytes:
+                if not aborted:
+                    connection.abort()
+                    aborted = True
+                raise HMCCLIError(
+                    f"SSH command {shown!r} exceeded {max_output_bytes} output bytes; "
+                    "completion is unknown. Read back before retrying."
+                )
+            received += len(chunk)
+            chunks.extend(chunk)
+        return bytes(chunks)
+
+    try:
+        process = await connection.create_process(
+            cmd, encoding=None, window=4096, max_pktsize=4096
+        )
+        readers = [
+            asyncio.create_task(read(stream))
+            for stream in (process.stdout, process.stderr)
+        ]
+        stdout_bytes, stderr_bytes = await asyncio.gather(*readers)
+        await process.wait_closed()
+        try:
+            stdout, stderr = stdout_bytes.decode("utf-8"), stderr_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HMCCLIError(
+                f"SSH command {shown!r} returned invalid UTF-8; completion is unknown. "
+                "Read back before retrying."
+            ) from None
+        if process.exit_status is None:
+            raise HMCCLIError(
+                f"SSH command {shown!r} supplied no exit status; completion is unknown. "
+                "Read back before retrying."
+            )
+        result = asyncssh.SSHCompletedProcess(
+            process.env,
+            process.command,
+            process.subsystem,
+            process.exit_status,
+            process.exit_signal,
+            process.returncode,
+            stdout,
+            stderr,
+        )
+        if process.exit_status:
+            raise asyncssh.ProcessError(
+                result.env,
+                result.command,
+                result.subsystem,
+                result.exit_status,
+                result.exit_signal,
+                result.returncode,
+                stdout,
+                stderr,
+            )
+        return result
+    except BaseException:
+        # Abort before leaving the connection context: its graceful exit can wait
+        # for a peer which is still writing or never acknowledges channel close.
+        if not aborted:
+            connection.abort()
+        if process is not None:
+            process.close()
+        raise
+    finally:
+        for task in readers:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
 
 
 def _validated_secrets(secrets: Collection[str]) -> tuple[str, ...]:
@@ -215,8 +345,27 @@ def _command_connection_error(cmd: str, error: OSError | ValueError) -> HMCCLIEr
 def _process_error(cmd: str, error: asyncssh.ProcessError) -> HMCCLIError:
     """Build a CLI error retaining the remote command's termination detail."""
     detail = error.stderr or error.stdout or str(error)
+    code = None
+    # Only a completed nonzero remote process can establish a coded refusal.
+    # Command echoes and transport diagnostics are not remote response evidence.
+    if (
+        error.exit_status is not None
+        and error.exit_status > 0
+        and not error.exit_signal
+    ):
+        for stream in (error.stderr, error.stdout):
+            response = (
+                stream.decode(errors="replace")
+                if isinstance(stream, bytes)
+                else stream or ""
+            )
+            match = re.search(r"(?:^|[\r\n])(HSCL[A-Z0-9]{4})\b", response)
+            if match:
+                code = match.group(1)
+                break
     return HMCCLIError(
-        f"SSH command {cmd!r} failed with {_process_termination(error)}: {detail.strip()}"
+        f"SSH command {cmd!r} failed with {_process_termination(error)}: {detail.strip()}",
+        remote_refusal_code=code,
     )
 
 

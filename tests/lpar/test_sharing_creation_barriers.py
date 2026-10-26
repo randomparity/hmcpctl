@@ -11,6 +11,7 @@ from hmcpctl.documents.lpar import (
     build_lpar_document,
     build_vios_document,
 )
+from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
 from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.provision import (
@@ -63,6 +64,8 @@ class _NoCreationReads:
         "rest-fallback",
         "all-resources",
         "native",
+        "lpar-layout",
+        "vios-layout",
         "vios",
         "vios-native",
         "preflight",
@@ -86,6 +89,9 @@ async def test_sharing_create_barrier(weight, route):
                 security_policy=LparSecurityPolicy(secure_boot=1)
                 if route == "vios-native"
                 else None,
+                memory_layout=LparMemoryLayout(hpt_ratio="1:128")
+                if route == "vios-layout"
+                else None,
             )
         elif route in {"preflight", "provision", "dry-run"}:
             request = ProvisionRequest(
@@ -107,6 +113,9 @@ async def test_sharing_create_barrier(weight, route):
                 settings=LparSettings(allow_perf_collection=True)
                 if route == "native"
                 else LparSettings(),
+                memory_layout=LparMemoryLayout(hpt_ratio="1:128")
+                if route == "lpar-layout"
+                else LparMemoryLayout(),
             )
             await create_and_stamp_lpar(hmc, "system", creation)
 

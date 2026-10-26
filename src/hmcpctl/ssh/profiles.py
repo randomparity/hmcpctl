@@ -20,6 +20,8 @@ async def get_lpar_description(
     config: HMCConfig,
     system_name: str,
     lpar_name: str,
+    *,
+    max_output_bytes: int | None = None,
 ) -> str:
     """Get the description field of *lpar_name* on *system_name* via SSH.
 
@@ -31,6 +33,8 @@ async def get_lpar_description(
         f"lssyscfg -r lpar -m {shlex.quote(system_name)} "
         f"--filter {shlex.quote(build_filter([('lpar_names', lpar_name)]))} -F description"
     )
+    if max_output_bytes is not None:
+        return await run_hmc_command(config, cmd, max_output_bytes=max_output_bytes)
     return await run_hmc_command(config, cmd)
 
 

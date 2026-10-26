@@ -1942,3 +1942,44 @@ async def test_sharing_outcome_before_uses_actual_fresh_callback(mock_hmc, autho
     assert result["before"]["configured"]["weight"] == 64
     assert result["before"]["current"]["weight"] == 64
     assert result["outcome"] == "applied"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale", [False, True])
+async def test_mcp_mixed_resources_keep_configured_rmw(
+    mock_hmc, authorized, monkeypatch, stale
+):
+    from hmcpctl.server_tools.lpar import lifecycle
+
+    after = _sharing_snapshot(
+        "0",
+        **{
+            f"{PPC}/SharedProcessorConfiguration/DesiredProcessingUnits": "0.7"
+            if stale
+            else "0.50",
+            f"{PPC}/SharedProcessorConfiguration/DesiredVirtualProcessors": "3.0",
+        },
+    )
+    _, post = _sharing_routes(mock_hmc, _sharing_snapshot(), after)
+    native = AsyncMock(side_effect=AssertionError("resources reached native mutation"))
+    monkeypatch.setattr(lifecycle, "change_lpar_processors", native)
+    async with HMCClient(make_config()) as hmc:
+        monkeypatch.setattr(lifecycle, "with_client", lambda fn, **kwargs: fn(hmc))
+        result = await lifecycle.hmc_dlpar_proc(
+            LPAR, LparResources(desired_procs=0.5, desired_vcpus=3, uncapped_weight=0)
+        )
+    assert post.call_count == 1
+    assert post.calls.last.request.headers["If-Match"] == ETAG
+    assert result["expected"]["configured"] == {
+        f"{PPC}/SharedProcessorConfiguration/DesiredProcessingUnits": "0.5",
+        f"{PPC}/SharedProcessorConfiguration/DesiredVirtualProcessors": "3",
+        f"{PPC}/SharedProcessorConfiguration/UncappedWeight": "0",
+        f"{PPC}/HasDedicatedProcessors": "false",
+    }
+    assert result["completion_scope"] == "current-configuration"
+    assert result["workflow_completed"] is not stale
+    assert result["configuration_verification"] == (
+        "mismatched" if stale else "matched"
+    )
+    assert result["runtime_verification"] == "matched"
+    native.assert_not_awaited()

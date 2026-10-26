@@ -25,6 +25,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   variants remain unevidenced on hardware
   ([#1780](https://github.com/randomparity/hmcpctl/issues/1780)).
 
+- Native LPAR processor add/remove/set quantities through `hmc_dlpar_proc(change=...)`
+  and `lpars processors` distinguish whole dedicated CPUs/shared virtual processors
+  from shared entitlement. Ownership, capacity and state checks precede mutation;
+  independent readback reports applied, partial or uncertain outcomes without replay
+  (#1778). The opt-in arm 56 has offline coverage; native quantity contexts remain
+  unverified on hardware. Existing absolute resource setters retain their behavior.
+
 - LPAR and VIOS creation through CLI/MCP accept optional strict booleans
   `hardware_mem_encryption` and `hardware_mem_expansion`, preserving omission and
   explicit false. Selected-system admission guards native creation; independent
