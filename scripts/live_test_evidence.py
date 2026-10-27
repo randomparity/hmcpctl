@@ -175,9 +175,73 @@ def _render_vios_ame_source(document: dict[str, Any]) -> str | None:
     return "\n".join(lines)
 
 
+def _render_vios_boot_source(document: dict[str, Any]) -> str | None:
+    run = document.get("run")
+    if (
+        not isinstance(run, dict)
+        or document.get("source_only") is not True
+        or run.get("group") != "vios-boot-source"
+        or run.get("subtasks") != []
+        or run.get("tree_clean") is not True
+        or type(run.get("partial")) is not bool
+        or type(document.get("schema_version")) is not int
+        or document["schema_version"] != 1
+    ):
+        return None
+    commit = run.get("tested_commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return None
+    cases = document.get("cases")
+    deletion = document.get("deletion")
+    outcomes = {"unobserved", "exact", "rejected", "mismatch", "unavailable", "unknown"}
+    executions = {"not-attempted", "intent", "acknowledged", "rejected", "unknown"}
+    if not isinstance(cases, list) or len(cases) > 8 or not isinstance(deletion, dict):
+        return None
+    observation = deletion.get("observation")
+    if (
+        not isinstance(observation, dict)
+        or not isinstance(observation.get("outcome"), str)
+        or observation["outcome"] not in outcomes
+        or not isinstance(deletion.get("execution"), str)
+        or deletion["execution"] not in executions
+    ):
+        return None
+    lines = [
+        "SOURCE ONLY — fixed VIOS pending-boot observations",
+        "",
+        f"Source revision: `{commit}`",
+        "",
+        "| Case | Observation |",
+        "| --- | --- |",
+    ]
+    for index, case in enumerate(cases):
+        if (
+            not isinstance(case, dict)
+            or type(case.get("index")) is not int
+            or case["index"] != index
+            or not isinstance(case.get("observation"), str)
+            or case["observation"] not in outcomes
+        ):
+            return None
+        lines.append(f"| {index + 1} | {case['observation']} |")
+    lines += [
+        "",
+        f"Cleanup: {deletion['execution']} / {observation['outcome']}",
+        "Interrupted/held" if run["partial"] else "Source observations completed",
+        "Independent recovery and session closeout remain private prerequisites.",
+    ]
+    return "\n".join(lines)
+
+
 def render(document: dict[str, Any]) -> str | None:
     """The Markdown matrix, or `None` when the document cannot be attributed."""
     run = document.get("run")
+    if (isinstance(run, dict) and run.get("group") == "vios-boot-source") or (
+        document.get("source_only") is True
+        and isinstance(run, dict)
+        and run.get("group") != "vios-ame-source"
+    ):
+        return _render_vios_boot_source(document)
     if document.get("source_only") is True or (
         isinstance(run, dict) and run.get("group") == "vios-ame-source"
     ):

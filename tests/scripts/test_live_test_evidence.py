@@ -449,3 +449,80 @@ def test_vios_source_empty_observations_remain_source_only():
     rendered = evidence.render(document)
     assert rendered is not None and "SOURCE ONLY" in rendered
     assert "TOTAL" not in rendered and "PASS" not in rendered
+
+
+def _boot_source_document():
+    return {
+        "schema_version": 1,
+        "source_only": True,
+        "run": {
+            "group": "vios-boot-source",
+            "subtasks": [],
+            "tested_commit": "a" * 40,
+            "tree_clean": True,
+            "partial": False,
+        },
+        "cases": [
+            {
+                "index": i,
+                "observation": "exact",
+                "record": "PRIVATE-SENTINEL",
+                "native_readback": "PRIVATE-SENTINEL",
+            }
+            for i in range(8)
+        ],
+        "deletion": {"execution": "acknowledged", "observation": {"outcome": "exact"}},
+        "results": [{"status": "PASS", "tool": "PRIVATE-SENTINEL"}],
+        "hmc": {"host": "PRIVATE-SENTINEL"},
+    }
+
+
+def test_boot_source_renderer_allowlist():
+    rendered = evidence.render(_boot_source_document())
+    assert rendered is not None and "SOURCE ONLY" in rendered
+    assert "PRIVATE-SENTINEL" not in rendered and "PASS" not in rendered
+    for i in range(1, 9):
+        assert f"| {i} | exact |" in rendered
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "schema",
+        "bool-index",
+        "order",
+        "group",
+        "flag",
+        "commit",
+        "partial",
+        "outcome",
+        "delete",
+        "run",
+        "cases",
+    ],
+)
+def test_boot_source_renderer_never_falls_through(fault):
+    d = _boot_source_document()
+    if fault == "schema":
+        d["schema_version"] = True
+    elif fault == "bool-index":
+        d["cases"][0]["index"] = False
+    elif fault == "order":
+        d["cases"].reverse()
+    elif fault == "group":
+        d["run"]["group"] = "dedicated"
+    elif fault == "flag":
+        d["source_only"] = False
+    elif fault == "commit":
+        d["run"]["tested_commit"] = "PRIVATE-SENTINEL"
+    elif fault == "partial":
+        d["run"]["partial"] = "PRIVATE-SENTINEL"
+    elif fault == "outcome":
+        d["cases"][0]["observation"] = "PRIVATE-SENTINEL"
+    elif fault == "delete":
+        d["deletion"]["observation"]["outcome"] = "PRIVATE-SENTINEL"
+    elif fault == "run":
+        d["run"] = None
+    elif fault == "cases":
+        d["cases"] = [None]
+    assert evidence.render(d) is None

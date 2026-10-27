@@ -137,10 +137,10 @@ phase, create, cases, deletion, snapshots, failure, transport, recovery. Unobser
 are explicit null/not-attempted, not fabricated defaults. run={group:"vios-boot-source",
 subtasks:[],tested_commit,tested_tree,tree_clean,imported_source_sha256,started,finished,partial}.
 fixture carries the packet fixture plus observed UUID/ID when positively confirmed.
-create/deletion={execution,record_sha256,identity,observation}; execution is one of
+create={execution,record_sha256,identity,observation,native_output}; deletion omits native_output; execution is one of
 not-attempted,intent,acknowledged,rejected,unknown. Deletion adds no native create record;
 record_sha256 is null for its fixed UUID route. cases contains at most8 ordered entries
-{index,literal_sha256,record,record_sha256,execution,native_readback,readback_sha256,
+{index,literal_sha256,record,record_sha256,execution,native_output,native_readback,readback_sha256,
 snapshot_index,observation}; observation is unobserved,exact,rejected,mismatch,unavailable,unknown.
 indices are0..7 internally; renderer prints1..8. snapshots retain the existing ame.snapshot
 shape and digest; native_readback retains complete bounded private raw text and parsed cells.
@@ -176,6 +176,7 @@ transport,closed}; logon/logoff in {not-entered,unknown,acknowledged,no-known-to
 {open,closed,unknown}; own_process_pid null unless an owned child remains. Closed requires
 acknowledged logon/logoff, closed HTTP, no owned child residue. A later read cannot prove a
 missing closeout. The schema records observations; it does not authenticate a hostile author.
+native_output is null unless command output was actually observed, otherwise exact text bounded to64KiB UTF-8 per command. Persist it privately before holding on unexpected successful output; it never reaches the source renderer. Operator explicitly approved this nested-field clarification; packet inputs, effects and phase budgets are unchanged.
 
 ## Resource allocation and target admission
 
