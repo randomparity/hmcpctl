@@ -8,6 +8,7 @@ import shlex
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
+from ..documents.lpar_creation_memory import LparCreationMemory
 from ..documents.lpar_hardware_memory import hardware_memory_pairs
 from ..documents.lpar_io import LparPhysicalIO
 from ..documents.lpar_memory_layout import LparMemoryLayout
@@ -46,6 +47,10 @@ _DEDICATED_SHARING_MODES = (
     "share_idle_procs_active",
     "share_idle_procs_always",
 )
+
+
+class _CreationMemorySubmissionError(HMCCLIError):
+    """A native C07 create requires scoped identity reconciliation."""
 
 
 class _LayoutCreateSubmissionError(HMCCLIError):
@@ -165,6 +170,7 @@ async def create_lpar_via_cli(
     hardware_mem_expansion: bool | None = None,
     memory_layout: LparMemoryLayout | None = None,
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
+    creation_memory: LparCreationMemory | None = None,
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -188,6 +194,11 @@ async def create_lpar_via_cli(
     processor mode's ``sharing_mode``. Omitted values take the defaults of
     :func:`complete_create_resources`, which the REST create uses too.
     """
+    if creation_memory is not None and not isinstance(
+        creation_memory, LparCreationMemory
+    ):
+        raise TypeError("creation_memory must be LparCreationMemory")
+    memory_pairs = creation_memory.pairs() if creation_memory is not None else []
     serial_value = validate_serial_input(virtual_serial_adapters, max_virtual_slots)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
@@ -215,6 +226,7 @@ async def create_lpar_via_cli(
         config_pairs.append(("profile_name", profile_name))
     config_pairs.extend(hardware_pairs)
     config_pairs.extend(layout_pairs)
+    config_pairs.extend(memory_pairs)
     config_pairs.extend(_lpar_resource_pairs(resources, max_virtual_slots))
     if partition_id is not None:
         config_pairs.append(("lpar_id", partition_id))
@@ -247,7 +259,9 @@ async def create_lpar_via_cli(
     try:
         return await run_hmc_command(config, cmd)
     except HMCCLIError as error:
-        if layout_pairs:
+        if memory_pairs:
+            code = error.remote_refusal_code
+        elif layout_pairs:
             code = error.remote_refusal_code
             layout_error = f"{code}: " if code else ""
             layout_error += (
@@ -257,6 +271,14 @@ async def create_lpar_via_cli(
             raise HMCCLIError(
                 f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
             ) from error
+    except Exception:
+        if not memory_pairs:
+            raise
+    if memory_pairs:
+        raise _CreationMemorySubmissionError(
+            "Native creation memory outcome requires scoped identity reconciliation",
+            remote_refusal_code=code,
+        )
     if layout_error is not None:
         raise _LayoutCreateSubmissionError(layout_error, remote_refusal_code=code)
     raise HMCCLIError(
