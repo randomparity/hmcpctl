@@ -7,11 +7,13 @@ from dataclasses import replace
 from hmcpctl.client.core import HMCClient
 
 from ...documents.lpar import validate_partition_type
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...errors import HMCError
 from ...resource_identity import resolve_system_uuid
+from ...ssh.lpar import complete_create_resources
 from .assignments import (
     LparPcieAssignments,
     LparPcieWorkflowResult,
@@ -32,6 +34,22 @@ async def create_lpar(
     assignments: LparPcieAssignments,
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
+    if not isinstance(creation.creation_memory, LparCreationMemory):
+        raise TypeError("creation_memory must be LparCreationMemory")
+    memory_requested = bool(creation.creation_memory.pairs())
+    if memory_requested and creation.keylock is not None:
+        raise ValueError("Creation memory cannot be combined with native keylock")
+    if creation.creation_memory.mem_mode == "shared":
+        resources = complete_create_resources(creation.resources)
+        if resources is None or resources.dedicated is not False:
+            raise ValueError("Shared memory requires known shared processor resources")
+        if (
+            creation.physical_io.io_slots
+            or creation.creation_sriov
+            or assignments.dedicated
+            or assignments.sriov
+        ):
+            raise ValueError("Shared memory cannot use direct physical I/O or SR-IOV")
     validate_serial_input(creation.virtual_serial_adapters, creation.max_virtual_slots)
     serial_requested = bool(creation.virtual_serial_adapters)
     if serial_requested and creation.keylock is not None:
@@ -57,7 +75,10 @@ async def create_lpar(
         )
     validate_partition_type(creation.partition_type)
     if (
-        roles_requested(creation.settings) or layout_requested or serial_requested
+        roles_requested(creation.settings)
+        or layout_requested
+        or serial_requested
+        or memory_requested
     ) and (assignments.dedicated or assignments.sriov):
         caps = await read_role_capabilities(
             hmc,
@@ -96,7 +117,11 @@ async def create_lpar(
         steps.append(created.physical_io_step)
     policy_requested = bool(creation.security_policy.pairs())
     if created.apply_step is not None and not (
-        policy_requested or hardware_requested or layout_requested or serial_requested
+        policy_requested
+        or hardware_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
     ):
         steps.append(created.apply_step)
     if created.settings_step is not None:
@@ -113,12 +138,22 @@ async def create_lpar(
         steps.append(created.memory_layout_step)
     if created.serial_step is not None:
         steps.append(created.serial_step)
+    if created.creation_memory_step is not None:
+        steps.append(created.creation_memory_step)
     if created.apply_step is not None and (
-        policy_requested or hardware_requested or layout_requested or serial_requested
+        policy_requested
+        or hardware_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
     ):
         steps.append(created.apply_step)
     verification_failed = (
-        policy_requested or hardware_requested or layout_requested or serial_requested
+        policy_requested
+        or hardware_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
     ) and (
         created.ownership_stamped is not True
         or any(
@@ -128,6 +163,7 @@ async def create_lpar(
                 (hardware_requested, created.hardware_memory_step),
                 (layout_requested, created.memory_layout_step),
                 (serial_requested, created.serial_step),
+                (memory_requested, created.creation_memory_step),
                 (creation.settings.pairs(), created.settings_step),
                 (creation.reporting_settings.pairs(), created.reporting_step),
                 (creation.vtpm_settings.pairs(), created.vtpm_step),
@@ -152,7 +188,7 @@ async def create_lpar(
     apply_failed = (
         created.apply_step is not None and created.apply_step.status == "error"
     ) or (
-        roles_requested(creation.settings)
+        (roles_requested(creation.settings) or memory_requested)
         and creation.apply_profile is True
         and (created.apply_step is None or created.apply_step.status != "ok")
     )

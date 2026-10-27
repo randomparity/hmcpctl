@@ -27,6 +27,7 @@ from ...documents.lpar import (
     validate_keylock,
     validate_partition_type,
 )
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_memory_layout import LparMemoryLayout
@@ -40,6 +41,7 @@ from ...resource_identity import (
 )
 from ...ssh.lpar import (
     DEFAULT_PROFILE_NAME,
+    _CreationMemorySubmissionError,
     _LayoutCreateSubmissionError,
     apply_lpar_profile_via_cli,
     complete_create_resources,
@@ -56,6 +58,13 @@ from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml, leaf_text
 from .assignments import SriovLogicalPortAssignment
 from .configuration import configure_lpar_settings
+from .creation_memory import (
+    CreationMemoryAdmission,
+    _raise_creation_memory_failure,
+    admit_creation_memory,
+    confirm_creation_memory_identity,
+    creation_memory_step,
+)
 from .hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from .linux_roles import (
     admit_role_creation,
@@ -103,6 +112,7 @@ class LparCreation:
     hardware_mem_expansion: bool | None = None
     memory_layout: LparMemoryLayout = field(default_factory=LparMemoryLayout)
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = ()
+    creation_memory: LparCreationMemory = field(default_factory=LparCreationMemory)
 
 
 @dataclass(frozen=True)
@@ -122,6 +132,7 @@ class LparCreationResult:
     hardware_memory_step: WorkflowStep | None = None
     memory_layout_step: WorkflowStep | None = None
     serial_step: WorkflowStep | None = None
+    creation_memory_step: WorkflowStep | None = None
 
 
 @dataclass(frozen=True)
@@ -167,6 +178,7 @@ async def _create_via_cli(
     creation: LparCreation,
     *,
     controller_mode: bool = False,
+    memory_admission: CreationMemoryAdmission | None = None,
 ) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
     """Create with ``mksyscfg``, apply its profile, and read the partition back.
 
@@ -180,7 +192,7 @@ async def _create_via_cli(
     try:
         system_name = await resolve_system_cli_name(hmc.config, system_uuid)
     except HMCCLIError:
-        if creation.memory_layout.pairs():
+        if creation.memory_layout.pairs() or creation.creation_memory.pairs():
             raise
         system_name = system_name_or_uuid
     if creation.memory_layout.pairs():
@@ -192,6 +204,8 @@ async def _create_via_cli(
         native_options["memory_layout"] = creation.memory_layout
     if creation.virtual_serial_adapters:
         native_options["virtual_serial_adapters"] = creation.virtual_serial_adapters
+    if creation.creation_memory.pairs():
+        native_options["creation_memory"] = creation.creation_memory
     serial_submission_failed = False
     try:
         await create_lpar_via_cli(
@@ -212,6 +226,9 @@ async def _create_via_cli(
             hardware_mem_expansion=creation.hardware_mem_expansion,
             **native_options,
         )
+    except _CreationMemorySubmissionError as error:
+        assert memory_admission is not None
+        await _raise_creation_memory_failure(hmc, memory_admission, error)
     except _LayoutCreateSubmissionError as error:
         if creation.virtual_serial_adapters:
             serial_submission_failed = True
@@ -232,6 +249,7 @@ async def _create_via_cli(
         and not creation.security_policy.pairs()
         and not creation.memory_layout.pairs()
         and not creation.virtual_serial_adapters
+        and not creation.creation_memory.pairs()
         and creation.hardware_mem_encryption is None
         and creation.hardware_mem_expansion is None
         and not roles_requested(creation.settings)
@@ -253,6 +271,7 @@ async def _create_via_cli(
             and creation.hardware_mem_expansion is None
             and not creation.memory_layout.pairs()
             and not creation.virtual_serial_adapters
+            and not creation.creation_memory.pairs()
         ):
             raise
         # Native creation succeeded, but the identity lookup is unavailable.
@@ -283,6 +302,18 @@ async def create_and_stamp_lpar(
       delete it to release its resources.
     """
     reject_update_weight_on_create(creation.resources)
+    if not isinstance(creation.creation_memory, LparCreationMemory):
+        raise TypeError("creation_memory must be LparCreationMemory")
+    memory_requested = bool(creation.creation_memory.pairs())
+    shared_memory = creation.creation_memory.mem_mode == "shared"
+    if memory_requested and creation.keylock is not None:
+        raise ValueError("Creation memory cannot be combined with native keylock")
+    if shared_memory:
+        completed = complete_create_resources(creation.resources)
+        if completed is None or completed.dedicated is not False:
+            raise ValueError("Shared memory requires known shared processor resources")
+        if creation.physical_io.io_slots or creation.creation_sriov:
+            raise ValueError("Shared memory cannot use direct physical I/O or SR-IOV")
     validate_serial_input(creation.virtual_serial_adapters, creation.max_virtual_slots)
     serial_requested = bool(creation.virtual_serial_adapters)
     if serial_requested and creation.keylock is not None:
@@ -372,13 +403,13 @@ async def create_and_stamp_lpar(
         )
         admit_role_creation(creation, role_caps)
         controller_mode = role_caps.controller_mode
-    elif layout_requested or serial_requested:
+    elif layout_requested or serial_requested or memory_requested:
         controller_mode = (
             await read_role_capabilities(
                 hmc, system_uuid, need_kvm=False, need_management=False
             )
         ).controller_mode
-    if (layout_requested or serial_requested) and controller_mode:
+    if (layout_requested or serial_requested or memory_requested) and controller_mode:
         if creation.apply_profile is True:
             raise ValueError("Controller creation cannot apply a named profile")
         if creation.physical_io.requested or creation.creation_sriov:
@@ -407,7 +438,8 @@ async def create_and_stamp_lpar(
         creation.hardware_mem_expansion,
     )
     await admit_creation_io(hmc, system_uuid, creation)
-    await require_memory_within_system(hmc, system_uuid, creation.resources)
+    if not shared_memory:
+        await require_memory_within_system(hmc, system_uuid, creation.resources)
     serial_admission = (
         await admit_serial_creation(
             hmc,
@@ -426,15 +458,38 @@ async def create_and_stamp_lpar(
     readback_error: HMCError | None = None
     resources = complete_create_resources(creation.resources)
     if (
-        policy_requested or hardware_requested or layout_requested or serial_requested
-    ) and resources is not None:
+        (
+            policy_requested
+            or hardware_requested
+            or layout_requested
+            or serial_requested
+            or memory_requested
+        )
+        and resources is not None
+        and not shared_memory
+    ):
         await require_memory_within_system(hmc, system_uuid, resources)
+    memory_admission = None
+    if memory_requested:
+        system_name = await resolve_system_cli_name(hmc.config, system_uuid)
+        memory_admission = await admit_creation_memory(
+            hmc,
+            system_uuid,
+            system_name,
+            creation.creation_memory,
+            resources or creation.resources,
+            kind="LogicalPartition",
+            environment=creation.partition_type,
+            name=creation.name,
+            partition_id=creation.partition_id,
+        )
     if (
         resources is None
         or policy_requested
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or creation.reporting_settings.pairs()
         or creation.vtpm_settings.pairs()
         or creation.physical_io.requested
@@ -454,9 +509,10 @@ async def create_and_stamp_lpar(
                 system_name_or_uuid,
                 creation,
                 controller_mode=controller_mode,
+                memory_admission=memory_admission,
             )
         except HMCError as error:
-            if serial_requested or layout_requested:
+            if serial_requested or layout_requested or memory_requested:
                 raise
             if hardware_requested:
                 native_failed = True
@@ -510,13 +566,24 @@ async def create_and_stamp_lpar(
                 apply_step = WorkflowStep(
                     "apply_profile", "skipped", _REST_CREATE_CONFIGURED
                 )
-    if serial_admission is not None and created_lpar is not None:
-        try:
-            created_lpar = await confirm_serial_created(
-                hmc, serial_admission, created_lpar
-            )
-        except Exception:  # noqa: BLE001 — unconfirmed post-create identity forbids stamping.
-            created_lpar = None
+    if created_lpar is not None:
+        identity_ok = True
+        confirmed_lpar = created_lpar
+        if serial_admission is not None:
+            try:
+                confirmed_lpar = await confirm_serial_created(
+                    hmc, serial_admission, created_lpar
+                )
+            except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
+                identity_ok = False
+        if memory_admission is not None:
+            try:
+                confirmed_lpar = await confirm_creation_memory_identity(
+                    hmc, memory_admission, created_lpar
+                )
+            except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
+                identity_ok = False
+        created_lpar = confirmed_lpar if identity_ok else None
     serial_step = (
         await serial_creation_step(
             hmc, serial_admission, created_lpar, controller_mode=controller_mode
@@ -533,10 +600,11 @@ async def create_and_stamp_lpar(
             or hardware_requested
             or layout_requested
             or serial_requested
+            or memory_requested
             or role_requested
         ) and creation.stamp_policy == "required":
             raise HMCError(
-                f"{'Serial' if serial_requested else 'Memory layout' if layout_requested else 'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
+                f"{'Creation memory' if memory_requested else 'Serial' if serial_requested else 'Memory layout' if layout_requested else 'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
                 "unavailable and ownership was not stamped. Inspect the contained "
                 "partition before retrying; no rollback performed."
             ) from None
@@ -561,6 +629,7 @@ async def create_and_stamp_lpar(
             or hardware_requested
             or layout_requested
             or serial_requested
+            or memory_requested
             or role_requested
         ):
             skipped = "created identity readback unavailable; inspect the contained partition before retrying"
@@ -578,6 +647,11 @@ async def create_and_stamp_lpar(
             ),
             apply_step=apply_step,
             serial_step=serial_step,
+            creation_memory_step=await creation_memory_step(
+                hmc, memory_admission, None, controller_mode=controller_mode
+            )
+            if memory_admission is not None
+            else None,
             memory_layout_step=await _created_memory_layout_step(
                 hmc, None, creation, controller_mode=controller_mode
             ),
@@ -633,6 +707,7 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
     ) and (
         not isinstance(created_lpar, dict)
@@ -649,7 +724,9 @@ async def create_and_stamp_lpar(
             )
         return LparCreationResult(
             True,
-            None if role_requested or layout_requested else created_lpar,
+            None
+            if role_requested or layout_requested or memory_requested
+            else created_lpar,
             None,
             (),
             settings_step=WorkflowStep(
@@ -678,6 +755,11 @@ async def create_and_stamp_lpar(
                 creation.hardware_mem_encryption,
                 creation.hardware_mem_expansion,
             ),
+            creation_memory_step=await creation_memory_step(
+                hmc, memory_admission, None, controller_mode=controller_mode
+            )
+            if memory_admission is not None
+            else None,
         )
     ownership_stamped, warnings = await stamp_created_lpar_ownership(
         hmc,
@@ -703,6 +785,13 @@ async def create_and_stamp_lpar(
             hmc, serial_admission, created_lpar, controller_mode=controller_mode
         )
         if serial_admission is not None
+        else None
+    )
+    memory_step = (
+        await creation_memory_step(
+            hmc, memory_admission, created_lpar, controller_mode=controller_mode
+        )
+        if memory_admission is not None
         else None
     )
     layout_step = await _created_memory_layout_step(
@@ -737,6 +826,7 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
         else None
     )
@@ -746,6 +836,7 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
         else None
     )
@@ -755,6 +846,7 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
         else None
     )
@@ -766,6 +858,7 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
     ) and creation.apply_profile is not None:
         required = [
@@ -777,6 +870,7 @@ async def create_and_stamp_lpar(
             (hardware_requested, hardware_step),
             (layout_requested, layout_step),
             (serial_requested, serial_step),
+            (memory_requested, memory_step),
         ]
         verified = ownership_stamped is True and all(
             not requested or (step is not None and step.status == "ok")
@@ -808,11 +902,26 @@ async def create_and_stamp_lpar(
             )
         )
     if (
+        memory_admission is not None
+        and apply_step is not None
+        and apply_step.status == "ok"
+    ):
+        assert memory_step is not None
+        memory_step = await creation_memory_step(
+            hmc,
+            memory_admission,
+            created_lpar,
+            controller_mode=controller_mode,
+            current=True,
+            saved=memory_step.result.saved,
+        )
+    if (
         creation.physical_io.requested
         or policy_requested
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
     ):
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
@@ -827,6 +936,7 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
         else await _created_settings_step(
             hmc,
@@ -842,6 +952,7 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
         else await _created_reporting_step(hmc, system_name, creation),
         vtpm_step
@@ -849,17 +960,30 @@ async def create_and_stamp_lpar(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or role_requested
         else await _created_vtpm_step(hmc, system_name, creation),
         policy_step,
         hardware_step,
         memory_layout_step=layout_step,
         serial_step=serial_step,
+        creation_memory_step=memory_step,
     )
-    if role_requested or hardware_requested or layout_requested or serial_requested:
+    if (
+        role_requested
+        or hardware_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
+    ):
         safe_steps = {}
         step_names = ("apply_step", "physical_io_step", "reporting_step", "vtpm_step")
-        if hardware_requested or layout_requested or serial_requested:
+        if (
+            hardware_requested
+            or layout_requested
+            or serial_requested
+            or memory_requested
+        ):
             step_names += (
                 "settings_step",
                 "security_policy_step",
