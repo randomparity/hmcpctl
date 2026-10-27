@@ -2338,3 +2338,18 @@ Recovery rereads the retained packet binding and baseline without adopting,
 stamping, creating, deleting or resuming. Partial journals remain incomplete even
 when their fixture is absent now. Retain uncertain residue for root/operator
 reconciliation. Source rollback is a source/document revert, never an HMC action.
+
+## Inactive creation memory (C07, opt-in arm 65)
+
+The `creation-memory` group and `scripts/live_creation_memory.py` run one fixed
+inactive case per invocation and are excluded from default and `all`. Follow the
+[ST65 procedure](workflow/lpar-creation-memory-live-procedure.md) for the five
+cases, local `.env` keys, exact commands and separate current root window/grants.
+Maximum effects are one create, one LPAR stamp (zero VIOS stamps), and one
+conditional exact fresh UUID delete, with profile application disabled and no
+activation. Independent contained native profile XML, provider identity and
+baseline checks gate verified classic evidence and cleanup. Uncertain or incomplete
+creation, including controller designation gaps, preserves residue and stops.
+Always run read-only recovery, including after apparent success. A journal or
+saved grant cannot resume effects. Registration/offline proof supplies no native
+configuration, activation, compression, paging capacity or failover evidence.

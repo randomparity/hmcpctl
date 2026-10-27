@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import asdict, dataclass, field, fields
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -30,6 +32,10 @@ _VIOS_OBJECT_NAME = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*")
 class LiveTestConfig:
     """Validated operator configuration for live-test executions."""
 
+    creation_memory_case: str = ""
+    creation_memory_primary_vios_name: str = ""
+    creation_memory_secondary_vios_name: str = ""
+    creation_memory_fresh_delete_authorized: bool = False
     accelerator_qos_request_json: str = ""
     creation_memory_layout_hpt_ratio: str = ""
     creation_memory_layout_ppt_ratio: str = ""
@@ -168,6 +174,10 @@ class LiveTestConfig:
     #: (ADR 0115).
     _OPTIONAL_CONFIG_FIELDS: ClassVar[dict[str, str]] = {
         "LIVE_TEST_ACCELERATOR_QOS_REQUEST_JSON": "accelerator_qos_request_json",
+        "LIVE_TEST_CREATION_MEMORY_CASE": "creation_memory_case",
+        "LIVE_TEST_CREATION_MEMORY_PRIMARY_VIOS_NAME": "creation_memory_primary_vios_name",
+        "LIVE_TEST_CREATION_MEMORY_SECONDARY_VIOS_NAME": "creation_memory_secondary_vios_name",
+        "LIVE_TEST_CREATION_MEMORY_FRESH_DELETE_AUTHORIZED": "creation_memory_fresh_delete_authorized",
         "LIVE_TEST_CREATION_MEMORY_LAYOUT_HPT_RATIO": "creation_memory_layout_hpt_ratio",
         "LIVE_TEST_CREATION_MEMORY_LAYOUT_PPT_RATIO": "creation_memory_layout_ppt_ratio",
         "LIVE_TEST_CREATION_MEMORY_LAYOUT_FRESH_VIOS_DELETE_AUTHORIZED": "creation_memory_layout_fresh_vios_delete_authorized",
@@ -256,6 +266,7 @@ class LiveTestConfig:
                     parsed["partition_profile_memory_mib"]
                 )
             for field_name in (
+                "creation_memory_fresh_delete_authorized",
                 "creation_memory_layout_fresh_vios_delete_authorized",
                 "partition_profile_writer_window",
                 "system_profile_writer_window",
@@ -410,6 +421,7 @@ class LiveTestConfig:
 class LiveTestArtifacts:
     """Mutable discoveries and recovery state owned by one live-test invocation."""
 
+    creation_memory: dict = field(default_factory=dict)
     creation_memory_layout: dict = field(default_factory=dict)
     partition_profile_lifecycle: dict = field(default_factory=dict)
     system_profile_names: list[str] = field(default_factory=list)
@@ -520,6 +532,10 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
     parsed.setdefault("scratch_vg_name", "")
     parsed.setdefault("profile_artifact_suffix_hex_length", 16)
     for name in (
+        "creation_memory_case",
+        "creation_memory_primary_vios_name",
+        "creation_memory_secondary_vios_name",
+        "creation_memory_fresh_delete_authorized",
         "creation_memory_layout_hpt_ratio",
         "creation_memory_layout_ppt_ratio",
         "creation_memory_layout_fresh_vios_delete_authorized",
@@ -573,6 +589,8 @@ def decode_artifacts(value: Any) -> LiveTestArtifacts:
     # configured user, never this run's, so it is dropped rather than restored.
     # Every other field difference remains a mismatch.
     parsed.pop("test_user_uuid", None)
+    parsed.setdefault("creation_memory", {})
+    _validate_creation_memory(parsed["creation_memory"])
     parsed.setdefault("creation_memory_layout", {})
     _validate_creation_memory_layout(parsed["creation_memory_layout"])
     parsed.setdefault("partition_profile_lifecycle", {})
@@ -805,3 +823,178 @@ def _validate_creation_memory_layout(value: Any) -> None:
         or len({r["name"] for r in rows}) != len(rows)
     ):
         raise ValueError("creation memory layout VIOS baseline is ambiguous")
+
+
+def _validate_creation_memory(value: Any) -> None:
+    """Closed ST65 intent; saved grants are evidence and never cleanup authority."""
+    if not isinstance(value, dict):
+        raise TypeError("creation memory journal must be an object")
+    if len(json.dumps(value).encode()) > 5 * 1024 * 1024:
+        raise ValueError("creation memory journal exceeds 5 MiB")
+    if not value:
+        return
+    keys = {
+        "invocation_id",
+        "candidate_commit",
+        "system_uuid",
+        "hmc_identity",
+        "case",
+        "kind",
+        "name",
+        "token",
+        "uuid",
+        "phase",
+        "preabsence",
+        "create_returned",
+        "fresh_delete_authorized",
+        "requested",
+        "baseline",
+        "outcome",
+        "deletion",
+    }
+    if set(value) != keys:
+        raise ValueError("creation memory journal fields are invalid")
+    for key, pattern in (
+        ("invocation_id", r"[0-9a-f]{32}"),
+        ("candidate_commit", r"[0-9a-f]{40}"),
+    ):
+        if not isinstance(value[key], str) or re.fullmatch(pattern, value[key]) is None:
+            raise ValueError(f"creation memory {key} is invalid")
+    for key in ("system_uuid", "uuid"):
+        item = value[key]
+        if item is None and key == "uuid":
+            continue
+        if not isinstance(item, str) or not is_uuid(item) or item != item.lower():
+            raise ValueError("creation memory UUID is not canonical")
+    for key in ("preabsence", "create_returned", "fresh_delete_authorized"):
+        if type(value[key]) is not bool:
+            raise TypeError("creation memory flags must be boolean")
+    hmc = value["hmc_identity"]
+    if (
+        not isinstance(hmc, dict)
+        or set(hmc) != {"host", "port", "user", "verify_ssl"}
+        or any(
+            type(hmc[k]) is not t
+            for k, t in (
+                ("host", str),
+                ("port", int),
+                ("user", str),
+                ("verify_ssl", bool),
+            )
+        )
+        or not hmc["host"]
+        or not hmc["user"]
+        or not 1 <= hmc["port"] <= 65535
+    ):
+        raise ValueError("creation memory HMC identity is invalid")
+    for key, choices in (
+        (
+            "phase",
+            {
+                "prepared",
+                "create-pending",
+                "create-returned",
+                "delete-pending",
+                "deleted",
+                "complete",
+                "stopped-uncertain",
+            },
+        ),
+        (
+            "outcome",
+            {
+                "not-attempted",
+                "rejected",
+                "partial",
+                "unknown",
+                "created-verified",
+                "unavailable",
+                "mismatch",
+            },
+        ),
+        (
+            "deletion",
+            {"not-attempted", "pending", "confirmed-absent", "unknown", "refused"},
+        ),
+    ):
+        if not isinstance(value[key], str) or value[key] not in choices:
+            raise ValueError(f"creation memory {key} is invalid")
+    request = value["requested"]
+    if not isinstance(request, dict):
+        raise TypeError("creation memory requested must be an object")
+    # Reconstruct only the known saved decimal. Public numeric strings remain forbidden.
+    from .creation_memory import configured
+
+    primary = request.get("primary_paging_vios_name", "")
+    secondary = request.get("secondary_paging_vios_name", "")
+    kind, model = configured(
+        LiveTestConfig(
+            creation_memory_case=value["case"],
+            creation_memory_primary_vios_name=primary,
+            creation_memory_secondary_vios_name=secondary,
+            creation_memory_fresh_delete_authorized=value["fresh_delete_authorized"],
+        )
+    )
+    normalized = dict(request)
+    if "mem_expansion" in normalized:
+        if normalized["mem_expansion"] not in ("0", "1.1"):
+            raise ValueError("creation memory saved decimal is invalid")
+        normalized["mem_expansion"] = Decimal(normalized["mem_expansion"])
+    from hmcpctl.documents.lpar_creation_memory import LparCreationMemory
+
+    reconstructed = LparCreationMemory(**normalized)
+    if (
+        value["kind"] != kind
+        or reconstructed != model
+        or request != dict(model.pairs())
+    ):
+        raise ValueError("creation memory case/request/kind disagree")
+    prefix = (
+        "hmcpctl-live-lpar-" if kind == "LogicalPartition" else "hmcpctl-live-c07-vios-"
+    )
+    if (
+        not isinstance(value["name"], str)
+        or re.fullmatch(prefix + r"[0-9a-f]{8}", value["name"]) is None
+    ):
+        raise ValueError("creation memory name is invalid")
+    token = "lparcfg-" + value["name"][-8:] if kind == "LogicalPartition" else None
+    if value["token"] != token:
+        raise ValueError("creation memory name/token disagree")
+    baseline = value["baseline"]
+    if not isinstance(baseline, dict) or set(baseline) != {"pools", "vios"}:
+        raise ValueError("creation memory baseline is invalid")
+    pools = baseline["pools"]
+    if (
+        not isinstance(pools, dict)
+        or set(pools)
+        != {"partitions", "available_processing_units", "available_memory_mib"}
+        or not isinstance(pools["partitions"], list)
+        or any(not isinstance(n, str) or not n for n in pools["partitions"])
+        or pools["partitions"] != sorted(set(pools["partitions"]))
+    ):
+        raise ValueError("creation memory partition baseline is invalid")
+    for key in ("available_processing_units", "available_memory_mib"):
+        text = pools[key]
+        if (
+            not isinstance(text, str)
+            or re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", text) is None
+        ):
+            raise ValueError("creation memory capacity baseline is invalid")
+    rows = baseline["vios"]
+    if not isinstance(rows, list) or any(
+        not isinstance(row, dict)
+        or set(row) != {"uuid", "name"}
+        or not isinstance(row["uuid"], str)
+        or not is_uuid(row["uuid"])
+        or row["uuid"] != row["uuid"].lower()
+        or not isinstance(row["name"], str)
+        or not row["name"]
+        for row in rows
+    ):
+        raise ValueError("creation memory VIOS baseline is invalid")
+    if (
+        rows != sorted(rows, key=lambda r: r["uuid"])
+        or len({r["uuid"] for r in rows}) != len(rows)
+        or len({r["name"] for r in rows}) != len(rows)
+    ):
+        raise ValueError("creation memory VIOS baseline is ambiguous")

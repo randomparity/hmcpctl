@@ -69,6 +69,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import (
+    creation_memory,
     creation_memory_layout,
     lpar_config,
     lpar_hardware_memory,
@@ -92,6 +93,7 @@ from live_test.dedicated_pcie import (
     partition_not_found,
     select_profile_io_slots,
 )
+from live_test.observation import plain_data
 from live_test.profiles import ARTIFACT_PREFIX, backup_artifact_names
 from live_test.results import entries
 from live_test.storage import scsi_adapter_listing
@@ -129,6 +131,7 @@ _READ_ONLY_TOOLS = frozenset(
         "hmc_list_optical_media",
         "hmc_list_vios_backups",
         "hmc_list_vios",
+        "hmc_list_lpars",
         "hmc_get_system",
         "hmc_list_virtual_networks",
         "hmc_list_adapters",
@@ -190,6 +193,7 @@ _WITNESSED_SUBTASKS = (
         processor_sharing_weight.SUBTASK,
         lpar_security_policy.SUBTASK,
         lpar_hardware_memory.SUBTASK,
+        creation_memory.SUBTASK,
         creation_memory_layout.SUBTASK,
         lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
@@ -414,6 +418,106 @@ async def check_lpar_config(call, inputs: LparConfigInputs) -> list[Finding]:
 
 
 @dataclass(frozen=True)
+class CreationMemoryInputs:
+    system_name: str
+    journal: dict
+
+
+def creation_memory_skip_reason(document: dict, subtasks: list[int]) -> str | None:
+    """Recognize only the runner's complete pre-effect configuration rejection."""
+    if subtasks != [creation_memory.SUBTASK]:
+        return None
+    config = live_config.decode_saved_config(document.get("config"))
+    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    run = document["run"]
+    if (
+        set(document) != {"run", "config", "hmc", "artifacts", "results"}
+        or set(run)
+        != {
+            "group",
+            "subtasks",
+            "partial",
+            "tested_commit",
+            "tree_clean",
+            "schema_version",
+            "finished",
+        }
+        or run.get("group") != creation_memory.GROUP
+        or run.get("partial") is not False
+        or not isinstance(run.get("tested_commit"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", run["tested_commit"]) is None
+        or type(run.get("tree_clean")) is not bool
+        or not isinstance(run.get("schema_version"), str)
+        or document["artifacts"].get("creation_memory") != {}
+        or artifacts != live_config.LiveTestArtifacts()
+        or document["artifacts"] != asdict(artifacts)
+    ):
+        return None
+    hmc = document.get("hmc")
+    expected_hmc = runner._hmc_identity(HMCConfig.from_mapping({}))
+    if (
+        not isinstance(hmc, dict)
+        or set(hmc) != set(expected_hmc)
+        or any(type(hmc[key]) is not type(value) for key, value in expected_hmc.items())
+    ):
+        return None
+    rows = document.get("results")
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        return None
+    row = rows[0]
+    if (
+        set(row) != {"subtask", "tool", "status", "result", "timestamp", "note", "data"}
+        or type(row["subtask"]) is not int
+        or row["subtask"] != creation_memory.SUBTASK
+        or row["tool"] != creation_memory.GROUP
+        or row["status"] != "SKIP"
+        or row["result"] != "skipped"
+        # RunState.record serializes scalar None as this string, not JSON null.
+        or row["data"] != "None"
+    ):
+        return None
+    for value in (run.get("finished"), row["timestamp"]):
+        if not isinstance(value, str):
+            return None
+        try:
+            if datetime.fromisoformat(value).tzinfo is None:
+                return None
+        except ValueError:
+            return None
+    try:
+        creation_memory.configured(config)
+    except (ValueError, TypeError) as error:
+        reason = str(error)
+        return reason if reason and row["note"] == reason else None
+    return None
+
+
+def creation_memory_inputs_from_document(
+    document: dict, subtasks: list[int]
+) -> CreationMemoryInputs | None:
+    if creation_memory.SUBTASK not in subtasks:
+        return None
+    config = live_config.decode_saved_config(document.get("config"))
+    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    journal = artifacts.creation_memory
+    if (
+        not journal
+        or document.get("hmc") != journal["hmc_identity"]
+        or document.get("run", {}).get("tested_commit") != journal["candidate_commit"]
+    ):
+        raise ValueError("ST65 recovery lacks candidate/HMC-bound journal")
+    kind, memory = creation_memory.configured(config)
+    if (
+        document["run"].get("group") != creation_memory.GROUP
+        or document["run"].get("subtasks") != [creation_memory.SUBTASK]
+        or kind != journal["kind"]
+        or dict(memory.pairs()) != journal["requested"]
+    ):
+        raise ValueError("ST65 run/config/request binding differs")
+    return CreationMemoryInputs(config.system_name, journal)
+
+
+@dataclass(frozen=True)
 class CreationMemoryLayoutInputs:
     system_name: str
     journal: dict
@@ -501,6 +605,124 @@ def creation_memory_layout_inputs_from_document(document, subtasks):
     ):
         raise ValueError("ST58 recovery lacks candidate/HMC-bound journal")
     return CreationMemoryLayoutInputs(config.system_name, journal)
+
+
+async def check_creation_memory(call, inputs: CreationMemoryInputs) -> list[Finding]:
+    """Read-only current reconciliation; retained grants never authorize cleanup."""
+    j = inputs.journal
+    if (
+        runner._hmc_identity(HMCConfig()) != j["hmc_identity"]
+        or creation_memory._candidate() != j["candidate_commit"]
+    ):
+        raise StateUnreadable("ST65 current candidate/HMC differs from journal")
+    status, entry = await call("hmc_get_system", system_name_or_uuid=inputs.system_name)
+    name = (
+        (entry.get("Resource") or {}).get("SystemName")
+        if isinstance(entry, dict)
+        else None
+    )
+    if (
+        status != "PASS"
+        or creation_memory._canonical(lpar_config._uuid_of(entry)) != j["system_uuid"]
+        or not isinstance(name, str)
+        or not name
+    ):
+        raise StateUnreadable("ST65 selected-system identity unreadable")
+    system = shlex.quote(name)
+    current = {}
+    for key, command in (
+        ("partitions", f"lssyscfg -r lpar -m {system} -F name"),
+        (
+            "available_processing_units",
+            f"lshwres -r proc -m {system} --level sys -F curr_avail_sys_proc_units",
+        ),
+        (
+            "available_memory_mib",
+            f"lshwres -r mem -m {system} --level sys -F curr_avail_sys_mem,mem_region_size",
+        ),
+    ):
+        status, data = await call("hmc_run_command", cmd=command)
+        if (
+            status != "PASS"
+            or not isinstance(data, str)
+            or len(data.encode()) > creation_memory.LIMIT
+        ):
+            raise StateUnreadable("ST65 native baseline unreadable")
+        if key == "partitions":
+            names = data.splitlines()
+            if len(set(names)) != len(names) or any(not n for n in names):
+                raise StateUnreadable("ST65 duplicate/empty partition names")
+            current[key] = sorted(names)
+        else:
+            text = data.strip().split(",")[0]
+            if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", text) is None:
+                raise StateUnreadable("ST65 capacity baseline unreadable")
+            current[key] = text
+    inventories = {}
+    for kind, tool in (
+        ("LogicalPartition", "hmc_list_lpars"),
+        ("VirtualIOServer", "hmc_list_vios"),
+    ):
+        status, data = await call(tool, system_name_or_uuid=j["system_uuid"])
+        data = plain_data(data)
+        raw = data.get("entries") if isinstance(data, dict) else data
+        if (
+            status != "PASS"
+            or not isinstance(raw, list)
+            or len(json.dumps(data).encode()) > creation_memory.LIMIT
+            or (isinstance(data, dict) and data.get("unreadable_systems"))
+        ):
+            raise StateUnreadable("ST65 complete partition inventory unreadable")
+        rows = []
+        for row in raw:
+            uid = creation_memory._canonical(lpar_config._uuid_of(row))
+            part_name = (
+                (row.get("Resource") or {}).get("PartitionName")
+                if isinstance(row, dict)
+                else None
+            )
+            if not uid or not isinstance(part_name, str) or not part_name:
+                raise StateUnreadable("ST65 partition identity unreadable")
+            rows.append({"uuid": uid, "name": part_name})
+        if len({r["uuid"] for r in rows}) != len(rows) or len(
+            {r["name"] for r in rows}
+        ) != len(rows):
+            raise StateUnreadable("ST65 partition inventory ambiguous")
+        inventories[kind] = sorted(rows, key=lambda r: r["uuid"])
+    all_rows = inventories["LogicalPartition"] + inventories["VirtualIOServer"]
+    if sorted(r["name"] for r in all_rows) != current["partitions"]:
+        raise StateUnreadable("ST65 independent inventories disagree")
+    findings = []
+    residual = any(r["uuid"] == j["uuid"] or r["name"] == j["name"] for r in all_rows)
+    if (
+        residual
+        or current != j["baseline"]["pools"]
+        or inventories["VirtualIOServer"] != j["baseline"]["vios"]
+    ):
+        findings.append(
+            Finding(
+                "ST65 baseline/residual",
+                "partition/pool/VIOS baseline differs or exact fixture remains",
+                "root must inspect exact UUID and separately authorize any later cleanup; no replay",
+            )
+        )
+    if (
+        j["phase"] != "complete"
+        or j["deletion"] != "confirmed-absent"
+        or j["outcome"] != "created-verified"
+        or not j["preabsence"]
+        or not j["create_returned"]
+        or not j["uuid"]
+        or j["case"] == "controller-shared-lpar"
+    ):
+        findings.append(
+            Finding(
+                "ST65 interrupted/incomplete intent",
+                f"phase {j['phase']}; saved grants are not current authority",
+                "retain journal and independently reconcile without create/stamp/delete/resume",
+            )
+        )
+    return findings
 
 
 async def check_creation_memory_layout(
@@ -2218,6 +2440,19 @@ def main(argv: list[str] | None = None) -> int:
         round2_inputs = round2_inputs_from_document(document, subtasks)
     except (ValueError, TypeError, KeyError) as error:
         round2_error = str(error)
+    memory_inputs = None
+    memory_error = None
+    try:
+        skip_reason = creation_memory_skip_reason(document, subtasks)
+        if skip_reason:
+            print(f"SKIPPED  ST65 no fixture work: {skip_reason}")
+            print(
+                "Saved unarmed result only; not baseline, configured-value or runtime proof."
+            )
+            return 0
+        memory_inputs = creation_memory_inputs_from_document(document, subtasks)
+    except (ValueError, TypeError, KeyError) as error:
+        memory_error = str(error)
     creation_inputs = None
     creation_error = None
     try:
@@ -2263,6 +2498,7 @@ def main(argv: list[str] | None = None) -> int:
             (check_network, network_inputs),
             (check_lpar_config, lpar_config_inputs),
             (check_lpar_power, lpar_power_inputs),
+            (check_creation_memory, memory_inputs),
             (check_creation_memory_layout, creation_inputs),
             (check_round2, round2_inputs),
             (check_profile_artifacts, artifact_system),
@@ -2271,7 +2507,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     findings: list[Finding] = []
-    unread: list[str] = [error for error in (round2_error, creation_error) if error]
+    unread: list[str] = [
+        error for error in (round2_error, creation_error, memory_error) if error
+    ]
     try:
         users = users_witnessed(document, subtasks)
     except ValueError as error:
