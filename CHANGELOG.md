@@ -18,6 +18,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR and VIOS creation through CLI/MCP accept eight typed shared-memory and
+  saved Active Memory Expansion fields. Shared mode requires an existing pool,
+  contained paging providers and independent ownership checks. Saved/current
+  configuration verification stops follow-ups on missing evidence without replay.
+  Saved AME accepts zero or numeric 1–10 without declaring AIX intent; guest
+  compression remains AIX-only runtime guidance, unproven by saved acceptance.
+  The new creation variants remain unevidenced on hardware (#1768).
+
 - Native partition GZIP accelerator QoS through `hmc_set_lpar_accelerator_qos`
   and `lpars accelerator-qos` preserves explicit zero and optional native controls.
   Selected-system admission and ownership checks precede one submission; independent

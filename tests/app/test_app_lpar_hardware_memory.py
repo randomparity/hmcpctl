@@ -277,6 +277,20 @@ def test_old_positional_adapters_preserve_security_and_yes(
         if surface == "mcp"
         else ["max_virtual_slots", "virtual_serial_adapters"]
     )
+    expected_tail += (
+        ["creation_memory"]
+        if surface == "mcp"
+        else [
+            "mem_mode",
+            "desired_io_entitled_mem",
+            "mem_weight",
+            "primary_paging_vios_name",
+            "primary_paging_vios_id",
+            "secondary_paging_vios_name",
+            "secondary_paging_vios_id",
+            "mem_expansion",
+        ]
+    )
     assert names[hardware_position + 2 :] == expected_tail
     assert all(parameters[name].default is None for name in FIELDS)
     if surface == "cli":

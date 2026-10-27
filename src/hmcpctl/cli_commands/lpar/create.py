@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic import TypeAdapter
 
 from ...documents.lpar import (
     PARTITION_TYPES,
@@ -16,6 +17,7 @@ from ...documents.lpar import (
     LparSettings,
     validate_partition_type,
 )
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings
@@ -211,6 +213,61 @@ def lpars_create(
         str | None,
         typer.Option("--virtual-serial-adapters", help=SERIAL_INPUT_HELP),
     ] = None,
+    mem_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--mem-mode",
+            help="Explicit ded/shared memory mode; omitted preserves defaults",
+        ),
+    ] = None,
+    desired_io_entitled_mem: Annotated[
+        str | None,
+        typer.Option(
+            "--desired-io-entitled-mem",
+            help="Shared-mode positive integer MiB or exact auto",
+        ),
+    ] = None,
+    mem_weight: Annotated[
+        int | None,
+        typer.Option(
+            "--mem-weight", help="Shared-mode memory weight 0–255; zero is explicit"
+        ),
+    ] = None,
+    primary_paging_vios_name: Annotated[
+        str | None,
+        typer.Option(
+            "--primary-paging-vios-name",
+            help="Exact contained paging VIOS name; excludes primary ID",
+        ),
+    ] = None,
+    primary_paging_vios_id: Annotated[
+        int | None,
+        typer.Option(
+            "--primary-paging-vios-id",
+            help="Positive paging VIOS PartitionID; excludes primary name",
+        ),
+    ] = None,
+    secondary_paging_vios_name: Annotated[
+        str | None,
+        typer.Option(
+            "--secondary-paging-vios-name",
+            help="Exact contained secondary VIOS name; excludes secondary ID",
+        ),
+    ] = None,
+    secondary_paging_vios_id: Annotated[
+        str | None,
+        typer.Option(
+            "--secondary-paging-vios-id",
+            help="Positive PartitionID or exact none to disable designation",
+        ),
+    ] = None,
+    mem_expansion: Annotated[
+        str | None,
+        typer.Option(
+            "--mem-expansion",
+            help="Saved AME zero or exact numeric 1–10; no AIX intent or runtime proof",
+        ),
+    ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.
 
@@ -223,8 +280,37 @@ def lpars_create(
     the creation record and requires explicit dedicated never-share CPUs, which
     are never changed implicitly. Controller mode requires --no-apply and cannot
     use initial-profile I/O or profile-bearing assignments. Readback proves only
-    configuration, not KVM or NovaLink deployment.
+    configuration, not KVM or NovaLink deployment. Creation memory verifies saved
+    and current configured facts separately; unavailable evidence stops follow-ups.
+    Saved AME declares no AIX intent; AIX-only runtime compression is not proven.
     """
+    try:
+        creation_memory = TypeAdapter(LparCreationMemory).validate_python(
+            {
+                "mem_mode": mem_mode,
+                "desired_io_entitled_mem": None
+                if desired_io_entitled_mem is None
+                else "auto"
+                if desired_io_entitled_mem == "auto"
+                else int(desired_io_entitled_mem),
+                "mem_weight": mem_weight,
+                "primary_paging_vios_name": primary_paging_vios_name,
+                "primary_paging_vios_id": primary_paging_vios_id,
+                "secondary_paging_vios_name": secondary_paging_vios_name,
+                "secondary_paging_vios_id": None
+                if secondary_paging_vios_id is None
+                else "none"
+                if secondary_paging_vios_id == "none"
+                else int(secondary_paging_vios_id),
+                "mem_expansion": None
+                if mem_expansion is None
+                else Decimal(mem_expansion),
+            }
+        )
+    except (ValueError, InvalidOperation) as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="creation memory"
+        ) from None
     serial = load_virtual_serial_adapters(virtual_serial_adapters)
     try:
         validate_serial_input(serial, max_virtual_slots)
@@ -315,6 +401,7 @@ def lpars_create(
                 resources,
                 partition_id=partition_id,
                 max_virtual_slots=max_virtual_slots,
+                creation_memory=creation_memory,
                 virtual_serial_adapters=serial,
                 caller_token=caller_token,
                 physical_io=load_physical_io(physical_io),

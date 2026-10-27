@@ -1,6 +1,6 @@
 """Finite creation-only shared-memory and saved AME values."""
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -56,14 +56,54 @@ class LparCreationMemory:
     """Eight optional native fields; omission preserves HMC creation defaults."""
 
     __pydantic_config__ = ConfigDict(extra="forbid")
-    mem_mode: Literal["ded", "shared"] | None = None
-    desired_io_entitled_mem: StrictInt | Literal["auto"] | None = None
-    mem_weight: StrictInt | None = None
-    primary_paging_vios_name: StrictStr | None = None
-    primary_paging_vios_id: StrictInt | None = None
-    secondary_paging_vios_name: StrictStr | None = None
-    secondary_paging_vios_id: StrictInt | Literal["none"] | None = None
-    mem_expansion: ExpansionFactor | None = None
+    mem_mode: Literal["ded", "shared"] | None = field(
+        default=None,
+        metadata={
+            "description": "Explicit ded/shared memory mode; omission preserves HMC defaults without inferring a mode."
+        },
+    )
+    desired_io_entitled_mem: StrictInt | Literal["auto"] | None = field(
+        default=None,
+        metadata={
+            "description": "Positive integer MiB or exact auto; requires explicit shared memory mode."
+        },
+    )
+    mem_weight: StrictInt | None = field(
+        default=None,
+        metadata={
+            "description": "Strict integer memory weight 0–255; zero is explicit; requires shared memory mode."
+        },
+    )
+    primary_paging_vios_name: StrictStr | None = field(
+        default=None,
+        metadata={
+            "description": "Exact contained authorized paging VIOS name; requires shared mode and excludes primary ID."
+        },
+    )
+    primary_paging_vios_id: StrictInt | None = field(
+        default=None,
+        metadata={
+            "description": "Positive paging VIOS PartitionID, not UUID; requires shared mode and excludes primary name."
+        },
+    )
+    secondary_paging_vios_name: StrictStr | None = field(
+        default=None,
+        metadata={
+            "description": "Exact contained authorized secondary VIOS name, distinct from primary; shared mode only; excludes secondary ID."
+        },
+    )
+    secondary_paging_vios_id: StrictInt | Literal["none"] | None = field(
+        default=None,
+        metadata={
+            "description": "Positive PartitionID or exact none disabling secondary designation; shared mode only; excludes secondary name."
+        },
+    )
+    mem_expansion: ExpansionFactor | None = field(
+        default=None,
+        metadata={
+            "description": "Finite exact JSON number zero or inclusive 1–10 for saved AME; positive requires selected-system capability. No AIX intent, activation or guest runtime compression is inferred."
+        },
+    )
 
     def __post_init__(self) -> None:
         if self.mem_mode is not None and (

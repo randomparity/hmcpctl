@@ -1284,6 +1284,43 @@
                 "constraint": "optional strict seven-component typed client/server tuple; empty preserves omission; explicit maximum and unique nonreserved local slots; contained existing peer identity/ownership admission; one native creation attempt without replay or compensation; unresolved client capability is HMC-final across AIX/Linux, OS400 and Virtual IO Server; independent classic saved-default-profile configuration/unbound/pair facts, controller current mapping unavailable; no active traffic, boot or console claim; old live evidence gives no new-variant credit"
               }
             ]
+          },
+          {
+            "variant": "c07-creation-memory",
+            "parameters": [
+              {
+                "name": "creation_memory.desired_io_entitled_mem",
+                "constraint": "optional strict positive integer MiB or exact auto; explicit shared mode required; no invented numeric platform limits; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:desired_io_entitled_mem, p11:mksyscfg:partition-create:desired_io_entitled_mem"
+              },
+              {
+                "name": "creation_memory.mem_expansion",
+                "constraint": "optional finite exact JSON number zero or inclusive 1\u201310 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
+              },
+              {
+                "name": "creation_memory.mem_mode",
+                "constraint": "optional exact ded/shared; no inference; shared requires selected-system AMS capability, existing pool and contained authorized dedicated-memory providers; dedicated excludes six shared-only fields; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_mode, p11:mksyscfg:partition-create:mem_mode"
+              },
+              {
+                "name": "creation_memory.mem_weight",
+                "constraint": "optional strict integer 0\u2013255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
+              },
+              {
+                "name": "creation_memory.primary_paging_vios_id",
+                "constraint": "optional strict positive integer PartitionID, not UUID; resolves exactly to contained authorized dedicated-memory VIOS; requires explicit shared mode; excludes primary name; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:primary_paging_vios_id, p11:mksyscfg:partition-create:primary_paging_vios_id"
+              },
+              {
+                "name": "creation_memory.primary_paging_vios_name",
+                "constraint": "optional nonempty bounded native name resolved exactly to a contained authorized dedicated-memory VIOS; requires explicit shared mode; excludes primary ID; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:primary_paging_vios_name, p11:mksyscfg:partition-create:primary_paging_vios_name"
+              },
+              {
+                "name": "creation_memory.secondary_paging_vios_id",
+                "constraint": "optional strict positive integer PartitionID or exact none disabling designation; omission leaves HMC selection; explicit shared mode; excludes secondary name; selected identity distinct from primary; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:secondary_paging_vios_id, p11:mksyscfg:partition-create:secondary_paging_vios_id"
+              },
+              {
+                "name": "creation_memory.secondary_paging_vios_name",
+                "constraint": "optional nonempty bounded native name resolved exactly to contained authorized dedicated-memory VIOS distinct from primary; explicit shared mode; excludes secondary ID; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:secondary_paging_vios_name, p11:mksyscfg:partition-create:secondary_paging_vios_name"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -5078,6 +5115,43 @@
               {
                 "name": "virtual_serial_adapters",
                 "constraint": "optional strict seven-component typed client/server tuple; empty preserves omission; explicit maximum and unique nonreserved local slots; contained existing peer identity/ownership admission; one native creation attempt without replay or compensation; unresolved client capability is HMC-final across AIX/Linux, OS400 and Virtual IO Server; independent classic saved-default-profile configuration/unbound/pair facts, controller current mapping unavailable; no active traffic, boot or console claim; old live evidence gives no new-variant credit"
+              }
+            ]
+          },
+          {
+            "variant": "c07-creation-memory",
+            "parameters": [
+              {
+                "name": "creation_memory.desired_io_entitled_mem",
+                "constraint": "optional strict positive integer MiB or exact auto; explicit shared mode required; no invented numeric platform limits; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:desired_io_entitled_mem, p11:mksyscfg:partition-create:desired_io_entitled_mem"
+              },
+              {
+                "name": "creation_memory.mem_expansion",
+                "constraint": "optional finite exact JSON number zero or inclusive 1\u201310 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
+              },
+              {
+                "name": "creation_memory.mem_mode",
+                "constraint": "optional exact ded/shared; no inference; shared requires selected-system AMS capability, existing pool and contained authorized dedicated-memory providers; dedicated excludes six shared-only fields; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_mode, p11:mksyscfg:partition-create:mem_mode"
+              },
+              {
+                "name": "creation_memory.mem_weight",
+                "constraint": "optional strict integer 0\u2013255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
+              },
+              {
+                "name": "creation_memory.primary_paging_vios_id",
+                "constraint": "optional strict positive integer PartitionID, not UUID; resolves exactly to contained authorized dedicated-memory VIOS; requires explicit shared mode; excludes primary name; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:primary_paging_vios_id, p11:mksyscfg:partition-create:primary_paging_vios_id"
+              },
+              {
+                "name": "creation_memory.primary_paging_vios_name",
+                "constraint": "optional nonempty bounded native name resolved exactly to a contained authorized dedicated-memory VIOS; requires explicit shared mode; excludes primary ID; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:primary_paging_vios_name, p11:mksyscfg:partition-create:primary_paging_vios_name"
+              },
+              {
+                "name": "creation_memory.secondary_paging_vios_id",
+                "constraint": "optional strict positive integer PartitionID or exact none disabling designation; omission leaves HMC selection; explicit shared mode; excludes secondary name; selected identity distinct from primary; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:secondary_paging_vios_id, p11:mksyscfg:partition-create:secondary_paging_vios_id"
+              },
+              {
+                "name": "creation_memory.secondary_paging_vios_name",
+                "constraint": "optional nonempty bounded native name resolved exactly to contained authorized dedicated-memory VIOS distinct from primary; explicit shared mode; excludes secondary ID; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:secondary_paging_vios_name, p11:mksyscfg:partition-create:secondary_paging_vios_name"
               }
             ]
           }

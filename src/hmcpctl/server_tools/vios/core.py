@@ -10,6 +10,7 @@ from ..._app import (
     with_client,
 )
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import (
@@ -64,6 +65,7 @@ def hmc_create_vios(
     memory_layout: LparMemoryLayout | None = None,
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
     max_virtual_slots: int | None = None,
+    creation_memory: LparCreationMemory | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -78,6 +80,15 @@ def hmc_create_vios(
     Args:
         system_name_or_uuid: Target managed-system name or UUID.
         name: Name for the new VIOS partition.
+        creation_memory: Optional eight strict creation-only memory fields. Explicit
+            shared mode is required for entitlement, weight and paging selectors;
+            providers require independent contained ownership admission. Omission
+            preserves defaults; zero and secondary ID "none" remain explicit.
+            Saved AME zero or numeric 1–10 declares no AIX intent, including VIOS
+            and IBM i; positive AME requires selected-system capability. Saved and
+            current configured observations are separate and gate follow-ups;
+            unavailable evidence is incomplete. AIX-only guest runtime compression
+            guidance remains separate: no activation, runtime or replay guarantee.
         resources: Memory and processor settings for the VIOS.
         max_virtual_slots: Optional maximum virtual I/O slots, required explicitly for serial records.
         virtual_serial_adapters: Optional strict seven-component serial creation records
@@ -105,6 +116,10 @@ def hmc_create_vios(
             profile; uses environment defaults when omitted.
     """
 
+    if creation_memory is not None and not isinstance(
+        creation_memory, LparCreationMemory
+    ):
+        raise TypeError("creation_memory must be LparCreationMemory")
     validate_serial_input(virtual_serial_adapters, max_virtual_slots)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
@@ -123,6 +138,7 @@ def hmc_create_vios(
             memory_layout=memory_layout,
             max_virtual_slots=max_virtual_slots,
             virtual_serial_adapters=virtual_serial_adapters,
+            creation_memory=creation_memory,
         ),
         profile=profile,
     )
