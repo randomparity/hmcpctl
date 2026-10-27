@@ -326,10 +326,12 @@ def test_uom_user_replacement_reduces_unboundable_tool_count():
     # hmc_inspect_lpar, each one more connection-bearing.
     # #1726 adds one connection-bearing all-targets artifact deletion tool.
     # #1725 adds four connection-bearing all-targets system-profile mutations.
-    assert len(unboundable) == 37
-    assert len(connection_bearing) == 30
+    # #1772 makes VIOS creation nonexhaustive: serial peers require all-targets,
+    # adding exactly one connection-bearing tool (ADR 0303).
+    assert len(unboundable) == 38
+    assert len(connection_bearing) == 31
     assert len(connectionless) == 7
-    assert len(all_nonexhaustive) == 38
+    assert len(all_nonexhaustive) == 39
 
 
 # ---------------------------------------------------------------------------

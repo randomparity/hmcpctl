@@ -9,6 +9,7 @@ from hmcpctl.client.core import HMCClient
 from ...documents.lpar import validate_partition_type
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_memory_layout import LparMemoryLayout
+from ...documents.lpar_serial import validate_serial_input
 from ...errors import HMCError
 from ...resource_identity import resolve_system_uuid
 from .assignments import (
@@ -31,6 +32,12 @@ async def create_lpar(
     assignments: LparPcieAssignments,
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
+    validate_serial_input(creation.virtual_serial_adapters, creation.max_virtual_slots)
+    serial_requested = bool(creation.virtual_serial_adapters)
+    if serial_requested and creation.keylock is not None:
+        raise ValueError(
+            "Serial adapters cannot be combined with keylock in native creation"
+        )
     if not isinstance(creation.memory_layout, LparMemoryLayout):
         raise TypeError("memory_layout must be LparMemoryLayout")
     creation.memory_layout.validate_creation(creation.partition_type)
@@ -49,9 +56,9 @@ async def create_lpar(
             "Hardware memory settings cannot be combined with explicit keylock"
         )
     validate_partition_type(creation.partition_type)
-    if (roles_requested(creation.settings) or layout_requested) and (
-        assignments.dedicated or assignments.sriov
-    ):
+    if (
+        roles_requested(creation.settings) or layout_requested or serial_requested
+    ) and (assignments.dedicated or assignments.sriov):
         caps = await read_role_capabilities(
             hmc,
             await resolve_system_uuid(hmc, system_name_or_uuid),
@@ -89,7 +96,7 @@ async def create_lpar(
         steps.append(created.physical_io_step)
     policy_requested = bool(creation.security_policy.pairs())
     if created.apply_step is not None and not (
-        policy_requested or hardware_requested or layout_requested
+        policy_requested or hardware_requested or layout_requested or serial_requested
     ):
         steps.append(created.apply_step)
     if created.settings_step is not None:
@@ -104,12 +111,14 @@ async def create_lpar(
         steps.append(created.hardware_memory_step)
     if created.memory_layout_step is not None:
         steps.append(created.memory_layout_step)
+    if created.serial_step is not None:
+        steps.append(created.serial_step)
     if created.apply_step is not None and (
-        policy_requested or hardware_requested or layout_requested
+        policy_requested or hardware_requested or layout_requested or serial_requested
     ):
         steps.append(created.apply_step)
     verification_failed = (
-        policy_requested or hardware_requested or layout_requested
+        policy_requested or hardware_requested or layout_requested or serial_requested
     ) and (
         created.ownership_stamped is not True
         or any(
@@ -118,6 +127,7 @@ async def create_lpar(
                 (policy_requested, created.security_policy_step),
                 (hardware_requested, created.hardware_memory_step),
                 (layout_requested, created.memory_layout_step),
+                (serial_requested, created.serial_step),
                 (creation.settings.pairs(), created.settings_step),
                 (creation.reporting_settings.pairs(), created.reporting_step),
                 (creation.vtpm_settings.pairs(), created.vtpm_step),

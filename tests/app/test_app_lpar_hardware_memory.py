@@ -135,26 +135,22 @@ async def test_actual_mcp_strict_private_schema_and_grants(adapter):
                 assert len(str(result)) < 4000
                 adapter.operation.assert_not_awaited()
                 assert adapter.connections == []
-    if adapter.kind == "lpar":
-        with pytest.raises(AccessPolicyError, match="no target selector"):
-            application(adapter.name, {"managed_system": ["sys-R2"]})
-    grants = (
-        (f"hmc_create_{'vios' if adapter.kind == 'lpar' else 'lpar'}", "all-targets"),
-        ("hmc_create_vios", {"managed_system": ["sys-R2"]}),
-    )
-    for tool, targets in grants:
-        async with Client(application(tool, targets)) as client:
-            denied = await client.call_tool(
-                adapter.name,
-                {
-                    "system_name_or_uuid": "sys-R1",
-                    "name": "target-R1",
-                    "hardware_mem_encryption": True,
-                    "hardware_mem_expansion": False,
-                },
-                raise_on_error=False,
-            )
-            assert denied.is_error
+    # Both creation tools can select nested peers that scalar grants cannot bound.
+    with pytest.raises(AccessPolicyError, match="no target selector"):
+        application(adapter.name, {"managed_system": ["sys-R2"]})
+    other_tool = f"hmc_create_{'vios' if adapter.kind == 'lpar' else 'lpar'}"
+    async with Client(application(other_tool)) as client:
+        denied = await client.call_tool(
+            adapter.name,
+            {
+                "system_name_or_uuid": "sys-R1",
+                "name": "target-R1",
+                "hardware_mem_encryption": True,
+                "hardware_mem_expansion": False,
+            },
+            raise_on_error=False,
+        )
+        assert denied.is_error
     adapter.operation.assert_not_awaited()
     assert adapter.connections == []
 
@@ -274,8 +270,18 @@ def test_old_positional_adapters_preserve_security_and_yes(
             else ["hpt_ratio", "ppt_ratio"]
         )
     )
+    expected_tail += (
+        ["virtual_serial_adapters"]
+        if surface == "mcp" and adapter.kind == "lpar"
+        else ["virtual_serial_adapters", "max_virtual_slots"]
+        if surface == "mcp"
+        else ["max_virtual_slots", "virtual_serial_adapters"]
+    )
     assert names[hardware_position + 2 :] == expected_tail
     assert all(parameters[name].default is None for name in FIELDS)
+    if surface == "cli":
+        assert parameters["max_virtual_slots"].default is None
+        assert parameters["virtual_serial_adapters"].default is None
     last_old = "security_policy" if surface == "mcp" else "yes"
     old_names = [
         name for name in names[: names.index(last_old) + 1] if name not in FIELDS
@@ -302,6 +308,9 @@ def test_old_positional_adapters_preserve_security_and_yes(
     fn(*(values[name] for name in old_names))
     assert_forwarded(adapter, None, None)
     call = adapter.operation.await_args
+    request = call.args[2] if adapter.kind == "lpar" else SimpleNamespace(**call.kwargs)
+    assert request.virtual_serial_adapters == ()
+    assert request.max_virtual_slots is None
     assert (
         call.args[2].security_policy
         if adapter.kind == "lpar"

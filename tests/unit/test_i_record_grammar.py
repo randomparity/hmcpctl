@@ -884,6 +884,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "_capture_lpar_cli_dump",
         "read_sync_state",
         "restore_lpar_baseline",
+        "verify_fixture",
     }
 
 

@@ -17,6 +17,7 @@ from ...documents.lpar_security_policy import (
     SecurityPolicyResult,
     SecurityPolicyState,
 )
+from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
 from ...operations.lpar.security_policy import (
     configure_lpar_security_policy,
@@ -45,7 +46,12 @@ from ...tool_registry import tool_module
 tool, register_tools, tool_security = tool_module()
 
 
-@tool(effect="mutate", operation="vios.create", target_kind="managed_system")
+@tool(
+    effect="mutate",
+    operation="vios.create",
+    target_kind="managed_system",
+    exhaustive_targets=False,
+)
 def hmc_create_vios(
     system_name_or_uuid: str,
     name: str,
@@ -56,6 +62,8 @@ def hmc_create_vios(
     hardware_mem_encryption: HardwareMemoryFlag | None = None,
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
     memory_layout: LparMemoryLayout | None = None,
+    virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
+    max_virtual_slots: int | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -71,6 +79,13 @@ def hmc_create_vios(
         system_name_or_uuid: Target managed-system name or UUID.
         name: Name for the new VIOS partition.
         resources: Memory and processor settings for the VIOS.
+        max_virtual_slots: Optional maximum virtual I/O slots, required explicitly for serial records.
+        virtual_serial_adapters: Optional strict seven-component serial creation records
+            (64 KiB encoded maximum). Empty preserves defaults. Unique local slots >=2
+            require explicit max_virtual_slots; peers must be contained and authorized.
+            Client eligibility is HMC-final in every environment. No reciprocal mutation,
+            retry, activation or traffic proof. Saved configuration/pair observations gate
+            follow-ups; controller current observations remain unavailable.
         memory_layout: Optional advertised HPT/PPT creation ratios only.
             Native single-record creation requires explicit resources; saved
             identity/ratio verification must succeed. Controller mode has no
@@ -90,6 +105,7 @@ def hmc_create_vios(
             profile; uses environment defaults when omitted.
     """
 
+    validate_serial_input(virtual_serial_adapters, max_virtual_slots)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
@@ -105,6 +121,8 @@ def hmc_create_vios(
             hardware_mem_encryption=hardware_mem_encryption,
             hardware_mem_expansion=hardware_mem_expansion,
             memory_layout=memory_layout,
+            max_virtual_slots=max_virtual_slots,
+            virtual_serial_adapters=virtual_serial_adapters,
         ),
         profile=profile,
     )
