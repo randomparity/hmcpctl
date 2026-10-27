@@ -2151,6 +2151,55 @@ produce passing evidence. Generate any public, redacted, HEAD-bound evidence
 through `scripts/live_test_evidence.py`; never publish raw result JSON or treat
 configuration readback as Linux, KVM or management-controller deployment proof.
 
+
+### Partition creation affinity groups (C08, arm 57)
+
+LPAR and VIOS creation accept optional `affinity_group_id`: strict integer 1–255,
+`none` for an explicit native no-group selection, or omission to preserve the native default.
+CLI text is parsed into that scalar; booleans, floats, zero and 256 are rejected.
+Selected-system native controller authority selects profileless creation or classic
+named-profile grammar. Affinity does not imply Linux roles or their prerequisites.
+
+The named `lpar-affinity-group` arm is excluded from default and `all` selections.
+It creates `none` then `1` serially, using at most one owned inactive AIX/Linux
+fixture with 2048 MiB desired memory and 0.5 desired processor units. Profile
+application is disabled. A second fixture requires the first observation, guarded
+deletion, absence witness and free-resource baseline comparison to pass.
+
+Use a separately authorized exclusive window and deploy the exact candidate commit.
+Verify deployed HEAD and imported package source, available resources, no stranded
+scratch partitions, and the selected system before these separate invocations:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-affinity-group
+uv run --no-sync python scripts/live_lpar_affinity_group.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-affinity-group.json
+```
+
+Preflight and configuration do not authorize writes. The wrapper accepts no extra
+arguments; keep its default result files private. Run independent read-only recovery
+after every attempt, including interruption, failure or apparent success. Unknown
+identity, ownership or inactive state retains residue for operator inspection;
+there is no automatic activation, profile mutation or retry.
+Shared cleanup deletes only a freshly identified, matching-token inactive fixture.
+
+Independent fresh contained identity, positive numeric partition ID and exact default-profile
+identity precede raw selected `lssyscfg` reads. Classic saved `native-profile` must match
+the request; `native-partition` has its own normalized value and comparison status.
+Native value mismatch or unavailability cannot replace or erase independent saved proof;
+contradictory identity still stops the workflow. Controller native equality supplies no
+saved-proof source and remains incomplete. Failed/partial observations remain diagnostic.
+The `saved-affinity-configuration` assertion requires both `none` and `1` saved proofs
+and clean guarded cleanup. Current/pending semantics, runtime and physical placement
+remain unproved. Earlier failed/source-only evidence is unchanged.
+
+Scenario `st57-lpar-affinity-group-creation` supplies evidence only after an actual
+candidate-bound run and clean recovery. Generate filtered evidence with
+`scripts/live_test_evidence.py` and scan it before publication; never publish raw
+results. Source closure establishes grammar and field availability only. Positive
+creation transitions, controller behavior, VIOS and other hardware contexts remain
+unevidenced until observed in separately authorized runs; acceptance stays in scope.
+
 ## Processor sharing and uncapped weight (ST59, named opt-in)
 
 The `processor-sharing-weight` group and `scripts/live_lpar_sharing_weight.py`

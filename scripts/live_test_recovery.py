@@ -71,6 +71,7 @@ from live_test import config as live_config
 from live_test import (
     creation_memory,
     creation_memory_layout,
+    lpar_affinity_group,
     lpar_config,
     lpar_hardware_memory,
     lpar_linux_roles,
@@ -195,6 +196,7 @@ _WITNESSED_SUBTASKS = (
         lpar_hardware_memory.SUBTASK,
         creation_memory.SUBTASK,
         creation_memory_layout.SUBTASK,
+        lpar_affinity_group.SUBTASK,
         lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
     }
@@ -376,6 +378,7 @@ def lpar_config_inputs_from_document(
             lpar_security_policy.SUBTASK,
             lpar_hardware_memory.SUBTASK,
             creation_memory_layout.SUBTASK,
+            lpar_affinity_group.SUBTASK,
             lpar_linux_roles.SUBTASK,
         }.intersection(subtasks)
         or not system

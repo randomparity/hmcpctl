@@ -10,6 +10,7 @@ from ..._app import (
     with_client,
 )
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_memory_layout import LparMemoryLayout
@@ -66,6 +67,7 @@ def hmc_create_vios(
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
     max_virtual_slots: int | None = None,
     creation_memory: LparCreationMemory | None = None,
+    affinity_group_id: AffinityGroupID | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -103,6 +105,10 @@ def hmc_create_vios(
             named profile and returns incomplete verification when current
             values are unavailable. No huge-page or KVM reservation fields,
             activation or rollback.
+        affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
+            omission preserves defaults. Fresh classic saved-profile proof gates follow-ups;
+            native partition mismatch/unavailability is reported separately. Controller
+            saved proof remains unavailable. No current/runtime or placement claim.
         hardware_mem_encryption: Optional hardware memory encryption access;
             omission preserves defaults, false explicitly disables access.
         hardware_mem_expansion: Optional hardware memory expansion access;
@@ -125,6 +131,7 @@ def hmc_create_vios(
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
         memory_layout.validate_creation("Virtual IO Server")
+    validate_affinity_group_id(affinity_group_id)
     return with_client(
         lambda hmc: create_vios(
             hmc,
@@ -139,6 +146,7 @@ def hmc_create_vios(
             max_virtual_slots=max_virtual_slots,
             virtual_serial_adapters=virtual_serial_adapters,
             creation_memory=creation_memory,
+            affinity_group_id=affinity_group_id,
         ),
         profile=profile,
     )

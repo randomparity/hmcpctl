@@ -17,6 +17,7 @@ from ...documents.lpar import (
     LparSettings,
     validate_partition_type,
 )
+from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
@@ -268,6 +269,13 @@ def lpars_create(
             help="Saved AME zero or exact numeric 1–10; no AIX intent or runtime proof",
         ),
     ] = None,
+    affinity_group_id: Annotated[
+        str | None,
+        typer.Option(
+            "--affinity-group-id",
+            help="Saved affinity group: 1–255 or none; native observation is separate; omitted preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.
 
@@ -334,6 +342,12 @@ def lpars_create(
     except (ValueError, InvalidOperation) as error:
         raise typer.BadParameter(
             terminal_field(error, err=True), param_hint="memory layout"
+        ) from None
+    try:
+        affinity = parse_affinity_group_cli(affinity_group_id)
+    except ValueError as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--affinity-group-id"
         ) from None
     policy = load_security_policy(security_policy)
     try:
@@ -412,6 +426,7 @@ def lpars_create(
                 hardware_mem_encryption=hardware_mem_encryption,
                 hardware_mem_expansion=hardware_mem_expansion,
                 memory_layout=layout,
+                affinity_group_id=affinity,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,

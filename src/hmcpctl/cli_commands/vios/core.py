@@ -21,6 +21,7 @@ from hmcpctl.operations.lpar.security_policy import (
 )
 
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
@@ -296,6 +297,13 @@ def vios_create(
             help="Saved AME zero or exact numeric 1–10; no AIX intent or runtime proof",
         ),
     ] = None,
+    affinity_group_id: Annotated[
+        str | None,
+        typer.Option(
+            "--affinity-group-id",
+            help="Saved affinity group: 1–255 or none; native observation is separate; omitted preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner.
 
@@ -348,6 +356,12 @@ def vios_create(
         raise typer.BadParameter(
             terminal_field(error, err=True), param_hint="memory layout"
         ) from None
+    try:
+        affinity = parse_affinity_group_cli(affinity_group_id)
+    except ValueError as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--affinity-group-id"
+        ) from None
     policy = load_security_policy(security_policy)
     try:
         policy.validate_creation("Virtual IO Server")
@@ -391,6 +405,7 @@ def vios_create(
             max_virtual_slots=max_virtual_slots,
             creation_memory=creation_memory,
             virtual_serial_adapters=serial,
+            affinity_group_id=affinity,
         )
     )
     if isinstance(result, dict) and isinstance(

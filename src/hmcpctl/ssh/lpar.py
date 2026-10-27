@@ -8,6 +8,7 @@ import shlex
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
+from ..documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ..documents.lpar_creation_memory import LparCreationMemory
 from ..documents.lpar_hardware_memory import hardware_memory_pairs
 from ..documents.lpar_io import LparPhysicalIO
@@ -171,6 +172,7 @@ async def create_lpar_via_cli(
     memory_layout: LparMemoryLayout | None = None,
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
     creation_memory: LparCreationMemory | None = None,
+    affinity_group_id: AffinityGroupID | None = None,
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -205,6 +207,7 @@ async def create_lpar_via_cli(
             raise TypeError("memory_layout must be LparMemoryLayout")
         memory_layout.validate_creation(partition_type)
     layout_pairs = memory_layout.pairs() if memory_layout is not None else []
+    validate_affinity_group_id(affinity_group_id)
     hardware_pairs = hardware_memory_pairs(
         hardware_mem_encryption, hardware_mem_expansion
     )
@@ -224,6 +227,8 @@ async def create_lpar_via_cli(
     ]
     if profile_name is not None:
         config_pairs.append(("profile_name", profile_name))
+    if affinity_group_id is not None:
+        config_pairs.append(("affinity_group_id", affinity_group_id))
     config_pairs.extend(hardware_pairs)
     config_pairs.extend(layout_pairs)
     config_pairs.extend(memory_pairs)
@@ -267,7 +272,7 @@ async def create_lpar_via_cli(
             layout_error += (
                 "Native layout creation outcome requires scoped identity reconciliation"
             )
-        elif not hardware_pairs:
+        elif not hardware_pairs and affinity_group_id is None:
             raise HMCCLIError(
                 f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
             ) from error
@@ -282,7 +287,7 @@ async def create_lpar_via_cli(
     if layout_error is not None:
         raise _LayoutCreateSubmissionError(layout_error, remote_refusal_code=code)
     raise HMCCLIError(
-        "Hardware memory creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run."
+        f"{'Affinity group' if affinity_group_id is not None else 'Hardware memory'} creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run."
     )
 
 

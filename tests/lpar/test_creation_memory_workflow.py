@@ -5,6 +5,7 @@ pool links follow 2f95cc34, and BasePartition e3fa8fb8 owns memory nesting.
 These fixtures establish configured facts only; no live AMS observation is implied.
 """
 
+import shlex
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
@@ -1194,3 +1195,131 @@ async def test_single_provider_same_saved_pair_is_still_mismatch(memory_target):
         ]
     )
     assert "apply" not in b.events
+
+
+@pytest.mark.parametrize("kind", ["direct", "workflow", "vios"])
+@pytest.mark.parametrize("fault", [None, "affinity", "memory", "serial"])
+async def test_c07_c08_c11_creation_barriers(memory_target, monkeypatch, kind, fault):
+    from hmcpctl.operations.lpar import affinity_group
+    from hmcpctl.operations.vios.core import create_vios
+
+    b = memory_target
+    if kind == "vios":
+        b.local["ResourceType"] = "VirtualIOServer"
+        b.local["Resource"]["PartitionType"] = "Virtual IO Server"
+        b.hmc.get_vios.side_effect = lambda uuid: deepcopy(b.local)
+    if fault == "memory":
+        del b.saved["MemoryWeight"]
+    elif fault == "serial":
+        serial.read_serial_profile.side_effect = ValueError(PRIVATE)
+
+    async def observe(config, command):
+        words = shlex.split(command)
+        fields = words[words.index("-F") + 1].split(",")
+        profile = words[words.index("-r") + 1] == "prof"
+        values = {
+            "lpar_id": "9",
+            "lpar_name": "new",
+            "name": "default_profile" if profile else "new",
+            "lpar_env": "vioserver" if kind == "vios" else "aixlinux",
+            "affinity_group_id": "2" if fault == "affinity" else "1",
+        }
+        if not profile:
+            values["affinity_group_id"] = "none"
+        return ",".join(fields) + "\n" + ",".join(values[field] for field in fields)
+
+    monkeypatch.setattr(affinity_group, "run_hmc_command", observe)
+    options = {
+        "max_virtual_slots": 8,
+        "virtual_serial_adapters": (VirtualSerialAdapter(2, "server", False),),
+        "affinity_group_id": 1,
+    }
+    if kind == "vios":
+        if fault:
+            with pytest.raises(HMCError):
+                await create_vios(
+                    b.hmc, SYSTEM, "new", RESOURCES, creation_memory=SHARED, **options
+                )
+        else:
+            result = await create_vios(
+                b.hmc, SYSTEM, "new", RESOURCES, creation_memory=SHARED, **options
+            )
+            assert result["creation_memory_verification"].saved.status == "verified"
+            assert result["serial_verification"]["configuration"] == "verified"
+            assert (
+                result["affinity_verification"]["status"]
+                == "saved-configuration-verified"
+            )
+            assert (
+                result["affinity_verification"]["observation_status"][
+                    "native-partition"
+                ]
+                == "mismatch"
+            )
+        assert "stamp" not in b.events and "apply" not in b.events
+    else:
+        creation = core.LparCreation(
+            "new",
+            "AIX/Linux",
+            RESOURCES,
+            creation_memory=SHARED,
+            apply_profile=True,
+            **options,
+        )
+        if kind == "workflow":
+            result = await workflows.create_lpar(
+                b.hmc, SYSTEM, creation, LparPcieAssignments()
+            )
+            assert result.workflow_completed is (fault is None)
+            steps = {step.step: step for step in result.steps}
+            assert ("assign" in b.events) is (fault is None)
+        else:
+            result = await core.create_and_stamp_lpar(b.hmc, SYSTEM, creation)
+            steps = {
+                "creation_memory": result.creation_memory_step,
+                "virtual_serial_adapters": result.serial_step,
+                "affinity_group": result.affinity_group_step,
+            }
+        assert ("apply" in b.events) is (fault is None)
+        assert steps["creation_memory"].status == (
+            "error" if fault == "memory" else "ok"
+        )
+        assert steps["virtual_serial_adapters"].status == (
+            "error" if fault == "serial" else "ok"
+        )
+        assert steps["affinity_group"].status == (
+            "error" if fault == "affinity" else "ok"
+        )
+    assert b.events.count("create") == 1
+
+
+async def test_c07_controller_assignment_preflight_has_one_authority_owner(
+    memory_target, monkeypatch
+):
+    b = memory_target
+    b.controller = True
+    b.system["Resource"]["IsClassicHMCManagement"] = "false"
+    b.system["Resource"]["IsHMCPowerVMManagementController"] = "true"
+    command = linux_roles.run_hmc_command
+
+    async def observe(config, native_command):
+        if native_command.startswith("lscomgmt"):
+            b.events.append("authority")
+        return await command(config, native_command)
+
+    monkeypatch.setattr(linux_roles, "run_hmc_command", observe)
+    creation = core.LparCreation(
+        "new",
+        "AIX/Linux",
+        LparResources(desired_memory=1024),
+        creation_memory=Memory(mem_expansion=0),
+        apply_profile=False,
+    )
+    assignments = LparPcieAssignments(
+        dedicated=(DedicatedPcieAssignment("default_profile", "21010001"),)
+    )
+    with pytest.raises(ValueError, match="controller mode"):
+        await workflows.create_lpar(b.hmc, SYSTEM, creation, assignments)
+    assert b.events == ["authority"]
+    b.hmc._get.assert_not_awaited()
+    assert not b.created

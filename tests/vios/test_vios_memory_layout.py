@@ -12,7 +12,6 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 from hmcpctl.operations.vios import core
 from hmcpctl.ssh.transport import HMCCLIError
 
@@ -47,8 +46,8 @@ def boundary(monkeypatch):
     monkeypatch.setattr(
         core, "resolve_system_cli_name", AsyncMock(return_value="sys-R1"), raising=False
     )
-    mode = AsyncMock(return_value=RoleCapabilities(False, False, None, None, False))
-    monkeypatch.setattr(core, "read_role_capabilities", mode, raising=False)
+    mode = AsyncMock(return_value=({}, False))
+    monkeypatch.setattr(core, "read_creation_authority", mode, raising=False)
     write = AsyncMock(return_value="")
     monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", write)
     state = SimpleNamespace(
@@ -98,7 +97,7 @@ async def test_ratios_force_existing_native_once_with_mode_only(boundary):
     assert "lpar_env=vioserver" in record
     b.hmc.create_vios.assert_not_awaited()
     b.mode.assert_awaited_once_with(
-        b.hmc, SYSTEM, need_kvm=False, need_management=False
+        b.hmc, SYSTEM, need_management=False, context="Memory layout"
     )
     assert b.hmc.find_vios_by_name.await_args.kwargs == {"system_uuid": SYSTEM}
 
@@ -185,7 +184,7 @@ async def test_layout_partial_or_unknown_never_replays_or_claims_verified(
     if failure == "write":
         b.write.side_effect = HMCCLIError("private-provider-marker")
     if failure == "controller":
-        b.mode.return_value = RoleCapabilities(True, False, None, None, False)
+        b.mode.return_value = ({}, True)
     with pytest.raises(HMCError) as caught:
         await core.create_vios(
             b.hmc, "selector", "vios-R1", RESOURCES, memory_layout=LAYOUT

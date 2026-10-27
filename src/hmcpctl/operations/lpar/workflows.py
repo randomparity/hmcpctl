@@ -7,12 +7,12 @@ from dataclasses import replace
 from hmcpctl.client.core import HMCClient
 
 from ...documents.lpar import validate_partition_type
+from ...documents.lpar_affinity_group import validate_affinity_group_id
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...errors import HMCError
-from ...resource_identity import resolve_system_uuid
 from ...ssh.lpar import complete_create_resources
 from .assignments import (
     LparPcieAssignments,
@@ -23,7 +23,7 @@ from .assignments import (
 )
 from .core import LparCreation, create_and_stamp_lpar
 from .errors import translate_lpar_write_error
-from .linux_roles import read_role_capabilities, roles_requested
+from .linux_roles import roles_requested
 from .workflow_contract import WorkflowStep
 
 
@@ -64,6 +64,11 @@ async def create_lpar(
         raise ValueError(
             "Memory layout cannot be combined with keylock in native creation"
         )
+    affinity_requested = (
+        validate_affinity_group_id(creation.affinity_group_id) is not None
+    )
+    if affinity_requested and creation.keylock is not None:
+        raise ValueError("Affinity group cannot be combined with explicit keylock")
     hardware_requested = bool(
         hardware_memory_pairs(
             creation.hardware_mem_encryption, creation.hardware_mem_expansion
@@ -74,22 +79,6 @@ async def create_lpar(
             "Hardware memory settings cannot be combined with explicit keylock"
         )
     validate_partition_type(creation.partition_type)
-    if (
-        roles_requested(creation.settings)
-        or layout_requested
-        or serial_requested
-        or memory_requested
-    ) and (assignments.dedicated or assignments.sriov):
-        caps = await read_role_capabilities(
-            hmc,
-            await resolve_system_uuid(hmc, system_name_or_uuid),
-            need_kvm=creation.settings.kvm_capable is not None,
-            need_management=creation.settings.powervm_mgmt_capable is not None,
-        )
-        if caps.controller_mode:
-            raise ValueError(
-                "Dedicated and SR-IOV profile assignments are unavailable in controller mode"
-            )
     if creation.physical_io.requested:
         overlap = {s.drc_index for s in creation.physical_io.io_slots} & {
             s.drc_index for s in assignments.dedicated
@@ -102,11 +91,29 @@ async def create_lpar(
             creation, creation_sriov=creation.creation_sriov or assignments.sriov
         )
         assignments = replace(assignments, sriov=creation.creation_sriov)
-    await prevalidate_lpar_pcie_assignments(hmc, system_name_or_uuid, assignments)
+    preflight_assignments = None
+    if (
+        roles_requested(creation.settings)
+        or affinity_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
+    ) and (assignments.dedicated or assignments.sriov):
+        preflight_assignments = assignments
+    else:
+        await prevalidate_lpar_pcie_assignments(hmc, system_name_or_uuid, assignments)
     if creation.physical_io.requested:
         assignments = replace(assignments, sriov=())
     try:
-        created = await create_and_stamp_lpar(hmc, system_name_or_uuid, creation)
+        if preflight_assignments is None:
+            created = await create_and_stamp_lpar(hmc, system_name_or_uuid, creation)
+        else:
+            created = await create_and_stamp_lpar(
+                hmc,
+                system_name_or_uuid,
+                creation,
+                preflight_assignments=preflight_assignments,
+            )
     except HMCError as exc:
         translated = translate_lpar_write_error(exc)
         if translated is exc:
@@ -122,6 +129,7 @@ async def create_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or affinity_requested
     ):
         steps.append(created.apply_step)
     if created.settings_step is not None:
@@ -132,6 +140,8 @@ async def create_lpar(
         steps.append(created.vtpm_step)
     if created.security_policy_step is not None:
         steps.append(created.security_policy_step)
+    if created.affinity_group_step is not None:
+        steps.append(created.affinity_group_step)
     if created.hardware_memory_step is not None:
         steps.append(created.hardware_memory_step)
     if created.memory_layout_step is not None:
@@ -146,6 +156,7 @@ async def create_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or affinity_requested
     ):
         steps.append(created.apply_step)
     verification_failed = (
@@ -154,6 +165,7 @@ async def create_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or affinity_requested
     ) and (
         created.ownership_stamped is not True
         or any(
@@ -164,6 +176,7 @@ async def create_lpar(
                 (layout_requested, created.memory_layout_step),
                 (serial_requested, created.serial_step),
                 (memory_requested, created.creation_memory_step),
+                (affinity_requested, created.affinity_group_step),
                 (creation.settings.pairs(), created.settings_step),
                 (creation.reporting_settings.pairs(), created.reporting_step),
                 (creation.vtpm_settings.pairs(), created.vtpm_step),
@@ -188,7 +201,7 @@ async def create_lpar(
     apply_failed = (
         created.apply_step is not None and created.apply_step.status == "error"
     ) or (
-        (roles_requested(creation.settings) or memory_requested)
+        (roles_requested(creation.settings) or memory_requested or affinity_requested)
         and creation.apply_profile is True
         and (created.apply_step is None or created.apply_step.status != "ok")
     )

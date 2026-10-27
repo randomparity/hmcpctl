@@ -2341,3 +2341,47 @@ def test_c07_creation_memory_catalog_bindings(operation):
                 f"{generation}:mksyscfg:partition-create:{field}" in item["constraint"]
             )
     assert all("c07" not in evidence["id"] for evidence in maturity["evidence"])
+
+
+@pytest.mark.parametrize("operation", ["lpar.create", "vios.create"])
+def test_affinity_group_creation_catalog_contract(operation: str) -> None:
+    catalog = ROOT / "docs" / "capabilities"
+    record = next(
+        row
+        for row in inventory.load_json(catalog / "operations.json")["operations"]
+        if row["operation"] == operation
+    )
+    maturity = next(
+        row
+        for row in inventory.load_json(catalog / "maturity.json")["operations"]
+        if row["operation"] == operation
+    )
+    scope = [
+        row
+        for row in maturity["implementation"]["implemented_scope"]
+        if row["variant"] == "c08-affinity-group-creation"
+    ]
+    assert len(scope) == 1
+    assert [parameter["name"] for parameter in scope[0]["parameters"]] == [
+        "affinity_group_id"
+    ]
+    required = {
+        "tests/unit/test_lpar_affinity_group.py",
+        "tests/lpar/test_affinity_group_creation.py",
+        "tests/app/test_app_lpar_affinity_group.py",
+    }
+    if operation == "lpar.create":
+        required.add("tests/test_live_lpar_affinity_group_arm.py")
+    assert required <= set(record["tests"])
+    assert all((ROOT / path).is_file() for path in required)
+    registry = inventory.discover_registry()
+    assert record["signature"] == next(
+        tool.signature for tool in registry if tool.operation == operation
+    )
+    # Implemented input scope alone never supplies a hardware verification snapshot.
+    projection = json.loads(
+        inventory.render_runtime_projection([maturity], registry, {})
+    )["operations"]
+    assert projection[0]["implementation"] == maturity["implementation"]["state"]
+    assert projection[0]["verification"] == "unevidenced"
+    assert projection[0]["observed_at"] is None
