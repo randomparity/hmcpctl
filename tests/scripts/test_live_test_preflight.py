@@ -1022,6 +1022,24 @@ def test_serial_preflight_requires_complete_exact_inputs(monkeypatch, missing):
     dispatch.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "source,expected", [("source-R1", "RUNNABLE"), ("example-source", "SKIP")]
+)
+def test_processor_move_preflight_uses_named_fixture_admission(
+    workspace, monkeypatch, capsys, source, expected
+):
+    (workspace / ".env").write_text(
+        _env_text(LIVE_TEST_LPAR_NAME=source, LIVE_TEST_SCRATCH_LPAR_NAME="target-R2"),
+        encoding="utf-8",
+    )
+    _credentials(monkeypatch)
+    assert preflight.main(["--group", "lpar-processor-move", "--skip-hardware"]) == 0
+    output = capsys.readouterr().out
+    assert "lpar-processor-move" in output and expected in output
+    assert runner.SUBTASK_GROUPS["lpar-processor-move"] == [61]
+    assert 61 not in runner.SUBTASK_GROUPS["all"]
+
+
 def test_vios_source_preflight_exact_route(monkeypatch):
     from unittest.mock import Mock
 

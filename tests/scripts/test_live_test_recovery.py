@@ -2961,6 +2961,31 @@ def test_serial_recovery_rejects_other_authority_or_output(monkeypatch, extra):
     dispatch.assert_not_called()
 
 
+@pytest.mark.parametrize("credentials", [False, True])
+def test_processor_move_route_refuses_unarmed_proof(
+    tmp_path, monkeypatch, capsys, credentials
+):
+    from hmcpctl.config import HMCConfig
+
+    document = {
+        "run": {
+            "group": "lpar-processor-move",
+            "subtasks": [61],
+            "tree_clean": False,
+            "partial": True,
+        },
+        "results": [],
+    }
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: credentials)
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+    assert recovery.main(["--results", str(path)]) == 2
+    captured = capsys.readouterr()
+    assert "CLEAN:" not in captured.out
+    assert ("unconfirmed" if credentials else "credentials unavailable") in captured.err
+
+
 def test_vios_source_recovery_exact_route(monkeypatch):
     from live_test import vios_ame_source
 

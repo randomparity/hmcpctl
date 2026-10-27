@@ -98,3 +98,43 @@ class LparProcessorChange(BaseModel):
                 "Pass processors or processing_units; nothing was requested"
             )
         return self
+
+
+class LparProcessorMove(BaseModel):
+    """Native two-partition transfer; mode applicability is resolved at admission."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    processors: Annotated[StrictInt, Field(ge=0)] | None = Field(
+        default=None,
+        description="Whole dedicated processors or shared virtual processors to move, when applicable.",
+    )
+    processing_units: Decimal | None = Field(
+        default=None,
+        description="Shared entitlement to move in exact hundredths; integral for a dedicated destination.",
+    )
+    force: StrictBool = Field(
+        default=False,
+        description="Allow running AIX/Linux/VIOS changes without RMC; runtime effect requires restart.",
+    )
+
+    @field_validator("processing_units", mode="before")
+    @classmethod
+    def exact_units(cls, value: object) -> Decimal | None:
+        return (
+            None if value is None else cast("Decimal", bounded_processor_number(value))
+        )
+
+    @field_validator("processors")
+    @classmethod
+    def bounded_processors(cls, value: int | None) -> int | None:
+        if value is not None:
+            bounded_processor_number(value, whole=True)
+        return value
+
+    @model_validator(mode="after")
+    def require_quantity(self) -> Self:
+        if self.processors is None and self.processing_units is None:
+            raise ValueError(
+                "Pass processors or processing_units; nothing was requested"
+            )
+        return self
