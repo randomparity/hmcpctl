@@ -1271,6 +1271,19 @@
                 "constraint": "optional exact selected-system advertised PPT token; AIX/Linux and OS400 LPAR creation; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
               }
             ]
+          },
+          {
+            "variant": "c11-virtual-serial-creation",
+            "parameters": [
+              {
+                "name": "max_virtual_slots",
+                "constraint": "optional for nonserial creation; explicit integer maximum strictly greater than every selected serial local slot required for serial creation; no source-unspecified hardware maximum"
+              },
+              {
+                "name": "virtual_serial_adapters",
+                "constraint": "optional strict seven-component typed client/server tuple; empty preserves omission; explicit maximum and unique nonreserved local slots; contained existing peer identity/ownership admission; one native creation attempt without replay or compensation; unresolved client capability is HMC-final across AIX/Linux, OS400 and Virtual IO Server; independent classic saved-default-profile configuration/unbound/pair facts, controller current mapping unavailable; no active traffic, boot or console claim; old live evidence gives no new-variant credit"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -5052,6 +5065,19 @@
               {
                 "name": "memory_layout.ppt_ratio",
                 "constraint": "optional exact selected-system advertised PPT token; VIOS creation only; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+              }
+            ]
+          },
+          {
+            "variant": "c11-virtual-serial-creation",
+            "parameters": [
+              {
+                "name": "max_virtual_slots",
+                "constraint": "optional for nonserial creation; explicit integer maximum strictly greater than every selected serial local slot required for serial creation; no source-unspecified hardware maximum"
+              },
+              {
+                "name": "virtual_serial_adapters",
+                "constraint": "optional strict seven-component typed client/server tuple; empty preserves omission; explicit maximum and unique nonreserved local slots; contained existing peer identity/ownership admission; one native creation attempt without replay or compensation; unresolved client capability is HMC-final across AIX/Linux, OS400 and Virtual IO Server; independent classic saved-default-profile configuration/unbound/pair facts, controller current mapping unavailable; no active traffic, boot or console claim; old live evidence gives no new-variant credit"
               }
             ]
           }

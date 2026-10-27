@@ -2933,6 +2933,34 @@ def test_sharing_recovery_incomplete_never_claims_clean(
     assert "CLEAN" not in capsys.readouterr().out
 
 
+def test_serial_procedure_exact_read_only_dispatch(monkeypatch):
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock(return_value=2)
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    assert recovery.main(["--serial-procedure", "--results", "r"]) == 2
+    dispatch.assert_called_once_with(["recover", "--results", "r"])
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--packet-sha256", "s"],
+        ["--output", "o"],
+        ["--source-packet", "p"],
+    ],
+)
+def test_serial_recovery_rejects_other_authority_or_output(monkeypatch, extra):
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock()
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    with pytest.raises(SystemExit) as result:
+        recovery.main(["--serial-procedure", "--results", "r", *extra])
+    assert result.value.code == 2
+    dispatch.assert_not_called()
+
+
 @pytest.mark.parametrize("credentials", [False, True])
 def test_processor_move_route_refuses_unarmed_proof(
     tmp_path, monkeypatch, capsys, credentials

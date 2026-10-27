@@ -2282,3 +2282,59 @@ checks. Partial, rejected or unverified outcomes stop for independent reconcilia
 and approved recovery; no automatic inverse, activation, force, target substitution
 or replay is implied. Forced/no-RMC, dedicated and other contexts need their own
 explicit procedures and evidence; successful current readback alone is not guest proof.
+
+## Standalone ST63 serial creation
+
+ST63 is an opt-in native creation procedure, outside default runner and ST100
+dispatch. It exercises the existing C11 native writer, shared serial admission
+and fresh identity confirmation, plus a separate guarded LPAR ownership stamp.
+It does not exercise the complete `create_and_stamp_lpar`/`create_vios` owners
+or their CLI/MCP workflows. Its literal independent CSV oracle observes a saved
+default-profile reciprocal pair; it proves no active traffic, boot or console
+behavior. No hardware run or maturity promotion follows from its presence.
+
+Root must separately approve the exact candidate and packet in a current exclusive
+writer window. The budget is one fresh inactive fixture, exactly 1 GiB and one
+dedicated CPU, one native create, one LPAR stamp where applicable, and at most one
+conditional fresh-UUID delete. There is no existing-peer mutation, activation,
+retry, fallback or recovery write. An uncertain call or observation stops effects.
+
+Use operator-owned mode 0600 packet/preflight/result files in an existing private
+mode 0700 directory outside the checkout. Never replace previous intent. The JSON
+packet has exactly `candidate`, `expires_utc`, `system_uuid`, `partition_type`,
+`name`, `caller_token`, `cleanup_authorized`. Candidate has exactly `commit`,
+`tree` (40 lowercase hexadecimal each) and `hmc_identity`, whose exact fields are
+`host`, `port` (strict integer 1–65535), `user`, `verify_ssl` (boolean),
+`agent_id`; host/account/owner are nonempty strings. Owner is the effective
+configured agent ID or `hmcpctl`. Effective connection, clean deployed HEAD/tree
+and imported package source must match before authentication. Expiry is UTC ISO
+8601. Partition type is `AIX/Linux`, `OS400` or `Virtual IO Server`; names match
+`hmcpctl-live-serial-<8 lowercase hex>` and callers `q1772-<8 lowercase hex>`.
+Cleanup authorization is a strict boolean: false allows preflight only.
+
+After separately reviewing and approving that exact packet/window, run each
+command separately through the deployed candidate:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-serial-adapter --packet "$PACKET" --packet-sha256 "$SHA" --output "$PREFLIGHT"
+uv run --no-sync python scripts/live_lpar_serial_adapter.py --packet "$PACKET" --packet-sha256 "$SHA" --preflight "$PREFLIGHT" --results-file "$RESULTS" --grant-packet-sha256 "$SHA" --exclusive-writer-window
+uv run --no-sync python scripts/live_test_recovery.py --serial-procedure --results "$RESULTS"
+```
+
+Check each exit separately. Failed preflight stops execution; failed execution
+still requires read-only recovery. The grant digest and exclusive-window flag
+are separate current-invocation operator assertions, not cryptographic grants.
+Neither a packet nor retained preflight/journal authorizes effects after a crash.
+Preflight must be younger than 60 seconds, and both partition feeds, complete saved
+profiles and available CPU/memory must remain unchanged before creation. Residue
+and unavailable classic observations refuse admission. The finite request selects
+maximum 8 and same-partition reciprocal slots 2/3; every effect rechecks candidate,
+connection, expiry and fresh invocation after recording durable pending intent.
+
+Cleanup requires independently confirmed fresh contained inactive identity, exact
+resources, literal pair evidence and current LPAR owner/caller where applicable.
+Only that UUID may be deleted once; afterwards the complete baseline must match.
+Recovery rereads the retained packet binding and baseline without adopting,
+stamping, creating, deleting or resuming. Partial journals remain incomplete even
+when their fixture is absent now. Retain uncertain residue for root/operator
+reconciliation. Source rollback is a source/document revert, never an HMC action.
