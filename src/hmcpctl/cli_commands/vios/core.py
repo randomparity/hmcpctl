@@ -26,6 +26,7 @@ from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
+from ...operations.lpar.creation_memory import CreationMemoryVerification
 from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 from ...operations.partition_state import PartitionState
 from ...operations.vios.core import create_vios, list_vios, power_vios
@@ -392,6 +393,15 @@ def vios_create(
             virtual_serial_adapters=serial,
         )
     )
+    if isinstance(result, dict) and isinstance(
+        result.get("creation_memory_verification"), CreationMemoryVerification
+    ):
+        result = {
+            **result,
+            "creation_memory_verification": asdict(
+                result["creation_memory_verification"]
+            ),
+        }
     print_json(result)
 
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import json
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -18,6 +19,10 @@ from hmcpctl.cli_commands.lpar import create
 from hmcpctl.cli_commands.vios import core as vios_cli
 from hmcpctl.documents.lpar_creation_memory import LparCreationMemory
 from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
+from hmcpctl.operations.lpar.creation_memory import (
+    CreationMemoryObservation,
+    CreationMemoryVerification,
+)
 from hmcpctl.operations.lpar.workflows import create_lpar
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.server import TOOL_SECURITY, create_mcp
@@ -305,3 +310,64 @@ async def test_all_targets_policy_retains_independent_owner_denial(
         assert "owned by" in str(result.content)
     assert adapter.connections == [{"profile": None}]
     assert not b.created
+
+
+def test_vios_cli_creation_memory_verification_is_structured_json(monkeypatch):
+    verification = CreationMemoryVerification(
+        LparCreationMemory(mem_mode="ded", mem_expansion=Decimal("1.1")),
+        CreationMemoryObservation("verified", {"mem_expansion": Decimal("1.1")}, ()),
+        None,
+    )
+    outcome = {
+        "UUID": "vios-R1",
+        "creation_memory_verification": verification,
+        "serial_verification": {"status": "verified"},
+    }
+    monkeypatch.setattr(vios_cli, "with_client", lambda fn: outcome)
+    result = CliRunner().invoke(
+        app,
+        [
+            "vios",
+            "create",
+            "part-R1",
+            "--system",
+            "sys-R1",
+            "--yes",
+            "--mem-mode",
+            "ded",
+            "--mem-expansion",
+            "1.1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    proof = payload["creation_memory_verification"]
+    assert proof["saved"]["status"] == "verified"
+    assert proof["saved"]["observed"] == {"mem_expansion": "1.1"}
+    assert proof["current"] is None
+    assert payload["serial_verification"] == {"status": "verified"}
+    assert payload["UUID"] == "vios-R1"
+    assert outcome["creation_memory_verification"] is verification
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        None,
+        {"UUID": "vios-R1", "serial_verification": {"status": "verified"}},
+        {"creation_memory_verification": None},
+        {
+            "creation_memory_verification": {
+                "saved": {"status": "verified", "observed": {"mem_weight": 0}},
+                "current": None,
+            },
+        },
+    ],
+)
+def test_vios_cli_preserves_existing_plain_or_absent_verification(monkeypatch, outcome):
+    monkeypatch.setattr(vios_cli, "with_client", lambda fn: outcome)
+    result = CliRunner().invoke(
+        app, ["vios", "create", "part-R1", "--system", "sys-R1", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == outcome
