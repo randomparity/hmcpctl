@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from hmcpctl.config import HMCConfig
@@ -787,3 +788,62 @@ async def test_direct_native_provider_href_is_independently_resolved(native_targ
     await e.arm.exercise_creation_memory(None, e.state)
     assert e.state.artifacts.creation_memory["phase"] == "complete"
     assert e.state.observations[0]["observation"]["result"] == "passed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("fault", [None, "partition", "system", "parent", "origin"])
+async def test_saved_oracle_preserves_verified_uuid_spelling(monkeypatch, kind, fault):
+    from live_test import creation_memory as arm
+
+    parent = "abcdefab-abcd-4abc-8abc-abcdefabcdef"
+    system = "fedcbafe-fedc-4fed-8fed-fedcbafedcba"
+    raw_parent, raw_system = parent.upper(), system.upper()
+    inventory = SimpleNamespace(
+        partition_uuid=raw_parent if fault != "partition" else PRIMARY,
+        system_uuid=raw_system if fault != "system" else SECONDARY,
+        partition_type=kind,
+        profiles=[SimpleNamespace(name="default_profile", uuid=PROFILE)],
+    )
+    monkeypatch.setattr(
+        arm.profiles, "list_partition_profiles", AsyncMock(return_value=inventory)
+    )
+    href_parent = PRIMARY if fault == "parent" else raw_parent
+    host = "foreign.test" if fault == "origin" else "hmc.test"
+    href = f"https://{host}:443/rest/api/uom/ManagedSystem/{raw_system}/{kind}/{href_parent}"
+    raw = f"""<entry xmlns="{ATOM_NS}"><id>urn:uuid:{PROFILE}</id><content>
+      <LogicalPartitionProfile xmlns="{UOM_NS}">
+      <Metadata><Atom><AtomID>{PROFILE}</AtomID><AtomCreated>created</AtomCreated></Atom></Metadata>
+      <AssociatedPartition href="{href}"/><ProfileName>default_profile</ProfileName>
+      <SettingID>7</SettingID><ProfileMemory>
+      <ActiveMemorySharingEnabled>false</ActiveMemorySharingEnabled>
+      </ProfileMemory></LogicalPartitionProfile></content></entry>"""
+    request = AsyncMock(return_value=httpx.Response(200, text=raw))
+    hmc = SimpleNamespace(
+        config=HMCConfig.from_mapping({"host": "hmc.test", "user": "test"}),
+        _request_with_uuid_path_arguments=request,
+    )
+    journal = {
+        "kind": kind,
+        "system_uuid": system,
+        "uuid": parent,
+        "requested": {"mem_mode": "dedicated"},
+    }
+    if fault:
+        with pytest.raises(
+            ValueError, match="identity unavailable|different partition or HMC"
+        ):
+            await arm._oracle(hmc, journal, controller=False)
+        if fault in {"partition", "system"}:
+            request.assert_not_awaited()
+    else:
+        result = await arm._oracle(hmc, journal, controller=False)
+        assert result == {
+            "status": "verified",
+            "observed": {"mem_mode": "false"},
+            "unavailable": [],
+        }
+        assert request.await_args.args == (
+            "GET",
+            f"/rest/api/uom/{kind}/{raw_parent}/LogicalPartitionProfile/{PROFILE}",
+        )

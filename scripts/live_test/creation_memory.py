@@ -345,13 +345,13 @@ async def _oracle(hmc, journal: dict, *, controller: bool) -> dict:
         selected = [p for p in inventory.profiles if p.name == "default_profile"]
         if (
             len(selected) != 1
-            or inventory.partition_uuid != identity
-            or inventory.system_uuid != system
+            or _canonical(inventory.partition_uuid) != identity
+            or _canonical(inventory.system_uuid) != system
             or inventory.partition_type != kind
         ):
             raise ValueError("independent default profile identity unavailable")
         native = await client_profiles.read_native_profile(
-            hmc, kind, identity, selected[0].uuid, system
+            hmc, kind, inventory.partition_uuid, selected[0].uuid, inventory.system_uuid
         )
         if native.uuid != selected[0].uuid or native.name != "default_profile":
             raise ValueError("independent native profile selection differs")
