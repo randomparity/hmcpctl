@@ -191,6 +191,17 @@ def test_header_exact_literals(tmp_path, pending):
     )
 
 
+@pytest.mark.parametrize("variant", [str.lower, str.upper, str.swapcase])
+def test_header_uuid_case_preserves_native_text(tmp_path, variant):
+    p = packet(tmp_path)
+    ident = identity(p)
+    ident["vios_uuid"] = "abcdef01-2345-6789-abcd-0123456789ab"
+    observed = variant("aBcDeF01-2345-6789-AbCd-0123456789aB")
+    assert (
+        source.parse_native_header(native(p, uuid=observed), ident)["uuid"] == observed
+    )
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -202,6 +213,8 @@ def test_header_exact_literals(tmp_path, pending):
         "stderr",
         "replacement",
         "identity",
+        "uuid_shape",
+        "name_case",
         "quote",
     ],
 )
@@ -224,6 +237,10 @@ def test_header_rejects_malformed(tmp_path, change):
         raw = raw.replace("Not Activated", "\ufffd")
     if change == "identity":
         raw = native(p, uuid=V0)
+    if change == "uuid_shape":
+        raw = native(p, uuid="z" * 36)
+    if change == "name_case":
+        raw = native(p, name=identity(p)["name"].upper())
     if change == "quote":
         raw = raw.replace("Not Activated", '"unclosed')
     with pytest.raises(ValueError):

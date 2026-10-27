@@ -239,10 +239,11 @@ def parse_native_header(raw: str, identity: dict) -> dict[str, str]:
         "name": identity["name"],
         "lpar_id": str(identity["partition_id"]),
         "lpar_env": "vioserver",
-        "uuid": identity["vios_uuid"],
         "description": identity["description"],
     }
-    if any(cells[k] != v for k, v in expected.items()):
+    if _uuid(cells["uuid"]) != _uuid(identity["vios_uuid"]) or any(
+        cells[k] != v for k, v in expected.items()
+    ):
         raise Held("native identity or marker differs")
     return cells
 
