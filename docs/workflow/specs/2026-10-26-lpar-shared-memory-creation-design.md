@@ -236,11 +236,15 @@ requested values, observations and unavailable names are bounded to this eight-f
 
 1. **Boundary inventory:** widen caller-to-native-record, HMC-to-admission/readback and
    affected-provider authorization boundaries. No new transport or credential boundary.
+   ST65 private result paths and retained JSON cross into read-only recovery conclusions.
 2. **Actor model:** malformed/unauthorized authenticated callers and concurrent HMC writers.
    The configured HMC is trusted for evidence; embedded destinations remain untrusted.
+   Operator-selected paths and local persisted records may be stale, malformed or foreign.
 3. **Controls:** strict bounded input, fixed keys plus record/shell encoding, complete unique
    contained identities, fixed-path reads, ownership/audit and non-exhaustive MCP target policy,
    independent verification and no uncertain replay. Error text excludes raw provider payloads.
+   ST65 requires private owned fresh destinations and closed bounded journal decoding bound to
+   candidate/HMC/invocation. Retained grants are evidence only; recovery never authorizes writes.
 4. **Outside this model:** compromised trusted host/HMC and guest correctness, covered by
    deployment trust and guest operations; this accepts no omitted C1–C5 creation obligation.
 
