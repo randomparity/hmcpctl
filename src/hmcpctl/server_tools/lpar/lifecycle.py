@@ -10,7 +10,7 @@ from ..._app import (
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources
 from ...documents.lpar_memory import LparMemoryChange, LparMemoryMove
-from ...documents.lpar_processors import LparProcessorChange
+from ...documents.lpar_processors import LparProcessorChange, LparProcessorMove
 from ...jobs import BootMode, PowerOnKeylock, PowerOnOperationType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
 from ...operations.lpar.activation import (
@@ -27,6 +27,7 @@ from ...operations.lpar.decommission import DecommissionResult, decommission_lpa
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
 from ...operations.lpar.memory import change_lpar_memory
 from ...operations.lpar.memory_move import move_lpar_memory
+from ...operations.lpar.processor_move import move_lpar_processors
 from ...operations.lpar.processors import change_lpar_processors
 from ...tool_registry import tool_module
 
@@ -664,6 +665,55 @@ def hmc_move_lpar_memory(
         raise ValueError("Memory move requires source, destination and managed system")
     return with_client(
         lambda hmc: move_lpar_memory(
+            hmc,
+            lpar_name_or_uuid,
+            target_lpar_name_or_uuid,
+            move,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
+
+@tool(
+    effect="mutate",
+    operation="lpar.move_processors",
+    target_kind="lpar",
+    extra_targets=(("lpar", "target_lpar_name_or_uuid"),),
+)
+def hmc_move_lpar_processors(
+    lpar_name_or_uuid: str,
+    target_lpar_name_or_uuid: str,
+    system_name_or_uuid: str,
+    move: LparProcessorMove,
+    profile: str | None = None,
+    ownership_override: bool = False,
+) -> dict[str, Any]:
+    """Move processor quantities once and independently observe both partitions.
+
+    Args:
+        lpar_name_or_uuid: Source PartitionName or UUID within the selected system.
+        target_lpar_name_or_uuid: Distinct destination PartitionName or UUID.
+        system_name_or_uuid: Containing managed system name or UUID, required.
+        move: Typed processor count and/or entitlement, and optional no-RMC force intent.
+        profile: Configured connection profile; default when omitted.
+        ownership_override: Explicit operator override for both ownership checks.
+
+    Source/destination modes, bounds, state and capabilities are checked.
+    Native firmware and guest admission enforce remaining reservations. Both results
+    carry change_location and warnings; forced effects may need an OS restart.
+    Partial/unverified effects must not be automatically replayed or compensated.
+    """
+    if any(
+        not value.strip()
+        for value in (lpar_name_or_uuid, target_lpar_name_or_uuid, system_name_or_uuid)
+    ):
+        raise ValueError(
+            "Processor move requires source, destination and managed system"
+        )
+    return with_client(
+        lambda hmc: move_lpar_processors(
             hmc,
             lpar_name_or_uuid,
             target_lpar_name_or_uuid,
