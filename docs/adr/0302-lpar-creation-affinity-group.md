@@ -2,41 +2,42 @@
 
 ## Status
 
-Accepted for #1769 after design, scope, product and security review.
+Private proposed amendment only; not adopted, implemented or independently reviewed.
+Prior D3/A3/Party1/P4/S3 cover their historical bytes, not this changed criterion.
+User call_6f289dcf9ef4484b99a26406c941d29c/0 approved “Approve saved-configuration
+criterion”: prepare this design update only. ADR0302 reservation remains unchanged.
 
 ## Context
 
-The P10 mksyscfg:41 and P11 mksyscfg:49 selectors under docs/refs admit none
-or integer 1–255 for memory/processor grouping. C08 assigns their creation use.
-Existing LPAR/VIOS owners already encode native records and handle partial effects.
+C08 owns two partition-create occurrences, P10 mksyscfg:41 and P11 mksyscfg:49.
+At candidate433c7ea6, ST57 requested no apply: positive1 returned profile1 and
+partition none; all-plane equality truthfully stopped follow-ups. The failed
+source-only experiment did not establish the original effective-assignment outcome.
 
 ## Decision
 
-Add optional creation-only affinity_group_id through existing operations and
-CLI/MCP: strict integer 1–255, exact none, or omission. CLI parses decimal text.
-Selection uses one native record; omission preserves the existing call graph.
-Reuse C05's native authority observation without importing Linux/KVM prerequisites;
-retain role errors, controller profileless grammar and C10 independent barriers.
-Keep all_resources where existing selected-feature contracts allow it.
-
-Observe the selected native partition with documented projection/filter grammar;
-label it native-partition. Classic named-profile evidence is separate native-profile.
-Require unique contained identity, strict rows and literal request equality.
-Neither observation establishes current/runtime semantics or an XML-zero mapping.
-Unverified assignment is partial and blocks follow-up apply/assignments.
-Preserve VIOS's entry-or-exception shape; no automatic retry, rollback or activation.
+Success means independently verified saved affinity configuration. Classic creation
+requires fresh contained identity and exact default-profile identity/value equality.
+Keep native-partition observations separate, including mismatch/unavailability;
+current, pending, runtime and physical-placement semantics remain unestablished.
+A valid different native value alone no longer defeats verified saved configuration.
+Controller creation remains profileless; without a supported saved-proof source it
+returns incomplete, even when its native partition value matches. Keep all contexts.
+Retain strict scalar inputs, single native record, ownership/identity uncertainty,
+C05/C06/C07/C10/C11 checks and existing optional-apply owner. Unknown saved proof
+or failed/missing requested-apply acknowledgement blocks later effects.
+No setter, profile CRUD, retry, rollback, extra apply or activation is introduced.
 
 ## Consequences
 
-Some created resources require operator inspection. Positive/controller behavior
-remains unevidenced until a matching-candidate live run; ST57 grants no execution.
+LPAR exposes scoped saved status and separate native observations. VIOS retains
+entry-or-exception, proposing bounded affinity_verification metadata on success.
+Existing failed/none-only source evidence stays failed/source-only; no maturity credit.
+ST57 remains reserved and inactive, with no execution authority from this amendment.
 
 ## Considered & rejected
 
-- **No change.** verified: #1769 Expected requires the two creation occurrences.
-- **Reuse ResourceGroup/minimum policy.** verified: #1769 explicitly separates them.
-- **General proxy/shared update field.** judgment: expands a creation-only contract.
-- **XML-zero/profile-current equivalence.** verified: retained cli-prof-lp3 proves
-  profile none; normalized catalogs carry no mapping or equivalence evidence.
-- **Linux/KVM/hardware capability restrictions.** verified: neither creation selector
-  attaches those prerequisites to affinity_group_id.
+- **Keep effective/all-plane success.** verified: candidate433c7ea6 affinity_group.py:115–132 and the retained readback investigation show that equality neither proves effective assignment nor admits the captured profile1/partition-none pair.
+- **Infer current/runtime from profile or XML zero.** verified: P10/P11 lssyscfg:34–35 supply grammar, not that equivalence; retained field catalogs establish vocabulary only.
+- **Apply or activate to obtain equality.** judgment: outside the approved saved criterion; the source-only apply proposal is unadopted and no experiment is authorized.
+- **Drop controller/VIOS or reuse ResourceGroup.** verified: frozen C08 has empty exclusions and separate owners; source unavailability requires honest incompleteness.
