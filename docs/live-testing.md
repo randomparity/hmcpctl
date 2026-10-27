@@ -2183,11 +2183,15 @@ identity, ownership or inactive state retains residue for operator inspection;
 there is no automatic activation, profile mutation or retry.
 Shared cleanup deletes only a freshly identified, matching-token inactive fixture.
 
-Independent contained identity and raw selected `lssyscfg` fields must agree with
-each request. Results label `native-partition` separately from classic
-`native-profile`; the profile never substitutes for missing partition observation.
-Unsupported, malformed, unavailable or mismatched observations fail the proof.
-Neither label asserts current/effective state or hypervisor runtime equivalence.
+Independent fresh contained identity, positive numeric partition ID and exact default-profile
+identity precede raw selected `lssyscfg` reads. Classic saved `native-profile` must match
+the request; `native-partition` has its own normalized value and comparison status.
+Native value mismatch or unavailability cannot replace or erase independent saved proof;
+contradictory identity still stops the workflow. Controller native equality supplies no
+saved-proof source and remains incomplete. Failed/partial observations remain diagnostic.
+The `saved-affinity-configuration` assertion requires both `none` and `1` saved proofs
+and clean guarded cleanup. Current/pending semantics, runtime and physical placement
+remain unproved. Earlier failed/source-only evidence is unchanged.
 
 Scenario `st57-lpar-affinity-group-creation` supplies evidence only after an actual
 candidate-bound run and clean recovery. Generate filtered evidence with

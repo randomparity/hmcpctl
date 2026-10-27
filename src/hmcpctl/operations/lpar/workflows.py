@@ -176,7 +176,7 @@ async def create_lpar(
     apply_failed = (
         created.apply_step is not None and created.apply_step.status == "error"
     ) or (
-        roles_requested(creation.settings)
+        (roles_requested(creation.settings) or affinity_requested)
         and creation.apply_profile is True
         and (created.apply_step is None or created.apply_step.status != "ok")
     )

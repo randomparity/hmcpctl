@@ -2,7 +2,8 @@
 
 This mutates a managed system. Run live_test_preflight.py --group lpar-affinity-group
 first and live_test_recovery.py afterwards, including after apparent success.
-No activation or profile apply is performed; native affinity observations are not runtime proof.
+No activation or profile apply is performed. Saved configuration is verified independently;
+native observations do not prove current/pending semantics, runtime or physical placement.
 """
 
 from __future__ import annotations

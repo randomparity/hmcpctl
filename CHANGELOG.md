@@ -53,9 +53,11 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   unverified on hardware. Existing absolute resource setters retain their behavior.
 - LPAR and VIOS creation accept optional `affinity_group_id` as a strict integer
   1–255 or literal `none`, preserving omission. Native creation uses selected-system
-  authority and contained, labelled partition/profile observations; unavailable or
-  mismatched readback blocks dependent writes without replay. These observations
-  do not establish current/runtime equivalence. Opt-in arm 57 exercises serial
+  authority and independently verified classic saved-profile configuration. Native
+  partition mismatch/unavailability is reported separately; saved or identity uncertainty
+  blocks dependent writes without replay. Controller saved proof remains incomplete.
+  These observations do not establish current/pending semantics, runtime or placement.
+  Opt-in arm 57 exercises serial
   inactive fixtures; affinity hardware evidence remains unrun (#1769).
 
 - LPAR and VIOS creation through CLI/MCP accept optional strict booleans

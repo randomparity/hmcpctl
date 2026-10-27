@@ -95,8 +95,9 @@ def hmc_create_vios(
             values are unavailable. No huge-page or KVM reservation fields,
             activation or rollback.
         affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
-            omission preserves defaults. Separate native partition/profile observations
-            must match before follow-ups; unavailable evidence requires inspection.
+            omission preserves defaults. Fresh classic saved-profile proof gates follow-ups;
+            native partition mismatch/unavailability is reported separately. Controller
+            saved proof remains unavailable. No current/runtime or placement claim.
         hardware_mem_encryption: Optional hardware memory encryption access;
             omission preserves defaults, false explicitly disables access.
         hardware_mem_expansion: Optional hardware memory expansion access;

@@ -417,11 +417,15 @@ async def create_vios(
         controller_mode=controller_mode,
         vios=True,
     )
-    if affinity_step is not None and affinity_step.status != "ok":
-        raise HMCError(
-            f"VIOS exists or may exist; affinity group {affinity_step.result['status']}. "
-            "Inspect before retrying. No second create or rollback performed"
-        )
+    if affinity_step is not None:
+        if affinity_step.status != "ok":
+            raise HMCError(
+                f"VIOS exists or may exist; affinity group {affinity_step.result['status']}. "
+                f"Observed {affinity_step.result['observed']}; "
+                f"observation status {affinity_step.result['observation_status']}. "
+                "Inspect before retrying. No second create or rollback performed"
+            ) from None
+        entry = {**entry, "affinity_verification": affinity_step.result}
     if serial_admission is not None:
         return {**entry, "serial_verification": serial_step.result}
     return entry

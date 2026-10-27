@@ -208,19 +208,10 @@ async def test_mixed_layout_affinity_forwarding_and_target_authorization(adapter
         assert layout.hpt_ratio == "1:128"
     adapter.operation.reset_mock()
     adapter.connections.clear()
-    if adapter.kind == "lpar":
-        from hmcpctl.authorization.access_policy import AccessPolicyError
+    from hmcpctl.authorization.access_policy import AccessPolicyError
 
-        with pytest.raises(AccessPolicyError, match="has no target selector"):
-            application(adapter.name, targets={"managed_system": ["allowed-R1"]})
-    else:
-        async with Client(
-            application(adapter.name, targets={"managed_system": ["allowed-R1"]})
-        ) as client:
-            result = await client.call_tool(
-                adapter.name, arguments, raise_on_error=False
-            )
-            assert result.is_error
+    with pytest.raises(AccessPolicyError, match="has no target selector"):
+        application(adapter.name, targets={"managed_system": ["allowed-R1"]})
     other = f"hmc_create_{'vios' if adapter.kind == 'lpar' else 'lpar'}"
     async with Client(application(other)) as client:
         result = await client.call_tool(adapter.name, arguments, raise_on_error=False)
@@ -257,3 +248,83 @@ def test_mixed_cli_forwarding(adapter, monkeypatch):
         else call.kwargs["memory_layout"]
     )
     assert layout.hpt_ratio == "1:128"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "adapter,available",
+    [("lpar", True), ("lpar", False), ("vios", True)],
+    indirect=["adapter"],
+)
+async def test_saved_affinity_presentations(adapter, monkeypatch, available):
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    proof = {
+        "status": "saved-configuration-verified"
+        if available
+        else "readback-unavailable",
+        "requested": 1,
+        "observed": {
+            "native-partition": "none",
+            "native-profile": 1 if available else None,
+        },
+        "observation_status": {
+            "native-partition": "mismatch",
+            "native-profile": "matches-request"
+            if available
+            else "readback-unavailable",
+        },
+    }
+    expected = (
+        LparPcieWorkflowResult(
+            True,
+            available,
+            {"UUID": "target-R1"},
+            True,
+            (WorkflowStep("affinity_group", "ok" if available else "error", proof),),
+            (),
+        )
+        if adapter.kind == "lpar"
+        else {"UUID": "target-R1", "affinity_verification": proof}
+    )
+    adapter.operation.return_value = expected
+    assert (
+        await asyncio.to_thread(
+            adapter.handler, "sys-R1", "target-R1", affinity_group_id=1
+        )
+        == expected
+    )
+    monkeypatch.setattr(
+        adapter.cli_module, "with_client", lambda fn: asyncio.run(fn(adapter.client))
+    )
+    cli = await asyncio.to_thread(
+        CliRunner().invoke,
+        app,
+        [
+            adapter.group,
+            "create",
+            "target-R1",
+            "--system",
+            "sys-R1",
+            "--affinity-group-id",
+            "1",
+            "--yes",
+        ],
+    )
+    assert cli.exit_code == (1 if adapter.kind == "lpar" and not available else 0)
+    assert (
+        proof["status"] in cli.output
+        and "native-partition" in cli.output
+        and "mismatch" in cli.output
+    )
+    async with Client(application(adapter.name)) as client:
+        result = await client.call_tool(
+            adapter.name,
+            {
+                "system_name_or_uuid": "sys-R1",
+                "name": "target-R1",
+                "affinity_group_id": 1,
+            },
+        )
+    assert not result.is_error
+    assert proof["status"] in str(result) and "native-partition" in str(result)

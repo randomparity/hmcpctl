@@ -53,9 +53,12 @@ def target(monkeypatch):
             "UUID": PARTITION,
             "Resource": {
                 "PartitionName": b.name,
-                "PartitionID": "7",
+                "PartitionID": "0" if b.fault == "zero-id" else "7",
                 "PartitionType": "AIX/Linux",
                 "PartitionState": "running" if b.fault == "active" else "not activated",
+                "DefaultProfileName": None
+                if b.fault == "missing-profile"
+                else "default_profile",
             },
         }
 
@@ -90,9 +93,14 @@ def target(monkeypatch):
                     "lpar_env": "aixlinux",
                     "affinity_group_id": "2"
                     if b.fault == "mismatch"
+                    or (b.fault == "native-mismatch" and kind == "lpar")
                     else str(b.values[-1]),
                 }
-                if b.fault == "unavailable":
+                if b.fault == "native-invalid" and kind == "lpar":
+                    row["affinity_group_id"] = "PRIVATE"
+                if b.fault == "unavailable" or (
+                    b.fault == "native-unavailable" and kind == "lpar"
+                ):
                     return "FAIL", None
                 raw = ",".join(fields) + "\n" + ",".join(row[f] for f in fields) + "\n"
                 return "PASS", "\n" + raw if b.fault == "header" else raw
@@ -125,8 +133,18 @@ def target(monkeypatch):
                         "result": "malformed"
                         if b.fault == "result"
                         else {
-                            "status": "verified",
+                            "status": "readback-unavailable"
+                            if b.fault == "product-unverified"
+                            else "saved-configuration-verified",
                             "requested": args["affinity_group_id"],
+                            "observed": {
+                                "native-partition": args["affinity_group_id"],
+                                "native-profile": args["affinity_group_id"],
+                            },
+                            "observation_status": {
+                                "native-partition": "matches-request",
+                                "native-profile": "matches-request",
+                            },
                         },
                     }
                 ],
@@ -178,7 +196,7 @@ async def test_serial_independent_observations(target, monkeypatch):
     assert result["scenario"] == "st57-lpar-affinity-group-creation"
     assert result["data"]["authority"] == "classic"
     assert result["assertions"][0].holds and result["cleanup"] == "passed"
-    assert set(result["data"]["observations"][0]) == {
+    assert set(result["data"]["observations"][0]["observed"]) == {
         "native-partition",
         "native-profile",
     }
@@ -190,6 +208,8 @@ async def test_serial_independent_observations(target, monkeypatch):
     [
         "mismatch",
         "unavailable",
+        "missing-profile",
+        "zero-id",
         "wrong-id",
         "header",
         "result",
@@ -298,15 +318,15 @@ async def test_default_selection_excludes_arm_before_client(
 async def test_controller_observes_only_native_partition(target, monkeypatch):
     target.controller = True
     await exercise(target, monkeypatch)
-    assert target.values == ["none", 1] and not target.exists
-    assert target.events.count("observation") == 2
+    assert target.values == ["none"] and not target.exists
+    assert target.events.count("observation") == 1
     result = target.state.record_verified.call_args.kwargs
-    assert result["assertions"][0].holds
+    assert not result["assertions"][0].holds
     assert result["data"]["authority"] == "controller"
-    assert result["data"]["observations"] == [
-        {"native-partition": "none"},
-        {"native-partition": "1"},
-    ]
+    proof = result["data"]["observations"][0]
+    assert proof["status"] == "readback-unavailable"
+    assert proof["observed"] == {"native-partition": "none"}
+    assert proof["observation_status"] == {"native-partition": "matches-request"}
 
 
 @pytest.mark.asyncio
@@ -340,3 +360,69 @@ async def test_independent_recovery_is_read_only(listing, clean):
     assert calls == [
         ("hmc_run_command", {"cmd": "lssyscfg -r lpar -m system -F name,state"})
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault,credit",
+    [
+        ("native-mismatch", True),
+        ("native-unavailable", True),
+        ("native-invalid", True),
+        ("mismatch", False),
+        ("product-unverified", False),
+    ],
+)
+async def test_saved_native_split(target, monkeypatch, fault, credit):
+    target.fault = fault
+    await exercise(target, monkeypatch)
+    report = target.state.record_verified.call_args.kwargs
+    assert report["assertions"][0].id == "saved-affinity-configuration"
+    assert report["assertions"][0].holds is credit
+    assert target.values == (["none", 1] if credit else ["none"])
+    if credit:
+        proof = report["data"]["observations"][1]
+        assert proof["observed"] == {
+            "native-partition": 2 if fault == "native-mismatch" else None,
+            "native-profile": 1,
+        }
+        assert proof["observation_status"]["native-partition"] == (
+            "mismatch" if fault == "native-mismatch" else "readback-unavailable"
+        )
+        assert "PRIVATE" not in str(report)
+    else:
+        failures = [
+            call.args[3]
+            for call in target.state.record.call_args_list
+            if len(call.args) >= 4 and call.args[2] == "FAIL"
+        ]
+        assert any(
+            isinstance(item, dict) and item["status"] != "saved-configuration-verified"
+            for item in failures
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformed", ["status", "steps", "values"])
+async def test_unverified_product_result_is_bounded(target, monkeypatch, malformed):
+    original = target.state.call.side_effect
+
+    async def call(client, tool, **args):
+        status, data = await original(client, tool, **args)
+        if tool == "hmc_create_lpar":
+            if malformed == "steps":
+                data["steps"] = None
+            else:
+                proof = data["steps"][0]["result"]
+                proof["status"] = ["PRIVATE"] if malformed == "status" else "mismatch"
+                proof["observed"] = {"native-profile": {"PRIVATE": "PRIVATE"}}
+                proof["observation_status"] = {"native-partition": ["PRIVATE"]}
+        return status, data
+
+    target.state.call.side_effect = call
+    await exercise(target, monkeypatch)
+    assert target.values == ["none"] and not target.exists
+    assert "PRIVATE" not in str(target.state.record.call_args_list)
+    assert any(
+        isinstance(call.args[3], dict) for call in target.state.record.call_args_list
+    )

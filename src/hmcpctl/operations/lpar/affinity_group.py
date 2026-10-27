@@ -1,4 +1,4 @@
-"""Contained, separately labelled native affinity observations after creation."""
+"""Independent saved affinity proof and bounded native observations after creation."""
 
 import re
 import shlex
@@ -31,13 +31,15 @@ async def created_affinity_group_step(
     controller_mode: bool = False,
     vios: bool = False,
 ) -> WorkflowStep | None:
-    """Observe the selected partition and, separately, its classic named profile."""
+    """Verify saved classic configuration and report native observation separately."""
     validate_affinity_group_id(affinity_group_id)
     if affinity_group_id is None:
         return None
     observed: dict[str, int | str | None] = {"native-partition": None}
     if not controller_mode:
         observed["native-profile"] = None
+    identity_confirmed = False
+    identity_conflict = False
     try:
         uuid = (entry or {}).get("UUID")
         initial = (entry or {}).get("Resource")
@@ -69,12 +71,21 @@ async def created_affinity_group_step(
             or re.fullmatch(r"[1-9][0-9]*", partition_id) is None
         ):
             raise ValueError("Created affinity numeric identity unavailable")
+        if (
+            not controller_mode
+            and leaf_text(resource.get("DefaultProfileName")) != DEFAULT_PROFILE_NAME
+        ):
+            raise ValueError("Created affinity default profile identity unavailable")
         system = await resolve_system_name(hmc, system_uuid)
         native_env = {
             "AIX/Linux": "aixlinux",
             "OS400": "os400",
             "Virtual IO Server": "vioserver",
         }[environment]
+        identity_confirmed = True
+    except (HMCError, OSError, ValueError, TypeError, PermissionError):
+        pass
+    if identity_confirmed:
         for label in observed:
             profile = label == "native-profile"
             filters: list[tuple[str, object]] = [("lpar_ids", partition_id)]
@@ -88,46 +99,68 @@ async def created_affinity_group_step(
                     "lpar_env": native_env,
                 }
             fields = (*expected, "affinity_group_id")
-            raw = await run_hmc_command(
-                hmc.config,
-                f"lssyscfg -r {'prof' if profile else 'lpar'} -m {shlex.quote(system)} "
-                f"--filter {shlex.quote(build_filter(filters))} -F {','.join(fields)} --header",
-            )
-            records = raw.splitlines()
-            if len(records) != 2 or records[0] != ",".join(fields):
-                raise ValueError(
-                    "Affinity observation requires one exact header and row"
+            try:
+                raw = await run_hmc_command(
+                    hmc.config,
+                    f"lssyscfg -r {'prof' if profile else 'lpar'} -m {shlex.quote(system)} "
+                    f"--filter {shlex.quote(build_filter(filters))} -F {','.join(fields)} --header",
                 )
-            rows = parse_hmc_result_rows(raw, fields, "created affinity group")
-            if len(rows) != 1 or any(
-                rows[0][field] != value for field, value in expected.items()
-            ):
-                raise ValueError("Affinity observation identity unavailable")
-            value = rows[0]["affinity_group_id"]
-            if value == "none":
-                observed[label] = value
-            elif re.fullmatch(r"[1-9][0-9]{0,2}", value) and int(value) <= 255:
-                observed[label] = int(value)
-            else:
-                raise ValueError("Affinity observation domain unavailable")
-    except (HMCError, OSError, ValueError, TypeError, PermissionError):
-        pass
+                records = raw.splitlines()
+                if not records or records[0] != ",".join(fields):
+                    raise ValueError(
+                        "Affinity observation requires one exact header and row"
+                    )
+                rows = parse_hmc_result_rows(raw, fields, "created affinity group")
+                if len(rows) != 1 or any(
+                    rows[0][field] != value for field, value in expected.items()
+                ):
+                    identity_conflict = True
+                    raise ValueError("Affinity observation identity unavailable")
+                if len(records) != 2:
+                    raise ValueError(
+                        "Affinity observation requires one exact header and row"
+                    )
+                value = rows[0]["affinity_group_id"]
+                if value == "none":
+                    observed[label] = value
+                elif re.fullmatch(r"[1-9][0-9]{0,2}", value) and int(value) <= 255:
+                    observed[label] = int(value)
+                else:
+                    raise ValueError("Affinity observation domain unavailable")
+            except (HMCError, OSError, ValueError, TypeError, PermissionError):
+                continue
+    observation_status = {
+        label: "readback-unavailable"
+        if value is None
+        else "matches-request"
+        if value == affinity_group_id
+        else "mismatch"
+        for label, value in observed.items()
+    }
     status = "readback-unavailable"
-    if all(value is not None for value in observed.values()):
-        status = (
-            "verified"
-            if all(value == affinity_group_id for value in observed.values())
-            else "mismatch"
-        )
+    if identity_confirmed and not identity_conflict and not controller_mode:
+        saved_status = observation_status["native-profile"]
+        if saved_status != "readback-unavailable":
+            status = (
+                "saved-configuration-verified"
+                if saved_status == "matches-request"
+                else "mismatch"
+            )
+    verified = status == "saved-configuration-verified"
+    message = (
+        "Saved affinity configuration verified; native partition observation is separate. "
+        "Current/pending semantics and physical placement are unproved"
+        if verified
+        else "Partition exists or may exist; saved affinity configuration unverified. "
+        "Inspect before retrying; no rollback performed."
+    )
+    if controller_mode:
+        message += " Controller saved-proof source is unavailable."
     result: dict[str, Any] = {
         "status": status,
         "requested": affinity_group_id,
         "observed": observed,
+        "observation_status": observation_status,
+        "message": message,
     }
-    if status != "verified":
-        result["message"] = (
-            "Partition exists or may exist; affinity group unverified. Inspect before retrying; no rollback performed."
-        )
-    return WorkflowStep(
-        "affinity_group", "ok" if status == "verified" else "error", result
-    )
+    return WorkflowStep("affinity_group", "ok" if verified else "error", result)

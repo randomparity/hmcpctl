@@ -1278,7 +1278,7 @@
             "parameters": [
               {
                 "name": "affinity_group_id",
-                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority and contained labelled native-partition/named-profile equality or explicit unavailable/mismatch; no XML mapping or current/runtime equivalence claim"
+                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority, fresh contained/default-profile identity and independent classic saved-profile equality; native value/status reported separately including mismatch/unavailability; contradictory identity blocks effects; controller saved proof unavailable; no current/pending semantics, runtime or physical-placement claim"
               }
             ]
           },
@@ -5084,7 +5084,7 @@
             "parameters": [
               {
                 "name": "affinity_group_id",
-                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority and contained labelled native-partition/named-profile equality or explicit unavailable/mismatch; no XML mapping or current/runtime equivalence claim"
+                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority, fresh contained/default-profile identity and independent classic saved-profile equality; native value/status reported separately including mismatch/unavailability; contradictory identity blocks effects; controller saved proof unavailable; no current/pending semantics, runtime or physical-placement claim"
               }
             ]
           },

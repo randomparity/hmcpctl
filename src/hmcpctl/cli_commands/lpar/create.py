@@ -216,7 +216,7 @@ def lpars_create(
         str | None,
         typer.Option(
             "--affinity-group-id",
-            help="Native affinity group: 1–255 or none; omitted preserves defaults",
+            help="Saved affinity group: 1–255 or none; native observation is separate; omitted preserves defaults",
         ),
     ] = None,
 ) -> None:

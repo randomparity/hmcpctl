@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import pytest
+from lpar.test_serial_creation import invoke as invoke_serial
+from lpar.test_serial_creation import target as serial_target  # noqa: F401 - pytest fixture
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
@@ -44,6 +46,7 @@ def target(monkeypatch):
             "PartitionID": "7",
             "PartitionType": "AIX/Linux",
             "PartitionState": "not activated",
+            "DefaultProfileName": "default_profile",
         },
     }
     system = {
@@ -89,7 +92,7 @@ def target(monkeypatch):
         if "affinity_group_id" in cmd and cmd.startswith("lssyscfg"):
             kind = words[words.index("-r") + 1]
             b.events.append(kind)
-            if b.fault == "read":
+            if b.fault == "read" or b.fault == f"{kind}-read":
                 raise HMCCLIError("PRIVATE")
             fields = words[words.index("-F") + 1].split(",")
             values = {
@@ -107,12 +110,16 @@ def target(monkeypatch):
                 values["lpar_id"] = "8"
             if b.fault == "environment":
                 values["lpar_env"] = "os400"
+            if b.fault == "lpar-value" and kind == "lpar":
+                values["affinity_group_id"] = "PRIVATE"
+            if b.fault == "lpar-identity" and kind == "lpar":
+                values["lpar_id"] = "8"
             if b.fault == "mismatch" and kind == "lpar":
                 values["affinity_group_id"] = "2"
             if b.fault == "profile-mismatch" and kind == "prof":
                 values["affinity_group_id"] = "2"
             header = ",".join(fields)
-            if b.fault == "quoted-header":
+            if b.fault == "quoted-header" or b.fault == f"{kind}-header":
                 header = ",".join(f'"{field}"' for field in fields)
             if b.fault == "leading-blank":
                 header = "\n" + header
@@ -191,14 +198,20 @@ async def test_native_authority_and_omission(target, monkeypatch, kind, value):
     assert "prof" in b.events
     b.hmc.get_console_info.assert_not_awaited()
     if kind == "vios":
-        assert result is b.entry
+        assert result["UUID"] == b.entry["UUID"]
+        assert (
+            result["affinity_verification"]["status"] == "saved-configuration-verified"
+        )
     else:
         step = (
             result.affinity_group_step
             if kind == "direct"
             else next(s for s in result.steps if s.step == "affinity_group")
         )
-        assert step.status == "ok" and step.result["status"] == "verified"
+        assert (
+            step.status == "ok"
+            and step.result["status"] == "saved-configuration-verified"
+        )
         assert set(step.result["observed"]) == {"native-partition", "native-profile"}
 
 
@@ -209,7 +222,6 @@ async def test_native_authority_and_omission(target, monkeypatch, kind, value):
         "read",
         "identity",
         "environment",
-        "mismatch",
         "profile-mismatch",
         "malformed",
         "multiple",
@@ -277,8 +289,11 @@ async def test_controller_grammar_and_apply(target, monkeypatch):
         if c.args[1].startswith("mksyscfg")
     )
     assert "profile_name=" not in record and "prof" not in target.events
-    assert result.workflow_completed
-    assert "current" not in str(result) and "runtime" not in str(result)
+    assert not result.workflow_completed
+    step = next(s for s in result.steps if s.step == "affinity_group")
+    assert step.result["status"] == "readback-unavailable"
+    assert step.result["observation_status"] == {"native-partition": "matches-request"}
+    target.assign.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -291,7 +306,17 @@ async def test_controller_explicit_apply_refused(target):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "case", ["missing", "wrong-uuid", "wrong-name", "wrong-env", "bad-id", "outside"]
+    "case",
+    [
+        "missing",
+        "wrong-uuid",
+        "wrong-name",
+        "wrong-env",
+        "bad-id",
+        "outside",
+        "missing-profile",
+        "changed-profile",
+    ],
 )
 async def test_contained_fresh_identity_before_observation(target, monkeypatch, case):
     from hmcpctl.operations.lpar import affinity_group
@@ -308,6 +333,10 @@ async def test_contained_fresh_identity_before_observation(target, monkeypatch, 
         fresh["Resource"]["PartitionType"] = "OS400"
     elif case == "bad-id":
         fresh["Resource"]["PartitionID"] = "07"
+    elif case == "missing-profile":
+        fresh["Resource"].pop("DefaultProfileName")
+    elif case == "changed-profile":
+        fresh["Resource"]["DefaultProfileName"] = "other"
     else:
         target.hmc.list_logical_partitions.return_value = []
     target.hmc.get_logical_partition.return_value = fresh
@@ -422,7 +451,7 @@ async def test_mixed_creation_domains(target, monkeypatch, sibling, matches):
             next(s for s in result.steps if s.step == "affinity_group").status == "ok"
         )
         assert ("apply" in target.events) is matches
-    if matches:
+    if matches and sibling != "role":
         target.assign.assert_awaited_once()
         assert result.workflow_completed
     else:
@@ -539,13 +568,13 @@ def mixed_layout(target, monkeypatch):
 @pytest.mark.parametrize(
     "fault,affinity_status,layout_status",
     [
-        (None, "verified", "verified"),
+        (None, "saved-configuration-verified", "verified"),
         ("affinity-mismatch", "mismatch", "verified"),
         ("affinity-unavailable", "readback-unavailable", "verified"),
-        ("layout-mismatch", "verified", "mismatch"),
-        ("layout-unavailable", "verified", "unavailable"),
-        ("stamp", "verified", "verified"),
-        ("controller", "verified", "unavailable"),
+        ("layout-mismatch", "saved-configuration-verified", "mismatch"),
+        ("layout-unavailable", "saved-configuration-verified", "unavailable"),
+        ("stamp", "saved-configuration-verified", "verified"),
+        ("controller", "readback-unavailable", "unavailable"),
     ],
 )
 async def test_mixed_layout_affinity_keeps_independent_results_and_barriers(
@@ -559,7 +588,7 @@ async def test_mixed_layout_affinity_keeps_independent_results_and_barriers(
     elif fault == "stamp":
         b.fault = "stamp"
     elif fault and fault.startswith("affinity-"):
-        b.fault = "mismatch" if fault.endswith("mismatch") else "read"
+        b.fault = "profile-mismatch" if fault.endswith("mismatch") else "read"
     elif fault:
         mixed_layout.fault = fault.removeprefix("layout-")
     result = await invoke(
@@ -631,7 +660,9 @@ async def test_vios_layout_mode_only_and_mixed_share_one_authority(
             await call
         assert "PRIVATE" not in str(caught.value)
     else:
-        assert await call == b.entry
+        result = await call
+        assert result["UUID"] == b.entry["UUID"]
+        assert ("affinity_verification" in result) is (affinity is not None)
     assert b.events.count("authority") == 1
     assert b.events.count("create") == 1
     assert b.events.count("layout-read") == int(not b.controller)
@@ -914,4 +945,190 @@ async def test_assignment_prevalidation_survives_authority_owner_move(
     with pytest.raises(ValueError, match=message):
         await workflows.create_lpar(b.hmc, SYSTEM, creation, requested)
     assert b.events[0] == "authority:null" and "create" not in b.events
+    b.assign.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["none", 1, 255])
+@pytest.mark.parametrize("environment", ["AIX/Linux", "OS400", "Virtual IO Server"])
+async def test_saved_profile_with_native_mismatch(
+    target, monkeypatch, value, environment
+):
+    from hmcpctl.operations.lpar import affinity_group
+
+    monkeypatch.setattr(affinity_group, "run_hmc_command", target.command)
+    target.entry["Resource"]["PartitionType"] = environment
+    target.value, target.fault = str(value), "mismatch"
+    kind = "vios" if environment == "Virtual IO Server" else "direct"
+    result = await invoke(target, kind, value)
+    proof = (
+        result["affinity_verification"]
+        if kind == "vios"
+        else result.affinity_group_step.result
+    )
+    assert proof["status"] == "saved-configuration-verified"
+    assert proof["observed"] == {"native-partition": 2, "native-profile": value}
+    assert proof["observation_status"] == {
+        "native-partition": "mismatch",
+        "native-profile": "matches-request",
+    }
+    assert "physical placement are unproved" in proof["message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault,saved",
+    [
+        ("lpar-read", True),
+        ("lpar-value", True),
+        ("lpar-header", True),
+        ("prof-read", False),
+        ("profile-mismatch", False),
+        ("lpar-identity", False),
+    ],
+)
+async def test_saved_proof_is_independent(target, monkeypatch, fault, saved):
+    from hmcpctl.operations.lpar import affinity_group
+
+    monkeypatch.setattr(affinity_group, "run_hmc_command", target.command)
+    target.fault = fault
+    result = await invoke(target, "direct")
+    proof = result.affinity_group_step.result
+    assert (result.affinity_group_step.status == "ok") is saved
+    assert "lpar" in target.events and "prof" in target.events
+    assert proof["status"] == (
+        "saved-configuration-verified"
+        if saved
+        else "mismatch"
+        if fault == "profile-mismatch"
+        else "readback-unavailable"
+    )
+    assert "PRIVATE" not in str(proof)
+    if saved:
+        assert proof["observation_status"]["native-partition"] == "readback-unavailable"
+        assert proof["observed"]["native-profile"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ack", [None, "skipped", "error", "ok"])
+async def test_saved_affinity_followup_barriers(target, monkeypatch, ack):
+    from hmcpctl.operations.lpar import affinity_group
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    monkeypatch.setattr(affinity_group, "run_hmc_command", target.command)
+    apply = AsyncMock(
+        return_value=None if ack is None else WorkflowStep("apply_profile", ack)
+    )
+    monkeypatch.setattr(core, "_apply_created_profile", apply)
+    result = await invoke(target, apply_profile=True)
+    apply.assert_awaited_once()
+    assert result.workflow_completed is (ack == "ok")
+    assert target.assign.await_count == int(ack == "ok")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["direct", "workflow", "vios"])
+async def test_affinity_sharing_weight_refusal(target, kind):
+    creation = core.LparCreation(
+        "part-R1", "AIX/Linux", LparResources(uncapped_weight=64), affinity_group_id=1
+    )
+    with pytest.raises(ValueError, match="uncapped_weight.*only.*update"):
+        if kind == "vios":
+            await create_vios(
+                target.hmc, SYSTEM, "part-R1", creation.resources, affinity_group_id=1
+            )
+        elif kind == "direct":
+            await core.create_and_stamp_lpar(target.hmc, SYSTEM, creation)
+        else:
+            await workflows.create_lpar(
+                target.hmc, SYSTEM, creation, profile_assignments("dedicated")
+            )
+    assert target.hmc.mock_calls == [] and target.events == []
+
+
+@pytest.mark.asyncio
+async def test_vios_saved_affinity_result(target, monkeypatch):
+    from hmcpctl.operations.lpar import affinity_group
+
+    monkeypatch.setattr(affinity_group, "run_hmc_command", target.command)
+    target.fault = "prof-read"
+    with pytest.raises(HMCError) as exc:
+        await invoke(target, "vios")
+    assert "native-partition" in str(exc.value) and "matches-request" in str(exc.value)
+    assert "native-profile" in str(exc.value) and "readback-unavailable" in str(
+        exc.value
+    )
+    assert "PRIVATE" not in str(exc.value) and exc.value.__cause__ is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "identity", "profile", "stamp", "timeout"])
+async def test_affinity_serial_barrier_union(serial_target, monkeypatch, fault):  # noqa: F811 - imported pytest fixture
+    from hmcpctl.operations.lpar import affinity_group
+
+    b = serial_target
+    if fault == "stamp" and b.kind == "VirtualIOServer":
+        pytest.skip("VIOS has no ownership stamp owner")
+    b.fault = fault
+    b.hmc.get_vios.return_value = b.local
+
+    async def observe(config, cmd):
+        if "affinity_group_id" not in cmd:
+            return await b.command(config, cmd)
+        words = shlex.split(cmd)
+        fields = words[words.index("-F") + 1].split(",")
+        values = {
+            "lpar_id": "9",
+            "lpar_name": "new",
+            "name": "default_profile" if "prof" in words else "new",
+            "lpar_env": {
+                "AIX/Linux": "aixlinux",
+                "OS400": "os400",
+                "Virtual IO Server": "vioserver",
+            }[b.environment],
+            "affinity_group_id": "1" if "prof" in words else "none",
+        }
+        return ",".join(fields) + "\n" + ",".join(values[f] for f in fields)
+
+    monkeypatch.setattr(affinity_group, "run_hmc_command", observe)
+    assign = AsyncMock(return_value=AssignmentResult(True, False, ()))
+    monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", assign)
+    options = {} if b.kind == "VirtualIOServer" else {"apply_profile": True}
+    if fault == "timeout" or (b.kind == "VirtualIOServer" and fault):
+        with pytest.raises(HMCError):
+            await invoke_serial(b, affinity_group_id=1, **options)
+        assign.assert_not_awaited()
+    else:
+        result = await invoke_serial(b, affinity_group_id=1, **options)
+        if b.kind == "VirtualIOServer":
+            assert (
+                result["affinity_verification"]["status"]
+                == "saved-configuration-verified"
+            )
+            assert result["serial_verification"]["configuration"] == "verified"
+        else:
+            assert result.workflow_completed is (fault is None)
+            assert assign.await_count == int(fault is None)
+            assert ("apply" in b.events) is (fault is None)
+    assert b.events.count("controller") == 1
+    assert b.events.count("create") == 1
+    if fault in {"identity", "timeout"}:
+        assert "stamp" not in b.events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["dedicated", "sriov"])
+async def test_affinity_serial_controller_assignment_barrier(assignment_target, kind):
+    from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
+
+    b = assignment_target
+    b.replies = ["1"]
+    creation = replace(
+        assignment_creation("C08"),
+        max_virtual_slots=8,
+        virtual_serial_adapters=(VirtualSerialAdapter(2, "server", False),),
+    )
+    with pytest.raises(ValueError, match="controller mode"):
+        await workflows.create_lpar(b.hmc, SYSTEM, creation, profile_assignments(kind))
+    assert b.events == ["authority:1"]
     b.assign.assert_not_awaited()
