@@ -959,3 +959,187 @@ def test_sharing_preflight_names_scope():
 
 
 GROUP_SHARING = "processor-sharing-weight"
+
+
+def test_serial_procedure_exact_preflight_dispatch(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock(return_value=2)
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    assert (
+        preflight.main(
+            [
+                "--group",
+                "lpar-serial-adapter",
+                "--packet",
+                "p",
+                "--packet-sha256",
+                "s",
+                "--output",
+                "f",
+            ]
+        )
+        == 2
+    )
+    dispatch.assert_called_once_with(
+        [
+            "preflight",
+            "--packet",
+            "p",
+            "--packet-sha256",
+            "s",
+            "--output",
+            "f",
+        ]
+    )
+
+
+@pytest.mark.parametrize("missing", ["--packet", "--packet-sha256", "--output"])
+def test_serial_preflight_requires_complete_exact_inputs(monkeypatch, missing):
+    from unittest.mock import Mock
+
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock()
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    args = [
+        "--group",
+        "lpar-serial-adapter",
+        "--packet",
+        "p",
+        "--packet-sha256",
+        "s",
+        "--output",
+        "f",
+    ]
+    position = args.index(missing)
+    del args[position : position + 2]
+    with pytest.raises(SystemExit) as result:
+        preflight.main(args)
+    assert result.value.code == 2
+    dispatch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "source,expected", [("source-R1", "RUNNABLE"), ("example-source", "SKIP")]
+)
+def test_processor_move_preflight_uses_named_fixture_admission(
+    workspace, monkeypatch, capsys, source, expected
+):
+    (workspace / ".env").write_text(
+        _env_text(LIVE_TEST_LPAR_NAME=source, LIVE_TEST_SCRATCH_LPAR_NAME="target-R2"),
+        encoding="utf-8",
+    )
+    _credentials(monkeypatch)
+    assert preflight.main(["--group", "lpar-processor-move", "--skip-hardware"]) == 0
+    output = capsys.readouterr().out
+    assert "lpar-processor-move" in output and expected in output
+    assert runner.SUBTASK_GROUPS["lpar-processor-move"] == [61]
+    assert 61 not in runner.SUBTASK_GROUPS["all"]
+
+
+def test_vios_source_preflight_exact_route(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    assert (
+        preflight.main(
+            [
+                "--group",
+                "vios-ame-source",
+                "--packet",
+                "p.json",
+                "--packet-sha256",
+                "a" * 64,
+                "--output",
+                "private",
+            ]
+        )
+        == 2
+    )
+    route.assert_called_once_with(
+        [
+            "preflight",
+            "--packet",
+            "p.json",
+            "--packet-sha256",
+            "a" * 64,
+            "--output",
+            "private",
+        ]
+    )
+
+
+@pytest.mark.parametrize("extra", [[], ["--skip-hardware"], ["--detach-probe"]])
+def test_vios_source_preflight_refuses_incomplete_or_bypass(monkeypatch, extra):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    args = ["--group", "vios-ame-source"]
+    if extra:
+        args += ["--packet", "p", "--packet-sha256", "a" * 64, "--output", "o"]
+    with pytest.raises(SystemExit) as caught:
+        preflight.main(args + extra)
+    assert caught.value.code == 2
+    route.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["--packet", "--packet-sha256", "--output"])
+def test_vios_source_preflight_requires_each_binding(monkeypatch, missing):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    bindings = {"--packet": "p", "--packet-sha256": "a" * 64, "--output": "o"}
+    args = ["--group", "vios-ame-source"]
+    for flag, value in bindings.items():
+        if flag != missing:
+            args.extend([flag, value])
+    with pytest.raises(SystemExit) as caught:
+        preflight.main(args)
+    assert caught.value.code == 2
+    route.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "--grant-packet-sha256",
+        "--exclusive-writer-window",
+        "--fresh-vios-delete-approved",
+    ],
+)
+def test_vios_source_preflight_rejects_effect_assertions(monkeypatch, flag):
+    from unittest.mock import Mock
+
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    args = [
+        "--group",
+        "vios-ame-source",
+        "--packet",
+        "p",
+        "--packet-sha256",
+        "a" * 64,
+        "--output",
+        "o",
+        flag,
+    ]
+    if flag == "--grant-packet-sha256":
+        args.append("a" * 64)
+    with pytest.raises(SystemExit) as caught:
+        preflight.main(args)
+    assert caught.value.code == 2
+    route.assert_not_called()

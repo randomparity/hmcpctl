@@ -2931,3 +2931,130 @@ def test_sharing_recovery_incomplete_never_claims_clean(
     monkeypatch.setattr(recovery, "_run_checks", clean)
     assert recovery.main(["--results", str(path)]) == 2
     assert "CLEAN" not in capsys.readouterr().out
+
+
+def test_serial_procedure_exact_read_only_dispatch(monkeypatch):
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock(return_value=2)
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    assert recovery.main(["--serial-procedure", "--results", "r"]) == 2
+    dispatch.assert_called_once_with(["recover", "--results", "r"])
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--packet-sha256", "s"],
+        ["--output", "o"],
+        ["--source-packet", "p"],
+    ],
+)
+def test_serial_recovery_rejects_other_authority_or_output(monkeypatch, extra):
+    from live_test import lpar_serial_adapter
+
+    dispatch = Mock()
+    monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
+    with pytest.raises(SystemExit) as result:
+        recovery.main(["--serial-procedure", "--results", "r", *extra])
+    assert result.value.code == 2
+    dispatch.assert_not_called()
+
+
+@pytest.mark.parametrize("credentials", [False, True])
+def test_processor_move_route_refuses_unarmed_proof(
+    tmp_path, monkeypatch, capsys, credentials
+):
+    from hmcpctl.config import HMCConfig
+
+    document = {
+        "run": {
+            "group": "lpar-processor-move",
+            "subtasks": [61],
+            "tree_clean": False,
+            "partial": True,
+        },
+        "results": [],
+    }
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: credentials)
+    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+    assert recovery.main(["--results", str(path)]) == 2
+    captured = capsys.readouterr()
+    assert "CLEAN:" not in captured.out
+    assert ("unconfirmed" if credentials else "credentials unavailable") in captured.err
+
+
+def test_vios_source_recovery_exact_route(monkeypatch):
+    from live_test import vios_ame_source
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    assert (
+        recovery.main(
+            [
+                "--vios-ame-source-packet",
+                "p.json",
+                "--packet-sha256",
+                "a" * 64,
+                "--results",
+                "capture/results.json",
+                "--output",
+                "private",
+            ]
+        )
+        == 2
+    )
+    route.assert_called_once_with(
+        [
+            "recover",
+            "--packet",
+            "p.json",
+            "--packet-sha256",
+            "a" * 64,
+            "--results",
+            "capture/results.json",
+            "--output",
+            "private",
+        ]
+    )
+
+
+@pytest.mark.parametrize("other", ["--source-packet", "--activation-source-packet"])
+def test_vios_source_recovery_packets_are_exclusive(monkeypatch, other):
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    with pytest.raises(SystemExit) as caught:
+        recovery.main(
+            [
+                "--vios-ame-source-packet",
+                "p",
+                other,
+                "q",
+                "--packet-sha256",
+                "a" * 64,
+                "--output",
+                "o",
+            ]
+        )
+    assert caught.value.code == 2
+    route.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["--packet-sha256", "--output"])
+def test_vios_source_recovery_requires_each_binding(monkeypatch, missing):
+    from live_test import vios_ame_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_ame_source, "main", route)
+    args = ["--vios-ame-source-packet", "p"]
+    for flag, value in {"--packet-sha256": "a" * 64, "--output": "o"}.items():
+        if flag != missing:
+            args.extend([flag, value])
+    with pytest.raises(SystemExit) as caught:
+        recovery.main(args)
+    assert caught.value.code == 2
+    route.assert_not_called()

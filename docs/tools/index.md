@@ -6,14 +6,14 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **195** tools are registered.
-- **194** are exposed by a default deployment.
+- **197** tools are registered.
+- **196** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
 | `destructive` | 44 |
-| `mutate` | 60 |
+| `mutate` | 62 |
 | `read` | 90 |
 
 ## Maturity vocabulary
@@ -39,7 +39,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `inventory` | 1 | [inventory.md](inventory.md) |
 | `io_slot` | 1 | [io_slot.md](io_slot.md) |
 | `job` | 2 | [job.md](job.md) |
-| `lpar` | 46 | [lpar.md](lpar.md) |
+| `lpar` | 48 | [lpar.md](lpar.md) |
 | `lpar_profile` | 11 | [lpar_profile.md](lpar_profile.md) |
 | `media` | 10 | [media.md](media.md) |
 | `memory_pool` | 2 | [memory_pool.md](memory_pool.md) |
@@ -212,6 +212,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_modify_user` | `mutate` | [user.md](user.md) |
 | `hmc_mount_optical_media` | `mutate` | [media.md](media.md) |
 | `hmc_move_lpar_memory` | `mutate` | [lpar.md](lpar.md) |
+| `hmc_move_lpar_processors` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_operation_status` | `read` | [operation.md](operation.md) |
 | `hmc_plan_lpar` | `read` | [lpar.md](lpar.md) |
 | `hmc_plan_lpar_memopt_scores` | `read` | [lpar.md](lpar.md) |
@@ -245,6 +246,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_search_tools` | `read` | [tools.md](tools.md) |
 | `hmc_set_default_partition_profile` | `mutate` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_set_default_vios_partition_profile` | `mutate` | [vios_profile.md](vios_profile.md) |
+| `hmc_set_lpar_accelerator_qos` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_set_lpar_boot_order` | `mutate` | [boot_order.md](boot_order.md) |
 | `hmc_set_lpar_description` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_set_lpar_msp` | `mutate` | [lpar.md](lpar.md) |

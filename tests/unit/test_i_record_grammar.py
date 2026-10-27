@@ -821,6 +821,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         }
 
     assert by_label["-i"] == {
+        "_ssh",
         "create_lpar_via_cli",
         "profile_command",
         "create_vios_vfc_group_label",
@@ -846,6 +847,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "add_vnic_backing",
     }
     assert by_label["--filter"] == {
+        "_ssh",
         "_profile",
         "get_lpar_memory_layout",
         "_read",
@@ -884,6 +886,8 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "_capture_lpar_cli_dump",
         "read_sync_state",
         "restore_lpar_baseline",
+        "read_accelerator_qos",
+        "verify_fixture",
     }
 
 

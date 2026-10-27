@@ -1382,6 +1382,56 @@ exports only allowlisted structural fields. No native evidence or maturity promo
 mocked-boundary tests, preparation or this document. Product scope-audit activation finding remains
 open until source-backed analysis resolves it.
 
+### VIOS AME source diagnostic
+
+The separately registered `vios-ame-source` arm answers whether this target accepts
+fresh inactive VIOS creation with dedicated memory and AME 0/1.10. It is source
+research, not an ordinary product arm or maturity promotion. It references #1768
+without completing its product criteria. No activation, LPAR phase, service VIOS
+mutation, paging/pool change or separate ownership stamp is performed.
+
+Use the closed schema and fixed budgets in the
+[VIOS AME diagnostic spec](workflow/specs/2026-10-26-vios-ame-source-diagnostic-design.md). Root must
+bind the exact clean deployed commit/tree/imported source hashes, Python 3.11.15,
+effective named connection, target, two nonce-derived absent names, initial marker,
+fixed resources and current private window. Source-client deployment evidence for
+an earlier commit does not establish this arm's deployed identity.
+
+Create a private mode-0700 window directory outside the checkout and a mode-0600 initial packet.
+Set its `baseline_sha256` to `null` and record its raw SHA256. Run initial read-only preflight:
+
+    uv run --no-sync python scripts/live_test_preflight.py --group vios-ame-source --packet "$initial_packet" --packet-sha256 "$initial_sha" --output "$window/preflight-initial"
+
+Root reviews its protected baseline and session closeout, then creates the final
+packet with that exact baseline digest and computes the new raw packet SHA256.
+All other bindings stay identical. Run final read-only preflight:
+
+    uv run --no-sync python scripts/live_test_preflight.py --group vios-ame-source --packet "$packet" --packet-sha256 "$packet_sha" --output "$window/preflight-final"
+
+Only after root binds current source/ownership/deletion authority and exclusive
+writer coordination, invoke the named arm once:
+
+    uv run --no-sync python scripts/live_vios_ame_source.py --packet "$packet" --packet-sha256 "$packet_sha" --output "$window/capture" --grant-packet-sha256 "$packet_sha" --exclusive-writer-window --fresh-vios-delete-approved
+
+Always run the registered read-only recovery, including after failure:
+
+    uv run --no-sync python scripts/live_test_recovery.py --vios-ame-source-packet "$packet" --packet-sha256 "$packet_sha" --results "$window/capture/results.json" --output "$window/recover"
+
+Every stage claims its window slot once. Do not remove receipts, repeat a stage,
+refresh a baseline or alter a packet to obtain a clean result. If the window
+expires before recovery, stop for root's new bounded observational authorization;
+no expiry extension or cleanup authority is inferred. Missing capture evidence
+is still observed as unknown, never reconstructed as successful history.
+
+Review both results.json and session.json. Unknown native completion, marker or
+foreign drift, checkpoint failure, budget exhaustion or uncertain logout leaves
+an explicit held disposition. Recovery never deletes. Root must separately resolve
+any exact-UUID residual; a matching name or marker alone grants no cleanup.
+Preserve raw private files. The optional standard evidence renderer emits only
+SOURCE ONLY labels and filtered outcomes, never product PASS or raw target data.
+Acceptance shows configuration behavior for this firmware/input; it does not prove
+guest compression. No source catalog or operation maturity changes automatically.
+
 ### Product system-profile lifecycle arm
 
 The named `system-profiles` arm exercises the product CLI/MCP domain contract. It is
@@ -1783,6 +1833,130 @@ Generate public evidence only through the evidence script, redact the complete
 matrix and retain its commit binding. Raw results remain private. A skipped or
 failed arm supplies no positive evidence and makes no maturity promotion.
 
+## Native GZIP accelerator QoS (opt-in subtask 64)
+
+The `lpar-accelerator-qos` group dispatches only ST64, scenario
+`st64-lpar-accelerator-qos`, and is excluded from default/all execution.
+The root controller must bind the deployed clean candidate equal to HEAD, HMC
+destination, existing owned target, exact request, protected inventory, two
+separate effect intents and bounded execution window before running it. This
+procedure neither provisions fixtures nor authorizes a live window.
+
+In the authoritative local configuration file, select `LIVE_TEST_SYSTEM_NAME`,
+`LIVE_TEST_LPAR_NAME`, `LIVE_TEST_PROTECTED_LPAR_NAMES` and the optional setting
+`LIVE_TEST_ACCELERATOR_QOS_REQUEST_JSON`. For example, with anonymous fixture
+names `sys-R1` and `partition-R1`:
+
+```dotenv
+LIVE_TEST_ACCELERATOR_QOS_REQUEST_JSON='{"qos":3,"wait_minutes":0,"detail_level":4,"force":false}'
+```
+
+No QoS is inferred. Missing requests, default/blank fixtures, protected targets
+and malformed or unknown request fields refuse before connection. Ambient exports
+do not supply this setting. Older unrelated saved runs decode the absent setting
+as empty and remain readable; the named arm refuses that empty request.
+Preflight reports the target, exact request and intended set plus separate
+original-baseline restoration. Configuration acceptance never asserts mutation
+eligibility.
+
+The arm independently resolves containment, kind, UUID, numeric partition ID,
+the actual matching ownership stamp, protection, accelerator capability, state
+and RMC. Native current/pending quantities must be equal, numeric and different
+from the requested QoS. It records immutable original REST identity, native
+partition/system rows, request and source commit. Before each setter it repeats
+admission and expected partition quantities, checks the same clean candidate,
+records the exact intent and successfully checkpoints it.
+
+There are at most two MCP effects: the explicit forward request and the
+separately authorized restore request, which changes only QoS to the immutable
+original quantity while retaining wait/detail/force. Each must return PASS,
+submission `completed`, an explicit null `submission_error`,
+`workflow_completed=true`, and outcome `observed`; an independent transport's
+fixed GZIP numeric-ID native read must show both quantities equal to the request.
+Refusal, uncertainty, drift, read or checkpoint failure stops further writes.
+There is no retry, compensating set, activation, restart, profile write or deletion.
+Final cleanup requires original partition identity/current/pending and the
+original native system baseline. Current/pending evidence establishes neither
+effective guest runtime nor profile persistence. The exercised partition
+type/state/force are recorded; every other context remains unrun.
+
+Root provisions an existing mode-0700 `RUN_DIR` outside repositories and binds
+the deadlines and controller/transport cleanup. The wrapper accepts only
+`--results-file`, rejects reused results/observations and unsafe destinations,
+and applies umask 077 while dispatching. Capture each command's stdout/stderr
+privately. Run recovery after every attempted arm, including apparent success:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-accelerator-qos
+uv run --no-sync python scripts/live_lpar_accelerator_qos.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+Read-only recovery requires the same clean commit and HMC destination, exact
+group/ST64, one original baseline, `run.partial=false` and the ordered successful
+baseline, forward-intent, forward-observed, restore-intent, restore-observed,
+final-baseline sequence. Both intents and independently observed outcomes must
+match. Fresh identity and partition/system reads must equal the original
+baselines. Missing, duplicate, reordered, malformed, partial or refused proof
+exits 2/unconfirmed even when current quantities equal baseline. Bounded fresh
+read witnesses are observations in private captured stdout, never permission to
+repair incomplete history; the original checkpoint bytes remain unchanged.
+Recovery has no resource-write path. Generate public evidence only through the
+filtered evidence generator at the exact tested commit; never publish raw results.
+Offline tests and source reading supply no live evidence or maturity promotion.
+
+## Native two-partition processor move (D06, opt-in subtask 61)
+
+The `lpar-processor-move` arm requires two existing owned, unprotected AIX/Linux
+partitions running with active RMC, shared processors and dedicated memory.
+The controller selects the exact candidate and fixtures using `LIVE_TEST_LPAR_NAME`
+and `LIVE_TEST_SCRATCH_LPAR_NAME`, and authorizes an exclusive window without DPO
+and bounded controller/transport deadlines. Both fixtures need reported dynamic CPU
+capability, disabled/suspended profile sync, matching full native/REST current and
+runtime baselines, and 0.10-unit source-floor/destination-ceiling headroom.
+This arm creates, activates and deletes nothing; it performs no force or profile setup.
+
+The arm checkpoints both complete CPU/memory/profile and independent system baselines,
+then a forward 0.10-entitlement intent. It calls `hmc_move_lpar_processors` once and
+independently observes both peers. Only complete matching endpoint results with
+PASS, applied, workflow_completed true and explicitly null submission errors permit
+fresh admission and a separately checkpointed reverse 0.10-unit transfer.
+It persists each observation before permitting the next effect. Partial, uncertain,
+missing or failed evidence stops writes; no automatic replay or rollback follows.
+There are at most two effects. Both original full baselines must be restored.
+
+Verify that the deployed clean HEAD matches the selected candidate. Set `RUN_DIR`
+to an existing mode-0700 directory outside all repositories, use `umask 077`, and
+capture command output there. The wrapper requires a new results destination and
+refuses exposed/repository directories or existing result/observation files.
+Run the named preflight first, then the arm, and recovery after every attempted arm,
+including failed and apparently successful attempts. Retain logout/reaping evidence.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-processor-move
+uv run --no-sync python scripts/live_lpar_processor_move.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+Recovery reads only. CLEAN requires the same clean candidate and HMC destination,
+complete canonical baseline/forward-intent/forward-observation/reverse-intent/
+reverse-observation/final-baseline proof, and fresh independent equality with both
+original snapshots and system resources. A matching current state cannot replace
+missing saved proof; complete saved proof cannot replace fresh equality.
+Incomplete or malformed records remain unconfirmed, including pre-effect stops.
+Processor quantities use exact two-place strings in the journal; floats, exponent
+spellings and missing runtime quantities cannot attest cleanup.
+
+Product support includes all four documented processor-mode pairs, with mode-specific
+count/entitlement inputs. Mixed-mode shared vCPUs are observed and bounded without an
+invented count delta. This live arm exercises only running shared/shared AIX/Linux
+without force. It supplies no dedicated, mixed-mode, inactive, forced, IBM i or VIOS
+hardware claim. Skips and failures produce no positive maturity evidence. Generate
+public evidence through the evidence script, retain its commit binding and redact
+its complete output; raw result documents stay private.
+
 ## Inactive partition security policy (arm 52)
 
 The opt-in `lpar-security-policy` arm requires a positive selected-system secure
@@ -2153,3 +2327,59 @@ checks. Partial, rejected or unverified outcomes stop for independent reconcilia
 and approved recovery; no automatic inverse, activation, force, target substitution
 or replay is implied. Forced/no-RMC, dedicated and other contexts need their own
 explicit procedures and evidence; successful current readback alone is not guest proof.
+
+## Standalone ST63 serial creation
+
+ST63 is an opt-in native creation procedure, outside default runner and ST100
+dispatch. It exercises the existing C11 native writer, shared serial admission
+and fresh identity confirmation, plus a separate guarded LPAR ownership stamp.
+It does not exercise the complete `create_and_stamp_lpar`/`create_vios` owners
+or their CLI/MCP workflows. Its literal independent CSV oracle observes a saved
+default-profile reciprocal pair; it proves no active traffic, boot or console
+behavior. No hardware run or maturity promotion follows from its presence.
+
+Root must separately approve the exact candidate and packet in a current exclusive
+writer window. The budget is one fresh inactive fixture, exactly 1 GiB and one
+dedicated CPU, one native create, one LPAR stamp where applicable, and at most one
+conditional fresh-UUID delete. There is no existing-peer mutation, activation,
+retry, fallback or recovery write. An uncertain call or observation stops effects.
+
+Use operator-owned mode 0600 packet/preflight/result files in an existing private
+mode 0700 directory outside the checkout. Never replace previous intent. The JSON
+packet has exactly `candidate`, `expires_utc`, `system_uuid`, `partition_type`,
+`name`, `caller_token`, `cleanup_authorized`. Candidate has exactly `commit`,
+`tree` (40 lowercase hexadecimal each) and `hmc_identity`, whose exact fields are
+`host`, `port` (strict integer 1–65535), `user`, `verify_ssl` (boolean),
+`agent_id`; host/account/owner are nonempty strings. Owner is the effective
+configured agent ID or `hmcpctl`. Effective connection, clean deployed HEAD/tree
+and imported package source must match before authentication. Expiry is UTC ISO
+8601. Partition type is `AIX/Linux`, `OS400` or `Virtual IO Server`; names match
+`hmcpctl-live-serial-<8 lowercase hex>` and callers `q1772-<8 lowercase hex>`.
+Cleanup authorization is a strict boolean: false allows preflight only.
+
+After separately reviewing and approving that exact packet/window, run each
+command separately through the deployed candidate:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-serial-adapter --packet "$PACKET" --packet-sha256 "$SHA" --output "$PREFLIGHT"
+uv run --no-sync python scripts/live_lpar_serial_adapter.py --packet "$PACKET" --packet-sha256 "$SHA" --preflight "$PREFLIGHT" --results-file "$RESULTS" --grant-packet-sha256 "$SHA" --exclusive-writer-window
+uv run --no-sync python scripts/live_test_recovery.py --serial-procedure --results "$RESULTS"
+```
+
+Check each exit separately. Failed preflight stops execution; failed execution
+still requires read-only recovery. The grant digest and exclusive-window flag
+are separate current-invocation operator assertions, not cryptographic grants.
+Neither a packet nor retained preflight/journal authorizes effects after a crash.
+Preflight must be younger than 60 seconds, and both partition feeds, complete saved
+profiles and available CPU/memory must remain unchanged before creation. Residue
+and unavailable classic observations refuse admission. The finite request selects
+maximum 8 and same-partition reciprocal slots 2/3; every effect rechecks candidate,
+connection, expiry and fresh invocation after recording durable pending intent.
+
+Cleanup requires independently confirmed fresh contained inactive identity, exact
+resources, literal pair evidence and current LPAR owner/caller where applicable.
+Only that UUID may be deleted once; afterwards the complete baseline must match.
+Recovery rereads the retained packet binding and baseline without adopting,
+stamping, creating, deleting or resuming. Partial journals remain incomplete even
+when their fixture is absent now. Retain uncertain residue for root/operator
+reconciliation. Source rollback is a source/document revert, never an HMC action.

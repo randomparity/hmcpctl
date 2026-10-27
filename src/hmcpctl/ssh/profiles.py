@@ -528,15 +528,25 @@ def parse_profile_io_slots(value: str) -> tuple[ProfileIoSlot, ...]:
 
 
 async def read_lpar_profile_record(
-    config: HMCConfig, system_name: str, lpar_name: str, profile_name: str
+    config: HMCConfig,
+    system_name: str,
+    lpar_name: str,
+    profile_name: str,
+    *,
+    max_output_bytes: int | None = None,
 ) -> str:
-    """Read exactly one native LPAR profile attribute record."""
+    """Read exactly one native LPAR profile attribute record, optionally bounded."""
     filters = build_filter([("lpar_names", lpar_name), ("profile_names", profile_name)])
     command = (
         f"lssyscfg -r prof -m {shlex.quote(system_name)} "
         f"--filter {shlex.quote(filters)}"
     )
-    output = await run_hmc_command(config, command)
+    if max_output_bytes is None:
+        output = await run_hmc_command(config, command)
+    else:
+        output = await run_hmc_command(
+            config, command, max_output_bytes=max_output_bytes
+        )
     records = [line for line in output.splitlines() if line]
     if len(records) != 1:
         raise HMCCLIError(

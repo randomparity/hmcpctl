@@ -672,19 +672,27 @@ def test_affinity_appends_after_landed_memory_layout_inputs():
 
     from hmcpctl.ssh.lpar import create_lpar_via_cli
 
-    assert [item.name for item in fields(core.LparCreation)][-2:] == [
+    assert [item.name for item in fields(core.LparCreation)][-3:] == [
         "memory_layout",
+        "virtual_serial_adapters",
         "affinity_group_id",
     ]
-    assert [item.name for item in fields(core.LparCreationResult)][-2:] == [
+    assert [item.name for item in fields(core.LparCreationResult)][-3:] == [
         "memory_layout_step",
+        "serial_step",
         "affinity_group_step",
     ]
-    for function in [create_vios, create_lpar_via_cli]:
-        assert list(inspect.signature(function).parameters)[-2:] == [
-            "memory_layout",
-            "affinity_group_id",
-        ]
+    assert list(inspect.signature(create_vios).parameters)[-4:] == [
+        "memory_layout",
+        "max_virtual_slots",
+        "virtual_serial_adapters",
+        "affinity_group_id",
+    ]
+    assert list(inspect.signature(create_lpar_via_cli).parameters)[-3:] == [
+        "memory_layout",
+        "virtual_serial_adapters",
+        "affinity_group_id",
+    ]
 
 
 @pytest.fixture

@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 59; 26 to 36 are other arms' row ids.
-ST53–ST59 require named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 64; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61 and ST64 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -73,6 +73,7 @@ from hmcpctl.server import TOOL_SECURITY, _gates, create_mcp
 from hmcpctl.server_tools.command import configure_arbitrary_command_tool
 from live_test import config as live_config
 from live_test import evidence, scenario_validation
+from live_test.accelerator_qos import exercise_accelerator_qos
 from live_test.bare_cec import exercise_bare_cec
 from live_test.config import (
     LiveTestArtifacts,
@@ -122,6 +123,7 @@ from live_test.observation import (
 )
 from live_test.partition_profile_contract import exercise as exercise_profile_contract
 from live_test.partition_profiles import exercise_partition_profiles
+from live_test.processor_move import exercise_processor_move
 from live_test.processor_quantities import exercise_processor_quantities
 from live_test.processor_sharing_weight import exercise_processor_sharing_weight
 from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
@@ -704,11 +706,13 @@ SUBTASKS = {
     52: exercise_lpar_security_policy,
     53: exercise_lpar_linux_roles,
     54: exercise_memory_move,
+    61: exercise_processor_move,
     55: exercise_lpar_hardware_memory,
     56: exercise_processor_quantities,
     57: exercise_lpar_affinity_group,
     58: exercise_creation_memory_layout,
     59: exercise_processor_sharing_weight,
+    64: exercise_accelerator_qos,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -755,6 +759,8 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-memory-quantities": [50],
     "processor-sharing-weight": [59],
     "lpar-memory-move": [54],
+    "lpar-accelerator-qos": [64],
+    "lpar-processor-move": [61],
     "lpar-processor-quantities": [56],
     "lpar-vtpm": [51],
     "lpar-security-policy": [52],
@@ -1040,7 +1046,9 @@ async def main(
             return 1
     else:
         tasks = sorted(
-            n for n in SUBTASKS if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59}
+            n
+            for n in SUBTASKS
+            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64}
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.

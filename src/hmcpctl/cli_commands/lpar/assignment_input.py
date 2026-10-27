@@ -9,6 +9,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
+from ...documents.lpar_serial import SERIAL_INPUT_BYTES, VirtualSerialAdapter
 from ...operations.lpar.assignments import LparPcieAssignments
 from ..output import terminal_field, usage_error
 
@@ -64,3 +65,37 @@ def load_security_policy(value: str | None) -> LparSecurityPolicy:
             for item in error.errors()
         )
         usage_error(f"Invalid --security-policy: {details}")
+
+
+SERIAL_INPUT_HELP = (
+    "Inline JSON array (64 KiB): local_slot, role (client/server), is_required boolean; "
+    "optional supports_hmc (server integer 0 only), remote_lpar_id, remote_lpar_name, "
+    "remote_slot. Clients need one ID/name and remote slot. Explicit --max-virtual-slots "
+    "must exceed unique local slots >=2. Selected peers require ownership; no peer is "
+    "created. HMC decides client capability; saved pair verification proves no traffic."
+)
+
+
+def load_virtual_serial_adapters(value: str | None) -> tuple[VirtualSerialAdapter, ...]:
+    """Decode bounded inline serial JSON without reflecting untrusted values."""
+    if value is None:
+        return ()
+    if (
+        len(value) > SERIAL_INPUT_BYTES
+        or len(value.encode("utf-8")) > SERIAL_INPUT_BYTES
+    ):
+        usage_error("Invalid --virtual-serial-adapters: inline JSON exceeds 64 KiB")
+    try:
+        payload = json.loads(value)
+    except (ValueError, RecursionError):
+        usage_error("Invalid --virtual-serial-adapters: expected an inline JSON array")
+    if not isinstance(payload, list):
+        usage_error("Invalid --virtual-serial-adapters: expected an inline JSON array")
+    try:
+        return TypeAdapter(tuple[VirtualSerialAdapter, ...]).validate_python(payload)
+    except ValidationError as error:
+        details = ", ".join(
+            ".".join(str(part) for part in item["loc"]) or item["type"]
+            for item in error.errors()
+        )
+        usage_error(f"Invalid --virtual-serial-adapters: {details}")

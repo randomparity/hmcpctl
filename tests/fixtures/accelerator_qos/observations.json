@@ -1,0 +1,28 @@
+{
+  "provenance": {
+    "capture_date": "2026-10-26",
+    "source": "retained source capture",
+    "partition_id": "synthetic"
+  },
+  "system": {
+    "type": "gzip",
+    "max_qos": 128,
+    "curr_avail_qos": 128,
+    "pend_avail_qos": 128
+  },
+  "partition": {
+    "lpar_id": 7,
+    "type": "gzip",
+    "curr_qos": 0,
+    "pend_qos": 0
+  },
+  "capabilities": {
+    "general": true,
+    "gzip_supported": true,
+    "ibmi": false
+  },
+  "xml_qos_collection": {
+    "metadata_only": true,
+    "runtime_evidence": false
+  }
+}

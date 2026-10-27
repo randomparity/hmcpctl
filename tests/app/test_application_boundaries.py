@@ -120,8 +120,10 @@ def test_create_mcp_returns_independent_complete_applications():
     # #1764 adds target-specific LPAR/VIOS vTPM reads and guarded updates.
     # #1765 adds target-specific LPAR/VIOS security-policy reads and updates.
     # #1775 adds the native two-target dedicated-memory move.
-    assert len(asyncio.run(first.list_tools())) == 194
-    assert len(asyncio.run(second.list_tools())) == 194
+    # #1779 adds the native two-target processor move.
+    # #1781 adds the native partition accelerator QoS setter.
+    assert len(asyncio.run(first.list_tools())) == 196
+    assert len(asyncio.run(second.list_tools())) == 196
 
 
 def test_operations_do_not_import_application_modules():

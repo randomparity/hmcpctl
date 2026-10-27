@@ -13,6 +13,7 @@ from ..documents.lpar_hardware_memory import hardware_memory_pairs
 from ..documents.lpar_io import LparPhysicalIO
 from ..documents.lpar_memory_layout import LparMemoryLayout
 from ..documents.lpar_security_policy import LparSecurityPolicy
+from ..documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
@@ -164,6 +165,7 @@ async def create_lpar_via_cli(
     hardware_mem_encryption: bool | None = None,
     hardware_mem_expansion: bool | None = None,
     memory_layout: LparMemoryLayout | None = None,
+    virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
     affinity_group_id: AffinityGroupID | None = None,
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
@@ -188,6 +190,7 @@ async def create_lpar_via_cli(
     processor mode's ``sharing_mode``. Omitted values take the defaults of
     :func:`complete_create_resources`, which the REST create uses too.
     """
+    serial_value = validate_serial_input(virtual_serial_adapters, max_virtual_slots)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
@@ -241,6 +244,8 @@ async def create_lpar_via_cli(
     extra = creation_io_record(physical_io or LparPhysicalIO(), creation_sriov)
     if extra:
         config_str += "," + extra
+    if serial_value:
+        config_str += ',"virtual_serial_adapters=' + serial_value + '"'
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
     layout_error = None
     code = None

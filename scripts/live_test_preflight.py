@@ -44,6 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from live_test import (
+    accelerator_qos,
     bare_cec,
     creation_memory_layout,
     dedicated_pcie,
@@ -52,6 +53,7 @@ from live_test import (
     memory_move,
     partition_profile_contract,
     partition_profiles,
+    processor_move,
     profiles,
     runner,
     storage_lifecycle,
@@ -379,6 +381,26 @@ def _lpar_linux_roles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _accelerator_qos_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        target, request = accelerator_qos.configured(config)
+    except ValueError as error:
+        return ArmVerdict(
+            "lpar-accelerator-qos", False, str(error), (), config.system_name
+        )
+    return ArmVerdict(
+        "lpar-accelerator-qos",
+        True,
+        "configuration validated; mutation eligibility is decided at runtime",
+        (
+            f"existing owned target {target}; exact request {request.model_dump_json()}",
+            "one intended QoS set, then separate original-baseline restoration with identical wait/detail/force",
+            "root binds clean deployed HEAD, destination, protected inventory, both effect intents and bounded window; mandatory read-only recovery",
+        ),
+        config.system_name,
+    )
+
+
 def _memory_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     try:
         memory_move.configured(config)
@@ -391,6 +413,26 @@ def _memory_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
         (
             "two existing owned running AIX/Linux RMC dedicated-memory fixtures; no creation or deletion",
             "exclusive no-DPO window; one-region forward then separately verified reverse; stop writes on uncertainty",
+            "independent dual baselines and mandatory read-only recovery; no force/activation or automatic rollback",
+        ),
+        config.system_name,
+    )
+
+
+def _processor_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        processor_move.configured(config)
+    except ValueError as error:
+        return ArmVerdict(
+            "lpar-processor-move", False, str(error), (), config.system_name
+        )
+    return ArmVerdict(
+        "lpar-processor-move",
+        True,
+        "configuration validated",
+        (
+            "two existing owned running AIX/Linux RMC shared-CPU dedicated-memory fixtures; no creation or deletion",
+            "exclusive no-DPO window; 0.10-unit forward then separately verified reverse; stop writes on uncertainty",
             "independent dual baselines and mandatory read-only recovery; no force/activation or automatic rollback",
         ),
         config.system_name,
@@ -731,6 +773,8 @@ _ARM_VERDICTS = {
     "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-memory-move": _memory_move_verdict,
+    "lpar-accelerator-qos": _accelerator_qos_verdict,
+    "lpar-processor-move": _processor_move_verdict,
     "lpar-processor-quantities": _processor_quantities_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
@@ -865,6 +909,8 @@ def main(argv: list[str] | None = None) -> int:
             *runner.SUBTASK_GROUPS,
             "system-profile-source",
             "system-profile-activation-source",
+            "lpar-serial-adapter",
+            "vios-ame-source",
         ),
         help="predict one arm instead of every arm",
     )
@@ -882,6 +928,55 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--packet-sha256")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.group == "vios-ame-source":
+        from live_test import vios_ame_source
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "VIOS AME source preflight requires packet, digest, private output and live read-only checks"
+            )
+        return vios_ame_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
+
+    if args.group == "lpar-serial-adapter":
+        from live_test import lpar_serial_adapter
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "ST63 requires packet, digest, fresh private output and read-only hardware checks"
+            )
+        return lpar_serial_adapter.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
     if args.group == "system-profile-activation-source":
         from live_test import system_profile_activation_source
 

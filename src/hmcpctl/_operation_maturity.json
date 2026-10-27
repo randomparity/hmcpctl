@@ -402,6 +402,13 @@
       "observed_at": null
     },
     {
+      "operation": "lpar.move_processors",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.plan",
       "implementation": "implemented",
       "verification": "unevidenced",
@@ -449,6 +456,13 @@
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-08T18:52:55Z"
+    },
+    {
+      "operation": "lpar.set_accelerator_qos",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar.set_description",

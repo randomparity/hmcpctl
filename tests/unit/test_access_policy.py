@@ -443,20 +443,23 @@ def test_optional_selectors_must_be_covered_too() -> None:
     assert policy.permits_tool("hmc_power_off_lpar") is True
 
 
-def test_a_composite_a_table_cannot_bound_is_refused_at_load() -> None:
+@pytest.mark.parametrize(
+    "tool", ["hmc_provision_lpar", "hmc_create_lpar", "hmc_create_vios"]
+)
+def test_a_composite_a_table_cannot_bound_is_refused_at_load(tool) -> None:
     """Same rule, reached through `exhaustive_targets=False` rather than through
     an empty selector tuple — the composite case, where the grant *looks* covered.
     """
     with pytest.raises(AccessPolicyError) as raised:
         _compile(
             _document(
-                tools=["hmc_provision_lpar"],
+                tools=[tool],
                 connections=["lab"],
                 targets={"managed_system": ["S1"]},
             )
         )
 
-    assert "'hmc_provision_lpar'" in str(raised.value)
+    assert repr(tool) in str(raised.value)
     assert "all-targets" in str(raised.value)
 
 

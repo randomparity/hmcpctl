@@ -18,6 +18,7 @@ from ...documents.lpar import (
 )
 from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_memory_layout import LparMemoryLayout
+from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
@@ -26,9 +27,11 @@ from ..output import console, err_console, print_json, terminal_field, usage_err
 from ..runtime import with_client
 from .assignment_input import (
     SECURITY_POLICY_WARNING,
+    SERIAL_INPUT_HELP,
     load_pcie_assignments,
     load_physical_io,
     load_security_policy,
+    load_virtual_serial_adapters,
 )
 
 
@@ -198,6 +201,17 @@ def lpars_create(
             help="Exact finite reservation, at most two decimals; <=65536 canonical ASCII bytes; selecting zero also declares Linux intent; HMC decides numeric limits",
         ),
     ] = None,
+    max_virtual_slots: Annotated[
+        int | None,
+        typer.Option(
+            "--max-virtual-slots",
+            help="Maximum virtual I/O slots; required explicitly for serial input",
+        ),
+    ] = None,
+    virtual_serial_adapters: Annotated[
+        str | None,
+        typer.Option("--virtual-serial-adapters", help=SERIAL_INPUT_HELP),
+    ] = None,
     affinity_group_id: Annotated[
         str | None,
         typer.Option(
@@ -219,6 +233,14 @@ def lpars_create(
     use initial-profile I/O or profile-bearing assignments. Readback proves only
     configuration, not KVM or NovaLink deployment.
     """
+    serial = load_virtual_serial_adapters(virtual_serial_adapters)
+    try:
+        validate_serial_input(serial, max_virtual_slots)
+    except (ValueError, TypeError):
+        raise typer.BadParameter(
+            "Unique local slots >=2 must be below explicit --max-virtual-slots; encoded serial collection must fit 64 KiB",
+            param_hint="--virtual-serial-adapters",
+        ) from None
     try:
         layout = LparMemoryLayout(
             min_num_huge_pages=min_num_huge_pages,
@@ -306,6 +328,8 @@ def lpars_create(
                 lpar_type,
                 resources,
                 partition_id=partition_id,
+                max_virtual_slots=max_virtual_slots,
+                virtual_serial_adapters=serial,
                 caller_token=caller_token,
                 physical_io=load_physical_io(physical_io),
                 apply_profile=not no_apply,

@@ -1986,9 +1986,38 @@ def main(argv: list[str] | None = None) -> int:
     source_packets = parser.add_mutually_exclusive_group()
     source_packets.add_argument("--source-packet", type=Path)
     source_packets.add_argument("--activation-source-packet", type=Path)
+    source_packets.add_argument("--serial-procedure", action="store_true")
+    source_packets.add_argument("--vios-ame-source-packet", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.vios_ame_source_packet:
+        from live_test import vios_ame_source
+
+        if not args.packet_sha256 or not args.output:
+            parser.error(
+                "VIOS AME source recovery requires packet digest and private output"
+            )
+        return vios_ame_source.main(
+            [
+                "recover",
+                "--packet",
+                str(args.vios_ame_source_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+                "--output",
+                str(args.output),
+            ]
+        )
+
+    if args.serial_procedure:
+        from live_test import lpar_serial_adapter
+
+        if args.output or args.packet_sha256:
+            parser.error("ST63 recovery uses retained results only")
+        return lpar_serial_adapter.main(["recover", "--results", str(args.results)])
     if args.activation_source_packet:
         from live_test import system_profile_activation_source
 
@@ -2129,6 +2158,52 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(
             "CLEAN: finite memory-move success and both original baselines confirmed; no writes"
+        )
+        return 0
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "lpar-accelerator-qos"
+    ):
+        from live_test import accelerator_qos
+
+        if not runner._bootstrap_config():
+            print("accelerator-qos recovery: credentials unavailable", file=sys.stderr)
+            return 2
+        try:
+            asyncio.run(accelerator_qos.recover_document(HMCConfig(), document))
+        except Exception as error:  # noqa: BLE001 — malformed or partial evidence never attests CLEAN
+            print(
+                f"accelerator-qos recovery unconfirmed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: finite accelerator-qos proof and original baselines confirmed; no writes"
+        )
+        return 0
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "lpar-processor-move"
+    ):
+        from live_test import processor_move
+
+        if not runner._bootstrap_config():
+            print("processor-move recovery: credentials unavailable", file=sys.stderr)
+            return 2
+        try:
+            asyncio.run(processor_move.recover_document(HMCConfig(), document))
+        except Exception as error:  # noqa: BLE001 — unreadable state never attests CLEAN
+            print(
+                f"processor-move recovery unconfirmed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "CLEAN: finite processor-move success and both original baselines confirmed; no writes"
         )
         return 0
 

@@ -1281,6 +1281,19 @@
                 "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority and contained labelled native-partition/named-profile equality or explicit unavailable/mismatch; no XML mapping or current/runtime equivalence claim"
               }
             ]
+          },
+          {
+            "variant": "c11-virtual-serial-creation",
+            "parameters": [
+              {
+                "name": "max_virtual_slots",
+                "constraint": "optional for nonserial creation; explicit integer maximum strictly greater than every selected serial local slot required for serial creation; no source-unspecified hardware maximum"
+              },
+              {
+                "name": "virtual_serial_adapters",
+                "constraint": "optional strict seven-component typed client/server tuple; empty preserves omission; explicit maximum and unique nonreserved local slots; contained existing peer identity/ownership admission; one native creation attempt without replay or compensation; unresolved client capability is HMC-final across AIX/Linux, OS400 and Virtual IO Server; independent classic saved-default-profile configuration/unbound/pair facts, controller current mapping unavailable; no active traffic, boot or console claim; old live evidence gives no new-variant credit"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -5074,6 +5087,19 @@
                 "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority and contained labelled native-partition/named-profile equality or explicit unavailable/mismatch; no XML mapping or current/runtime equivalence claim"
               }
             ]
+          },
+          {
+            "variant": "c11-virtual-serial-creation",
+            "parameters": [
+              {
+                "name": "max_virtual_slots",
+                "constraint": "optional for nonserial creation; explicit integer maximum strictly greater than every selected serial local slot required for serial creation; no source-unspecified hardware maximum"
+              },
+              {
+                "name": "virtual_serial_adapters",
+                "constraint": "optional strict seven-component typed client/server tuple; empty preserves omission; explicit maximum and unique nonreserved local slots; contained existing peer identity/ownership admission; one native creation attempt without replay or compensation; unresolved client capability is HMC-final across AIX/Linux, OS400 and Virtual IO Server; independent classic saved-default-profile configuration/unbound/pair facts, controller current mapping unavailable; no active traffic, boot or console claim; old live evidence gives no new-variant credit"
+              }
+            ]
           }
         ],
         "missing_scope": []
@@ -5982,6 +6008,47 @@
           {
             "variant": "native-dedicated-memory-move",
             "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.set_accelerator_qos",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "native-partition-gzip-qos",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "lpar.move_processors",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "native-processor-move",
+            "parameters": [
+              {
+                "name": "force",
+                "constraint": "Explicit documented AIX/Linux/VIOS no-RMC intent; deferred effect is reported separately for each endpoint and may require a restart."
+              },
+              {
+                "name": "processing_units",
+                "constraint": "Finite nonnegative hundredths; shared/shared or shared/dedicated only, integral for shared/dedicated; no unselected mixed-mode vCPU delta is inferred."
+              },
+              {
+                "name": "processors",
+                "constraint": "Nonnegative whole count; dedicated/dedicated, shared/shared or dedicated/shared only; explicit zero is an admitted no-op."
+              }
+            ]
           }
         ],
         "missing_scope": []

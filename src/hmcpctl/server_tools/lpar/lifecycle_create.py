@@ -16,6 +16,7 @@ from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
+from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
 from ...operations.lpar.core import LparCreation
@@ -61,6 +62,7 @@ def hmc_create_lpar(
     hardware_mem_encryption: HardwareMemoryFlag | None = None,
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
     memory_layout: LparMemoryLayout | None = None,
+    virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
     affinity_group_id: AffinityGroupID | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
@@ -86,6 +88,12 @@ def hmc_create_lpar(
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
         resources: Memory and processor assignments for the new partition.
+        virtual_serial_adapters: Optional strict seven-component serial creation records
+            (64 KiB encoded maximum). Empty preserves defaults. Unique local slots >=2
+            require explicit max_virtual_slots; peers must be contained and authorized.
+            Client eligibility is HMC-final in every environment. No reciprocal mutation,
+            retry, activation or traffic proof. Saved configuration/pair observations gate
+            follow-ups; controller current observations remain unavailable.
         memory_layout: Optional AIX/Linux huge-page counts, advertised HPT/PPT
             ratios, and Linux reservation. Reservation selection including zero
             declares intent, not installed OS proof; finite/two-decimal values,
@@ -149,6 +157,7 @@ def hmc_create_lpar(
     if caller_token is not None:
         validate_caller_token(caller_token)
     validate_partition_type(partition_type)
+    validate_serial_input(virtual_serial_adapters, max_virtual_slots)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
@@ -165,6 +174,7 @@ def hmc_create_lpar(
                 partition_id=partition_id,
                 keylock=keylock,
                 max_virtual_slots=max_virtual_slots,
+                virtual_serial_adapters=virtual_serial_adapters,
                 caller_token=caller_token,
                 physical_io=physical_io
                 if physical_io is not None

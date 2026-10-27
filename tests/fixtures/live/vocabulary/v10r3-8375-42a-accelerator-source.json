@@ -1,0 +1,63 @@
+{
+ "firmware": "v10r3-8375-42a-accelerator-source",
+ "sources": [
+  "2026-10-26 authorized #1781 fixed read-only native GZIP source capture: HMC V10R3 SP1060 managing 8375-42A; offline SSH-record adapter of retained capture; source vocabulary only, no setter or runtime proof"
+ ],
+ "rest": {
+  "endpoints": [],
+  "errors": [],
+  "values": {},
+  "element_enums": {}
+ },
+ "cli": {
+  "commands": [
+   {
+    "command": "lshwres -r accel -m {} --level lpar --rsubtype gzip --filter lpar_ids={}",
+    "exit_status": [
+     0
+    ],
+    "codes": [],
+    "outputs": [],
+    "error_streams": []
+   },
+   {
+    "command": "lshwres -r accel -m {} --level sys --rsubtype gzip",
+    "exit_status": [
+     0
+    ],
+    "codes": [],
+    "outputs": [],
+    "error_streams": []
+   }
+  ],
+  "values": {
+   "lshwres -r accel --rsubtype gzip --level lpar :: curr_qos": [
+    "<int>"
+   ],
+   "lshwres -r accel --rsubtype gzip --level lpar :: lpar_id": [
+    "<int>"
+   ],
+   "lshwres -r accel --rsubtype gzip --level lpar :: lpar_name": [
+    "<text>"
+   ],
+   "lshwres -r accel --rsubtype gzip --level lpar :: pend_qos": [
+    "<int>"
+   ],
+   "lshwres -r accel --rsubtype gzip --level lpar :: type": [
+    "gzip"
+   ],
+   "lshwres -r accel --rsubtype gzip --level sys :: curr_avail_qos": [
+    "<int>"
+   ],
+   "lshwres -r accel --rsubtype gzip --level sys :: max_qos": [
+    "<int>"
+   ],
+   "lshwres -r accel --rsubtype gzip --level sys :: pend_avail_qos": [
+    "<int>"
+   ],
+   "lshwres -r accel --rsubtype gzip --level sys :: type": [
+    "gzip"
+   ]
+  }
+ }
+}

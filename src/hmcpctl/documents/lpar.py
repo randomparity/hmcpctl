@@ -621,6 +621,8 @@ VIOS_DEFAULT_RESOURCES = LparResources(
 def build_vios_document(
     name: str,
     resources: LparResources = VIOS_DEFAULT_RESOURCES,
+    *,
+    max_virtual_slots: int | None = None,
 ) -> str:
     """Build a VirtualIOServer document for creating a Virtual IO Server.
 
@@ -631,7 +633,12 @@ def build_vios_document(
     """
     return document_envelope(
         "VirtualIOServer",
-        _partition_body(name, "Virtual IO Server", resources=resources),
+        _partition_body(
+            name,
+            "Virtual IO Server",
+            resources=resources,
+            max_virtual_slots=max_virtual_slots,
+        ),
     )
 
 
