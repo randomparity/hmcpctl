@@ -18,7 +18,7 @@ Usage:
 stops importing (AGENTS.md).
 
 Registered subtasks span 0 through 64; 26 to 36 are other arms' row ids.
-ST53–ST56, ST58, ST59, ST61 and ST64 require named groups and are excluded from default and all selections.
+ST53–ST59, ST61 and ST64 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -92,6 +92,7 @@ from live_test.lpar import (
     mutate_lpar_properties,
     restore_lpar_baseline,
 )
+from live_test.lpar_affinity_group import exercise_lpar_affinity_group
 from live_test.lpar_config import (
     exercise_lpar_config,
     exercise_lpar_reporting,
@@ -708,6 +709,7 @@ SUBTASKS = {
     61: exercise_processor_move,
     55: exercise_lpar_hardware_memory,
     56: exercise_processor_quantities,
+    57: exercise_lpar_affinity_group,
     58: exercise_creation_memory_layout,
     59: exercise_processor_sharing_weight,
     64: exercise_accelerator_qos,
@@ -763,6 +765,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-vtpm": [51],
     "lpar-security-policy": [52],
     "lpar-hardware-memory": [55],
+    "lpar-affinity-group": [57],
     "creation-memory-layout": [58],
     "lpar-linux-roles": [53],
     # ST40 mutates the VIOS's storage, so only its own arm dispatches it (#1348).
@@ -1045,7 +1048,7 @@ async def main(
         tasks = sorted(
             n
             for n in SUBTASKS
-            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 58, 59, 61, 64}
+            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64}
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.

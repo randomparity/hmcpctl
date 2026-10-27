@@ -11,6 +11,7 @@ from ...documents.lpar import (
     PartitionType,
     validate_partition_type,
 )
+from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_memory_layout import LparMemoryLayout
@@ -62,6 +63,7 @@ def hmc_create_lpar(
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
     memory_layout: LparMemoryLayout | None = None,
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
+    affinity_group_id: AffinityGroupID | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -99,6 +101,10 @@ def hmc_create_lpar(
             Huge pages use a separate pool; capacity is checked at activation.
             Saved profile verification does not prove activation or runtime;
             controller current values may be unavailable, blocking follow-ups.
+        affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
+            omission preserves defaults. Fresh classic saved-profile proof gates follow-ups;
+            native partition mismatch/unavailability is reported separately. Controller
+            saved proof remains unavailable. No current/runtime or placement claim.
         hardware_mem_encryption: Optional hardware memory encryption access;
             omission preserves defaults, false explicitly disables access.
         hardware_mem_expansion: Optional hardware memory expansion access;
@@ -157,6 +163,7 @@ def hmc_create_lpar(
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
         memory_layout.validate_creation(partition_type)
+    validate_affinity_group_id(affinity_group_id)
     return with_client(
         lambda hmc: create_lpar(
             hmc,
@@ -179,6 +186,7 @@ def hmc_create_lpar(
                 memory_layout=memory_layout
                 if memory_layout is not None
                 else LparMemoryLayout(),
+                affinity_group_id=affinity_group_id,
                 security_policy=security_policy
                 if security_policy is not None
                 else LparSecurityPolicy(),
