@@ -25,6 +25,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   Runtime effectiveness and profile persistence remain unverified. The opt-in arm 64
   procedure has offline coverage; hardware contexts remain unevidenced (#1781).
 
+- Native processor moves through `hmc_move_lpar_processors` and
+  `lpars processor-move` support all four dedicated/shared mode pairs with explicit
+  count or entitlement inputs. Both endpoints require authorization and independent
+  readback; partial or uncertain effects are reported without replay or rollback.
+  The opt-in ST61 arm verifies only its declared running shared/shared case when
+  executed; no live hardware evidence is claimed by its offline tests (#1779).
+
 - LPAR processor updates and combined modify through CLI/MCP accept sharing
   modes and strict integer `uncapped_weight` values from 0–255, preserving zero
   and omission. Independent configured/current readback determines completion;

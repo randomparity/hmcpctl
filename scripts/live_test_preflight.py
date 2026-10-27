@@ -53,6 +53,7 @@ from live_test import (
     memory_move,
     partition_profile_contract,
     partition_profiles,
+    processor_move,
     profiles,
     runner,
     storage_lifecycle,
@@ -418,6 +419,26 @@ def _memory_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _processor_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        processor_move.configured(config)
+    except ValueError as error:
+        return ArmVerdict(
+            "lpar-processor-move", False, str(error), (), config.system_name
+        )
+    return ArmVerdict(
+        "lpar-processor-move",
+        True,
+        "configuration validated",
+        (
+            "two existing owned running AIX/Linux RMC shared-CPU dedicated-memory fixtures; no creation or deletion",
+            "exclusive no-DPO window; 0.10-unit forward then separately verified reverse; stop writes on uncertainty",
+            "independent dual baselines and mandatory read-only recovery; no force/activation or automatic rollback",
+        ),
+        config.system_name,
+    )
+
+
 def _processor_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-processor-quantities",
@@ -740,6 +761,7 @@ _ARM_VERDICTS = {
     "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-memory-move": _memory_move_verdict,
     "lpar-accelerator-qos": _accelerator_qos_verdict,
+    "lpar-processor-move": _processor_move_verdict,
     "lpar-processor-quantities": _processor_quantities_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,

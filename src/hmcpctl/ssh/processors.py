@@ -7,7 +7,11 @@ import io
 import shlex
 
 from ..config import HMCConfig
-from ..documents.lpar_processors import LparProcessorChange, bounded_processor_number
+from ..documents.lpar_processors import (
+    LparProcessorChange,
+    LparProcessorMove,
+    bounded_processor_number,
+)
 from .transport import HMCCLIError, run_hmc_command
 
 _FIELDS = [
@@ -93,6 +97,48 @@ async def change_lpar_processor_quantity(
             ("--procunits", f"{bounded_processor_number(change.processing_units):.2f}")
         )
     if change.force:
+        parts.append("--force")
+    return await run_hmc_command(
+        config, " ".join(parts), include_stderr=True, max_output_bytes=65536
+    )
+
+
+async def move_lpar_processor_quantity(
+    config: HMCConfig,
+    system_name: str,
+    source_id: int,
+    target_id: int,
+    move: LparProcessorMove,
+) -> str:
+    """Submit one fixed native move; admission and postconditions belong upstream."""
+    _require_id(source_id)
+    _require_id(target_id)
+    if source_id == target_id:
+        raise ValueError("Processor move requires distinct partition IDs")
+    if not isinstance(move, LparProcessorMove):
+        raise TypeError("move must be a typed LparProcessorMove; nothing was sent")
+    parts = [
+        "chhwres",
+        "-r",
+        "proc",
+        "-m",
+        shlex.quote(system_name),
+        "-o",
+        "m",
+        "--id",
+        str(source_id),
+        "--tid",
+        str(target_id),
+    ]
+    if move.processors is not None:
+        parts.extend(
+            ("--procs", str(bounded_processor_number(move.processors, whole=True)))
+        )
+    if move.processing_units is not None:
+        parts.extend(
+            ("--procunits", f"{bounded_processor_number(move.processing_units):.2f}")
+        )
+    if move.force:
         parts.append("--force")
     return await run_hmc_command(
         config, " ".join(parts), include_stderr=True, max_output_bytes=65536

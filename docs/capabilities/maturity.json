@@ -5981,6 +5981,33 @@
         "missing_scope": []
       },
       "evidence": []
+    },
+    {
+      "operation": "lpar.move_processors",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "native-processor-move",
+            "parameters": [
+              {
+                "name": "force",
+                "constraint": "Explicit documented AIX/Linux/VIOS no-RMC intent; deferred effect is reported separately for each endpoint and may require a restart."
+              },
+              {
+                "name": "processing_units",
+                "constraint": "Finite nonnegative hundredths; shared/shared or shared/dedicated only, integral for shared/dedicated; no unselected mixed-mode vCPU delta is inferred."
+              },
+              {
+                "name": "processors",
+                "constraint": "Nonnegative whole count; dedicated/dedicated, shared/shared or dedicated/shared only; explicit zero is an admitted no-op."
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
     }
   ]
 }

@@ -402,6 +402,13 @@
       "observed_at": null
     },
     {
+      "operation": "lpar.move_processors",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.plan",
       "implementation": "implemented",
       "verification": "unevidenced",
