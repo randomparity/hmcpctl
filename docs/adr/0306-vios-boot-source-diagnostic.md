@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed, 2026-10-27. Operator-approved charter and format; independent review pending.
+Accepted, 2026-10-27. Independent design review and scope audit approved the contract.
 Design-only authority: call_dfc2b0181f834c4083aafd06c2a39556/0.
 
 ## Context
