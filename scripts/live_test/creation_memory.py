@@ -288,7 +288,7 @@ async def _provider(hmc, system: str, element, expected: str | None) -> object:
         not identity
         or url.scheme != "https"
         or url.hostname != hmc.config.host
-        or (url.port or 443) != hmc.config.port
+        or (url.port if url.port is not None else 443) != hmc.config.port
         or url.username
         or url.password
         or url.query
@@ -510,6 +510,38 @@ async def _create(
         )
         result_status, _ = judge_create_result(status, data)
         entry = result_field(data, "lpar") if result_status == "PASS" else None
+        if j["case"] == "controller-shared-lpar":
+            result_status, entry = "FAIL", None
+            # This acknowledged partial result permits only independent readback.
+            match plain_data(data):
+                case {
+                    "resource_created": True,
+                    "workflow_completed": False,
+                    "lpar": returned,
+                    "steps": [
+                        {"step": "create", "status": "ok", "result": created},
+                        {
+                            "step": "creation_memory",
+                            "status": "error",
+                            "result": {
+                                "saved": None,
+                                "current": {
+                                    "status": "unavailable",
+                                    "unavailable": [
+                                        "primary_paging_vios_name",
+                                        "secondary_paging_vios_id",
+                                    ],
+                                },
+                            },
+                        },
+                        {"step": "apply_profile", "status": "skipped"},
+                    ],
+                } if (
+                    status == "PASS"
+                    and _canonical(_uuid_of(returned)) is not None
+                    and _canonical(_uuid_of(returned)) == _canonical(_uuid_of(created))
+                ):
+                    result_status, entry = "PASS", returned
     else:
         status, data = await state.call(
             client,

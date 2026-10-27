@@ -301,6 +301,8 @@ def native_target(monkeypatch):
             fields = fields.replace("<SecondaryPagingServicePartition/>", "")
         if env.fault == "foreign-provider":
             fields = fields.replace("https://hmc.test", "https://foreign.test")
+        if env.fault == "zero-port-provider":
+            fields = fields.replace("https://hmc.test", "https://hmc.test:0")
         if env.fault == "whitespace-provider":
             fields = fields.replace("https://hmc.test", " https://hmc.test")
         if env.fault == "direct-link":
@@ -349,6 +351,37 @@ def native_target(monkeypatch):
             if env.fault in {"refusal", "timeout"}:
                 return "FAIL", "unknown or rejected private diagnostic"
             if tool == "hmc_create_lpar":
+                if state.config.creation_memory_case == "controller-shared-lpar":
+                    entry = {"UUID": FRESH} if env.fault != "no-uuid" else {}
+                    return "PASS", {
+                        "resource_created": True,
+                        "workflow_completed": False,
+                        "lpar": entry,
+                        "ownership_stamped": True,
+                        "steps": [
+                            {"step": "create", "status": "ok", "result": entry},
+                            {
+                                "step": "creation_memory",
+                                "status": "error",
+                                "result": {
+                                    "saved": None,
+                                    "current": {
+                                        "status": "unavailable",
+                                        "observed": {
+                                            "mem_mode": "shared",
+                                            "desired_io_entitled_mem": "auto",
+                                            "mem_weight": 0,
+                                        },
+                                        "unavailable": [
+                                            "primary_paging_vios_name",
+                                            "secondary_paging_vios_id",
+                                        ],
+                                    },
+                                },
+                            },
+                            {"step": "apply_profile", "status": "skipped"},
+                        ],
+                    }
                 return "PASS", {
                     "lpar": {"UUID": FRESH} if env.fault != "no-uuid" else {},
                     "workflow_completed": env.fault != "incomplete",
@@ -445,6 +478,7 @@ async def test_one_fixed_case_independent_oracle_cleanup_and_no_runtime(
         "missing-leaf",
         "absent-secondary",
         "foreign-provider",
+        "zero-port-provider",
         "whitespace-provider",
         "wrong-provider",
         "duplicate-leaf",
@@ -499,6 +533,11 @@ async def test_controller_retains_current_facts_without_designation_or_cleanup(
     await e.arm.exercise_creation_memory(None, e.state)
     j = e.state.artifacts.creation_memory
     assert j["outcome"] == "unavailable" and j["phase"] == "stopped-uncertain"
+    assert j["create_returned"] is True and j["uuid"] == FRESH
+    assert e.checkpoints[-1]["uuid"] == FRESH
+    assert j["deletion"] == "not-attempted"
+    assert len([t for t, _ in e.calls if t.startswith("hmc_create_")]) == 1
+    assert not any("apply" in t or "activate" in t or "stamp" in t for t, _ in e.calls)
     assert not any(t.startswith("hmc_delete_") for t, _ in e.calls)
     assert not e.state.observations
     observation = next(
@@ -511,6 +550,71 @@ async def test_controller_retains_current_facts_without_designation_or_cleanup(
         "PrimaryPagingServicePartition",
         "SecondaryPagingServicePartition",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "refusal",
+        "timeout",
+        "no-uuid",
+        "nonack",
+        "create-error",
+        "other-error",
+        "memory-mismatch",
+        "missing-steps",
+        "different-uuid",
+        "completed",
+        "malformed-memory",
+        "failed-status",
+    ],
+)
+async def test_controller_requires_acknowledged_expected_partial_result(
+    native_target, fault
+):
+    e = native_target
+    e.state.config = replace(armed("controller-shared-lpar"), system_name=SYSTEM)
+    e.fault = fault
+    original_call = e.state.call
+
+    async def call(client, tool, **args):
+        status, data = await original_call(client, tool, **args)
+        if tool == "hmc_create_lpar" and isinstance(data, dict):
+            if fault == "nonack":
+                data["resource_created"] = False
+            elif fault == "create-error":
+                data["steps"][0]["status"] = "error"
+            elif fault == "other-error":
+                data["steps"].append({"step": "other", "status": "error"})
+            elif fault == "memory-mismatch":
+                data["steps"][1]["result"]["current"]["status"] = "mismatch"
+            elif fault == "missing-steps":
+                data["steps"] = None
+            elif fault == "different-uuid":
+                data["steps"][0]["result"] = {"UUID": PRIMARY}
+            elif fault == "completed":
+                data["workflow_completed"] = True
+                data["steps"][1]["status"] = "ok"
+            elif fault == "malformed-memory":
+                del data["steps"][1]["result"]["current"]["unavailable"]
+        return (
+            ("FAIL", data)
+            if tool == "hmc_create_lpar" and fault == "failed-status"
+            else (status, data)
+        )
+
+    e.state.call = call
+    await e.arm.exercise_creation_memory(None, e.state)
+    j = e.state.artifacts.creation_memory
+    assert j["outcome"] == "unknown" and j["uuid"] is None
+    assert j["create_returned"] is False
+    assert not any(t.startswith("hmc_delete_") for t, _ in e.calls)
+    assert not e.state.observations
+    assert not any(
+        isinstance(r["data"], dict) and "observed" in r["data"] for r in e.state.results
+    )
+    assert len([t for t, _ in e.calls if t.startswith("hmc_create_")]) == 1
 
 
 @pytest.mark.asyncio
