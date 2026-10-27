@@ -350,7 +350,12 @@ async def admit_creation_memory(
         primary = _selected(memory, "primary", tuple(providers))
         secondary = _selected(memory, "secondary", tuple(providers))
         if not primary or (
-            len(primary) == len(secondary) == 1 and primary == secondary
+            len(primary) == len(secondary) == 1
+            and primary == secondary
+            and (
+                memory.secondary_paging_vios_name is not None
+                or memory.secondary_paging_vios_id is not None
+            )
         ):
             raise ValueError(
                 "Primary and secondary paging provider identities must differ"

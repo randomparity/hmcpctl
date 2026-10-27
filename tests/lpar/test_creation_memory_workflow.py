@@ -1114,3 +1114,83 @@ async def test_identity_metadata_attributes_preserve_confirmed_scalar_values(
     assert result.ownership_stamped is True
     assert result.creation_memory_step.status == "ok"
     assert result.lpar["Resource"]["PartitionName"] == "new"
+
+
+@pytest.mark.parametrize("primary_selector", [None, "name", "id"])
+async def test_single_provider_keeps_omitted_secondary_selection_and_verifies_empty(
+    memory_target, primary_selector
+):
+    b = memory_target
+    b.providers = b.providers[:1]
+    del b.pools[0]["Resource"]["PagingServicePartitionTwo"]
+    selectors = (
+        {}
+        if primary_selector is None
+        else {
+            f"primary_paging_vios_{primary_selector}": "paging-a"
+            if primary_selector == "name"
+            else 7
+        }
+    )
+    memory = Memory(mem_mode="shared", **selectors)
+    admission = await admit(b, memory)
+    assert admission.primary == admission.secondary
+    assert [p.uuid for p in admission.secondary] == [PRIMARY]
+    assert memory.secondary_paging_vios_name is memory.secondary_paging_vios_id is None
+    result = await create(b, memory)
+    proof = result.creation_memory_step.result.saved
+    assert proof.status == "verified"
+    assert proof.observed["secondary_paging_vios_name"] == "none"
+    assert (
+        proof.observed[f"primary_paging_vios_{primary_selector or 'name'}"]["uuid"]
+        == PRIMARY
+    )
+    assert b.events.count("create") == 1
+
+
+@pytest.mark.parametrize("secondary_selector", ["name", "id"])
+async def test_single_provider_cannot_satisfy_explicit_same_secondary(
+    memory_target, secondary_selector
+):
+    b = memory_target
+    b.providers = b.providers[:1]
+    del b.pools[0]["Resource"]["PagingServicePartitionTwo"]
+    memory = Memory(
+        mem_mode="shared",
+        **{
+            f"secondary_paging_vios_{secondary_selector}": "paging-a"
+            if secondary_selector == "name"
+            else 7
+        },
+    )
+    with pytest.raises(ValueError, match="identities must differ"):
+        await create(b, memory)
+    assert not b.created
+
+
+async def test_single_provider_omission_keeps_candidate_authorization(memory_target):
+    b = memory_target
+    b.providers = b.providers[:1]
+    del b.pools[0]["Resource"]["PagingServicePartitionTwo"]
+    b.providers[0]["Resource"]["Description"] = (
+        "[hmcpctl owner:foreign created:2026-10-27]"
+    )
+    with pytest.raises(PermissionError):
+        await create(b, Memory(mem_mode="shared"))
+    assert not b.created
+
+
+async def test_single_provider_same_saved_pair_is_still_mismatch(memory_target):
+    b = memory_target
+    b.providers = b.providers[:1]
+    del b.pools[0]["Resource"]["PagingServicePartitionTwo"]
+    b.saved["SecondaryPagingServicePartition"] = link(PRIMARY)
+    result = await create(b, Memory(mem_mode="shared"), apply_profile=True)
+    assert result.creation_memory_step.result.saved.status == "mismatch"
+    assert (
+        result.creation_memory_step.result.saved.observed["primary_paging_vios_name"]
+        == result.creation_memory_step.result.saved.observed[
+            "secondary_paging_vios_name"
+        ]
+    )
+    assert "apply" not in b.events

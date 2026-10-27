@@ -127,3 +127,19 @@ async def test_vios_uncertainty_reconciles_without_replay(
         await create_vios(b.hmc, "system", "new", RESOURCES, creation_memory=SHARED)
     assert PRIVATE not in str(error.value) and b.events.count("create") == 1
     assert "stamp" not in b.events and "apply" not in b.events
+
+
+async def test_vios_single_provider_omitted_secondary_verifies_saved_empty(
+    memory_target,
+):
+    b = memory_target
+    vios(b)
+    b.providers = b.providers[:1]
+    del b.pools[0]["Resource"]["PagingServicePartitionTwo"]
+    result = await create_vios(
+        b.hmc, "system", "new", RESOURCES, creation_memory=Memory(mem_mode="shared")
+    )
+    proof = result["creation_memory_verification"]
+    assert proof.saved.status == "verified" and proof.current is None
+    assert proof.saved.observed["secondary_paging_vios_name"] == "none"
+    assert "stamp" not in b.events and "apply" not in b.events
