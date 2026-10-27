@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 from ...client.core import HMCClient
 from ...documents.lpar import LparSettings
@@ -58,15 +58,19 @@ def _role_console_version(resource: object) -> tuple[int, int, int, int] | None:
     return version, release, service_pack, fix_level
 
 
-async def read_role_capabilities(
-    hmc: HMCClient, system_uuid: str, *, need_kvm: bool, need_management: bool
-) -> RoleCapabilities:
-    """Read authority first; management-only selection adds no KVM queries."""
+async def read_creation_authority(
+    hmc: HMCClient,
+    system_uuid: str,
+    *,
+    need_management: bool,
+    context: Literal["Linux role", "Affinity group", "Memory layout"],
+) -> tuple[dict[str, Any], bool]:
+    """Classify native controller authority without borrowing feature prerequisites."""
     try:
         entry = await hmc.get_managed_system(system_uuid)
     except HMCError as error:
         raise type(error)(
-            "Linux role preflight could not read selected-system authority; "
+            f"{context} preflight could not read selected-system authority; "
             "no changes were submitted. Check connectivity and read permissions, then retry.",
             status_code=error.status_code,
         ) from None
@@ -74,11 +78,13 @@ async def read_role_capabilities(
     if not isinstance(resource, dict):
         raise ValueError(  # noqa: TRY004 — malformed remote evidence, not caller input
             "Linux roles require readable selected-system authority"
+            if context == "Linux role"
+            else f"{context} requires readable selected-system authority"
         )
     system = leaf_text(resource.get("SystemName"))
     if not isinstance(system, str) or not system.strip():
         raise ValueError(
-            "Linux role controller preflight requires a readable selected-system name"
+            f"{context} controller preflight requires a readable selected-system name"
         )
     try:
         raw = await run_hmc_command(
@@ -86,7 +92,7 @@ async def read_role_capabilities(
         )
     except HMCError as error:
         raise type(error)(
-            "Linux role preflight could not read native controller authority; "
+            f"{context} preflight could not read native controller authority; "
             "no changes were submitted. Check connectivity and read permissions, then retry.",
             status_code=error.status_code,
         ) from None
@@ -108,7 +114,19 @@ async def read_role_capabilities(
             "Linux role controller preflight requires native is_controller=1 for "
             "management-role selection, or known classic profile evidence for KVM-only selection; "
             "no changes were submitted. Inspect controller status; this operation never acquires it."
+            if context == "Linux role"
+            else f"{context} creation requires known native controller or classic profile authority; no changes were submitted. Inspect controller status; this operation never acquires it."
         )
+    return resource, controller
+
+
+async def read_role_capabilities(
+    hmc: HMCClient, system_uuid: str, *, need_kvm: bool, need_management: bool
+) -> RoleCapabilities:
+    """Read authority first; management-only selection adds no KVM queries."""
+    resource, controller = await read_creation_authority(
+        hmc, system_uuid, need_management=need_management, context="Linux role"
+    )
     if not need_kvm:
         return RoleCapabilities(controller, False, None, None, False)
     caps = resource.get("AssociatedSystemCapabilities")

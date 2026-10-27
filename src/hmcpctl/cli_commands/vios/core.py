@@ -20,6 +20,7 @@ from hmcpctl.operations.lpar.security_policy import (
 )
 
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
+from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings
@@ -238,6 +239,13 @@ def vios_create(
         str | None,
         typer.Option("--virtual-serial-adapters", help=SERIAL_INPUT_HELP),
     ] = None,
+    affinity_group_id: Annotated[
+        str | None,
+        typer.Option(
+            "--affinity-group-id",
+            help="Saved affinity group: 1–255 or none; native observation is separate; omitted preserves defaults",
+        ),
+    ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner."""
     serial = load_virtual_serial_adapters(virtual_serial_adapters)
@@ -257,6 +265,12 @@ def vios_create(
     except ValueError as error:
         raise typer.BadParameter(
             terminal_field(error, err=True), param_hint="memory layout"
+        ) from None
+    try:
+        affinity = parse_affinity_group_cli(affinity_group_id)
+    except ValueError as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--affinity-group-id"
         ) from None
     policy = load_security_policy(security_policy)
     try:
@@ -300,6 +314,7 @@ def vios_create(
             memory_layout=layout,
             max_virtual_slots=max_virtual_slots,
             virtual_serial_adapters=serial,
+            affinity_group_id=affinity,
         )
     )
     print_json(result)

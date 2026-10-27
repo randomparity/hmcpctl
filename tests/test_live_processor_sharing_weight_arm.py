@@ -493,13 +493,13 @@ def test_sharing_runner_registration():
     assert runner.SUBTASK_GROUPS.get(GROUP) == [59]
     for subtask, group in (
         (56, "lpar-processor-quantities"),
+        (57, "lpar-affinity-group"),
         (58, "creation-memory-layout"),
         (59, GROUP),
     ):
         assert subtask in runner.SUBTASKS
         assert runner.SUBTASK_GROUPS[group] == [subtask]
         assert subtask not in runner.SUBTASK_GROUPS["all"]
-    assert 57 not in runner.SUBTASKS
     assert runner._parse_arguments(["--group", GROUP]).group == GROUP
 
 

@@ -850,6 +850,8 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "_ssh",
         "_profile",
         "get_lpar_memory_layout",
+        "_read",
+        "created_affinity_group_step",
         "facts",
         "_facts",
         "scsi_adapter_listing",

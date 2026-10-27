@@ -395,7 +395,6 @@ def layout_creation_target(monkeypatch):
     from hmcpctl.client.core import HMCClient
     from hmcpctl.config import HMCConfig
     from hmcpctl.operations.lpar import core
-    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
     hmc = AsyncMock(spec=HMCClient)
     hmc.config = HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
@@ -418,8 +417,8 @@ def layout_creation_target(monkeypatch):
     monkeypatch.setattr(
         core, "resolve_system_cli_name", AsyncMock(return_value="sys-R1")
     )
-    mode = AsyncMock(return_value=RoleCapabilities(False, False, None, None, False))
-    monkeypatch.setattr(core, "read_role_capabilities", mode)
+    mode = AsyncMock(return_value=({}, False))
+    monkeypatch.setattr(core, "read_creation_authority", mode)
     stamp = AsyncMock(return_value=(True, ()))
     monkeypatch.setattr(core, "stamp_created_lpar_ownership", stamp)
     apply = AsyncMock()
@@ -487,7 +486,7 @@ async def test_layout_single_native_record_contains_six_fields(layout_creation_t
     target.write.assert_awaited_once()
     target.hmc.create_logical_partition.assert_not_awaited()
     target.mode.assert_awaited_once_with(
-        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+        target.hmc, LAYOUT_SYSTEM, need_management=False, context="Memory layout"
     )
     assert result.memory_layout_step.status == "ok"
     assert result.memory_layout_step.result.status == "verified"
@@ -635,10 +634,9 @@ async def test_layout_controller_omits_profile_and_reports_unavailable(
     import shlex
 
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
-    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
     target = layout_creation_target
-    target.mode.return_value = RoleCapabilities(True, False, None, None, False)
+    target.mode.return_value = ({}, True)
     result = await create_and_stamp_lpar(
         target.hmc,
         "selector",
@@ -656,10 +654,9 @@ async def test_layout_controller_omits_profile_and_reports_unavailable(
 @pytest.mark.asyncio
 async def test_layout_controller_apply_denial_precedes_create(layout_creation_target):
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
-    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
     target = layout_creation_target
-    target.mode.return_value = RoleCapabilities(True, False, None, None, False)
+    target.mode.return_value = ({}, True)
     with pytest.raises(ValueError, match="[Cc]ontroller"):
         await create_and_stamp_lpar(
             target.hmc,
@@ -854,7 +851,7 @@ async def test_layout_percentage_zero_adds_no_kvm_role_or_companion(
     assert "kvm_capable=" not in record and "lpar_proc_compat_mode=" not in record
     target.hmc.get_console_info.assert_not_awaited()
     target.mode.assert_awaited_once_with(
-        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+        target.hmc, LAYOUT_SYSTEM, need_management=False, context="Memory layout"
     )
     assert result.memory_layout_step.status == "ok"
 
@@ -878,10 +875,9 @@ async def test_layout_ratio_admission_refuses_before_single_create(
 async def test_layout_controller_initial_profile_io_denied(layout_creation_target):
     from hmcpctl.documents.lpar_io import LparPhysicalIO
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
-    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
     target = layout_creation_target
-    target.mode.return_value = RoleCapabilities(True, False, None, None, False)
+    target.mode.return_value = ({}, True)
     with pytest.raises(ValueError, match="initial-profile"):
         await create_and_stamp_lpar(
             target.hmc,
@@ -897,11 +893,20 @@ async def test_layout_controller_initial_profile_io_denied(layout_creation_targe
 @pytest.mark.asyncio
 async def test_layout_role_selection_retains_independent_kvm_admission(
     layout_creation_target,
+    monkeypatch,
 ):
+    from unittest.mock import AsyncMock
+
     from hmcpctl.documents.lpar import LparSettings
+    from hmcpctl.operations.lpar import core
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
     target = layout_creation_target
+    role_mode = AsyncMock(
+        return_value=RoleCapabilities(False, False, None, None, False)
+    )
+    monkeypatch.setattr(core, "read_role_capabilities", role_mode)
     with pytest.raises(ValueError, match="KVM selection requires"):
         await create_and_stamp_lpar(
             target.hmc,
@@ -911,9 +916,10 @@ async def test_layout_role_selection_retains_independent_kvm_admission(
                 settings=LparSettings(kvm_capable=False),
             ),
         )
-    target.mode.assert_awaited_once_with(
+    role_mode.assert_awaited_once_with(
         target.hmc, LAYOUT_SYSTEM, need_kvm=True, need_management=False
     )
+    target.mode.assert_not_awaited()
     target.write.assert_not_awaited()
 
 
@@ -1049,7 +1055,7 @@ async def test_layout_os400_ratios_do_not_borrow_linux_role_prerequisites(
     assert "lpar_env=os400" in shlex.split(target.write.await_args.args[1])[-1]
     assert result.memory_layout_step.status == "ok"
     target.mode.assert_awaited_once_with(
-        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+        target.hmc, LAYOUT_SYSTEM, need_management=False, context="Memory layout"
     )
 
 
@@ -1149,23 +1155,16 @@ async def test_layout_workflow_controller_assignment_denial_before_prevalidation
 ):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.lpar import workflows
+    from hmcpctl.operations.lpar import core, workflows
     from hmcpctl.operations.lpar.assignments import (
         DedicatedPcieAssignment,
         LparPcieAssignments,
     )
-    from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
     target = layout_creation_target
-    mode = AsyncMock(return_value=RoleCapabilities(True, False, None, None, False))
-    monkeypatch.setattr(
-        workflows, "resolve_system_uuid", AsyncMock(return_value=LAYOUT_SYSTEM)
-    )
-    monkeypatch.setattr(workflows, "read_role_capabilities", mode)
+    target.mode.return_value = ({}, True)
     prevalidate = AsyncMock()
-    monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
-    create = AsyncMock()
-    monkeypatch.setattr(workflows, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(core, "prevalidate_lpar_pcie_assignments", prevalidate)
     assignments = LparPcieAssignments(
         dedicated=(DedicatedPcieAssignment("default_profile", "21010010"),)
     )
@@ -1176,11 +1175,13 @@ async def test_layout_workflow_controller_assignment_denial_before_prevalidation
             layout_creation(LparMemoryLayout(hpt_ratio="1:128")),
             assignments,
         )
-    mode.assert_awaited_once_with(
-        target.hmc, LAYOUT_SYSTEM, need_kvm=False, need_management=False
+    target.mode.assert_awaited_once_with(
+        target.hmc, LAYOUT_SYSTEM, need_management=False, context="Memory layout"
     )
     prevalidate.assert_not_awaited()
-    create.assert_not_awaited()
+    target.write.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+    target.apply.assert_not_awaited()
 
 
 @pytest.mark.asyncio

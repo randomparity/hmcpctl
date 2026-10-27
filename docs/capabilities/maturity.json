@@ -1269,6 +1269,16 @@
               {
                 "name": "memory_layout.ppt_ratio",
                 "constraint": "optional exact selected-system advertised PPT token; AIX/Linux and OS400 LPAR creation; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+
+              }
+            ]
+          },
+          {
+            "variant": "c08-affinity-group-creation",
+            "parameters": [
+              {
+                "name": "affinity_group_id",
+                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority, fresh contained/default-profile identity and independent classic saved-profile equality; native value/status reported separately including mismatch/unavailability; contradictory identity blocks effects; controller saved proof unavailable; no current/pending semantics, runtime or physical-placement claim"
               }
             ]
           },
@@ -5065,6 +5075,16 @@
               {
                 "name": "memory_layout.ppt_ratio",
                 "constraint": "optional exact selected-system advertised PPT token; VIOS creation only; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
+
+              }
+            ]
+          },
+          {
+            "variant": "c08-affinity-group-creation",
+            "parameters": [
+              {
+                "name": "affinity_group_id",
+                "constraint": "optional strict integer 1..255 or literal none; omission preserves native defaults; single native creation record; selected-system authority, fresh contained/default-profile identity and independent classic saved-profile equality; native value/status reported separately including mismatch/unavailability; contradictory identity blocks effects; controller saved proof unavailable; no current/pending semantics, runtime or physical-placement claim"
               }
             ]
           },
