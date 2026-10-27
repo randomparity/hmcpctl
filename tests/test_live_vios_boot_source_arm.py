@@ -501,6 +501,8 @@ async def rig(tmp_path, monkeypatch):
 
 async def run_capture(rig):
     p, _wire, h, output, _before = rig
+    with h.budget.section("logon", 1, 0, source.MIB, 20):
+        await h.logon()
     return await source.capture(
         h,
         p,
@@ -644,8 +646,8 @@ async def test_snapshot_complete_collection_guards(rig, fault):
     assert w.injected == 1 and not w.boots and not w.deletes
 
 
-def session(p, stage="capture"):
-    return {
+def session(p, stage="capture", document=None):
+    close = {
         "schema_version": 1,
         "source_only": True,
         "packet_sha256": "d" * 64,
@@ -663,6 +665,13 @@ def session(p, stage="capture"):
         },
         "closed": True,
     }
+    if document is not None:
+        close["transport"] = deepcopy(document["transport"])
+        close["transport"]["calls"].append(
+            {"kind": "REST", "label": "DELETE /rest/api/web/Logon"}
+        )
+        close["transport"]["used"][0] += 1
+    return close
 
 
 @pytest.mark.asyncio
@@ -703,7 +712,7 @@ async def test_recovery_present_absence_cannot_repair_history(rig, unknown):
     elif unknown != "companion":
         document[unknown]["execution"] = "unknown"
     if unknown != "companion":
-        source._save(out, session(p), "session.json")
+        source._save(out, session(p, document=document), "session.json")
     h.budget = source.BootSourceBudget("recover", p)
     recovery = out.parent / "recover"
     recovery.mkdir(mode=0o700)
@@ -719,7 +728,7 @@ async def test_recovery_present_absence_cannot_repair_history(rig, unknown):
 async def test_recovery_complete_history_and_current_baseline(rig):
     p, _w, h, out, _ = rig
     document = await run_capture(rig)
-    source._save(out, session(p), "session.json")
+    source._save(out, session(p, document=document), "session.json")
     h.budget = source.BootSourceBudget("recover", p)
     recovery = out.parent / "recover"
     recovery.mkdir(mode=0o700)
@@ -1142,7 +1151,7 @@ async def test_ordered_every_effect_has_durable_exact_intent(rig, monkeypatch):
 async def test_recovery_renamed_owned_uuid_remains_residue(rig):
     p, w, h, out, _ = rig
     d = await run_capture(rig)
-    source._save(out, session(p), "session.json")
+    source._save(out, session(p, document=d), "session.json")
     w.nodes[OWN] = {
         "name": "renamed-owned-fixture",
         "description": p["fixture"]["description"],
@@ -1295,3 +1304,136 @@ async def test_history_strict_observed_identity_types(rig):
         target = changed[slot] if slot == "fixture" else changed[slot]["identity"]
         target["partition_id"] = True
         assert not source._history_complete(p, changed, h.packet_sha)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "empty",
+        "missing-create",
+        "duplicate-create",
+        "ninth-boot",
+        "duplicate-delete",
+        "foreign-delete",
+        "foreign-put",
+        "unknown-ssh",
+        "boot-before-create",
+        "early-delete",
+    ],
+)
+async def test_history_rejects_contradictory_physical_trace(rig, fault):
+    p, _w, h, out, _ = rig
+    document = await run_capture(rig)
+    assert source._history_complete(p, document, h.packet_sha)
+    trace = document["transport"]
+    if fault == "empty":
+        trace.update(used=[0, 0, 0], calls=[])
+    elif fault == "missing-create":
+        trace["calls"].remove({"kind": "SSH", "label": "create"})
+    elif fault in {"boot-before-create", "early-delete"}:
+        moved = (
+            {"kind": "SSH", "label": "boot"}
+            if fault == "boot-before-create"
+            else {
+                "kind": "REST",
+                "label": "DELETE /rest/api/uom/VirtualIOServer/" + OWN,
+            }
+        )
+        trace["calls"].remove(moved)
+        trace["calls"].insert(1, moved)
+    else:
+        kind, label = {
+            "duplicate-create": ("SSH", "create"),
+            "ninth-boot": ("SSH", "boot"),
+            "duplicate-delete": ("REST", "DELETE /rest/api/uom/VirtualIOServer/" + OWN),
+            "foreign-delete": ("REST", "DELETE /rest/api/uom/VirtualIOServer/" + V0),
+            "foreign-put": ("REST", "PUT /rest/api/uom/VirtualIOServer/" + OWN),
+            "unknown-ssh": ("SSH", "power"),
+        }[fault]
+        trace["calls"].append({"kind": kind, "label": label})
+    trace["used"][:2] = [
+        sum(c["kind"] == k for c in trace["calls"]) for k in ["REST", "SSH"]
+    ]
+    source._save(out, session(p, document=document), "session.json")
+    h.budget = source.BootSourceBudget("recover", p)
+    output = out.parent / "recover"
+    output.mkdir(mode=0o700)
+    result = await source.recover(h, p, document, output)
+    assert (
+        result["recovery"]["baseline_agrees_now"]
+        and result["recovery"]["fixture_absent_now"]
+    )
+    assert (
+        not result["recovery"]["history_complete"] and not result["recovery"]["clean"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["unrelated", "extra-delete", "counter"])
+async def test_recovery_session_trace_must_extend_capture(rig, fault):
+    p, _w, h, out, _ = rig
+    document = await run_capture(rig)
+    close = session(p, document=document)
+    if fault == "unrelated":
+        close = session(p)
+    elif fault == "extra-delete":
+        close["transport"]["calls"].insert(
+            -1, {"kind": "REST", "label": "DELETE /rest/api/uom/VirtualIOServer/" + OWN}
+        )
+        close["transport"]["used"][0] += 1
+    else:
+        close["transport"]["used"][2] += source.MIB + 1
+    source._save(out, close, "session.json")
+    h.budget = source.BootSourceBudget("recover", p)
+    output = out.parent / "recover"
+    output.mkdir(mode=0o700)
+    result = await source.recover(h, p, document, output)
+    assert result["recovery"]["history_complete"]
+    assert (
+        not result["recovery"]["capture_session_closed"]
+        and not result["recovery"]["clean"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_uncertainty_completed_snapshot_survives_native_failure(rig, monkeypatch):
+    _p, w, h, out, _ = rig
+    w.boot_fault = ("unknown", 0)
+    original = w.ssh
+
+    async def ssh(config, command, **kwargs):
+        raw = await original(config, command, **kwargs)
+        return (
+            "malformed uncertainty header"
+            if "uncertainty" in h.native_consumed
+            else raw
+        )
+
+    monkeypatch.setattr(source, "run_hmc_command", ssh)
+    result = await run_capture(rig)
+    stored = json.loads((out / "results.json").read_text())
+    assert len(result["snapshots"]) == 3 and stored["snapshots"] == result["snapshots"]
+    assert stored["phase"] == "held" and stored["cases"][0]["execution"] == "unknown"
+    assert w.creates == 1 and len(w.boots) == 1 and not w.deletes
+
+
+@pytest.mark.asyncio
+async def test_uncertainty_snapshot_checkpoint_failure_stops_native_read(
+    rig, monkeypatch
+):
+    _p, w, h, out, _ = rig
+    w.boot_fault = ("unknown", 0)
+    save = source._save
+
+    def failed(directory, document, name_out="results.json"):
+        if len(document.get("snapshots", [])) == 3:
+            raise source.CheckpointError("synthetic uncertainty checkpoint failure")
+        save(directory, document, name_out)
+
+    monkeypatch.setattr(source, "_save", failed)
+    with pytest.raises(source.CheckpointError):
+        await run_capture(rig)
+    assert h.held and "uncertainty" not in h.native_consumed and not w.deletes
+    stored = json.loads((out / "results.json").read_text())
+    assert len(stored["snapshots"]) == 2 and stored["phase"] == "held"

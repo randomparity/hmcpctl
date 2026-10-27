@@ -832,12 +832,15 @@ async def capture(
         try:
             uncertain = await ame.snapshot(hmc, p)
             document["snapshots"].append(uncertain)
+            _checkpoint(directory, document, "held", hmc)
             if (
                 ident is not None
                 and hmc.uncertainty_native_safe
                 and _owned(uncertain, p, b0) == ident
             ):
                 await _header(hmc, p, ident, "uncertainty")
+        except CheckpointError:
+            raise
         except (Exception, asyncio.CancelledError) as error:  # noqa: BLE001 — retain held original and any own-child residue
             hmc.own_process_pid = (
                 getattr(error, "own_process_pid", None) or hmc.own_process_pid
@@ -872,6 +875,44 @@ def _transport_valid(transport: object, stage: str) -> bool:
     return (
         sum(c["kind"] == "REST" for c in calls) == used[0]
         and sum(c["kind"] == "SSH" for c in calls) == used[1]
+    )
+
+
+def _capture_trace(transport: object, identity: str) -> bool:
+    if not isinstance(transport, dict) or not _transport_valid(transport, "capture"):
+        return False
+    calls = transport["calls"]
+    if not calls or calls[0] != {"kind": "REST", "label": "PUT /rest/api/web/Logon"}:
+        return False
+    effects = []
+    for index, call in enumerate(calls):
+        label = call["label"]
+        if call["kind"] == "SSH":
+            if label not in {"mode", "header", "create", "boot"}:
+                return False
+            if label in {"create", "boot"}:
+                effects.append(label)
+        elif label == "DELETE /rest/api/uom/VirtualIOServer/" + identity:
+            effects.append("delete")
+        elif not (
+            label.startswith("GET /rest/api/")
+            or (index == 0 and label == "PUT /rest/api/web/Logon")
+        ):
+            return False
+    # Positional boot calls bind the already re-derived ordered case records.
+    return effects == ["create", *(["boot"] * 8), "delete"]
+
+
+def _session_extends_capture(close: dict, transport: object) -> bool:
+    if not isinstance(transport, dict) or not _transport_valid(transport, "capture"):
+        return False
+    after = close["transport"]
+    return (
+        after["calls"]
+        == transport["calls"]
+        + [{"kind": "REST", "label": "DELETE /rest/api/web/Logon"}]
+        and after["used"][:2] == [transport["used"][0] + 1, transport["used"][1]]
+        and 0 <= after["used"][2] - transport["used"][2] <= MIB
     )
 
 
@@ -1032,6 +1073,8 @@ def _history_matches(p: dict, d: dict, packet_sha: str) -> bool:
         return False
     _admission(snapshots[0], p, require_digest=True)
     ident = _owned(snapshots[1], p, b0)
+    if not _capture_trace(d["transport"], ident["vios_uuid"]):
+        return False
     if encode(d["fixture"]) != encode(
         {
             **p["fixture"],
@@ -1159,7 +1202,9 @@ async def recover(
         if history
         else baseline
     )
-    closed = _session_closed(close, hmc.packet_sha, "capture")
+    closed = _session_closed(
+        close, hmc.packet_sha, "capture"
+    ) and _session_extends_capture(close, document.get("transport"))
     d["recovery"] = {
         "history_complete": history,
         "baseline_agrees_now": baseline,
