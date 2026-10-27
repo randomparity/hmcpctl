@@ -30,6 +30,7 @@ _VIOS_OBJECT_NAME = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*")
 class LiveTestConfig:
     """Validated operator configuration for live-test executions."""
 
+    accelerator_qos_request_json: str = ""
     creation_memory_layout_hpt_ratio: str = ""
     creation_memory_layout_ppt_ratio: str = ""
     creation_memory_layout_fresh_vios_delete_authorized: bool = False
@@ -166,6 +167,7 @@ class LiveTestConfig:
     #: export cannot redirect an arm that creates and deletes partitions
     #: (ADR 0115).
     _OPTIONAL_CONFIG_FIELDS: ClassVar[dict[str, str]] = {
+        "LIVE_TEST_ACCELERATOR_QOS_REQUEST_JSON": "accelerator_qos_request_json",
         "LIVE_TEST_CREATION_MEMORY_LAYOUT_HPT_RATIO": "creation_memory_layout_hpt_ratio",
         "LIVE_TEST_CREATION_MEMORY_LAYOUT_PPT_RATIO": "creation_memory_layout_ppt_ratio",
         "LIVE_TEST_CREATION_MEMORY_LAYOUT_FRESH_VIOS_DELETE_AUTHORIZED": "creation_memory_layout_fresh_vios_delete_authorized",
@@ -504,6 +506,7 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
         raise TypeError("results config must be a JSON object")
     expected = asdict(LiveTestConfig())
     parsed = dict(value)
+    parsed.setdefault("accelerator_qos_request_json", "")
     # A results document written before #1030 removed these settings is still a
     # valid restore source; every other field difference remains a mismatch.
     parsed.pop("dry_run_vios_slot", None)

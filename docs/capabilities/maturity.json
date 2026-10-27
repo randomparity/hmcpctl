@@ -5995,6 +5995,20 @@
       "evidence": []
     },
     {
+      "operation": "lpar.set_accelerator_qos",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "native-partition-gzip-qos",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
       "operation": "lpar.move_processors",
       "implementation": {
         "state": "implemented",

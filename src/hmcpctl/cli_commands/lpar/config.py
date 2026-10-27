@@ -13,7 +13,9 @@ from hmcpctl.cli_commands.lpar.assignment_input import (
     load_security_policy,
 )
 from hmcpctl.documents.lpar import LparReportingSettings, LparSettings
+from hmcpctl.documents.lpar_accelerator import LparAcceleratorQos
 from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
+from hmcpctl.operations.lpar.accelerator import set_lpar_accelerator_qos
 from hmcpctl.operations.lpar.configuration import (
     configure_lpar_msp,
     configure_lpar_reporting_settings,
@@ -679,6 +681,7 @@ def register_commands(group: typer.Typer) -> None:
     group.command("configure-security-policy", short_help="Set policy.")(
         lpars_configure_security_policy
     )
+    group.command("accelerator-qos")(lpars_accelerator_qos)
     group.command("configure-vtpm")(lpars_configure_vtpm)
     group.command("get-vtpm-settings")(lpars_get_vtpm_settings)
     group.command("configure-reporting")(lpars_configure_reporting)
@@ -797,4 +800,68 @@ def lpars_configure_security_policy(
     )
     print_json(asdict(result))
     if result.status != "verified":
+        raise typer.Exit(1)
+
+
+def lpars_accelerator_qos(
+    name_or_uuid: str = typer.Argument(..., help="Partition name or UUID"),
+    system: str = typer.Option(
+        ..., "--system", "-s", help="Containing system name or UUID"
+    ),
+    qos: int = typer.Option(
+        ..., "--qos", help="Explicit nonnegative GZIP QoS quantity"
+    ),
+    wait_minutes: int | None = typer.Option(
+        None,
+        "--wait-minutes",
+        help="OS command wait in minutes; zero disables native deadline",
+    ),
+    detail_level: int | None = typer.Option(
+        None, "--detail-level", help="OS command detail level, 1 through 4"
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Allow AIX/Linux/VIOS without RMC; successful change requires OS restart",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    ownership_override: bool = typer.Option(
+        False, "--ownership-override", help="Operator-approved ownership bypass"
+    ),
+) -> None:
+    """Set native GZIP QoS once and report independent current/pending observations.
+
+    The HMC decides target-specific limits. QoS zero is an explicit quantity,
+    never an inferred reset or no-op; omitted wait/detail use HMC defaults.
+    Wait zero disables the native deadline, while the SSH deadline still applies.
+    Force without active RMC requires an OS restart after a successful change.
+    completion_scope is native-current-and-pending; it proves neither effective
+    guest runtime nor profile persistence. Inspect incomplete results independently
+    before acting; never automatically replay an incomplete request.
+    """
+    try:
+        change = LparAcceleratorQos(
+            qos=qos, wait_minutes=wait_minutes, detail_level=detail_level, force=force
+        )
+        if not name_or_uuid.strip() or not system.strip():
+            raise ValueError("Partition and system selectors must be nonblank")
+    except ValueError as error:
+        usage_error(str(error))
+    if not yes and not typer.confirm(
+        f"Set GZIP QoS={terminal_field(qos)} on '{terminal_field(name_or_uuid)}' "
+        f"(system {terminal_field(system)}), force={terminal_field(force)} "
+        "(force without active RMC requires OS restart after success)?"
+    ):
+        return
+    result = with_client(
+        lambda hmc: set_lpar_accelerator_qos(
+            hmc,
+            name_or_uuid,
+            change,
+            system_name_or_uuid=system,
+            ownership_override=ownership_override,
+        )
+    )
+    print_json(result)
+    if not result["workflow_completed"]:
         raise typer.Exit(1)

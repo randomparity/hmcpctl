@@ -1,0 +1,26 @@
+[
+  {
+    "selector": "commands-p10:commands/chhwres:L00197:command-synopsis",
+    "sha256": "1569925f-b684fa57-af026870-da88d243-275cd489-8eec6d12-aaf9d5aa-d54617c0",
+    "role": "allocated",
+    "tokens": "-r -m --rsubtype -o -q -p --id"
+  },
+  {
+    "selector": "commands-p11:commands/chhwres:L00199:command-synopsis",
+    "sha256": "1569925f-b684fa57-af026870-da88d243-275cd489-8eec6d12-aaf9d5aa-d54617c0",
+    "role": "allocated",
+    "tokens": "-r -m --rsubtype -o -q -p --id"
+  },
+  {
+    "selector": "commands-p10:commands/chhwres:L00198:command-synopsis",
+    "sha256": "ceabd96b-d6bb26b7-0d91a475-f6705819-d9807eae-e8040952-b26c5988-b52ce444",
+    "role": "supporting",
+    "tokens": "-w -d --force"
+  },
+  {
+    "selector": "commands-p11:commands/chhwres:L00200:command-synopsis",
+    "sha256": "ceabd96b-d6bb26b7-0d91a475-f6705819-d9807eae-e8040952-b26c5988-b52ce444",
+    "role": "supporting",
+    "tokens": "-w -d --force"
+  }
+]

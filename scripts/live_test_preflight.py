@@ -44,6 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from live_test import (
+    accelerator_qos,
     bare_cec,
     creation_memory_layout,
     dedicated_pcie,
@@ -375,6 +376,26 @@ def _lpar_linux_roles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
             f"one owned inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit dedicated never-share, 2 GiB desired memory/one CPU; management-only creation omits KVM and POWER10; full KVM creation adds same-record POWER10",
             "both variants: native controller=1, explicit apply false and no profile; management-only: two management updates false-to-true-to-false; full KVM: KVM true-to-false then management false-to-true-to-false (three updates)",
             "independent known roles/compatibility/resource reads, inactive-only matching-token deletion, baseline comparison and mandatory recovery; management-only has no catalog promotion; no activation, guest, key or controller-takeover effects",
+        ),
+        config.system_name,
+    )
+
+
+def _accelerator_qos_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        target, request = accelerator_qos.configured(config)
+    except ValueError as error:
+        return ArmVerdict(
+            "lpar-accelerator-qos", False, str(error), (), config.system_name
+        )
+    return ArmVerdict(
+        "lpar-accelerator-qos",
+        True,
+        "configuration validated; mutation eligibility is decided at runtime",
+        (
+            f"existing owned target {target}; exact request {request.model_dump_json()}",
+            "one intended QoS set, then separate original-baseline restoration with identical wait/detail/force",
+            "root binds clean deployed HEAD, destination, protected inventory, both effect intents and bounded window; mandatory read-only recovery",
         ),
         config.system_name,
     )
@@ -739,6 +760,7 @@ _ARM_VERDICTS = {
     "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-memory-move": _memory_move_verdict,
+    "lpar-accelerator-qos": _accelerator_qos_verdict,
     "lpar-processor-move": _processor_move_verdict,
     "lpar-processor-quantities": _processor_quantities_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
