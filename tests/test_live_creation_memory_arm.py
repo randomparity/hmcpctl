@@ -4,6 +4,7 @@ import sys
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict, replace
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -409,10 +410,34 @@ def native_target(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "case", ["shared-lpar", "redundant-lpar", "ame-zero-vios", "ame-positive-vios"]
+    "case,operation,row,scenario,other_scenario",
+    [
+        ("shared-lpar", "lpar.create", 65, "st65-shared-lpar", "st65-redundant-lpar"),
+        (
+            "redundant-lpar",
+            "lpar.create",
+            6501,
+            "st65-redundant-lpar",
+            "st65-shared-lpar",
+        ),
+        (
+            "ame-zero-vios",
+            "vios.create",
+            65,
+            "st65-ame-zero-vios",
+            "st65-ame-positive-vios",
+        ),
+        (
+            "ame-positive-vios",
+            "vios.create",
+            6502,
+            "st65-ame-positive-vios",
+            "st65-ame-zero-vios",
+        ),
+    ],
 )
 async def test_one_fixed_case_independent_oracle_cleanup_and_no_runtime(
-    native_target, case
+    native_target, case, operation, row, scenario, other_scenario
 ):
     e = native_target
     e.state.config = replace(
@@ -446,6 +471,27 @@ async def test_one_fixed_case_independent_oracle_cleanup_and_no_runtime(
         assert deletes[0][1]["vios_name_or_uuid"] == FRESH
     assert len(e.state.observations) == 1
     assert e.state.observations[0]["observation"]["cleanup"] == "passed"
+    import check_capability_inventory as inventory
+    import promote_live_observations as promotion
+
+    sites = inventory.discover_observation_sites()
+    assert sites[(operation, row)] == scenario
+    assert e.state.results[-1]["subtask"] == row
+    assert runner.SUBTASK_GROUPS[e.arm.GROUP] == [65]
+    run = {
+        "group": e.arm.GROUP,
+        "subtasks": runner.SUBTASK_GROUPS[e.arm.GROUP],
+        "results": e.state.results,
+        "finished_time": datetime.now(UTC),
+    }
+    observation = e.state.observations[0]
+    assert observation["operation"] == operation
+    assert observation["observation"]["scenario"] == scenario
+    promotion._invocation(observation, run, sites)
+    relabelled = deepcopy(observation)
+    relabelled["observation"]["scenario"] = other_scenario
+    with pytest.raises(promotion.PromotionError, match="invocation"):
+        promotion._invocation(relabelled, run, sites)
     assert all(
         c["phase"]
         in {

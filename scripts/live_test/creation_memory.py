@@ -619,7 +619,7 @@ def _verified(state: RunState) -> None:
         )
     elif case == "redundant-lpar":
         state.record_verified(
-            SUBTASK,
+            6501,
             "hmc_create_lpar",
             operation="lpar.create",
             scenario=REDUNDANT_SCENARIO,
@@ -639,7 +639,7 @@ def _verified(state: RunState) -> None:
         )
     elif case == "ame-positive-vios":
         state.record_verified(
-            SUBTASK,
+            6502,
             "hmc_create_vios",
             operation="vios.create",
             scenario=AME_POSITIVE_SCENARIO,
