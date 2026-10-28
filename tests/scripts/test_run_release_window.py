@@ -41,6 +41,7 @@ def window(tmp_path):
         "cli.py",
         "config.py",
         "runner.py",
+        "creation_memory.py",
         "partition_profiles.py",
         "partition_profile_contract.py",
         "profile_contract_run.py",

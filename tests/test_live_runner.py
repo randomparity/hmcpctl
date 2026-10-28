@@ -9066,3 +9066,77 @@ def test_statistics_direct_runner_requires_private_named_destination(
 
     monkeypatch.setattr(runner.LiveTestConfig, "from_env_file", forbidden)
     assert runner._run_from_arguments(arguments) == 1
+
+
+def test_creation_memory_optional_defaults_and_registration():
+    from dataclasses import asdict
+
+    from live_test import config as settings
+    from live_test import creation_memory
+
+    saved = asdict(settings.LiveTestConfig())
+    saved["protected_lpar_names"] = list(saved["protected_lpar_names"])
+    for key in tuple(saved):
+        if key.startswith("creation_memory_") and not key.startswith(
+            "creation_memory_layout_"
+        ):
+            saved.pop(key)
+    assert settings.decode_saved_config(saved).creation_memory_case == ""
+    artifacts = asdict(settings.LiveTestArtifacts())
+    artifacts.pop("creation_memory")
+    assert settings.decode_artifacts(artifacts).creation_memory == {}
+    assert runner.SUBTASK_GROUPS["creation-memory"] == [65]
+    assert runner.SUBTASKS[65] is creation_memory.exercise_creation_memory
+
+
+@pytest.mark.parametrize(
+    "saved_group,saved_subtasks,journal",
+    [
+        ("creation-memory", [], {}),
+        (None, [65], {}),
+        (None, [], {"unknown": True}),
+    ],
+)
+def test_st65_refuses_saved_or_borrowed_context(
+    tmp_path, saved_group, saved_subtasks, journal
+):
+    hmc = _live_hmc_config()
+    document = _result_document(live_config.LiveTestConfig(), hmc)
+    document["run"] = {"group": saved_group, "subtasks": saved_subtasks}
+    document["artifacts"]["creation_memory"] = journal
+    path = tmp_path / "prior.json"
+    path.write_text(json.dumps(document))
+    state = runner.RunState()
+    assert not runner._restore_artifacts_from_results(state, hmc, str(path))
+    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert 65 not in runner.SUBTASK_GROUPS["all"]
+
+
+@pytest.mark.parametrize("permission", ["TRUE", "1", "yes", "", "false", "true"])
+def test_st65_permission_is_literal_dotenv_only(tmp_path, monkeypatch, permission):
+    defaults = live_config.LiveTestConfig()
+    path = tmp_path / ".env"
+    values = {}
+    for key, name in defaults._CONFIG_FIELDS.items():
+        value = getattr(defaults, name)
+        values[key] = ",".join(value) if isinstance(value, tuple) else str(value)
+    keys = {
+        "LIVE_TEST_CREATION_MEMORY_CASE": "shared-lpar",
+        "LIVE_TEST_CREATION_MEMORY_PRIMARY_VIOS_NAME": "paging-a",
+        "LIVE_TEST_CREATION_MEMORY_SECONDARY_VIOS_NAME": "",
+        "LIVE_TEST_CREATION_MEMORY_FRESH_DELETE_AUTHORIZED": "true",
+    }
+    for key, value in keys.items():
+        monkeypatch.setenv(key, value)
+    path.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+    assert live_config.LiveTestConfig.from_env_file(path).creation_memory_case == ""
+    values.update(keys)
+    values["LIVE_TEST_CREATION_MEMORY_FRESH_DELETE_AUTHORIZED"] = permission
+    path.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+    if permission not in {"true", "false"}:
+        with pytest.raises(ValueError):
+            live_config.LiveTestConfig.from_env_file(path)
+    else:
+        assert live_config.LiveTestConfig.from_env_file(
+            path
+        ).creation_memory_fresh_delete_authorized is (permission == "true")

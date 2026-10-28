@@ -22,6 +22,7 @@ from ...documents.lpar import (
     reject_update_weight_on_create,
 )
 from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
@@ -42,6 +43,7 @@ from ...resource_identity import (
 )
 from ...ssh.commands import HMC_NO_RESULTS, build_filter
 from ...ssh.lpar import (
+    _CreationMemorySubmissionError,
     complete_create_resources,
     create_lpar_via_cli,
     resolve_system_cli_name,
@@ -51,6 +53,12 @@ from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
 from ..lpar.affinity_group import created_affinity_group_step
+from ..lpar.creation_memory import (
+    _raise_creation_memory_failure,
+    admit_creation_memory,
+    confirm_creation_memory_identity,
+    creation_memory_step,
+)
 from ..lpar.hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from ..lpar.linux_roles import read_creation_authority, read_role_capabilities
 from ..lpar.memory_bound import require_memory_within_system
@@ -138,6 +146,7 @@ async def create_vios(
     memory_layout: LparMemoryLayout | None = None,
     max_virtual_slots: int | None = None,
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
+    creation_memory: LparCreationMemory | None = None,
     affinity_group_id: AffinityGroupID | None = None,
 ) -> dict[str, Any] | None:
     """Create a VIOS partition on a managed system and return its entry.
@@ -146,6 +155,16 @@ async def create_vios(
     VirtualIOServer document; V10R3 refuses one sent as a LogicalPartition
     (#1214).
     """
+    if creation_memory is not None and not isinstance(
+        creation_memory, LparCreationMemory
+    ):
+        raise TypeError("creation_memory must be LparCreationMemory")
+    memory_requested = creation_memory is not None and bool(creation_memory.pairs())
+    shared_memory = creation_memory is not None and creation_memory.mem_mode == "shared"
+    if shared_memory:
+        completed = complete_create_resources(resources)
+        if completed is None or completed.dedicated is not False:
+            raise ValueError("Shared memory requires known shared processor resources")
     reject_update_weight_on_create(resources)
     validate_serial_input(virtual_serial_adapters, max_virtual_slots)
     serial_requested = bool(virtual_serial_adapters)
@@ -174,11 +193,12 @@ async def create_vios(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
     ):
         completed = complete_create_resources(resources)
         if completed is None:
             raise ValueError(
-                f"VIOS {'native' if policy_requested or hardware_requested or layout_requested or serial_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
+                f"VIOS {'native' if policy_requested or hardware_requested or layout_requested or serial_requested or memory_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
             )
         resources = completed
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
@@ -188,6 +208,7 @@ async def create_vios(
         or hardware_requested
         or layout_requested
         or serial_requested
+        or memory_requested
         or affinity_requested
     ):
         return await hmc.create_vios(
@@ -202,7 +223,8 @@ async def create_vios(
         raise ValueError(
             "A VIOS with that name already exists on the selected system; nothing was created"
         )
-    await require_memory_within_system(hmc, system_uuid, resources)
+    if not shared_memory:
+        await require_memory_within_system(hmc, system_uuid, resources)
     if vtpm_settings is not None and vtpm_requested:
         admit_vtpm(vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid))
     if security_policy is not None and policy_requested:
@@ -216,7 +238,7 @@ async def create_vios(
     )
     system = (
         await resolve_system_cli_name(hmc.config, system_uuid)
-        if layout_requested or serial_requested
+        if layout_requested or serial_requested or memory_requested
         else await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
     )
     controller_mode = False
@@ -227,7 +249,7 @@ async def create_vios(
             need_management=False,
             context="Affinity group" if affinity_requested else "Memory layout",
         )
-    elif serial_requested:
+    elif serial_requested or memory_requested:
         controller_mode = (
             await read_role_capabilities(
                 hmc, system_uuid, need_kvm=False, need_management=False
@@ -248,7 +270,23 @@ async def create_vios(
         if serial_requested
         else None
     )
+    memory_admission = (
+        await admit_creation_memory(
+            hmc,
+            system_uuid,
+            system,
+            creation_memory,
+            resources,
+            kind="VirtualIOServer",
+            environment="Virtual IO Server",
+            name=name,
+        )
+        if memory_requested
+        else None
+    )
     native_options: dict[str, Any] = {}
+    if memory_requested:
+        native_options["creation_memory"] = creation_memory
     if max_virtual_slots is not None:
         native_options["max_virtual_slots"] = max_virtual_slots
     if serial_requested:
@@ -272,13 +310,21 @@ async def create_vios(
             affinity_group_id=affinity_group_id,
             **native_options,
         )
+    except _CreationMemorySubmissionError as error:
+        assert memory_admission is not None
+        await _raise_creation_memory_failure(hmc, memory_admission, error)
     except Exception as error:
-        if not serial_requested and not isinstance(error, HMCError):
+        if (
+            not serial_requested
+            and not memory_requested
+            and not isinstance(error, HMCError)
+        ):
             raise
         if (
             hardware_requested
             or layout_requested
             or serial_requested
+            or memory_requested
             or affinity_requested
         ):
             native_failed = True
@@ -300,8 +346,9 @@ async def create_vios(
             if not (
                 hardware_requested
                 or layout_requested
-                or affinity_requested
                 or serial_requested
+                or memory_requested
+                or affinity_requested
             ):
                 raise
             # Native creation succeeded; discard unavailable lookup diagnostics.
@@ -317,6 +364,7 @@ async def create_vios(
             or hardware_requested
             or layout_requested
             or serial_requested
+            or memory_requested
             or affinity_requested
         ) and (
             not isinstance(entry.get("UUID"), str)
@@ -325,6 +373,13 @@ async def create_vios(
             or entry["Resource"].get("PartitionName") != name
         ):
             raise ValueError("Created VIOS identity unconfirmed")
+        if memory_admission is not None:
+            entry = await confirm_creation_memory_identity(hmc, memory_admission, entry)
+            memory_step = await creation_memory_step(
+                hmc, memory_admission, entry, controller_mode=controller_mode
+            )
+            if memory_step.status != "ok":
+                raise ValueError("Creation memory observation incomplete")
         if serial_admission is not None:
             entry = await confirm_serial_created(hmc, serial_admission, entry)
             serial_step = await serial_creation_step(
@@ -364,14 +419,17 @@ async def create_vios(
                     "Created VIOS policy readback differs from requested fields"
                 )
     except Exception as error:
-        if not serial_requested and not isinstance(
-            error, (HMCError, ValueError, PermissionError)
+        if (
+            not serial_requested
+            and not memory_requested
+            and not isinstance(error, (HMCError, ValueError, PermissionError))
         ):
             raise
         if (
             hardware_requested
             or layout_requested
             or serial_requested
+            or memory_requested
             or affinity_requested
         ):
             verification_failed = True
@@ -386,7 +444,7 @@ async def create_vios(
     if verification_failed:
         raise HMCError(
             "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
-            if layout_requested or serial_requested
+            if layout_requested or serial_requested or memory_requested
             else f"VIOS exists or may exist; {'affinity group' if affinity_requested else 'hardware memory access'} readback-unavailable. Inspect before retrying. No second create or rollback performed"
         )
     assert (
@@ -426,9 +484,12 @@ async def create_vios(
                 "Inspect before retrying. No second create or rollback performed"
             ) from None
         entry = {**entry, "affinity_verification": affinity_step.result}
+    metadata: dict[str, Any] = {}
     if serial_admission is not None:
-        return {**entry, "serial_verification": serial_step.result}
-    return entry
+        metadata["serial_verification"] = serial_step.result
+    if memory_admission is not None:
+        metadata["creation_memory_verification"] = memory_step.result
+    return {**entry, **metadata} if metadata else entry
 
 
 async def delete_vios(

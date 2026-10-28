@@ -45,6 +45,7 @@ def candidate(tmp_path):
         "scripts/check_capability_inventory.py",
         "scripts/live_test_runner.py",
         "scripts/live_test/runner.py",
+        "scripts/live_test/creation_memory.py",
         "scripts/live_test/partition_profiles.py",
         "scripts/live_test/partition_profile_contract.py",
         "scripts/live_test/profile_contract_run.py",
