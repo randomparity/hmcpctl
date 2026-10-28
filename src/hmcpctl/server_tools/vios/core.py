@@ -9,6 +9,7 @@ from pydantic import StrictBool
 from ..._app import (
     with_client,
 )
+from ...documents.boot import select_boot_string
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
 from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
 from ...documents.lpar_creation_memory import LparCreationMemory
@@ -20,12 +21,14 @@ from ...documents.lpar_security_policy import (
     SecurityPolicyState,
 )
 from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
+from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
 from ...operations.lpar.security_policy import (
     configure_lpar_security_policy,
     read_lpar_security_policy,
 )
 from ...operations.lpar.vtpm import VtpmResult, configure_lpar_vtpm, read_lpar_vtpm
+from ...operations.vios.boot_order import read_vios_boot_order, set_vios_boot_order
 from ...operations.vios.core import (
     BackupType,
     RestoreBackupType,
@@ -68,6 +71,7 @@ def hmc_create_vios(
     max_virtual_slots: int | None = None,
     creation_memory: LparCreationMemory | None = None,
     affinity_group_id: AffinityGroupID | None = None,
+    start_settings: LparStartSettings | None = None,
 ) -> dict[str, Any] | None:
     """Create a new Virtual IO Server (VIOS) partition on a managed system.
 
@@ -105,6 +109,9 @@ def hmc_create_vios(
             named profile and returns incomplete verification when current
             values are unavailable. No huge-page or KVM reservation fields,
             activation or rollback.
+        start_settings: Optional five creation-only boot/start settings. Omission preserves
+            defaults; explicit false is retained. Controllers require contained ownership
+            admission and independent required-plane verification before follow-up effects.
         affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
             omission preserves defaults. Fresh classic saved-profile proof gates follow-ups;
             native partition mismatch/unavailability is reported separately. Controller
@@ -122,6 +129,10 @@ def hmc_create_vios(
             profile; uses environment defaults when omitted.
     """
 
+    if start_settings is not None:
+        if not isinstance(start_settings, LparStartSettings):
+            raise TypeError("start_settings must be LparStartSettings")
+        start_settings.validate_creation("Virtual IO Server")
     if creation_memory is not None and not isinstance(
         creation_memory, LparCreationMemory
     ):
@@ -147,6 +158,7 @@ def hmc_create_vios(
             virtual_serial_adapters=virtual_serial_adapters,
             creation_memory=creation_memory,
             affinity_group_id=affinity_group_id,
+            start_settings=start_settings,
         ),
         profile=profile,
     )
@@ -593,6 +605,53 @@ def hmc_configure_vios_security_policy(
             system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
             vios=True,
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="vios.read_boot_order", target_kind="vios")
+def hmc_read_vios_boot_order(
+    system_name_or_uuid: str, vios_name_or_uuid: str, profile: str | None = None
+) -> dict[str, Any]:
+    """Read exact stored VIOS pending text through contained native identity.
+
+    Missing/malformed/unbound observation is an error; null means observed empty.
+    Stored configuration does not prove bootability or activate the VIOS.
+    """
+    return with_client(
+        lambda hmc: read_vios_boot_order(
+            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
+        profile=profile,
+    )
+
+
+@tool(effect="mutate", operation="vios.set_boot_order", target_kind="vios")
+def hmc_set_vios_boot_order(
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    devices: list[str] | None = None,
+    *,
+    ownership_override: bool = False,
+    profile: str | None = None,
+    boot_string: str | None = None,
+) -> dict[str, Any]:
+    """Set VIOS pending text once and independently verify exact stored text.
+
+    Supply legacy devices or exact printable boot_string (non-whitespace, <=16KiB UTF-8),
+    never both. No clear/retry/activation; uncertainty requires inspection. Read/write
+    results contain exactly vios_uuid, vios_name and pending_boot_string.
+    """
+    select_boot_string(devices, boot_string)
+    return with_client(
+        lambda hmc: set_vios_boot_order(
+            hmc,
+            vios_name_or_uuid,
+            devices,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+            boot_string=boot_string,
         ),
         profile=profile,
     )

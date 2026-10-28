@@ -95,7 +95,11 @@ def cli_args(adapter):
 
 def test_direct_handler_appends_and_forwards_typed_memory(adapter):
     parameters = inspect.signature(adapter.handler).parameters
-    assert list(parameters)[-2:] == ["creation_memory", "affinity_group_id"]
+    assert list(parameters)[-3:] == [
+        "creation_memory",
+        "affinity_group_id",
+        "start_settings",
+    ]
     assert parameters["creation_memory"].default is None
     memory = LparCreationMemory(
         mem_mode="shared",
