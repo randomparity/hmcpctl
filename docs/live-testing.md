@@ -2413,6 +2413,10 @@ uv run --no-sync python scripts/live_test_recovery.py --memory-statistics --resu
 uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
 ```
 
+ST67 recovery requires `--memory-statistics`. It admits a regular UTF-8 file of at most
+1 MiB and rejects duplicate JSON members before credential bootstrap or HMC reads.
+The generic recovery route refuses ST67; other arms keep their existing loader behavior.
+
 Run independent read-only recovery after every attempt, including failure or apparent
 success. It checks the same candidate, destination, fixture identity and preserved
 allocation environment; it never resets, repairs or restores history. Recovery reports
@@ -2439,7 +2443,3 @@ creation, including controller designation gaps, preserves residue and stops.
 Always run read-only recovery, including after apparent success. A journal or
 saved grant cannot resume effects. Registration/offline proof supplies no native
 configuration, activation, compression, paging capacity or failover evidence.
-
-ST67 recovery requires --memory-statistics: admit a regular UTF-8 file of at most1MiB
-and reject duplicate JSON members before credential bootstrap or HMC reads. The generic
-recovery route refuses ST67; unrelated arms retain their existing loader behavior.

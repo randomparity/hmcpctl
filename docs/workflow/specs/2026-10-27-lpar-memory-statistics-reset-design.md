@@ -168,6 +168,10 @@ Independent final observation verifies current eligibility and environment alloc
 not counter equality. Missing allocation fields are unavailable preservation evidence, not0.
 Context/allocation changes fail the live preservation assertion; no corrective write follows.
 
+ST67 recovery requires `--memory-statistics`. It admits a regular UTF-8 file of at most
+1 MiB and rejects duplicate JSON members before credential bootstrap or HMC reads.
+The generic recovery route refuses ST67; other arms keep their existing loader behavior.
+
 Recovery checks nonpartial candidate/destination/config, exact ordered baseline/intent/result/
 final rows, exactly one submit and matching result shape plus fresh read-only identity/current
 allocation observations. Partial/missing/malformed/uncertain histories refuse confirmation.
@@ -218,7 +222,3 @@ public read tool rejected. Existing allocation and permissive parser regression 
 Plan mapsR1–R8 to concrete tasks/cases; generated artifacts are regenerated before checks.
 Full verify and separate pinned14hooks before push; CI3.11–3.14 is distinct evidence.
 No unit test pretends to prove live reset, counter history or exact modern eligibility.
-
-ST67 recovery requires --memory-statistics: admit a regular UTF-8 file of at most1MiB
-and reject duplicate JSON members before credential bootstrap or HMC reads. The generic
-recovery route refuses ST67; unrelated arms retain their existing loader behavior.
