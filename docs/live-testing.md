@@ -2388,6 +2388,85 @@ stamping, creating, deleting or resuming. Partial journals remain incomplete eve
 when their fixture is absent now. Retain uncertain residue for root/operator
 reconciliation. Source rollback is a source/document revert, never an HMC action.
 
+### VIOS pending-boot source diagnostic
+
+The opt-in `vios-boot-source` procedure qualifies, rejects or holds one fixed
+`csv-minimal-two-attribute-v1` encoder on one fresh inactive VIOS/release. It is
+source evidence only: no product maturity, published native grammar, activation
+or bootability claim follows. It is absent from ordinary/default/all dispatch.
+See [ADR 0306](adr/0306-vios-boot-source-diagnostic.md) and the
+[closed diagnostic contract](workflow/specs/2026-10-27-vios-boot-source-design.md).
+
+Root first coordinates the exclusive writer interval and separately authorizes
+this source execution and conditional exact-UUID cleanup. Packet fields, flags,
+old receipts and a recovered marker cannot supply that operational authority.
+Root must review the exact packet and raw-byte digest, deployed clean Git
+commit/tree, selected twenty source hashes, effective profile endpoint/agent,
+and bound Python 3.11.15 runtime. This is a deployment gate; the project's
+Python floor and Linux amd64 Python 3.11–3.14 verification targets are unchanged.
+Use a fresh canonical external 0700 window; packet files and evidence are 0600.
+Retain at least 168 MiB for bounded artifacts. The absolute window is 3200–7200
+seconds; root supplies an outer deadline watchdog. A watchdog kill leaves unknown
+execution, never proof of cancellation or authority to replay.
+
+The fixture is exactly one `c09v-<24 nonce hex digits>` VIOS with its initial
+ownership/caller marker atomic in creation. Its fixed envelope is min/desired/max
+memory 1024/2048/4096 MiB, shared CPU 0.1/0.5/1.0, vCPU 1/1/2, uncapped,
+dedicated memory and AME disabled, with `default_profile`. It is never activated.
+The eight ordered literals are `c09-plain`, `c09,comma`, `c09=equals`, `c09'single`,
+`c09"double`, `c09\slash`, `c09 space`, and `c09,='"\ combined`. The candidate
+uses minimal CSV quoting for exactly two attribute cells and whole-record shell
+quoting. No caller-selected literal, alternate encoding, retry or empty clear exists.
+
+Execute each named phase once, only after root's current operational grant:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group vios-boot-source --packet "$INITIAL" --packet-sha256 "$INITIAL_SHA" --output "$WINDOW/preflight-initial"
+```
+
+Root binds the observed original B0 digest into a final packet, retaining the
+same binding/window. Code never adopts or refreshes the packet's baseline.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group vios-boot-source --packet "$PACKET" --packet-sha256 "$SHA" --output "$WINDOW/preflight-final"
+uv run --no-sync python scripts/live_vios_boot_source.py --packet "$PACKET" --packet-sha256 "$SHA" --output "$WINDOW/capture" --grant-packet-sha256 "$SHA" --exclusive-writer-window --fresh-vios-delete-approved
+```
+
+Durable intents and finite physical tokens precede one creation, at most eight
+ordered boot attempts and one conditional owned UUID deletion. Each stage has
+one logon/logout and closes only its own client/children. Capture ceilings are
+830 REST, 40 SSH, 42 MiB accepted payload and 2600 seconds; each preflight and
+recovery is 70 REST, 1 SSH, 4 MiB and 200 seconds. Aggregate ceilings are
+1040 REST, 43 SSH, 54 MiB and 3200 seconds. These are conservative ceilings,
+not allowances for additional probes: a maximum 9-VIOS/33-profile snapshot is
+68 REST/1 SSH; admitted 8-VIOS/32-profile preflight is 64 REST/1 SSH.
+
+B1 and independent full native N1 are fixed after verified creation. Every boot
+observation must match full B1, including saved-profile ETags and available
+capacity, and every native nonpending cell/header order must match N1, including
+uptime. A pending text match with other drift is held. Final deletion needs
+fresh contained identity, marker, inactivity and source/grant/reserve checks at
+the physical DELETE boundary; full restored B0 and absence prove cleanup.
+Malformed output, unknown completion, text mismatch, nonboot drift or failed
+checkpoint holds every further resource effect, including deletion. No clear,
+restore or guessed cleanup follows; root dispositions retained residue separately.
+
+Read-only recovery is mandatory even after apparent success or failure, once
+the capture process has terminated. It cannot repair unknown history with present
+absence, and verifies capture and recovery session closure independently.
+
+```sh
+uv run --no-sync python scripts/live_test_recovery.py --vios-boot-source-packet "$PACKET" --packet-sha256 "$SHA" --results "$WINDOW/capture/results.json" --output "$WINDOW/recover"
+uv run --no-sync python scripts/live_test_evidence.py "$WINDOW/capture/results.json"
+```
+
+Retain the first actual qualified/rejected/held findings and session evidence
+privately. Publish only the filtered SOURCE ONLY rendering. Exit 0 for capture
+requires all eight exact observations, confirmed deletion and closed own session;
+recovery additionally requires complete historical proof, present B0/absence and
+closed old/new sessions. Every other result is exit 2. Neither exit nor this
+procedure promotes parent product readiness.
+
 ## Inactive creation memory (C07, opt-in arm 65)
 
 The `creation-memory` group and `scripts/live_creation_memory.py` run one fixed

@@ -121,3 +121,34 @@ def test_agents_md_points_at_the_runbook():
 
     assert "docs/live-testing.md" in agents
     assert "evidence only for the commit it ran on" in agents
+
+
+@pytest.mark.parametrize(
+    "script,flag",
+    [
+        ("scripts/live_vios_boot_source.py", "--grant-packet-sha256"),
+        ("scripts/live_test_preflight.py", "vios-boot-source"),
+        ("scripts/live_test_recovery.py", "--vios-boot-source-packet"),
+    ],
+)
+def test_boot_source_runbook_entrypoints(script, flag):
+    # The runbook's existing path checks enforce installed script references;
+    # these are executable parser contracts, not prose assertions.
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / script), "--help"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0 and flag in result.stdout
+
+
+def test_boot_source_no_default_dispatch():
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from live_test import runner
+
+    assert "vios-boot-source" not in runner.SUBTASK_GROUPS
