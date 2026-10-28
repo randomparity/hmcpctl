@@ -12,6 +12,7 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_memory_layout import LparMemoryLayout
@@ -63,6 +64,7 @@ def hmc_create_lpar(
     hardware_mem_expansion: HardwareMemoryFlag | None = None,
     memory_layout: LparMemoryLayout | None = None,
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
+    creation_memory: LparCreationMemory | None = None,
     affinity_group_id: AffinityGroupID | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
@@ -87,6 +89,15 @@ def hmc_create_lpar(
     Args:
         system_name_or_uuid: SystemName or UUID of the managed system to create on.
         name: Unique PartitionName for the new logical partition.
+        creation_memory: Optional eight strict creation-only memory fields. Explicit
+            shared mode is required for entitlement, weight and paging selectors;
+            providers require independent contained ownership admission. Omission
+            preserves defaults; zero and secondary ID "none" remain explicit.
+            Saved AME zero or numeric 1–10 declares no AIX intent, including VIOS
+            and IBM i; positive AME requires selected-system capability. Saved and
+            current configured observations are separate and gate follow-ups;
+            unavailable evidence is incomplete. AIX-only guest runtime compression
+            guidance remains separate: no activation, runtime or replay guarantee.
         resources: Memory and processor assignments for the new partition.
         virtual_serial_adapters: Optional strict seven-component serial creation records
             (64 KiB encoded maximum). Empty preserves defaults. Unique local slots >=2
@@ -158,6 +169,10 @@ def hmc_create_lpar(
     if caller_token is not None:
         validate_caller_token(caller_token)
     validate_partition_type(partition_type)
+    if creation_memory is not None and not isinstance(
+        creation_memory, LparCreationMemory
+    ):
+        raise TypeError("creation_memory must be LparCreationMemory")
     validate_serial_input(virtual_serial_adapters, max_virtual_slots)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
@@ -176,6 +191,9 @@ def hmc_create_lpar(
                 keylock=keylock,
                 max_virtual_slots=max_virtual_slots,
                 virtual_serial_adapters=virtual_serial_adapters,
+                creation_memory=creation_memory
+                if creation_memory is not None
+                else LparCreationMemory(),
                 caller_token=caller_token,
                 physical_io=physical_io
                 if physical_io is not None

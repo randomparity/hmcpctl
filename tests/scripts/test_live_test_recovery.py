@@ -3132,3 +3132,276 @@ def test_vios_boot_source_recovery_requires_each_binding(monkeypatch, missing):
         recovery.main(args)
     assert caught.value.code == 2
     route.assert_not_called()
+
+
+def _c07_document(phase="complete"):
+    from live_test import config as settings
+
+    from hmcpctl.config import HMCConfig
+
+    config = settings.LiveTestConfig(
+        system_name="00000000-0000-0000-0000-000000000001",
+        creation_memory_case="ame-zero-vios",
+        creation_memory_fresh_delete_authorized=True,
+    )
+    journal = {
+        "invocation_id": "a" * 32,
+        "candidate_commit": "b" * 40,
+        "system_uuid": config.system_name,
+        "hmc_identity": recovery.runner._hmc_identity(
+            HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
+        ),
+        "case": "ame-zero-vios",
+        "kind": "VirtualIOServer",
+        "name": "hmcpctl-live-c07-vios-deadbeef",
+        "token": None,
+        "uuid": "00000000-0000-0000-0000-000000000002",
+        "phase": phase,
+        "preabsence": True,
+        "create_returned": True,
+        "fresh_delete_authorized": True,
+        "requested": {"mem_mode": "ded", "mem_expansion": "0"},
+        "baseline": {
+            "pools": {
+                "partitions": [],
+                "available_processing_units": "10.0",
+                "available_memory_mib": "8192",
+            },
+            "vios": [],
+        },
+        "outcome": "created-verified",
+        "deletion": "confirmed-absent",
+    }
+    return {
+        "run": {
+            "group": "creation-memory",
+            "subtasks": [65],
+            "partial": False,
+            "tested_commit": "b" * 40,
+        },
+        "hmc": deepcopy(journal["hmc_identity"]),
+        "config": json.loads(json.dumps(dataclasses.asdict(config))),
+        "artifacts": dataclasses.asdict(
+            settings.LiveTestArtifacts(creation_memory=journal)
+        ),
+        "results": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        (("unknown",), 1),
+        (("requested", "unknown"), 1),
+        (("requested", "mem_expansion"), 0),
+        (("requested", "mem_expansion"), "0.0"),
+        (("hmc_identity", "port"), True),
+        (("hmc_identity", "unknown"), 1),
+        (("token",), "not-a-vios-token"),
+        (("uuid",), "invalid"),
+        (("invocation_id",), "invalid"),
+        (("candidate_commit",), "invalid"),
+        (("preabsence",), 1),
+        (("baseline", "unknown"), []),
+        (("baseline", "pools", "partitions"), ["duplicate", "duplicate"]),
+        (("baseline", "vios"), [{"uuid": "invalid", "name": "paging"}]),
+        (("deletion",), "clean"),
+        (("phase",), "invalid"),
+    ],
+)
+def test_c07_closed_journal_decoder_refuses_malformed_intent(path, value):
+    from live_test import config as settings
+
+    document = _c07_document()
+    node = document["artifacts"]["creation_memory"]
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+    with pytest.raises((ValueError, TypeError)):
+        settings.decode_artifacts(document["artifacts"])
+
+
+@pytest.mark.parametrize(
+    "fault", ["journal", "candidate", "hmc", "config", "group", "selection"]
+)
+def test_c07_inputs_refuse_unbound_or_missing_journal(fault):
+    document = _c07_document()
+    if fault == "journal":
+        document["artifacts"]["creation_memory"] = {}
+    elif fault == "candidate":
+        document["run"]["tested_commit"] = "c" * 40
+    elif fault == "hmc":
+        document["hmc"]["host"] = "foreign.test"
+    elif fault == "config":
+        document["config"]["creation_memory_case"] = "ame-positive-vios"
+    elif fault == "group":
+        document["run"]["group"] = "all"
+    else:
+        document["run"]["subtasks"] = [65, 1]
+    with pytest.raises((ValueError, TypeError)):
+        recovery.creation_memory_inputs_from_document(document, [65])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "prepared",
+        "create-pending",
+        "create-returned",
+        "delete-pending",
+        "deleted",
+        "complete",
+        "stopped-uncertain",
+    ],
+)
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "",
+        "residual",
+        "baseline",
+        "system",
+        "unreadable",
+        "candidate",
+        "hmc",
+        "renamed",
+        "duplicate",
+    ],
+)
+async def test_c07_recovery_all_phases_are_read_only_and_never_resume(
+    monkeypatch, phase, fault
+):
+    from live_test import creation_memory
+
+    from hmcpctl.config import HMCConfig
+
+    document = _c07_document(phase)
+    j = document["artifacts"]["creation_memory"]
+    inputs = recovery.creation_memory_inputs_from_document(document, [65])
+    monkeypatch.setattr(
+        recovery,
+        "HMCConfig",
+        lambda: HMCConfig.from_mapping(
+            {"host": "foreign.test" if fault == "hmc" else "hmc.test", "user": "test"}
+        ),
+    )
+    monkeypatch.setattr(
+        creation_memory,
+        "_candidate",
+        lambda: ("c" if fault == "candidate" else "b") * 40,
+    )
+    calls = []
+
+    async def call(tool, **args):
+        recovery.guard_read_only(tool, args)
+        calls.append(tool)
+        if fault == "unreadable":
+            return "FAIL", None
+        if tool == "hmc_get_system":
+            return "PASS", {
+                "UUID": "invalid" if fault == "system" else j["system_uuid"],
+                "Resource": {"SystemName": "system-test"},
+            }
+        rows = (
+            [
+                {
+                    "UUID": j["uuid"],
+                    "Resource": {
+                        "PartitionName": "renamed" if fault == "renamed" else j["name"]
+                    },
+                }
+            ]
+            if fault in {"residual", "renamed", "duplicate"}
+            else []
+        )
+        if fault == "duplicate":
+            rows *= 2
+        if tool == "hmc_list_lpars":
+            return "PASS", {"entries": [], "unreadable_systems": []}
+        if tool == "hmc_list_vios":
+            return "PASS", {"entries": rows}
+        if args["cmd"].endswith("-F name"):
+            return "PASS", "\n".join(r["Resource"]["PartitionName"] for r in rows)
+        if args["cmd"].endswith("curr_avail_sys_proc_units"):
+            return "PASS", "10.0"
+        return "PASS", "4096,256" if fault == "baseline" else "8192,256"
+
+    if fault in {"unreadable", "system", "candidate", "hmc", "duplicate"}:
+        with pytest.raises(recovery.StateUnreadable):
+            await recovery.check_creation_memory(call, inputs)
+    else:
+        findings = await recovery.check_creation_memory(call, inputs)
+        assert bool(findings) is (phase != "complete" or fault != "")
+    assert all(
+        t in {"hmc_get_system", "hmc_run_command", "hmc_list_lpars", "hmc_list_vios"}
+        for t in calls
+    )
+
+
+def test_c07_real_unarmed_writer_recovery_route_and_forgery(
+    tmp_path, monkeypatch, capsys
+):
+    from live_test import config as settings
+    from live_test import creation_memory as arm
+
+    from hmcpctl.config import HMCConfig
+
+    @asynccontextmanager
+    async def served():
+        yield object()
+
+    monkeypatch.setattr(recovery.runner, "served_client", served)
+    monkeypatch.setattr(recovery.runner, "served_schemas", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        arm, "HMCClient", lambda *args: pytest.fail("unarmed must not connect")
+    )
+    path = tmp_path / "result.json"
+    assert (
+        asyncio.run(
+            recovery.runner.main(
+                group=arm.GROUP,
+                results_path=str(path),
+                config=settings.LiveTestConfig(),
+                hmc_config=HMCConfig.from_mapping({}),
+            )
+        )
+        == 0
+    )
+    document = json.loads(path.read_text())
+    assert recovery.creation_memory_skip_reason(document, [65])
+    monkeypatch.setattr(
+        recovery.runner,
+        "_bootstrap_config",
+        lambda: pytest.fail("unarmed recovery must not authenticate"),
+    )
+    assert recovery.main(["--results", str(path)]) == 0
+    assert "SKIPPED  ST65" in capsys.readouterr().out
+    for fault in ("partial", "note", "missing-journal", "extra-row", "armed"):
+        forged = deepcopy(document)
+        if fault == "partial":
+            forged["run"]["partial"] = True
+        elif fault == "note":
+            forged["results"][0]["note"] = "different"
+        elif fault == "missing-journal":
+            forged["artifacts"].pop("creation_memory")
+        elif fault == "extra-row":
+            forged["results"].append(deepcopy(forged["results"][0]))
+        else:
+            forged["config"]["creation_memory_case"] = "ame-zero-vios"
+            forged["config"]["creation_memory_fresh_delete_authorized"] = True
+        assert recovery.creation_memory_skip_reason(forged, [65]) is None
+        path.write_text(json.dumps(forged))
+        assert recovery.main(["--results", str(path)]) == 2
+        assert "CLEAN" not in capsys.readouterr().out
+
+
+def test_c07_saved_journal_is_bounded_before_semantic_decoding():
+    from live_test import config as settings
+
+    document = _c07_document()
+    document["artifacts"]["creation_memory"]["baseline"]["pools"]["partitions"] = [
+        "x" * (5 * 1024 * 1024)
+    ]
+    with pytest.raises(ValueError, match="5 MiB"):
+        settings.decode_artifacts(document["artifacts"])

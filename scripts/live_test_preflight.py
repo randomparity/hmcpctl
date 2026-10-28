@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_test import (
     accelerator_qos,
     bare_cec,
+    creation_memory,
     creation_memory_layout,
     dedicated_pcie,
     lpar_config,
@@ -467,6 +468,26 @@ def _memory_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict
     )
 
 
+def _creation_memory_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        creation_memory.configured(config)
+    except (TypeError, ValueError) as error:
+        return ArmVerdict("creation-memory", False, str(error))
+    return ArmVerdict(
+        "creation-memory",
+        True,
+        "separate exclusive root case/window and measured request/deadline/session budgets required",
+        (
+            f"one fixed inactive case: {config.creation_memory_case}; 2048 MiB desired/0.5 shared units",
+            "max1 create/1 LPAR stamp (zero VIOS stamps)/1 exact fresh UUID delete; no apply or activation",
+            "current conditional fresh-delete grant and served destructive policy required; private fresh journal",
+            "independent saved XML equality and baseline checks; mismatch/unavailable/controller incomplete preserves residue",
+            "no retry/adoption/compensation; mandatory read-only recovery; no runtime proof",
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_affinity_group_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-affinity-group",
@@ -779,6 +800,7 @@ _ARM_VERDICTS = {
     "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
     "lpar-hardware-memory": _lpar_hardware_memory_verdict,
+    "creation-memory": _creation_memory_verdict,
     "lpar-affinity-group": _lpar_affinity_group_verdict,
     "creation-memory-layout": _creation_memory_layout_verdict,
     "lpar-linux-roles": _lpar_linux_roles_verdict,
