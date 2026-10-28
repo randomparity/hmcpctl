@@ -15,9 +15,9 @@ ROOT = Path(__file__).parents[1]
 TOOL_PINS = {
     "detect-secrets==1.5.0",
     "prek==0.5.5",
-    "ruff==0.17.0",
-    "ty==0.0.86",
-    "zizmor==1.30.1",
+    "ruff==0.17.1",
+    "ty==0.0.89",
+    "zizmor==1.31.1",
 }
 TY_INCLUDE = ["src/hmcpctl", "scripts"]
 RUFF_EXTEND_SELECT = {
@@ -192,8 +192,8 @@ SCORECARD_ACTION_PINS = {
         "v7.0.2",
     ),
     "github/codeql-action/upload-sarif": (
-        "24c54180a607b1449ed407dd24f251e4e9147c8d",  # pragma: allowlist secret
-        "v4.38.3",
+        "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",  # pragma: allowlist secret
+        "v4.39.0",
     ),
     "ossf/scorecard-action": (
         "fa7117db83c52d787ae5a89f350999701505d78e",  # pragma: allowlist secret
