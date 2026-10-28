@@ -54,8 +54,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
 import shlex
+import stat
 import sys
 from collections.abc import Awaitable, Callable
 from collections.abc import Set as AbstractSet
@@ -2195,6 +2197,44 @@ def _report(
         print("CLEAN  nothing this run dispatched was left behind")
 
 
+def _statistics_recovery(path: Path) -> int:
+    from live_test import memory_statistics
+
+    def unique_members(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Statistics recovery JSON has duplicate members")
+            result[key] = value
+        return result
+
+    try:
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("Statistics recovery requires a regular results file")
+            raw = stream.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError("Statistics recovery raw results exceed 1 MiB")
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_members)
+        if (
+            not isinstance(document, dict)
+            or document.get("run", {}).get("group") != memory_statistics.GROUP
+        ):
+            raise ValueError("Statistics recovery requires its named run")
+        if not runner._bootstrap_config():
+            raise ValueError("Statistics recovery credentials unavailable")
+        asyncio.run(memory_statistics.recover_document(HMCConfig(), document))
+    except Exception as error:  # noqa: BLE001 — malformed/uncertain evidence cannot confirm recovery
+        print(
+            f"statistics recovery unconfirmed: {type(error).__name__}", file=sys.stderr
+        )
+        return 2
+    print(
+        "OBSERVED: finite reset-attempt record and current environment confirmed; reset verification unavailable"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2209,11 +2249,20 @@ def main(argv: list[str] | None = None) -> int:
     source_packets.add_argument("--source-packet", type=Path)
     source_packets.add_argument("--activation-source-packet", type=Path)
     source_packets.add_argument("--serial-procedure", action="store_true")
+    source_packets.add_argument(
+        "--memory-statistics",
+        action="store_true",
+        help="ST67 bounded raw-record recovery; never restores counter history",
+    )
     source_packets.add_argument("--vios-ame-source-packet", type=Path)
     source_packets.add_argument("--vios-boot-source-packet", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.memory_statistics:
+        if args.output or args.packet_sha256:
+            parser.error("ST67 recovery uses retained results only")
+        return _statistics_recovery(args.results)
     if args.vios_ame_source_packet:
         from live_test import vios_ame_source
 
@@ -2381,6 +2430,17 @@ def main(argv: list[str] | None = None) -> int:
             "CLEAN: system-profile original baseline and finite terminal sequence confirmed"
         )
         return 0
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "lpar-memory-statistics"
+    ):
+        print(
+            "statistics recovery requires --memory-statistics for bounded raw admission",
+            file=sys.stderr,
+        )
+        return 2
 
     if (
         isinstance(document, dict)

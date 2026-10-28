@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Entitled-memory statistics reset through `hmc_reset_lpar_memory_statistics` and
+  `lpars memory-statistics-reset` submits once after contained Running shared-memory,
+  system AMS and ownership checks. Native completion and independent before/after
+  statistics remain separate; reset verification is always unavailable. The opt-in
+  ST67 arm has no live evidence, and counter history cannot be restored (#1777).
+
+
 - LPAR and VIOS creation through CLI/MCP accept eight typed shared-memory and
   saved Active Memory Expansion fields. Shared mode requires an existing pool,
   contained paging providers and independent ownership checks. Saved/current

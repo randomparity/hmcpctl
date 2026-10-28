@@ -2,17 +2,62 @@
 
 from __future__ import annotations
 
+import math
 import shlex
 from collections.abc import Callable
 from typing import Any
 
 from ..config import HMCConfig
-from ..documents.lpar_memory import LparMemoryChange, LparMemoryMove
+from ..documents.lpar_memory import (
+    LparMemoryChange,
+    LparMemoryMove,
+    LparMemoryStatisticsReset,
+)
 from .commands import _parse_lshwres_output, hmc_error_code
 from .transport import HMCCLIError, run_hmc_command
 
 # The managed system does not support Active Memory Sharing (V11R2, POWER11).
 _AMS_UNSUPPORTED = "HSCLA4A0"
+
+
+def _statistics_target(config: HMCConfig, system_name: str, partition_id: int) -> str:
+    if not math.isfinite(config.ssh_timeout) or config.ssh_timeout <= 0:
+        raise ValueError("Statistics reset requires a finite positive ssh_timeout")
+    if type(partition_id) is not int or partition_id < 1:
+        raise ValueError("Statistics reset requires a positive integer partition_id")
+    if not isinstance(system_name, str) or not system_name.strip():
+        raise ValueError("Statistics reset requires a nonblank system_name")
+    return shlex.quote(system_name)
+
+
+async def read_lpar_memory_statistics(
+    config: HMCConfig, system_name: str, partition_id: int
+) -> str:
+    """Read exactly one partition's bounded native statistics row."""
+    system = _statistics_target(config, system_name, partition_id)
+    return await run_hmc_command(
+        config,
+        f"lshwres -r mem -m {system} --level lpar --filter lpar_ids={partition_id} --stat",
+        max_output_bytes=65536,
+    )
+
+
+async def reset_lpar_memory_statistics_native(
+    config: HMCConfig,
+    system_name: str,
+    partition_id: int,
+    reset: LparMemoryStatisticsReset,
+) -> str:
+    """Submit one fixed reset; the domain owns admission and independent readback."""
+    if not isinstance(reset, LparMemoryStatisticsReset):
+        raise TypeError("reset must be a typed LparMemoryStatisticsReset")
+    system = _statistics_target(config, system_name, partition_id)
+    command = f"chhwres -r mem -m {system} -o rs --id {partition_id}"
+    if reset.wait_minutes is not None:
+        command += f" -w {reset.wait_minutes}"
+    if reset.detail_level is not None:
+        command += f" -d {reset.detail_level}"
+    return await run_hmc_command(config, command, max_output_bytes=65536)
 
 
 async def list_memory_pools(

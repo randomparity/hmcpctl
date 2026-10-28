@@ -26,9 +26,11 @@ class HMCCLIError(HMCError):
         body: str | None = None,
         *,
         remote_refusal_code: str | None = None,
+        remote_nonzero_completed: bool = False,
     ) -> None:
         super().__init__(message, status_code, body)
         self.remote_refusal_code = remote_refusal_code
+        self.remote_nonzero_completed = remote_nonzero_completed is True
 
 
 #: What a declared secret value reads as in any diagnostic (ADR 0246).
@@ -104,12 +106,15 @@ async def run_hmc_command(
             )
         except HMCCLIError as error:
             message = _redact(str(error), declared)
+            completed = error.remote_nonzero_completed
             code = error.remote_refusal_code
             if code is not None and _redact(code, declared) != code:
                 code = None
     # Raised outside the handler so the error carries no __cause__/__context__:
     # the asyncssh exception repeats the command and remote output verbatim.
-    raise HMCCLIError(message, remote_refusal_code=code)
+    raise HMCCLIError(
+        message, remote_refusal_code=code, remote_nonzero_completed=completed
+    )
 
 
 async def _run_hmc_command(
@@ -366,6 +371,11 @@ def _process_error(cmd: str, error: asyncssh.ProcessError) -> HMCCLIError:
     return HMCCLIError(
         f"SSH command {cmd!r} failed with {_process_termination(error)}: {detail.strip()}",
         remote_refusal_code=code,
+        remote_nonzero_completed=(
+            type(error.exit_status) is int
+            and error.exit_status > 0
+            and not error.exit_signal
+        ),
     )
 
 
