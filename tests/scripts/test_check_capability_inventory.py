@@ -2296,6 +2296,54 @@ def test_hardware_memory_creation_catalog_contract(operation: str) -> None:
 
 
 @pytest.mark.parametrize("operation", ["lpar.create", "vios.create"])
+def test_c07_creation_memory_catalog_bindings(operation):
+    fields = {
+        "mem_mode",
+        "desired_io_entitled_mem",
+        "mem_weight",
+        "primary_paging_vios_name",
+        "primary_paging_vios_id",
+        "secondary_paging_vios_name",
+        "secondary_paging_vios_id",
+        "mem_expansion",
+    }
+    catalog = ROOT / "docs/capabilities"
+    record = next(
+        row
+        for row in inventory.load_json(catalog / "operations.json")["operations"]
+        if row["operation"] == operation
+    )
+    registered = next(
+        tool for tool in inventory.discover_registry() if tool.operation == operation
+    )
+    assert record["signature"] == registered.signature
+    assert "cli:commands/mksyscfg" in record["row_ids"]
+    assert "tests/app/test_app_creation_memory.py" in record["tests"]
+    maturity = next(
+        row
+        for row in inventory.load_json(catalog / "maturity.json")["operations"]
+        if row["operation"] == operation
+    )
+    variants = [
+        row
+        for row in maturity["implementation"]["implemented_scope"]
+        if row["variant"] == "c07-creation-memory"
+    ]
+    assert len(variants) == 1
+    parameters = variants[0]["parameters"]
+    assert {item["name"] for item in parameters} == {
+        f"creation_memory.{field}" for field in fields
+    }
+    for item in parameters:
+        field = item["name"].split(".")[1]
+        for generation in ("p10", "p11"):
+            assert (
+                f"{generation}:mksyscfg:partition-create:{field}" in item["constraint"]
+            )
+    assert all("c07" not in evidence["id"] for evidence in maturity["evidence"])
+
+
+@pytest.mark.parametrize("operation", ["lpar.create", "vios.create"])
 def test_affinity_group_creation_catalog_contract(operation: str) -> None:
     catalog = ROOT / "docs" / "capabilities"
     record = next(

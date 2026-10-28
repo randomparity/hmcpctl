@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 64; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61 and ST64 require named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 65; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64 and ST65 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -82,6 +82,7 @@ from live_test.config import (
     decode_saved_config,
 )
 from live_test.connectivity import inventory_connectivity
+from live_test.creation_memory import exercise_creation_memory
 from live_test.creation_memory_layout import exercise_creation_memory_layout
 from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
 from live_test.detach_probe import exercise_detach_probe
@@ -457,6 +458,7 @@ class RunState:
     group: str | None = None
     hmc_config: HMCConfig | None = None
     checkpoint: Callable[[], None] | None = None
+    creation_memory_invocation: str | None = None
     creation_memory_layout_invocation: str | None = None
 
     async def call(
@@ -710,6 +712,7 @@ SUBTASKS = {
     55: exercise_lpar_hardware_memory,
     56: exercise_processor_quantities,
     57: exercise_lpar_affinity_group,
+    65: exercise_creation_memory,
     58: exercise_creation_memory_layout,
     59: exercise_processor_sharing_weight,
     64: exercise_accelerator_qos,
@@ -765,6 +768,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-vtpm": [51],
     "lpar-security-policy": [52],
     "lpar-hardware-memory": [55],
+    "creation-memory": [65],
     "lpar-affinity-group": [57],
     "creation-memory-layout": [58],
     "lpar-linux-roles": [53],
@@ -913,6 +917,13 @@ def _restore_artifacts_from_results(
         if not isinstance(saved_tasks, list):
             raise TypeError("results subtasks must be an array")
         if (
+            state.group == "creation-memory"
+            or saved_run.get("group") == "creation-memory"
+            or 65 in saved_tasks
+            or saved_artifacts.get("creation_memory")
+        ):
+            raise ValueError("creation-memory context cannot be restored")
+        if (
             state.group == "creation-memory-layout"
             or saved_run.get("group") == "creation-memory-layout"
             or 58 in saved_tasks
@@ -1048,12 +1059,22 @@ async def main(
         tasks = sorted(
             n
             for n in SUBTASKS
-            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64}
+            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 65}
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]
-    if 58 in tasks:
+    if 65 in tasks:
+        if (
+            state.artifacts.creation_memory
+            or state.creation_memory_invocation is not None
+            or Path(results_path).exists()
+            or evidence.observations_path(results_path).exists()
+        ):
+            print("Existing ST65 context refused; use fresh private results")
+            return 1
+        prior_paths = []
+    elif 58 in tasks:
         if state.artifacts.creation_memory_layout or Path(results_path).exists():
             print("Existing ST58 context refused; use fresh private results")
             return 1
