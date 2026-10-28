@@ -21,7 +21,8 @@ Use existing pydantic/asyncssh/typer/FastMCP and stdlib csv, re, shlex.
 Keep allocation APIs/results, shared permissive parser, config defaults and existing permission semantics.
 Required system/partition selectors; canonical UUID comparison ignores case, resource names do not.
 Only one native reset attempt; no force/retry/reverse/activation/allocation/profile write.
-Finite configured SSH timeout and64KiB combined command-output cap remain in force.
+Require finite positive config.ssh_timeout before any ownership/statistics SSH; reuse that
+existing value/transport without changing global defaults. Keep64KiB combined output cap.
 Native wait0 disables only the guest-command timer, not client timeout or server execution.
 Public artifacts contain no lab identifiers; private live results stay outside checkout.
 Live proof uses the matching deployed commit, preflight, named arm, recovery and generated evidence.
@@ -78,7 +79,8 @@ validation, all-targets grants or any post-observation check. No new bypass poli
 
 Internal SSH owner ssh/memory.py adds read_lpar_memory_statistics(config:HMCConfig,
 system_name:str,partition_id:int)->str and reset_lpar_memory_statistics_native(config,
-system_name,partition_id,reset)->str. Both use max_output_bytes=65536 and finite SSH owner.
+system_name,partition_id,reset)->str. Both independently reject non-finite/non-positive config.ssh_timeout before transport,
+then use max_output_bytes=65536 and the existing finite-positive timeout value.
 Read exact command: lshwres -r mem -m QSYS --level lpar --filter lpar_ids=ID --stat.
 Write exact command: chhwres -r mem -m QSYS -o rs --id ID, then -w/-d only if non-None.
 IDs must be positive strict integers; system must be nonblank and shlex.quote encoded.
@@ -126,6 +128,7 @@ Same/zero/lower/higher values or changed field sets do not change verification s
 
 1 Strict request/selectors before client dispatch; resolve system and unique contained
 LPAR/VIOS, get direct identity/current mode/state, positive system AMS and system CLI name.
+Reject non-finite/non-positive config.ssh_timeout before any ownership/statistics SSH.
 2 Invoke the existing ownership guard with ownership_override (defaultFalse). Read one-ID
 statistics, parse bounded row. Unusable baseline returns
 not_submitted/incomplete; no reset call. Validate optional settings against reported AIX/Linux.
@@ -133,6 +136,8 @@ not_submitted/incomplete; no reset call. Validate optional settings against repo
 UUID/kind/name/nativeID/shared/state/system identity with initial context, invoke the existing
 ownership guard again with the same ownership_override value. Each true guard call uses its
 existing ownership-override audit before returning; override never skips this context recheck.
+Revalidate optional wait/detail against freshly reported PartitionType AIX/Linux before submit;
+a changed AIX/Linux-to-IBM i type with options refuses even if other facts match.
 Any change/refusal prevents submit. Do not compare volatile statistics or infer installed OS.
 4 Invoke native reset exactly once. Catch ordinary HMC/transport errors into native fact;
 propagate cancellation/BaseException so the owning runtime closes; no replay/fallback.

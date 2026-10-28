@@ -6,6 +6,8 @@ Accepted (2026-08-25)
 
 > Amended by [ADR 0276](0276-lpar-virtual-tpm-configuration.md) for the new VIOS vTPM update branch only; unrelated VIOS policy is unchanged.
 
+> Amended by [ADR 0288](0288-lpar-entitled-memory-statistics-reset.md) solely for the guarded counter-history reset on LogicalPartition and VirtualIOServer, extending the legacy resource-change-only scope and closed VIOS wording for this operation; standard audited ownership override applies, and unrelated VIOS policy is unchanged.
+
 ## Context
 
 ADR 0011 established the advisory ownership protocol: a token
@@ -133,7 +135,7 @@ against that commit rather than maintained forward.
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
-| `reset_lpar_memory_statistics` | `operations/lpar/memory_statistics.py::reset_lpar_memory_statistics` | guarded (`operations/lpar/memory_statistics.py::reset_lpar_memory_statistics`, via `authorize_lpar_mutation` after selected-system containment); standard audited `ownership_override=False`; explicit override bypasses only the ownership guard; LPAR/VIOS union requires MCP all-targets | #1777 / ADR 0288 |
+| `reset_lpar_memory_statistics` | `operations/lpar/memory_statistics.py::reset_lpar_memory_statistics` | guarded (`operations/lpar/memory_statistics.py::reset_lpar_memory_statistics`, via `authorize_lpar_mutation` after selected-system containment); ADR0288 counter-history scope amendment; standard audited `ownership_override=False`; explicit override bypasses only the ownership guard; LPAR/VIOS union requires MCP all-targets | #1777 / ADR 0288 |
 | `configure_lpar_security_policy` | `operations/lpar/security_policy.py::configure_lpar_security_policy` | guarded (`operations/lpar/security_policy.py::configure_lpar_security_policy`, via contained LPAR/VIOS authorization helpers); explicit settings plus existing operator confirmation declare consent | #1765 / ADR 0277 |
 | `configure_lpar_vtpm` | `operations/lpar/vtpm.py::configure_lpar_vtpm` | guarded (`operations/lpar/vtpm.py::configure_lpar_vtpm`, via contained LPAR/VIOS authorization helpers); destructive enabled disable additionally requires independent consent | #1764 / ADR 0276 |
 | `delete_lpar` | `operations/lpar/core.py::delete_lpar` | guarded (`operations/lpar/core.py::delete_lpar`) | — |

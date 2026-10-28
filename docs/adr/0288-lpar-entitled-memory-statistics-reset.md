@@ -21,11 +21,17 @@ Add LparMemoryStatisticsReset and separate reset operation/CLI/MCP presentations
 Require contained authorized stable identity/current shared/Running/system AMS and
 one usable before observation. HMC validates undocumented OS/release/RMC eligibility;
 wait/detail are allowed only for reported AIX/Linux. Submit native mem rs once.
+Reject non-finite/non-positive config.ssh_timeout before any ownership/statistics SSH.
+Both new SSH entries enforce the same precondition using the existing timeout value.
 Finite client timeout remains even when native wait0 disables the guest timer.
+Revalidate optional wait/detail against fresh reported PartitionType before submission.
 Keep native completion, raw ordered before/after fields, errors and identity facts
 separate. Reset verification is unavailable for each result produced by this design.
 Usable means a valid bounded row with at least one recognized numeric-text field;
 unknown/missing/unavailable values are retained. Do not infer units or reset causation.
+This narrowly amends ADR0092 scope for this counter-history reset on LogicalPartition
+and VirtualIOServer, despite its legacy resource-change-only and closed VIOS wording;
+unrelated VIOS policy is unchanged.
 Retain standard audited ownership_override:bool=False on the operation/CLI/MCP.
 Explicit true bypasses only the existing ownership read/check through its audit;
 containment, identity, shared/Running/AMS, usable statistics and MCP grants still apply.
