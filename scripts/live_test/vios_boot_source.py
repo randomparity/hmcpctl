@@ -17,6 +17,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from hmcpctl.config import load_profile, validate_agent_id
+from hmcpctl.documents.partition_profile import one, parse_profile
 from hmcpctl.operations.vios.core import delete_vios
 from hmcpctl.ssh.commands import build_attribute_record, build_filter
 from hmcpctl.ssh.description_validation import validate_lpar_description
@@ -513,49 +514,49 @@ def _admission(s: dict, p: dict, *, require_digest: bool) -> None:
         raise Held("approved B0 baseline differs")
 
 
-def _resource_fields(fields: dict) -> None:
-    memory = fields["PartitionMemoryConfiguration"]["value"]
-    cpu = fields["PartitionProcessorConfiguration"]["value"]
-    if not isinstance(memory, dict) or not isinstance(cpu, dict):
-        raise Held("resource containers unavailable")
-    shared = cpu.get("SharedProcessorConfiguration")
-    if not isinstance(shared, dict):
-        raise Held("shared processor evidence unavailable")
-    checks = [
-        (memory, k, str(v), True)
-        for k, v in zip(
-            ("MinimumMemory", "DesiredMemory", "MaximumMemory"),
-            (1024, 2048, 4096),
-            strict=True,
-        )
-    ]
-    checks.extend(
-        (shared, k, v, integer)
-        for k, v, integer in (
-            ("MinimumProcessingUnits", "0.1", False),
-            ("DesiredProcessingUnits", "0.5", False),
-            ("MaximumProcessingUnits", "1.0", False),
-            ("MinimumVirtualProcessors", "1", True),
-            ("DesiredVirtualProcessors", "1", True),
-            ("MaximumVirtualProcessors", "2", True),
-        )
-    )
-    for container, key, wanted, integer in checks:
-        try:
-            value = Decimal(_text(leaf_text(container.get(key)), 64))
-        except InvalidOperation as error:
-            raise Held("resource evidence is not numeric") from error
-        if (
-            not value.is_finite()
-            or value != Decimal(wanted)
-            or (integer and value != value.to_integral_value())
-        ):
-            raise Held("fixed resource tuple differs")
-    if (
-        leaf_text(cpu.get("HasDedicatedProcessors")) != "false"
-        or leaf_text(cpu.get("SharingMode")) != "uncapped"
+def _resource_fields(fields: dict, profile: str) -> None:
+    if any(
+        not isinstance(fields[key]["value"], dict)
+        for key in ("PartitionMemoryConfiguration", "PartitionProcessorConfiguration")
     ):
-        raise Held("shared uncapped processor evidence required")
+        raise Held("resource containers unavailable")
+    # Inactive current configurations can be uninitialized; prove the configured tuple
+    # from the contained saved profile while preserving every current field in B1.
+    root = parse_profile(profile)
+    exact = {
+        "ProfileName": "default_profile",
+        "ProcessorAttributes/HasDedicatedProcessors": "false",
+        "ProcessorAttributes/SharingMode": "uncapped",
+        "ProfileMemory/ActiveMemorySharingEnabled": "false",
+        "ProfileMemory/ActiveMemoryExpansionEnabled": "false",
+    }
+    numeric = {
+        "ProfileMemory/MinimumMemory": "1024",
+        "ProfileMemory/DesiredMemory": "2048",
+        "ProfileMemory/MaximumMemory": "4096",
+        "ProfileMemory/ExpansionFactor": "0",
+        "ProcessorAttributes/SharedProcessorConfiguration/MinimumProcessingUnits": "0.1",
+        "ProcessorAttributes/SharedProcessorConfiguration/DesiredProcessingUnits": "0.5",
+        "ProcessorAttributes/SharedProcessorConfiguration/MaximumProcessingUnits": "1",
+        "ProcessorAttributes/SharedProcessorConfiguration/MinimumVirtualProcessors": "1",
+        "ProcessorAttributes/SharedProcessorConfiguration/DesiredVirtualProcessors": "1",
+        "ProcessorAttributes/SharedProcessorConfiguration/MaximumVirtualProcessors": "2",
+    }
+    for path, wanted in (exact | numeric).items():
+        node = one(root, path)
+        if len(node):
+            raise Held("saved resource evidence is not scalar")
+        value = _text(node.text, 64)
+        if path in exact:
+            if value != wanted:
+                raise Held("fixed saved resource mode differs")
+        else:
+            try:
+                number = Decimal(value)
+            except InvalidOperation as error:
+                raise Held("saved resource evidence is not numeric") from error
+            if not number.is_finite() or number != Decimal(wanted):
+                raise Held("fixed saved resource tuple differs")
 
 
 def _owned(s: dict, p: dict, before: dict) -> dict:
@@ -565,9 +566,16 @@ def _owned(s: dict, p: dict, before: dict) -> dict:
     raw = _text(leaf_text(fields["PartitionID"]["value"]), 16)
     if not raw.isdecimal() or str(int(raw)) != raw or int(raw) <= 0:
         raise Held("canonical positive REST partition ID required")
-    _resource_fields(fields)
-    if ame._observed(s, ident, case).get("outcome") != "observed-accepted":
-        raise Held("dedicated AME0 default profile unconfirmed")
+    saved = s["stable"]["vios"][ident]["profiles"]
+    if len(saved) != 1 or set(s["profiles"][ident]) != set(saved):
+        raise Held("unique default saved profile required")
+    profile_id, profile = next(iter(saved.items()))
+    if profile["name"] != "default_profile" or not profile["etag"]:
+        raise Held("default saved profile identity/ETag unavailable")
+    raw_profile = s["profiles"][ident][profile_id]
+    if ame._profile_semantic(raw_profile) != profile["semantic"]:
+        raise Held("saved profile witness differs from protected snapshot")
+    _resource_fields(fields, raw_profile)
     if ame._foreign(s["stable"], ident) != ame._baseline_foreign(before):
         raise Held("foreign protected B0 configuration differs")
     return {

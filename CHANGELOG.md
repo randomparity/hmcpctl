@@ -253,6 +253,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- The opt-in VIOS boot-source diagnostic verifies configured resources from the
+  unique contained saved default profile while preserving inactive current resource
+  observations and strict snapshot equality. Uninitialized current placeholders no
+  longer prevent its first boot-source observation; live qualification remains
+  unproven (#1770).
+
 - `HMC_AGENT_ID` help text and the config schema now list every character `agent_id`
   refuses, including `/`, `:` and space; the text is built from the validator's own
   table so the two cannot drift (#1476, thanks to @KeuqS for the approach in #1485).
