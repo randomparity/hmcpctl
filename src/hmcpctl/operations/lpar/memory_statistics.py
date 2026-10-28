@@ -148,15 +148,16 @@ async def _context(hmc: HMCClient, system_uuid: str, selector: str) -> dict[str,
     summaries = await hmc.list_system_summaries()
     selected = summary_matching(summaries, system_uuid)
     system_name = selected.get("SystemName") if selected else None
-    named = (
-        summary_matching(summaries, system_name)
-        if isinstance(system_name, str)
-        else None
-    )
+    named = [
+        row.get("UUID")
+        for row in summaries
+        if isinstance(row, dict) and row.get("SystemName") == system_name
+    ]
     if (
-        not system_name
-        or named is None
-        or named["UUID"].lower() != system_uuid.lower()
+        not isinstance(system_name, str)
+        or not system_name
+        or any(not is_uuid(uuid) for uuid in named)
+        or {str(uuid).lower() for uuid in named} != {system_uuid.lower()}
         or _text(system_resource.get("SystemName"), "SystemName") != system_name
     ):
         raise ValueError("Statistics managed system has no matching unique CLI name")

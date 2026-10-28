@@ -519,7 +519,7 @@ async def test_uuid_system_with_duplicate_cli_name_refuses_before_ssh(reset_boun
         {"UUID": SYSTEM, "SystemName": "sys-R1"},
         {"UUID": "00000000-0000-0000-0000-000000000099", "SystemName": "sys-R1"},
     ]
-    with pytest.raises(ValueError, match="Ambiguous"):
+    with pytest.raises(ValueError, match="unique CLI name"):
         await reset_lpar_memory_statistics(
             state.hmc,
             "guest-R1",
@@ -539,3 +539,36 @@ async def test_context_qualifies_cli_name_from_one_snapshot(reset_boundary):
     assert context["system_name"] == "sys-R1"
     state.hmc.list_system_summaries.assert_awaited_once()
     state.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duplicate", [False, True])
+async def test_uuid_shaped_cli_name_is_matched_literally(reset_boundary, duplicate):
+    from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
+    from hmcpctl.operations.lpar.memory_statistics import (
+        _context,
+        reset_lpar_memory_statistics,
+    )
+
+    state = reset_boundary
+    state.system["Resource"]["SystemName"] = SYSTEM
+    summaries = [{"UUID": SYSTEM.upper(), "SystemName": SYSTEM}]
+    if duplicate:
+        summaries.append(
+            {"UUID": "bbbbbbbb-0000-0000-0000-000000000002", "SystemName": SYSTEM}
+        )
+    state.hmc.list_system_summaries.return_value = summaries
+    if duplicate:
+        with pytest.raises(ValueError, match="unique CLI name"):
+            await reset_lpar_memory_statistics(
+                state.hmc,
+                "guest-R1",
+                LparMemoryStatisticsReset(),
+                system_name_or_uuid=SYSTEM,
+            )
+        state.command.assert_not_awaited()
+        state.description.assert_not_awaited()
+    else:
+        context = await _context(state.hmc, SYSTEM, "guest-R1")
+        assert context["system_name"] == SYSTEM
+        state.hmc.list_system_summaries.assert_awaited_once()
