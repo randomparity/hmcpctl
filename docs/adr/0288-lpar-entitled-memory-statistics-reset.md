@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for #1777; adopted for design review, implementation held.
+Accepted (2026-10-28)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # Entitled-memory statistics reset — full design for #1777
 
-Proposed design; implementation and hardware remain held behind normal gates.
+Implemented; live reset evidence remains unevidenced.
 ADR0288; M250; EMPTY exclusions; parent #638 D04. Sourcebase2ff6c6f7;
 read-only integration context616a7dbf. Operator decisions are recorded in the issue workflow.
 
