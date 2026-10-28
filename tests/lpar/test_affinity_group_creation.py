@@ -703,25 +703,29 @@ def test_affinity_appends_after_landed_memory_layout_inputs():
 
     from hmcpctl.ssh.lpar import create_lpar_via_cli
 
-    assert [item.name for item in fields(core.LparCreation)][-3:] == [
+    assert [item.name for item in fields(core.LparCreation)][-4:] == [
         "memory_layout",
         "virtual_serial_adapters",
+        "creation_memory",
         "affinity_group_id",
     ]
-    assert [item.name for item in fields(core.LparCreationResult)][-3:] == [
+    assert [item.name for item in fields(core.LparCreationResult)][-4:] == [
         "memory_layout_step",
         "serial_step",
+        "creation_memory_step",
         "affinity_group_step",
     ]
-    assert list(inspect.signature(create_vios).parameters)[-4:] == [
+    assert list(inspect.signature(create_vios).parameters)[-5:] == [
         "memory_layout",
         "max_virtual_slots",
         "virtual_serial_adapters",
+        "creation_memory",
         "affinity_group_id",
     ]
-    assert list(inspect.signature(create_lpar_via_cli).parameters)[-3:] == [
+    assert list(inspect.signature(create_lpar_via_cli).parameters)[-4:] == [
         "memory_layout",
         "virtual_serial_adapters",
+        "creation_memory",
         "affinity_group_id",
     ]
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
 import typer
@@ -21,10 +22,12 @@ from hmcpctl.operations.lpar.security_policy import (
 
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
 from ...documents.lpar_affinity_group import parse_affinity_group_cli
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
+from ...operations.lpar.creation_memory import CreationMemoryVerification
 from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 from ...operations.partition_state import PartitionState
 from ...operations.vios.core import create_vios, list_vios, power_vios
@@ -239,6 +242,61 @@ def vios_create(
         str | None,
         typer.Option("--virtual-serial-adapters", help=SERIAL_INPUT_HELP),
     ] = None,
+    mem_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--mem-mode",
+            help="Explicit ded/shared memory mode; omitted preserves defaults",
+        ),
+    ] = None,
+    desired_io_entitled_mem: Annotated[
+        str | None,
+        typer.Option(
+            "--desired-io-entitled-mem",
+            help="Shared-mode positive integer MiB or exact auto",
+        ),
+    ] = None,
+    mem_weight: Annotated[
+        int | None,
+        typer.Option(
+            "--mem-weight", help="Shared-mode memory weight 0–255; zero is explicit"
+        ),
+    ] = None,
+    primary_paging_vios_name: Annotated[
+        str | None,
+        typer.Option(
+            "--primary-paging-vios-name",
+            help="Exact contained paging VIOS name; excludes primary ID",
+        ),
+    ] = None,
+    primary_paging_vios_id: Annotated[
+        int | None,
+        typer.Option(
+            "--primary-paging-vios-id",
+            help="Positive paging VIOS PartitionID; excludes primary name",
+        ),
+    ] = None,
+    secondary_paging_vios_name: Annotated[
+        str | None,
+        typer.Option(
+            "--secondary-paging-vios-name",
+            help="Exact contained secondary VIOS name; excludes secondary ID",
+        ),
+    ] = None,
+    secondary_paging_vios_id: Annotated[
+        str | None,
+        typer.Option(
+            "--secondary-paging-vios-id",
+            help="Positive PartitionID or exact none to disable designation",
+        ),
+    ] = None,
+    mem_expansion: Annotated[
+        str | None,
+        typer.Option(
+            "--mem-expansion",
+            help="Saved AME zero or exact numeric 1–10; no AIX intent or runtime proof",
+        ),
+    ] = None,
     affinity_group_id: Annotated[
         str | None,
         typer.Option(
@@ -247,7 +305,39 @@ def vios_create(
         ),
     ] = None,
 ) -> None:
-    """Create an inactive VIOS through its existing owner."""
+    """Create an inactive VIOS through its existing owner.
+
+    Creation memory checks saved and current configuration separately. Saved AME
+    declares no AIX intent; AIX-only runtime compression and activation are unproven.
+    Missing postconditions are incomplete, without replay or rollback.
+    """
+    try:
+        creation_memory = TypeAdapter(LparCreationMemory).validate_python(
+            {
+                "mem_mode": mem_mode,
+                "desired_io_entitled_mem": None
+                if desired_io_entitled_mem is None
+                else "auto"
+                if desired_io_entitled_mem == "auto"
+                else int(desired_io_entitled_mem),
+                "mem_weight": mem_weight,
+                "primary_paging_vios_name": primary_paging_vios_name,
+                "primary_paging_vios_id": primary_paging_vios_id,
+                "secondary_paging_vios_name": secondary_paging_vios_name,
+                "secondary_paging_vios_id": None
+                if secondary_paging_vios_id is None
+                else "none"
+                if secondary_paging_vios_id == "none"
+                else int(secondary_paging_vios_id),
+                "mem_expansion": None
+                if mem_expansion is None
+                else Decimal(mem_expansion),
+            }
+        )
+    except (ValueError, InvalidOperation) as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="creation memory"
+        ) from None
     serial = load_virtual_serial_adapters(virtual_serial_adapters)
     try:
         validate_serial_input(serial, max_virtual_slots)
@@ -313,10 +403,20 @@ def vios_create(
             hardware_mem_expansion=hardware_mem_expansion,
             memory_layout=layout,
             max_virtual_slots=max_virtual_slots,
+            creation_memory=creation_memory,
             virtual_serial_adapters=serial,
             affinity_group_id=affinity,
         )
     )
+    if isinstance(result, dict) and isinstance(
+        result.get("creation_memory_verification"), CreationMemoryVerification
+    ):
+        result = {
+            **result,
+            "creation_memory_verification": asdict(
+                result["creation_memory_verification"]
+            ),
+        }
     print_json(result)
 
 

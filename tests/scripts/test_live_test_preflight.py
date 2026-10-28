@@ -1143,3 +1143,43 @@ def test_vios_source_preflight_rejects_effect_assertions(monkeypatch, flag):
         preflight.main(args)
     assert caught.value.code == 2
     route.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "shared-lpar",
+        "redundant-lpar",
+        "ame-zero-vios",
+        "ame-positive-vios",
+        "controller-shared-lpar",
+    ],
+)
+def test_c07_preflight_reports_one_case_current_grant_and_exact_cap(case):
+    config = live_config.LiveTestConfig(
+        creation_memory_case=case,
+        creation_memory_primary_vios_name="paging-a" if "lpar" in case else "",
+        creation_memory_secondary_vios_name="paging-b"
+        if case == "redundant-lpar"
+        else "",
+        creation_memory_fresh_delete_authorized=True,
+    )
+    verdict = preflight.arm_verdicts(config, "creation-memory")[0]
+    assert verdict.runnable
+    effects = " ".join(verdict.mutates)
+    for phrase in (
+        case,
+        "max1 create/1 LPAR stamp",
+        "zero VIOS stamps",
+        "1 exact fresh UUID delete",
+        "current",
+        "mandatory read-only recovery",
+        "no runtime proof",
+    ):
+        assert phrase in effects
+
+
+def test_c07_preflight_unarmed_without_current_permission():
+    assert not preflight.arm_verdicts(live_config.LiveTestConfig(), "creation-memory")[
+        0
+    ].runnable
