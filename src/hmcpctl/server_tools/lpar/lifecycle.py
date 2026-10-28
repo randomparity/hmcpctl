@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import StrictBool
+
 from ..._app import (
     with_client,
 )
@@ -32,11 +34,65 @@ from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_proc
 from ...operations.lpar.memory import change_lpar_memory
 from ...operations.lpar.memory_move import move_lpar_memory
 from ...operations.lpar.memory_statistics import reset_lpar_memory_statistics
+from ...operations.lpar.paging import PagingSwitchoverResult, switch_lpar_paging_vios
 from ...operations.lpar.processor_move import move_lpar_processors
 from ...operations.lpar.processors import change_lpar_processors
 from ...tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()
+
+
+@tool(
+    effect="mutate",
+    operation="lpar.switch_paging_vios",
+    target_kind="lpar",
+    extra_targets=(("vios", "expected_current_paging_vios_name_or_uuid"),),
+    exhaustive_targets=False,
+)
+def hmc_switch_lpar_paging_vios(
+    lpar_name_or_uuid: str,
+    system_name_or_uuid: str,
+    expected_current_paging_vios_name_or_uuid: str,
+    exclusive_writer_window: StrictBool,
+    profile: str | None = None,
+) -> PagingSwitchoverResult:
+    """Switch a running shared partition's redundant paging provider once.
+
+    Requires an all-targets grant and ownership authorization for the consumer
+    and both providers. Missing required evidence refuses before submission.
+    Results retain native completion and independent provider/preservation facts;
+    uncertain outcomes require inspection. No retry or automatic reverse.
+
+    Args:
+        lpar_name_or_uuid: Contained LPAR or VIOS name or UUID.
+        system_name_or_uuid: Required containing managed system name or UUID.
+        expected_current_paging_vios_name_or_uuid: Expected current paging VIOS name or UUID.
+        exclusive_writer_window: Literal true acknowledgement of a coordinated writer window.
+        profile: Optional configured HMC connection profile.
+    """
+    if type(exclusive_writer_window) is not bool or exclusive_writer_window is not True:
+        raise ValueError("Paging switchover requires exclusive_writer_window=true")
+    if any(
+        not isinstance(value, str) or not value.strip()
+        for value in (
+            lpar_name_or_uuid,
+            system_name_or_uuid,
+            expected_current_paging_vios_name_or_uuid,
+        )
+    ):
+        raise ValueError(
+            "Paging switchover requires nonblank system, partition and expected provider"
+        )
+    return with_client(
+        lambda hmc: switch_lpar_paging_vios(
+            hmc,
+            lpar_name_or_uuid,
+            system_name_or_uuid=system_name_or_uuid,
+            expected_current_paging_vios_name_or_uuid=expected_current_paging_vios_name_or_uuid,
+            exclusive_writer_window=exclusive_writer_window,
+        ),
+        profile=profile,
+    )
 
 
 @tool(
