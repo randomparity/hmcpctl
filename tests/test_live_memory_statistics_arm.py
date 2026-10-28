@@ -363,7 +363,7 @@ async def test_observation_ids_and_matrix_preserve_bounded_claim(live_boundary):
     document = await exercise(live_boundary)
     observation = state.observations[-1]
     assert observation["operation"] == "lpar.reset_memory_statistics"
-    assert observation["observation"]["scenario"] == arm.SCENARIO
+    assert observation["observation"]["scenario"] == "st67-lpar-memory-statistics-reset"
     assert observation["observation"]["assertions"] == [
         "native-command-completed",
         "usable-before",
