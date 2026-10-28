@@ -2255,6 +2255,7 @@ def main(argv: list[str] | None = None) -> int:
         help="ST67 bounded raw-record recovery; never restores counter history",
     )
     source_packets.add_argument("--vios-ame-source-packet", type=Path)
+    source_packets.add_argument("--vios-boot-source-packet", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
@@ -2274,6 +2275,27 @@ def main(argv: list[str] | None = None) -> int:
                 "recover",
                 "--packet",
                 str(args.vios_ame_source_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+                "--output",
+                str(args.output),
+            ]
+        )
+
+    if args.vios_boot_source_packet:
+        from live_test import vios_boot_source
+
+        if not args.packet_sha256 or not args.output:
+            parser.error(
+                "VIOS boot source recovery requires packet digest and private output"
+            )
+        return vios_boot_source.main(
+            [
+                "recover",
+                "--packet",
+                str(args.vios_boot_source_packet),
                 "--packet-sha256",
                 args.packet_sha256,
                 "--results",

@@ -3084,6 +3084,80 @@ def test_statistics_recovery_routes_without_clean_claim(
         assert "reset verification unavailable" in output.out
 
 
+def test_vios_boot_source_recovery_exact_route(monkeypatch):
+    from live_test import vios_boot_source
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(vios_boot_source, "main", route)
+    assert (
+        recovery.main(
+            [
+                "--vios-boot-source-packet",
+                "p.json",
+                "--packet-sha256",
+                "a" * 64,
+                "--results",
+                "capture/results.json",
+                "--output",
+                "private",
+            ]
+        )
+        == 2
+    )
+    route.assert_called_once_with(
+        [
+            "recover",
+            "--packet",
+            "p.json",
+            "--packet-sha256",
+            "a" * 64,
+            "--results",
+            "capture/results.json",
+            "--output",
+            "private",
+        ]
+    )
+
+
+@pytest.mark.parametrize("other", ["--source-packet", "--activation-source-packet"])
+def test_vios_boot_source_recovery_packets_are_exclusive(monkeypatch, other):
+    from live_test import vios_boot_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_boot_source, "main", route)
+    with pytest.raises(SystemExit) as caught:
+        recovery.main(
+            [
+                "--vios-boot-source-packet",
+                "p",
+                other,
+                "q",
+                "--packet-sha256",
+                "a" * 64,
+                "--output",
+                "o",
+            ]
+        )
+    assert caught.value.code == 2
+    route.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["--packet-sha256", "--output"])
+def test_vios_boot_source_recovery_requires_each_binding(monkeypatch, missing):
+    from live_test import vios_boot_source
+
+    route = Mock()
+    monkeypatch.setattr(vios_boot_source, "main", route)
+    args = ["--vios-boot-source-packet", "p"]
+    for flag, value in {"--packet-sha256": "a" * 64, "--output": "o"}.items():
+        if flag != missing:
+            args.extend([flag, value])
+    with pytest.raises(SystemExit) as caught:
+        recovery.main(args)
+    assert caught.value.code == 2
+    route.assert_not_called()
+
+
 def _c07_document(phase="complete"):
     from live_test import config as settings
 
