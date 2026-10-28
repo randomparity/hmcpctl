@@ -215,8 +215,13 @@ C. Require acknowledged native create plus full post-create snapshot: one fresh 
 VirtualIOServer UUID/name/positive ID, REST state exactly "not activated", initial marker,
 fixed resources and no foreign drift. Read its full native header and bind that baseline.
 Bind this snapshot as B1 and first valid full native row as N1.
-No unknown create may be adopted or cleaned. Require a unique default profile with dedicated
-memory and AME disabled; unavailable resource evidence holds before any boot write.
+No unknown create may be adopted or cleaned. Require a unique contained default profile with
+matching protected semantic witness/ETag, dedicated memory and AME disabled. Prove every
+configured memory/CPU minimum, desired and maximum, shared uncapped mode and expansion0
+from that saved profile using strict unique finite scalars. Inactive current configurations
+may contain uninitialized numeric/mode placeholders: require their resource containers and
+preserve all current fields exactly in B1, without using those placeholders as configured
+tuple proof. Missing/ambiguous saved resources or associations hold before any boot write.
 D. For each exact case: fresh REST detail and full native read bind UUID/name/ID/type/marker
 and unchanged baseline/nonboot fields; check current inactivity/grant/source/reserves; persist
 case-index/record hash/write-intent; consume that case token before SSH; submit once. Follow
