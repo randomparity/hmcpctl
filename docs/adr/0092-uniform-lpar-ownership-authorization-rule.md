@@ -133,6 +133,7 @@ against that commit rather than maintained forward.
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
+| `reset_lpar_memory_statistics` | `operations/lpar/memory_statistics.py::reset_lpar_memory_statistics` | guarded (`operations/lpar/memory_statistics.py::reset_lpar_memory_statistics`, via `authorize_lpar_mutation` after selected-system containment); fixed `ownership_override=False`, no public override; LPAR/VIOS union requires MCP all-targets | #1777 / ADR 0288 |
 | `configure_lpar_security_policy` | `operations/lpar/security_policy.py::configure_lpar_security_policy` | guarded (`operations/lpar/security_policy.py::configure_lpar_security_policy`, via contained LPAR/VIOS authorization helpers); explicit settings plus existing operator confirmation declare consent | #1765 / ADR 0277 |
 | `configure_lpar_vtpm` | `operations/lpar/vtpm.py::configure_lpar_vtpm` | guarded (`operations/lpar/vtpm.py::configure_lpar_vtpm`, via contained LPAR/VIOS authorization helpers); destructive enabled disable additionally requires independent consent | #1764 / ADR 0276 |
 | `delete_lpar` | `operations/lpar/core.py::delete_lpar` | guarded (`operations/lpar/core.py::delete_lpar`) | — |
