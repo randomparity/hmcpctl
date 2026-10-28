@@ -419,14 +419,11 @@ def _recovery_status(before, after, terminal):
     )
     if current_drift:
         diagnostics += ("current-provider",)
-    status = (
-        "drift"
-        if current_drift or preservation == "drifted"
-        else "clean"
-        if preservation == "verified" and terminal
-        else "unverified"
-    )
-    return status, diagnostics
+    if current_drift or preservation == "drifted":
+        return "drift", diagnostics
+    if preservation == "verified" and terminal:
+        return "clean", diagnostics
+    return "unverified", diagnostics
 
 
 async def recover_document(hmc_config, document) -> dict:
