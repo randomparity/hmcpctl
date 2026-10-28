@@ -2,9 +2,10 @@
 
 ## Status
 
-Proposed for #1776 under the existing campaign reservation0287; two design passes dispositioned, awaiting A1.
+Accepted for #1776 under the existing campaign reservation0287; D2/A2 are terminal.
 C07 and #1777 source prerequisites are landed at base 7a74c4513cd13ab50b33fd16432faea0e8003d01;
-normal gates remain required. This record grants no implementation or hardware execution.
+Implementation follows the reviewed contract; product/security and delivery gates remain required.
+This record grants no hardware execution.
 
 ## Context
 
@@ -14,7 +15,7 @@ Two pool providers and a saved designation alone do not establish current redund
 
 ## Decision
 
-Propose one typed operation with expected-current provider and coordinated writer acknowledgment.
+Use one typed operation with expected-current provider and coordinated writer acknowledgment.
 Require positive configured P/S with provenance, independent current redundant pairR and
 {P,S}=R; verify effective current provider separately. Do not claim runtime role orientation.
 Use fixed native writer, bounded contained observations and three-resource authorization.

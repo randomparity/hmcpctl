@@ -6,7 +6,7 @@ Accepted (2026-08-25)
 
 > Amended by [ADR 0276](0276-lpar-virtual-tpm-configuration.md) for the new VIOS vTPM update branch only; unrelated VIOS policy is unchanged.
 
-> Proposed amendment by [ADR 0287](0287-lpar-paging-vios-switchover.md), #1776:
+> Amended by [ADR 0287](0287-lpar-paging-vios-switchover.md), #1776:
 > `switch_lpar_paging_vios` remains unconditionally guarded, but accepts no per-call
 > ownership override. This operation-only exception to §5 leaves every other
 > operation and ownership rule unchanged.
@@ -196,7 +196,7 @@ wildcard records the operation's actual scope.
 | `change_lpar_processors` | `operations/lpar/processors.py::change_lpar_processors` | guarded (`operations/lpar/processors.py::change_lpar_processors`, via `authorize_lpar_mutation` after selected-system containment) | #1778 / ADR 0296 |
 | `change_lpar_memory` | `operations/lpar/memory.py::change_lpar_memory` | guarded (`operations/lpar/memory.py::change_lpar_memory`, via `authorize_lpar_mutation` after selected-system containment) | #1774 / ADR 0285 |
 | `move_lpar_memory` | `operations/lpar/memory_move.py::move_lpar_memory` | guarded (`operations/lpar/memory_move.py::move_lpar_memory`, via `authorize_lpar_mutation` for both contained endpoints) | #1775 / ADR 0286 |
-| Planned paging-VIOS switchover | PLANNED operation `switch_lpar_paging_vios` (ADR 0287); implementation absent | PLANNED: must reach existing ownership authorization unconditionally for contained target and both paging providers; no ownership override (operation-only ADR 0287 exception to §5); no current guard-coverage claim | #1776 / ADR 0287 |
+| `switch_lpar_paging_vios` | `operations/lpar/paging.py::switch_lpar_paging_vios` | guarded (`operations/lpar/paging.py::switch_lpar_paging_vios`, via `authorize_lpar_mutation` for contained consumer and both paging providers); no ownership override (operation-only ADR0287 exception to §5) | #1776 / ADR 0287 |
 | `apply_lpar_pcie_assignments` | `operations/lpar/assignments.py::apply_lpar_pcie_assignments` | guarded via `apply_validated_lpar_pcie_assignments` delegates (`operations/virtualization/pcie.py::assign_dedicated_pcie_slot`, `operations/virtualization/pcie.py::assign_sriov_logical_port`, `operations/virtualization/vnic.py::add_vnic`) | — |
 | `add_network_adapter` | `operations/virtualization/adapters.py::add_network_adapter` | guarded (`operations/virtualization/adapters.py::add_network_adapter`) | #372 |
 | `add_vscsi_adapter` | `operations/virtualization/adapters.py::add_vscsi_adapter` | guarded (`operations/virtualization/adapters.py::add_vscsi_adapter`) | #372 |

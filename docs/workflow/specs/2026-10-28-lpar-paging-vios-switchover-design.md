@@ -2,7 +2,8 @@
 
 ## Status and authority
 
-Proposed for formal design review and scope audit; no implementation or hardware grant.
+Design accepted after two design passes and A1/A2 scope audits. Root authorized bounded
+implementation against this contract; no hardware grant applies.
 Landed base 7a74c4513cd13ab50b33fd16432faea0e8003d01. C07 merged at
 decf4770515648e5f30248174cc8ad1c1572e196; #1777 merged at this base. Borrowed API hashes and
 remote completion/redaction provenance were reconciled against these landed Git objects.
@@ -10,10 +11,11 @@ Root confirmed the existing0287 reservation, docs/adr/0287-lpar-paging-vios-swit
 no new reservation is made. This design retains EMPTY exclusions/M250.
 Compact contract-plan format approved call_65842dc5d84c4b14887170cb35930280/0.
 Governing accounting approved call_5f8116ae70774f95a0057d07d16b0c9a/0: full set read,
-exclude only unchanged673 ADR0092 lines numerically; no implementation/review grant.
+exclude only unchanged673 ADR0092 lines numerically; this accounting approval grants no review pass.
 No-override interface approved call_bce9f35688384d17b6309510046fed67/0.
-Scope is frozen under q1776-6c7a309d; two design passes are terminal, A1 remains pending.
-Both source prerequisites are landed; design disposition is not implementation authorization.
+Scope is frozen under q1776-6c7a309d; D2/A2 are terminal. Actual source PR1818 landing
+b5ef629181a6b0c02585096558e2fe29e96c738c is integrated by ordinary merge.
+Normal product/security, final verification and delivery gates remain pending.
 
 ## Frozen scope charter
 
@@ -108,11 +110,11 @@ exception class, suppress the unsafe chained message, emit no raw cause/override
 no switch. Leave the shared helper unchanged; precheck errors are never submission evidence.
 No stable facade export, generic proxy or configurable source predicate is added.
 
-Proposed CLI: lpars paging-switchover PARTITION --system SYSTEM
+CLI: lpars paging-switchover PARTITION --system SYSTEM
  --expected-current-paging-vios NAME_OR_UUID --exclusive-writer-window [--yes].
 --yes skips confirmation only, never supplies the window acknowledgment. Use asdict(result)
 then existing print_json; non-completed result exits1 after JSON, invalid input uses usage_error.
-Proposed MCP hmc_switch_lpar_paging_vios uses the four required selectors/window arguments
+MCP hmc_switch_lpar_paging_vios uses the four required selectors/window arguments
 above plus profile:str|None=None. effect=mutate, operation=lpar.switch_paging_vios,
 target_kind=lpar, automatic partition/system selectors and one extra expected-provider vios selector,
 exhaustive_targets=False. Discovery of the other provider requires all-targets; a scoped table
@@ -288,7 +290,7 @@ unevidenced. Library/MCP serialize typed facts consistently; CLI returns1 on inc
 ## Live scenario and recovery
 
 ST66/group lpar-paging-switchover/scenario st66-lpar-paging-switchover uses already
-configured redundancy; it creates/allocates nothing. Recheck collisions at adoption.
+configured redundancy; it creates/allocates nothing. ST66 remains the assigned arm.
 Preflight pins clean deployed commit/tree, destination, fixture ownership, positive before vector,
 expected-current/window and private durable checkpoint. Run one forward attempt; independently
 capture expected provider and all retained facts. Always run read-only recovery against original
@@ -303,8 +305,9 @@ Use existing preflight→named wrapper→recovery→filtered evidence generator;
 ## Validation and implementation bounds
 
 Contract plan inventories domain/transport/presentation/source/live tests and exact commands.
-D1/D2 findings are dispositioned within the frozen scope; A1 remains required. No passing
-implementation or hardware evidence is claimed. Proposed implementation estimate
+D1/D2 findings and A2-1 are dispositioned within the frozen scope. Focused implementation
+checks are retained privately; final verification and hardware evidence are not claimed.
+Implementation estimate
 3000–4500 gross changed lines; M250 remains fixed. No tool/dependency floor or public facade change.
 Required before delivery: focused meaningful red/green tests, source-shaped negatives, regenerate
 metadata/tools/scenarios, just verify, pinned prek all-files and supported Python3.11–3.14 CI.
