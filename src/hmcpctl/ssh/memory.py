@@ -46,6 +46,23 @@ async def read_lpar_paging_devices(config: HMCConfig, system_name: str) -> str:
     )
 
 
+async def switch_lpar_paging_provider(
+    config: HMCConfig, system_name: str, partition_id: int
+) -> str:
+    """Submit exactly one native toggle; the operation owns intent/readback."""
+    if not math.isfinite(config.ssh_timeout) or config.ssh_timeout <= 0:
+        raise ValueError("Paging switch requires a finite positive ssh_timeout")
+    if not isinstance(system_name, str) or not system_name.strip():
+        raise ValueError("Paging switch requires a nonblank system_name")
+    if type(partition_id) is not int or partition_id < 1:
+        raise ValueError("Paging switch requires a positive integer partition_id")
+    return await run_hmc_command(
+        config,
+        f"chhwres -r mem -m {shlex.quote(system_name)} -o so --id {partition_id}",
+        max_output_bytes=65536,
+    )
+
+
 def _statistics_target(config: HMCConfig, system_name: str, partition_id: int) -> str:
     if not math.isfinite(config.ssh_timeout) or config.ssh_timeout <= 0:
         raise ValueError("Statistics reset requires a finite positive ssh_timeout")

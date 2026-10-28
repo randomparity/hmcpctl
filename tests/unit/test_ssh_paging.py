@@ -34,7 +34,12 @@ async def test_fixed_readers(monkeypatch, name, command):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("timeout", [float("inf"), float("nan"), 0, -1])
 @pytest.mark.parametrize(
-    "name", ["read_lpar_paging_memory", "read_lpar_paging_devices"]
+    "name",
+    [
+        "read_lpar_paging_memory",
+        "read_lpar_paging_devices",
+        "switch_lpar_paging_provider",
+    ],
 )
 async def test_invalid_timeout_zero_io(monkeypatch, timeout, name):
     entry = getattr(memory, name, None)
@@ -42,5 +47,18 @@ async def test_invalid_timeout_zero_io(monkeypatch, timeout, name):
     transport = AsyncMock()
     monkeypatch.setattr(memory, "run_hmc_command", transport)
     with pytest.raises(ValueError, match="finite positive"):
-        await entry(HMCConfig.from_mapping({"ssh_timeout": timeout}), "system")
+        args = (9,) if name == "switch_lpar_paging_provider" else ()
+        await entry(HMCConfig.from_mapping({"ssh_timeout": timeout}), "system", *args)
+    transport.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partition_id", [0, -1, True, "9", 9.5])
+async def test_fixed_writer_rejects_invalid_id(monkeypatch, partition_id):
+    transport = AsyncMock()
+    monkeypatch.setattr(memory, "run_hmc_command", transport)
+    with pytest.raises(ValueError, match="positive integer"):
+        await memory.switch_lpar_paging_provider(
+            HMCConfig.from_mapping({}), "system", partition_id
+        )
     transport.assert_not_called()
