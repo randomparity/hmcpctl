@@ -358,3 +358,43 @@ async def test_unknown_unchanged_attempt_is_not_recovery_completion(live_boundar
     result = await arm.recover_document(state.hmc_config, document)
     assert result["status"] == "unverified"
     boundary.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["pool", "provider"])
+@pytest.mark.parametrize("drift", [False, True])
+async def test_readonly_recovery_missing_reader_distinguishes_drift(
+    live_boundary, missing, drift
+):
+    from hmcpctl.errors import HMCError
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    boundary, state = live_boundary
+    boundary.change = False
+    boundary.error = HMCCLIError("unknown completion")
+    document = await exercise(live_boundary)
+    get = boundary.hmc._get.side_effect
+    if drift:
+        boundary.rows["LogicalPartition"] = boundary.rows["LogicalPartition"].replace(
+            "<PartitionState>running", "<PartitionState>not activated"
+        )
+
+    async def unavailable(path, *args, **kwargs):
+        if (
+            path.endswith("/SharedMemoryPool")
+            if missing == "pool"
+            else path.lower().endswith(PRIMARY)
+        ):
+            raise HMCError("read unavailable")
+        return await get(path, *args, **kwargs)
+
+    boundary.hmc._get.side_effect = unavailable
+    before = deepcopy(document)
+    result = await arm.recover_document(state.hmc_config, document)
+    assert result["status"] == ("drift" if drift else "unverified")
+    assert result["after"]["unavailable"]
+    assert set(result["after"]["invalid"]) == (
+        {"consumer-not-running"} if drift else set()
+    )
+    assert document == before
+    boundary.submit.assert_awaited_once()

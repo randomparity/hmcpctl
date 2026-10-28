@@ -498,3 +498,36 @@ async def test_uncontained_consumer_is_never_fetched(paging_boundary):
         call.args[0].lower().endswith(foreign)
         for call in paging_boundary.hmc._get.await_args_list
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["pool", "provider"])
+async def test_missing_pool_or_provider_detail_retains_independent_facts(
+    paging_boundary, missing
+):
+    from hmcpctl.errors import HMCError
+
+    b = paging_boundary
+    get = b.hmc._get.side_effect
+
+    async def unavailable(path, *args, **kwargs):
+        if (
+            path.endswith("/SharedMemoryPool")
+            if missing == "pool"
+            else path.lower().endswith(PRIMARY)
+        ):
+            raise HMCError("read unavailable")
+        return await get(path, *args, **kwargs)
+
+    b.hmc._get.side_effect = unavailable
+    result = await observe(b)
+    assert result.unavailable and result.invalid == ()
+    assert result.current_native.uuid == result.current_uom.uuid == SECONDARY
+    assert result.configured.primary.uuid == PRIMARY and len(result.paths) == 2
+    assert result.native_redundant is True
+    if missing == "provider":
+        assert result.pool_uuid == POOL and result.pool_id == 0
+        assert result.unique_device_id == "device-one" and result.uom_redundant is True
+        assert len(result.providers) == 2 and result.provider_dedicated == (None, True)
+    else:
+        assert result.pool_uuid is None and result.uom_redundant is None

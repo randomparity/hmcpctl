@@ -467,3 +467,89 @@ async def test_acknowledgment_without_uom_after_proof_is_unverified(attempt):
     )
     assert result.after.current_uom is None and "uom-current" in result.diagnostics
     attempt.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["pool", "provider"])
+@pytest.mark.parametrize("drift", [False, True])
+async def test_unavailable_post_reader_is_not_invented_drift(attempt, missing, drift):
+    from hmcpctl.errors import HMCError
+
+    b = attempt
+    b.change = False
+    b.error = HMCCLIError("unknown completion")
+    get = b.hmc._get.side_effect
+
+    async def unavailable(path, *args, **kwargs):
+        if b.submit.await_count:
+            if drift:
+                b.rows["LogicalPartition"] = b.rows["LogicalPartition"].replace(
+                    "<PartitionState>running", "<PartitionState>not activated"
+                )
+            if (
+                path.endswith("/SharedMemoryPool")
+                if missing == "pool"
+                else path.lower().endswith(PRIMARY)
+            ):
+                raise HMCError("read unavailable")
+        return await get(path, *args, **kwargs)
+
+    b.hmc._get.side_effect = unavailable
+    result = await run(b)
+    assert result.submission == "unknown" and result.observation == "unchanged"
+    assert result.preservation == ("drifted" if drift else "unavailable")
+    assert result.outcome == ("partial" if drift else "unverified")
+    assert result.after.unavailable and result.workflow_completed is False
+    assert set(result.after.invalid) == ({"consumer-not-running"} if drift else set())
+    b.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_readable_device_drift_survives_provider_detail_failure(attempt):
+    from hmcpctl.errors import HMCError
+
+    b = attempt
+    b.change = False
+    b.error = HMCCLIError("unknown completion")
+    get = b.hmc._get.side_effect
+
+    async def unavailable(path, *args, **kwargs):
+        if b.submit.await_count:
+            b.rows["SharedMemoryPool"] = b.rows["SharedMemoryPool"].replace(
+                "device-one", "device-two"
+            )
+            if path.lower().endswith(PRIMARY):
+                raise HMCError("provider detail unavailable")
+        return await get(path, *args, **kwargs)
+
+    b.hmc._get.side_effect = unavailable
+    result = await run(b)
+    assert result.preservation == "drifted" and result.outcome == "partial"
+    assert result.after.unique_device_id == "device-two"
+    assert "unique_device_id" in result.diagnostics and result.after.unavailable
+    assert result.after.invalid == ()
+    b.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["pool", "provider"])
+async def test_missing_before_reader_still_prevents_submission(attempt, missing):
+    from hmcpctl.errors import HMCError
+
+    b = attempt
+    get = b.hmc._get.side_effect
+
+    async def unavailable(path, *args, **kwargs):
+        if (
+            path.endswith("/SharedMemoryPool")
+            if missing == "pool"
+            else path.lower().endswith(PRIMARY)
+        ):
+            raise HMCError("read unavailable")
+        return await get(path, *args, **kwargs)
+
+    b.hmc._get.side_effect = unavailable
+    with pytest.raises(ValueError, match="prerequisites are unavailable"):
+        await run(b)
+    b.submit.assert_not_awaited()
+    b.description.assert_not_awaited()
