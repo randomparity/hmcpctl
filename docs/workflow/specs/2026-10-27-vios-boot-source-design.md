@@ -133,7 +133,8 @@ are independently proven immediately before its use, not supplied by packet iden
 
 Private journal schema1 has exact top-level keys schema_version, source_only, run,
 packet_sha256, binding_sha256, baseline_sha256, observed_baseline_sha256, encoding_id, fixture,
-phase, create, cases, deletion, snapshots, failure, transport, recovery. Unobserved values
+phase, create, cases, deletion, snapshots, failure, transport, recovery, uncertainty_native.
+Unobserved values
 are explicit null/not-attempted, not fabricated defaults. run={group:"vios-boot-source",
 subtasks:[],tested_commit,tested_tree,tree_clean,imported_source_sha256,started,finished,partial}.
 fixture carries the packet fixture plus observed UUID/ID when positively confirmed.
@@ -145,6 +146,9 @@ snapshot_index,observation}; observation is unobserved,exact,rejected,mismatch,u
 indices are0..7 internally; renderer prints1..8. snapshots retain the existing ame.snapshot
 shape and digest; native_readback retains complete bounded private raw text and parsed cells.
 A reported exact match is re-derived from record/literal/header/identity/snapshot data.
+uncertainty_native is null or {qualifying:false,witness:{raw,cells}}, retaining only the
+successful reserved native observation privately. It never alters unknown execution, held
+state or failure; non-null forbids historical qualification and public rendering omits it.
 recovery={history_complete,baseline_agrees_now,fixture_absent_now,capture_session_closed,clean}
 is null until recovery; empty/missing/invalid history remains incomplete. failure holds a
 bounded fixed category and last phase, never provider text in publishable output. transport

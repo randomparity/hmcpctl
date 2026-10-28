@@ -711,6 +711,7 @@ async def test_history_rederives_every_witness(rig):
         lambda d: d["deletion"]["observation"].update(predelete_native=None),
         lambda d: d["fixture"].update(vios_uuid=V0),
         lambda d: d["run"].update(tree_clean=False),
+        lambda d: d.update(uncertainty_native={"qualifying": False, "witness": {}}),
     ]
     for edit in edits:
         changed = deepcopy(document)
@@ -1009,6 +1010,45 @@ async def test_session_real_closeout_and_initial_deadline(rig, monkeypatch, faul
         assert close["logoff"] == "unknown"
     if fault == "expired-setup":
         assert not w.http
+
+
+@pytest.mark.asyncio
+async def test_session_prelogoff_checkpoint_failure_still_closes_own_session(
+    rig, monkeypatch
+):
+    from types import SimpleNamespace
+
+    p, w, _, out, _ = rig
+    p["baseline_sha256"] = None
+    output = out.parent / "preflight-initial"
+    output.mkdir(mode=0o700)
+    monkeypatch.setattr(source, "load_profile", lambda profile: config(p))
+    clients = []
+    client = source.BootSourceHMC
+
+    def connected(*args):
+        hmc = client(*args)
+        clients.append(hmc)
+        return hmc
+
+    monkeypatch.setattr(source, "BootSourceHMC", connected)
+    save = source._save
+
+    def failed(directory, document, name_out="results.json"):
+        if name_out == "session.json" and document["logoff"] == "unknown":
+            raise source.CheckpointError("synthetic pre-logoff checkpoint failure")
+        save(directory, document, name_out)
+
+    monkeypatch.setattr(source, "_save", failed)
+    args = SimpleNamespace(packet_sha256="d" * 64, output=output)
+    assert await source._run_stage(p, args, "preflight-initial", time.monotonic()) == 2
+    assert (
+        sum(method == "DELETE" and url.endswith("/Logon") for method, url in w.http)
+        == 1
+    )
+    assert clients[0]._http.is_closed
+    close = json.loads((output / "session.json").read_text())
+    assert close["logoff"] == "not-entered" and close["closed"] is False
 
 
 @pytest.mark.asyncio
@@ -1433,6 +1473,31 @@ async def test_uncertainty_completed_snapshot_survives_native_failure(rig, monke
     assert len(result["snapshots"]) == 3 and stored["snapshots"] == result["snapshots"]
     assert stored["phase"] == "held" and stored["cases"][0]["execution"] == "unknown"
     assert w.creates == 1 and len(w.boots) == 1 and not w.deletes
+
+
+@pytest.mark.asyncio
+async def test_uncertainty_native_witness_is_private_and_nonqualifying(rig):
+    import live_test_evidence as evidence
+
+    p, w, h, out, _ = rig
+    w.boot_fault = ("unknown", 0)
+    result = await run_capture(rig)
+    witness = {
+        "raw": native(p, VALUES[0]),
+        "cells": source.parse_native_header(native(p, VALUES[0]), identity(p)),
+    }
+    stored = json.loads((out / "results.json").read_text())
+    assert stored["uncertainty_native"] == {"qualifying": False, "witness": witness}
+    assert stored == result and result["failure"] == {
+        "category": "observation",
+        "phase": "boot-intent",
+    }
+    assert h.held and result["run"]["partial"] and result["phase"] == "held"
+    assert result["cases"][0]["execution"] == "unknown" and not w.deletes
+    assert not source._history_complete(p, result, h.packet_sha)
+    rendered = evidence.render(result)
+    assert "Interrupted/held" in rendered and p["fixture"]["name"] not in rendered
+    assert VALUES[0] not in rendered and "pend_boot_string" not in rendered
 
 
 @pytest.mark.asyncio

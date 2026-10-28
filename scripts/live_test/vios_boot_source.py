@@ -480,6 +480,7 @@ def _new_document(p: dict, packet_sha: str) -> dict:
         "failure": None,
         "transport": {"used": [0, 0, 0], "calls": []},
         "recovery": None,
+        "uncertainty_native": None,
     }
 
 
@@ -839,7 +840,10 @@ async def capture(
                 and hmc.uncertainty_native_safe
                 and _owned(uncertain, p, b0) == ident
             ):
-                await _header(hmc, p, ident, "uncertainty")
+                document["uncertainty_native"] = {
+                    "qualifying": False,
+                    "witness": await _header(hmc, p, ident, "uncertainty"),
+                }
         except CheckpointError:
             raise
         except (Exception, asyncio.CancelledError) as error:  # noqa: BLE001 — retain held original and any own-child residue
@@ -1038,6 +1042,7 @@ def _history_matches(p: dict, d: dict, packet_sha: str) -> bool:
         d["failure"] is not None
         or d["phase"] != "deleted-observed"
         or d["recovery"] is not None
+        or d["uncertainty_native"] is not None
     ):
         return False
     run = _keys(d["run"], set(template["run"]))
@@ -1297,9 +1302,12 @@ async def _run_stage(p: dict, args, stage: str, started: float) -> int:
     finally:
         if hmc.is_logged_on:
             close["logoff"] = "unknown"
-            try:
-                if not checkpoint_failed:
+            if not checkpoint_failed:
+                try:
                     checkpoint()
+                except CheckpointError:
+                    code = 2
+            try:
                 with budget.section("logoff", 1, 0, MIB, 20):
                     await hmc.logoff()
                 close["logoff"] = "acknowledged"
