@@ -1,6 +1,6 @@
 # C09 partition boot/start configuration design
 
-Status: Reviewed design, D1/D2 corrections collected; pending A1. No implementation/live credit.
+Status: D1/D2 and A1 complete; implementation in progress. No product live credit.
 Approved G4/raw/result/format and N1/N2/N3 contracts govern the normal build gates.
 Issue: #1770, native parent #638; claim q1770-02d745af.
 Landed anchor: b5ef629181a6b0c02585096558e2fe29e96c738c; tree equals qualified source d68a5c55.
@@ -367,5 +367,5 @@ Code rollback is a normal revert; it cannot undo stored HMC state or remove crea
 
 D1/D2 corrections use approved N1 readback matrix (call_e87c06ac1540470b8a0cc4b4710e34b2/0),
 N2 ST68 interface (call_539484bf951d4490947ca82068155684/0) and N3 cleanup policy
-(call_c246acf3a8364b1998a1c1a4a407f67c/0). Remaining: A1, build/proofs/regeneration/guardrails,
+(call_c246acf3a8364b1998a1c1a4a407f67c/0). A1 approved; remaining: build/proofs/regeneration/guardrails,
 CI and separately authorized product hardware; no controller/Unicode/product live claim.

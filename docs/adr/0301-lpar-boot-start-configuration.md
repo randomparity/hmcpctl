@@ -2,11 +2,11 @@
 
 ## Status
 
-Reviewed design correction (2026-10-28); pending A1, not implemented
+Reviewed design; A1 approved (2026-10-28); implementation in progress
 
 G4 readback, bounded Unicode/raw input and result direction are approved for design only;
 The #1770 contract-plan format and N1/N2/N3 corrections are approved for design.
-D1/D2 findings are dispositioned; A1/build gates and product live proof remain.
+D1/D2 findings are dispositioned; A1 approved; build gates and product live proof remain.
 
 ## Context
 
