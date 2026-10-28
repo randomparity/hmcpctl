@@ -61,10 +61,12 @@ def compare_paging(
             drift.append(field)
     for field in ("providers", "paths"):
         value = getattr(after, field)
+        members = set(value)
+        baseline = set(getattr(before, field))
+        if members - baseline or (len(value) == 2 and members != baseline):
+            drift.append(field)
         if len(value) != 2:
             missing.append(field)
-        elif set(value) != set(getattr(before, field)):
-            drift.append(field)
     if (
         len(after.providers) != 2
         or len(before.providers) != 2

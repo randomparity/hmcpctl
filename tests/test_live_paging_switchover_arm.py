@@ -423,3 +423,25 @@ async def test_partial_pool_readonly_recovery_retains_drift(
     )
     assert document == original
     boundary.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("missing", [False, True])
+async def test_known_member_readonly_recovery_precedes_completeness(
+    live_boundary, changed, missing
+):
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    boundary, state = live_boundary
+    boundary.change = False
+    boundary.error = HMCCLIError("unknown completion")
+    document = await exercise(live_boundary)
+    replacement = boundary.pool_member_response(changed, missing)
+    original = deepcopy(document)
+    result = await arm.recover_document(state.hmc_config, document)
+    assert result["status"] == ("drift" if changed else "unverified")
+    assert (replacement in {p["uuid"] for p in result["after"]["providers"]}) is changed
+    assert bool(result["after"]["unavailable"]) is missing
+    assert document == original
+    boundary.submit.assert_awaited_once()

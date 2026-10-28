@@ -586,3 +586,39 @@ async def test_partial_pool_before_attempt_remains_closed(attempt, missing):
         await run(attempt)
     attempt.submit.assert_not_awaited()
     attempt.description.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("missing", [False, True])
+async def test_known_member_after_attempt_precedes_completeness(
+    attempt, changed, missing
+):
+    b = attempt
+    b.change = False
+    b.error = HMCCLIError("unknown completion")
+    replacement = b.pool_member_response(changed, missing, after_attempt=True)
+    result = await run(b)
+    assert result.submission == "unknown" and result.observation == "unchanged"
+    assert result.preservation == (
+        "drifted" if changed else "unavailable" if missing else "verified"
+    )
+    assert result.outcome == ("partial" if changed else "unverified")
+    assert result.workflow_completed is False
+    assert (replacement in {p.uuid for p in result.after.providers}) is changed
+    assert bool(result.after.unavailable) is missing
+    if changed and missing:
+        assert result.after.invalid == () and "providers" in result.diagnostics
+    b.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changed,missing", [(False, True), (True, True), (True, False)]
+)
+async def test_known_member_prewrite_guard_stays_closed(attempt, changed, missing):
+    attempt.pool_member_response(changed, missing)
+    with pytest.raises(ValueError, match="prerequisites are unavailable"):
+        await run(attempt)
+    attempt.submit.assert_not_awaited()
+    attempt.description.assert_not_awaited()

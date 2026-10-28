@@ -150,7 +150,32 @@ def paging_boundary(monkeypatch):
 
         boundary.hmc._get.side_effect = partial
 
+    def pool_member_response(changed, missing, *, after_attempt=False):
+        replacement_uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+        replacement = entry(
+            "VirtualIOServer", replacement_uuid, provider("paging-c", 10)
+        )
+        get = boundary.hmc._get.side_effect
+
+        async def response(path, *args, **kwargs):
+            if path.lower().endswith(replacement_uuid):
+                return replacement
+            body = await get(path, *args, **kwargs)
+            if path.endswith("/VirtualIOServer"):
+                return body.replace("</feed>", replacement + "</feed>")
+            active = not after_attempt or boundary.submit.await_count
+            if active and path.endswith("/SharedMemoryPool"):
+                if changed:
+                    body = body.replace(PRIMARY, replacement_uuid)
+                if missing:
+                    body = body.replace("PagingServicePartitionTwo", "MissingProvider")
+            return body
+
+        boundary.hmc._get.side_effect = response
+        return replacement_uuid
+
     boundary.partial_pool_response = partial_pool_response
+    boundary.pool_member_response = pool_member_response
     return boundary
 
 
@@ -597,3 +622,25 @@ async def test_duplicate_pool_provider_is_a_positive_contradiction(paging_bounda
     assert result.invalid == ("pool-providers-not-distinct",)
     assert len(result.providers) == 2 and result.providers[0] == result.providers[1]
     assert result.pool_uuid == POOL and result.uom_redundant is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("missing", [False, True])
+async def test_known_member_observation_precedes_completeness(
+    paging_boundary, changed, missing
+):
+    from hmcpctl.operations.lpar.paging import compare_paging
+
+    before = await observe(paging_boundary)
+    replacement = paging_boundary.pool_member_response(changed, missing)
+    after = await observe(paging_boundary)
+    assert len(after.providers) == (1 if missing else 2)
+    assert (replacement in {p.uuid for p in after.providers}) is changed
+    assert bool(after.unavailable) is missing
+    preservation, diagnostics = compare_paging(before, after)
+    assert preservation == (
+        "drifted" if changed else "unavailable" if missing else "verified"
+    )
+    if changed:
+        assert "providers" in diagnostics
