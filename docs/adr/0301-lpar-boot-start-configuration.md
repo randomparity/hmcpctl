@@ -2,11 +2,9 @@
 
 ## Status
 
-Reviewed design; A1 approved (2026-10-28); implementation in progress
+Reviewed design; A1 approved; approved VIOS fixture stamp awaits changed-input A2
 
-G4 readback, bounded Unicode/raw input and result direction are approved for design only;
-The #1770 contract-plan format and N1/N2/N3 corrections are approved for design.
-D1/D2 findings are dispositioned; A1 approved; build gates and product live proof remain.
+G4/raw/result/format and N1/N2/N3 remain approved; D1/D2 findings are dispositioned.
 
 ## Context
 
@@ -48,21 +46,19 @@ Preserve LPAR boot results and outer creation schema; use existing workflow/VIOS
 Separate VIOS boot results have three observed keys; null only means observed empty read text.
 New raw text preserves printable Unicode/spacing, requires a non-whitespace character and has
 a 16KiB UTF-8 application budget; legacy path lists remain unchanged. Exact readback is mandatory.
-The VIOS source algorithm is qualified; approved ST68 remains unimplemented and unevidenced.
+ST68 may stamp one independently confirmed fresh VIOS fixture using the existing ownership helper.
+Separate acknowledgment/marker verification and bounded pre-session config gate guarded cleanup;
+No public creator change/hardware authority/live credit; the tracked design owns this finite contract.
 
 ## Considered & rejected
 
-- Count activation/path-list support as complete C09 coverage. verified: the P10/P11
-  mksyscfg creation rows and chsyscfg update rows distinguish the contexts; at baseline
-  6b85ac16, operations/lpar/boot_order.py accepts only slash-rooted path lists and returns
-  the write response, while activation.py submits an immediate job.
+- Count activation/path lists as C09 coverage: P10/P11 distinguish create/update; baseline
+  boot_order.py returned the write response and activation.py submits a separate immediate job.
 - Add fields to shared update/create LparSettings. judgment: a creation-only value keeps
   this finite scope from widening unrelated update inputs and documentation.
-- Reuse LPAR pending XML for VIOS. verified: retained VirtualIOServer extends BasePartition,
-  while retained LogicalPartition declares BootListInformation; the available source does
-  not establish a writable VIOS pending leaf. An instance POST endpoint is insufficient.
-- Relax the generic native serializer for opaque strings. verified: ssh/commands.py:112
-  at baseline 6b85ac16 restricts delimiters and trailing quoted lists; documents/boot.py:6
-  accepts punctuation that this parser cannot carry. Shell quoting is a different boundary.
+- Reuse LPAR XML for VIOS: VirtualIOServer extends BasePartition; only LogicalPartition
+  declares BootListInformation. An instance POST endpoint establishes no writable VIOS leaf.
+- Relax the generic serializer: its delimiter/trailing-list restrictions cannot carry raw
+  boot punctuation; shell quoting is separate. Use only the qualified fixed two-cell writer.
 - Introduce a second LPAR setter or generic command proxy. judgment: the existing owner can
   accept the approved additional input while preserving one authorization/readback policy.

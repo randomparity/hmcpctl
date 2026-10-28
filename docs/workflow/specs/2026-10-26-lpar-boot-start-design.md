@@ -1,6 +1,6 @@
 # C09 partition boot/start configuration design
 
-Status: D1/D2 and A1 complete; implementation in progress. No product live credit.
+Status: D1/D2 and A1 complete; approved stamp delta awaits A2. No product live credit.
 Approved G4/raw/result/format and N1/N2/N3 contracts govern the normal build gates.
 Issue: #1770, native parent #638; claim q1770-02d745af.
 Landed anchor: b5ef629181a6b0c02585096558e2fe29e96c738c; tree equals qualified source d68a5c55.
@@ -8,15 +8,13 @@ Authority: [frozen six-field scope](https://github.com/randomparity/hmcpctl/issu
 Lane: full-spec; frozen complexity M and denominator 250. Exclusion/owner set: empty.
 Decision record: [proposed ADR0301](../../adr/0301-lpar-boot-start-configuration.md).
 G4 design authority: call_db59b5f315004029bc2f4cd5d9b4f063/0 and exact approved proposal.
-The #1770 contract-plan format approval and existing campaign authority remain; no product live credit is implied.
 
 ## Problem and success
 
-C09 closes five creation inputs and one update input across twelve P10/P11 bindings.
-Success requires source applicability, contained authorization, independent postconditions,
-CLI/MCP parity, negative tests and truthful evidence through existing separate LPAR/VIOS owners.
-Activation, profile lifecycle, dependencies/provisioning and the stable facade gain no surface;
-these owner boundaries exclude no C09 binding. Existing activation/path lists are only partial reuse.
+C09 closes five creation inputs/one update across twelve P10/P11 bindings through separate
+LPAR/VIOS owners: source applicability, contained authorization, independent postconditions,
+CLI/MCP parity, negative tests and truthful evidence. No binding is excluded; activation/path
+lists are partial reuse, without profile/dependency/provisioning/stable-facade expansion.
 
 ## Global Constraints
 
@@ -78,26 +76,18 @@ universal Unicode, controller, size or bootability claim; current/shadow/last-bo
 
 ## Existing owners and extension points
 
-`operations/lpar/core.py:95` owns LparCreation; `create_and_stamp_lpar` at302 validates
-before create, selects native families and stamps confirmed identity. `workflows.py:30`
-owns assignments; its151–178 barriers include creation_memory, affinity and serial steps.
-Preserve their typed defaults, metadata, uncertainty handling and every requested-family
-barrier when C09 joins; the older checkpoint is not the integration base.
+Existing LparCreation/create_and_stamp_lpar and workflows own validation, native selection,
+confirmed identity/stamping and assignments. Preserve typed defaults, metadata, uncertainty
+and every requested memory/affinity/serial/layout/hardware/policy/I/O/vTPM/settings barrier.
+create_vios retains VirtualIOServer lookup, explicit resources and its separate family guards.
 
-`operations/vios/core.py:136` owns create_vios, its native path and VirtualIOServer lookup.
-C09 follows that separate path and its explicit-resource prerequisite. It does not send a
-VIOS to LogicalPartition or bypass memory, policy, layout, hardware or serial admission.
+ssh/lpar.py composes one mksyscfg record from ordinary, physical/SR-IOV and serial pairs.
+The C09 resolved numeric controller list remains last; shared scalar/list validation and
+whole-record shell quoting stay separate and unchanged.
 
-`ssh/lpar.py:154` owns the one mksyscfg creation. It composes ordinary pairs, physical/SR-IOV
-records and serial records. `ssh/commands.py:112` owns scalar/quoted-list validation and
-shell quoting remains a separate layer. A C09 numeric list must be the final composed
-quoted pair, after existing I/O and serial suffixes. Do not relax the shared serializer.
-
-`operations/lpar/boot_order.py:73` owns path-list mutation. The client fixed-field writer
-is `set_pending_boot_string(self, lpar_uuid: str, boot_string: str)`; it uses Advanced
-whole-LogicalPartition RMW, preserves unrelated XML and requires field presence and ETag.
-The current operation returns the write response, so the CLI's green message is not an
-independent postcondition. C09 replaces that success assumption in the existing owner.
+The existing LPAR boot owner uses set_pending_boot_string(self, lpar_uuid, boot_string):
+Advanced whole-LogicalPartition ETag RMW with field presence/unrelated XML preservation.
+C09 replaces write-response-only success in that owner with independent exact observation.
 
 ## Approved interfaces and application behavior
 
@@ -295,12 +285,40 @@ only positively observed empty read text becomes null. One acknowledged write su
 with fresh exact requested pending text; unknown/refusal/unavailable remains a safe error.
 Source [d68a5c55](https://github.com/randomparity/hmcpctl/issues/1770#issuecomment-6479770844)
 qualified all eight fixed literals, full B1/native preservation, deletion/B0 and closed recovery.
-C07/source shipping and integration are landed at b5; source diagnostic review history remains separate; no parent counts transfer.
-The bound release supplies delimiter/parser evidence, not universal Unicode/size/state support,
-VIOS XML mapping or product live credit. The approved raw policy leaves HMC semantics final.
+At landed b5, source history/counts stay separate; no universal support or product live credit.
 
-The plan retains the existing broader LPAR regression route and separately authorized source
-qualification. Neither an AME diagnostic nor source permission authorizes boot product writes.
+
+## ST68 fixture ownership
+
+VIOS creation alone permits MAX1 existing stamp_lpar_ownership(config, system_name,
+lpar_name, *, agent_id=None, caller_token=None); no public creator or other-case stamp.
+Require acknowledged current creation absent B0, fresh unique contained UUID/name/positive ID,
+inactive/fixed saved resources, protected current/profile ETag/unknown I/O and foreign B0 equality.
+Initial description must remain exact with no foreign/malformed marker; no name-only adoption.
+Before stamp recheck candidate/import/connection, raw digest/current grant/exclusive invocation.
+Use existing date.today local-calendar marker, no new date API/retry:
+[hmcpctl owner:<agent> created:<local-date>] [caller <packet-token>].
+Private vios_stamp is null if inapplicable/unarmed; otherwise exact keys identity, created_date,
+expected_description, returned_description, execution, verification, observed_description.
+identity has system_uuid/kind/uuid/name/partition_id, kind VirtualIOServer. Persist intent before
+call: execution=unknown, verification=unavailable, returned/observed_description=null.
+ANY successful string return, including empty/different/date-shifted, means acknowledged;
+retain exact returned_description, never downgrade acknowledgment on failed/mismatched readback.
+None/raised/lost remains unknown. Independent fresh contained Advanced GET requires exact full
+expected==returned==observed marker and unchanged identity/inactivity/current facts for verified;
+contrary observation=mismatch, absent/unreadable/unbound=unavailable. Record observed_description.
+Only verified marker plus all fresh normal deletion guards makes delete eligible; otherwise
+stop ALL effects and retain residue/certainty for read-only recovery, never reconstruct authority.
+After load_profile/identity validation BEFORE any client/session/REST/SSH, use existing config
+model_copy(update={"max_response_bytes": min(config.max_response_bytes,262144)}); recheck identity/
+trust unchanged, record selected cap, use same deterministic cap in run/recovery. No live mutation.
+All REST responses use this cap/any stricter operator cap; ordinary32MiB default is not admitted.
+Reserve extra1SSH<=65536B/20s +1REST<=262144B/20s (327680B/40s) for stamp/readback, plus full
+pre-stamp guards/delete/post-baseline/logout. Complete-case counts/bytes/remaining suffix must
+fit original caps BEFORE create and again before stamp/delete; unproved route refuses zero effects.
+Offline proof: unknown create/stale guard/no reserve=>no stamp; MAX1; None/error=>no delete;
+other/empty/date-shifted return stays acknowledged but cannot qualify; failed GET never downgrades.
+Prove bounded-stream overflow refuses, stricter cap preserved and no authenticated config mutation.
 
 ## Failure model
 
@@ -344,19 +362,11 @@ qualification. Neither an AME diagnostic nor source permission authorizes boot p
 
 ## Verification inventory and delivery
 
-The ignored plan maps executable contracts to named focused tests. The inventory includes
-all twelve bindings, strict zero/omission/enums, names/IDs/ambiguity/foreign controllers,
-AllTargets versus narrow grants, record composition, source refusals, one-write uncertainty,
-classical/controller planes, created identity/ownership, C11 family barriers, old path/clear
-behavior, CLI positional yes, and CLI/MCP legacy result and failure semantics. Tests isolate HMC environment.
-
-New tests must bite under controlled faults before restoration; source-contract tests bind
-facts, not copied prose. Pure prose changes do not gain snapshot tests. Generated tool docs,
-capability/maturity bindings and changelog follow actual implementation; no row gains live
-credit from this design or the source header. Keep legacy live evidence tied to its commit.
-
-No AI model/prompt/retrieval surface is added. Tool input/authorization/output behavior is
-covered by executable contract tests, rather than an invented LLM evaluation claim.
+The ignored plan maps twelve source bindings, strict input, contained identities, AllTargets,
+family composition/barriers, exact independent observations, CLI positional yes, legacy
+results/clear and negative uncertainty contracts to named tests. Tests isolate HMC environment.
+Controlled faults must bite. Regenerate metadata/tool docs/changelog from implementation;
+legacy evidence stays commit-bound. No AI surface or pure-prose snapshot tests are added.
 
 ## Rollback, feasibility and remaining gates
 
@@ -365,7 +375,5 @@ known identity and observations, stop follow-ups and require inspection; do not 
 auto-clear or auto-restore. A later authorized replacement boot value is a new operation.
 Code rollback is a normal revert; it cannot undo stored HMC state or remove created partitions.
 
-D1/D2 corrections use approved N1 readback matrix (call_e87c06ac1540470b8a0cc4b4710e34b2/0),
-N2 ST68 interface (call_539484bf951d4490947ca82068155684/0) and N3 cleanup policy
-(call_c246acf3a8364b1998a1c1a4a407f67c/0). A1 approved; remaining: build/proofs/regeneration/guardrails,
-CI and separately authorized product hardware; no controller/Unicode/product live claim.
+N1/N2/N3 remain approved; call_f0891f005b554495a602c49aee0c6026/0 adds only the plan’s bounded
+VIOS fixture stamp. Changed-input A2, build/proofs/guardrails/CI and separate hardware remain.
