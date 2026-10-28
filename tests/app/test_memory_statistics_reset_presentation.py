@@ -12,6 +12,8 @@ from test_target_authorization import _authorize
 from typer.testing import CliRunner
 
 from hmcpctl.authorization.access_policy import AccessPolicyError
+from hmcpctl.authorization.connection_scope import ConnectionScopeError
+from hmcpctl.authorization.target_scope import TargetScopeError
 from hmcpctl.cli import app
 from hmcpctl.cli_commands.lpar import memory
 from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
@@ -172,3 +174,27 @@ async def test_actual_mcp_wrong_connection_denies_before_client(monkeypatch):
                 },
             )
     client.assert_not_called()
+
+
+@pytest.mark.parametrize("grant_kind", ["mutate", "destructive", "tool"])
+@pytest.mark.parametrize("all_targets", [False, True])
+def test_reset_requires_destructive_or_explicit_tool_grant(grant_kind, all_targets):
+    grant = {
+        ("tools" if grant_kind == "tool" else "effects"): [
+            TOOL if grant_kind == "tool" else grant_kind
+        ],
+        "connections": ["lab"],
+        "targets": "all-targets"
+        if all_targets
+        else {"managed_system": ["sys-R1"], "lpar": ["guest-R1"]},
+    }
+    args = {
+        "lpar_name_or_uuid": "guest-R1",
+        "system_name_or_uuid": "sys-R1",
+        "profile": "lab",
+    }
+    if grant_kind == "mutate" or not all_targets:
+        with pytest.raises((AccessPolicyError, ConnectionScopeError, TargetScopeError)):
+            _authorize([grant], TOOL, args)
+    else:
+        _authorize([grant], TOOL, args)

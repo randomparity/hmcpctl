@@ -67,7 +67,7 @@ CLI lpars memory-statistics-reset NAME --system SYSTEM [--wait-minutes N]
 MCP hmc_reset_lpar_memory_statistics(lpar_name_or_uuid:str,system_name_or_uuid:str,
 reset:LparMemoryStatisticsReset|None=None,profile:str|None=None,
 ownership_override:bool=False)->dict[str,Any]. Omitted reset becomes the strict empty request.
-Tool metadata mutate/operationlpar.reset_memory_statistics/target_kindlpar/exhaustive_targets=False.
+Tool metadata destructive/operationlpar.reset_memory_statistics/target_kindlpar/exhaustive_targets=False.
 The selector can resolve either LPAR or VIOS; existing policy only labels raw selectors and cannot
 bound that union with a specific lpar/vios targets table. Require existing all-targets grant
 for this tool/connection, plus domain containment/ownership. No new target resolver, --vios flag or grant namespace.

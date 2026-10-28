@@ -454,6 +454,8 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         # ADR 0199: its stop and restart actions power the partition off.
         "hmc_power_lpar",
         "hmc_remote_restart_lpar",
+        # Reset discards existing statistics history irreversibly (ADR 0288).
+        "hmc_reset_lpar_memory_statistics",
         # Saving current configuration can overwrite an existing saved profile.
         "hmc_save_current_partition_profile",
         "hmc_save_current_vios_partition_profile",

@@ -40,7 +40,7 @@ tool, register_tools, tool_security = tool_module()
 
 
 @tool(
-    effect="mutate",
+    effect="destructive",
     operation="lpar.reset_memory_statistics",
     target_kind="lpar",
     exhaustive_targets=False,

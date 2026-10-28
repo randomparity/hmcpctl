@@ -18,6 +18,8 @@ eligibility guarantees; they do not claim those original guarantees were proved.
 ## Decision
 
 Add LparMemoryStatisticsReset and separate reset operation/CLI/MCP presentations.
+Classify the MCP reset as destructive under ADR0035: it irreversibly discards existing
+counter history. A mutate-only grant cannot authorize it; all-targets remains mandatory.
 Require contained authorized stable identity/current shared/Running/system AMS and
 one usable before observation. HMC validates undocumented OS/release/RMC eligibility;
 wait/detail are allowed only for reported AIX/Linux. Submit native mem rs once.
