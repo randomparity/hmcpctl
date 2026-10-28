@@ -698,8 +698,18 @@ def _unguarded_payloads_for(
     ]
 
 
-def _unguarded_i_values(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
-    return _unguarded_payloads_for(func, _is_an_i_record_literal, "-i", BUILDER_NAME)
+def _unguarded_i_values(
+    func: ast.FunctionDef | ast.AsyncFunctionDef, *, source_path: Path | None = None
+) -> list[str]:
+    # C09's source-qualified two-cell CSV is a distinct fixed dialect, never a
+    # generic escape from the shared scalar grammar or a function-name whitelist.
+    builder = BUILDER_NAME
+    if (
+        source_path == _REPO_ROOT / "src/hmcpctl/operations/vios/boot_order.py"
+        and func.name == "set_vios_boot_order"
+    ):
+        builder = "_encode_boot_record"
+    return _unguarded_payloads_for(func, _is_an_i_record_literal, "-i", builder)
 
 
 def _unguarded_a_values(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
@@ -765,7 +775,21 @@ def test_every_site_is_built_by_its_shared_builder(
     sites = _selected_functions(scanned_modules, predicate)
     assert sites, f"no {label} sites found — the AST scan stopped working"
 
-    skipping = {name: unguarded for name, node in sites if (unguarded := checker(node))}
+    paths = {
+        id(node): path
+        for path, tree in scanned_modules
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    skipping = {}
+    for name, node in sites:
+        unguarded = (
+            _unguarded_i_values(node, source_path=paths[id(node)])
+            if label == "-i"
+            else checker(node)
+        )
+        if unguarded:
+            skipping[name] = unguarded
     assert not skipping, (
         f"these {label} payloads are not built by their shared builder: "
         f"{skipping}. shlex.quote protects the shell word only; the "
@@ -821,6 +845,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         }
 
     assert by_label["-i"] == {
+        "set_vios_boot_order",
         "_native",
         "_ssh",
         "create_lpar_via_cli",
@@ -1039,3 +1064,35 @@ def test_literal_selection_reuses_one_walk_without_selecting_exclusions(
     assert len(selected) == 1
     assert isinstance(selected[0], ast.JoinedStr)
     assert walk.call_count == 1
+
+
+def test_vios_csv_recognition_is_bound_to_exact_source_function_and_call():
+    source = """async def set_vios_boot_order(text):
+    record = _encode_boot_record(7, text)
+    command = f"chsyscfg -r lpar -m system -i {shlex.quote(record)}"
+"""
+    owner = _REPO_ROOT / "src/hmcpctl/operations/vios/boot_order.py"
+    node = _function_from_source(source)
+    assert not _unguarded_i_values(node, source_path=owner)
+    assert _unguarded_i_values(node)
+    assert _unguarded_i_values(node, source_path=owner.with_name("unrelated.py"))
+    assert _unguarded_i_values(
+        _function_from_source(source.replace("set_vios_boot_order", "unrelated")),
+        source_path=owner,
+    )
+    for bypass in (
+        source.replace("_encode_boot_record(7, text)", "text"),
+        source.replace("shlex.quote(record)", "shlex.quote(text)"),
+    ):
+        assert _unguarded_i_values(_function_from_source(bypass), source_path=owner)
+
+
+def test_vios_csv_encoder_does_not_exempt_hoisted_commands():
+    owner = _REPO_ROOT / "src/hmcpctl/operations/vios/boot_order.py"
+    tree = ast.parse(
+        'record = _encode_boot_record(7, text)\ncommand = f"chsyscfg -r lpar -m system -i {shlex.quote(record)}"'
+    )
+    with pytest.raises(AssertionError, match="outside any function"):
+        test_no_command_literal_lives_outside_a_function(
+            "-i", _is_an_i_record_literal, [(owner, tree)]
+        )

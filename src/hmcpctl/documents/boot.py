@@ -30,3 +30,31 @@ def join_boot_device_paths(paths: list[str]) -> str:
                 "read-boot-order reports, of printable ASCII with no whitespace"
             )
     return " ".join(paths)
+
+
+def validate_raw_boot_string(text: str) -> str:
+    """Validate the bounded raw path without normalizing stored text."""
+    if (
+        not isinstance(text, str)
+        or not text
+        or not text.isprintable()
+        or not text.strip()
+    ):
+        raise ValueError("Raw boot string must contain printable non-whitespace text")
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeError:
+        raise ValueError("Raw boot string must be valid UTF-8") from None
+    if size > 16384:
+        raise ValueError("Raw boot string exceeds the 16384-byte application budget")
+    return text
+
+
+def select_boot_string(devices: list[str] | None, boot_string: str | None) -> str:
+    """Keep legacy paths and raw text as mutually exclusive input forms."""
+    if (devices is None) == (boot_string is None):
+        raise ValueError("Supply exactly one of devices or boot_string")
+    if boot_string is not None:
+        return validate_raw_boot_string(boot_string)
+    assert devices is not None
+    return join_boot_device_paths(devices)
