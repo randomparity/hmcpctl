@@ -156,7 +156,7 @@ async def _context(hmc: HMCClient, system_uuid: str, selector: str) -> dict[str,
     if (
         not isinstance(system_name, str)
         or not system_name
-        or any(not is_uuid(uuid) for uuid in named)
+        or any(not isinstance(uuid, str) or not is_uuid(uuid) for uuid in named)
         or {str(uuid).lower() for uuid in named} != {system_uuid.lower()}
         or _text(system_resource.get("SystemName"), "SystemName") != system_name
     ):

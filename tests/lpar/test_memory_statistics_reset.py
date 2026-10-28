@@ -572,3 +572,23 @@ async def test_uuid_shaped_cli_name_is_matched_literally(reset_boundary, duplica
         context = await _context(state.hmc, SYSTEM, "guest-R1")
         assert context["system_name"] == SYSTEM
         state.hmc.list_system_summaries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_null_uuid_after_submission_retains_known_completion(reset_boundary):
+    from hmcpctl.operations.lpar.memory_statistics import parse_statistics
+
+    state = reset_boundary
+    valid = {"UUID": SYSTEM, "SystemName": "sys-R1"}
+    state.hmc.list_system_summaries.side_effect = lambda: (
+        [valid] + ([{"UUID": None, "SystemName": "sys-R1"}] if state.resets else [])
+    )
+    result = await reset_operation(state)
+    assert result["native_completion"] == "completed"
+    assert result["submission_error"] is None
+    assert not result["workflow_completed"]
+    assert result["identity_preserved"] is None
+    assert result["before_statistics"] == parse_statistics(ROW)
+    assert result["after_statistics"] is None
+    assert "ValueError" in result["after_error"]
+    assert (state.resets, state.statistics) == (1, 1)
