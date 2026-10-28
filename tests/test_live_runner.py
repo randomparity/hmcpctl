@@ -9055,6 +9055,19 @@ def test_st58_restore_malformed_context_refuses_without_partial_state(
     assert state.artifacts == live_config.LiveTestArtifacts()
 
 
+@pytest.mark.parametrize("arguments", [["67"], ["--group", "lpar-memory-statistics"]])
+def test_statistics_direct_runner_requires_private_named_destination(
+    monkeypatch, arguments
+):
+    from live_test import runner
+
+    def forbidden():
+        pytest.fail("unsafe statistics destination reached credential bootstrap")
+
+    monkeypatch.setattr(runner.LiveTestConfig, "from_env_file", forbidden)
+    assert runner._run_from_arguments(arguments) == 1
+
+
 def test_creation_memory_optional_defaults_and_registration():
     from dataclasses import asdict
 

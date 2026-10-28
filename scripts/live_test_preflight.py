@@ -52,6 +52,7 @@ from live_test import (
     lpar_config,
     lpar_power,
     memory_move,
+    memory_statistics,
     partition_profile_contract,
     partition_profiles,
     processor_move,
@@ -397,6 +398,26 @@ def _accelerator_qos_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
             f"existing owned target {target}; exact request {request.model_dump_json()}",
             "one intended QoS set, then separate original-baseline restoration with identical wait/detail/force",
             "root binds clean deployed HEAD, destination, protected inventory, both effect intents and bounded window; mandatory read-only recovery",
+        ),
+        config.system_name,
+    )
+
+
+def _memory_statistics_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        memory_statistics.configured(config)
+    except ValueError as error:
+        return ArmVerdict(
+            memory_statistics.GROUP, False, str(error), (), config.system_name
+        )
+    return ArmVerdict(
+        memory_statistics.GROUP,
+        True,
+        "configuration validated; live eligibility remains required",
+        (
+            "existing positively owned Running shared-memory fixture with system AMS; no creation or activation",
+            "one irreversible statistics-history reset; bounded independent observations, reset verification unavailable",
+            "clean candidate and private checkpoint before effects; mandatory read-only recovery cannot restore counter history",
         ),
         config.system_name,
     )
@@ -794,6 +815,7 @@ _ARM_VERDICTS = {
     "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-memory-move": _memory_move_verdict,
+    "lpar-memory-statistics": _memory_statistics_verdict,
     "lpar-accelerator-qos": _accelerator_qos_verdict,
     "lpar-processor-move": _processor_move_verdict,
     "lpar-processor-quantities": _processor_quantities_verdict,

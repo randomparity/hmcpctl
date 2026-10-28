@@ -2,7 +2,7 @@
 
 # `lpar` tools
 
-48 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+49 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -51,6 +51,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_read_lpar_refcodes` | `read` | `lpar.list_refcodes` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Read recent partition reference codes with offline POWER9 definitions. |
 | `hmc_remote_restart_lpar` | `destructive` | `lpar.remote_restart` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Remote-restart a failed LPAR on another managed system. |
 | `hmc_rename_lpar` | `mutate` | `lpar.rename` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Rename one LPAR after enforcing its ownership token. |
+| `hmc_reset_lpar_memory_statistics` | `destructive` | `lpar.reset_memory_statistics` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Reset memory statistics history once on a contained Running shared partition. |
 | `hmc_set_lpar_accelerator_qos` | `mutate` | `lpar.set_accelerator_qos` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Set native GZIP accelerator QoS once and independently observe the result. |
 | `hmc_set_lpar_description` | `mutate` | `lpar.set_description` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set an LPAR's CLI-only description after validating printable ASCII. |
 | `hmc_set_lpar_msp` | `mutate` | `lpar.set_msp` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set a VIOS partition's Migratable Service Partition flag. |
