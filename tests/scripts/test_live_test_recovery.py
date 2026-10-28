@@ -3072,7 +3072,9 @@ def test_statistics_recovery_routes_without_clean_claim(
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
     readback = AsyncMock(side_effect=ValueError("incomplete") if failure else None)
     monkeypatch.setattr(memory_statistics, "recover_document", readback)
-    assert recovery.main(["--results", str(path)]) == (2 if failure else 0)
+    assert recovery.main(["--memory-statistics", "--results", str(path)]) == (
+        2 if failure else 0
+    )
     readback.assert_awaited_once()
     output = capsys.readouterr()
     assert "CLEAN" not in output.out
@@ -3353,3 +3355,20 @@ def test_c07_saved_journal_is_bounded_before_semantic_decoding():
     ]
     with pytest.raises(ValueError, match="5 MiB"):
         settings.decode_artifacts(document["artifacts"])
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo"])
+def test_statistics_raw_recovery_refuses_nonregular_without_bootstrap(
+    tmp_path, monkeypatch, kind
+):
+    import os
+
+    path = tmp_path / "record"
+    if kind == "directory":
+        path.mkdir()
+    else:
+        os.mkfifo(path)
+    bootstrap = Mock(side_effect=AssertionError("nonregular record reached bootstrap"))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", bootstrap)
+    assert recovery.main(["--memory-statistics", "--results", str(path)]) == 2
+    bootstrap.assert_not_called()

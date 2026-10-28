@@ -507,3 +507,35 @@ async def test_missing_detail_is_actionable_before_effect(reset_boundary, method
     with pytest.raises(ValueError, match="unavailable"):
         await reset_operation(reset_boundary)
     assert reset_boundary.resets == 0
+
+
+@pytest.mark.asyncio
+async def test_uuid_system_with_duplicate_cli_name_refuses_before_ssh(reset_boundary):
+    from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
+    from hmcpctl.operations.lpar.memory_statistics import reset_lpar_memory_statistics
+
+    state = reset_boundary
+    state.hmc.list_system_summaries.return_value = [
+        {"UUID": SYSTEM, "SystemName": "sys-R1"},
+        {"UUID": "00000000-0000-0000-0000-000000000099", "SystemName": "sys-R1"},
+    ]
+    with pytest.raises(ValueError, match="Ambiguous"):
+        await reset_lpar_memory_statistics(
+            state.hmc,
+            "guest-R1",
+            LparMemoryStatisticsReset(),
+            system_name_or_uuid=SYSTEM,
+        )
+    state.command.assert_not_awaited()
+    state.description.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_context_qualifies_cli_name_from_one_snapshot(reset_boundary):
+    from hmcpctl.operations.lpar.memory_statistics import _context
+
+    state = reset_boundary
+    context = await _context(state.hmc, SYSTEM.upper(), "guest-R1")
+    assert context["system_name"] == "sys-R1"
+    state.hmc.list_system_summaries.assert_awaited_once()
+    state.command.assert_not_awaited()

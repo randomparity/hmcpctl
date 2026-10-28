@@ -559,6 +559,11 @@ def _validate_baseline(document, baseline, run):
         or not all(_text(destination[key]) for key in ("host", "user"))
     ):
         raise ValueError("Statistics baseline destination is malformed")
+    schemas = {destination["schema_version"]}
+    if not destination["schema_version"]:
+        schemas.add("(not set)")
+    if run["schema_version"] not in schemas:
+        raise ValueError("Statistics run and destination schema differ")
     if not isinstance(document["config"], dict) or set(document["config"]) != set(
         asdict(LiveTestConfig())
     ):

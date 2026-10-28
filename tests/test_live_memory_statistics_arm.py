@@ -378,3 +378,92 @@ async def test_observation_ids_and_matrix_preserve_bounded_claim(live_boundary):
     assert rendered is not None and arm.TOOL in rendered
     assert "PRIVATE-SENTINEL" not in rendered
     assert document["results"][-1]["data"] == {"reset_verification": "unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_run_schema_mismatch_refuses_before_recovery_reads(live_boundary):
+    boundary, state = live_boundary
+    document = await exercise(live_boundary)
+    document["run"]["schema_version"] = "V99_99"
+    reads, calls = boundary.reads, boundary.command.await_count
+    with pytest.raises(ValueError, match="schema"):
+        await arm.recover_document(state.hmc_config, document)
+    assert (boundary.reads, boundary.command.await_count) == (reads, calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("schema", ["", "(not set)"])
+async def test_unset_schema_recovery_preserves_sentinel(live_boundary, schema):
+    boundary, state = live_boundary
+    boundary.hmc.config = state.hmc_config.model_copy(update={"schema_version": ""})
+    state.hmc_config = boundary.hmc.config
+    document = await exercise(live_boundary)
+    document["run"]["schema_version"] = schema
+    await arm.recover_document(state.hmc_config, document)
+
+
+@pytest.mark.parametrize(
+    "fault", ["completion", "attempt", "root", "schema", "oversize", "utf8"]
+)
+def test_raw_recovery_refuses_before_bootstrap(
+    live_boundary, tmp_path, monkeypatch, fault
+):
+    import live_test_recovery as recovery
+
+    document = asyncio.run(exercise(live_boundary))
+    raw = json.dumps(document)
+    tokens = {
+        "completion": (
+            '"native_completion": "completed"',
+            '"native_completion": "unknown", "native_completion": "completed"',
+        ),
+        "attempt": ('"attempt": 1', '"attempt": 2, "attempt": 1'),
+        "root": ('"run": {', '"run": {}, "run": {'),
+        "schema": ('"schema_version": 1', '"schema_version": 2, "schema_version": 1'),
+    }
+    if fault in tokens:
+        old, new = tokens[fault]
+        assert old in raw
+        raw = raw.replace(old, new, 1)
+    if fault == "oversize":
+        raw += " " * (1024 * 1024)
+    path = tmp_path / "results.json"
+    path.write_bytes(raw.encode() + (b"\xff" if fault == "utf8" else b""))
+    bootstrap = Mock(side_effect=AssertionError("malformed raw reached bootstrap"))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", bootstrap)
+    boundary, _state = live_boundary
+    calls = boundary.command.await_count
+    assert recovery.main(["--memory-statistics", "--results", str(path)]) == 2
+    bootstrap.assert_not_called()
+    assert boundary.command.await_count == calls
+
+
+@pytest.mark.parametrize("named", [False, True])
+@pytest.mark.parametrize("schema", ["", "V1_0"])
+def test_actual_recovery_route_requires_named_flag(
+    live_boundary, tmp_path, monkeypatch, capsys, named, schema
+):
+    import live_test_recovery as recovery
+
+    import hmcpctl.config as config_owner
+
+    boundary, state = live_boundary
+    state.hmc_config = boundary.hmc.config.model_copy(update={"schema_version": schema})
+    boundary.hmc.config = state.hmc_config
+    monkeypatch.setenv("HMC_SCHEMA_VERSION", schema)
+    document = asyncio.run(exercise(live_boundary))
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(document))
+    for key in ("HOST", "PORT", "USER", "PASSWORD", "VERIFY_SSL", "SCHEMA_VERSION"):
+        monkeypatch.delenv("HMC_" + key, raising=False)
+    monkeypatch.setattr(config_owner, "load_profile", lambda: state.hmc_config)
+    calls = boundary.command.await_count
+    args = ["--results", str(path)] + (["--memory-statistics"] if named else [])
+    assert recovery.main(args) == (0 if named else 2)
+    output = capsys.readouterr()
+    assert "CLEAN" not in output.out
+    if named:
+        assert "OBSERVED" in output.out
+    else:
+        assert "--memory-statistics" in output.err
+        assert boundary.command.await_count == calls

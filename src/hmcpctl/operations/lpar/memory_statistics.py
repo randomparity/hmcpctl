@@ -10,7 +10,11 @@ from typing import Any
 from ...client.core import HMCClient
 from ...documents.lpar_memory import LparMemoryStatisticsReset
 from ...errors import HMCError
-from ...resource_identity import is_uuid, resolve_system_uuid, system_name_from_uuid
+from ...resource_identity import (
+    is_uuid,
+    resolve_system_uuid,
+    summary_matching,
+)
 from ...ssh.memory import (
     read_lpar_memory_statistics,
     reset_lpar_memory_statistics_native,
@@ -141,9 +145,18 @@ async def _context(hmc: HMCClient, system_uuid: str, selector: str) -> dict[str,
     ):
         raise ValueError("Statistics managed system identity differs")
     system_resource = resource_container(system, "Resource")
-    system_name = await system_name_from_uuid(hmc, system_uuid)
+    summaries = await hmc.list_system_summaries()
+    selected = summary_matching(summaries, system_uuid)
+    system_name = selected.get("SystemName") if selected else None
+    named = (
+        summary_matching(summaries, system_name)
+        if isinstance(system_name, str)
+        else None
+    )
     if (
         not system_name
+        or named is None
+        or named["UUID"].lower() != system_uuid.lower()
         or _text(system_resource.get("SystemName"), "SystemName") != system_name
     ):
         raise ValueError("Statistics managed system has no matching unique CLI name")
