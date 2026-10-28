@@ -151,7 +151,15 @@ all opaque/absent metadata, nonpositive/bool/missing status, signal and timeout 
 Existing remote_refusal_code is a separate optional safe diagnostic, never completion proof.
 
 Directly import landed C07 PagingProvider,_entries,_read,_detail,_identity,_inventory,
-_provider_uuid from operations/lpar/creation_memory.py; leave that owner unchanged.
+_provider_uuid from operations/lpar/creation_memory.py; keep that owner and helpers in place.
+Necessary C2 containment/C4 readback prerequisites correct only UUID identity comparisons in
+creation_memory.py::_provider_uuid and client/client_profiles.py::_validate_parent/read_native_profile.
+Follow ADR0094:151–153, ADR0092 UUID identity policy and ADR0160: validate UUID segments, then
+casefold only their comparisons. Preserve exact resource/path literals, origin/route checks,
+either-case callers and existing returned-UUID policy; never decode links or lowercase arbitrary
+strings, SettingID or preserved raw profile XML. No new helper framework or ownership transfer.
+Cover these owners in tests/lpar/test_creation_memory_workflow.py and tests/unit/test_client_profiles.py;
+D03 associated/configured/runtime joins retain the same UUID-only equality semantics.
 PartitionIdentity,ConfiguredPair,PagingObservation live with their actual reader owner,
 operations/lpar/paging_observation.py. PagingSwitchoverResult lives with the one-attempt
 owner operations/lpar/paging.py, which imports observation records and never vice versa.

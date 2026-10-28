@@ -228,12 +228,19 @@ def _provider_uuid(hmc: HMCClient, system: str, value: object) -> str:
         or url.fragment
     ):
         raise ValueError("Paging provider link is foreign")
+    parts = tuple(
+        part.casefold() if is_uuid(part) else part for part in url.path.split("/")
+    )
     for prefix in (
         "/rest/api/uom/VirtualIOServer/",
         f"/rest/api/uom/ManagedSystem/{system}/VirtualIOServer/",
     ):
-        if url.path.startswith(prefix) and is_uuid(url.path[len(prefix) :]):
-            return url.path[len(prefix) :].lower()
+        expected = tuple(
+            part.casefold() if is_uuid(part) else part
+            for part in prefix.split("/")[:-1]
+        )
+        if parts[:-1] == expected and is_uuid(parts[-1]):
+            return parts[-1].lower()
     raise ValueError("Paging provider link is outside the selected system VIOS route")
 
 

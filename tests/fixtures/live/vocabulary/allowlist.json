@@ -1,5 +1,12 @@
 [
  {
+  "kind": "cli-command",
+  "file": "src/hmcpctl/ssh/memory.py",
+  "subject": "lshwres -r mempool -m {} --rsubtype pgdev",
+  "value": "",
+  "reason": "Published P10/P11 lshwres synopsis and pgdev subtype (docs/refs/hmc-commands-p10/commands/lshwres.md:47,95 and P11 equivalent); required bounded read for #1776. No captured command/output or runtime availability is claimed; capture remains absent under #1202."
+ },
+ {
   "kind": "literal",
   "file": "tests/app/test_cli_commands.py",
   "subject": "State",
