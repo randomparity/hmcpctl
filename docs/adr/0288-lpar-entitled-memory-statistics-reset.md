@@ -26,7 +26,10 @@ Keep native completion, raw ordered before/after fields, errors and identity fac
 separate. Reset verification is unavailable for each result produced by this design.
 Usable means a valid bounded row with at least one recognized numeric-text field;
 unknown/missing/unavailable values are retained. Do not infer units or reset causation.
-Reuse current ownership, authorization, audit and bounded SSH; no override input.
+Retain standard audited ownership_override:bool=False on the operation/CLI/MCP.
+Explicit true bypasses only the existing ownership read/check through its audit;
+containment, identity, shared/Running/AMS, usable statistics and MCP grants still apply.
+Reuse current authorization, audit and bounded SSH; ST67 keeps override=False.
 Require existing MCP all-targets grants for this LPAR/VIOS union; no selector-kind alias. Add only explicit
 completed-nonzero provenance to the existing CLI error; preserve it through redaction.
 ST67 uses an already owned Running shared fixture, one intent and read-only recovery.

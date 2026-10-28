@@ -59,17 +59,22 @@ strict=True, extra=forbid; wait_minutes:StrictInt>=0|None=None;
 detail_level:StrictInt between1and4|None=None. Empty request selects native defaults.
 Domain operations/lpar/memory_statistics.py:
 reset_lpar_memory_statistics(hmc:HMCClient,lpar_name_or_uuid:str,reset:LparMemoryStatisticsReset,
-*,system_name_or_uuid:str)->dict[str,Any].
+*,system_name_or_uuid:str,ownership_override:bool=False)->dict[str,Any].
 No companion public statistics-read operation. Private observation is an internal helper.
 CLI lpars memory-statistics-reset NAME --system SYSTEM [--wait-minutes N]
-[--detail-level N] [--yes] (detail N=1..4); negative/blank input before client.
+[--detail-level N] [--ownership-override] [--yes] (detail N=1..4); negative/blank input before client.
 MCP hmc_reset_lpar_memory_statistics(lpar_name_or_uuid:str,system_name_or_uuid:str,
-reset:LparMemoryStatisticsReset|None=None,profile:str|None=None)->dict[str,Any]. Omitted reset becomes the strict empty request.
+reset:LparMemoryStatisticsReset|None=None,profile:str|None=None,
+ownership_override:bool=False)->dict[str,Any]. Omitted reset becomes the strict empty request.
 Tool metadata mutate/operationlpar.reset_memory_statistics/target_kindlpar/exhaustive_targets=False.
 The selector can resolve either LPAR or VIOS; existing policy only labels raw selectors and cannot
 bound that union with a specific lpar/vios targets table. Require existing all-targets grant
-for this tool/connection, plus domain containment/ownership. No new resolver, flag or grant namespace.
-No public ownership override; both ownership checks use existing override=False and64KiB bound.
+for this tool/connection, plus domain containment/ownership. No new target resolver, --vios flag or grant namespace.
+Standard ownership_override defaultsFalse in domain/MCP and the CLI flag. Pass the exact
+value to both existing authorize_lpar_mutation calls with max_output_bytes=65536.
+Explicit true invokes the existing audited override and skips only ownership-token read/check;
+it cannot bypass containment/identity/shared/Running/AMS/usable-baseline, optional-setting
+validation, all-targets grants or any post-observation check. No new bypass policy or audit owner.
 
 Internal SSH owner ssh/memory.py adds read_lpar_memory_statistics(config:HMCConfig,
 system_name:str,partition_id:int)->str and reset_lpar_memory_statistics_native(config,
@@ -121,10 +126,13 @@ Same/zero/lower/higher values or changed field sets do not change verification s
 
 1 Strict request/selectors before client dispatch; resolve system and unique contained
 LPAR/VIOS, get direct identity/current mode/state, positive system AMS and system CLI name.
-2 Authorize ownership. Read one-ID statistics, parse bounded row. Unusable baseline returns
+2 Invoke the existing ownership guard with ownership_override (defaultFalse). Read one-ID
+statistics, parse bounded row. Unusable baseline returns
 not_submitted/incomplete; no reset call. Validate optional settings against reported AIX/Linux.
 3 Independently re-read full containment/direct context and system capability; compare
-UUID/kind/name/nativeID/shared/state/system identity with initial context, reauthorize ownership.
+UUID/kind/name/nativeID/shared/state/system identity with initial context, invoke the existing
+ownership guard again with the same ownership_override value. Each true guard call uses its
+existing ownership-override audit before returning; override never skips this context recheck.
 Any change/refusal prevents submit. Do not compare volatile statistics or infer installed OS.
 4 Invoke native reset exactly once. Catch ordinary HMC/transport errors into native fact;
 propagate cancellation/BaseException so the owning runtime closes; no replay/fallback.
@@ -147,7 +155,7 @@ Use implemented LiveTestConfig.lp3_name via LIVE_TEST_LPAR_NAME; no new fixture 
 Require an existing positively owned, non-protected Running shared fixture with positive AMS,
 usable baseline and exact candidate/destination. No creation, activation, pool/provider or media
 setup belongs to this issue. Missing fixture is a live prerequisite, not scope added to1777.
-Arm calls MCP once with empty settings/no override and records durable baseline, reset intent,
+Arm calls MCP once with empty settings and ownership_override=False, recording baseline, reset intent,
 returned result, independent final stats/context. Checkpoint baseline and intent before call.
 Rows form the finite journal; no duplicate new generic ledger/artifact framework.
 Independent final observation verifies current eligibility and environment allocation fields
