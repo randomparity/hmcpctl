@@ -2523,3 +2523,18 @@ creation, including controller designation gaps, preserves residue and stops.
 Always run read-only recovery, including after apparent success. A journal or
 saved grant cannot resume effects. Registration/offline proof supplies no native
 configuration, activation, compression, paging capacity or failover evidence.
+
+## Paging-VIOS switchover (D03, opt-in ST66)
+
+The named `lpar-paging-switchover` group runs only ST66/scenario
+`st66-lpar-paging-switchover`; it is excluded from `all` and unfiltered runs.
+It uses an existing positively owned running shared-memory consumer and both
+contained dedicated paging providers. Configure `LIVE_TEST_LPAR_NAME`,
+`LIVE_TEST_PAGING_EXPECTED_CURRENT_VIOS` and `LIVE_TEST_PAGING_WRITER_WINDOW=true`.
+The complete [procedure](workflow/lpar-paging-switchover-live-procedure.md) defines
+clean deployed commit/tree binding, fresh private output, one forward checkpoint,
+mandatory read-only `--paging-switchover` recovery after child termination, and
+separately authorized restoration with its own fresh expected-current/window and
+journal. Expected forward current-provider drift remains held; recovery never
+mutates or rebases the original baseline. No live evidence is implied by this
+procedure or its offline tests.

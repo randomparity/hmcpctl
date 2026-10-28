@@ -36,6 +36,8 @@ class LiveTestConfig:
     creation_memory_primary_vios_name: str = ""
     creation_memory_secondary_vios_name: str = ""
     creation_memory_fresh_delete_authorized: bool = False
+    paging_expected_current_vios: str = ""
+    paging_writer_window: bool = False
     accelerator_qos_request_json: str = ""
     creation_memory_layout_hpt_ratio: str = ""
     creation_memory_layout_ppt_ratio: str = ""
@@ -173,6 +175,8 @@ class LiveTestConfig:
     #: export cannot redirect an arm that creates and deletes partitions
     #: (ADR 0115).
     _OPTIONAL_CONFIG_FIELDS: ClassVar[dict[str, str]] = {
+        "LIVE_TEST_PAGING_EXPECTED_CURRENT_VIOS": "paging_expected_current_vios",
+        "LIVE_TEST_PAGING_WRITER_WINDOW": "paging_writer_window",
         "LIVE_TEST_ACCELERATOR_QOS_REQUEST_JSON": "accelerator_qos_request_json",
         "LIVE_TEST_CREATION_MEMORY_CASE": "creation_memory_case",
         "LIVE_TEST_CREATION_MEMORY_PRIMARY_VIOS_NAME": "creation_memory_primary_vios_name",
@@ -268,6 +272,7 @@ class LiveTestConfig:
             for field_name in (
                 "creation_memory_fresh_delete_authorized",
                 "creation_memory_layout_fresh_vios_delete_authorized",
+                "paging_writer_window",
                 "partition_profile_writer_window",
                 "system_profile_writer_window",
                 "system_profile_continue_on_error",
@@ -532,6 +537,8 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
     parsed.setdefault("scratch_vg_name", "")
     parsed.setdefault("profile_artifact_suffix_hex_length", 16)
     for name in (
+        "paging_expected_current_vios",
+        "paging_writer_window",
         "creation_memory_case",
         "creation_memory_primary_vios_name",
         "creation_memory_secondary_vios_name",
