@@ -389,17 +389,24 @@ async def observe_paging(
         for entry in inventory or ()
         if entry["ResourceType"] == "VirtualIOServer"
     )
-    detail = await load("consumer-detail", _detail(hmc, target.kind, target.uuid))
+    contained = inventory is not None and any(
+        entry["UUID"] == target.uuid.lower() and entry["ResourceType"] == target.kind
+        for entry in inventory
+    )
+    detail = (
+        await load("consumer-detail", _detail(hmc, target.kind, target.uuid))
+        if contained
+        else None
+    )
+    if not contained:
+        unavailable.append("consumer-detail")
     resource = _mapping(detail["Resource"]) if detail else {}
     identity = fact("consumer-identity", lambda: _identity(detail, target.kind))
     if identity is not None and identity != PagingProvider(
         target.uuid.lower(), target.name, target.partition_id
     ):
         invalid.append("consumer-identity-changed")
-    if inventory is not None and not any(
-        e["UUID"] == target.uuid.lower() and e["ResourceType"] == target.kind
-        for e in inventory
-    ):
+    if inventory is not None and not contained:
         invalid.append("consumer-not-contained")
     environment = fact("consumer-type", lambda: _text(resource.get("PartitionType")))
     allowed = (

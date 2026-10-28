@@ -485,3 +485,16 @@ async def test_positive_different_identity_is_drift_not_missing(paging_boundary,
         assert result.current_uom.uuid == result.current_native.uuid == third
     else:
         assert (third, "disk-a") in result.paths
+
+
+@pytest.mark.asyncio
+async def test_uncontained_consumer_is_never_fetched(paging_boundary):
+    mod = observation_module()
+    foreign = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    target = mod.PartitionIdentity(foreign, "consumer", 9, "LogicalPartition")
+    result = await mod.observe_paging(paging_boundary.hmc, SYSTEM, "system", target)
+    assert "consumer-not-contained" in result.invalid
+    assert not any(
+        call.args[0].lower().endswith(foreign)
+        for call in paging_boundary.hmc._get.await_args_list
+    )
