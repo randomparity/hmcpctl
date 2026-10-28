@@ -553,3 +553,36 @@ async def test_missing_before_reader_still_prevents_submission(attempt, missing)
         await run(b)
     b.submit.assert_not_awaited()
     b.description.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["link", "containment"])
+@pytest.mark.parametrize("change", ["unchanged", "redundancy", "device"])
+async def test_partial_pool_after_attempt_keeps_observed_drift(
+    attempt, missing, change
+):
+    b = attempt
+    b.change = False
+    b.error = HMCCLIError("unknown completion")
+    b.partial_pool_response(missing, change, after_attempt=True)
+    result = await run(b)
+    drift = change != "unchanged"
+    assert result.submission == "unknown" and result.observation == "unchanged"
+    assert result.preservation == ("drifted" if drift else "unavailable")
+    assert result.outcome == ("partial" if drift else "unverified")
+    assert result.after.unavailable and result.workflow_completed is False
+    assert result.after.uom_redundant is (change != "redundancy")
+    assert result.after.unique_device_id == (
+        "device-two" if change == "device" else "device-one"
+    )
+    b.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["link", "containment"])
+async def test_partial_pool_before_attempt_remains_closed(attempt, missing):
+    attempt.partial_pool_response(missing, "unchanged")
+    with pytest.raises(ValueError, match="prerequisites are unavailable"):
+        await run(attempt)
+    attempt.submit.assert_not_awaited()
+    attempt.description.assert_not_awaited()

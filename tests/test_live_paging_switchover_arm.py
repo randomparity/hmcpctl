@@ -398,3 +398,28 @@ async def test_readonly_recovery_missing_reader_distinguishes_drift(
     )
     assert document == before
     boundary.submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["link", "containment"])
+@pytest.mark.parametrize("change", ["unchanged", "redundancy", "device"])
+async def test_partial_pool_readonly_recovery_retains_drift(
+    live_boundary, missing, change
+):
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    boundary, state = live_boundary
+    boundary.change = False
+    boundary.error = HMCCLIError("unknown completion")
+    document = await exercise(live_boundary)
+    boundary.partial_pool_response(missing, change)
+    original = deepcopy(document)
+    result = await arm.recover_document(state.hmc_config, document)
+    assert result["status"] == ("unverified" if change == "unchanged" else "drift")
+    assert result["after"]["unavailable"]
+    assert result["after"]["uom_redundant"] is (change != "redundancy")
+    assert result["after"]["unique_device_id"] == (
+        "device-two" if change == "device" else "device-one"
+    )
+    assert document == original
+    boundary.submit.assert_awaited_once()

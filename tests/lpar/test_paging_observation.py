@@ -126,9 +126,32 @@ def paging_boundary(monkeypatch):
     )
     monkeypatch.setattr(native, "read_lpar_paging_memory", current, raising=False)
     monkeypatch.setattr(native, "read_lpar_paging_devices", devices, raising=False)
-    return SimpleNamespace(
+    boundary = SimpleNamespace(
         hmc=hmc, rows=rows, current=current, devices=devices, original=deepcopy(rows)
     )
+
+    def partial_pool_response(missing, change, *, after_attempt=False):
+        get = boundary.hmc._get.side_effect
+
+        async def partial(path, *args, **kwargs):
+            if after_attempt and not boundary.submit.await_count:
+                return await get(path, *args, **kwargs)
+            if missing == "containment" and path.endswith("/VirtualIOServer"):
+                return feed(rows["VirtualIOServer-b"])
+            body = await get(path, *args, **kwargs)
+            if path.endswith("/SharedMemoryPool"):
+                if missing == "link":
+                    body = body.replace("PagingServicePartitionTwo", "MissingProvider")
+                if change == "redundancy":
+                    body = body.replace("<IsRedundant>true", "<IsRedundant>false")
+                elif change == "device":
+                    body = body.replace("device-one", "device-two")
+            return body
+
+        boundary.hmc._get.side_effect = partial
+
+    boundary.partial_pool_response = partial_pool_response
+    return boundary
 
 
 async def observe(boundary):
@@ -531,3 +554,46 @@ async def test_missing_pool_or_provider_detail_retains_independent_facts(
         assert len(result.providers) == 2 and result.provider_dedicated == (None, True)
     else:
         assert result.pool_uuid is None and result.uom_redundant is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["link", "containment"])
+@pytest.mark.parametrize("change", ["unchanged", "redundancy", "device"])
+async def test_partial_pool_retains_independent_device_facts(
+    paging_boundary, missing, change
+):
+    b = paging_boundary
+    b.partial_pool_response(missing, change)
+    result = await observe(b)
+    assert result.unavailable
+    assert result.pool_uuid == POOL and result.pool_id == 0
+    assert result.uom_redundant is (change != "redundancy")
+    assert result.unique_device_id == (
+        "device-two" if change == "device" else "device-one"
+    )
+    assert result.invalid == (("uom-not-redundant",) if change == "redundancy" else ())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["link", "containment"])
+async def test_partial_pool_retains_known_provider_negative(paging_boundary, missing):
+    b = paging_boundary
+    key = "VirtualIOServer-a" if missing == "link" else "VirtualIOServer-b"
+    b.rows[key] = b.rows[key].replace(
+        "<SharedMemoryEnabled>false", "<SharedMemoryEnabled>true"
+    )
+    b.partial_pool_response(missing, "unchanged")
+    result = await observe(b)
+    assert result.unavailable and result.invalid == ("provider-not-dedicated",)
+    assert result.provider_dedicated == (False,)
+    assert result.pool_uuid == POOL and result.unique_device_id == "device-one"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_pool_provider_is_a_positive_contradiction(paging_boundary):
+    b = paging_boundary
+    b.rows["SharedMemoryPool"] = b.rows["SharedMemoryPool"].replace(SECONDARY, PRIMARY)
+    result = await observe(b)
+    assert result.invalid == ("pool-providers-not-distinct",)
+    assert len(result.providers) == 2 and result.providers[0] == result.providers[1]
+    assert result.pool_uuid == POOL and result.uom_redundant is True

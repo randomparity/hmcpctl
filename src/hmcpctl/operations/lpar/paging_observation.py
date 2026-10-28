@@ -234,9 +234,7 @@ async def _configured(
     return ConfiguredPair(pair[0], pair[1], *metadata)
 
 
-async def _pool(
-    hmc: HMCClient, system: str, inventory: tuple[dict[str, Any], ...]
-) -> tuple[dict[str, Any], tuple[PagingProvider, ...], tuple[bool | None, ...]]:
+async def _pool(hmc: HMCClient, system: str) -> dict[str, Any]:
     rows = await _read(
         hmc,
         f"ManagedSystem/{system}/SharedMemoryPool",
@@ -245,42 +243,19 @@ async def _pool(
     )
     if len(rows) != 1:
         raise ValueError("Paging requires exactly one identified pool")
-    pool = rows[0]
-    resource = _mapping(pool["Resource"])
-    providers, dedicated = [], []
-    for key in ("PagingServicePartitionOne", "PagingServicePartitionTwo"):
-        uuid = _provider_uuid(hmc, system, resource.get(key))
-        matches = [
-            e
-            for e in inventory
-            if e["UUID"] == uuid and e["ResourceType"] == "VirtualIOServer"
-        ]
-        if len(matches) != 1:
-            raise ValueError("Paging provider is not contained")
-        expected = _identity(matches[0], "VirtualIOServer")
-        providers.append(expected)
-        try:
-            detail = await _detail(hmc, "VirtualIOServer", uuid)
-            if _identity(detail, "VirtualIOServer") != expected:
-                raise ValueError("Paging provider detail identity differs")
-            fields = _mapping(detail["Resource"])
-            if _text(fields.get("PartitionType")) != "Virtual IO Server":
-                raise ValueError("Paging provider type differs")
-            dedicated.append(
-                not _boolean(
-                    _mapping(fields.get("PartitionMemoryConfiguration")).get(
-                        "SharedMemoryEnabled"
-                    )
-                )
-            )
-        except (HMCError, ValueError, TypeError):
-            dedicated.append(None)
-    if providers[0] == providers[1]:
-        raise ValueError("Paging providers must differ")
-    ordered = sorted(
-        zip(providers, dedicated, strict=True), key=lambda item: item[0].uuid
+    return rows[0]
+
+
+async def _provider_dedicated(hmc: HMCClient, provider: PagingProvider) -> bool:
+    detail = await _detail(hmc, "VirtualIOServer", provider.uuid)
+    if _identity(detail, "VirtualIOServer") != provider:
+        raise ValueError("Paging provider detail identity differs")
+    fields = _mapping(detail["Resource"])
+    if _text(fields.get("PartitionType")) != "Virtual IO Server":
+        raise ValueError("Paging provider type differs")
+    return not _boolean(
+        _mapping(fields.get("PartitionMemoryConfiguration")).get("SharedMemoryEnabled")
     )
-    return pool, tuple(p for p, _ in ordered), tuple(d for _, d in ordered)
 
 
 def _device(
@@ -438,10 +413,28 @@ async def observe_paging(
         )
         if progress is True:
             invalid.append("operation-in-progress")
-    pool_data = await load("pool-providers", _pool(hmc, system_uuid, inventory or ()))
-    pool, providers, dedicated = pool_data or ({}, (), ())
-    if any(value is None for value in dedicated):
-        unavailable.append("provider-detail")
+    pool = await load("pool", _pool(hmc, system_uuid)) or {}
+    observed_providers = []
+    for key in ("PagingServicePartitionOne", "PagingServicePartitionTwo"):
+        provider = fact(
+            "pool-providers",
+            lambda key=key: _provider(
+                known_providers,
+                _provider_uuid(
+                    hmc, system_uuid, _mapping(pool.get("Resource")).get(key)
+                ),
+            ),
+        )
+        if provider is not None:
+            dedicated = await load(
+                "provider-detail", _provider_dedicated(hmc, provider)
+            )
+            observed_providers.append((provider, dedicated))
+    ordered = sorted(observed_providers, key=lambda item: item[0].uuid)
+    providers = tuple(provider for provider, _ in ordered)
+    dedicated = tuple(value for _, value in ordered)
+    if len(providers) == 2 and providers[0] == providers[1]:
+        invalid.append("pool-providers-not-distinct")
     if any(value is False for value in dedicated):
         invalid.append("provider-not-dedicated")
     pool_id = fact("pool-id", lambda: _integer(pool["Resource"].get("PoolID"), 0))
@@ -516,19 +509,19 @@ async def observe_paging(
         if names is not None and names != sorted(name for _, name in paths):
             invalid.append("device-names-disagree")
     if (
-        len(providers) == 2
+        len(set(providers)) == 2
         and paths
         and {uuid for uuid, _ in paths} != {p.uuid for p in providers}
     ):
         invalid.append("runtime-pool-pair-disagree")
-    if len(providers) == 2 and any(
+    if len(set(providers)) == 2 and any(
         p is not None and p not in providers for p in (current_uom, current_native)
     ):
         invalid.append("current-outside-pair")
     if current_native and current_uom and current_native != current_uom:
         invalid.append("current-readers-disagree")
     if (
-        len(providers) == 2
+        len(set(providers)) == 2
         and configured
         and {configured.primary, configured.secondary} != set(providers)
     ):
