@@ -23,7 +23,7 @@ from hmcpctl.ssh.transport import HMCCLIError
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import vios_ame_source as ame
 from live_test import vios_boot_source as source
-from test_live_vios_ame_source_arm import SYS, V0, Wire
+from test_live_vios_ame_source_arm import SYS, V0, Wire, field
 
 VALUES = [
     "c09-plain",
@@ -389,6 +389,25 @@ def test_reuse_globals_unchanged():
     assert source.BootSourceBudget.reserve is not ame.Budget.reserve
 
 
+SAVED_RESOURCES = {
+    "ProfileName": "default_profile",
+    "HasDedicatedProcessors": "false",
+    "SharingMode": "uncapped",
+    "ActiveMemorySharingEnabled": "false",
+    "ActiveMemoryExpansionEnabled": "false",
+    "MinimumMemory": "1024",
+    "DesiredMemory": "2048",
+    "MaximumMemory": "4096",
+    "ExpansionFactor": "0",
+    "MinimumProcessingUnits": "0.1",
+    "DesiredProcessingUnits": "0.5",
+    "MaximumProcessingUnits": "1",
+    "MinimumVirtualProcessors": "1",
+    "DesiredVirtualProcessors": "1",
+    "MaximumVirtualProcessors": "2",
+}
+
+
 class BootWire(Wire):
     """Synthetic HTTP and SSH only; shared snapshot and real scoped deleter run unchanged."""
 
@@ -400,21 +419,81 @@ class BootWire(Wire):
         self.events = []
         self.boot_fault = None
         self.drift = None
+        self.profile_fault = None
+
+    def profile(self, identity, pid):
+        raw = super().profile(identity, pid)
+        memory = "".join(
+            field(k, v)
+            for k, v in [
+                ("MinimumMemory", 1024),
+                ("DesiredMemory", 2048),
+                ("MaximumMemory", 4096),
+            ]
+        )
+        shared = "".join(
+            field(k, v)
+            for k, v in [
+                ("MinimumProcessingUnits", "0.1"),
+                ("DesiredProcessingUnits", "0.5"),
+                ("MaximumProcessingUnits", "1"),
+                ("MinimumVirtualProcessors", 1),
+                ("DesiredVirtualProcessors", 1),
+                ("MaximumVirtualProcessors", 2),
+            ]
+        )
+        cpu = (
+            "<ProcessorAttributes>"
+            + field("HasDedicatedProcessors", "false")
+            + field("SharingMode", "uncapped")
+            + "<SharedProcessorConfiguration>"
+            + shared
+            + "</SharedProcessorConfiguration></ProcessorAttributes>"
+        )
+        raw = raw.replace("</ProfileMemory>", memory + "</ProfileMemory>" + cpu)
+        if identity == OWN and self.drift == "resource":
+            raw = raw.replace(
+                field("MaximumMemory", 4096), field("MaximumMemory", 8192)
+            )
+        if identity == OWN and self.profile_fault:
+            tag, action = self.profile_fault
+            if tag == "association":
+                return raw.replace(f"/VirtualIOServer/{OWN}", f"/VirtualIOServer/{V0}")
+            old = field(tag, SAVED_RESOURCES[tag])
+            if old not in raw:
+                old = f"<{tag}>{SAVED_RESOURCES[tag]}</{tag}>"
+            assert raw.count(old) == 1
+            replacement = {
+                "missing": "",
+                "duplicate": old + old,
+                "wrong": field(tag, "999"),
+                "nonfinite": field(tag, "NaN"),
+                "nonnumeric": field(tag, "unavailable"),
+                "nested": f"<{tag}><unknown>1</unknown></{tag}>",
+            }[action]
+            raw = raw.replace(old, replacement)
+        return raw
 
     def vios(self, ident):
         raw = super().vios(ident)
-        raw = raw.replace(
-            "<PartitionMemoryConfiguration><DesiredMemory>2048</DesiredMemory></PartitionMemoryConfiguration>",
-            "<PartitionMemoryConfiguration><MinimumMemory>1024</MinimumMemory><DesiredMemory>2048</DesiredMemory><MaximumMemory>4096</MaximumMemory></PartitionMemoryConfiguration>",
-        )
-        raw = raw.replace(
-            "<PartitionProcessorConfiguration><DesiredVirtualProcessors>1</DesiredVirtualProcessors></PartitionProcessorConfiguration>",
-            "<PartitionProcessorConfiguration><HasDedicatedProcessors>false</HasDedicatedProcessors><SharingMode>uncapped</SharingMode><SharedProcessorConfiguration><MinimumProcessingUnits>0.1</MinimumProcessingUnits><DesiredProcessingUnits>0.5</DesiredProcessingUnits><MaximumProcessingUnits>1.0</MaximumProcessingUnits><MinimumVirtualProcessors>1</MinimumVirtualProcessors><DesiredVirtualProcessors>1</DesiredVirtualProcessors><MaximumVirtualProcessors>2</MaximumVirtualProcessors></SharedProcessorConfiguration></PartitionProcessorConfiguration>",
-        )
         if ident == OWN:
             raw = raw.replace(">3</PartitionID>", f">{self.partition_id}</PartitionID>")
-        if ident == OWN and self.drift == "resource":
-            raw = raw.replace("<MaximumMemory>4096", "<MaximumMemory>8192")
+            raw = raw.replace(
+                "<PartitionMemoryConfiguration><DesiredMemory>2048</DesiredMemory></PartitionMemoryConfiguration>",
+                "<PartitionMemoryConfiguration><MinimumMemory>0</MinimumMemory><DesiredMemory>0</DesiredMemory><MaximumMemory>0</MaximumMemory><CurrentMinimumMemory>0</CurrentMinimumMemory><CurrentMemory>0</CurrentMemory><CurrentMaximumMemory>0</CurrentMaximumMemory></PartitionMemoryConfiguration>",
+            )
+            raw = raw.replace(
+                "<PartitionProcessorConfiguration><DesiredVirtualProcessors>1</DesiredVirtualProcessors></PartitionProcessorConfiguration>",
+                "<PartitionProcessorConfiguration><HasDedicatedProcessors>true</HasDedicatedProcessors><SharingMode>sre idle proces</SharingMode><CurrentHasDedicatedProcessors>true</CurrentHasDedicatedProcessors><CurrentSharingMode>sre idle proces</CurrentSharingMode><SharedProcessorConfiguration><Metadata><Atom/></Metadata></SharedProcessorConfiguration></PartitionProcessorConfiguration>",
+            )
+            if self.boots and self.drift in {"current", "io"}:
+                if self.drift == "current":
+                    raw = raw.replace("<CurrentMemory>0", "<CurrentMemory>1")
+                else:
+                    raw = raw.replace(
+                        "</PartitionIOConfiguration>",
+                        "<UnknownAdapterFlag>changed</UnknownAdapterFlag></PartitionIOConfiguration>",
+                    )
         return raw
 
     def system(self):
@@ -531,6 +610,28 @@ async def run_capture(rig):
 
 
 @pytest.mark.asyncio
+async def test_inactive_current_placeholders_use_saved_configured_resources(rig):
+    p, w, _h, _out, _before = rig
+    result = await run_capture(rig)
+    assert source._owned(
+        result["snapshots"][1], p, result["snapshots"][0]["stable"]
+    ) == identity(p)
+    assert result["phase"] == "deleted-observed" and not result["run"]["partial"]
+    assert w.boots == VALUES and w.deletes == [OWN]
+    b1 = result["snapshots"][1]
+    fields = b1["stable"]["vios"][OWN]["fields"]
+    memory = fields["PartitionMemoryConfiguration"]["value"]
+    cpu = fields["PartitionProcessorConfiguration"]["value"]
+    assert memory["CurrentMemory"] == "0" and memory["DesiredMemory"] == "0"
+    assert (
+        cpu["HasDedicatedProcessors"] == "true"
+        and cpu["SharingMode"] == "sre idle proces"
+    )
+    assert all(s["stable"] == b1["stable"] for s in result["snapshots"][2:-1])
+    assert source._owned(b1, p, result["snapshots"][0]["stable"]) == identity(p)
+
+
+@pytest.mark.asyncio
 async def test_ordered_complete_capture_snapshot_and_preservation(rig):
     _p, w, h, out, before = rig
     result = await run_capture(rig)
@@ -554,7 +655,9 @@ async def test_ordered_complete_capture_snapshot_and_preservation(rig):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("drift", ["etag", "uptime", "capacity", "pending-pre"])
+@pytest.mark.parametrize(
+    "drift", ["etag", "uptime", "capacity", "pending-pre", "current", "io"]
+)
 async def test_preservation_drift_holds_all_effects(rig, drift):
     _p, w, _h, _out, _ = rig
     w.drift = drift
@@ -575,6 +678,76 @@ async def test_resource_unproved_fixture_prevents_boot(rig, fault):
         w.fault = fault
     result = await run_capture(rig)
     assert result["run"]["partial"] is True and not w.boots and not w.deletes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tag", SAVED_RESOURCES)
+@pytest.mark.parametrize("action", ["wrong", "missing", "duplicate", "nested"])
+async def test_saved_resource_scalar_fault_holds_before_boot(rig, tag, action):
+    _p, w, _h, _out, _before = rig
+    w.profile_fault = (tag, action)
+    result = await run_capture(rig)
+    assert result["phase"] == "held" and result["run"]["partial"]
+    assert w.creates == 1 and not w.boots and not w.deletes and OWN in w.nodes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tag", list(SAVED_RESOURCES)[5:])
+@pytest.mark.parametrize("action", ["nonfinite", "nonnumeric"])
+async def test_saved_resource_number_unavailable_holds_before_boot(rig, tag, action):
+    _p, w, _h, _out, _before = rig
+    w.profile_fault = (tag, action)
+    result = await run_capture(rig)
+    assert result["phase"] == "held" and not w.boots and not w.deletes
+
+
+@pytest.mark.asyncio
+async def test_saved_resource_foreign_association_holds_before_boot(rig):
+    _p, w, _h, _out, _before = rig
+    w.profile_fault = ("association", "wrong")
+    result = await run_capture(rig)
+    assert result["phase"] == "held" and not w.boots and not w.deletes
+
+
+@pytest.mark.asyncio
+async def test_saved_resource_witness_must_match_protected_profile(rig):
+    p, _w, _h, _out, before = rig
+    result = await run_capture(rig)
+    created = deepcopy(result["snapshots"][1])
+    pid = next(iter(created["profiles"][OWN]))
+    created["profiles"][OWN][pid] = created["profiles"][OWN][pid].replace(
+        field("DesiredMemory", 2048), field("DesiredMemory", 4096)
+    )
+    with pytest.raises(ValueError, match="witness differs"):
+        source._owned(created, p, before["stable"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    ["two-profiles", "extra-raw", "name", "etag", "memory-container", "cpu-container"],
+)
+async def test_saved_resource_identity_and_current_availability_required(rig, fault):
+    p, _w, _h, _out, before = rig
+    result = await run_capture(rig)
+    created = deepcopy(result["snapshots"][1])
+    own = created["stable"]["vios"][OWN]
+    pid = next(iter(own["profiles"]))
+    if fault == "two-profiles":
+        own["profiles"]["other"] = deepcopy(own["profiles"][pid])
+    elif fault == "extra-raw":
+        created["profiles"][OWN]["other"] = created["profiles"][OWN][pid]
+    elif fault in {"name", "etag"}:
+        own["profiles"][pid][fault] = "" if fault == "etag" else "other"
+    else:
+        key = (
+            "PartitionMemoryConfiguration"
+            if fault == "memory-container"
+            else "PartitionProcessorConfiguration"
+        )
+        own["fields"][key]["value"] = None
+    with pytest.raises(ValueError):
+        source._owned(created, p, before["stable"])
 
 
 @pytest.mark.asyncio
