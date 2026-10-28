@@ -6,14 +6,14 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **197** tools are registered.
-- **196** are exposed by a default deployment.
+- **198** tools are registered.
+- **197** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
 | `destructive` | 44 |
-| `mutate` | 62 |
+| `mutate` | 63 |
 | `read` | 90 |
 
 ## Maturity vocabulary
@@ -39,7 +39,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `inventory` | 1 | [inventory.md](inventory.md) |
 | `io_slot` | 1 | [io_slot.md](io_slot.md) |
 | `job` | 2 | [job.md](job.md) |
-| `lpar` | 48 | [lpar.md](lpar.md) |
+| `lpar` | 49 | [lpar.md](lpar.md) |
 | `lpar_profile` | 11 | [lpar_profile.md](lpar_profile.md) |
 | `media` | 10 | [media.md](media.md) |
 | `memory_pool` | 2 | [memory_pool.md](memory_pool.md) |
@@ -238,6 +238,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_remove_vios_vfc_group_label` | `destructive` | [vios_label.md](vios_label.md) |
 | `hmc_remove_vnic` | `destructive` | [vnic.md](vnic.md) |
 | `hmc_rename_lpar` | `mutate` | [lpar.md](lpar.md) |
+| `hmc_reset_lpar_memory_statistics` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_restore_lpar_profiles` | `destructive` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_restore_vios` | `destructive` | [vios.md](vios.md) |
 | `hmc_run_command` | `arbitrary-command` | [command.md](command.md) |

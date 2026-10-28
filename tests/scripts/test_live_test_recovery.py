@@ -3058,3 +3058,25 @@ def test_vios_source_recovery_requires_each_binding(monkeypatch, missing):
         recovery.main(args)
     assert caught.value.code == 2
     route.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_statistics_recovery_routes_without_clean_claim(
+    tmp_path, monkeypatch, capsys, failure
+):
+    from live_test import memory_statistics
+
+    document = {"run": {"group": "lpar-memory-statistics"}}
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    readback = AsyncMock(side_effect=ValueError("incomplete") if failure else None)
+    monkeypatch.setattr(memory_statistics, "recover_document", readback)
+    assert recovery.main(["--results", str(path)]) == (2 if failure else 0)
+    readback.assert_awaited_once()
+    output = capsys.readouterr()
+    assert "CLEAN" not in output.out
+    if failure:
+        assert "unconfirmed" in output.err
+    else:
+        assert "reset verification unavailable" in output.out

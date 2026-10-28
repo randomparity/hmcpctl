@@ -59,3 +59,11 @@ class LparMemoryMove(BaseModel):
         default=False,
         description="Permit documented AIX/Linux/VIOS no-RMC deferred effects; never IBM i.",
     )
+
+
+class LparMemoryStatisticsReset(BaseModel):
+    """Reset statistics history once; zero wait disables only the guest timer."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    wait_minutes: Annotated[StrictInt, Field(ge=0)] | None = None
+    detail_level: Annotated[StrictInt, Field(ge=1, le=4)] | None = None

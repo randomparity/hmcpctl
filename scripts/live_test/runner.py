@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 64; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61 and ST64 require named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 67; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64 and ST67 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -106,6 +106,7 @@ from live_test.lpar_security_policy import exercise_lpar_security_policy
 from live_test.lpar_vtpm import exercise_lpar_vtpm
 from live_test.memory_move import exercise_memory_move
 from live_test.memory_quantities import exercise_memory_quantities
+from live_test.memory_statistics import exercise_memory_statistics, private_destination
 from live_test.metrics import (
     exercise_pcm_preferences,
     inspect_metrics_jobs,
@@ -706,6 +707,7 @@ SUBTASKS = {
     52: exercise_lpar_security_policy,
     53: exercise_lpar_linux_roles,
     54: exercise_memory_move,
+    67: exercise_memory_statistics,
     61: exercise_processor_move,
     55: exercise_lpar_hardware_memory,
     56: exercise_processor_quantities,
@@ -759,6 +761,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-memory-quantities": [50],
     "processor-sharing-weight": [59],
     "lpar-memory-move": [54],
+    "lpar-memory-statistics": [67],
     "lpar-accelerator-qos": [64],
     "lpar-processor-move": [61],
     "lpar-processor-quantities": [56],
@@ -835,6 +838,16 @@ def _parse_arguments(argv: list[str] | None = None) -> RunnerArguments:
 def _run_from_arguments(argv: list[str] | None = None) -> int:
     """Validate arguments, then bootstrap configuration and execute the live run."""
     arguments = _parse_arguments(argv)
+    if arguments.group == "lpar-memory-statistics" or arguments.subtask == 67:
+        try:
+            if arguments.group != "lpar-memory-statistics":
+                raise ValueError("Statistics reset requires its named opt-in group")
+            private_destination(arguments.results_path)
+        except (ValueError, OSError, RuntimeError):
+            print(
+                "Statistics reset requires new canonical absolute private results outside repositories"
+            )
+            return 1
     try:
         config = LiveTestConfig.from_env_file()
         # Validated here, beside the rest of the configuration: `evidence.emit_observations`
@@ -1048,7 +1061,7 @@ async def main(
         tasks = sorted(
             n
             for n in SUBTASKS
-            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64}
+            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 67}
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.

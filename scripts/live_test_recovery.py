@@ -2141,6 +2141,29 @@ def main(argv: list[str] | None = None) -> int:
     if (
         isinstance(document, dict)
         and isinstance(document.get("run"), dict)
+        and document["run"].get("group") == "lpar-memory-statistics"
+    ):
+        from live_test import memory_statistics
+
+        if not runner._bootstrap_config():
+            print("statistics recovery: credentials unavailable", file=sys.stderr)
+            return 2
+        try:
+            asyncio.run(memory_statistics.recover_document(HMCConfig(), document))
+        except Exception as error:  # noqa: BLE001 — incomplete proof never confirms an irreversible attempt
+            print(
+                f"statistics recovery unconfirmed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "OBSERVED: finite reset-attempt record and current environment confirmed; reset verification unavailable"
+        )
+        return 0
+
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("run"), dict)
         and document["run"].get("group") == "lpar-memory-move"
     ):
         from live_test import memory_move

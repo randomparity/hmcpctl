@@ -9,7 +9,11 @@ from ..._app import (
 )
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources
-from ...documents.lpar_memory import LparMemoryChange, LparMemoryMove
+from ...documents.lpar_memory import (
+    LparMemoryChange,
+    LparMemoryMove,
+    LparMemoryStatisticsReset,
+)
 from ...documents.lpar_processors import LparProcessorChange, LparProcessorMove
 from ...jobs import BootMode, PowerOnKeylock, PowerOnOperationType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
@@ -27,11 +31,64 @@ from ...operations.lpar.decommission import DecommissionResult, decommission_lpa
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
 from ...operations.lpar.memory import change_lpar_memory
 from ...operations.lpar.memory_move import move_lpar_memory
+from ...operations.lpar.memory_statistics import reset_lpar_memory_statistics
 from ...operations.lpar.processor_move import move_lpar_processors
 from ...operations.lpar.processors import change_lpar_processors
 from ...tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()
+
+
+@tool(
+    effect="mutate",
+    operation="lpar.reset_memory_statistics",
+    target_kind="lpar",
+    exhaustive_targets=False,
+)
+def hmc_reset_lpar_memory_statistics(
+    lpar_name_or_uuid: str,
+    system_name_or_uuid: str,
+    reset: LparMemoryStatisticsReset | None = None,
+    profile: str | None = None,
+    ownership_override: bool = False,
+) -> dict[str, Any]:
+    """Reset memory statistics history once on a contained Running shared partition.
+
+    Args:
+        lpar_name_or_uuid: LPAR or VIOS name or UUID in the selected system.
+        system_name_or_uuid: Required managed system name or UUID.
+        reset: Optional native wait/detail settings, supported only for reported AIX/Linux.
+        profile: Configured HMC connection; default when omitted.
+        ownership_override: Existing audited ownership override, default false.
+
+    Requires system AMS and an all-targets grant for this connection. The override
+    affects only ownership, never containment, eligibility or tool authorization.
+    Reports native completion and independent statistics; reset verification always
+    remains unavailable. No automatic retry or history restoration is performed.
+    """
+    if any(
+        not isinstance(value, str) or not value.strip()
+        for value in (lpar_name_or_uuid, system_name_or_uuid)
+    ):
+        raise ValueError(
+            "Statistics reset requires nonblank partition and managed system"
+        )
+    settings = reset if reset is not None else LparMemoryStatisticsReset()
+    if not isinstance(settings, LparMemoryStatisticsReset):
+        raise TypeError("reset must be a typed LparMemoryStatisticsReset")
+    if type(ownership_override) is not bool:
+        raise TypeError("ownership_override must be a boolean")
+    return with_client(
+        lambda hmc: reset_lpar_memory_statistics(
+            hmc,
+            lpar_name_or_uuid,
+            settings,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        ),
+        profile=profile,
+    )
+
 
 # PowerOff operations hmc_power_off_lpar admits. dumprestart is served only by
 # hmc_dump_restart_lpar, so a grant of this tool cannot reach the crash (ADR 0188).

@@ -1143,3 +1143,17 @@ def test_vios_source_preflight_rejects_effect_assertions(monkeypatch, flag):
         preflight.main(args)
     assert caught.value.code == 2
     route.assert_not_called()
+
+
+def test_statistics_preflight_requires_existing_fixture(monkeypatch, capsys):
+    config = live_config.LiveTestConfig(system_name="sys-R1", lp3_name="guest-R1")
+    monkeypatch.setattr(preflight, "_check_configuration", lambda: (config, ""))
+    monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
+    assert preflight.main(["--group", "lpar-memory-statistics", "--skip-hardware"]) == 0
+    output = capsys.readouterr().out
+    assert "no creation or activation" in output
+    assert "reset verification unavailable" in output
+    verdict = preflight._memory_statistics_verdict(
+        live_config.LiveTestConfig(lp3_name="")
+    )
+    assert not verdict.runnable

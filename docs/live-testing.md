@@ -2387,3 +2387,39 @@ Recovery rereads the retained packet binding and baseline without adopting,
 stamping, creating, deleting or resuming. Partial journals remain incomplete even
 when their fixture is absent now. Retain uncertain residue for root/operator
 reconciliation. Source rollback is a source/document revert, never an HMC action.
+
+
+## Entitled-memory statistics observation (D04, opt-in ST67)
+
+The `lpar-memory-statistics` group runs scenario `st67-lpar-memory-statistics-reset`
+only when explicitly selected; it is excluded from default/all runs. It requires a
+separately provisioned, owned Running shared-memory LPAR or VIOS selected through
+`LIVE_TEST_LPAR_NAME` (`lp3_name`), positive system AMS and complete identity/allocation
+observations. A configured name does not prove fixture existence or eligibility.
+This arm creates, converts, activates and deletes nothing. MCP requires an all-targets
+connection grant; ST67 uses `ownership_override=False` and empty native reset settings.
+
+Verify the deployed clean commit matches the candidate. Obtain a separate hardware
+window with bounded controller/transport deadlines and owned-session closeout. Use an
+existing private mode-0700 `RUN_DIR` outside repositories and `umask 077`; the wrapper
+requires a fresh canonical output path. Persist baseline and intent before one reset.
+The finite record contains baseline, reset intent, reset observation and final observation,
+followed by the evidence row. Partial, malformed or missing records cannot confirm recovery.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-memory-statistics
+uv run --no-sync python scripts/live_lpar_memory_statistics.py --results-file "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$RUN_DIR/results.json"
+uv run --no-sync python scripts/live_test_evidence.py "$RUN_DIR/results.json"
+```
+
+Run independent read-only recovery after every attempt, including failure or apparent
+success. It checks the same candidate, destination, fixture identity and preserved
+allocation environment; it never resets, repairs or restores history. Recovery reports
+OBSERVED/unavailable, with exit0 only for the complete successful record and preserved
+environment, otherwise exit2/unconfirmed. It makes no CLEAN counter-history claim.
+Native completion and independently usable before/after rows do not verify reset causality,
+all counters or units. Different/equal/zero counters cannot establish or defeat reset proof;
+`reset_verification` remains unavailable. Never retry after uncertainty. Raw results stay
+private; publish only generated filtered evidence for the exact tested commit. No live
+reset is evidenced by offline tests or the earlier dedicated-partition statistics read.

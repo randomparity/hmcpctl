@@ -1285,6 +1285,7 @@ _NOT_EXHAUSTIVE = frozenset(
         "hmc_plan_lpar",
         # Selectors, but a continuation names none; the delegated tool binds (ADR 0199).
         "hmc_power_lpar",
+        "hmc_reset_lpar_memory_statistics",
         # Selectors, but the VIOS reads sit below the signature (ADR 0200).
         "hmc_inspect_lpar",
         # Selectors, but one of them is a per-system slot number the fleet-wide
@@ -1339,6 +1340,7 @@ def test_every_selector_less_tool_is_unbounded_and_no_other_is_by_accident():
         "hmc_modify_lpar",
         "hmc_plan_lpar",
         "hmc_power_lpar",
+        "hmc_reset_lpar_memory_statistics",
         "hmc_provision_lpar",
         "hmc_restore_lpar_profiles",
         "hmc_restore_vios",

@@ -463,3 +463,49 @@ async def test_successful_stderr_is_retained_only_when_requested():
             make_config(), "rstprofdata", include_stderr=True
         )
     assert output == "restored\n[stderr]\nkeystore warning\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,signal,completed",
+    [
+        (1, None, True),
+        (7, None, True),
+        (0, None, False),
+        (None, None, False),
+        (True, None, False),
+        (-1, None, False),
+        (1, "TERM", False),
+        (None, "TERM", False),
+    ],
+)
+@pytest.mark.parametrize("secret", [None, "private-value"])
+async def test_completed_nonzero_provenance(status, signal, completed, secret):
+    connection = _make_ssh_mock()
+    connection.run.side_effect = asyncssh.ProcessError(
+        env={},
+        command="cmd",
+        subsystem=None,
+        exit_status=status,
+        exit_signal=signal,
+        returncode=status,
+        stdout="",
+        stderr="uncoded refusal " + (secret or "ordinary detail"),
+    )
+    with (
+        patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=connection),
+        pytest.raises(HMCCLIError) as caught,
+    ):
+        await run_hmc_command(make_config(), "cmd", secrets=(secret,) if secret else ())
+    assert caught.value.remote_nonzero_completed is completed
+    if secret:
+        assert secret not in str(caught.value)
+        assert caught.value.__context__ is None and caught.value.__cause__ is None
+
+
+def test_other_cli_errors_do_not_establish_remote_completion():
+    assert HMCCLIError("exit status 1 HSCL0001").remote_nonzero_completed is False
+    assert (
+        HMCCLIError("opaque", remote_nonzero_completed=1).remote_nonzero_completed
+        is False
+    )
