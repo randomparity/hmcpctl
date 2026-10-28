@@ -65,5 +65,11 @@ class LparMemoryStatisticsReset(BaseModel):
     """Reset statistics history once; zero wait disables only the guest timer."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-    wait_minutes: Annotated[StrictInt, Field(ge=0)] | None = None
-    detail_level: Annotated[StrictInt, Field(ge=1, le=4)] | None = None
+    wait_minutes: Annotated[StrictInt, Field(ge=0)] | None = Field(
+        default=None,
+        description="Native wait in minutes, only for reported AIX/Linux. Zero disables the guest timer; the finite client timeout remains. Omit for the native default.",
+    )
+    detail_level: Annotated[StrictInt, Field(ge=1, le=4)] | None = Field(
+        default=None,
+        description="Native detail level 1–4, only for reported AIX/Linux. Omit for the native default; stored observations do not verify reset causality.",
+    )

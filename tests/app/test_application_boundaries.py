@@ -122,8 +122,9 @@ def test_create_mcp_returns_independent_complete_applications():
     # #1775 adds the native two-target dedicated-memory move.
     # #1779 adds the native two-target processor move.
     # #1781 adds the native partition accelerator QoS setter.
-    assert len(asyncio.run(first.list_tools())) == 196
-    assert len(asyncio.run(second.list_tools())) == 196
+    # #1777 adds the guarded entitled-memory statistics reset.
+    assert len(asyncio.run(first.list_tools())) == 197
+    assert len(asyncio.run(second.list_tools())) == 197
 
 
 def test_operations_do_not_import_application_modules():
