@@ -112,3 +112,93 @@ async def test_list_and_delete_adapter_reject_unknown_adapter_types():
 
     client.list_child.assert_not_awaited()
     client.delete_child.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_network_creation_selected_xml_uses_one_real_child_put(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.xmlutil import parse_feed
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    feed = '<feed xmlns="http://www.w3.org/2005/Atom"/>'
+    route = mock_hmc.put(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(200, text=feed))
+    async with HMCClient(make_config()) as client:
+        await client.add_network_adapter(
+            partition,
+            100,
+            tagged=True,
+            addl_vlan_ids=[2],
+            allowed_os_mac_addrs="none",
+            qos_priority=0,
+            vsi_manager_id=1,
+            vsi_type_id=2,
+            vsi_type_version=3,
+        )
+    assert route.call_count == 1
+    resource = parse_feed(route.calls[0].request.content.decode())[0]["Resource"]
+    assert resource["TaggedVLANIDs"] == "2"
+    assert resource["AllowedOperatingSystemMACAddresses"] == "NONE"
+    assert resource["QualityOfServicePriority"] == "0"
+    assert resource["QualityOfServicePriorityEnabled"] == "true"
+    assert resource["VirtualStationInterfaceManagerID"] == "1"
+    assert resource["VirtualStationInterfaceTypeID"] == "2"
+    assert resource["VirtualStationInterfaceTypeVersion"] == "3"
+    assert "X-HMC-Schema-Version" not in route.calls[0].request.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status, body",
+    [
+        (200, ""),
+        (204, ""),
+        (200, "<broken"),
+        (200, "<feed/>"),
+        (200, '<entry xmlns="http://www.w3.org/2005/Atom"/>'),
+        (
+            200,
+            '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="next" href="/more"/></feed>',
+        ),
+    ],
+)
+async def test_network_creation_feed_refuses_missing_or_incomplete_inventory(
+    mock_hmc, status, body
+):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    route = mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(status, text=body))
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError):
+            await client._network_adapter_creation_feed(partition)
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_network_creation_feed_accepts_positively_empty_atom_feed(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(
+        return_value=httpx.Response(
+            200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>'
+        )
+    )
+    async with HMCClient(make_config()) as client:
+        assert await client._network_adapter_creation_feed(partition) == []

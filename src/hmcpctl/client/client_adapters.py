@@ -6,14 +6,19 @@ domain mixin; this module only defines methods for adapters.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
+from defusedxml import ElementTree as DET
 
 from ..documents.adapters import (
     build_client_network_adapter_document,
     build_vfc_adapter_document,
     build_vscsi_adapter_document,
 )
+from ..errors import HMCError
+from ..xmlutil import ATOM_NS
 from .client_contracts import AdaptersClient, AdapterType, validate_adapter_type
+from .client_parse import _parse_feed
 
 
 class AdaptersMixin:
@@ -71,12 +76,48 @@ class AdaptersMixin:
         virtual_switch_id: int | None = None,
         tagged: bool = False,
         mac_address: str | None = None,
+        addl_vlan_ids: list[int] | None = None,
+        allowed_os_mac_addrs: list[str] | Literal["all", "none"] | None = None,
+        qos_priority: int | Literal["none"] | None = None,
+        vsi_manager_id: int | None = None,
+        vsi_type_id: int | None = None,
+        vsi_type_version: int | None = None,
     ) -> dict[str, Any] | None:
         """Add a Virtual Ethernet client network adapter to an LPAR."""
 
         xml = build_client_network_adapter_document(
-            port_vlan_id, slot_number, virtual_switch_id, tagged, mac_address
+            port_vlan_id,
+            slot_number,
+            virtual_switch_id,
+            tagged,
+            mac_address,
+            addl_vlan_ids=addl_vlan_ids,
+            allowed_os_mac_addrs=allowed_os_mac_addrs,
+            qos_priority=qos_priority,
+            vsi_manager_id=vsi_manager_id,
+            vsi_type_id=vsi_type_id,
+            vsi_type_version=vsi_type_version,
         )
         return await self.create_child(
             "LogicalPartition", lpar_uuid, "ClientNetworkAdapter", xml
         )
+
+    async def _network_adapter_creation_feed(
+        self: AdaptersClient, lpar_uuid: str
+    ) -> list[dict[str, Any]]:
+        """Read positive, unpaginated inventory for creation identity proof."""
+        path = f"/rest/api/uom/LogicalPartition/{lpar_uuid}/ClientNetworkAdapter"
+        xml = await self._get(
+            path, "ClientNetworkAdapter", uuid_path_arguments={"parent_uuid": lpar_uuid}
+        )
+        if not xml.strip():
+            raise HMCError("Client network adapter inventory is unavailable")
+        entries = _parse_feed(xml, path)
+        root = DET.fromstring(xml.encode("utf-8"))
+        if root.tag != f"{{{ATOM_NS}}}feed" or any(
+            node.get("rel") == "next" for node in root.findall(f"{{{ATOM_NS}}}link")
+        ):
+            raise HMCError(
+                "Client network adapter inventory must be a complete Atom feed"
+            )
+        return entries

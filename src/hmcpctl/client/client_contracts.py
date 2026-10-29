@@ -386,6 +386,15 @@ class StorageClient(Protocol):
 class AdaptersClient(Protocol):
     """Host operations required by :class:`client_adapters.AdaptersMixin`."""
 
+    async def _get(
+        self,
+        path: str,
+        resource_type: str | None = None,
+        include_schema_version: bool = True,
+        *,
+        uuid_path_arguments: Mapping[str, str] | None = None,
+    ) -> str: ...
+
     async def list_child(
         self, parent_type: str, parent_uuid: str, child_type: str
     ) -> list[dict[str, Any]]: ...

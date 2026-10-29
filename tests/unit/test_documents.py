@@ -8,6 +8,7 @@ import pytest
 
 from hmcpctl.documents import common
 from hmcpctl.documents.access import AUTHENTICATION_TYPES, build_hmc_user_document
+from hmcpctl.documents.adapters import build_client_network_adapter_document
 from hmcpctl.documents.common import UOM_NS
 from hmcpctl.documents.logon import build_logon_request_document
 from hmcpctl.documents.lpar import (
@@ -396,3 +397,144 @@ def test_remote_access_document_is_unchanged():
         "  </KerberosConfiguration>\n"
         "</ManagementConsole>\n"
     )
+
+
+_NETWORK_LEGACY_XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<ClientNetworkAdapter xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/" schemaVersion="V1_0">\n  <Metadata><Atom/></Metadata>\n  <VirtualSlotNumber kb="COD" kxe="false">3</VirtualSlotNumber>\n  <MACAddress kb="CUR" kxe="false">020000000001</MACAddress>\n  <PortVLANID kb="CUR" kxe="false">100</PortVLANID>\n  <TaggedVLANSupported kb="CUA" kxe="false">true</TaggedVLANSupported>\n  <VirtualSwitchID kb="ROR" kxe="false">1</VirtualSwitchID>\n</ClientNetworkAdapter>\n'
+
+
+def test_network_creation_omission_preserves_legacy_bytes():
+    assert (
+        build_client_network_adapter_document(100, 3, 1, True, "020000000001")
+        == _NETWORK_LEGACY_XML
+    )
+    assert (
+        build_client_network_adapter_document(
+            100,
+            3,
+            1,
+            True,
+            "020000000001",
+            addl_vlan_ids=None,
+            allowed_os_mac_addrs=None,
+            qos_priority=None,
+            vsi_manager_id=None,
+            vsi_type_id=None,
+            vsi_type_version=None,
+        )
+        == _NETWORK_LEGACY_XML
+    )
+
+
+def test_network_creation_six_fields_use_schema_order_and_explicit_zero():
+    root = ET.fromstring(
+        build_client_network_adapter_document(
+            100,
+            3,
+            1,
+            True,
+            "020000000001",
+            addl_vlan_ids=[1, 4094],
+            allowed_os_mac_addrs=["0200000000ab"],
+            qos_priority=0,
+            vsi_manager_id=1,
+            vsi_type_id=2,
+            vsi_type_version=3,
+        )
+    )
+    names = [e.tag.rsplit("}", 1)[-1] for e in root]
+    assert names == [
+        "Metadata",
+        "VirtualSlotNumber",
+        "AllowedOperatingSystemMACAddresses",
+        "MACAddress",
+        "PortVLANID",
+        "QualityOfServicePriority",
+        "QualityOfServicePriorityEnabled",
+        "TaggedVLANIDs",
+        "TaggedVLANSupported",
+        "VirtualStationInterfaceManagerID",
+        "VirtualStationInterfaceTypeID",
+        "VirtualSwitchID",
+        "VirtualStationInterfaceTypeVersion",
+    ]
+    by_name = {e.tag.rsplit("}", 1)[-1]: e for e in root}
+    assert by_name["TaggedVLANIDs"].text == "1 4094"
+    assert by_name["TaggedVLANIDs"].get("kb") == "CUA"
+    assert by_name["AllowedOperatingSystemMACAddresses"].text == "0200000000AB"
+    assert by_name["QualityOfServicePriority"].text == "0"
+    assert by_name["QualityOfServicePriorityEnabled"].text == "true"
+    for field in [
+        "AllowedOperatingSystemMACAddresses",
+        "QualityOfServicePriority",
+        "QualityOfServicePriorityEnabled",
+        "VirtualStationInterfaceManagerID",
+        "VirtualStationInterfaceTypeID",
+        "VirtualStationInterfaceTypeVersion",
+    ]:
+        assert by_name[field].get("kb") == "CUD"
+        assert by_name[field].get("kxe") == "false"
+
+
+@pytest.mark.parametrize("policy, expected", [("all", "ALL"), ("none", "NONE")])
+def test_network_creation_mac_policies_and_disabled_qos(policy, expected):
+    root = ET.fromstring(
+        build_client_network_adapter_document(
+            100,
+            allowed_os_mac_addrs=policy,
+            qos_priority="none",
+            addl_vlan_ids=[],
+        )
+    )
+    values = {e.tag.rsplit("}", 1)[-1]: e.text for e in root}
+    assert values["AllowedOperatingSystemMACAddresses"] == expected
+    assert values["QualityOfServicePriorityEnabled"] == "false"
+    assert "QualityOfServicePriority" not in values
+    assert "TaggedVLANIDs" in values
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"addl_vlan_ids": "1"},
+        {"addl_vlan_ids": [None]},
+        {"addl_vlan_ids": [True]},
+        {"addl_vlan_ids": [0]},
+        {"addl_vlan_ids": [4095]},
+        {"addl_vlan_ids": [1.5]},
+        {"addl_vlan_ids": list(range(1, 22))},
+        {"allowed_os_mac_addrs": "ALL"},
+        {"allowed_os_mac_addrs": []},
+        {"allowed_os_mac_addrs": [1]},
+        {"allowed_os_mac_addrs": ["02:00:00:00:00:01"]},
+        {"allowed_os_mac_addrs": ["020000000001"] * 5},
+        {"qos_priority": True},
+        {"qos_priority": -1},
+        {"qos_priority": 8},
+        {"qos_priority": "0"},
+        {"qos_priority": 0.5},
+        {"vsi_manager_id": True},
+        {"vsi_type_id": "1"},
+        {"vsi_type_version": 2**31},
+        {"vsi_manager_id": -(2**31) - 1},
+    ],
+)
+def test_network_creation_rejects_invalid_selected_fields(kwargs):
+    with pytest.raises(ValueError):
+        build_client_network_adapter_document(100, tagged=True, **kwargs)
+
+
+def test_network_creation_requires_explicit_tagging_for_additional_vlans():
+    with pytest.raises(ValueError, match="tagged"):
+        build_client_network_adapter_document(100, addl_vlan_ids=[2])
+
+
+@pytest.mark.parametrize("value", [-(2**31), 2**31 - 1])
+def test_network_creation_retains_vsi_representational_limits_for_hmc_validation(value):
+    xml = build_client_network_adapter_document(100, vsi_type_id=value)
+    root = ET.fromstring(xml)
+    assert root.find(f"{{{UOM_NS}}}VirtualStationInterfaceTypeID").text == str(value)
+
+
+def test_network_creation_retains_escaping_boundary_for_unsupported_tuple():
+    with pytest.raises(TypeError, match="escaping boundary"):
+        build_client_network_adapter_document(100, tagged=True, addl_vlan_ids=(1,))
