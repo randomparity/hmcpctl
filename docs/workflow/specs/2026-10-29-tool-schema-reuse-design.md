@@ -1,8 +1,8 @@
 # Tool schema reuse design
 
-Proposed 2026-10-29 for PR #1823, `fix/checkpoint-json-serialization`.
-Authority: the operator approved step 1, preparing the bounded design; production
-implementation, publishing changes and merging are later steps.
+Adopted 2026-10-29 for PR #1823, `fix/checkpoint-json-serialization`.
+Authority: the operator requested the quest workflow from planning through PR
+handoff after reviewing this design. Merge remains a separate decision.
 Decision: [ADR 0308](../../adr/0308-definition-owned-tool-schema-templates.md).
 
 ## Problem

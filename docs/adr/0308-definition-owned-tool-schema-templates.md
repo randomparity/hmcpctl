@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-29), for PR #1823. Implementation awaits design adoption.
+Accepted (2026-10-29), for PR #1823. The operator adopted implementation through PR handoff.
 
 ## Context
 
@@ -43,7 +43,7 @@ per definition. Each binding gets independent mutable schemas and annotations.
   arguments and authorizes against the current application's callback.
 - Composed special tools keep their existing registration paths. The six-name
   stable facade, MCP schemas, dependencies and CI limits do not change.
-- Fixed-definition lifetime needs explicit adoption before implementation;
+- Fixed-definition lifetime is adopted for the static catalog;
   signature/model hot-patching would require a separate lifecycle design.
 
 ## Considered & rejected
