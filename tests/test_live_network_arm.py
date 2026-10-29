@@ -80,6 +80,16 @@ MUTATIONS = (
 )
 
 
+N1_FIELDS = {
+    "addl_vlan_ids": [],
+    "allowed_os_mac_addrs": "all",
+    "qos_priority": "none",
+    "vsi_manager_id": 0,
+    "vsi_type_id": 0,
+    "vsi_type_version": 0,
+}
+
+
 @dataclass
 class FakeHMC:
     """An HMC answering the arm's calls; each knob injects one behaviour."""
@@ -166,10 +176,27 @@ class FakeHMC:
         ]
 
     def _hmc_add_network_adapter(self, kwargs):
-        self.adapters["ClientNetworkAdapter"][self._new_uuid()] = {
-            "PortVLANID": str(kwargs["port_vlan_id"])
+        identity = self._new_uuid()
+        resource = {
+            "PortVLANID": str(kwargs["port_vlan_id"]),
+            "TaggedVLANIDs": "",
+            "AllowedOperatingSystemMACAddresses": "ALL",
+            "QualityOfServicePriorityEnabled": "false",
+            "VirtualStationInterfaceManagerID": "0",
+            "VirtualStationInterfaceTypeID": "0",
+            "VirtualStationInterfaceTypeVersion": "0",
         }
-        return "PASS", {}
+        self.adapters["ClientNetworkAdapter"][identity] = resource
+        return "PASS", {
+            "UUID": identity,
+            "Resource": dict(resource),
+            "creation_verification": {
+                "status": "verified",
+                "checked_fields": list(N1_FIELDS),
+                "mismatched_fields": [],
+                "unavailable_fields": [],
+            },
+        }
 
     def _add_client(self, adapter_type, kwargs):
         partition, slot = REMOTE_FIELDS[adapter_type]
@@ -745,9 +772,18 @@ async def test_a_refused_unknown_delete_that_still_applied_fails_its_assertion(
 
     state = await _run(monkeypatch, hmc)
 
-    observation = _observation(state, "adapter.delete")
-    assert "unknown-uuid-refused" not in observation["assertions"]
-    assert hmc.adapters == _pre_existing()
+    assert _manual(state)
+    new = set(hmc.adapters["ClientNetworkAdapter"]) - set(
+        PRE_EXISTING_ADAPTERS["ClientNetworkAdapter"]
+    )
+    assert len(new) == 2
+    targets = {
+        kwargs["adapter_uuid"]
+        for tool, kwargs in hmc.calls
+        if tool == "hmc_delete_adapter"
+    }
+    assert not new & targets
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
 
 
 @pytest.mark.asyncio
@@ -827,3 +863,202 @@ async def test_an_unformattable_port_still_records_its_manual_recovery(monkeypat
     state = await _run(monkeypatch, hmc)
 
     assert any("label is not its original" in text for text in _manual(state))
+
+
+@pytest.mark.asyncio
+async def test_n1_six_fields_are_selected_in_the_existing_single_create(monkeypatch):
+    hmc = FakeHMC()
+    state = await _run(monkeypatch, hmc)
+    calls = [kwargs for tool, kwargs in hmc.calls if tool == "hmc_add_network_adapter"]
+    assert len(calls) == 1
+    assert {name: calls[0][name] for name in N1_FIELDS} == N1_FIELDS
+    assert (
+        "creation-fields-verified"
+        in _observation(state, "adapter.add_network")["assertions"]
+    )
+    assert hmc.adapters == _pre_existing()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        {},
+        {
+            "status": "unavailable",
+            "checked_fields": list(N1_FIELDS),
+            "mismatched_fields": [],
+            "unavailable_fields": ["qos_priority"],
+        },
+        {
+            "status": "mismatched",
+            "checked_fields": list(N1_FIELDS),
+            "mismatched_fields": ["qos_priority"],
+            "unavailable_fields": [],
+        },
+        {
+            "status": "verified",
+            "checked_fields": ["qos_priority"],
+            "mismatched_fields": [],
+            "unavailable_fields": [],
+        },
+        {
+            "status": "verified",
+            "checked_fields": list(N1_FIELDS),
+            "mismatched_fields": [],
+            "unavailable_fields": [],
+            "extra": True,
+        },
+    ],
+)
+async def test_n1_nonqualifying_metadata_stops_before_cleanup_or_later_effects(
+    monkeypatch, metadata
+):
+    hmc = FakeHMC()
+    original = hmc._hmc_add_network_adapter
+
+    def create(kwargs):
+        status, data = original(kwargs)
+        data["creation_verification"] = metadata
+        return status, data
+
+    hmc._hmc_add_network_adapter = create
+    state = await _run(monkeypatch, hmc)
+    assert _manual(state)
+    index = next(
+        i for i, (tool, _) in enumerate(hmc.calls) if tool == "hmc_add_network_adapter"
+    )
+    assert not [tool for tool, _ in hmc.calls[index + 1 :] if tool in MUTATIONS]
+    assert len(hmc.adapters["ClientNetworkAdapter"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_n1_independent_fields_override_a_claimed_verified_result(monkeypatch):
+    hmc = FakeHMC()
+    original = hmc._hmc_add_network_adapter
+
+    def create(kwargs):
+        status, data = original(kwargs)
+        hmc.adapters["ClientNetworkAdapter"][data["UUID"]][
+            "VirtualStationInterfaceTypeID"
+        ] = "9"
+        return status, data
+
+    hmc._hmc_add_network_adapter = create
+    state = await _run(monkeypatch, hmc)
+    assert _manual(state)
+    assert "hmc_delete_adapter" not in hmc.mutations()
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+async def test_n1_foreign_uuid_arriving_before_cleanup_is_never_deleted(monkeypatch):
+    hmc = FakeHMC()
+    original = hmc._hmc_list_adapters
+    reads_after_create = 0
+    foreign = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+    def read(kwargs):
+        nonlocal reads_after_create
+        if kwargs["adapter_type"] == "ClientNetworkAdapter" and any(
+            tool == "hmc_add_network_adapter" for tool, _ in hmc.calls
+        ):
+            reads_after_create += 1
+            if reads_after_create == 3:
+                hmc.adapters["ClientNetworkAdapter"][foreign] = {
+                    "VirtualSlotNumber": "99",
+                    "PortVLANID": "99",
+                }
+        return original(kwargs)
+
+    hmc._hmc_list_adapters = read
+    state = await _run(monkeypatch, hmc)
+    assert foreign in hmc.adapters["ClientNetworkAdapter"]
+    assert _manual(state)
+    assert not any(
+        tool == "hmc_delete_adapter" and kwargs["adapter_uuid"] == foreign
+        for tool, kwargs in hmc.calls
+    )
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+async def test_n1_foreign_uuid_arriving_during_delete_is_not_a_second_target(
+    monkeypatch,
+):
+    hmc = FakeHMC()
+    original = hmc._hmc_delete_adapter
+    foreign = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+    def delete(kwargs):
+        if (
+            kwargs["adapter_type"] == "ClientNetworkAdapter"
+            and kwargs["adapter_uuid"] in hmc.adapters["ClientNetworkAdapter"]
+        ):
+            hmc.adapters["ClientNetworkAdapter"][foreign] = {
+                "VirtualSlotNumber": "99",
+                "PortVLANID": "99",
+            }
+        return original(kwargs)
+
+    hmc._hmc_delete_adapter = delete
+    state = await _run(monkeypatch, hmc)
+    assert foreign in hmc.adapters["ClientNetworkAdapter"]
+    assert _manual(state)
+    assert not any(
+        tool == "hmc_delete_adapter" and kwargs["adapter_uuid"] == foreign
+        for tool, kwargs in hmc.calls
+    )
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("VirtualStationInterfaceTypeID", {"text": "0"}),
+        ("VirtualStationInterfaceTypeID", {"@attrs": {}, "text": "0", "Nested": "0"}),
+        ("VirtualStationInterfaceTypeID", ["0", "0"]),
+        ("QualityOfServicePriorityEnabled", {"text": "false"}),
+        ("TaggedVLANIDs", None),
+    ],
+)
+async def test_n1_malformed_independent_leaf_never_inherits_product_verification(
+    monkeypatch, field, value
+):
+    hmc = FakeHMC()
+    original = hmc._hmc_add_network_adapter
+
+    def create(kwargs):
+        status, data = original(kwargs)
+        hmc.adapters["ClientNetworkAdapter"][data["UUID"]][field] = value
+        return status, data
+
+    hmc._hmc_add_network_adapter = create
+    state = await _run(monkeypatch, hmc)
+    assert _manual(state)
+    assert "hmc_delete_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+async def test_n1_create_identity_case_uses_independent_server_spelling_for_cleanup(
+    monkeypatch,
+):
+    hmc = FakeHMC()
+    original = hmc._hmc_add_network_adapter
+
+    def create(kwargs):
+        status, data = original(kwargs)
+        identity = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+        hmc.adapters["ClientNetworkAdapter"][identity] = hmc.adapters[
+            "ClientNetworkAdapter"
+        ].pop(data["UUID"])
+        data["UUID"] = identity.lower()
+        return status, data
+
+    hmc._hmc_add_network_adapter = create
+    state = await _run(monkeypatch, hmc)
+    assert not _manual(state)
+    assert _observation(state, "adapter.add_network")["result"] == "passed"
+    assert hmc.adapters == _pre_existing()

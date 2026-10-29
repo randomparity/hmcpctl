@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import StrictInt, StrictStr
 
 from ..._app import run_limited_collection, with_client
 from ...client.client_contracts import AdapterType
 from ...client.core import HMCClient
+from ...documents.adapters import validate_network_adapter_creation_fields
 from ...operations.lpar.profile_sync import resource_with_change_location
 from ...operations.virtualization.adapters import (
     add_network_adapter,
@@ -64,12 +67,24 @@ def hmc_add_network_adapter(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
+    *,
+    addl_vlan_ids: list[StrictInt] | None = None,
+    allowed_os_mac_addrs: list[StrictStr] | Literal["all", "none"] | None = None,
+    qos_priority: StrictInt | Literal["none"] | None = None,
+    vsi_manager_id: StrictInt | None = None,
+    vsi_type_id: StrictInt | None = None,
+    vsi_type_version: StrictInt | None = None,
 ) -> dict[str, Any]:
     """Add a virtual Ethernet adapter to an LPAR; active LPARs require RMC.
 
     Returns the adapter plus ``change_location``: the partition's
     CurrentProfileSync and whether the adapter lives only in the current
     configuration (a profile activation then drops it) or in its profile too.
+
+    Selected new fields add ``creation_verification`` beside the original identity:
+    verified, mismatched or unavailable stored-field evidence. This does not prove
+    runtime traffic, QoS, VSI registration or saved-profile equality. Do not retry
+    blindly after uncertainty; no automatic compensation is performed.
 
     Args:
         lpar_name_or_uuid: Partition name or UUID; discover partitions with
@@ -80,11 +95,34 @@ def hmc_add_network_adapter(
             or ``None`` to use the HMC default.
         tagged: Whether the adapter accepts IEEE 802.1Q tagged VLAN traffic.
         mac_address: Optional 12-hex-digit MAC address, with no separators.
+        addl_vlan_ids: Additional VLAN IDs 1–4094, at most twenty; nonempty requires
+            tagged=True. Omitted leaves HMC defaults; an empty list is explicit.
+        allowed_os_mac_addrs: all, none, or one to four 12-hex MAC addresses.
+        qos_priority: Priority 0–7, or none to disable. Omitted preserves defaults.
+        vsi_manager_id: VSI manager signed 32-bit value; HMC validates semantic limits.
+        vsi_type_id: VSI type signed 32-bit value; HMC validates semantic limits.
+        vsi_type_version: VSI version signed 32-bit value; HMC validates semantic limits.
         ownership_override: Bypass LPAR ownership rejection after operator approval.
         profile: TOML profile name, or the environment-default HMC when omitted.
         system_name_or_uuid: Optional SystemName or UUID that disambiguates the
             partition name; when omitted the name is searched fleet-wide.
     """
+
+    fields: dict[str, Any] = {
+        "addl_vlan_ids": addl_vlan_ids,
+        "allowed_os_mac_addrs": allowed_os_mac_addrs,
+        "qos_priority": qos_priority,
+        "vsi_manager_id": vsi_manager_id,
+        "vsi_type_id": vsi_type_id,
+        "vsi_type_version": vsi_type_version,
+    }
+    selected = {name: value for name, value in fields.items() if value is not None}
+    if selected:
+        validate_network_adapter_creation_fields(tagged=tagged, **selected)
+        selected = {
+            name: value.copy() if isinstance(value, list) else value
+            for name, value in selected.items()
+        }
 
     async def operation(hmc: HMCClient):
         result = await add_network_adapter(
@@ -97,8 +135,14 @@ def hmc_add_network_adapter(
             mac_address=mac_address,
             ownership_override=ownership_override,
             system_name_or_uuid=system_name_or_uuid,
+            **selected,
         )
-        return resource_with_change_location(result.resource, result.change_location)
+        rendered = resource_with_change_location(
+            result.resource, result.change_location
+        )
+        if result.creation_verification is not None:
+            rendered["creation_verification"] = result.creation_verification
+        return rendered
 
     return with_client(operation, profile=profile)
 

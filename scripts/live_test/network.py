@@ -7,9 +7,10 @@ it is Not Activated, it round-trips a test VLAN with a client network adapter, a
 vSCSI and a vFC client adapter paired to the VIOS serving the partition, and that
 VIOS's FC-port and vFC group labels.
 
-Every ST9 scenario reads its own baseline, re-reads after each mutation whatever the
-call returned, and reverses the difference from the baseline. A reversal it cannot
-confirm records a manual-recovery row and stops ST9: no later mutation runs.
+Every ST9 scenario reads its own baseline and re-reads after each mutation.
+The client-network scenario deletes only its independently verified fixture UUID;
+storage scenarios reverse their baseline difference. Uncertain verification or
+cleanup records a manual-recovery row and stops ST9: no later mutation runs.
 """
 
 from __future__ import annotations
@@ -21,12 +22,14 @@ import shlex
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from fastmcp import Client
 
 from hmcpctl.errors import HMCError
+from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh.commands import build_attribute_record, build_filter
+from hmcpctl.xmlutil import leaf_text
 
 from .observation import Assertion
 from .results import entries
@@ -462,6 +465,101 @@ def _new(
     return None if after is None else [after[k] for k in after if k not in baseline]
 
 
+_NETWORK_CREATION_SETTINGS: dict[str, Any] = {
+    "addl_vlan_ids": [],
+    "allowed_os_mac_addrs": "all",
+    "qos_priority": "none",
+    "vsi_manager_id": 0,
+    "vsi_type_id": 0,
+    "vsi_type_version": 0,
+}
+
+
+def _network_keys(snapshot: Mapping[str, object] | None) -> dict[str, str] | None:
+    if snapshot is None:
+        return None
+    keys: dict[str, str] = {}
+    for value in snapshot:
+        if not isinstance(value, str) or not is_uuid(value) or value.casefold() in keys:
+            return None
+        keys[value.casefold()] = value
+    return keys
+
+
+def _network_text(value: object) -> str | None:
+    if isinstance(value, dict) and (
+        set(value) != {"@attrs", "text"} or not isinstance(value.get("@attrs"), dict)
+    ):
+        return None
+    text = leaf_text(value)
+    return text.strip() if isinstance(text, str) else None
+
+
+def _network_fields_match(resource: Mapping[str, object]) -> bool:
+    vlans = _network_text(resource.get("TaggedVLANIDs"))
+    return (
+        isinstance(vlans, str)
+        and not vlans.strip()
+        and _network_text(resource.get("AllowedOperatingSystemMACAddresses")) == "ALL"
+        and _network_text(resource.get("QualityOfServicePriorityEnabled"))
+        in ("false", "0")
+        and all(
+            as_int(_network_text(resource.get(name))) == 0
+            for name in (
+                "VirtualStationInterfaceManagerID",
+                "VirtualStationInterfaceTypeID",
+                "VirtualStationInterfaceTypeVersion",
+            )
+        )
+    )
+
+
+def _network_metadata_verified(data: Any) -> bool:
+    metadata = data.get("creation_verification") if isinstance(data, Mapping) else None
+    return (
+        isinstance(metadata, dict)
+        and set(metadata)
+        == {"status", "checked_fields", "mismatched_fields", "unavailable_fields"}
+        and metadata["status"] == "verified"
+        and metadata["checked_fields"] == list(_NETWORK_CREATION_SETTINGS)
+        and metadata["mismatched_fields"] == []
+        and metadata["unavailable_fields"] == []
+    )
+
+
+def _network_fixture(
+    listed: Listing | None,
+    baseline: Adapters,
+    identity: object,
+    vlan: int,
+    expected_placement: tuple[str, ...] | None = None,
+) -> str | None:
+    keys, original = _network_keys(listed), _network_keys(baseline)
+    if (
+        keys is None
+        or original is None
+        or not isinstance(identity, str)
+        or not is_uuid(identity)
+    ):
+        return None
+    wanted = identity.casefold()
+    if wanted in original or set(keys) != set(original) | {wanted} or listed is None:
+        return None
+    if not all(isinstance(resource, Mapping) for resource in listed.values()):
+        return None
+    placed = _placements(listed)
+    if any(placed[keys[key]] != baseline[original[key]] for key in original):
+        return None
+    resource, placement = listed[keys[wanted]], placed[keys[wanted]]
+    if as_int(
+        _network_text(resource.get("PortVLANID"))
+    ) != vlan or not _network_fields_match(resource):
+        return None
+    if expected_placement is not None and placement != expected_placement:
+        return None
+    return keys[wanted]
+
+
 def _client_assertions(
     added: str,
     new: list[Mapping[str, object]] | None,
@@ -515,7 +613,7 @@ class _Arm:
         """Record one read's row and return its data, or None when it failed."""
         return result[1] if self.note(label, tool, result) == "PASS" else None
 
-    def manual(self, what: str, command: str) -> None:
+    def manual(self, what: str, command: str) -> NoReturn:
         self.state.record(
             SUBTASK,
             "network round trip",
@@ -838,6 +936,11 @@ class _Arm:
         self, vlan: int, switch: int, baseline: Adapters
     ) -> None:
         kind = "ClientNetworkAdapter"
+        if _network_keys(baseline) is None:
+            self.manual(
+                "client adapter baseline identity is unavailable",
+                "inspect the baseline; no adapter was created",
+            )
         result = await self.state.call(
             self.client,
             "hmc_add_network_adapter",
@@ -845,59 +948,123 @@ class _Arm:
             port_vlan_id=vlan,
             virtual_switch_id=switch,
             system_name_or_uuid=self.system,
+            addl_vlan_ids=[],
+            allowed_os_mac_addrs="all",
+            qos_priority="none",
+            vsi_manager_id=0,
+            vsi_type_id=0,
+            vsi_type_version=0,
         )
         added = self.note("test VLAN", "hmc_add_network_adapter", result)
         after = await self.adapters(kind, "after add")
-        new = _new(after, baseline)
-        one_added = new is not None and len(new) == 1
-        pvid = (
-            one_added and new is not None and as_int(new[0].get("PortVLANID")) == vlan
+        identity = result[1].get("UUID") if isinstance(result[1], Mapping) else None
+        fixture = _network_fixture(after, baseline, identity, vlan)
+        qualified = (
+            added == "PASS"
+            and _network_metadata_verified(result[1])
+            and fixture is not None
         )
+        if not qualified or after is None or fixture is None:
+            self.manual(
+                "N1 creation identity or selected fields are unverified",
+                "inspect adapter residue; no automatic cleanup or retry",
+            )
+        placement = _placements(after)[fixture]
+        unknown = str(uuid.uuid4())
+        if unknown.casefold() in {key.casefold() for key in after}:
+            self.manual(
+                "negative delete target is not absent",
+                "inspect the fixture; no negative delete attempted",
+            )
         result = await self.state.call(
             self.client,
             "hmc_delete_adapter",
             lpar_name_or_uuid=self.lpar,
             adapter_type=kind,
-            adapter_uuid=str(uuid.uuid4()),
+            adapter_uuid=unknown,
             system_name_or_uuid=self.system,
         )
         refused = self.note("unknown UUID", "hmc_delete_adapter", result)
-        unchanged = await self.placements(kind, "after unknown delete")
+        unchanged = await self.adapters(kind, "after unknown delete")
         unknown_refused = (
-            refused == "FAIL" and after is not None and unchanged == _placements(after)
+            refused == "FAIL"
+            and _network_fixture(unchanged, baseline, fixture, vlan, placement)
+            is not None
         )
-        deleted, restored, drift = await self.remove_new_adapters(kind, baseline)
-        cleanup = "passed" if restored else "failed"
+        if not unknown_refused:
+            self.manual(
+                "unknown delete changed or obscured the adapter baseline",
+                "inspect residue; no automatic cleanup or retry",
+            )
+        deleted, restored = await self.delete_network_fixture(
+            baseline, fixture, vlan, placement
+        )
         self.state.record_verified(
             SUBTASK,
             "hmc_add_network_adapter",
             operation="adapter.add_network",
             scenario="st9-client-network-adapter",
             assertions=[
-                Assertion("adapter-added", one_added and added == "PASS"),
-                Assertion("pvid-matches", pvid),
+                Assertion("adapter-added", added == "PASS"),
+                Assertion("pvid-matches", fixture is not None),
+                Assertion("creation-fields-verified", qualified),
             ],
-            cleanup=cleanup,
+            cleanup="passed" if restored else "failed",
             data=None,
         )
-        if deleted is None:
-            self.skip("hmc_delete_adapter", "the add left no adapter to delete")
-        else:
-            self.state.record_verified(
-                SUBTASK,
-                "hmc_delete_adapter",
-                operation="adapter.delete",
-                scenario="st9-client-network-adapter",
-                assertions=[
-                    Assertion("delete-accepted", deleted),
-                    Assertion("unknown-uuid-refused", unknown_refused),
-                    Assertion("adapters-equal-baseline", restored),
-                ],
-                cleanup=cleanup,
-                data=None,
+        self.state.record_verified(
+            SUBTASK,
+            "hmc_delete_adapter",
+            operation="adapter.delete",
+            scenario="st9-client-network-adapter",
+            assertions=[
+                Assertion("delete-accepted", deleted),
+                Assertion("unknown-uuid-refused", unknown_refused),
+                Assertion("adapters-equal-baseline", restored),
+            ],
+            cleanup="passed" if restored else "failed",
+            data=None,
+        )
+
+    async def delete_network_fixture(
+        self, baseline: Adapters, fixture: str, vlan: int, placement: tuple[str, ...]
+    ) -> tuple[bool, bool]:
+        """Delete only the independently proven network fixture, never a delta."""
+        current = await self.adapters(
+            "ClientNetworkAdapter", "before verified fixture delete"
+        )
+        target = _network_fixture(current, baseline, fixture, vlan, placement)
+        if target is None:
+            self.manual(
+                "adapter drift before fixture cleanup",
+                "inspect residue; no automatic deletion",
             )
-        if not restored:
-            self.manual(f"{self.lpar}'s {kind} set is off its baseline", drift)
+        result = await self.state.call(
+            self.client,
+            "hmc_delete_adapter",
+            lpar_name_or_uuid=self.lpar,
+            adapter_type="ClientNetworkAdapter",
+            adapter_uuid=target,
+            system_name_or_uuid=self.system,
+        )
+        accepted = (
+            self.note("verified fixture delete", "hmc_delete_adapter", result) == "PASS"
+        )
+        after = await self.placements(
+            "ClientNetworkAdapter", "after verified fixture delete"
+        )
+        restored = (
+            after is not None
+            and _network_keys(after) is not None
+            and {key.casefold(): value for key, value in after.items()}
+            == {key.casefold(): value for key, value in baseline.items()}
+        )
+        if not accepted or not restored:
+            self.manual(
+                "fixture deletion or restoration is unconfirmed",
+                "inspect residue; no retry or later mutation",
+            )
+        return accepted, restored
 
     async def remove_new_adapters(
         self, adapter_type: str, baseline: Adapters
