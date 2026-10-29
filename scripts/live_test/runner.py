@@ -18,7 +18,7 @@ Usage:
 stops importing (AGENTS.md).
 
 Registered subtasks span 0 through 67; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65 and ST67 require named groups and are excluded from default and all selections.
+ST53–ST59, ST61, ST64, ST65, ST66 and ST67 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -123,6 +123,7 @@ from live_test.observation import (
     classify_failure,
     grade_assertions,
 )
+from live_test.paging_switchover import exercise_paging_switchover
 from live_test.partition_profile_contract import exercise as exercise_profile_contract
 from live_test.partition_profiles import exercise_partition_profiles
 from live_test.processor_move import exercise_processor_move
@@ -709,6 +710,7 @@ SUBTASKS = {
     52: exercise_lpar_security_policy,
     53: exercise_lpar_linux_roles,
     54: exercise_memory_move,
+    66: exercise_paging_switchover,
     67: exercise_memory_statistics,
     61: exercise_processor_move,
     55: exercise_lpar_hardware_memory,
@@ -764,6 +766,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-memory-quantities": [50],
     "processor-sharing-weight": [59],
     "lpar-memory-move": [54],
+    "lpar-paging-switchover": [66],
     "lpar-memory-statistics": [67],
     "lpar-accelerator-qos": [64],
     "lpar-processor-move": [61],
@@ -842,6 +845,16 @@ def _parse_arguments(argv: list[str] | None = None) -> RunnerArguments:
 def _run_from_arguments(argv: list[str] | None = None) -> int:
     """Validate arguments, then bootstrap configuration and execute the live run."""
     arguments = _parse_arguments(argv)
+    if arguments.group == "lpar-paging-switchover" or arguments.subtask == 66:
+        try:
+            if arguments.group != "lpar-paging-switchover":
+                raise ValueError("Paging switch requires its named opt-in group")
+            private_destination(arguments.results_path)
+        except (ValueError, OSError, RuntimeError):
+            print(
+                "Paging switch requires new canonical absolute private results outside repositories"
+            )
+            return 1
     if arguments.group == "lpar-memory-statistics" or arguments.subtask == 67:
         try:
             if arguments.group != "lpar-memory-statistics":
@@ -1072,12 +1085,20 @@ async def main(
         tasks = sorted(
             n
             for n in SUBTASKS
-            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 65, 67}
+            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 65, 66, 67}
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
     prior_paths = [results_path]
-    if 65 in tasks:
+    if 66 in tasks:
+        if (
+            Path(results_path).exists()
+            or evidence.observations_path(results_path).exists()
+        ):
+            print("Existing ST66 context refused; use fresh private results")
+            return 1
+        prior_paths = []
+    elif 65 in tasks:
         if (
             state.artifacts.creation_memory
             or state.creation_memory_invocation is not None

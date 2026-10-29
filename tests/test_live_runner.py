@@ -9140,3 +9140,26 @@ def test_st65_permission_is_literal_dotenv_only(tmp_path, monkeypatch, permissio
         assert live_config.LiveTestConfig.from_env_file(
             path
         ).creation_memory_fresh_delete_authorized is (permission == "true")
+
+
+@pytest.mark.parametrize("arguments", [["66"], ["--group", "lpar-paging-switchover"]])
+def test_paging_direct_runner_requires_private_named_destination(
+    monkeypatch, arguments
+):
+    def forbidden():
+        pytest.fail("unsafe paging destination reached configuration bootstrap")
+
+    monkeypatch.setattr(runner.LiveTestConfig, "from_env_file", forbidden)
+    assert runner._run_from_arguments(arguments) == 1
+
+
+def test_paging_optional_defaults_preserve_old_documents():
+    from dataclasses import asdict
+
+    from live_test.config import decode_saved_config
+
+    saved = asdict(runner.LiveTestConfig())
+    saved["protected_lpar_names"] = list(saved["protected_lpar_names"])
+    del saved["paging_expected_current_vios"]
+    del saved["paging_writer_window"]
+    assert decode_saved_config(saved).paging_writer_window is False

@@ -53,6 +53,7 @@ from live_test import (
     lpar_power,
     memory_move,
     memory_statistics,
+    paging_switchover,
     partition_profile_contract,
     partition_profiles,
     processor_move,
@@ -398,6 +399,26 @@ def _accelerator_qos_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
             f"existing owned target {target}; exact request {request.model_dump_json()}",
             "one intended QoS set, then separate original-baseline restoration with identical wait/detail/force",
             "root binds clean deployed HEAD, destination, protected inventory, both effect intents and bounded window; mandatory read-only recovery",
+        ),
+        config.system_name,
+    )
+
+
+def _paging_switchover_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    try:
+        paging_switchover.configured_paging_fixture(config)
+    except ValueError as error:
+        return ArmVerdict(
+            paging_switchover.GROUP, False, str(error), (), config.system_name
+        )
+    return ArmVerdict(
+        paging_switchover.GROUP,
+        True,
+        "configuration validated; independent runtime eligibility remains required",
+        (
+            "existing positively owned Running shared target and both dedicated paging providers; no provisioning",
+            "one forward attempt with expected current provider and coordinated writer window",
+            "private clean deployed commit/tree checkpoint; mandatory read-only recovery; separate restoration authorization",
         ),
         config.system_name,
     )
@@ -815,6 +836,7 @@ _ARM_VERDICTS = {
     "lpar-physical-io": _lpar_physical_io_verdict,
     "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-memory-move": _memory_move_verdict,
+    "lpar-paging-switchover": _paging_switchover_verdict,
     "lpar-memory-statistics": _memory_statistics_verdict,
     "lpar-accelerator-qos": _accelerator_qos_verdict,
     "lpar-processor-move": _processor_move_verdict,
@@ -949,6 +971,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--group",
+        action="append",
         choices=(
             *runner.SUBTASK_GROUPS,
             "system-profile-source",
@@ -974,6 +997,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--packet-sha256")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.group and len(args.group) != 1:
+        parser.error("exactly one preflight group may be selected")
+    args.group = args.group[0] if args.group else None
     if args.group == "vios-ame-source":
         from live_test import vios_ame_source
 

@@ -2197,6 +2197,37 @@ def _report(
         print("CLEAN  nothing this run dispatched was left behind")
 
 
+def _paging_recovery(path: Path) -> int:
+    from live_test import paging_switchover
+
+    def unique_members(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Paging recovery JSON has duplicate members")
+            result[key] = value
+        return result
+
+    try:
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("Paging recovery requires a regular results file")
+            raw = stream.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError("Paging recovery results exceed 1 MiB")
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_members)
+        if not runner._bootstrap_config():
+            raise ValueError("Paging recovery credentials unavailable")
+        result = asyncio.run(paging_switchover.recover_document(HMCConfig(), document))
+    except Exception as error:  # noqa: BLE001 - uncertain evidence never confirms recovery
+        print(f"paging recovery unconfirmed: {type(error).__name__}", file=sys.stderr)
+        return 2
+    print(
+        f"PAGING {result['status']}: read-only original-baseline comparison; historical forward result unchanged"
+    )
+    return {"clean": 0, "drift": 1, "unverified": 2}[result["status"]]
+
+
 def _statistics_recovery(path: Path) -> int:
     from live_test import memory_statistics
 
@@ -2246,6 +2277,11 @@ def main(argv: list[str] | None = None) -> int:
         help="the run's results document (default: %(default)s)",
     )
     source_packets = parser.add_mutually_exclusive_group()
+    source_packets.add_argument(
+        "--paging-switchover",
+        action="store_true",
+        help="ST66 bounded read-only original-baseline recovery",
+    )
     source_packets.add_argument("--source-packet", type=Path)
     source_packets.add_argument("--activation-source-packet", type=Path)
     source_packets.add_argument("--serial-procedure", action="store_true")
@@ -2260,6 +2296,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.paging_switchover:
+        if args.output or args.packet_sha256:
+            parser.error("ST66 recovery uses retained results only")
+        return _paging_recovery(args.results)
     if args.memory_statistics:
         if args.output or args.packet_sha256:
             parser.error("ST67 recovery uses retained results only")

@@ -25,6 +25,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   no clear, retry or activation is implied. These product variants remain unevidenced on
   hardware (#1770).
 
+
+- Redundant paging-VIOS switchover through `hmc_switch_lpar_paging_vios` and
+  `lpars paging-switchover` requires the expected current provider, an explicit
+  coordinated writer window, contained configured/runtime redundancy and ownership
+  of the consumer and both providers. It attempts once and reports native submission,
+  independent effective state and preservation separately. The opt-in ST66 procedure
+  keeps restoration separate; no hardware evidence is claimed (#1776).
+
 - Entitled-memory statistics reset through `hmc_reset_lpar_memory_statistics` and
   `lpars memory-statistics-reset` submits once after contained Running shared-memory,
   system AMS and ownership checks. Native completion and independent before/after

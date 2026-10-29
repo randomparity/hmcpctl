@@ -3457,3 +3457,57 @@ def test_boot_start_recovery_uses_original_results_without_effect_grant(monkeypa
     monkeypatch.setattr(lpar_boot_start, "main", route)
     assert recovery.main(["--boot-start-procedure", "--results", "private.json"]) == 2
     route.assert_called_once_with(["recover", "--results", "private.json"])
+
+
+@pytest.mark.parametrize("status,code", [("clean", 0), ("drift", 1), ("unverified", 2)])
+def test_paging_recovery_routes_before_generic_partial_gate(
+    tmp_path, monkeypatch, capsys, status, code
+):
+    from live_test import paging_switchover
+
+    document = {"run": {"group": "lpar-paging-switchover", "partial": True}}
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    readback = AsyncMock(return_value={"status": status})
+    monkeypatch.setattr(paging_switchover, "recover_document", readback)
+    assert recovery.main(["--paging-switchover", "--results", str(path)]) == code
+    readback.assert_awaited_once()
+    assert "historical forward result unchanged" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("raw", ['{"run":{},"run":{}}', "x" * (1024 * 1024 + 1)])
+def test_paging_recovery_bounds_raw_input(tmp_path, monkeypatch, raw):
+    from live_test import paging_switchover
+
+    path = tmp_path / "results.json"
+    path.write_text(raw)
+    readback = AsyncMock()
+    monkeypatch.setattr(paging_switchover, "recover_document", readback)
+    monkeypatch.setattr(
+        recovery.runner,
+        "_bootstrap_config",
+        lambda: pytest.fail("invalid raw input reached credentials"),
+    )
+    assert recovery.main(["--paging-switchover", "--results", str(path)]) == 2
+    readback.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        ["--paging-switchover", "--boot-start-procedure"],
+        ["--boot-start-procedure", "--paging-switchover"],
+    ],
+)
+def test_simultaneous_st66_st68_recovery_refuses_before_credentials(
+    monkeypatch, selectors
+):
+    monkeypatch.setattr(
+        recovery.runner,
+        "_bootstrap_config",
+        lambda: pytest.fail("ambiguous phases reached credentials"),
+    )
+    with pytest.raises(SystemExit) as error:
+        recovery.main(selectors)
+    assert error.value.code == 2
