@@ -704,10 +704,13 @@ def _unguarded_i_values(
     # C09's source-qualified two-cell CSV is a distinct fixed dialect, never a
     # generic escape from the shared scalar grammar or a function-name whitelist.
     builder = BUILDER_NAME
-    if (
-        source_path == _REPO_ROOT / "src/hmcpctl/operations/vios/boot_order.py"
-        and func.name == "set_vios_boot_order"
-    ):
+    if (source_path, func.name) in {
+        (
+            _REPO_ROOT / "src/hmcpctl/operations/vios/boot_order.py",
+            "set_vios_boot_order",
+        ),
+        (_REPO_ROOT / "scripts/live_test/lpar_boot_start.py", "admit_boot_payloads"),
+    }:
         builder = "_encode_boot_record"
     return _unguarded_payloads_for(func, _is_an_i_record_literal, "-i", builder)
 
@@ -846,6 +849,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
 
     assert by_label["-i"] == {
         "set_vios_boot_order",
+        "admit_boot_payloads",
         "_native",
         "_ssh",
         "create_lpar_via_cli",
@@ -1096,3 +1100,36 @@ def test_vios_csv_encoder_does_not_exempt_hoisted_commands():
         test_no_command_literal_lives_outside_a_function(
             "-i", _is_an_i_record_literal, [(owner, tree)]
         )
+
+
+def test_st68_size_admission_uses_only_the_actual_fixed_encoder_at_exact_site():
+    path = _REPO_ROOT / "scripts/live_test/lpar_boot_start.py"
+    tree = ast.parse(path.read_text())
+    imports = [
+        n
+        for n in tree.body
+        if isinstance(n, ast.ImportFrom)
+        and n.module == "hmcpctl.operations.vios.boot_order"
+    ]
+    assert len(imports) == 1
+    assert [(a.name, a.asname) for a in imports[0].names] == [
+        ("_encode_boot_record", None)
+    ]
+    source = """def admit_boot_payloads(value):
+    record = _encode_boot_record(7, value)
+    command = f"chsyscfg -r lpar -m system -i {shlex.quote(record)}"
+    return len(command)
+"""
+    node = _function_from_source(source)
+    assert _unguarded_i_values(node, source_path=path) == []
+    assert _unguarded_i_values(node, source_path=_REPO_ROOT / "scripts/other.py")
+    assert _unguarded_i_values(
+        _function_from_source(source.replace("admit_boot_payloads", "unrelated")),
+        source_path=path,
+    )
+    assert _unguarded_i_values(
+        _function_from_source(
+            source.replace("shlex.quote(record)", "shlex.quote(value)")
+        ),
+        source_path=path,
+    )

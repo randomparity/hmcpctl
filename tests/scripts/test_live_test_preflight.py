@@ -1302,3 +1302,55 @@ def test_c07_preflight_unarmed_without_current_permission():
     assert not preflight.arm_verdicts(live_config.LiveTestConfig(), "creation-memory")[
         0
     ].runnable
+
+
+def test_boot_start_exact_named_preflight_route(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import lpar_boot_start
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(lpar_boot_start, "main", route)
+    assert (
+        preflight.main(
+            [
+                "--group",
+                "lpar-boot-start",
+                "--packet",
+                "p",
+                "--packet-sha256",
+                "s",
+                "--output",
+                "f",
+            ]
+        )
+        == 2
+    )
+    route.assert_called_once_with(
+        ["preflight", "--packet", "p", "--packet-sha256", "s", "--output", "f"]
+    )
+
+
+@pytest.mark.parametrize("extra", [["--skip-hardware"], ["--detach-probe"]])
+def test_boot_start_preflight_cannot_bypass_read_only_admission(monkeypatch, extra):
+    from unittest.mock import Mock
+
+    from live_test import lpar_boot_start
+
+    route = Mock()
+    monkeypatch.setattr(lpar_boot_start, "main", route)
+    with pytest.raises(SystemExit):
+        preflight.main(
+            [
+                "--group",
+                "lpar-boot-start",
+                "--packet",
+                "p",
+                "--packet-sha256",
+                "s",
+                "--output",
+                "f",
+                *extra,
+            ]
+        )
+    route.assert_not_called()

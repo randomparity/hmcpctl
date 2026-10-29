@@ -2,7 +2,7 @@
 
 ## Status
 
-Reviewed design; A1 approved; approved VIOS fixture stamp awaits changed-input A2
+Reviewed design; A1/A2 approved; implementation in progress
 
 G4/raw/result/format and N1/N2/N3 remain approved; D1/D2 findings are dispositioned.
 

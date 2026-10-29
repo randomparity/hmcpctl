@@ -1,6 +1,6 @@
 # C09 partition boot/start configuration design
 
-Status: D1/D2 and A1 complete; approved stamp delta awaits A2. No product live credit.
+Status: D1/D2 and A1/A2 complete; implementation in progress. No product live credit.
 Approved G4/raw/result/format and N1/N2/N3 contracts govern the normal build gates.
 Issue: #1770, native parent #638; claim q1770-02d745af.
 Landed anchor: b5ef629181a6b0c02585096558e2fe29e96c738c; tree equals qualified source d68a5c55.
@@ -376,4 +376,4 @@ auto-clear or auto-restore. A later authorized replacement boot value is a new o
 Code rollback is a normal revert; it cannot undo stored HMC state or remove created partitions.
 
 N1/N2/N3 remain approved; call_f0891f005b554495a602c49aee0c6026/0 adds only the plan’s bounded
-VIOS fixture stamp. Changed-input A2, build/proofs/guardrails/CI and separate hardware remain.
+VIOS fixture stamp. A2 approved; build/proofs/guardrails/CI and separate hardware remain.

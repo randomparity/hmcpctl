@@ -3446,3 +3446,14 @@ def test_statistics_raw_recovery_refuses_nonregular_without_bootstrap(
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", bootstrap)
     assert recovery.main(["--memory-statistics", "--results", str(path)]) == 2
     bootstrap.assert_not_called()
+
+
+def test_boot_start_recovery_uses_original_results_without_effect_grant(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import lpar_boot_start
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(lpar_boot_start, "main", route)
+    assert recovery.main(["--boot-start-procedure", "--results", "private.json"]) == 2
+    route.assert_called_once_with(["recover", "--results", "private.json"])

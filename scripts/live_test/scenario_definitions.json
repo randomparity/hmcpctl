@@ -824,6 +824,20 @@
       "expected": "success"
     },
     {
+      "scenario": "st100-vios-read-boot-order",
+      "operation": "vios.read_boot_order",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        },
+        "vios_name_or_uuid": {
+          "target": "vios"
+        }
+      },
+      "expected": "success"
+    },
+    {
       "scenario": "st100-vios-label-list-fc-ports",
       "operation": "vios_label.list_fc_ports",
       "class": "read-only",

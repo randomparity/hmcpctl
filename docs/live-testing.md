@@ -2469,6 +2469,111 @@ procedure promotes parent product readiness.
 
 
 
+## Partition boot/start configuration (C09, opt-in ST68)
+
+ST68 is a standalone, one-case procedure. It is excluded from default/all runner
+selection. Source qualification of the eight fixed VIOS strings is separate;
+no product live result follows from that source receipt or the offline tests.
+Use a clean deployed candidate and a fresh separately authorized exclusive window.
+The registered owners perform configuration only: no activation, profile apply,
+second create, retry, seed/clear, pool change, ownership takeover or alternate encoder.
+
+Prepare a private regular UTF-8 JSON packet (0600, <=1MiB) in a fresh operator-owned
+0700 directory outside the checkout. Preflight/recovery evidence is bounded at4MiB, run
+evidence at8MiB; packet/ST63 defaults remain1MiB. Oversized checkpoints preserve old
+durable intent and stop without dropping data or claiming success. Exact packet keys are:
+
+| Key | Required binding |
+| --- | --- |
+| candidate | Exact commit/tree (40 lowercase hex each) and hmc_identity with only host, port, user, verify_ssl, agent_id; no credential values |
+| expires_utc | Aware UTC expiry, at most1200s ahead; never reset it between phases |
+| system_uuid | Canonical selected-system UUID |
+| partition_type | AIX/Linux, OS400 or Virtual IO Server; source restrictions apply |
+| name | Fresh absent hmcpctl-live-boot- followed by8 lowercase hex |
+| caller_token | q1770- followed by8 lowercase hex, bound to this invocation |
+| cleanup_authorized | true before any effect; only the case's guarded delete OR exact restoration |
+| case | Exactly one of the finite cases below |
+| controllers | [] except power cases:1–2 exact objects with kind, uuid, name, partition_id; unique contained identities and existing authorization |
+| boot_target | null for creation; otherwise exact kind, uuid, name, partition_id, description of the already owned inactive target |
+
+The14 exact cases are create-omitted, create-auto-0, create-auto-1,
+create-monitor-0, create-monitor-1, create-mode-norm, create-mode-dd,
+create-mode-ds, create-mode-of, create-mode-sms, create-power-ids,
+create-power-names, boot-raw and boot-devices. OS400 mode cases refuse before effects.
+Both controller selector bindings remain covered; native IDs are resolved by the product owner.
+
+Creation requests one inactive fixture: min/desired/max1024MiB and one dedicated
+min/desired/maxCPU, keep_idle_procs, max_virtual_slots8, no I/O/serial adapters.
+The full current configuration remains observational, including inactive placeholders;
+prove the fixed tuple through its unique contained saved default profile. Preserve all
+foreign/current/profile XML, unknown I/O, profile ETags and system capacity exactly.
+Creation permits at most one conditional owned deletion after fresh full guards.
+VIOS creation alone also permits MAX1 existing ownership stamp after acknowledged
+fresh creation and independent UUID/name/native-ID/inactivity/resource/foreign proof.
+Intent precedes the stamp; any returned string acknowledges execution. Exact returned
+and independently observed full expected owner/date/caller marker are separately required.
+None/error/unknown or unverified marker stops all further effects, including deletion.
+LPAR cases use their existing creator stamp; boot cases never stamp.
+
+Boot cases select an already owned inactive AIX/Linux LPAR or VIOS. Before a test write,
+the independently read exact nonempty baseline must pass the restoring raw validator:
+printable Unicode, at least one non-whitespace character, <=16384 UTF-8 bytes, applicable
+source. Prove both future serialized test/restoration payloads fit before the first write.
+No empty baseline seed or clear is allowed. Raw case text is exactly
+`  /dev/test,a=b"c'\d  `; devices are [/dev/test-a,/dev/test-b]. Restore at most once,
+only after acknowledged independent test readback, fresh current==known last test value,
+and exact protected current/profile/controller/foreign equality. Unknown or drift retains
+named residue; no speculative restoration. The same public owner verifies restoration.
+
+| Phase | REST | HMC SSH | Combined bounded transport bytes | Maximum |
+| --- | ---: | ---: | ---: | ---: |
+| preflight |32|4|4MiB|300s|
+| run |64|8|8MiB|300s|
+| read-only recovery |32|4|4MiB|300s|
+
+Aggregate ceilings are128REST/16SSH/16MiB in the original1200s window. Count logon,
+failures and logoff. Before constructing any client, use existing max_response_bytes
+min(operator,262144), preserving a stricter operator value and binding unchanged port
+explicitly; no fallback endpoint or authenticated config mutation. Native output and
+individual request/command admission are bounded at65536bytes. Reads use at most2s,
+ordinary writes/logoff20s and creation60s; remaining absolute deadlines may shorten them.
+Reserve complete case/readback/cleanup/post-baseline/own-closeout requests and bytes
+before effects, plus separate300s recovery and20s reap first; repeat suffix admission
+before stamp/delete/restore. Unproved or unfittable routes HOLD with zero effects.
+
+Original inventory is <=4partitions/8profiles and <=2controllers; creation adds at most
+one partition/profile. Existing pool observations stay <=4; no new pool probe is added.
+Offline physical-boundary proofs use an existing stricter operator response cap65536;
+this is no availability claim. Under that cap, nonpower creation and both boot cases
+fit their proved small inventories. Default clamp262144 may fail whole-route byte
+reservation even when counts fit. Both power-selector cases require more than64REST
+in the proved one-controller routes (67LPAR/72VIOS); one/two-controller cases therefore
+HOLD before CREATE under current owners. Maximum inventory can likewise be read but
+refuse the complete effect route. Never shrink a baseline, enlarge limits, adapt the
+cap silently or retry to make a case qualify. These bounds do not narrow product APIs.
+
+After actual deployment and separate authorization, set PACKET/SHA/PREFLIGHT/RESULTS to
+fresh private paths and the exact raw packet SHA256. Use only these registered commands:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-boot-start --packet "$PACKET" --packet-sha256 "$SHA" --output "$PREFLIGHT"
+uv run --no-sync python scripts/live_lpar_boot_start.py --packet "$PACKET" --packet-sha256 "$SHA" --preflight "$PREFLIGHT" --results-file "$RESULTS" --grant-packet-sha256 "$SHA" --exclusive-writer-window
+# After ANY attempted run is terminal/reaped, including nonzero/unknown, run recovery once:
+uv run --no-sync python scripts/live_test_recovery.py --boot-start-procedure --results "$RESULTS"
+uv run --no-sync python scripts/live_test_evidence.py "${RESULTS}.recovery.json"
+```
+
+Preflight must be0–<60s old and match exact candidate/import/runtime/trust/connection,
+selected response cap and fresh full baseline. Current digest grant/exclusive invocation
+is required before each effect; retained packet/preflight/journal never recreates authority.
+Recovery uses a fresh independent read-only session and original results binding; expiry
+never bars bounded read-only inspection. It retains the original run bytes and writes the
+fresh .recovery.json sibling. CLEAN requires known complete history, closed own sessions,
+fixture absence plus full original B0 (creation), or exact restored text plus full B0 (boot).
+Missing evidence, unknown effects or drift stays HELD/UNKNOWN. A run header alone never
+qualifies. The renderer emits only fixed case/status and tested revision, withholding all
+provider fields. Inspect its output before any public use. This procedure grants no hardware.
+
 ## Entitled-memory statistics observation (D04, opt-in ST67)
 
 The `lpar-memory-statistics` group runs scenario `st67-lpar-memory-statistics-reset`

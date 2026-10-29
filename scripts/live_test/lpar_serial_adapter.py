@@ -158,7 +158,9 @@ def binding(packet, config):
         raise ValueError("ST63 current packet has expired")
 
 
-def private_path(path, *, fresh=False):
+def private_path(path, *, fresh=False, maximum=LIMIT):
+    if type(maximum) is not int or maximum not in (LIMIT, 4 * LIMIT, 8 * LIMIT):
+        raise ValueError("fixed 1/4/8MiB private-file ceiling required")
     path = Path(path).absolute()
     resolved = path.resolve()
     parent = path.parent.lstat()
@@ -181,14 +183,18 @@ def private_path(path, *, fresh=False):
             not stat.S_ISREG(info.st_mode)
             or info.st_uid != os.getuid()
             or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_size > LIMIT
+            or info.st_size > maximum
         ):
             raise ValueError("ST63 bounded private regular file required")
     return path
 
 
-def read(path):
-    return json.loads(private_path(path).read_bytes())
+def read(path, *, maximum=LIMIT):
+    with private_path(path, maximum=maximum).open("rb") as stream:
+        raw = stream.read(maximum + 1)
+    if len(raw) > maximum:
+        raise ValueError("private input exceeds fixed byte bound")
+    return json.loads(raw)
 
 
 def load_packet(path, digest):
@@ -200,11 +206,13 @@ def load_packet(path, digest):
     return packet
 
 
-def write(path, document, *, fresh=False):
+def write(path, document, *, fresh=False, maximum=LIMIT):
     raw = json.dumps(document, sort_keys=True, indent=2).encode()
-    if len(raw) > LIMIT:
+    if type(maximum) is not int or maximum not in (LIMIT, 4 * LIMIT, 8 * LIMIT):
+        raise ValueError("fixed 1/4/8MiB private-file ceiling required")
+    if len(raw) > maximum:
         raise ValueError("ST63 retained evidence exceeds bound")
-    path = private_path(path, fresh=fresh)
+    path = private_path(path, fresh=fresh, maximum=maximum)
     if fresh:
         with path.open("xb") as stream:
             os.fchmod(stream.fileno(), 0o600)
