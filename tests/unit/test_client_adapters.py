@@ -248,3 +248,21 @@ async def test_creation_inventory_refuses_ambiguous_raw_atom_entries(mock_hmc, e
         with pytest.raises(HMCError, match="unambiguous"):
             await client._network_adapter_creation_feed(partition)
     assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_creation_inventory_preserves_one_valid_contained_entry():
+    identity = "11111111-1111-4111-8111-111111111111"
+    xml = (
+        '<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+        f"<id>urn:uuid:{identity}</id><content>"
+        '<ClientNetworkAdapter xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">'
+        "<VirtualStationInterfaceTypeID>0</VirtualStationInterfaceTypeID>"
+        "</ClientNetworkAdapter></content></entry></feed>"
+    )
+    client = SimpleNamespace(_get=AsyncMock(return_value=xml))
+    result = await AdaptersMixin._network_adapter_creation_feed(client, identity)
+    assert len(result) == 1
+    assert result[0]["UUID"] == identity
+    assert result[0]["ResourceType"] == "ClientNetworkAdapter"
+    assert result[0]["Resource"]["VirtualStationInterfaceTypeID"] == "0"
