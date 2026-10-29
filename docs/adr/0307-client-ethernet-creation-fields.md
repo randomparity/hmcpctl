@@ -39,3 +39,6 @@ Reuse the strict inventory reader for existing client-network listings, preservi
 results for positive complete feeds while raising on missing/partial evidence. No new
 flag or parallel transport is introduced. The ST9 fixture proof explicitly binds the
 selected virtual switch through cleanup. Other adapter listing kinds are unchanged.
+
+Completeness includes the HTTP envelope: reject Link/Content-Range headers and Atom
+NEXT links in any case. Retain metadata through the existing UUID-checked request helpers.

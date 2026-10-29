@@ -254,7 +254,12 @@ async def test_creation_inventory_refuses_ambiguous_raw_atom_entries(mock_hmc, e
 
 
 @pytest.mark.asyncio
-async def test_creation_inventory_preserves_one_valid_contained_entry():
+async def test_creation_inventory_preserves_one_valid_contained_entry(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
     identity = "11111111-1111-4111-8111-111111111111"
     xml = (
         '<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
@@ -263,8 +268,11 @@ async def test_creation_inventory_preserves_one_valid_contained_entry():
         "<VirtualStationInterfaceTypeID>0</VirtualStationInterfaceTypeID>"
         "</ClientNetworkAdapter></content></entry></feed>"
     )
-    client = SimpleNamespace(_get=AsyncMock(return_value=xml))
-    result = await AdaptersMixin._network_adapter_creation_feed(client, identity)
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(200, text=xml))
+    async with HMCClient(make_config()) as client:
+        result = await client._network_adapter_creation_feed(identity)
     assert len(result) == 1
     assert result[0]["UUID"] == identity
     assert result[0]["ResourceType"] == "ClientNetworkAdapter"
@@ -306,3 +314,37 @@ async def test_network_listing_accepts_positive_complete_empty_feed(mock_hmc):
     )
     async with HMCClient(make_config()) as client:
         assert await client.list_adapters(identity, "ClientNetworkAdapter") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers,body",
+    [
+        (
+            {"Link": '</more>; rel="next"'},
+            '<feed xmlns="http://www.w3.org/2005/Atom"/>',
+        ),
+        (
+            {"Content-Range": "items 0-0/2"},
+            '<feed xmlns="http://www.w3.org/2005/Atom"/>',
+        ),
+        (
+            {},
+            '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="NEXT" href="/more"/></feed>',
+        ),
+    ],
+)
+async def test_network_listing_refuses_explicit_continuation(mock_hmc, headers, body):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(200, text=body, headers=headers))
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError, match="complete"):
+            await client.list_adapters(identity, "ClientNetworkAdapter")

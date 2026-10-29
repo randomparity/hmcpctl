@@ -109,15 +109,28 @@ class AdaptersMixin:
     ) -> list[dict[str, Any]]:
         """Read complete inventory for network listing and creation identity proof."""
         path = f"/rest/api/uom/LogicalPartition/{lpar_uuid}/ClientNetworkAdapter"
-        xml = await self._get(
-            path, "ClientNetworkAdapter", uuid_path_arguments={"parent_uuid": lpar_uuid}
+        response = await self._request_with_uuid_path_arguments(
+            "GET",
+            path,
+            uuid_path_arguments={"parent_uuid": lpar_uuid},
+            headers=self._uom_headers("ClientNetworkAdapter"),
         )
+        if response.status_code == 204:
+            raise HMCError("Client network adapter inventory is unavailable")
+        if response.status_code != 200:
+            raise HMCError(f"GET {path} failed", response.status_code, response.text)
+        if "link" in response.headers or "content-range" in response.headers:
+            raise HMCError(
+                "Client network adapter inventory must be a complete Atom feed"
+            )
+        xml = response.text
         if not xml.strip():
             raise HMCError("Client network adapter inventory is unavailable")
         entries = _parse_feed(xml, path)
         root = DET.fromstring(xml.encode("utf-8"))
         if root.tag != f"{{{ATOM_NS}}}feed" or any(
-            node.get("rel") == "next" for node in root.findall(f"{{{ATOM_NS}}}link")
+            node.get("rel", "").casefold() == "next"
+            for node in root.findall(f"{{{ATOM_NS}}}link")
         ):
             raise HMCError(
                 "Client network adapter inventory must be a complete Atom feed"

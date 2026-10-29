@@ -138,12 +138,13 @@ Covered elsewhere:
 
 ## Threat model
 
-Widened boundaries: typed caller fields into authorized creation; HMC XML into verification;
+Widened boundaries: typed caller fields into authorized creation; HMC HTTP/XML into verification;
 new metadata into CLI/MCP output. No new endpoint, credential or permission is introduced.
 Untrusted actors: malformed local/MCP inputs and server-controlled resource content.
 Trust existing credential configuration and operator-approved ownership override policy.
 Controls: strict field types/counts; existing XML escaping and target authorization;
-parent-anchored reads; UUID shape/case convention; leaf normalization and strict parsing;
+parent-anchored reads; complete HTTP/Atom envelope guards; UUID shape/case convention;
+leaf normalization and strict parsing;
 fixed-name public metadata with no raw exception/response echo added.
 Out of scope: compromised credentials/HMC and malicious authorized administrators; existing
 transport/authorization policy owns those risks. No new global session journal is proposed.
@@ -209,3 +210,8 @@ listing failure through the existing tool result into ST9; never equate missing 
 with restored empty inventory. Positive empty complete inventory can prove restoration.
 Use actual HTTP transport fixtures and offline harness boundary regressions, including empty
 initial inventory, post-delete204/blank200, and switch-only changes. No hardware run.
+
+HTTP completeness is checked before flattening: reuse existing authenticated, UUID-checked
+request and UOM-header helpers so response metadata is retained. Treat Link/Content-Range
+headers as unsupported envelopes and detect XML NEXT relations case-insensitively.
+Do not follow continuation links. Keep native HTTP failure semantics and one logical GET.

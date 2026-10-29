@@ -1117,15 +1117,33 @@ async def test_n1_switch_only_drift_before_cleanup_refuses_delete(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "status,body,unavailable",
+    "status,body,headers,unavailable",
     [
-        (204, "", True),
-        (200, "", True),
-        (200, '<feed xmlns="http://www.w3.org/2005/Atom"/>', False),
+        (204, "", {}, True),
+        (200, "", {}, True),
+        (200, '<feed xmlns="http://www.w3.org/2005/Atom"/>', {}, False),
+        (
+            200,
+            '<feed xmlns="http://www.w3.org/2005/Atom"/>',
+            {"Link": '</more>; rel="next"'},
+            True,
+        ),
+        (
+            200,
+            '<feed xmlns="http://www.w3.org/2005/Atom"/>',
+            {"Content-Range": "items 0-0/2"},
+            True,
+        ),
+        (
+            200,
+            '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="NEXT" href="/more"/></feed>',
+            {},
+            True,
+        ),
     ],
 )
 async def test_n1_empty_restoration_requires_positive_http_inventory(
-    monkeypatch, mock_hmc, status, body, unavailable
+    monkeypatch, mock_hmc, status, body, headers, unavailable
 ):
     import httpx
     from conftest import make_config
@@ -1136,7 +1154,7 @@ async def test_n1_empty_restoration_requires_positive_http_inventory(
     identity = "11111111-1111-4111-8111-111111111111"
     route = mock_hmc.get(
         f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
-    ).mock(return_value=httpx.Response(status, text=body))
+    ).mock(return_value=httpx.Response(status, text=body, headers=headers))
     hmc = FakeHMC()
     hmc.adapters["ClientNetworkAdapter"] = {}
     state = _state(monkeypatch, hmc)

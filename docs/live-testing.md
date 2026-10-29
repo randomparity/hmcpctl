@@ -358,7 +358,8 @@ every change whatever the call returned, and verifies restoration:
   Credit requires verified creation metadata with all six checked fields and independent
   contained identity/field readback, including the selected `VirtualSwitchID`. A switch
   mismatch or missing switch stops before cleanup. Client-network listings require a
-  complete Atom feed: HTTP 204, blank bodies, pagination or ambiguous entries are errors;
+  complete HTTP/Atom envelope: HTTP 204, blank bodies, `Link`/`Content-Range` headers,
+  XML `next` links in any case, or ambiguous entries are errors;
   a positively complete empty feed remains an empty list. Refusal or missing evidence
   leaves qualification failed or unevidenced. Cleanup deletes only that verified fixture UUID once, after
   a fresh read proves unchanged baseline placements plus exactly that fixture on its
