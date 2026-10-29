@@ -618,6 +618,11 @@ def hmc_read_vios_boot_order(
 
     Missing/malformed/unbound observation is an error; null means observed empty.
     Stored configuration does not prove bootability or activate the VIOS.
+
+    Args:
+        system_name_or_uuid: CLI name or UUID of the containing managed system.
+        vios_name_or_uuid: Name or UUID of the VirtualIOServer on that system.
+        profile: Configured HMC profile, or the default when omitted.
     """
     return with_client(
         lambda hmc: read_vios_boot_order(
@@ -642,6 +647,14 @@ def hmc_set_vios_boot_order(
     Supply legacy devices or exact printable boot_string (non-whitespace, <=16KiB UTF-8),
     never both. No clear/retry/activation; uncertainty requires inspection. Read/write
     results contain exactly vios_uuid, vios_name and pending_boot_string.
+
+    Args:
+        system_name_or_uuid: CLI name or UUID of the containing managed system.
+        vios_name_or_uuid: Name or UUID of the VirtualIOServer on that system.
+        devices: Legacy absolute device paths in priority order; mutually exclusive with boot_string.
+        ownership_override: Skip ownership-token validation when true.
+        profile: Configured HMC profile, or the default when omitted.
+        boot_string: Exact printable raw text with a non-whitespace character, at most 16384 UTF-8 bytes; preserved without normalization, mutually exclusive with devices.
     """
     select_boot_string(devices, boot_string)
     return with_client(

@@ -1,6 +1,6 @@
 """Creation-only partition boot/start settings and source applicability."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import ConfigDict, StrictBool, StrictInt, StrictStr
 
@@ -12,11 +12,36 @@ class LparStartSettings:
     """Optional values preserve native defaults; selectors are resolved before create."""
 
     __pydantic_config__ = ConfigDict(extra="forbid")
-    auto_start: StrictBool | None = None
-    boot_mode: BootMode | None = None
-    power_ctrl_lpar_ids: tuple[StrictInt, ...] | None = None
-    power_ctrl_lpar_names: tuple[StrictStr, ...] | None = None
-    conn_monitoring: StrictBool | None = None
+    auto_start: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Automatic-start policy; false is explicit, omission preserves the native default. Does not activate the partition."
+        },
+    )
+    boot_mode: BootMode | None = field(
+        default=None,
+        metadata={
+            "description": "Firmware boot mode: norm, dd, ds, of or sms; AIX/Linux or VIOS only. Configures policy without activation."
+        },
+    )
+    power_ctrl_lpar_ids: tuple[StrictInt, ...] | None = field(
+        default=None,
+        metadata={
+            "description": "Distinct positive power-controller IDs on the selected managed system; mutually exclusive with names. Containment and authorization are checked before creation."
+        },
+    )
+    power_ctrl_lpar_names: tuple[StrictStr, ...] | None = field(
+        default=None,
+        metadata={
+            "description": "Distinct power-controller names on the selected managed system, resolved to native IDs; mutually exclusive with IDs. Containment and authorization are checked before creation."
+        },
+    )
+    conn_monitoring: StrictBool | None = field(
+        default=None,
+        metadata={
+            "description": "Connection-monitoring policy; false is explicit, omission preserves the native default. Requires independent configured-state readback."
+        },
+    )
 
     def __post_init__(self) -> None:
         for name in ("auto_start", "conn_monitoring"):

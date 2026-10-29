@@ -798,7 +798,8 @@ async def test_apply_waits_for_requested_domain_verification(
         ("policy", "_created_security_policy_step"),
     ]:
 
-        async def read(*args, name=name):
+        async def read(*args, name=name, controller_mode=False, start_admission=None):
+            assert controller_mode is False and start_admission is None
             return await verified(name)
 
         monkeypatch.setattr(core, helper, read)

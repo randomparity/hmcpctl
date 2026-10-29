@@ -291,7 +291,11 @@ def test_old_positional_adapters_preserve_security_and_yes(
             "mem_expansion",
         ]
     )
-    assert names[hardware_position + 2 :] == [*expected_tail, "affinity_group_id"]
+    assert names[hardware_position + 2 :] == [
+        *expected_tail,
+        "affinity_group_id",
+        "start_settings",
+    ]
     assert all(parameters[name].default is None for name in FIELDS)
     if surface == "cli":
         assert parameters["max_virtual_slots"].default is None

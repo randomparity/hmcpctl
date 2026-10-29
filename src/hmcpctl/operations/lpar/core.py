@@ -341,13 +341,13 @@ async def create_and_stamp_lpar(
       :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
       delete it to release its resources.
     """
+    reject_update_weight_on_create(creation.resources)
     if not isinstance(creation.start_settings, LparStartSettings):
         raise TypeError("start_settings must be LparStartSettings")
     creation.start_settings.validate_creation(creation.partition_type)
     start_requested = creation.start_settings.requested()
     if start_requested and creation.keylock is not None:
         raise ValueError("Start settings cannot be combined with native keylock")
-    reject_update_weight_on_create(creation.resources)
     if not isinstance(creation.creation_memory, LparCreationMemory):
         raise TypeError("creation_memory must be LparCreationMemory")
     memory_requested = bool(creation.creation_memory.pairs())
