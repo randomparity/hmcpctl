@@ -139,9 +139,13 @@ def _network_cli_creation_fields(
         try:
             parsed = json.loads(raw)
         except (ValueError, TypeError) as exc:
-            raise typer.BadParameter(f"{name} must be a JSON array") from exc
+            raise typer.BadParameter(
+                terminal_field(f"{name} must be a JSON array", err=True)
+            ) from exc
         if not isinstance(parsed, list):
-            raise typer.BadParameter(f"{name} must be a JSON array")
+            raise typer.BadParameter(
+                terminal_field(f"{name} must be a JSON array", err=True)
+            )
         selected[name] = parsed
     if "qos_priority" in selected and selected["qos_priority"] != "none":
         try:
@@ -152,7 +156,7 @@ def _network_cli_creation_fields(
         try:
             validate_network_adapter_creation_fields(tagged=tagged, **selected)
         except ValueError as exc:
-            raise typer.BadParameter(str(exc)) from exc
+            raise typer.BadParameter(terminal_field(str(exc), err=True)) from exc
     return selected
 
 
