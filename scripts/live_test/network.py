@@ -72,7 +72,10 @@ def as_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, str) and value.strip().lstrip("-").isdigit():
-        return int(value)
+        try:
+            return int(value)
+        except ValueError:
+            return None
     return None
 
 

@@ -1022,6 +1022,11 @@ async def test_n1_foreign_uuid_arriving_during_delete_is_not_a_second_target(
         ("VirtualStationInterfaceTypeID", ["0", "0"]),
         ("QualityOfServicePriorityEnabled", {"text": "false"}),
         ("TaggedVLANIDs", None),
+        ("VirtualStationInterfaceManagerID", "--0"),
+        pytest.param(
+            "VirtualStationInterfaceManagerID", "9" * 5000, id="oversized-integer"
+        ),
+        ("VirtualStationInterfaceManagerID", "²"),
     ],
 )
 async def test_n1_malformed_independent_leaf_never_inherits_product_verification(
