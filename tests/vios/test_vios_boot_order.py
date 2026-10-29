@@ -208,3 +208,92 @@ async def test_native_printable_unicode_and_spacing_are_lossless(target):
         hmc, VIOS, system_name_or_uuid=SYSTEM, boot_string=text
     )
     assert result["pending_boot_string"] == text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", [VALUES[3], VALUES[7]])
+@pytest.mark.parametrize("failure", [False, True])
+async def test_real_transport_redacts_boot_payload_without_changing_command(
+    target, monkeypatch, caplog, text, failure
+):
+    import logging
+    import traceback
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import asyncssh
+    from conftest import make_config
+
+    from hmcpctl.ssh import transport
+
+    hmc, _state = target
+    hmc.config = make_config(agent_id="agent")
+    record = boot._encode_boot_record(7, text)
+    expected = f"chsyscfg -r lpar -m system -i {shlex.quote(record)}"
+    forms = (text, record, shlex.quote(text), shlex.quote(record))
+    commands, errors = [], []
+    channel_log = asyncssh.logging.logger.get_child(context="conn=0").get_child(
+        context="chan=0"
+    )
+
+    async def create(command, **_kwargs):
+        commands.append(command)
+        channel_log.info("  Command: %s", command)
+        write = command.startswith("chsyscfg")
+        if write:
+            channel_log.info("echo %s", " | ".join(forms))
+        code = int(write and failure)
+        return SimpleNamespace(
+            stdout=SimpleNamespace(
+                read=AsyncMock(
+                    side_effect=[b"" if write else header(text).encode(), b""]
+                )
+            ),
+            stderr=SimpleNamespace(
+                read=AsyncMock(
+                    side_effect=[" | ".join(forms).encode() if code else b"", b""]
+                )
+            ),
+            env={},
+            command=command,
+            subsystem=None,
+            exit_status=code,
+            exit_signal=None,
+            returncode=code,
+            wait_closed=AsyncMock(),
+            close=MagicMock(),
+        )
+
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    connection.create_process.side_effect = create
+    connection.abort = MagicMock()
+    monkeypatch.setattr(asyncssh, "connect", MagicMock(return_value=connection))
+
+    async def real_command(*args, **kwargs):
+        try:
+            return await transport.run_hmc_command(*args, **kwargs)
+        except transport.HMCCLIError as error:
+            errors.append("".join(traceback.format_exception(error)))
+            raise
+
+    monkeypatch.setattr(boot, "run_hmc_command", real_command)
+    filters = list(logging.getLogger("asyncssh").filters)
+    with caplog.at_level(logging.INFO, logger="asyncssh"):
+        if failure:
+            with pytest.raises(HMCError, match="unverified"):
+                await boot.set_vios_boot_order(
+                    hmc, VIOS, system_name_or_uuid=SYSTEM, boot_string=text
+                )
+        else:
+            result = await boot.set_vios_boot_order(
+                hmc, VIOS, system_name_or_uuid=SYSTEM, boot_string=text
+            )
+            assert result["pending_boot_string"] == text
+    assert commands[0] == expected
+    assert sum(c.startswith("chsyscfg") for c in commands) == 1
+    assert bool(errors) is failure
+    diagnostics = caplog.text + "".join(errors)
+    assert "Command:" in diagnostics and "<redacted>" in diagnostics
+    assert all(form not in diagnostics for form in forms)
+    assert logging.getLogger("asyncssh").filters == filters

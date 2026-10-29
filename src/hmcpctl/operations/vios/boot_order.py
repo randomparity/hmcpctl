@@ -187,6 +187,7 @@ async def set_vios_boot_order(
             hmc.config,
             f"chsyscfg -r lpar -m {shlex.quote(system)} -i {shlex.quote(record)}",
             include_stderr=True,
+            secrets=(requested, record),
             max_output_bytes=65536,
         )
         if not isinstance(raw, str) or len(raw.encode()) > 65536 or "[stderr]" in raw:
