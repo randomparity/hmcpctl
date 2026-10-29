@@ -112,7 +112,7 @@ class AdaptersMixin:
         response = await self._request_with_uuid_path_arguments(
             "GET",
             path,
-            uuid_path_arguments={"parent_uuid": lpar_uuid},
+            uuid_path_arguments={"lpar_uuid": lpar_uuid},
             headers=self._uom_headers("ClientNetworkAdapter"),
         )
         if response.status_code == 204:
