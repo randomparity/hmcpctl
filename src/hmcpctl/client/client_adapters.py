@@ -16,7 +16,7 @@ from ..documents.adapters import (
     build_vscsi_adapter_document,
 )
 from ..errors import HMCError
-from ..xmlutil import ATOM_NS
+from ..xmlutil import ATOM_NS, localname
 from .client_contracts import AdaptersClient, AdapterType, validate_adapter_type
 from .client_parse import _parse_feed
 
@@ -120,4 +120,22 @@ class AdaptersMixin:
             raise HMCError(
                 "Client network adapter inventory must be a complete Atom feed"
             )
+        for entry in root:
+            if localname(entry.tag) != "entry":
+                continue
+            ids = [node for node in entry if localname(node.tag) == "id"]
+            bodies = [node for node in entry if localname(node.tag) == "content"]
+            if (
+                entry.tag != f"{{{ATOM_NS}}}entry"
+                or len(ids) != 1
+                or ids[0].tag != f"{{{ATOM_NS}}}id"
+                or len(ids[0]) != 0
+                or len(bodies) != 1
+                or bodies[0].tag != f"{{{ATOM_NS}}}content"
+                or len(bodies[0]) != 1
+                or localname(bodies[0][0].tag) != "ClientNetworkAdapter"
+            ):
+                raise HMCError(
+                    "Client network adapter inventory requires unambiguous Atom entries"
+                )
         return entries

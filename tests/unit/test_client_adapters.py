@@ -202,3 +202,49 @@ async def test_network_creation_feed_accepts_positively_empty_atom_feed(mock_hmc
     )
     async with HMCClient(make_config()) as client:
         assert await client._network_adapter_creation_feed(partition) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entry",
+    [
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111</id>"
+            "<id>urn:uuid:22222222-2222-4222-8222-222222222222</id>"
+            "<content><ClientNetworkAdapter/></content>"
+        ),
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111</id>"
+            "<content><ClientNetworkAdapter/></content>"
+            "<content><ClientNetworkAdapter/></content>"
+        ),
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111</id>"
+            "<content><ClientNetworkAdapter/><ClientNetworkAdapter/></content>"
+        ),
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111<Nested/></id>"
+            "<content><ClientNetworkAdapter/></content>"
+        ),
+    ],
+)
+async def test_creation_inventory_refuses_ambiguous_raw_atom_entries(mock_hmc, entry):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    route = mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            text=f'<feed xmlns="http://www.w3.org/2005/Atom"><entry>{entry}</entry></feed>',
+        )
+    )
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError, match="unambiguous"):
+            await client._network_adapter_creation_feed(partition)
+    assert route.call_count == 1
