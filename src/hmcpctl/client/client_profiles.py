@@ -18,6 +18,7 @@ from ..documents.partition_profile import (
     parse_profile,
 )
 from ..errors import HMCError
+from ..resource_identity import is_uuid
 from .client_contracts import _reject_non_uuid_path_argument
 from .client_parse import _parse_feed
 from .core import HMCClient
@@ -63,6 +64,16 @@ def _validate_parent(
     if not href or not href.isprintable() or any(c.isspace() for c in href):
         raise ValueError("profile parent association is unavailable or malformed")
     parsed = urlsplit(href)
+    parts = tuple(
+        part.casefold() if is_uuid(part) else part for part in parsed.path.split("/")
+    )
+    paths = {
+        tuple(part.casefold() if is_uuid(part) else part for part in path.split("/"))
+        for path in (
+            f"/rest/api/uom/{kind}/{parent}",
+            f"/rest/api/uom/ManagedSystem/{system}/{kind}/{parent}",
+        )
+    }
     if (
         parsed.scheme != "https"
         or parsed.hostname != hmc.config.host
@@ -71,11 +82,7 @@ def _validate_parent(
         or parsed.password
         or parsed.query
         or parsed.fragment
-        or parsed.path
-        not in {
-            f"/rest/api/uom/{kind}/{parent}",
-            f"/rest/api/uom/ManagedSystem/{system}/{kind}/{parent}",
-        }
+        or parts not in paths
     ):
         raise ValueError("profile belongs to a different partition or HMC")
 
@@ -94,7 +101,12 @@ async def read_native_profile(
         raise HMCError("contained profile GET failed", response.status_code)
     element = parse_profile(response.text)
     entries = _parse_feed(response.text, path)
-    if len(entries) != 1 or entries[0].get("UUID") != uuid:
+    observed_uuid = entries[0].get("UUID") if len(entries) == 1 else None
+    if (
+        not isinstance(observed_uuid, str)
+        or not is_uuid(observed_uuid)
+        or observed_uuid.casefold() != uuid.casefold()
+    ):
         raise ValueError(
             "profile readback identity differs from the contained selector"
         )

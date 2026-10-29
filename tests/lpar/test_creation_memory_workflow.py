@@ -429,6 +429,41 @@ async def test_provider_origin_check(memory_target, href):
     assert not b.created
 
 
+@pytest.mark.parametrize("upper_caller", [False, True])
+@pytest.mark.parametrize("upper_link", [False, True])
+async def test_paging_provider_uuid_case(memory_target, upper_caller, upper_link):
+    system = "abcdefab-1234-4123-8123-abcdefabcdef"
+    caller = system.upper() if upper_caller else system
+    linked = system.upper() if upper_link else system
+    value = link(
+        PRIMARY.upper(),
+        path=f"/rest/api/uom/ManagedSystem/{linked}/VirtualIOServer/{PRIMARY.upper()}",
+    )
+    assert cm._provider_uuid(memory_target.hmc, caller, value) == PRIMARY
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        "managedsystem",
+        "virtualioserver",
+        "not-a-uuid",
+        "abcdefab-1234-4123-8123-abcdefabcdee",
+    ],
+)
+async def test_paging_provider_uuid_case_keeps_route(memory_target, segment):
+    system = "abcdefab-1234-4123-8123-abcdefabcdef"
+    path = f"/rest/api/uom/ManagedSystem/{system}/VirtualIOServer/{PRIMARY}"
+    if segment == "managedsystem":
+        path = path.replace("ManagedSystem", segment)
+    elif segment == "virtualioserver":
+        path = path.replace("VirtualIOServer", segment)
+    else:
+        path = path.replace(system, segment)
+    with pytest.raises(ValueError):
+        cm._provider_uuid(memory_target.hmc, system, link(PRIMARY, path=path))
+
+
 @pytest.mark.parametrize("explicit", [True, False])
 async def test_provider_ownership_check(memory_target, explicit):
     b = memory_target

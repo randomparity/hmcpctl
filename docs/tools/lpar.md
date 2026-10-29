@@ -2,7 +2,7 @@
 
 # `lpar` tools
 
-49 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+50 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -57,3 +57,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_set_lpar_msp` | `mutate` | `lpar.set_msp` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set a VIOS partition's Migratable Service Partition flag. |
 | `hmc_set_lpar_proc_compat` | `mutate` | `lpar.set_proc_compat` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Set the processor compatibility mode on an LPAR's partition profile. |
 | `hmc_set_minimum_affinity_policy` | `mutate` | `lpar.set_minimum_affinity_policy` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Set an LPAR's POWER11 minimum-affinity policy after authorization. |
+| `hmc_switch_lpar_paging_vios` | `mutate` | `lpar.switch_paging_vios` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Switch a running shared partition's redundant paging provider once. |

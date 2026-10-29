@@ -1,7 +1,8 @@
-"""Native current-memory quantity commands (ADR 0285)."""
+"""Native memory-resource commands."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Literal
 
 import typer
@@ -14,8 +15,52 @@ from ...documents.lpar_memory import (
 from ...operations.lpar.memory import change_lpar_memory
 from ...operations.lpar.memory_move import move_lpar_memory
 from ...operations.lpar.memory_statistics import reset_lpar_memory_statistics
+from ...operations.lpar.paging import switch_lpar_paging_vios
 from ..output import print_json, terminal_field, usage_error
 from ..runtime import with_client
+
+
+def lpars_paging_switchover(
+    name_or_uuid: str = typer.Argument(..., help="Contained partition name or UUID"),
+    system: str = typer.Option(..., "--system", "-s", help="Containing managed system"),
+    expected_current_paging_vios: str = typer.Option(
+        ...,
+        "--expected-current-paging-vios",
+        help="Expected current paging VIOS name or UUID",
+    ),
+    exclusive_writer_window: bool = typer.Option(
+        False,
+        "--exclusive-writer-window",
+        help="Acknowledge a coordinated writer window",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+) -> None:
+    """Switch the current redundant paging provider once and verify independently."""
+    if not exclusive_writer_window:
+        usage_error("Paging switchover requires --exclusive-writer-window")
+    if any(
+        not value.strip()
+        for value in (name_or_uuid, system, expected_current_paging_vios)
+    ):
+        usage_error(
+            "Partition, --system and --expected-current-paging-vios must be nonblank"
+        )
+    if not yes and not typer.confirm(
+        f"Switch paging provider once for '{terminal_field(name_or_uuid)}'? Inspect uncertain outcomes before another attempt"
+    ):
+        return
+    result = with_client(
+        lambda hmc: switch_lpar_paging_vios(
+            hmc,
+            name_or_uuid,
+            system_name_or_uuid=system,
+            expected_current_paging_vios_name_or_uuid=expected_current_paging_vios,
+            exclusive_writer_window=exclusive_writer_window,
+        )
+    )
+    print_json(asdict(result))
+    if not result.workflow_completed:
+        raise typer.Exit(code=1)
 
 
 def lpars_memory(
@@ -179,6 +224,9 @@ def lpars_memory_statistics_reset(
 def register_commands(group: typer.Typer) -> None:
     """Register native memory changes on the existing LPAR group."""
     group.command("memory", short_help="Adjust.")(lpars_memory)
+    group.command("paging-switchover", short_help="Switch paging VIOS once.")(
+        lpars_paging_switchover
+    )
     group.command("memory-move", short_help="Move.")(lpars_memory_move)
     group.command("memory-statistics-reset", short_help="Reset statistics history.")(
         lpars_memory_statistics_reset

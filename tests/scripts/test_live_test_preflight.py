@@ -1302,3 +1302,36 @@ def test_c07_preflight_unarmed_without_current_permission():
     assert not preflight.arm_verdicts(live_config.LiveTestConfig(), "creation-memory")[
         0
     ].runnable
+
+
+def test_paging_preflight_requires_expected_provider_and_window(monkeypatch, capsys):
+    config = live_config.LiveTestConfig(
+        system_name="sys-R1",
+        lp3_name="guest-R1",
+        paging_expected_current_vios="paging-R1",
+        paging_writer_window=True,
+    )
+    monkeypatch.setattr(preflight, "_check_configuration", lambda: (config, ""))
+    monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
+    assert preflight.main(["--group", "lpar-paging-switchover", "--skip-hardware"]) == 0
+    assert "separate restoration authorization" in capsys.readouterr().out
+    assert not preflight._paging_switchover_verdict(
+        live_config.LiveTestConfig(lp3_name="guest-R1")
+    ).runnable
+
+
+def test_paging_optional_settings_parse_strictly(workspace):
+    (workspace / ".env").write_text(
+        _env_text(
+            LIVE_TEST_PAGING_EXPECTED_CURRENT_VIOS="paging-R1",
+            LIVE_TEST_PAGING_WRITER_WINDOW="true",
+        )
+    )
+    config = live_config.LiveTestConfig.from_env_file()
+    assert (
+        config.paging_writer_window is True
+        and config.paging_expected_current_vios == "paging-R1"
+    )
+    (workspace / ".env").write_text(_env_text(LIVE_TEST_PAGING_WRITER_WINDOW="1"))
+    with pytest.raises(ValueError):
+        live_config.LiveTestConfig.from_env_file()

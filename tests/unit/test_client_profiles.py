@@ -62,6 +62,50 @@ async def test_native_read_retains_xml_etag_identity_and_fixed_route():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("upper_caller", [False, True])
+@pytest.mark.parametrize("upper_entry", [False, True])
+@pytest.mark.parametrize("upper_parent", [False, True])
+async def test_native_profile_uuid_case(upper_caller, upper_entry, upper_parent):
+    parent = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    profile = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    system = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    caller_parent = parent.upper() if upper_caller else parent
+    caller_profile = profile.upper() if upper_caller else profile
+    caller_system = system.upper() if upper_caller else system
+    linked_parent = parent.upper() if upper_parent else parent
+    linked_system = system.upper() if upper_parent else system
+    raw = native_xml(
+        uuid=profile.upper() if upper_entry else profile,
+        href=f"https://hmc.test/rest/api/uom/ManagedSystem/{linked_system}/LogicalPartition/{linked_parent}",
+    ).replace(">17</SettingID>", ">MiXeD-SettingID</SettingID>")
+    hmc = client(response(raw))
+    result = await read_native_profile(
+        hmc, "LogicalPartition", caller_parent, caller_profile, caller_system
+    )
+    assert result.uuid == caller_profile
+    assert result.raw == raw and result.setting_id == "MiXeD-SettingID"
+    assert (
+        hmc._request_with_uuid_path_arguments.call_args.args[1]
+        == f"/rest/api/uom/LogicalPartition/{caller_parent}/LogicalPartitionProfile/{caller_profile}"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["logicalpartition", "VirtualIOServer"])
+async def test_native_profile_uuid_case_keeps_resource_kind(kind):
+    with pytest.raises(ValueError):
+        await read_native_profile(
+            client(
+                response(native_xml(href=f"https://hmc.test/rest/api/uom/{kind}/{P}"))
+            ),
+            "LogicalPartition",
+            P,
+            F,
+            S,
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "href",
     [
@@ -180,3 +224,12 @@ async def test_native_delete_preserves_acceptance_status_and_never_sends_conditi
         f"/rest/api/uom/LogicalPartition/{P}/LogicalPartitionProfile/{F}",
     )
     assert "If-Match" not in call.kwargs["headers"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uuid", ["not-a-uuid", F.replace("-", ""), "g" * 36])
+async def test_native_profile_uuid_case_rejects_malformed_return(uuid):
+    with pytest.raises(ValueError, match="identity differs"):
+        await read_native_profile(
+            client(response(native_xml(uuid=uuid))), "LogicalPartition", P, F, S
+        )
