@@ -367,6 +367,7 @@ family composition/barriers, exact independent observations, CLI positional yes,
 results/clear and negative uncertainty contracts to named tests. Tests isolate HMC environment.
 Controlled faults must bite. Regenerate metadata/tool docs/changelog from implementation;
 legacy evidence stays commit-bound. No AI surface or pure-prose snapshot tests are added.
+Forecast: 6253–6800; historical 2890–4320 understated required ST68 route/budget/restore/recovery proofs.
 
 ## Rollback, feasibility and remaining gates
 
