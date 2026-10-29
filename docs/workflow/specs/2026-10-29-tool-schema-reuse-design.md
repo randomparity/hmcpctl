@@ -45,9 +45,11 @@ gate, existing two-worker admission/ownership policy, 25-minute test deadline an
 1. Decoration still validates security and collects a frozen definition.
 2. Registration evaluates `permits(name)` before preparing or copying a template.
 3. A successful cold preparation calls the existing `Tool.from_function` with
-   the original handler and `annotations_for(effect)`. It stores no policy state.
+   a disposable metadata-preserving callable of the original handler's sync/async
+   kind and `annotations_for(effect)`. SDK signature normalization stays on that
+   disposable callable. It stores no policy state.
 4. Binding deep-copies the `FunctionTool`, including nested schema/annotation
-   containers, and replaces `fn` with a fresh `authorized` wrapper. Its authorizer
+   containers, and replaces `fn` with a fresh `authorized` wrapper around the prepared callable. Its authorizer
    remains the current caller's callback and is evaluated on each invocation.
 5. Register only the bound copy. The original Python handler is unchanged.
 6. `cached_property` retains at most one template per accessed live definition.

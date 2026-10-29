@@ -19,10 +19,13 @@ preserving fresh authorization wrappers, schema equality and cache isolation.
 ## Decision
 
 Give each collected `ToolDefinition` one lazy private `FunctionTool` template.
-Prepare it from its original handler and derived annotations, without an
-application, policy, session or dispatch authorizer. After `permits(name)` passes,
+Prepare it through a disposable metadata-preserving callable of the same sync/async
+kind, without an application, policy, session or dispatch authorizer. This isolates
+FastMCP's injected-parameter signature normalization from the original handler.
+After `permits(name)` passes,
 deep-copy that template, replace its callable with a fresh `authorized(...)`
-wrapper, and register the copy through the existing `FastMCP.add_tool` API.
+wrapper around the prepared callable, and register the copy through the existing
+`FastMCP.add_tool` API.
 The template itself is never registered or returned to a client.
 
 The definition is the lifetime and invalidation boundary. A new collection or

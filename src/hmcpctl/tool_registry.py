@@ -197,15 +197,31 @@ class ToolDefinition:
 
     @functools.cached_property
     def _schema_template(self) -> FunctionTool:
+        # FastMCP normalizes injected-parameter signatures in place.
+        handler = self.handler
+        if inspect.iscoroutinefunction(handler):
+
+            @functools.wraps(handler)
+            async def metadata_handler(*args: Any, **kwargs: Any) -> Any:
+                return await handler(*args, **kwargs)
+
+        else:
+
+            @functools.wraps(handler)
+            def metadata_handler(*args: Any, **kwargs: Any) -> Any:
+                return handler(*args, **kwargs)
+
         return Tool.from_function(
-            self.handler, annotations=annotations_for(self.security.effect)
+            metadata_handler, annotations=annotations_for(self.security.effect)
         )
 
     def _bind(self, authorize: Authorize) -> FunctionTool:
         return self._schema_template.model_copy(
             deep=True,
             update={
-                "fn": authorized(self.name, self.security, self.handler, authorize)
+                "fn": authorized(
+                    self.name, self.security, self._schema_template.fn, authorize
+                )
             },
         )
 

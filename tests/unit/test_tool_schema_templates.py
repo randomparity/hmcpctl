@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import inspect
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
@@ -245,13 +246,28 @@ def test_template_does_not_retain_authorizer_before_invocation():
     assert reference() is None
 
 
-def test_sdk_context_injection_remains_supported():
-    async def contextual(ctx: Context) -> dict[str, bool]:
-        return {"context_present": isinstance(ctx, Context)}
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_sdk_context_injection_remains_supported(asynchronous):
+    if asynchronous:
+
+        async def contextual(ctx: Context) -> dict[str, bool]:
+            return {"context_present": isinstance(ctx, Context)}
+
+    else:
+
+        def contextual(ctx: Context) -> dict[str, bool]:
+            return {"context_present": isinstance(ctx, Context)}
+
+    signature = inspect.signature(contextual)
+    attributes = contextual.__dict__.copy()
+    annotations = contextual.__annotations__.copy()
 
     register = collect(contextual)
     application = create_base_mcp()
     register(application, permits=lambda _: True, authorize=lambda *_: None)
+    assert inspect.signature(contextual) == signature
+    assert contextual.__dict__ == attributes
+    assert contextual.__annotations__ == annotations
 
     async def invoke():
         async with Client(application) as client:
