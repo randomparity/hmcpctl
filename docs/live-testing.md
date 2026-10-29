@@ -356,9 +356,13 @@ every change whatever the call returned, and verifies restoration:
   `qos_priority="none"`, `vsi_manager_id=0`, `vsi_type_id=0` and `vsi_type_version=0`.
   These are explicit test values, not defaults or a guarantee of HMC acceptance.
   Credit requires verified creation metadata with all six checked fields and independent
-  contained identity/field readback. Refusal or missing evidence leaves qualification
-  failed or unevidenced. Cleanup deletes only that verified fixture UUID once, after
-  a fresh read proves unchanged baseline placements plus exactly that fixture.
+  contained identity/field readback, including the selected `VirtualSwitchID`. A switch
+  mismatch or missing switch stops before cleanup. Client-network listings require a
+  complete Atom feed: HTTP 204, blank bodies, pagination or ambiguous entries are errors;
+  a positively complete empty feed remains an empty list. Refusal or missing evidence
+  leaves qualification failed or unevidenced. Cleanup deletes only that verified fixture UUID once, after
+  a fresh read proves unchanged baseline placements plus exactly that fixture on its
+  selected switch.
   Acknowledged deletion and independent baseline equality must precede later writes.
   Drift or uncertain creation, verification or deletion stops subsequent effects and
   records manual recovery, retaining residue rather than inferring cleanup. Foreign

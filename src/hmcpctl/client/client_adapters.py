@@ -26,6 +26,8 @@ class AdaptersMixin:
         self: AdaptersClient, lpar_uuid: str, adapter_type: AdapterType
     ) -> list[dict[str, Any]]:
         validate_adapter_type(adapter_type)
+        if adapter_type == "ClientNetworkAdapter":
+            return await self._network_adapter_creation_feed(lpar_uuid)
         return await self.list_child("LogicalPartition", lpar_uuid, adapter_type)
 
     async def delete_adapter(
@@ -105,7 +107,7 @@ class AdaptersMixin:
     async def _network_adapter_creation_feed(
         self: AdaptersClient, lpar_uuid: str
     ) -> list[dict[str, Any]]:
-        """Read positive, unpaginated inventory for creation identity proof."""
+        """Read complete inventory for network listing and creation identity proof."""
         path = f"/rest/api/uom/LogicalPartition/{lpar_uuid}/ClientNetworkAdapter"
         xml = await self._get(
             path, "ClientNetworkAdapter", uuid_path_arguments={"parent_uuid": lpar_uuid}

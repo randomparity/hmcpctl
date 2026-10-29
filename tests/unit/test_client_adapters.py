@@ -21,25 +21,28 @@ def test_adapter_type_validation_accepts_only_the_published_vocabulary():
 
 
 @pytest.mark.asyncio
-async def test_list_and_delete_adapter_delegate_to_child_resources():
+@pytest.mark.parametrize(
+    "adapter_type", ["ClientNetworkAdapter", "VirtualSCSIClientAdapter"]
+)
+async def test_list_and_delete_adapter_delegate_to_child_resources(adapter_type):
     client = SimpleNamespace(
         list_child=AsyncMock(return_value=[{"UUID": "adapter-1"}]),
+        _network_adapter_creation_feed=AsyncMock(return_value=[{"UUID": "adapter-1"}]),
         delete_child=AsyncMock(),
     )
-
-    adapters = await AdaptersMixin.list_adapters(
-        client, "lpar-1", "ClientNetworkAdapter"
-    )
-    await AdaptersMixin.delete_adapter(
-        client, "lpar-1", "ClientNetworkAdapter", "adapter-1"
-    )
-
+    adapters = await AdaptersMixin.list_adapters(client, "lpar-1", adapter_type)
+    await AdaptersMixin.delete_adapter(client, "lpar-1", adapter_type, "adapter-1")
     assert adapters == [{"UUID": "adapter-1"}]
-    client.list_child.assert_awaited_once_with(
-        "LogicalPartition", "lpar-1", "ClientNetworkAdapter"
-    )
+    if adapter_type == "ClientNetworkAdapter":
+        client._network_adapter_creation_feed.assert_awaited_once_with("lpar-1")
+        client.list_child.assert_not_awaited()
+    else:
+        client.list_child.assert_awaited_once_with(
+            "LogicalPartition", "lpar-1", adapter_type
+        )
+        client._network_adapter_creation_feed.assert_not_awaited()
     client.delete_child.assert_awaited_once_with(
-        "LogicalPartition", "lpar-1", "ClientNetworkAdapter", "adapter-1"
+        "LogicalPartition", "lpar-1", adapter_type, "adapter-1"
     )
 
 
@@ -266,3 +269,40 @@ async def test_creation_inventory_preserves_one_valid_contained_entry():
     assert result[0]["UUID"] == identity
     assert result[0]["ResourceType"] == "ClientNetworkAdapter"
     assert result[0]["Resource"]["VirtualStationInterfaceTypeID"] == "0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,body", [(204, ""), (200, "")])
+async def test_network_listing_refuses_missing_http_inventory(mock_hmc, status, body):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(status, text=body))
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError, match="unavailable"):
+            await client.list_adapters(identity, "ClientNetworkAdapter")
+
+
+@pytest.mark.asyncio
+async def test_network_listing_accepts_positive_complete_empty_feed(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(
+        return_value=httpx.Response(
+            200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>'
+        )
+    )
+    async with HMCClient(make_config()) as client:
+        assert await client.list_adapters(identity, "ClientNetworkAdapter") == []

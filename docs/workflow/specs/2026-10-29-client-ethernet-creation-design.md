@@ -2,7 +2,7 @@
 
 Status: accepted design for #1821; implementation authorized.
 Baseline: b305024c6f5172be7a86e3d2a8a69999cf4367e5.
-Authority: https://github.com/randomparity/hmcpctl/issues/1821#issuecomment-6493134442.
+Authority: https://github.com/randomparity/hmcpctl/issues/1821#issuecomment-6494394191.
 Lane: full-spec. Complexity: M. Fixed design denominator: 250.
 
 ## Problem
@@ -195,3 +195,17 @@ unknown deletion or unexpected residue takes manual/_Stop. A concurrent unrelate
 that appears before or after this read is never a delete target. Leave vSCSI/vFC cleanup
 unchanged and report its adjacent risk separately. Hardware remains separately authorized.
 
+
+## Approved completeness and switch correction
+
+Existing ClientNetworkAdapter listing uses the same strict complete Atom inventory reader
+as selected-input creation proof. A positive empty feed returns []; missing bodies,204,
+pagination or ambiguous raw Atom entries raise HMCError. No new selector or result shape
+is added. Other adapter kinds retain list_child behavior; omitted-field creation is unchanged.
+ST9 requires readable VirtualSwitchID equal to its selected switch during initial fixture
+proof and all later pre-delete observations. Switch-only drift or unavailable switch evidence
+records manual recovery and stops before deletion or subsequent writes. Preserve complete
+listing failure through the existing tool result into ST9; never equate missing HTTP bodies
+with restored empty inventory. Positive empty complete inventory can prove restoration.
+Use actual HTTP transport fixtures and offline harness boundary regressions, including empty
+initial inventory, post-delete204/blank200, and switch-only changes. No hardware run.

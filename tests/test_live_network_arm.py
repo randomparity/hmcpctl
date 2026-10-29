@@ -179,6 +179,7 @@ class FakeHMC:
         identity = self._new_uuid()
         resource = {
             "PortVLANID": str(kwargs["port_vlan_id"]),
+            "VirtualSwitchID": str(kwargs["virtual_switch_id"]),
             "TaggedVLANIDs": "",
             "AllowedOperatingSystemMACAddresses": "ALL",
             "QualityOfServicePriorityEnabled": "false",
@@ -1067,3 +1068,102 @@ async def test_n1_create_identity_case_uses_independent_server_spelling_for_clea
     assert not _manual(state)
     assert _observation(state, "adapter.add_network")["result"] == "passed"
     assert hmc.adapters == _pre_existing()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("switch", [None, "2"])
+async def test_n1_initial_switch_must_be_readable_and_match(monkeypatch, switch):
+    hmc = FakeHMC()
+    original = hmc._hmc_add_network_adapter
+
+    def create(kwargs):
+        status, data = original(kwargs)
+        hmc.adapters["ClientNetworkAdapter"][data["UUID"]]["VirtualSwitchID"] = switch
+        return status, data
+
+    hmc._hmc_add_network_adapter = create
+    state = await _run(monkeypatch, hmc)
+    assert _manual(state)
+    assert "hmc_delete_adapter" not in hmc.mutations()
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+async def test_n1_switch_only_drift_before_cleanup_refuses_delete(monkeypatch):
+    hmc = FakeHMC()
+    original = hmc._hmc_list_adapters
+    reads = 0
+
+    def read(kwargs):
+        nonlocal reads
+        if kwargs["adapter_type"] == "ClientNetworkAdapter" and any(
+            tool == "hmc_add_network_adapter" for tool, _ in hmc.calls
+        ):
+            reads += 1
+            if reads == 3:
+                next(reversed(hmc.adapters["ClientNetworkAdapter"].values()))[
+                    "VirtualSwitchID"
+                ] = "2"
+        return original(kwargs)
+
+    hmc._hmc_list_adapters = read
+    state = await _run(monkeypatch, hmc)
+    assert _manual(state)
+    deletes = [kwargs for tool, kwargs in hmc.calls if tool == "hmc_delete_adapter"]
+    assert len(deletes) == 1  # Existing unknown-UUID negative only.
+    assert deletes[0]["adapter_uuid"] not in hmc.adapters["ClientNetworkAdapter"]
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,body,unavailable",
+    [
+        (204, "", True),
+        (200, "", True),
+        (200, '<feed xmlns="http://www.w3.org/2005/Atom"/>', False),
+    ],
+)
+async def test_n1_empty_restoration_requires_positive_http_inventory(
+    monkeypatch, mock_hmc, status, body, unavailable
+):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    route = mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(status, text=body))
+    hmc = FakeHMC()
+    hmc.adapters["ClientNetworkAdapter"] = {}
+    state = _state(monkeypatch, hmc)
+    async with HMCClient(make_config()) as client:
+
+        async def scripted(_state, _client, tool, **kwargs):
+            if (
+                tool == "hmc_list_adapters"
+                and kwargs["adapter_type"] == "ClientNetworkAdapter"
+                and any(name == "hmc_add_network_adapter" for name, _ in hmc.calls)
+                and not hmc.adapters["ClientNetworkAdapter"]
+            ):
+                hmc.calls.append((tool, kwargs))
+                try:
+                    return "PASS", await client.list_adapters(
+                        identity, "ClientNetworkAdapter"
+                    )
+                except HMCError:
+                    return "FAIL", "inventory unavailable"
+            return hmc.answer(tool, kwargs)
+
+        monkeypatch.setattr(runner.RunState, "call", scripted)
+        await network.mutate_virtual_networking(object(), state)
+    assert route.call_count >= 1
+    assert bool(_manual(state)) is unavailable
+    if unavailable:
+        assert "hmc_delete_virtual_network" not in hmc.mutations()
+        assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+    else:
+        assert "hmc_delete_virtual_network" in hmc.mutations()

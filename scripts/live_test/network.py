@@ -535,6 +535,7 @@ def _network_fixture(
     baseline: Adapters,
     identity: object,
     vlan: int,
+    switch: int,
     expected_placement: tuple[str, ...] | None = None,
 ) -> str | None:
     keys, original = _network_keys(listed), _network_keys(baseline)
@@ -554,9 +555,11 @@ def _network_fixture(
     if any(placed[keys[key]] != baseline[original[key]] for key in original):
         return None
     resource, placement = listed[keys[wanted]], placed[keys[wanted]]
-    if as_int(
-        _network_text(resource.get("PortVLANID"))
-    ) != vlan or not _network_fields_match(resource):
+    if (
+        as_int(_network_text(resource.get("PortVLANID"))) != vlan
+        or as_int(_network_text(resource.get("VirtualSwitchID"))) != switch
+        or not _network_fields_match(resource)
+    ):
         return None
     if expected_placement is not None and placement != expected_placement:
         return None
@@ -961,7 +964,7 @@ class _Arm:
         added = self.note("test VLAN", "hmc_add_network_adapter", result)
         after = await self.adapters(kind, "after add")
         identity = result[1].get("UUID") if isinstance(result[1], Mapping) else None
-        fixture = _network_fixture(after, baseline, identity, vlan)
+        fixture = _network_fixture(after, baseline, identity, vlan, switch)
         qualified = (
             added == "PASS"
             and _network_metadata_verified(result[1])
@@ -991,7 +994,7 @@ class _Arm:
         unchanged = await self.adapters(kind, "after unknown delete")
         unknown_refused = (
             refused == "FAIL"
-            and _network_fixture(unchanged, baseline, fixture, vlan, placement)
+            and _network_fixture(unchanged, baseline, fixture, vlan, switch, placement)
             is not None
         )
         if not unknown_refused:
@@ -1000,7 +1003,7 @@ class _Arm:
                 "inspect residue; no automatic cleanup or retry",
             )
         deleted, restored = await self.delete_network_fixture(
-            baseline, fixture, vlan, placement
+            baseline, fixture, vlan, switch, placement
         )
         self.state.record_verified(
             SUBTASK,
@@ -1030,13 +1033,18 @@ class _Arm:
         )
 
     async def delete_network_fixture(
-        self, baseline: Adapters, fixture: str, vlan: int, placement: tuple[str, ...]
+        self,
+        baseline: Adapters,
+        fixture: str,
+        vlan: int,
+        switch: int,
+        placement: tuple[str, ...],
     ) -> tuple[bool, bool]:
         """Delete only the independently proven network fixture, never a delta."""
         current = await self.adapters(
             "ClientNetworkAdapter", "before verified fixture delete"
         )
-        target = _network_fixture(current, baseline, fixture, vlan, placement)
+        target = _network_fixture(current, baseline, fixture, vlan, switch, placement)
         if target is None:
             self.manual(
                 "adapter drift before fixture cleanup",

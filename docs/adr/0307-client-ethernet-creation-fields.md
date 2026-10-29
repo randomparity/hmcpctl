@@ -32,3 +32,10 @@ Stored configuration does not prove runtime network behavior or external VSI reg
 See [the creation contract](../workflow/specs/2026-10-29-client-ethernet-creation-design.md).
 ST9 exercises one fixed six-field request with verified-UUID-only cleanup. No hardware
 qualification is claimed; uncertainty stops subsequent harness effects.
+
+## Adopted evidence correction
+
+Reuse the strict inventory reader for existing client-network listings, preserving list
+results for positive complete feeds while raising on missing/partial evidence. No new
+flag or parallel transport is introduced. The ST9 fixture proof explicitly binds the
+selected virtual switch through cleanup. Other adapter listing kinds are unchanged.
