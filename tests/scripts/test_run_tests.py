@@ -606,7 +606,7 @@ def test_timing_switch_only_changes_presentation(
     assert captured.err == ("slowest durations\n" if value == "1" else "")
     assert captured.out == "test: passed; configured coverage gate passed\n"
     assert calls[0][0] == [sys.executable, "-m", "pytest"] + (
-        ["--durations=30", "--durations-min=0"] if value == "1" else []
+        ["-vv", "--durations=30", "--durations-min=0"] if value == "1" else []
     )
     environment = calls[0][1]["env"]
     assert isinstance(environment, dict)
@@ -651,7 +651,7 @@ def test_timing_cli_retains_successful_output(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "['--durations=30', '--durations-min=0']" in result.stderr
+    assert "['-vv', '--durations=30', '--durations-min=0']" in result.stderr
     assert "configured coverage gate passed" in result.stdout
 
 
@@ -817,7 +817,7 @@ def test_serial_cli_preserves_original_invocation(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert result.stderr == "['--durations=30', '--durations-min=0']\n"
+    assert result.stderr == "['-vv', '--durations=30', '--durations-min=0']\n"
     assert result.stdout == "test: passed; configured coverage gate passed\n"
 
 

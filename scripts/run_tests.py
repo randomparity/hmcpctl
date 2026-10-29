@@ -251,7 +251,7 @@ def _run_suite(parallel: bool) -> int:
     if parallel:
         command.extend(["-n", "2", "--dist=loadfile", "--max-worker-restart=0"])
     if timings:
-        command.extend(["--durations=30", "--durations-min=0"])
+        command.extend(["-vv", "--durations=30", "--durations-min=0"])
     environment = {
         key: value
         for key, value in os.environ.items()

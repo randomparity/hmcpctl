@@ -59,6 +59,8 @@ jobs:
         run: UV_NO_SYNC=1 uv run --no-sync prek run --all-files
       - name: Run runtime verification suite
         run: just verify-runtime
+        env:
+          HMCPCTL_TEST_TIMINGS: ${{ matrix.python-version == '3.12' && '1' || '0' }}
       - name: Retain validated wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
