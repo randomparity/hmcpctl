@@ -1204,9 +1204,14 @@ def dispatch(args):
         args.grant_packet_sha256 or args.exclusive_writer_window
     ):
         raise ValueError("ST68 read-only phase cannot accept effect assertions")
-    original = (
-        serial.read(args.results, maximum=8 * MIB) if args.mode == "recover" else None
-    )
+    original, original_sha256 = None, None
+    if args.mode == "recover":
+        with serial.private_path(args.results, maximum=8 * MIB).open("rb") as stream:
+            original_raw = stream.read(8 * MIB + 1)
+        if len(original_raw) > 8 * MIB:
+            raise ValueError("ST68 original results exceed8MiB before JSON")
+        original = _json(original_raw)
+        original_sha256 = hashlib.sha256(original_raw).hexdigest()
     packet_path = Path(original["packet_path"]) if original is not None else args.packet
     digest = original["packet_sha256"] if original is not None else args.packet_sha256
     with serial.private_path(packet_path).open("rb") as stream:
@@ -1273,9 +1278,7 @@ def dispatch(args):
         else:
             document["baseline"] = await recover(hmc, p, original, document)
             document["history_verified"] = True
-            document["original_results_sha256"] = hashlib.sha256(
-                args.results.read_bytes()
-            ).hexdigest()
+            document["original_results_sha256"] = original_sha256
         document["complete"] = True
 
     asyncio.run(phase(hmc, p, document, path, operation))

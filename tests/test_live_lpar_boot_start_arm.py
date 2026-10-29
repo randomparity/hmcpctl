@@ -1242,8 +1242,9 @@ async def test_phase_failure_or_cancellation_keeps_owned_closeout_and_original_e
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("results_change", [None, "replace", "grow"])
 async def test_actual_cli_three_phase_protocol_and_filtered_final_evidence(
-    physical_world, monkeypatch, tmp_path, capsys
+    physical_world, monkeypatch, tmp_path, capsys, results_change
 ):
     import hashlib
 
@@ -1291,10 +1292,50 @@ async def test_actual_cli_three_phase_protocol_and_filtered_final_evidence(
         == 0
     )
     run_bytes = w.path.read_bytes()
-    assert await asyncio.to_thread(arm.main, ["recover", "--results", str(w.path)]) == 0
-    assert w.path.read_bytes() == run_bytes
+    original_recover, original_open = arm.recover, Path.open
+    reads = []
+
+    async def changed_results(*args):
+        result = await original_recover(*args)
+        if results_change:
+            with original_open(
+                w.path, "wb" if results_change == "replace" else "ab"
+            ) as stream:
+                stream.write(
+                    b"{}" if results_change == "replace" else b" " * (8 * arm.MIB + 1)
+                )
+        return result
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def bounded_open(path, *args, **kwargs):
+        with original_open(path, *args, **kwargs) as stream:
+            mode = args[0] if args else kwargs.get("mode", "r")
+            if path != w.path or mode != "rb":
+                yield stream
+                return
+
+            class Reader:
+                def read(self, n=-1):
+                    reads.append(n)
+                    assert n == 8 * arm.MIB + 1, "unbounded original-results read"
+                    return stream.read(n)
+
+            yield Reader()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(arm, "recover", changed_results)
+        patch.setattr(Path, "open", bounded_open)
+        assert (
+            await asyncio.to_thread(arm.main, ["recover", "--results", str(w.path)])
+            == 0
+        )
+    assert reads == [8 * arm.MIB + 1]
+    assert (w.path.read_bytes() == run_bytes) is (results_change is None)
     recovered = arm.serial.read(w.path.with_name(w.path.name + ".recovery.json"))
     assert recovered["clean"] and recovered["history_verified"]
+    assert recovered["original_results_sha256"] == hashlib.sha256(run_bytes).hexdigest()
     public = live_test_evidence.render(recovered)
     assert public is not None and "CLEAN" in public and "hmc.test" not in public
     assert w.pending not in capsys.readouterr().out
@@ -1538,3 +1579,35 @@ async def test_native_effect_route_cannot_apply_or_retarget_or_add_fields(
         assert not h.sent and w.ssh == []
     finally:
         await h._http.aclose()
+
+
+@pytest.mark.parametrize("grow_after_stat", [False, True])
+def test_recovery_original_overflow_refuses_before_json_credentials_or_hmc(
+    tmp_path, monkeypatch, grow_after_stat
+):
+    tmp_path.chmod(0o700)
+    path = tmp_path / "original.json"
+    arm.serial.write(path, {}, fresh=True)
+    original_path, original_open = arm.serial.private_path, Path.open
+
+    def grow():
+        with original_open(path, "ab") as stream:
+            stream.write(b" " * (8 * arm.MIB + 1))
+
+    def checked_path(*args, **kwargs):
+        result = original_path(*args, **kwargs)
+        if grow_after_stat:
+            grow()
+        return result
+
+    if not grow_after_stat:
+        grow()
+    monkeypatch.setattr(arm.serial, "private_path", checked_path)
+    monkeypatch.setattr(arm, "_json", lambda *_: pytest.fail("overflow reached JSON"))
+    monkeypatch.setattr(
+        arm, "load_profile", lambda: pytest.fail("overflow reached credentials")
+    )
+    monkeypatch.setattr(
+        arm, "CountedHMC", lambda *_: pytest.fail("overflow reached HMC")
+    )
+    assert arm.main(["recover", "--results", str(path)]) == 2
