@@ -2,7 +2,7 @@
 
 # `vios` tools
 
-14 tools in the `vios` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+16 tools in the `vios` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -21,4 +21,6 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_list_vios_backups` | `read` | `vios.list_backups` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List a VIOS backup catalog with the supported ``lsviosbk`` command. |
 | `hmc_power_off_vios` | `destructive` | `vios.power_off` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Power off a VIOS, optionally scoped by system and waiting for completion. |
 | `hmc_power_on_vios` | `mutate` | `vios.power_on` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Power on a VIOS, optionally waiting for a normalized job outcome. |
+| `hmc_read_vios_boot_order` | `read` | `vios.read_boot_order` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read exact stored VIOS pending text through contained native identity. |
 | `hmc_restore_vios` | `destructive` | `vios.restore` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Restore a catalog entry with the supported ``rstviosbk`` command. |
+| `hmc_set_vios_boot_order` | `mutate` | `vios.set_boot_order` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Set VIOS pending text once and independently verify exact stored text. |

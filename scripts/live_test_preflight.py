@@ -971,11 +971,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--group",
+        action="append",
         choices=(
             *runner.SUBTASK_GROUPS,
             "system-profile-source",
             "system-profile-activation-source",
             "lpar-serial-adapter",
+            "lpar-boot-start",
             "vios-ame-source",
             "vios-boot-source",
         ),
@@ -995,6 +997,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--packet-sha256")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.group and len(args.group) != 1:
+        parser.error("exactly one preflight group may be selected")
+    args.group = args.group[0] if args.group else None
     if args.group == "vios-ame-source":
         from live_test import vios_ame_source
 
@@ -1034,6 +1039,31 @@ def main(argv: list[str] | None = None) -> int:
                 "VIOS boot source preflight requires packet, digest, private output and live read-only checks"
             )
         return vios_boot_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
+
+    if args.group == "lpar-boot-start":
+        from live_test import lpar_boot_start
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "ST68 requires exact packet, digest, private output and read-only admission"
+            )
+        return lpar_boot_start.main(
             [
                 "preflight",
                 "--packet",

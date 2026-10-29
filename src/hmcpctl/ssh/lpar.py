@@ -15,6 +15,7 @@ from ..documents.lpar_io import LparPhysicalIO
 from ..documents.lpar_memory_layout import LparMemoryLayout
 from ..documents.lpar_security_policy import LparSecurityPolicy
 from ..documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
+from ..documents.lpar_start import LparStartSettings
 from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
@@ -173,6 +174,7 @@ async def create_lpar_via_cli(
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
     creation_memory: LparCreationMemory | None = None,
     affinity_group_id: AffinityGroupID | None = None,
+    start_settings: LparStartSettings | None = None,
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -196,6 +198,14 @@ async def create_lpar_via_cli(
     processor mode's ``sharing_mode``. Omitted values take the defaults of
     :func:`complete_create_resources`, which the REST create uses too.
     """
+    if start_settings is not None:
+        if not isinstance(start_settings, LparStartSettings):
+            raise TypeError("start_settings must be LparStartSettings")
+        start_settings.validate_creation(partition_type)
+        if start_settings.power_ctrl_lpar_names is not None:
+            raise ValueError(
+                "Power controller names must be resolved before native create"
+            )
     if creation_memory is not None and not isinstance(
         creation_memory, LparCreationMemory
     ):
@@ -232,6 +242,8 @@ async def create_lpar_via_cli(
     config_pairs.extend(hardware_pairs)
     config_pairs.extend(layout_pairs)
     config_pairs.extend(memory_pairs)
+    if start_settings is not None:
+        config_pairs.extend(start_settings.pairs())
     config_pairs.extend(_lpar_resource_pairs(resources, max_virtual_slots))
     if partition_id is not None:
         config_pairs.append(("lpar_id", partition_id))
@@ -258,6 +270,16 @@ async def create_lpar_via_cli(
         config_str += "," + extra
     if serial_value:
         config_str += ',"virtual_serial_adapters=' + serial_value + '"'
+    if start_settings is not None and start_settings.power_ctrl_lpar_ids is not None:
+        config_str += "," + build_attribute_record(
+            [
+                (
+                    "power_ctrl_lpar_ids",
+                    ",".join(map(str, start_settings.power_ctrl_lpar_ids)),
+                )
+            ],
+            quoted=("power_ctrl_lpar_ids",),
+        )
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
     layout_error = None
     code = None

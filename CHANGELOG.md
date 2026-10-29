@@ -18,6 +18,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- LPAR and VIOS creation accept typed boot/start settings with contained power-controller
+  authorization and independent required saved/current observations. Raw pending boot text
+  preserves printable Unicode/spacing through existing LPAR XML and a separate VIOS CSV
+  owner; writes require independent exact readback. Missing evidence blocks completion;
+  no clear, retry or activation is implied. These product variants remain unevidenced on
+  hardware (#1770).
+
+
 - Redundant paging-VIOS switchover through `hmc_switch_lpar_paging_vios` and
   `lpars paging-switchover` requires the expected current provider, an explicit
   coordinated writer window, contained configured/runtime redundancy and ownership

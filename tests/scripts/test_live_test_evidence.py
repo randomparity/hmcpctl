@@ -526,3 +526,48 @@ def test_boot_source_renderer_never_falls_through(fault):
     elif fault == "cases":
         d["cases"] = [None]
     assert evidence.render(d) is None
+
+
+def _boot_start_document():
+    return {
+        "group": "lpar-boot-start",
+        "mode": "recover",
+        "case": "boot-raw",
+        "source_only": False,
+        "run": {
+            "group": "lpar-boot-start",
+            "tested_commit": "a" * 40,
+            "tree_clean": True,
+        },
+        "complete": True,
+        "clean": True,
+        "history_verified": True,
+        "session": {"closed": True, "local_closed": True},
+        "original_results_sha256": "b" * 64,
+        "private": {"raw": _SENTINEL, "hostname": _SENTINEL},
+    }
+
+
+def test_boot_start_renderer_requires_recovery_and_filters_all_provider_data():
+    result = evidence.render(_boot_start_document())
+    assert result is not None and "CLEAN" in result and _SENTINEL not in result
+    assert "boot-raw" in result and "a" * 40 in result
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("mode", "run"),
+        ("complete", False),
+        ("history_verified", False),
+        ("clean", False),
+        ("source_only", True),
+        ("case", _SENTINEL),
+    ],
+)
+def test_boot_start_incomplete_or_source_evidence_cannot_qualify(field, value):
+    d = _boot_start_document()
+    d[field] = value
+    result = evidence.render(d)
+    assert result is None or "CLEAN" not in result
+    assert result is None or _SENTINEL not in result

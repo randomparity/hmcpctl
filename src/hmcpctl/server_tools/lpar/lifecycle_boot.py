@@ -8,6 +8,7 @@ from hmcpctl.operations.lpar.ownership import list_lpar_ownership
 from hmcpctl.operations.systems.fleet import FleetListing
 
 from ..._app import ssh_with_client, with_client
+from ...documents.boot import select_boot_string
 from ...operations.lpar.boot_order import (
     clear_lpar_boot_order,
     read_lpar_boot_order,
@@ -94,10 +95,11 @@ def hmc_read_lpar_refcodes(
 def hmc_set_lpar_boot_order(
     system_name_or_uuid: str,
     lpar_name_or_uuid: str,
-    devices: list[str],
+    devices: list[str] | None = None,
     *,
     ownership_override: bool = False,
     profile: str | None = None,
+    boot_string: str | None = None,
 ) -> dict[str, Any] | None:
     """Set the pending boot order used on the LPAR's next activation.
 
@@ -115,6 +117,7 @@ def hmc_set_lpar_boot_order(
     Args:
         system_name_or_uuid: CLI name or UUID of the managed system.
         lpar_name_or_uuid: Name or UUID of the logical partition.
+        boot_string: Exact printable raw pending text; non-whitespace, <=16KiB UTF-8; mutually exclusive with devices.
         devices: Open Firmware device paths in first-to-last order, such as
             ``/vdevice/v-scsi@30000002/disk@8100000000000000``; each starts with
             ``/`` and is printable ASCII with no whitespace.
@@ -122,12 +125,15 @@ def hmc_set_lpar_boot_order(
         profile: Configured HMC profile, or the default when omitted.
     """
 
+    select_boot_string(devices, boot_string)
+
     async def set_boot_order(hmc) -> dict[str, Any] | None:
         return await set_lpar_boot_order(
             hmc,
             system_name_or_uuid=system_name_or_uuid,
             lpar_name_or_uuid=lpar_name_or_uuid,
             devices=devices,
+            **({"boot_string": boot_string} if boot_string is not None else {}),
             ownership_override=ownership_override,
         )
 

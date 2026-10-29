@@ -288,6 +288,10 @@ def _parsed(entry: str) -> dict:
 async def test_read_lpar_boot_order_returns_strings_from_the_advanced_group():
     hmc = AsyncMock()
     hmc.get_uom.return_value = _parsed(_entry(devices=f"{DISK} {LAN}", last=DISK))
+    hmc.read_logical_partition_document.return_value = (
+        _lpar(_entry(devices=f"{DISK} {LAN}", last=DISK)),
+        None,
+    )
 
     with patch(
         "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
@@ -312,6 +316,7 @@ async def test_read_lpar_boot_order_returns_strings_from_the_advanced_group():
 async def test_read_lpar_boot_order_reports_empty_fields_as_none():
     hmc = AsyncMock()
     hmc.get_uom.return_value = _parsed(_entry())
+    hmc.read_logical_partition_document.return_value = (_lpar(_entry()), None)
 
     with patch(
         "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
@@ -369,13 +374,25 @@ async def test_set_lpar_boot_order_authorizes_then_writes_the_joined_paths():
         events.append(("write", uuid, value)) or {"Resource": {"UUID": uuid}}
     )
 
+    hmc.get_uom.return_value = _parsed(_entry(pending=f"{DISK} {LAN}"))
+    hmc.read_logical_partition_document.return_value = (
+        _lpar(_entry(pending=f"{DISK} {LAN}")),
+        None,
+    )
+
     async def authorize(*args, **kwargs):
         events.append(("authorize", args[1:], kwargs))
         return LPAR
 
-    with patch(
-        "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
-        side_effect=authorize,
+    with (
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
+            side_effect=authorize,
+        ),
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
     ):
         result = await set_lpar_boot_order(
             hmc,
@@ -425,16 +442,264 @@ async def test_set_lpar_boot_order_translates_hmc_not_acceptable():
     hmc.set_pending_boot_string.side_effect = HMCError(
         "write failed", status_code=406, body=body
     )
+    hmc.get_uom.return_value = _parsed(_entry())
+    hmc.read_logical_partition_document.return_value = (_lpar(_entry()), None)
 
     with (
         patch(
             "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
             new=AsyncMock(return_value=LPAR),
         ),
-        pytest.raises(HMCError, match="Not Acceptable") as exc_info,
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        pytest.raises(HMCError, match="unverified") as exc_info,
     ):
         await set_lpar_boot_order(hmc, "lpar-1", [DISK], system_name_or_uuid="system-1")
 
     assert exc_info.value.status_code == 406
-    assert exc_info.value.body == body
-    assert isinstance(exc_info.value.__cause__, HMCError)
+    assert exc_info.value.body is None
+    assert "schema mismatch" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["  /dev/test  ", "none", "é λ", "a" * 16384],
+    ids=["spacing", "literal-none", "unicode", "byte-limit"],
+)
+def test_raw_and_path_inputs_preserve_exact_text(text):
+    from hmcpctl.documents.boot import select_boot_string, validate_raw_boot_string
+
+    assert validate_raw_boot_string(text) == text
+    assert select_boot_string(None, text) == text
+    assert select_boot_string([DISK, LAN], None) == f"{DISK} {LAN}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "  ", "a\n", "a\x00", "a\ud800", "a" * 16385, "é" * 8193],
+    ids=[
+        "empty",
+        "whitespace",
+        "newline",
+        "control",
+        "surrogate",
+        "bytes-over",
+        "unicode-bytes-over",
+    ],
+)
+def test_raw_input_refuses_before_effects(text):
+    from hmcpctl.documents.boot import validate_raw_boot_string
+
+    with pytest.raises(ValueError):
+        validate_raw_boot_string(text)
+
+
+@pytest.mark.parametrize("devices,text", [(None, None), ([DISK], "raw"), ([], "raw")])
+def test_boot_input_requires_exactly_one(devices, text):
+    from hmcpctl.documents.boot import select_boot_string
+
+    with pytest.raises(ValueError):
+        select_boot_string(devices, text)
+
+
+def _raw_entry(pending, environment="AIX/Linux"):
+    from xml.sax.saxutils import escape
+
+    return _entry(pending=escape(pending)).replace(
+        "<DesignatedIPLSource",
+        f"<PartitionType>{environment}</PartitionType><DesignatedIPLSource",
+    )
+
+
+@pytest.mark.asyncio
+async def test_lossless_pending_actual_xml_read_boundary(mock_hmc):
+    text = "  /dev/test,a=b  "
+    _routes(mock_hmc, entry=_raw_entry(text))
+    with patch(
+        "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+        new=AsyncMock(return_value=LPAR),
+    ):
+        async with HMCClient(make_config()) as hmc:
+            result = await read_lpar_boot_order(
+                hmc, LPAR, system_name_or_uuid="system-a"
+            )
+    assert result["pending_boot_string"] == text
+    assert len(result) == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observed", ["  /dev/test  ", "/dev/test"])
+async def test_independent_boot_verification_preserves_return(mock_hmc, observed):
+    state = {"pending": "baseline"}
+    get = mock_hmc.get(LPAR_PATH, params={"group": "Advanced"}).mock(
+        side_effect=lambda request: httpx.Response(
+            200, text=_raw_entry(state["pending"]), headers={"ETag": ETAG}
+        )
+    )
+    response = _raw_entry("provider reply")
+
+    def post_response(request):
+        state["pending"] = observed
+        return httpx.Response(200, text=response)
+
+    post = mock_hmc.post(LPAR_PATH, params={"group": "Advanced"}).mock(
+        side_effect=post_response
+    )
+    with (
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
+            new=AsyncMock(return_value=LPAR),
+        ),
+    ):
+        async with HMCClient(make_config()) as hmc:
+            if observed == "  /dev/test  ":
+                result = await set_lpar_boot_order(
+                    hmc,
+                    LPAR,
+                    system_name_or_uuid="system-a",
+                    boot_string="  /dev/test  ",
+                )
+                assert result == parse_feed(response)[0]
+            else:
+                with pytest.raises(HMCError, match="verif"):
+                    await set_lpar_boot_order(
+                        hmc,
+                        LPAR,
+                        system_name_or_uuid="system-a",
+                        boot_string="  /dev/test  ",
+                    )
+    assert post.call_count == 1 and get.call_count > 1
+
+
+@pytest.mark.asyncio
+async def test_os400_raw_with_leaf_and_etag_has_zero_writes(mock_hmc):
+    _, post = _routes(mock_hmc, entry=_raw_entry("baseline", "OS400"))
+    with (
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
+    ):
+        async with HMCClient(make_config()) as hmc:
+            with pytest.raises(ValueError, match="OS400"):
+                await set_lpar_boot_order(
+                    hmc, LPAR, system_name_or_uuid="system-a", boot_string="raw"
+                )
+    assert post.call_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault", ["missing", "duplicate", "namespace", "identity", "nested", "malformed"]
+)
+async def test_lossless_read_refuses_invalid_xml_boundary(mock_hmc, fault):
+    body = _raw_entry("raw")
+    if fault == "missing":
+        body = _entry(pending_element=False)
+    elif fault == "duplicate":
+        body = body.replace(
+            "</BootListInformation>",
+            "<PendingBootString>raw</PendingBootString></BootListInformation>",
+        )
+    elif fault == "namespace":
+        body = body.replace(
+            "<PendingBootString ", '<PendingBootString xmlns="urn:foreign" '
+        )
+    elif fault == "identity":
+        body = body.replace(
+            f"<AtomID>{LPAR}</AtomID>",
+            "<AtomID>bbbb0000-0000-0000-0000-000000000002</AtomID>",
+        )
+    elif fault == "nested":
+        body = body.replace(
+            "raw</PendingBootString>", "raw<Unexpected/></PendingBootString>"
+        )
+    else:
+        body = "<LogicalPartition>private-bad-xml"
+    _routes(mock_hmc, entry=body)
+    with patch(
+        "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+        new=AsyncMock(return_value=LPAR),
+    ):
+        async with HMCClient(make_config()) as hmc:
+            with pytest.raises(HMCError) as exc:
+                await read_lpar_boot_order(hmc, LPAR, system_name_or_uuid="system-a")
+    assert "private-bad-xml" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "post_status,post_body", [(200, ""), (202, ""), (200, "not-xml")]
+)
+async def test_ack_without_independent_match_never_completes(
+    mock_hmc, post_status, post_body
+):
+    _routes(mock_hmc, entry=_raw_entry("baseline"))
+    post = mock_hmc.post(LPAR_PATH, params={"group": "Advanced"}).mock(
+        return_value=httpx.Response(post_status, text=post_body)
+    )
+    with (
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
+            new=AsyncMock(return_value=LPAR),
+        ),
+    ):
+        async with HMCClient(make_config()) as hmc:
+            with pytest.raises(HMCError):
+                await set_lpar_boot_order(
+                    hmc, LPAR, system_name_or_uuid="system-a", boot_string="requested"
+                )
+    assert post.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("submission", ["rejected", "acknowledged", "unknown"])
+async def test_boot_write_retains_submission_certainty_without_provider_body(
+    submission,
+):
+    from hmcpctl.errors import LparUpdateError
+
+    hmc = AsyncMock()
+    hmc.get_uom.return_value = _parsed(_raw_entry("baseline"))
+    hmc.read_logical_partition_document.return_value = (
+        _lpar(_raw_entry("baseline")),
+        ETAG,
+    )
+    hmc.set_pending_boot_string.side_effect = LparUpdateError(
+        "private-provider-text",
+        submission,
+        412 if submission == "rejected" else None,
+        "private-body",
+    )
+    with (
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        pytest.raises(LparUpdateError) as exc,
+    ):
+        await set_lpar_boot_order(
+            hmc, LPAR, system_name_or_uuid="system-a", boot_string="raw"
+        )
+    assert exc.value.submission == submission
+    assert "private-provider" not in str(exc.value) and exc.value.body is None
+    assert hmc.set_pending_boot_string.await_count == 1

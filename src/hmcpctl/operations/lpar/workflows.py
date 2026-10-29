@@ -34,6 +34,10 @@ async def create_lpar(
     assignments: LparPcieAssignments,
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
+    creation.start_settings.validate_creation(creation.partition_type)
+    start_requested = creation.start_settings.requested()
+    if start_requested and creation.keylock is not None:
+        raise ValueError("Start settings cannot be combined with native keylock")
     if not isinstance(creation.creation_memory, LparCreationMemory):
         raise TypeError("creation_memory must be LparCreationMemory")
     memory_requested = bool(creation.creation_memory.pairs())
@@ -98,6 +102,7 @@ async def create_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
     ) and (assignments.dedicated or assignments.sriov):
         preflight_assignments = assignments
     else:
@@ -129,6 +134,7 @@ async def create_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
     ):
         steps.append(created.apply_step)
@@ -156,6 +162,7 @@ async def create_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
     ):
         steps.append(created.apply_step)
@@ -165,6 +172,7 @@ async def create_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
     ) and (
         created.ownership_stamped is not True
@@ -177,7 +185,7 @@ async def create_lpar(
                 (serial_requested, created.serial_step),
                 (memory_requested, created.creation_memory_step),
                 (affinity_requested, created.affinity_group_step),
-                (creation.settings.pairs(), created.settings_step),
+                (creation.settings.pairs() or start_requested, created.settings_step),
                 (creation.reporting_settings.pairs(), created.reporting_step),
                 (creation.vtpm_settings.pairs(), created.vtpm_step),
                 (creation.physical_io.requested, created.physical_io_step),
@@ -201,7 +209,12 @@ async def create_lpar(
     apply_failed = (
         created.apply_step is not None and created.apply_step.status == "error"
     ) or (
-        (roles_requested(creation.settings) or memory_requested or affinity_requested)
+        (
+            roles_requested(creation.settings)
+            or memory_requested
+            or start_requested
+            or affinity_requested
+        )
         and creation.apply_profile is True
         and (created.apply_step is None or created.apply_step.status != "ok")
     )

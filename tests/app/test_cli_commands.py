@@ -5351,21 +5351,17 @@ def test_set_boot_order_prints_confirmation_and_read_back_only(fake_hmc, monkeyp
 
 
 @pytest.mark.parametrize(
-    ("document", "expected"),
+    "document",
     [
-        (None, "-"),
-        (
-            {"Resource": {"BootListInformation": {"PendingBootString": BOOT_PATH}}},
-            BOOT_PATH,
-        ),
-        ({"Resource": {"BootListInformation": {"PendingBootString": ""}}}, "-"),
-        (
-            {"Resource": {"BootListInformation": {"PendingBootString": {"@ksv": "1"}}}},
-            "-",
-        ),
+        None,
+        {"Resource": {"BootListInformation": {"PendingBootString": BOOT_PATH}}},
+        {"Resource": {"BootListInformation": {"PendingBootString": ""}}},
+        {"Resource": {"BootListInformation": {"PendingBootString": {"@ksv": "1"}}}},
     ],
 )
-def test_set_boot_order_read_back_shapes(fake_hmc, monkeypatch, document, expected):
+def test_set_boot_order_uses_verified_request_not_post_body(
+    fake_hmc, monkeypatch, document
+):
     _stub_set_boot_order(monkeypatch, document)
 
     result = RUNNER.invoke(
@@ -5373,7 +5369,9 @@ def test_set_boot_order_read_back_shapes(fake_hmc, monkeypatch, document, expect
     )
 
     assert result.exit_code == 0
-    assert f"Pending boot string: {expected}" in result.stdout
+    assert f"Pending boot string: {BOOT_PATH}" in result.stdout
+    # The domain owner has independently verified the request; the old POST result
+    # shape (including None or missing text) is no longer a CLI readback oracle.
 
 
 def test_set_boot_order_json_prints_full_document(fake_hmc, monkeypatch):

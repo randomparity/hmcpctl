@@ -1277,11 +1277,25 @@
       "observed_at": null
     },
     {
+      "operation": "vios.read_boot_order",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "vios.restore",
       "implementation": "implemented",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T15:27:07Z"
+    },
+    {
+      "operation": "vios.set_boot_order",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "vios_label.create_vfc_group",

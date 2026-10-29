@@ -21,6 +21,7 @@ from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
+from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.core import LparCreation
 from ...operations.lpar.workflows import create_lpar
@@ -276,6 +277,13 @@ def lpars_create(
             help="Saved affinity group: 1–255 or none; native observation is separate; omitted preserves defaults",
         ),
     ] = None,
+    start_settings: Annotated[
+        str | None,
+        typer.Option(
+            "--start-settings",
+            help="Typed creation-only boot/start JSON; omission preserves defaults, false is explicit",
+        ),
+    ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.
 
@@ -344,6 +352,21 @@ def lpars_create(
             terminal_field(error, err=True), param_hint="memory layout"
         ) from None
     try:
+        lpar_type = validate_partition_type(partition_type)
+    except ValueError as exc:
+        usage_error(f"--type: {exc}")
+    try:
+        start = (
+            TypeAdapter(LparStartSettings).validate_json(start_settings)
+            if start_settings is not None
+            else LparStartSettings()
+        )
+        start.validate_creation(partition_type)
+    except ValueError as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--start-settings"
+        ) from None
+    try:
         affinity = parse_affinity_group_cli(affinity_group_id)
     except ValueError as error:
         raise typer.BadParameter(
@@ -378,10 +401,6 @@ def lpars_create(
         )
     if caller_token is not None:
         validate_caller_token(caller_token)
-    try:
-        lpar_type = validate_partition_type(partition_type)
-    except ValueError as exc:
-        usage_error(f"--type: {exc}")
     if not yes:
         typer.confirm(
             (
@@ -427,6 +446,7 @@ def lpars_create(
                 hardware_mem_expansion=hardware_mem_expansion,
                 memory_layout=layout,
                 affinity_group_id=affinity,
+                start_settings=start,
                 settings=LparSettings(
                     allow_perf_collection=allow_perf_collection,
                     lpar_avail_priority=lpar_avail_priority,

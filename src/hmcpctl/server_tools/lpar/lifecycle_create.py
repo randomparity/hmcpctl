@@ -18,6 +18,7 @@ from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
+from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
 from ...operations.lpar.core import LparCreation
@@ -66,6 +67,7 @@ def hmc_create_lpar(
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = (),
     creation_memory: LparCreationMemory | None = None,
     affinity_group_id: AffinityGroupID | None = None,
+    start_settings: LparStartSettings | None = None,
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -112,6 +114,9 @@ def hmc_create_lpar(
             Huge pages use a separate pool; capacity is checked at activation.
             Saved profile verification does not prove activation or runtime;
             controller current values may be unavailable, blocking follow-ups.
+        start_settings: Optional five creation-only boot/start settings. Omission preserves
+            defaults; explicit false is retained. Controllers require contained ownership
+            admission and independent required-plane verification before follow-up effects.
         affinity_group_id: Optional native affinity group: integer 1–255 or literal none;
             omission preserves defaults. Fresh classic saved-profile proof gates follow-ups;
             native partition mismatch/unavailability is reported separately. Controller
@@ -169,6 +174,10 @@ def hmc_create_lpar(
     if caller_token is not None:
         validate_caller_token(caller_token)
     validate_partition_type(partition_type)
+    if start_settings is not None:
+        if not isinstance(start_settings, LparStartSettings):
+            raise TypeError("start_settings must be LparStartSettings")
+        start_settings.validate_creation(partition_type)
     if creation_memory is not None and not isinstance(
         creation_memory, LparCreationMemory
     ):
@@ -205,6 +214,9 @@ def hmc_create_lpar(
                 if memory_layout is not None
                 else LparMemoryLayout(),
                 affinity_group_id=affinity_group_id,
+                start_settings=start_settings
+                if start_settings is not None
+                else LparStartSettings(),
                 security_policy=security_policy
                 if security_policy is not None
                 else LparSecurityPolicy(),

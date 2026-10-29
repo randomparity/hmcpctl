@@ -34,6 +34,7 @@ from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
+from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...errors import HMCError
 from ...resource_identity import (
@@ -86,6 +87,13 @@ from .security_policy import (
     read_security_policy_capabilities,
 )
 from .serial import admit_serial_creation, confirm_serial_created, serial_creation_step
+from .start import (
+    StartAdmission,
+    admit_start_creation,
+    confirm_start_created,
+    created_start_step,
+    recheck_start_controllers,
+)
 from .vtpm import admit_vtpm, read_vtpm_capabilities
 
 _logger = logging.getLogger(__name__)
@@ -121,6 +129,7 @@ class LparCreation:
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = ()
     creation_memory: LparCreationMemory = field(default_factory=LparCreationMemory)
     affinity_group_id: AffinityGroupID | None = None
+    start_settings: LparStartSettings = field(default_factory=LparStartSettings)
 
 
 @dataclass(frozen=True)
@@ -191,6 +200,7 @@ async def _create_via_cli(
     *,
     controller_mode: bool = False,
     memory_admission: CreationMemoryAdmission | None = None,
+    start_admission: StartAdmission | None = None,
 ) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
     """Create with ``mksyscfg``, apply its profile, and read the partition back.
 
@@ -218,6 +228,9 @@ async def _create_via_cli(
         native_options["virtual_serial_adapters"] = creation.virtual_serial_adapters
     if creation.creation_memory.pairs():
         native_options["creation_memory"] = creation.creation_memory
+    if start_admission is not None:
+        await recheck_start_controllers(hmc, start_admission)
+        native_options["start_settings"] = start_admission.settings
     serial_submission_failed = False
     try:
         await create_lpar_via_cli(
@@ -248,6 +261,10 @@ async def _create_via_cli(
         else:
             await _raise_layout_create_failure(hmc, system_uuid, creation, error)
     except Exception:
+        if start_admission is not None:
+            raise HMCError(
+                "Start creation outcome unknown; partition exists or may exist. Inspect contained identity before retrying; no rollback performed"
+            ) from None
         if not creation.virtual_serial_adapters:
             raise
         serial_submission_failed = True
@@ -263,6 +280,7 @@ async def _create_via_cli(
         and not creation.memory_layout.pairs()
         and not creation.virtual_serial_adapters
         and not creation.creation_memory.pairs()
+        and not creation.start_settings.requested()
         and creation.hardware_mem_encryption is None
         and creation.hardware_mem_expansion is None
         and creation.affinity_group_id is None
@@ -290,6 +308,7 @@ async def _create_via_cli(
             and not creation.memory_layout.pairs()
             and not creation.virtual_serial_adapters
             and not creation.creation_memory.pairs()
+            and not creation.start_settings.requested()
             and creation.affinity_group_id is None
         ):
             raise
@@ -323,6 +342,12 @@ async def create_and_stamp_lpar(
       delete it to release its resources.
     """
     reject_update_weight_on_create(creation.resources)
+    if not isinstance(creation.start_settings, LparStartSettings):
+        raise TypeError("start_settings must be LparStartSettings")
+    creation.start_settings.validate_creation(creation.partition_type)
+    start_requested = creation.start_settings.requested()
+    if start_requested and creation.keylock is not None:
+        raise ValueError("Start settings cannot be combined with native keylock")
     if not isinstance(creation.creation_memory, LparCreationMemory):
         raise TypeError("creation_memory must be LparCreationMemory")
     memory_requested = bool(creation.creation_memory.pairs())
@@ -421,6 +446,7 @@ async def create_and_stamp_lpar(
                 or layout_requested
                 or serial_requested
                 or memory_requested
+                or start_requested
             )
             and (preflight_assignments.dedicated or preflight_assignments.sriov)
         ):
@@ -455,7 +481,7 @@ async def create_and_stamp_lpar(
             need_management=False,
             context="Affinity group" if affinity_requested else "Memory layout",
         )
-    elif serial_requested or memory_requested:
+    elif serial_requested or memory_requested or start_requested:
         controller_mode = (
             await read_role_capabilities(
                 hmc, system_uuid, need_kvm=False, need_management=False
@@ -470,7 +496,11 @@ async def create_and_stamp_lpar(
             hmc, system_name_or_uuid, preflight_assignments
         )
     if (
-        affinity_requested or layout_requested or serial_requested or memory_requested
+        affinity_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
+        or start_requested
     ) and controller_mode:
         if creation.apply_profile is True:
             raise ValueError(
@@ -521,6 +551,13 @@ async def create_and_stamp_lpar(
         if serial_requested
         else None
     )
+    start_admission = (
+        await admit_start_creation(
+            hmc, system_uuid, system_name_or_uuid, creation.start_settings
+        )
+        if start_requested
+        else None
+    )
     system_name: str | None = None
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
@@ -532,6 +569,7 @@ async def create_and_stamp_lpar(
             or layout_requested
             or serial_requested
             or memory_requested
+            or start_requested
         )
         and resources is not None
         and not shared_memory
@@ -558,6 +596,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or creation.reporting_settings.pairs()
         or creation.vtpm_settings.pairs()
@@ -579,9 +618,15 @@ async def create_and_stamp_lpar(
                 creation,
                 controller_mode=controller_mode,
                 memory_admission=memory_admission,
+                start_admission=start_admission,
             )
         except HMCError as error:
-            if serial_requested or layout_requested or memory_requested:
+            if (
+                serial_requested
+                or layout_requested
+                or memory_requested
+                or start_requested
+            ):
                 raise
             if hardware_requested or affinity_requested:
                 native_failed = True
@@ -652,6 +697,17 @@ async def create_and_stamp_lpar(
                 )
             except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
                 identity_ok = False
+        if start_admission is not None:
+            try:
+                confirmed_lpar = await confirm_start_created(
+                    hmc,
+                    start_admission,
+                    created_lpar,
+                    creation.name,
+                    creation.partition_type,
+                )
+            except Exception:  # noqa: BLE001 — unknown identity forbids ownership stamping.
+                identity_ok = False
         created_lpar = confirmed_lpar if identity_ok else None
     serial_step = (
         await serial_creation_step(
@@ -671,6 +727,7 @@ async def create_and_stamp_lpar(
             or affinity_requested
             or serial_requested
             or memory_requested
+            or start_requested
             or role_requested
         ) and creation.stamp_policy == "required":
             raise HMCError(
@@ -700,6 +757,7 @@ async def create_and_stamp_lpar(
             or layout_requested
             or serial_requested
             or memory_requested
+            or start_requested
             or affinity_requested
             or role_requested
         ):
@@ -764,7 +822,7 @@ async def create_and_stamp_lpar(
                     "error",
                     "Created partition readback unavailable; settings unverified",
                 )
-                if creation.settings.pairs()
+                if creation.settings.pairs() or start_requested
                 else None
             ),
             vtpm_step=WorkflowStep(
@@ -788,6 +846,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
     ) and (
@@ -809,6 +868,7 @@ async def create_and_stamp_lpar(
             if role_requested
             or layout_requested
             or memory_requested
+            or start_requested
             or affinity_requested
             else created_lpar,
             None,
@@ -818,7 +878,7 @@ async def create_and_stamp_lpar(
                 "error",
                 "Created partition identity unconfirmed; roles unverified",
             )
-            if role_requested
+            if role_requested or start_requested
             else None,
             memory_layout_step=await _created_memory_layout_step(
                 hmc, None, creation, controller_mode=controller_mode
@@ -922,13 +982,15 @@ async def create_and_stamp_lpar(
             system_name,
             creation,
             created_lpar,
-            **({"controller_mode": True} if controller_mode else {}),
+            controller_mode=controller_mode,
+            start_admission=start_admission,
         )
         if policy_requested
         or hardware_requested
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
         else None
@@ -940,6 +1002,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
         else None
@@ -951,6 +1014,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
         else None
@@ -964,11 +1028,12 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
     ) and creation.apply_profile is not None:
         required = [
-            (creation.settings.pairs(), settings_step),
+            (creation.settings.pairs() or start_requested, settings_step),
             (creation.reporting_settings.pairs(), reporting_step),
             (creation.vtpm_settings.pairs(), vtpm_step),
             (creation.physical_io.requested, io_step),
@@ -1033,6 +1098,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
     ):
@@ -1049,6 +1115,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
         else await _created_settings_step(
@@ -1057,7 +1124,8 @@ async def create_and_stamp_lpar(
             system_name,
             creation,
             created_lpar,
-            **({"controller_mode": True} if controller_mode else {}),
+            controller_mode=controller_mode,
+            start_admission=start_admission,
         ),
         io_step,
         reporting_step
@@ -1066,6 +1134,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
         else await _created_reporting_step(hmc, system_name, creation),
@@ -1075,6 +1144,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
         or role_requested
         else await _created_vtpm_step(hmc, system_name, creation),
@@ -1091,6 +1161,7 @@ async def create_and_stamp_lpar(
         or layout_requested
         or serial_requested
         or memory_requested
+        or start_requested
         or affinity_requested
     ):
         safe_steps = {}
@@ -1100,6 +1171,7 @@ async def create_and_stamp_lpar(
             or layout_requested
             or serial_requested
             or memory_requested
+            or start_requested
             or affinity_requested
         ):
             step_names += (
@@ -1281,7 +1353,7 @@ async def _created_reporting_step(
     return WorkflowStep("reporting_settings", "ok" if matches else "error", observed)
 
 
-async def _created_settings_step(
+async def _created_legacy_settings_step(
     hmc: HMCClient,
     system_uuid: str,
     cli_system: str | None,
@@ -1447,3 +1519,38 @@ async def rename_lpar(
             raise
         raise translated from exc
     return lpar_uuid, updated
+
+
+async def _created_settings_step(
+    hmc: HMCClient,
+    system_uuid: str,
+    cli_system: str | None,
+    creation: LparCreation,
+    created: dict[str, Any],
+    *,
+    controller_mode: bool = False,
+    start_admission: StartAdmission | None = None,
+) -> WorkflowStep | None:
+    legacy = await _created_legacy_settings_step(
+        hmc, system_uuid, cli_system, creation, created, controller_mode=controller_mode
+    )
+    if start_admission is None:
+        return legacy
+    start = await created_start_step(
+        hmc,
+        start_admission,
+        created,
+        creation.name,
+        creation.partition_type,
+        controller_mode=controller_mode,
+    )
+    if legacy is None:
+        return start
+    return WorkflowStep(
+        "settings",
+        "ok" if legacy.status == start.status == "ok" else "error",
+        {
+            "settings": legacy.result,
+            **start.result,
+        },
+    )

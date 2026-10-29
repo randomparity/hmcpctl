@@ -20,16 +20,19 @@ from hmcpctl.operations.lpar.security_policy import (
     read_lpar_security_policy,
 )
 
+from ...documents.boot import select_boot_string
 from ...documents.lpar import VIOS_DEFAULT_RESOURCES, LparResources
 from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
+from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
 from ...operations.lpar.creation_memory import CreationMemoryVerification
 from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 from ...operations.partition_state import PartitionState
+from ...operations.vios.boot_order import read_vios_boot_order, set_vios_boot_order
 from ...operations.vios.core import create_vios, list_vios, power_vios
 from ..output import (
     InventoryFormat,
@@ -176,6 +179,8 @@ def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
     group.command("list")(vios_list)
     group.command("create")(vios_create)
+    group.command("read-boot-order")(vios_read_boot_order)
+    group.command("set-boot-order")(vios_set_boot_order)
     group.command("get-vtpm-settings")(vios_get_vtpm_settings)
     group.command("get-security-policy", short_help="Read policy.")(
         vios_get_security_policy
@@ -304,6 +309,13 @@ def vios_create(
             help="Saved affinity group: 1–255 or none; native observation is separate; omitted preserves defaults",
         ),
     ] = None,
+    start_settings: Annotated[
+        str | None,
+        typer.Option(
+            "--start-settings",
+            help="Typed creation-only boot/start JSON; omission preserves defaults, false is explicit",
+        ),
+    ] = None,
 ) -> None:
     """Create an inactive VIOS through its existing owner.
 
@@ -357,6 +369,17 @@ def vios_create(
             terminal_field(error, err=True), param_hint="memory layout"
         ) from None
     try:
+        start = (
+            TypeAdapter(LparStartSettings).validate_json(start_settings)
+            if start_settings is not None
+            else LparStartSettings()
+        )
+        start.validate_creation("Virtual IO Server")
+    except ValueError as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="--start-settings"
+        ) from None
+    try:
         affinity = parse_affinity_group_cli(affinity_group_id)
     except ValueError as error:
         raise typer.BadParameter(
@@ -406,6 +429,7 @@ def vios_create(
             creation_memory=creation_memory,
             virtual_serial_adapters=serial,
             affinity_group_id=affinity,
+            start_settings=start,
         )
     )
     if isinstance(result, dict) and isinstance(
@@ -521,3 +545,48 @@ def vios_configure_security_policy(
     print_json(asdict(result))
     if result.status != "verified":
         raise typer.Exit(1)
+
+
+def vios_read_boot_order(
+    system_name: str = typer.Argument(...),
+    vios_name_or_uuid: str = typer.Argument(...),
+) -> None:
+    """Read exact stored VIOS pending boot text; empty is null, unavailable is an error."""
+    print_json(
+        with_client(
+            lambda hmc: read_vios_boot_order(
+                hmc, vios_name_or_uuid, system_name_or_uuid=system_name
+            )
+        )
+    )
+
+
+def vios_set_boot_order(
+    system_name: str = typer.Argument(...),
+    vios_name_or_uuid: str = typer.Argument(...),
+    devices: list[str] | None = typer.Argument(None),
+    *,
+    boot_string: str | None = typer.Option(
+        None,
+        "--boot-string",
+        help="Exact printable raw text; non-whitespace and <=16KiB UTF-8; no device list together",
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+) -> None:
+    """Replace VIOS pending text once and independently verify; no clear or activation."""
+    try:
+        select_boot_string(devices, boot_string)
+    except ValueError as error:
+        raise typer.BadParameter(terminal_field(error, err=True)) from None
+    print_json(
+        with_client(
+            lambda hmc: set_vios_boot_order(
+                hmc,
+                vios_name_or_uuid,
+                devices,
+                system_name_or_uuid=system_name,
+                ownership_override=ownership_override,
+                boot_string=boot_string,
+            )
+        )
+    )

@@ -233,9 +233,55 @@ def _render_vios_boot_source(document: dict[str, Any]) -> str | None:
     return "\n".join(lines)
 
 
+def _render_boot_start(document: dict[str, Any]) -> str | None:
+    run = document.get("run")
+    if (
+        not isinstance(run, dict)
+        or run.get("group") != "lpar-boot-start"
+        or document.get("group") != "lpar-boot-start"
+        or document.get("source_only") is not False
+        or run.get("tree_clean") is not True
+    ):
+        return None
+    commit, case = run.get("tested_commit"), document.get("case")
+    pattern = (
+        r"(?:create-(?:omitted|auto-[01]|monitor-[01]|"
+        r"mode-(?:norm|dd|ds|of|sms)|power-(?:ids|names))|boot-(?:raw|devices))"
+    )
+    if (
+        not isinstance(commit, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", commit)
+        or not isinstance(case, str)
+        or not re.fullmatch(pattern, case)
+    ):
+        return None
+    session = document.get("session")
+    clean = (
+        document.get("mode") == "recover"
+        and document.get("complete") is True
+        and document.get("clean") is True
+        and document.get("history_verified") is True
+        and isinstance(session, dict)
+        and session.get("closed") is True
+        and session.get("local_closed") is True
+        and isinstance(document.get("original_results_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", document["original_results_sha256"])
+        is not None
+    )
+    return (
+        f"ST68 bounded boot/start observation on `{commit}`\n\n"
+        f"| Case | Independent recovery |\n| --- | --- |\n| {case} | {'CLEAN' if clean else 'HELD'} |\n\n"
+        "One configured case; no runtime bootability or universal platform claim."
+    )
+
+
 def render(document: dict[str, Any]) -> str | None:
     """The Markdown matrix, or `None` when the document cannot be attributed."""
     run = document.get("run")
+    if document.get("group") == "lpar-boot-start" or (
+        isinstance(run, dict) and run.get("group") == "lpar-boot-start"
+    ):
+        return _render_boot_start(document)
     if (isinstance(run, dict) and run.get("group") == "vios-boot-source") or (
         document.get("source_only") is True
         and isinstance(run, dict)

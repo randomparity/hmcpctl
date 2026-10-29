@@ -750,6 +750,15 @@
                 "constraint": "SystemName or UUID"
               }
             ]
+          },
+          {
+            "variant": "lossless-pending-text",
+            "parameters": [
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "contained Advanced raw XML pending element text; exact spacing, five legacy result keys; no shared parser change"
+              }
+            ]
           }
         ],
         "missing_scope": []
@@ -1269,7 +1278,6 @@
               {
                 "name": "memory_layout.ppt_ratio",
                 "constraint": "optional exact selected-system advertised PPT token; AIX/Linux and OS400 LPAR creation; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
-
               }
             ]
           },
@@ -1329,6 +1337,31 @@
               {
                 "name": "creation_memory.secondary_paging_vios_name",
                 "constraint": "optional nonempty bounded native name resolved exactly to contained authorized dedicated-memory VIOS distinct from primary; explicit shared mode; excludes secondary ID; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:secondary_paging_vios_name, p11:mksyscfg:partition-create:secondary_paging_vios_name"
+              }
+            ]
+          },
+          {
+            "variant": "c09-boot-start",
+            "parameters": [
+              {
+                "name": "start_settings.auto_start",
+                "constraint": "optional strict Boolean; omission preserves defaults, false emits0; classic saved AutoStart equality; controller observer unavailable; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:auto_start, p11:mksyscfg:partition-create:auto_start"
+              },
+              {
+                "name": "start_settings.boot_mode",
+                "constraint": "optional norm/dd/ds/of/sms for AIX/Linux/VIOS only; exact enum mapping on current plus classic saved planes; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:boot_mode, p11:mksyscfg:partition-create:boot_mode"
+              },
+              {
+                "name": "start_settings.conn_monitoring",
+                "constraint": "optional strict Boolean, false retained; current IsConnectionMonitoringEnabled and classic saved ConnectionMonitoringEnabled must independently equal request; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:conn_monitoring, p11:mksyscfg:partition-create:conn_monitoring"
+              },
+              {
+                "name": "start_settings.power_ctrl_lpar_ids",
+                "constraint": "optional distinct positive integer PartitionIDs; excludes names; every selected-system controller independently contained and owned; final native numeric list, exact required relationship sets; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:power_ctrl_lpar_ids, p11:mksyscfg:partition-create:power_ctrl_lpar_ids"
+              },
+              {
+                "name": "start_settings.power_ctrl_lpar_names",
+                "constraint": "optional distinct exact names; excludes IDs; resolve to contained authorized controllers before one create; names never native record values; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:power_ctrl_lpar_names, p11:mksyscfg:partition-create:power_ctrl_lpar_names"
               }
             ]
           }
@@ -3989,6 +4022,15 @@
           {
             "variant": "pending-boot-string",
             "parameters": []
+          },
+          {
+            "variant": "raw-pending-boot-string",
+            "parameters": [
+              {
+                "name": "boot_string",
+                "constraint": "exact printable non-whitespace Unicode, <=16384 UTF-8 bytes; no normalization; mutually exclusive with devices; AIX/Linux/VIOS source applicability; acknowledgment plus independent exact text and identity required; unknown remains error, no retry/clear/activation; source bindings p10:chsyscfg:partition-update:boot_string, p11:chsyscfg:partition-update:boot_string; no product live credit"
+              }
+            ]
           }
         ],
         "missing_scope": []
@@ -5112,7 +5154,6 @@
               {
                 "name": "memory_layout.ppt_ratio",
                 "constraint": "optional exact selected-system advertised PPT token; VIOS creation only; no ratios inferred from processor generation; omission preserved, single native create; strict scoped identity and requested classic saved-profile comparison, controller current mappings unavailable => incomplete outcome; no replay/rollback or runtime guarantee"
-
               }
             ]
           },
@@ -5172,6 +5213,31 @@
               {
                 "name": "creation_memory.secondary_paging_vios_name",
                 "constraint": "optional nonempty bounded native name resolved exactly to contained authorized dedicated-memory VIOS distinct from primary; explicit shared mode; excludes secondary ID; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:secondary_paging_vios_name, p11:mksyscfg:partition-create:secondary_paging_vios_name"
+              }
+            ]
+          },
+          {
+            "variant": "c09-boot-start",
+            "parameters": [
+              {
+                "name": "start_settings.auto_start",
+                "constraint": "optional strict Boolean; omission preserves defaults, false emits0; classic saved AutoStart equality; controller observer unavailable; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:auto_start, p11:mksyscfg:partition-create:auto_start"
+              },
+              {
+                "name": "start_settings.boot_mode",
+                "constraint": "optional norm/dd/ds/of/sms for AIX/Linux/VIOS only; exact enum mapping on current plus classic saved planes; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:boot_mode, p11:mksyscfg:partition-create:boot_mode"
+              },
+              {
+                "name": "start_settings.conn_monitoring",
+                "constraint": "optional strict Boolean, false retained; current IsConnectionMonitoringEnabled and classic saved ConnectionMonitoringEnabled must independently equal request; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:conn_monitoring, p11:mksyscfg:partition-create:conn_monitoring"
+              },
+              {
+                "name": "start_settings.power_ctrl_lpar_ids",
+                "constraint": "optional distinct positive integer PartitionIDs; excludes names; every selected-system controller independently contained and owned; final native numeric list, exact required relationship sets; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:power_ctrl_lpar_ids, p11:mksyscfg:partition-create:power_ctrl_lpar_ids"
+              },
+              {
+                "name": "start_settings.power_ctrl_lpar_names",
+                "constraint": "optional distinct exact names; excludes IDs; resolve to contained authorized controllers before one create; names never native record values; missing/mismatch blocks follow-ups; no default/runtime/activation inference; source bindings p10:mksyscfg:partition-create:power_ctrl_lpar_names, p11:mksyscfg:partition-create:power_ctrl_lpar_names"
               }
             ]
           }
@@ -6137,6 +6203,52 @@
           {
             "variant": "native-entitled-memory-statistics-reset-observation",
             "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.read_boot_order",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "native-pending-boot-string",
+            "parameters": [
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "selected-system VirtualIOServer UUID/name/native-ID/description independently bound; fixed full CSV header, no provider URLs; exact three-key result, observed empty only null"
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "vios.set_boot_order",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "native-pending-boot-string",
+            "parameters": [
+              {
+                "name": "boot_string",
+                "constraint": "exact printable non-whitespace Unicode, <=16384 UTF-8 bytes; no normalization; mutually exclusive with devices; AIX/Linux/VIOS source applicability; acknowledgment plus independent exact text and identity required; unknown remains error, no retry/clear/activation; source bindings p10:chsyscfg:partition-update:boot_string, p11:chsyscfg:partition-update:boot_string; no product live credit"
+              },
+              {
+                "name": "devices",
+                "constraint": "legacy slash-rooted printable non-space ASCII paths; existing joining and limits unchanged"
+              },
+              {
+                "name": "vios_name_or_uuid",
+                "constraint": "selected-system VirtualIOServer UUID/name/native-ID/description independently bound; fixed full CSV header, no provider URLs; exact three-key result, observed empty only null"
+              }
+            ]
           }
         ],
         "missing_scope": []

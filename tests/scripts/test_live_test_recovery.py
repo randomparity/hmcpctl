@@ -3448,6 +3448,17 @@ def test_statistics_raw_recovery_refuses_nonregular_without_bootstrap(
     bootstrap.assert_not_called()
 
 
+def test_boot_start_recovery_uses_original_results_without_effect_grant(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import lpar_boot_start
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(lpar_boot_start, "main", route)
+    assert recovery.main(["--boot-start-procedure", "--results", "private.json"]) == 2
+    route.assert_called_once_with(["recover", "--results", "private.json"])
+
+
 @pytest.mark.parametrize("status,code", [("clean", 0), ("drift", 1), ("unverified", 2)])
 def test_paging_recovery_routes_before_generic_partial_gate(
     tmp_path, monkeypatch, capsys, status, code
@@ -3480,3 +3491,23 @@ def test_paging_recovery_bounds_raw_input(tmp_path, monkeypatch, raw):
     )
     assert recovery.main(["--paging-switchover", "--results", str(path)]) == 2
     readback.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        ["--paging-switchover", "--boot-start-procedure"],
+        ["--boot-start-procedure", "--paging-switchover"],
+    ],
+)
+def test_simultaneous_st66_st68_recovery_refuses_before_credentials(
+    monkeypatch, selectors
+):
+    monkeypatch.setattr(
+        recovery.runner,
+        "_bootstrap_config",
+        lambda: pytest.fail("ambiguous phases reached credentials"),
+    )
+    with pytest.raises(SystemExit) as error:
+        recovery.main(selectors)
+    assert error.value.code == 2

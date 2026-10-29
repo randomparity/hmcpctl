@@ -1304,6 +1304,58 @@ def test_c07_preflight_unarmed_without_current_permission():
     ].runnable
 
 
+def test_boot_start_exact_named_preflight_route(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import lpar_boot_start
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(lpar_boot_start, "main", route)
+    assert (
+        preflight.main(
+            [
+                "--group",
+                "lpar-boot-start",
+                "--packet",
+                "p",
+                "--packet-sha256",
+                "s",
+                "--output",
+                "f",
+            ]
+        )
+        == 2
+    )
+    route.assert_called_once_with(
+        ["preflight", "--packet", "p", "--packet-sha256", "s", "--output", "f"]
+    )
+
+
+@pytest.mark.parametrize("extra", [["--skip-hardware"], ["--detach-probe"]])
+def test_boot_start_preflight_cannot_bypass_read_only_admission(monkeypatch, extra):
+    from unittest.mock import Mock
+
+    from live_test import lpar_boot_start
+
+    route = Mock()
+    monkeypatch.setattr(lpar_boot_start, "main", route)
+    with pytest.raises(SystemExit):
+        preflight.main(
+            [
+                "--group",
+                "lpar-boot-start",
+                "--packet",
+                "p",
+                "--packet-sha256",
+                "s",
+                "--output",
+                "f",
+                *extra,
+            ]
+        )
+    route.assert_not_called()
+
+
 def test_paging_preflight_requires_expected_provider_and_window(monkeypatch, capsys):
     config = live_config.LiveTestConfig(
         system_name="sys-R1",
@@ -1335,3 +1387,23 @@ def test_paging_optional_settings_parse_strictly(workspace):
     (workspace / ".env").write_text(_env_text(LIVE_TEST_PAGING_WRITER_WINDOW="1"))
     with pytest.raises(ValueError):
         live_config.LiveTestConfig.from_env_file()
+
+
+@pytest.mark.parametrize(
+    "groups",
+    [
+        ["--group", "lpar-boot-start", "--group=lpar-paging-switchover"],
+        ["--group=lpar-paging-switchover", "--group", "lpar-boot-start"],
+    ],
+)
+def test_simultaneous_st66_st68_preflight_refuses_before_credentials(
+    monkeypatch, groups
+):
+    def forbidden():
+        pytest.fail("ambiguous phases reached configuration or credentials")
+
+    monkeypatch.setattr(preflight, "_check_configuration", forbidden)
+    monkeypatch.setattr(preflight, "_check_credentials", forbidden)
+    with pytest.raises(SystemExit) as error:
+        preflight.main(groups)
+    assert error.value.code == 2

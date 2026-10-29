@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.markup import escape
 
 from ...client.client_profiles import PartitionKind
-from ...documents.boot import join_boot_device_paths
+from ...documents.boot import select_boot_string
 from ...documents.partition_profile import ProfilePatch
 from ...operations.lpar.boot_order import (
     clear_lpar_boot_order,
@@ -31,17 +31,6 @@ from ...operations.lpar.profiles import (
 )
 from ..output import console, print_json, terminal_field
 from ..runtime import with_client
-
-
-def _pending_boot_string(document: dict[str, Any] | None) -> str | None:
-    """The pending boot string in an updated LPAR document; an empty field parses as a dict."""
-    boot_list = ((document or {}).get("Resource") or {}).get(
-        "BootListInformation"
-    ) or {}
-    value = boot_list.get("PendingBootString")
-    if isinstance(value, dict):
-        value = value.get("text")
-    return value if isinstance(value, str) and value else None
 
 
 def lpars_read_boot_order(
@@ -67,8 +56,8 @@ def lpars_read_boot_order(
 def lpars_set_boot_order(
     system_name: str = typer.Argument(..., help="Managed system name"),
     lpar_name_or_uuid: str = typer.Argument(..., help="Logical partition name or UUID"),
-    devices: list[str] = typer.Argument(
-        ...,
+    devices: list[str] | None = typer.Argument(
+        None,
         help=(
             "Open Firmware device paths, first to last, as read-boot-order reports them. "
             "A never-booted partition reports none. Firmware names a virtual optical "
@@ -83,6 +72,11 @@ def lpars_set_boot_order(
     as_json: bool = typer.Option(
         False, "--json", help="Print the full updated LPAR document"
     ),
+    boot_string: str | None = typer.Option(
+        None,
+        "--boot-string",
+        help="Exact printable raw pending text; 16KiB UTF-8 budget; mutually exclusive with devices",
+    ),
 ) -> None:
     """Set the pending boot order used on the LPAR's next activation.
 
@@ -93,7 +87,7 @@ def lpars_set_boot_order(
         lpars set-boot-order system1 lpar-uuid-123 /vdevice/v-scsi@30000002/disk@8100000000000000
     """
     try:
-        boot_string = join_boot_device_paths(devices)
+        requested = select_boot_string(devices, boot_string)
     except ValueError as exc:
         raise typer.BadParameter(terminal_field(exc, err=True)) from exc
 
@@ -104,18 +98,17 @@ def lpars_set_boot_order(
             lpar_name_or_uuid=lpar_name_or_uuid,
             devices=devices,
             ownership_override=ownership_override,
+            **({"boot_string": boot_string} if boot_string is not None else {}),
         )
     )
 
     console.print(
-        f"[green]Boot order set to: {escape(terminal_field(boot_string))}[/green]"
+        f"[green]Boot order set to: {escape(terminal_field(requested))}[/green]"
     )
     if as_json:
         print_json(result)
         return
-    console.print(
-        f"Pending boot string: {escape(terminal_field(_pending_boot_string(result) or '-'))}"
-    )
+    console.print(f"Pending boot string: {escape(terminal_field(requested))}")
 
 
 def lpars_clear_boot_order(

@@ -2285,6 +2285,7 @@ def main(argv: list[str] | None = None) -> int:
     source_packets.add_argument("--source-packet", type=Path)
     source_packets.add_argument("--activation-source-packet", type=Path)
     source_packets.add_argument("--serial-procedure", action="store_true")
+    source_packets.add_argument("--boot-start-procedure", action="store_true")
     source_packets.add_argument(
         "--memory-statistics",
         action="store_true",
@@ -2344,6 +2345,15 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.output),
             ]
         )
+
+    if args.boot_start_procedure:
+        from live_test import lpar_boot_start
+
+        if args.output or args.packet_sha256:
+            parser.error(
+                "ST68 recovery derives its binding from original private results only"
+            )
+        return lpar_boot_start.main(["recover", "--results", str(args.results)])
 
     if args.serial_procedure:
         from live_test import lpar_serial_adapter

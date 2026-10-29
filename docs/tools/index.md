@@ -6,15 +6,15 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **199** tools are registered.
-- **198** are exposed by a default deployment.
+- **201** tools are registered.
+- **200** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
 | `destructive` | 45 |
-| `mutate` | 63 |
-| `read` | 90 |
+| `mutate` | 64 |
+| `read` | 91 |
 
 ## Maturity vocabulary
 
@@ -65,7 +65,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `update` | 4 | [update.md](update.md) |
 | `upgrade` | 1 | [upgrade.md](upgrade.md) |
 | `user` | 5 | [user.md](user.md) |
-| `vios` | 14 | [vios.md](vios.md) |
+| `vios` | 16 | [vios.md](vios.md) |
 | `vios_label` | 7 | [vios_label.md](vios_label.md) |
 | `vios_profile` | 6 | [vios_profile.md](vios_profile.md) |
 | `vnic` | 3 | [vnic.md](vnic.md) |
@@ -231,6 +231,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_read_lpar_boot_order` | `read` | [boot_order.md](boot_order.md) |
 | `hmc_read_lpar_refcodes` | `read` | [lpar.md](lpar.md) |
 | `hmc_read_partition_profile` | `read` | [lpar_profile.md](lpar_profile.md) |
+| `hmc_read_vios_boot_order` | `read` | [vios.md](vios.md) |
 | `hmc_read_vios_partition_profile` | `read` | [vios_profile.md](vios_profile.md) |
 | `hmc_remote_restart_lpar` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_remove_memory_pool` | `destructive` | [memory_pool.md](memory_pool.md) |
@@ -255,6 +256,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_set_minimum_affinity_policy` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_set_pcm_preferences` | `mutate` | [pcm.md](pcm.md) |
 | `hmc_set_sriov_adapter_mode` | `mutate` | [sriov.md](sriov.md) |
+| `hmc_set_vios_boot_order` | `mutate` | [vios.md](vios.md) |
 | `hmc_set_vios_fc_port_label` | `mutate` | [vios_label.md](vios_label.md) |
 | `hmc_snapshot_assess_affinity` | `read` | [snapshot.md](snapshot.md) |
 | `hmc_snapshot_capture` | `read` | [snapshot.md](snapshot.md) |
