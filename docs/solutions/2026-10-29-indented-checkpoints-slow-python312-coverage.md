@@ -2,7 +2,7 @@
 title: Indented checkpoint JSON makes Python 3.12 source-arm tests slow under coverage
 date: 2026-10-29
 tags: [performance, checkpoint, json, python, python312, pytest, coverage, cprofile]
-components: [scripts/live_test/system_profile_source.py, scripts/live_test/system_profile_activation_source.py, tests/scripts/test_live_system_profile_source.py]
+components: [scripts/live_test/system_profile_source.py, scripts/live_test/system_profile_activation_source.py, tests/scripts/test_live_system_profile_source.py, src/hmcpctl/tool_registry.py]
 ---
 
 ## Problem
@@ -70,3 +70,41 @@ separately; only the normal full guardrail run qualifies the coverage gate.
 Compare matching cases at the same source, lock, interpreter, execution mode
 and resource context. Capture CPU and individual phases before increasing
 timeouts or blaming a single old interpreter build.
+
+## Repeated application composition
+
+The subsequent full hosted diagnostic
+[40952334953](https://github.com/randomparity/hmcpctl/actions/runs/40952334953)
+passed on 3.12 and 3.13 in 19m32s and 19m26s, respectively. Both collected the
+same 24,523 identities and had balanced worker phase totals. This did not
+explain the earlier required-check timeout. It did show that moving files alone
+would not remove repeated schema work across those tests.
+
+`ToolDefinition` now owns a lazy private schema template. Registration checks
+its ceiling, deep-copies the metadata and supplies a fresh authorization wrapper.
+Applications keep independent mutable schemas and current dispatch authority;
+composed special tools retain their existing registration paths. Replacement
+of the source-defined catalog starts a new template lifetime; live signature or
+model hot-patching is not a supported refresh mechanism. See
+[ADR 0308](../adr/0308-definition-owned-tool-schema-templates.md).
+
+One ordered 30-build covered constructor sequence per interpreter, on the same
+local arm64 host and lockfile, produced these warm medians (builds 6–30):
+
+| Python | Coverage backend | Before | After |
+| --- | --- | --- | --- |
+| 3.11.15 | CTracer | 365 ms | 56 ms |
+| 3.12.13 | CTracer | 426 ms | 57 ms |
+| 3.13.12 | CTracer | 341 ms | 51 ms |
+| 3.14.3 | SysMonitor | 179 ms | 20 ms |
+
+The candidate was `0816ee61`; FastMCP 4.0.10, Pydantic 2.14.1 and coverage 7.15.4
+matched the before records. Remaining per-build type-adapter misses fell from
+200 to 7. These constructor measurements are separate from whole-suite timing,
+include different coverage backends, and do not establish a universal speedup.
+
+The new tests compare complete advertised tool records with the uncached path
+for legacy, narrow and empty policies. They also exercise independent authority,
+validation, Context injection, mutable schema isolation, failure, definition
+lifetime and concurrent composition. Controlled cache-bypass, shallow-copy and
+stale-authorizer faults each made their corresponding regressions fail.
