@@ -1,0 +1,380 @@
+# Temporary diagnostic for #1821, requested after local cross-version timing.
+# Never substitute these focused runs for required CI or merge this workflow.
+name: N1 focused timing
+on:
+  push:
+    branches: [diag/n1-focused-timing-1821]
+permissions:
+  contents: read
+concurrency:
+  group: n1-focused-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  focused:
+    name: ${{ matrix.label }} / focused timing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: py311-managed
+            python: "3.11"
+            provider: managed
+          - label: py312-system
+            python: "3.12"
+            provider: system
+          - label: py312-managed
+            python: "3.12"
+            provider: managed
+          - label: py313-managed
+            python: "3.13"
+            provider: managed
+    env:
+      UV_PYTHON_PREFERENCE: ${{ matrix.provider == 'managed' && 'only-managed' || 'only-system' }}
+      UV_PYTHON: ${{ matrix.provider == 'system' && '/usr/bin/python3.12' || matrix.python }}
+      EXPECTED_PROVIDER: ${{ matrix.provider }}
+    steps:
+      - name: Check out diagnostic candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install existing pinned uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: false
+          version: "0.12.10"
+      - name: Install existing pinned just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4
+        with:
+          just-version: "1.58.0"
+      - name: Bootstrap locked environment
+        run: just setup
+      - name: Prepare validated direct observer and metadata
+        run: |
+          umask 077
+          base="$RUNNER_TEMP/n1-focused"
+          mkdir -p "$base/events"
+          cat > "$base/q1775_ci_observer.py" <<'PYOBSERVER'
+          """Temporary #1775 observation only; remove with the diagnostic workflow commit."""
+
+          import hashlib
+          import json
+          import math
+          import os
+          from pathlib import Path
+          import re
+          import resource
+          import sys
+          import time
+
+          import pytest
+
+          _LIMIT = 16 * 1024 * 1024
+          _WRITE, _CLOSE = os.write, os.close
+          _NOW, _CPU, _USAGE = time.monotonic, time.process_time, resource.getrusage
+          _DUMPS, _HASH, _MATCH = json.dumps, hashlib.sha256, re.fullmatch
+          _STDERR = sys.__stderr__
+          _SELF = resource.RUSAGE_SELF
+
+
+          def _number(value):
+              return round(value, 6) if isinstance(value, (int, float)) and math.isfinite(value) else None
+
+
+          class Observer:
+              def __init__(self, directory, role):
+                  self.role = role
+                  self.current = None
+                  self.sequence = 0
+                  self.written = 0
+                  self.fd = os.open(
+                      directory / "events" / (role + ".jsonl"),
+                      os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND | os.O_NOFOLLOW,
+                      0o600,
+                  )
+                  affinity = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
+                  self.emit([
+                      "init", role, _NOW(), list(sys.version_info[:3]), sys.platform,
+                      os.cpu_count(), affinity, list(os.getloadavg()),
+                      "maxrss-KiB" if sys.platform == "linux" else "maxrss-bytes",
+                  ])
+
+              def emit(self, row):
+                  if self.fd is None:
+                      return
+                  data = (_DUMPS(row, separators=(",", ":"), ensure_ascii=True) + "\n").encode()
+                  if len(data) > 2048 or self.written + len(data) > _LIMIT - 256:
+                      data = (_DUMPS(["cap", _NOW(), self.written]) + "\n").encode()
+                      final = True
+                  else:
+                      final = False
+                  try:
+                      if _WRITE(self.fd, data) != len(data):
+                          raise OSError("short observer write")
+                      self.written += len(data)
+                  except OSError:
+                      _STDERR.write("q1775 observation unavailable: bounded event write failed\n")
+                      final = True
+                  if final:
+                      _CLOSE(self.fd)
+                      self.fd = None
+
+              @pytest.hookimpl(optionalhook=True)
+              def pytest_configure_node(self, node):
+                  if self.role == "controller":
+                      node.workerinput["q1775_observation"] = True
+
+              def pytest_runtest_logstart(self, nodeid, location):
+                  if self.role == "controller":
+                      return
+                  self.sequence += 1
+                  self.current = (nodeid, self.sequence)
+                  name = nodeid.split("[", 1)[0]
+                  if (
+                      len(name) > 240
+                      or "/../" in name
+                      or not _MATCH(r"tests/[A-Za-z0-9_./-]+\.py(?:::[A-Za-z0-9_]+)*", name)
+                  ):
+                      name = "unmapped"
+                  self.emit(["s", self.sequence, _NOW(), _HASH(nodeid.encode()).hexdigest(), name, _CPU()])
+
+              def pytest_runtest_logreport(self, report):
+                  if self.role == "controller" or self.current is None:
+                      return
+                  if report.nodeid != self.current[0]:
+                      self.emit(["unexpected-report", _NOW()])
+                      return
+                  phase = {"setup": 0, "call": 1, "teardown": 2}.get(report.when)
+                  outcome = {"passed": 0, "failed": 1, "skipped": 2}.get(report.outcome)
+                  usage = _USAGE(_SELF)
+                  self.emit([
+                      "p", self.current[1], _NOW(), phase, _number(report.duration),
+                      outcome, _CPU(), usage.ru_maxrss,
+                  ])
+
+              def pytest_runtest_logfinish(self, nodeid, location):
+                  if self.role != "controller" and self.current is not None:
+                      self.emit(["f", self.current[1], _NOW(), _CPU()])
+                      self.current = None
+
+              def pytest_sessionfinish(self, session, exitstatus):
+                  self.emit(["end", _NOW(), int(exitstatus), _CPU()])
+
+              def pytest_unconfigure(self, config):
+                  if self.fd is not None:
+                      _CLOSE(self.fd)
+                      self.fd = None
+
+
+          def pytest_configure(config):
+              directory_text = os.environ.get("Q1775_OBSERVER_DIR")
+              root_text = os.environ.get("Q1775_OBSERVER_ROOT")
+              if not directory_text or not root_text or config.rootpath.resolve() != Path(root_text).resolve():
+                  return
+              directory = Path(directory_text)
+              if directory.is_symlink() or not directory.is_dir():
+                  raise pytest.UsageError("q1775 observation directory is invalid")
+              worker = getattr(config, "workerinput", None)
+              if worker is not None:
+                  if worker.get("q1775_observation") is not True:
+                      return
+                  role = worker.get("workerid")
+                  if role not in ("gw0", "gw1"):
+                      raise pytest.UsageError("q1775 observation requires the unchanged two-worker policy")
+              else:
+                  try:
+                      owner = os.open(
+                          directory / "owner", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+                      )
+                  except FileExistsError:
+                      return
+                  os.close(owner)
+                  role = "controller" if config.getoption("numprocesses", default=0) else "serial"
+              config.pluginmanager.register(Observer(directory, role), "q1775-observation")
+          PYOBSERVER
+          uv run --no-sync python - <<'PYMETA'
+          import hashlib
+          from importlib.metadata import distributions
+          import json
+          import os
+          from pathlib import Path
+          import platform
+          import subprocess
+          import sys
+          import time
+
+          root = Path.cwd()
+          base = Path(os.environ['RUNNER_TEMP']) / 'n1-focused'
+          resources = {}
+          for name in ('cpu.max', 'memory.max', 'memory.current', 'cpuset.cpus.effective'):
+              path = Path('/sys/fs/cgroup') / name
+              resources[name] = path.read_text()[:4096] if path.is_file() else None
+          selected = Path(sys.executable).resolve()
+          kind = 'system' if selected == Path('/usr/bin/python3.12').resolve() else 'managed'
+          assert kind == os.environ['EXPECTED_PROVIDER'], (kind, os.environ['EXPECTED_PROVIDER'])
+          record = {
+              'source_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'lock_sha256': hashlib.sha256((root / 'uv.lock').read_bytes()).hexdigest(),
+              'module_sha256': hashlib.sha256((root / 'tests/scripts/test_live_system_profile_activation_source.py').read_bytes()).hexdigest(),
+              'observer_sha256': hashlib.sha256((base / 'q1775_ci_observer.py').read_bytes()).hexdigest(),
+              'version': sys.version, 'compiler': platform.python_compiler(),
+              'implementation': platform.python_implementation(), 'provider': kind,
+              'machine': platform.machine(), 'system': platform.system(), 'release': platform.release(),
+              'cpus': os.cpu_count(), 'affinity': len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
+              'load': list(os.getloadavg()), 'cgroup': resources,
+              'clock': str(time.get_clock_info('perf_counter')),
+              'packages': sorted((d.metadata['Name'], d.version) for d in distributions()),
+              'scope': 'focused diagnostic only; no full-suite coverage or CI qualification',
+          }
+          (base / 'metadata.json').write_text(json.dumps(record, indent=2) + '\n')
+          print(json.dumps({k: record[k] for k in ('version', 'provider', 'machine', 'cpus', 'affinity', 'cgroup')}))
+          PYMETA
+          cat > "$base/sample.sh" <<'SHSAMPLE'
+          set -euo pipefail
+          base="$RUNNER_TEMP/n1-focused"
+          sample="$base/$SAMPLE"
+          mkdir -p "$sample/events"
+          export PYTEST_PLUGINS=q1775_ci_observer
+          export PYTHONPATH="$base"
+          export Q1775_OBSERVER_DIR="$sample"
+          export Q1775_OBSERVER_ROOT="$GITHUB_WORKSPACE"
+          args=(uv run --no-sync python)
+          if [[ "$SAMPLE" == profile* ]]; then
+            args+=(-c '
+          import cProfile
+          import os
+          from pathlib import Path
+          import pytest
+          import sys
+
+          profiler = cProfile.Profile()
+          result = profiler.runcall(pytest.main, sys.argv[1:])
+          profile = Path(os.environ["RUNNER_TEMP"]) / "n1-focused" / (os.environ["SAMPLE"] + ".raw")
+          profiler.dump_stats(str(profile))
+          raise SystemExit(result)
+          ')
+          else
+            args+=(-m pytest)
+          fi
+          args+=(-q -o faulthandler_timeout=60)
+          if [[ "$SAMPLE" != *covered ]]; then
+            args+=(tests/scripts/test_live_system_profile_activation_source.py --no-cov)
+          else
+            args+=(tests/scripts/test_live_system_profile_activation_source.py)
+          fi
+          if [[ "$SAMPLE" == parallel ]]; then
+            args+=(-n 2)
+          elif [[ "$SAMPLE" == profile* ]]; then
+            args+=(-k 'test_serialized_firmware_proofs_preserve_resources_and_counter_chain and inactive-validation')
+          fi
+          printf 'sample=%s begin=%s\n' "$SAMPLE" "$(date -u +%FT%TZ)" > "$sample/boundary.txt"
+          set +e
+          /usr/bin/time -v -o "$sample/resources.txt" timeout --signal=INT --kill-after=15s 300s   "${args[@]}" > "$sample/pytest.log" 2>&1
+          result=$?
+          set -e
+          printf 'sample=%s end=%s exit=%s\n' "$SAMPLE" "$(date -u +%FT%TZ)" "$result" >> "$sample/boundary.txt"
+          cat "$sample/boundary.txt"
+          cat "$sample/pytest.log"
+          if [[ "$result" == 0 || "$SAMPLE" == *covered ]]; then
+            uv run --no-sync python - <<'PYCHECK'
+          import json
+          import os
+          from pathlib import Path
+
+          sample = Path(os.environ['Q1775_OBSERVER_DIR'])
+          files = sorted((sample / 'events').glob('*.jsonl'))
+          expected = 1 if os.environ['SAMPLE'].startswith('profile') else 167
+          covered = os.environ['SAMPLE'].endswith('covered')
+          completed = 0
+          assert 1 <= len(files) <= 3, 'missing or unexpected observer writers'
+          for file in files:
+              assert file.stat().st_size <= 16 * 1024 * 1024, 'oversized observer journal'
+              data = file.read_bytes()
+              assert data.endswith(b'\n'), 'truncated observer journal'
+              rows = [json.loads(row) for row in data.splitlines()]
+              assert rows[0][0] == 'init' and rows[-1][0] == 'end', 'incomplete observer journal'
+              assert rows[-1][2] == (1 if covered else 0), 'unexpected session exit'
+              assert all(row[0] in ('init', 's', 'p', 'f', 'end') for row in rows), 'invalid/capped journal'
+              starts = [row[1] for row in rows if row[0] == 's']
+              finishes = [row[1] for row in rows if row[0] == 'f']
+              assert starts == finishes == list(range(1, len(starts) + 1)), 'unfinished or duplicate cases'
+              assert all(row[5] == 0 for row in rows if row[0] == 'p'), 'unexpected phase outcome'
+              completed += len(finishes)
+          assert completed == expected, (completed, expected)
+          if covered:
+              assert 'Required test coverage of 90.5% not reached' in (sample / 'pytest.log').read_text()
+          (sample / 'validated.json').write_text(json.dumps({'completed': completed, 'session_exit': 1 if covered else 0, 'full_suite_gate': False}) + '\n')
+          print(f'Validated complete direct journals for {completed} cases')
+          PYCHECK
+          fi
+          if [[ "$SAMPLE" == profile* && -f "$base/$SAMPLE.raw" ]]; then
+            uv run --no-sync python - <<'PYSTATS'
+          import os
+          from pathlib import Path
+          import pstats
+
+          base = Path(os.environ['RUNNER_TEMP']) / 'n1-focused'
+          name = os.environ['SAMPLE']
+          with (base / (name + '.txt')).open('w') as output:
+              stats = pstats.Stats(str(base / (name + '.raw')), stream=output).strip_dirs()
+              stats.files = []  # Omit the raw profile's machine-specific absolute path.
+              stats.sort_stats('cumulative').print_stats(80)
+          PYSTATS
+          fi
+          exit "$result"
+          SHSAMPLE
+      - name: Run serial hotspot diagnostic
+
+        env:
+          SAMPLE: serial
+        run: |
+          bash "$RUNNER_TEMP/n1-focused/sample.sh"
+      - name: Run parallel hotspot diagnostic
+
+        env:
+          SAMPLE: parallel
+        run: |
+          bash "$RUNNER_TEMP/n1-focused/sample.sh"
+      - name: Run profile hotspot diagnostic
+
+        env:
+          SAMPLE: profile
+        run: |
+          bash "$RUNNER_TEMP/n1-focused/sample.sh"
+      - name: Run covered hotspot diagnostic
+        continue-on-error: true  # Partial-suite coverage fails the unchanged global gate.
+
+        env:
+          SAMPLE: covered
+        run: |
+          bash "$RUNNER_TEMP/n1-focused/sample.sh"
+      - name: Run profile-covered hotspot diagnostic
+        continue-on-error: true  # Partial-suite coverage fails the unchanged global gate.
+
+        env:
+          SAMPLE: profile-covered
+        run: |
+          bash "$RUNNER_TEMP/n1-focused/sample.sh"
+      - name: Require all five samples to have complete validated journals
+        run: |
+          for sample in serial parallel profile covered profile-covered; do
+            test -f "$RUNNER_TEMP/n1-focused/$sample/validated.json"
+          done
+      - name: Retain direct diagnostic evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: n1-focused-${{ matrix.label }}
+          path: |
+            ${{ runner.temp }}/n1-focused/metadata.json
+            ${{ runner.temp }}/n1-focused/*/events/*.jsonl
+            ${{ runner.temp }}/n1-focused/*/boundary.txt
+            ${{ runner.temp }}/n1-focused/*/resources.txt
+            ${{ runner.temp }}/n1-focused/*/pytest.log
+            ${{ runner.temp }}/n1-focused/*/validated.json
+            ${{ runner.temp }}/n1-focused/profile*.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 1
