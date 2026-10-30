@@ -1075,7 +1075,7 @@ def supervise(arguments, seconds):
     """Own one process group from spawn through reap; interrupted workers prove no closeout."""
     process = None
     previous = signal.getsignal(signal.SIGTERM)
-    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
 
     def stop(_signum, _frame):
         raise InterruptedError("ST69 supervisor interrupted")
@@ -1099,14 +1099,17 @@ def supervise(arguments, seconds):
     except (subprocess.TimeoutExpired, InterruptedError, KeyboardInterrupt):
         return 2
     finally:
-        if process is not None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-        signal.signal(signal.SIGTERM, previous)
-        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
+        try:
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+            signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
 
 
 def parser():

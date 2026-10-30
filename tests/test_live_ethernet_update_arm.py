@@ -480,7 +480,7 @@ async def test_logical_reservation_survives_real_ssh_chunk_overflow(monkeypatch)
         await hmc._http.aclose()
 
 
-@pytest.mark.parametrize("interrupt_spawn", [False, True])
+@pytest.mark.parametrize("interrupt_spawn", [None, "SIGTERM", "SIGINT"])
 def test_supervisor_kills_and_reaps_only_its_worker(monkeypatch, interrupt_spawn):
     import os
     import signal
@@ -497,13 +497,19 @@ def test_supervisor_kills_and_reaps_only_its_worker(monkeypatch, interrupt_spawn
         )
         created.append(process)
         if interrupt_spawn:
-            os.kill(os.getpid(), signal.SIGTERM)
+            os.kill(os.getpid(), getattr(signal, interrupt_spawn))
         return process
 
     monkeypatch.setattr(arm.subprocess, "Popen", spawn)
-    assert arm.supervise([], 0.03) == 2
-    assert len(created) == 1 and created[0].returncode is not None
-    assert created[0].poll() is not None
+    try:
+        assert arm.supervise([], 0.03) == 2
+        assert len(created) == 1 and created[0].returncode is not None
+        assert created[0].poll() is not None
+    finally:
+        for process in created:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
 
 
 @pytest.mark.asyncio
@@ -900,3 +906,42 @@ async def test_absence_policy_does_not_weaken_admission_or_invent_slot(
         selected["slot"] = None
     with pytest.raises((ValueError, TypeError)):
         arm.validate_document(document, "recover")
+
+
+def test_supervisor_cleanup_defers_a_second_interrupt(monkeypatch):
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    created = []
+    original_spawn, original_kill = subprocess.Popen, os.killpg
+    interrupted = []
+
+    def spawn(*args, **kwargs):
+        process = original_spawn(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        created.append(process)
+        return process
+
+    def kill(group, sig):
+        if not interrupted:
+            interrupted.append(True)
+            os.kill(os.getpid(), signal.SIGINT)
+        return original_kill(group, sig)
+
+    monkeypatch.setattr(arm.subprocess, "Popen", spawn)
+    monkeypatch.setattr(arm.os, "killpg", kill)
+    try:
+        try:
+            arm.supervise([], 0.03)
+        except KeyboardInterrupt:
+            pass
+        assert len(created) == 1 and created[0].returncode is not None
+    finally:
+        for process in created:
+            if process.poll() is None:
+                original_kill(process.pid, signal.SIGKILL)
+                process.wait()
