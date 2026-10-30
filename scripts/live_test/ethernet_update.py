@@ -177,12 +177,14 @@ def read_record(path, maximum=4 * MIB):
         raw = stream.read(maximum + 1)
     if len(raw) > maximum:
         raise ValueError("ST69 private record exceeds byte bound")
+
+    def refuse_nonfinite(_value):
+        raise ValueError("ST69 nonfinite JSON refused")
+
     document = json.loads(
         raw.decode("utf-8"),
         object_pairs_hook=no_duplicates,
-        parse_constant=lambda _: (_ for _ in ()).throw(
-            ValueError("ST69 nonfinite JSON refused")
-        ),
+        parse_constant=refuse_nonfinite,
     )
     return document, hashlib.sha256(raw).hexdigest()
 
@@ -707,7 +709,6 @@ def outcome(document, packet, current):
         current["adapters"],
         packet["adapter_uuid"],
         expected,
-        CASES[packet["case"]],
     )
     protected = (
         "hmc_uuid",

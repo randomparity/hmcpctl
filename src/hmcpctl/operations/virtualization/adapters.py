@@ -281,7 +281,7 @@ async def update_network_adapter(
     assert slot is not None  # The complete baseline inventory proved every slot.
     if not attributes:
         verification, preservation = _network_update_observation(
-            before, fresh, adapter_uuid, expected, selected
+            before, fresh, adapter_uuid, expected
         )
         return NetworkUpdateResult(
             system_uuid,
@@ -308,7 +308,6 @@ async def update_network_adapter(
         before,
         adapter_uuid,
         expected,
-        selected,
     )
     return NetworkUpdateResult(
         system_uuid,
@@ -517,7 +516,6 @@ def _network_update_observation(
     after: list[dict[str, Any]] | None,
     adapter_uuid: str,
     expected: dict[str, object],
-    selected: dict[str, Any],
 ) -> tuple[NetworkUpdateVerification, NetworkUpdatePreservation]:
     scope = "parsed_adapter_resources_except_metadata_and_selected_fields"
     unavailable = NetworkUpdateVerification(
@@ -634,7 +632,6 @@ async def _network_update_after(
     before: list[dict[str, Any]],
     identity: str,
     expected: dict[str, object],
-    selected: dict[str, Any],
 ) -> tuple[NetworkUpdateVerification, NetworkUpdatePreservation, tuple[str, ...]]:
     errors: tuple[str, ...] = ()
     try:
@@ -648,7 +645,7 @@ async def _network_update_after(
         after = None
         errors += ("adapter readback is unavailable",)
     verification, preservation = _network_update_observation(
-        before, after, identity, expected, selected
+        before, after, identity, expected
     )
     if not parent_matches:
         errors += (
