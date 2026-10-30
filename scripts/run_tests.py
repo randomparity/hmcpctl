@@ -276,7 +276,14 @@ def _group_arguments(group: str, root: Path = Path(".")) -> list[str]:
 
 def _coverage_command(arguments: list[str], environment: dict[str, str]) -> None:
     subprocess.run(
-        [sys.executable, "-m", "coverage", *arguments],
+        [
+            sys.executable,
+            "-m",
+            "coverage",
+            arguments[0],
+            "--rcfile=pyproject.toml",
+            *arguments[1:],
+        ],
         env=environment,
         check=True,
         timeout=120,

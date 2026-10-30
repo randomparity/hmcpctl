@@ -1586,3 +1586,24 @@ def test_group_and_combine_modes_are_exclusive(tmp_path):
     )
     assert result.returncode == 2
     assert "not allowed" in result.stderr
+
+
+@pytest.mark.parametrize("fault", ["shadow", "cwd"])
+def test_group_coverage_requires_project_configuration(tmp_path, fault):
+    directory = _group_data(tmp_path, complete=False)
+    working = tmp_path
+    if fault == "shadow":
+        (tmp_path / ".coveragerc").write_text("[report]\nfail_under = 0\n")
+    else:
+        working = tmp_path / "not-a-project"
+        working.mkdir()
+    result = _group_command(
+        working,
+        "--combine-coverage",
+        f"{sys.version_info.major}.{sys.version_info.minor}",
+        str(directory),
+    )
+    assert result.returncode == (2 if fault == "shadow" else 1), (
+        result.stdout + result.stderr
+    )
+    assert "combined coverage gate passed" not in result.stdout
