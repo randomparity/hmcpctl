@@ -77,13 +77,13 @@ def policy_attributes(policy: VnicPolicy) -> dict[str, str]:
         value = getattr(policy, item.name)
         if value is None:
             continue
-        result[item.name] = (
-            ",".join(map(str, value))
-            if isinstance(value, tuple)
-            else str(int(value))
-            if isinstance(value, bool)
-            else str(value)
-        )
+        if isinstance(value, tuple):
+            encoded = ",".join(map(str, value))
+        elif isinstance(value, bool):
+            encoded = str(int(value))
+        else:
+            encoded = str(value)
+        result[item.name] = encoded
     return result
 
 
@@ -132,15 +132,15 @@ def verify_policy(
             unavailable.append(item.name)
         elif actual != expected:
             mismatched.append(item.name)
-    status: Literal["not_requested", "verified", "mismatched", "unavailable"] = (
-        "not_requested"
-        if not checked
-        else "mismatched"
-        if mismatched
-        else "unavailable"
-        if unavailable
-        else "verified"
-    )
+    status: Literal["not_requested", "verified", "mismatched", "unavailable"]
+    if not checked:
+        status = "not_requested"
+    elif mismatched:
+        status = "mismatched"
+    elif unavailable:
+        status = "unavailable"
+    else:
+        status = "verified"
     return VnicPolicyVerification(
         status, tuple(checked), tuple(mismatched), tuple(unavailable)
     )
