@@ -18,6 +18,15 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Running client Ethernet updates through Python, `adapters update-network` and
+  `hmc_update_network_adapter` support tagging, VLAN replacement/add/remove,
+  QoS priority/disable and VSI values/profile removal. A coordinated writer
+  acknowledgement, contained identity and ownership precede one native attempt.
+  Independent selected-field and parsed-resource observations remain separate
+  from submission. Uncertain CLI outcomes exit nonzero; VSI removal has no
+  qualified positive oracle. Standalone ST69 retains the requested change and
+  uses read-only recovery. Hardware qualification remains unrun (#1824).
+
 - Client Ethernet creation accepts additional VLANs, allowed OS MAC policies, QoS priority
   and VSI identifiers through Python, CLI and MCP. Independent selected-field readback
   reports verified, mismatched or unavailable metadata. Unverified CLI creation exits

@@ -2,9 +2,8 @@
 
 ## Status
 
-Proposed, 2026-10-30. Private #638/N2 design; not implementation authority.
-0310 is privately reserved after checking 398 distinct visible heads; no collision.
-The only open PR head was included. Recheck the reservation before publication.
+Accepted, 2026-10-30. Implements [#1824](https://github.com/randomparity/hmcpctl/issues/1824)
+as the bounded N2 child of #638. Hardware qualification remains unrun.
 
 ## Context
 

@@ -1,9 +1,10 @@
 # Running client Ethernet updates: #638/N2
 
-Proposed private design at `669ebc0e9243a401b826ca24d0c6904f85fb89ba`.
-Authority is the frozen eight-field charter in `N2-scope.json`, including its exact approvals.
-Classification: full-spec, M, fixed denominator 250; selected-scope exclusions EMPTY.
-Filing, implementation, hardware and shipping remain held.
+Implementation contract for [#1824](https://github.com/randomparity/hmcpctl/issues/1824),
+the approved six-field N2 child of #638. Full-spec, M, fixed denominator 250;
+selected-scope exclusions EMPTY. Python/CLI/MCP and standalone ST69 are implemented;
+hardware qualification remains unrun. The implementation authority covers PR preparation,
+not merge or a new hardware window.
 Decision: [ADR 0310](../../adr/0310-running-client-ethernet-updates.md).
 
 ## Problem and bounded ownership
