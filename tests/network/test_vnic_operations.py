@@ -37,6 +37,7 @@ def test_vnic_models_are_immutable_and_result_field_order_is_stable() -> None:
         "backing_after_read_succeeded",
         "output",
         "errors",
+        "policy_verification",
     ]
 
 
@@ -670,6 +671,7 @@ async def test_add_before_state_after_dispatch_is_known_unchanged_partial(
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
             system_name_or_uuid="system-a",
+            pvid_priority=0,
         )
 
     result = caught.value.result
@@ -678,6 +680,9 @@ async def test_add_before_state_after_dispatch_is_known_unchanged_partial(
     assert result.slot_num is None
     assert result.vnic_after == ()
     assert result.backing_after == ()
+
+    assert result.policy_verification.status == "unavailable"
+    assert result.policy_verification.unavailable_fields == ("pvid_priority",)
 
 
 @pytest.mark.parametrize(
@@ -937,6 +942,7 @@ async def test_add_command_and_both_read_failures_are_retained_in_order(
             VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
             7,
             system_name_or_uuid="system-a",
+            pvid_priority=0,
         )
     result = caught.value.result
     assert result.changed is None
@@ -946,6 +952,9 @@ async def test_add_command_and_both_read_failures_are_retained_in_order(
     assert "HMC rejected VLAN" in result.errors[0]
     assert "vnic read" in result.errors[1]
     assert "backing read" in result.errors[2]
+
+    assert result.policy_verification.status == "unavailable"
+    assert result.policy_verification.unavailable_fields == ("pvid_priority",)
 
 
 @pytest.mark.asyncio
@@ -1366,3 +1375,233 @@ def test_snapshot_rejects_uncorrelatable_backing_states(states: str) -> None:
 
     with pytest.raises(ValueError, match="backing_device_states"):
         _parse_vnic_snapshots([row])
+
+
+_POLICY = {
+    "pvid_priority": 0,
+    "allowed_vlan_ids": [2, 4094],
+    "allowed_os_mac_addrs": ["AABBCCDDEEFF", "001122334455"],
+    "auto_priority_failover": False,
+    "mac_addr": "AABBCCDDEE01",
+}
+_NATIVE_POLICY = {
+    "pvid_priority": "0",
+    "allowed_vlan_ids": "4094,2",
+    "allowed_os_mac_addrs": "aabbccddeeff,001122334455",
+    "auto_priority_failover": "0",
+    "mac_addr": "aabbccddee01",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"pvid_priority": True},
+        {"pvid_priority": 8},
+        {"pvid_priority": -1},
+        {"auto_priority_failover": 0},
+        {"mac_addr": "aa:bb:cc:dd:ee:ff"},
+        {"mac_addr": "aabbccddee=f"},
+        {"allowed_vlan_ids": []},
+        {"allowed_vlan_ids": [0]},
+        {"allowed_vlan_ids": [4095]},
+        {"allowed_vlan_ids": [True]},
+        {"allowed_vlan_ids": [2, 2]},
+        {"allowed_vlan_ids": "2,3"},
+        {"allowed_os_mac_addrs": []},
+        {"allowed_os_mac_addrs": ["AABBCCDDEEFF", "aabbccddeeff"]},
+        {"allowed_os_mac_addrs": ['aabbccddee"f']},
+    ],
+)
+async def test_policy_invalid_before_preflight(monkeypatch, bad):
+    preflight = AsyncMock()
+    monkeypatch.setattr(
+        "hmcpctl.operations.virtualization.vnic._preflight_add", preflight
+    )
+    with pytest.raises(ValueError):
+        await add_vnic(
+            _hmc(),
+            "client-a",
+            VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
+            7,
+            system_name_or_uuid="system-a",
+            **bad,
+        )
+    preflight.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("defect", [None, "missing", "mismatch", "malformed"])
+async def test_selected_policy_reconciliation(monkeypatch, existing, defect):
+    _common(monkeypatch)
+    row = {**_vnic(), **_NATIVE_POLICY}
+    if defect == "missing":
+        del row["pvid_priority"]
+    elif defect == "mismatch":
+        row["pvid_priority"] = "7"
+    elif defect == "malformed":
+        row["pvid_priority"] = "garbage"
+    monkeypatch.setattr(
+        "hmcpctl.operations.virtualization.vnic.list_vnic_rows",
+        AsyncMock(side_effect=[[row], [row]] if existing else [[], [row]]),
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.virtualization.vnic.list_vnic_backing_rows",
+        AsyncMock(
+            side_effect=[[_backing()], [_backing()]] if existing else [[], [_backing()]]
+        ),
+    )
+    mutate = AsyncMock(return_value="ok")
+    monkeypatch.setattr(
+        "hmcpctl.operations.virtualization.vnic.add_vnic_backing", mutate
+    )
+
+    async def run():
+        return await add_vnic(
+            _hmc(),
+            "client-a",
+            VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
+            7,
+            system_name_or_uuid="system-a",
+            **_POLICY,
+        )
+
+    if existing and defect:
+        with pytest.raises(VnicCapabilityError, match="selected policies"):
+            await run()
+        mutate.assert_not_awaited()
+        return
+    if defect:
+        with pytest.raises(VnicPartialError) as caught:
+            await run()
+        result = caught.value.result
+        assert result.changed is True
+        verification = result.policy_verification
+        assert verification.status == (
+            "mismatched" if defect == "mismatch" else "unavailable"
+        )
+        assert (
+            verification.mismatched_fields
+            if defect == "mismatch"
+            else verification.unavailable_fields
+        ) == ("pvid_priority",)
+    else:
+        result = await run()
+        assert result.changed is not existing
+        assert result.policy_verification.status == "verified"
+    assert set(result.policy_verification.checked_fields) == set(_POLICY)
+    assert result.vnic_after[0].policy.auto_priority_failover is False
+    assert result.vnic_after[0].policy.allowed_vlan_ids == (2, 4094)
+    assert mutate.await_count == (0 if existing else 1)
+    if not existing:
+        assert mutate.await_args.kwargs["policy"] == {
+            "pvid_priority": "0",
+            "allowed_vlan_ids": "2,4094",
+            "allowed_os_mac_addrs": "001122334455,aabbccddeeff",
+            "auto_priority_failover": "0",
+            "mac_addr": "aabbccddee01",
+        }
+
+
+def test_policy_observations_are_independent_and_do_not_change_topology_equality():
+    first = _parse_vnic_snapshots([{**_vnic(), **_NATIVE_POLICY}])[0]
+    second = _parse_vnic_snapshots(
+        [
+            {
+                **_vnic(),
+                **_NATIVE_POLICY,
+                "allowed_vlan_ids": "2,,3",
+                "auto_priority_failover": "false",
+            }
+        ]
+    )[0]
+    assert first == second
+    assert second.policy.allowed_vlan_ids is None
+    assert second.policy.auto_priority_failover is None
+    assert second.policy.pvid_priority == 0
+    assert second.policy.mac_addr == "aabbccddee01"
+
+
+@pytest.mark.parametrize("sentinel", ["all", "none"])
+def test_policy_sentinels_and_omitted_selection(sentinel):
+    from hmcpctl.operations.virtualization.vnic_policy import (
+        creation_policy,
+        observed_policy,
+        policy_attributes,
+        verify_policy,
+    )
+
+    selected = creation_policy(allowed_vlan_ids=sentinel, allowed_os_mac_addrs=sentinel)
+    assert policy_attributes(selected) == {
+        "allowed_vlan_ids": sentinel,
+        "allowed_os_mac_addrs": sentinel,
+    }
+    assert (
+        verify_policy(
+            selected,
+            observed_policy(
+                {"allowed_vlan_ids": sentinel, "allowed_os_mac_addrs": sentinel}
+            ),
+        ).status
+        == "verified"
+    )
+    assert verify_policy(creation_policy(), None).status == "not_requested"
+    assert verify_policy(selected, None).unavailable_fields == (
+        "allowed_vlan_ids",
+        "allowed_os_mac_addrs",
+    )
+
+
+def test_no_unproven_hardware_count_caps():
+    from hmcpctl.operations.virtualization.vnic_policy import creation_policy
+
+    policy = creation_policy(
+        allowed_vlan_ids=list(range(1, 22)),
+        allowed_os_mac_addrs=[f"{n:012x}" for n in range(5)],
+    )
+    assert len(policy.allowed_vlan_ids) == 21
+    assert len(policy.allowed_os_mac_addrs) == 5
+
+
+@pytest.mark.asyncio
+async def test_complete_policy_record_is_bounded_before_preflight(monkeypatch):
+    preflight = AsyncMock()
+    monkeypatch.setattr(
+        "hmcpctl.operations.virtualization.vnic._preflight_add", preflight
+    )
+    with pytest.raises(ValueError, match="65536-byte"):
+        await add_vnic(
+            _hmc(),
+            "client-a",
+            VnicBackingSelector("vios-a", "100", "1", "1", Decimal(2)),
+            7,
+            system_name_or_uuid="system-a",
+            allowed_os_mac_addrs=[f"{n:012x}" for n in range(5100)],
+        )
+    preflight.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "name,raw",
+    [
+        ("pvid_priority", "8"),
+        ("allowed_vlan_ids", "1,1"),
+        ("allowed_os_mac_addrs", "not-a-mac"),
+        ("auto_priority_failover", "true"),
+        ("mac_addr", "123"),
+    ],
+)
+def test_each_malformed_policy_observation_remains_independent(name, raw):
+    from hmcpctl.operations.virtualization.vnic_policy import (
+        creation_policy,
+        observed_policy,
+        verify_policy,
+    )
+
+    observation = observed_policy({**_NATIVE_POLICY, name: raw})
+    verification = verify_policy(creation_policy(**_POLICY), observation)
+    assert verification.status == "unavailable"
+    assert verification.unavailable_fields == (name,)
+    assert verification.mismatched_fields == ()

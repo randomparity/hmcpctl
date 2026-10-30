@@ -115,6 +115,7 @@ def build_attribute_record(
     quoted: Collection[str] = (),
     surface: str = "-i",
     secret: Collection[str] = (),
+    allow_nontrailing_quoted: bool = False,
 ) -> str:
     """Return the ``-i`` attribute record for *pairs*, or raise.
 
@@ -124,6 +125,9 @@ def build_attribute_record(
     renders bare, byte-identical to the unmarked form.  Every other record
     delimiter is refused inside a marked value: only the comma's behaviour
     inside a quoted region is live-verified.
+
+    Only typed vNIC creation opts into *allow_nontrailing_quoted* (ADR 0311);
+    all other callers retain the final-pair restriction.
 
     *pairs* is an ordered sequence of ``(attribute, value)``.  Each value is
     rendered with :func:`str` and checked against the record grammar before the
@@ -180,7 +184,7 @@ def build_attribute_record(
             redact=attribute in secret_names,
         )
         if attribute in quotable and "," in text:
-            if index != len(pairs) - 1:
+            if index != len(pairs) - 1 and not allow_nontrailing_quoted:
                 # The live probes verified the quoted pair only as the final
                 # element of the record (ADR 0061); a non-trailing quoted
                 # pair is an unprobed form, so it fails closed like every

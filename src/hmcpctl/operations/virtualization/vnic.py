@@ -32,6 +32,7 @@ from hmcpctl.ssh.sriov import (
 )
 from hmcpctl.ssh.vnic import (
     add_vnic_backing,
+    build_vnic_add_attributes,
     list_vnic_backing_rows,
     list_vnic_rows,
     read_vios_identity,
@@ -39,6 +40,15 @@ from hmcpctl.ssh.vnic import (
 )
 from hmcpctl.ssh.vnic import (
     list_vnics as _list_vnics,
+)
+
+from .vnic_policy import (
+    VnicPolicy,
+    VnicPolicyVerification,
+    creation_policy,
+    observed_policy,
+    policy_attributes,
+    verify_policy,
 )
 
 
@@ -76,6 +86,7 @@ class VnicSnapshot:
     slot_num: str
     port_vlan_id: int
     backing_devices: tuple[VnicBackingSnapshot, ...]
+    policy: VnicPolicy = field(default_factory=VnicPolicy, compare=False)
 
 
 @dataclass(frozen=True)
@@ -93,6 +104,9 @@ class VnicChangeResult:
     backing_after_read_succeeded: bool
     output: str
     errors: tuple[str, ...]
+    policy_verification: VnicPolicyVerification = field(
+        default_factory=VnicPolicyVerification
+    )
 
 
 @dataclass(frozen=True)
@@ -263,6 +277,7 @@ def _parse_vnic_snapshots(rows: list[dict[str, str]]) -> tuple[VnicSnapshot, ...
             _parse_embedded_backings(
                 row["backing_devices"], row["backing_device_states"]
             ),
+            observed_policy(row),
         )
         for row in rows
     )
@@ -510,6 +525,7 @@ def _reconcile_add(
     port_vlan_id: int,
     output: str,
     mutation_errors: list[str],
+    selected_policy: VnicPolicy,
 ) -> VnicChangeResult:
     errors = [*mutation_errors, *readback.errors]
     candidates = _matching_vnics(context.vnics, selector, port_vlan_id)
@@ -554,6 +570,11 @@ def _reconcile_add(
         errors.append(
             "add reconciliation did not prove exactly one new active Operational backing"
         )
+    policy_verification = verify_policy(
+        selected_policy, observed_new[0].policy if len(observed_new) == 1 else None
+    )
+    if policy_verification.status in ("mismatched", "unavailable"):
+        errors.append("selected vNIC creation policies could not be verified")
     return VnicChangeResult(
         operation="add",
         mutation_dispatched=True,
@@ -568,6 +589,7 @@ def _reconcile_add(
         backing_after_read_succeeded=readback.backing_succeeded,
         output=output,
         errors=tuple(errors),
+        policy_verification=policy_verification,
     )
 
 
@@ -635,8 +657,17 @@ async def add_vnic(
     *,
     system_name_or_uuid: str,
     ownership_override: bool = False,
+    pvid_priority: int | None = None,
+    allowed_vlan_ids: list[int] | Literal["all", "none"] | None = None,
+    allowed_os_mac_addrs: list[str] | Literal["all", "none"] | None = None,
+    auto_priority_failover: bool | None = None,
+    mac_addr: str | None = None,
 ) -> VnicChangeResult:
-    """Add a vNIC backing and reconcile the resulting state.
+    """Add one vNIC backing with optional selected-policy verification.
+
+    Omitted policies retain HMC defaults. Explicit zero/false remain selected;
+    list policies accept nonempty unique members or all/none. Policy evidence is
+    independent of the topology outcome, including in partial results.
 
     Raises:
         ValueError: If selectors, VLAN, capacity granularity, or available capacity
@@ -647,6 +678,18 @@ async def add_vnic(
     selector = _validate_vnic_backing_selector(selector)
     if type(port_vlan_id) is not int or not 0 <= port_vlan_id <= 4094:
         raise ValueError("port_vlan_id must be an integer between 0 and 4094")
+    selected_policy = creation_policy(
+        pvid_priority=pvid_priority,
+        allowed_vlan_ids=allowed_vlan_ids,
+        allowed_os_mac_addrs=allowed_os_mac_addrs,
+        auto_priority_failover=auto_priority_failover,
+        mac_addr=mac_addr,
+    )
+    selected_attributes = policy_attributes(selected_policy)
+    if selected_attributes:
+        build_vnic_add_attributes(
+            _add_payload(selector), port_vlan_id, selected_attributes
+        )
     context = await _preflight_add(
         hmc,
         system_name_or_uuid,
@@ -662,6 +705,12 @@ async def add_vnic(
         candidates, matching_backing_before, selector, port_vlan_id
     )
     if len(pairs) == 1 and len(candidates) == 1 and len(matching_backing_before) == 1:
+        policy_verification = verify_policy(selected_policy, candidates[0].policy)
+        if policy_verification.status in ("mismatched", "unavailable"):
+            raise VnicCapabilityError(
+                "existing matching vNIC selected policies are mismatched or unavailable; "
+                "inspect the existing slot instead of adding another vNIC"
+            )
         return VnicChangeResult(
             operation="add",
             mutation_dispatched=False,
@@ -676,6 +725,7 @@ async def add_vnic(
             backing_after_read_succeeded=True,
             output="",
             errors=(),
+            policy_verification=policy_verification,
         )
     if pairs or candidates or matching_backing_before:
         raise VnicCapabilityError(
@@ -695,6 +745,7 @@ async def add_vnic(
             context.lpar_name,
             payload,
             port_vlan_id,
+            **({"policy": selected_attributes} if selected_attributes else {}),
         )
     except Exception as error:  # noqa: BLE001 - captured into the readback result and reconciled by the caller
         mutation_error = error
@@ -702,7 +753,9 @@ async def add_vnic(
     readback = await _read_vnic_state_after_mutation(
         hmc.config, context.system_name, context.lpar_name
     )
-    result = _reconcile_add(context, readback, selector, port_vlan_id, output, errors)
+    result = _reconcile_add(
+        context, readback, selector, port_vlan_id, output, errors, selected_policy
+    )
     if result.errors:
         partial = VnicPartialError("vNIC add could not be fully verified", result)
         cause = mutation_error or readback.cause

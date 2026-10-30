@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from contextlib import redirect_stdout
 from dataclasses import asdict
 from decimal import Decimal
+from typing import Any
 
 import typer
 
@@ -84,8 +86,47 @@ def network_add_vnic(
     port_vlan_id: int = typer.Option(..., "--port-vlan-id"),
     ownership_override: bool = typer.Option(False, "--ownership-override"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    pvid_priority: int | None = typer.Option(
+        None, "--pvid-priority", help="Priority 0..7; omitted keeps HMC default"
+    ),
+    allowed_vlan_ids: str | None = typer.Option(
+        None,
+        "--allowed-vlan-ids",
+        help="Unique VLANs 1..4094 separated by commas, or all/none",
+    ),
+    allowed_os_mac_addrs: str | None = typer.Option(
+        None,
+        "--allowed-os-mac-addrs",
+        help="Unique 12-hex MACs separated by commas, or all/none",
+    ),
+    auto_priority_failover: bool | None = typer.Option(
+        None, "--auto-priority-failover/--no-auto-priority-failover"
+    ),
+    mac_addr: str | None = typer.Option(
+        None, "--mac-addr", help="12-hex MAC; omitted lets HMC choose"
+    ),
 ) -> None:
     """Add and verify a vNIC with one typed SR-IOV backing selector."""
+    policy: dict[str, Any] = {
+        "pvid_priority": pvid_priority,
+        "allowed_vlan_ids": allowed_vlan_ids,
+        "allowed_os_mac_addrs": allowed_os_mac_addrs,
+        "auto_priority_failover": auto_priority_failover,
+        "mac_addr": mac_addr,
+    }
+    for name in ("allowed_vlan_ids", "allowed_os_mac_addrs"):
+        raw = policy[name]
+        if raw is None or raw in ("all", "none"):
+            continue
+        parts = raw.split(",")
+        if name == "allowed_vlan_ids":
+            if not all(re.fullmatch(r"[0-9]+", part) for part in parts):
+                raise typer.BadParameter(
+                    "use comma-separated integer VLAN IDs or all/none"
+                )
+            policy[name] = [int(part) for part in parts]
+        else:
+            policy[name] = parts
     if not yes and not _confirm_on_stderr(
         f"Add vNIC (VIOS={vios_name}, adapter={adapter_id}, "
         f"port={physical_port_id}, capacity={capacity_percent}, vlan={port_vlan_id}) "
@@ -108,6 +149,7 @@ def network_add_vnic(
                 port_vlan_id,
                 ownership_override=ownership_override,
                 system_name_or_uuid=system_name,
+                **{name: value for name, value in policy.items() if value is not None},
             )
         except VnicPartialError as exc:
             return exc

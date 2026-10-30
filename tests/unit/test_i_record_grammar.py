@@ -715,9 +715,32 @@ def _unguarded_i_values(
     return _unguarded_payloads_for(func, _is_an_i_record_literal, "-i", builder)
 
 
-def _unguarded_a_values(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
-    """Return *func*'s ``-a`` payloads not built by the record builder."""
-    return _unguarded_payloads_for(func, _is_an_a_record_literal, "-a", BUILDER_NAME)
+def _unguarded_a_values(
+    func: ast.FunctionDef | ast.AsyncFunctionDef, *, source_path: Path | None = None
+) -> list[str]:
+    """Trace the vNIC preflight helper's returned record through the same builder."""
+    builder = BUILDER_NAME
+    if (source_path, func.name) == (
+        _REPO_ROOT / "src/hmcpctl/ssh/vnic.py",
+        "add_vnic_backing",
+    ):
+        builder = "build_vnic_add_attributes"
+        tree = ast.parse(source_path.read_text())
+        helper = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == builder
+        )
+        bound = _builder_bound_names(helper, BUILDER_NAME)
+        returns = [
+            node.value for node in ast.walk(helper) if isinstance(node, ast.Return)
+        ]
+        if not returns or any(
+            not isinstance(value, ast.Name) or value.id not in bound
+            for value in returns
+        ):
+            return ["vNIC attribute helper does not return the shared builder record"]
+    return _unguarded_payloads_for(func, _is_an_a_record_literal, "-a", builder)
 
 
 def _unguarded_filter_values(
@@ -787,8 +810,8 @@ def test_every_site_is_built_by_its_shared_builder(
     skipping = {}
     for name, node in sites:
         unguarded = (
-            _unguarded_i_values(node, source_path=paths[id(node)])
-            if label == "-i"
+            checker(node, source_path=paths[id(node)])
+            if label in ("-i", "-a")
             else checker(node)
         )
         if unguarded:
@@ -1133,4 +1156,26 @@ def test_st68_size_admission_uses_only_the_actual_fixed_encoder_at_exact_site():
             source.replace("shlex.quote(record)", "shlex.quote(value)")
         ),
         source_path=path,
+    )
+
+
+@pytest.mark.parametrize("bad", ["2=3,4", '2"3,4', "2\n3,4", "2\x003,4"])
+def test_nontrailing_opt_in_preserves_value_validation(bad):
+    with pytest.raises(HMCCLIError):
+        build_attribute_record(
+            [("allowed_vlan_ids", bad), ("pvid_priority", 0)],
+            quoted=("allowed_vlan_ids",),
+            allow_nontrailing_quoted=True,
+        )
+
+
+def test_nontrailing_opt_in_keeps_default_closed():
+    pairs = [("allowed_vlan_ids", "2,3"), ("pvid_priority", 0)]
+    with pytest.raises(HMCCLIError, match="final element"):
+        build_attribute_record(pairs, quoted=("allowed_vlan_ids",))
+    assert (
+        build_attribute_record(
+            pairs, quoted=("allowed_vlan_ids",), allow_nontrailing_quoted=True
+        )
+        == '"allowed_vlan_ids=2,3",pvid_priority=0'
     )
