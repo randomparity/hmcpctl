@@ -2286,6 +2286,7 @@ def main(argv: list[str] | None = None) -> int:
     source_packets.add_argument("--activation-source-packet", type=Path)
     source_packets.add_argument("--serial-procedure", action="store_true")
     source_packets.add_argument("--boot-start-procedure", action="store_true")
+    source_packets.add_argument("--ethernet-update-procedure", action="store_true")
     source_packets.add_argument(
         "--memory-statistics",
         action="store_true",
@@ -2296,6 +2297,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
+    if args.ethernet_update_procedure:
+        from live_test import ethernet_update
+
+        if not args.output or args.packet_sha256:
+            parser.error(
+                "ST69 recovery requires original results and a fresh private output"
+            )
+        return ethernet_update.main(
+            ["recover", "--results", str(args.results), "--output", str(args.output)]
+        )
     if args.paging_switchover:
         if args.output or args.packet_sha256:
             parser.error("ST66 recovery uses retained results only")
@@ -2407,6 +2418,11 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         print(f"ERROR: cannot read {args.results}: {error}", file=sys.stderr)
         return 2
+
+    if document.get("group") == "client-ethernet-update":
+        parser.error(
+            "ST69 requires --ethernet-update-procedure and --output; generic recovery cannot handle it"
+        )
 
     if (
         isinstance(document, dict)

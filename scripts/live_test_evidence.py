@@ -275,9 +275,40 @@ def _render_boot_start(document: dict[str, Any]) -> str | None:
     )
 
 
+def _render_ethernet_update(document: dict[str, Any]) -> str | None:
+    from live_test import ethernet_update
+
+    try:
+        ethernet_update.validate_document(document)
+        if document["phase"] != "recover" or not document["complete"]:
+            return None
+        bound, intent, submission = (
+            document["binding"],
+            document["intent"],
+            document["submission"],
+        )
+        if intent is None or submission is None:
+            return None
+        commit = bound["candidate"]["commit"]
+        case = intent["case"]
+        # Only fixed enum values and validated Git SHA are public. Raw snapshots stay private.
+        return (
+            f"ST69 stored-field observation on `{commit}`\n\n"
+            "| Case | Submission | Verification | Preservation | Read-only recovery |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            f"| {case} | {submission['submission']} | {submission['verification']['status']} | "
+            f"{submission['preservation']['status']} | {document['result']} |\n\n"
+            "One retained change or explicit no-write observation; no runtime traffic or saved-profile claim."
+        )
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
 def render(document: dict[str, Any]) -> str | None:
     """The Markdown matrix, or `None` when the document cannot be attributed."""
     run = document.get("run")
+    if document.get("group") == "client-ethernet-update":
+        return _render_ethernet_update(document)
     if document.get("group") == "lpar-boot-start" or (
         isinstance(run, dict) and run.get("group") == "lpar-boot-start"
     ):

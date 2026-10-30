@@ -571,3 +571,18 @@ def test_boot_start_incomplete_or_source_evidence_cannot_qualify(field, value):
     result = evidence.render(d)
     assert result is None or "CLEAN" not in result
     assert result is None or _SENTINEL not in result
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"group": "client-ethernet-update"},
+        {
+            "group": "client-ethernet-update",
+            "schema_version": 1,
+            "result": "retained_verified_change",
+        },
+    ],
+)
+def test_st69_unattributed_or_fabricated_result_has_no_matrix(document):
+    assert evidence.render(document) is None
