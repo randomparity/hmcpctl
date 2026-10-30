@@ -682,3 +682,50 @@ def test_packet_hash_binds_the_same_bytes_that_were_parsed(tmp_path, monkeypatch
     monkeypatch.setattr(Path, "open", changing_open)
     with pytest.raises(ValueError, match="digest"):
         arm.load_packet(source, hashlib.sha256(second).hexdigest())
+
+
+@pytest.mark.asyncio
+async def test_interrupted_history_recovery_roundtrips_without_false_completion(
+    live_boundary,
+):
+    digest, path, _ = await run_preflight(live_boundary)
+    run_path = live_boundary.root / "run.json"
+    original = await arm.execute(
+        live_boundary.packet, digest, path, run_path, digest, True
+    )
+    original.update(submission=None, complete=False, result=None)
+    original["observations"]["postwrite"] = None
+    arm.checkpoint(run_path, original)
+    recovered = await arm.recover(run_path, live_boundary.root / "recovery.json")
+    assert recovered["result"] == "unconfirmed"
+    assert recovered["complete"] is False
+    assert (
+        arm.validate_document(json.loads(json.dumps(recovered)), "recover") == recovered
+    )
+    assert len(live_boundary.writes) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_known_drift_precedes_original_uncertainty(live_boundary):
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    digest, path, _ = await run_preflight(live_boundary)
+    native = live_boundary.native.side_effect
+
+    async def uncertain(config, command, **kwargs):
+        result = await native(config, command, **kwargs)
+        if command.startswith("chhwres"):
+            raise HMCCLIError("opaque timeout")
+        return result
+
+    live_boundary.native.side_effect = uncertain
+    run_path = live_boundary.root / "run.json"
+    original = await arm.execute(
+        live_boundary.packet, digest, path, run_path, digest, True
+    )
+    assert original["result"] == "unconfirmed"
+    live_boundary.rows[0]["Resource"]["MACAddress"] = "020000000099"
+    recovered = await arm.recover(run_path, live_boundary.root / "recovery.json")
+    assert recovered["result"] == "observed_drift"
+    assert recovered["submission"]["submission"] == "unknown"
+    assert len(live_boundary.writes) == 1

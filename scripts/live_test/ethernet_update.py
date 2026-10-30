@@ -699,24 +699,7 @@ def original_packet(document):
 
 
 def outcome(document, packet, current):
-    if (
-        document["intent"] is None
-        or document["submission"] is None
-        or not document["complete"]
-        or not closed(document)
-    ):
-        return "unconfirmed"
-    submitted = document["submission"]
-    if (
-        submitted["preservation"]["status"] == "drifted"
-        or submitted["verification"]["status"] == "mismatched"
-    ):
-        return "observed_drift"
-    if (
-        submitted["errors"]
-        or submitted["verification"]["status"] == "unavailable"
-        or submitted["preservation"]["status"] == "unavailable"
-    ):
+    if document["intent"] is None or document["baseline"] is None or current is None:
         return "unconfirmed"
     expected, _ = configured(document["baseline"], packet)
     verification, preservation = adapters._network_update_observation(
@@ -742,6 +725,20 @@ def outcome(document, packet, current):
         or verification.status == "mismatched"
     ):
         return "observed_drift"
+    submitted = document["submission"]
+    if submitted is not None and (
+        submitted["preservation"]["status"] == "drifted"
+        or submitted["verification"]["status"] == "mismatched"
+    ):
+        return "observed_drift"
+    if submitted is None or not document["complete"] or not closed(document):
+        return "unconfirmed"
+    if (
+        submitted["errors"]
+        or submitted["verification"]["status"] == "unavailable"
+        or submitted["preservation"]["status"] == "unavailable"
+    ):
+        return "unconfirmed"
     if verification.status != "verified" or preservation.status != "unchanged":
         return "unconfirmed"
     if (
@@ -805,8 +802,19 @@ async def phase(packet, digest, mode, output_path, action):
             document["budget"] = budget.record()
             if not closed(document):
                 document["errors"].append("ST69 session closeout unconfirmed")
+            history_complete = mode == "preflight" or (
+                document["intent"] is not None
+                and document["submission"] is not None
+                and document["observations"]["prewrite"] is not None
+                and document["observations"][
+                    "postwrite" if mode == "run" else "recovery"
+                ]
+                is not None
+            )
             document["complete"] = (
-                not document["errors"] and document["baseline"] is not None
+                not document["errors"]
+                and document["baseline"] is not None
+                and history_complete
             )
             if document["complete"] and mode == "run":
                 document["result"] = outcome(

@@ -2694,7 +2694,9 @@ Choose exactly one fixed case: `tagging-enable`/`tagging-disable`, `vlan-replace
 `vsi-remove`. A case incompatible with its baseline refuses; do not substitute values.
 The inventory may contain at most eight client adapters. Native SSH and REST are
 both required. The clean deployed source/import path must match the packet commit/tree.
-Provide the existing connection profile through `--profile` when needed.
+Select the existing connection profile consistently for all three commands with
+`export HMC_PROFILE=your-profile` when needed; otherwise the default profile is used.
+The generic preflight/recovery entry points do not accept `--profile`.
 
 After computing the SHA-256 of the exact private packet bytes, use:
 

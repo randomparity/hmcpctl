@@ -30,7 +30,16 @@ def test_named_entry_has_only_run_route(monkeypatch):
 
 def test_preflight_and_recovery_routes(monkeypatch):
     calls = []
-    monkeypatch.setattr(ethernet_update, "main", lambda args: calls.append(args) or 7)
+    monkeypatch.setenv("HMC_PROFILE", "st69-profile")
+
+    def dispatch(args):
+        import os
+
+        assert os.environ["HMC_PROFILE"] == "st69-profile"
+        calls.append(args)
+        return 7
+
+    monkeypatch.setattr(ethernet_update, "main", dispatch)
     assert (
         live_test_preflight.main(
             [
