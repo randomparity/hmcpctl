@@ -873,6 +873,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "unassign_sriov_logical_port_profile",
     }
     assert by_label["-a"] == {
+        "_set_ethernet_adapter",
         "assign_sriov_logical_port_dynamic",
         "add_vnic_backing",
     }
