@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from dataclasses import asdict
+from typing import Any, Literal
 
 import typer
 from rich.text import Text
 
 from ...client.client_contracts import ADAPTER_TYPES, AdapterType
-from ...documents.adapters import validate_network_adapter_creation_fields
+from ...documents.adapters import (
+    validate_network_adapter_creation_fields,
+    validate_network_adapter_update_fields,
+)
 from ...operations.virtualization.adapters import (
     AdapterResult,
+    _validate_network_update_target,
     add_network_adapter,
     add_vfc_adapter,
     add_vscsi_adapter,
     delete_adapter,
     list_adapters,
+    update_network_adapter,
 )
 from ..output import console, output, print_json, terminal_field
 from ..runtime import with_client
@@ -124,6 +130,97 @@ def adapters_add_network(
         )
     )
     _adapter_mutation(result, lpar, "network")
+
+
+def adapters_update_network(
+    lpar: str = typer.Argument(..., help="Running LPAR name or UUID"),
+    adapter_uuid: str = typer.Option(..., "--uuid", help="Contained adapter UUID"),
+    system: str = typer.Option(
+        ..., "--system", "-s", help="Managed system name or UUID"
+    ),
+    *,
+    exclusive_writer_window: bool = typer.Option(
+        False,
+        "--exclusive-writer-window",
+        help="Acknowledge coordinated exclusive writers; no HMC lock",
+    ),
+    tagged: bool | None = typer.Option(None, "--tagged/--untagged"),
+    addl_vlan_ids: str | None = typer.Option(
+        None,
+        "--addl-vlan-ids",
+        help="JSON VLAN array; empty replacement removes the known baseline",
+    ),
+    vlan_action: Literal["replace", "add", "remove"] = typer.Option(
+        "replace", "--vlan-action"
+    ),
+    qos_priority: str | None = typer.Option(
+        None, "--qos-priority", help="0–7 or none to disable"
+    ),
+    vsi_manager_id: int | None = typer.Option(None, "--vsi-manager-id"),
+    vsi_type_id: int | None = typer.Option(None, "--vsi-type-id"),
+    vsi_type_version: int | None = typer.Option(None, "--vsi-type-version"),
+    remove_vsi_profile: bool = typer.Option(False, "--remove-vsi-profile"),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+) -> None:
+    """Update one running client Ethernet adapter; never retry uncertainty blindly."""
+    if not exclusive_writer_window:
+        raise typer.BadParameter(
+            "--exclusive-writer-window is required, including with --yes"
+        )
+    try:
+        _validate_network_update_target(lpar, adapter_uuid, system)
+        vlans = json.loads(addl_vlan_ids) if addl_vlan_ids is not None else None
+        qos = (
+            int(qos_priority, 10)
+            if qos_priority not in (None, "none")
+            else qos_priority
+        )
+        fields: dict[str, Any] = {
+            "tagged": tagged,
+            "addl_vlan_ids": vlans,
+            "vlan_action": vlan_action,
+            "qos_priority": qos,
+            "vsi_manager_id": vsi_manager_id,
+            "vsi_type_id": vsi_type_id,
+            "vsi_type_version": vsi_type_version,
+            "remove_vsi_profile": remove_vsi_profile,
+        }
+        validate_network_adapter_update_fields(**fields)
+    except (ValueError, TypeError) as exc:
+        raise typer.BadParameter(terminal_field(str(exc), err=True)) from exc
+    if not yes and not typer.confirm(
+        f"Update network adapter '{terminal_field(adapter_uuid)}' on '{terminal_field(lpar)}'?"
+    ):
+        raise typer.Abort()
+    result = with_client(
+        lambda hmc: update_network_adapter(
+            hmc,
+            lpar,
+            adapter_uuid,
+            system_name_or_uuid=system,
+            exclusive_writer_window=True,
+            ownership_override=ownership_override,
+            **fields,
+        )
+    )
+    print_json(asdict(result))
+    verified = (
+        result.verification.status == "verified"
+        and result.preservation.status == "unchanged"
+    )
+    completed = result.submission == "completed" and result.mutation_dispatched
+    no_write = (
+        result.submission == "not_dispatched"
+        and not result.mutation_dispatched
+        and result.reason == "already_satisfied"
+    )
+    if not verified or not (completed or no_write):
+        console.print(
+            "Change may have occurred. Inspect the independent observations; do not retry blindly.",
+            markup=False,
+        )
+        raise typer.Exit(1)
 
 
 def _network_cli_creation_fields(
@@ -299,6 +396,7 @@ def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
     group.command("list")(adapters_list)
     group.command("add-network")(adapters_add_network)
+    group.command("update-network")(adapters_update_network)
     group.command("add-vscsi")(adapters_add_vscsi)
     group.command("add-vfc")(adapters_add_vfc)
     group.command("delete")(adapters_delete)

@@ -2661,3 +2661,79 @@ separately authorized restoration with its own fresh expected-current/window and
 journal. Expected forward current-provider drift remains held; recovery never
 mutates or rebases the original baseline. No live evidence is implied by this
 procedure or its offline tests.
+
+## Running client Ethernet update (N2, standalone ST69)
+
+ST69 uses `scripts/live_ethernet_update.py` only; default, `all`, ST9 and ST100
+never dispatch it. A fresh operator grant must identify one owned running LPAR's
+expendable existing client adapter and explicitly authorize retaining the requested
+change. This procedure creates, activates, stamps, deletes and restores nothing.
+No hardware run is authorized by registering the procedure.
+
+Create a mode-0600 packet in an operator-owned mode-0700 directory outside the
+checkout. All paths must be canonical absolute paths; output files must be fresh.
+The packet has exactly these fields:
+
+```json
+{
+  "schema_version": 1,
+  "candidate": {"commit": "<40-hex deployed HEAD>", "tree": "<40-hex HEAD tree>"},
+  "hmc_uuid": "<console UUID>",
+  "system_uuid": "<managed-system UUID>",
+  "lpar_uuid": "<running owned LPAR UUID>",
+  "adapter_uuid": "<contained expendable client adapter UUID>",
+  "case": "qos-set",
+  "expires_utc": "<future ISO-8601 UTC timestamp>",
+  "retained_change_authorized": true
+}
+```
+
+Choose exactly one fixed case: `tagging-enable`/`tagging-disable`, `vlan-replace`
+(tagged, 101/102), `vlan-add` (tagged, 101), `vlan-remove` (101), `vlan-empty`,
+`qos-set` (3), `qos-disable`, `vsi-set` (manager/type/version 1/2/3), or
+`vsi-remove`. A case incompatible with its baseline refuses; do not substitute values.
+Baseline and prewrite admission allow at most eight client adapters. Later bounded
+observations retain inventory growth or disappearance as drift. A postwrite/recovery
+slot is null only when a complete feed positively lacks the target; the original
+binding retains its exact integer slot. Native SSH and REST are
+both required. The clean deployed source/import path must match the packet commit/tree.
+Select the existing connection profile consistently for all three commands with
+`export HMC_PROFILE=your-profile` when needed; otherwise the default profile is used.
+The generic preflight/recovery entry points do not accept `--profile`.
+
+After computing the SHA-256 of the exact private packet bytes, use:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py \
+  --group client-ethernet-update --packet /private/st69/packet.json \
+  --packet-sha256 "$packet_sha256" --output /private/st69/preflight.json
+uv run --no-sync python scripts/live_ethernet_update.py \
+  --packet /private/st69/packet.json --packet-sha256 "$packet_sha256" \
+  --preflight /private/st69/preflight.json --out /private/st69/run.json \
+  --grant-packet-sha256 "$packet_sha256" --exclusive-writer-window
+uv run --no-sync python scripts/live_test_recovery.py \
+  --ethernet-update-procedure --results /private/st69/run.json \
+  --output /private/st69/recovery.json
+```
+
+The matching grant and writer acknowledgement must be current operator assertions;
+retained journals never grant another effect. Always run independent read-only recovery,
+including after refusal, interruption or apparent success. Inspect retained intent before
+any new action. Generic recovery refuses ST69. Recovery reports
+`retained_verified_change`, `observed_drift`, `unconfirmed` or `no_write_verified`;
+it never proves restoration or permits an automatic retry.
+
+Phase ceilings are preflight 24 REST/3 SSH/4 MiB/300 s, run 24/3/8 MiB/600 s,
+and recovery 24/2/4 MiB/300 s: aggregate 72/8/16 MiB/1,200 s. Each phase uses one
+own login/logout. The byte measure reserves configured retained-response/output caps
+plus request/command sizes, including failed reads; it does not bound wire traffic,
+delivered stream chunks or transient allocation. REST responses are capped at 256 KiB,
+native output and commands/bodies at 64 KiB; packets at 1 MiB, journals at 4 MiB.
+Owned worker supervision bounds the original phase deadline; killed workers cannot
+establish remote logout. Missing closeout keeps evidence incomplete.
+
+Publish only `scripts/live_test_evidence.py /private/st69/recovery.json` output.
+Raw packets and journals contain private identifiers. Generated evidence names the
+exact tested commit and fixed case; it makes no runtime traffic, VSI-registration,
+saved-profile equality or universal eligibility claim. VSI removal remains unavailable
+without a qualified positive oracle. Registration and offline tests add no live evidence.

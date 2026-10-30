@@ -131,6 +131,59 @@ def validate_network_adapter_creation_fields(
         _require_network_integer(name, value, -(2**31), 2**31 - 1)
 
 
+def validate_network_adapter_update_fields(
+    *,
+    tagged: bool | None = None,
+    addl_vlan_ids: list[int] | None = None,
+    vlan_action: Literal["replace", "add", "remove"] = "replace",
+    qos_priority: int | Literal["none"] | None = None,
+    vsi_manager_id: int | None = None,
+    vsi_type_id: int | None = None,
+    vsi_type_version: int | None = None,
+    remove_vsi_profile: bool = False,
+) -> None:
+    """Validate explicit running-client settings; baseline rules belong to the operation."""
+    if tagged is not None and type(tagged) is not bool:
+        raise ValueError("tagged must be a boolean or omitted")
+    if type(remove_vsi_profile) is not bool:
+        raise ValueError("remove_vsi_profile must be a boolean")
+    if vlan_action not in ("replace", "add", "remove"):
+        raise ValueError("vlan_action must be replace, add or remove")
+    if addl_vlan_ids is None and vlan_action != "replace":
+        raise ValueError("vlan_action requires explicit addl_vlan_ids")
+    if addl_vlan_ids is not None:
+        if not isinstance(addl_vlan_ids, list):
+            raise ValueError("addl_vlan_ids must be a list of integer VLAN IDs")
+        for value in addl_vlan_ids:
+            _require_network_integer("addl_vlan_ids", value, 1, 4094)
+            if value is None:
+                raise ValueError("addl_vlan_ids must contain integers from 1 to 4094")
+        if len(set(addl_vlan_ids)) != len(addl_vlan_ids):
+            raise ValueError("addl_vlan_ids must not contain duplicates")
+        if vlan_action != "remove" and len(addl_vlan_ids) > 20:
+            raise ValueError("the resulting VLAN set must contain at most twenty IDs")
+        if vlan_action != "replace" and not addl_vlan_ids:
+            raise ValueError("VLAN add/remove requires a nonempty list")
+    if qos_priority != "none":
+        _require_network_integer("qos_priority", qos_priority, 0, 7)
+    vsi = (
+        ("vsi_manager_id", vsi_manager_id),
+        ("vsi_type_id", vsi_type_id),
+        ("vsi_type_version", vsi_type_version),
+    )
+    for name, value in vsi:
+        _require_network_integer(name, value, -(2**31), 2**31 - 1)
+    if remove_vsi_profile and any(value is not None for _, value in vsi):
+        raise ValueError(
+            "VSI profile removal cannot be combined with numeric VSI settings"
+        )
+    if not remove_vsi_profile and all(
+        value is None
+        for value in (tagged, addl_vlan_ids, qos_priority, *(value for _, value in vsi))
+    ):
+        raise ValueError("select at least one network adapter update setting")
+
+
 @escapes_string_arguments
 def build_client_network_adapter_document(
     port_vlan_id: int,

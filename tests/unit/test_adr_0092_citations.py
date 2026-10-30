@@ -60,6 +60,7 @@ _MUTATOR_PREFIXES = (
     "submit_power_on_lpar",
     "unassign_",
     "unmount_",
+    "update_",
 )
 _INVENTORY_PATHS = tuple(
     _SOURCE_ROOT / path
@@ -99,6 +100,7 @@ _CLASSIFIED_MUTATORS = frozenset(
         "recover_lpar_migration",
         "remote_restart_lpar",
         "add_network_adapter",
+        "update_network_adapter",
         "add_vscsi_adapter",
         "add_vfc_adapter",
         "delete_adapter",
@@ -407,9 +409,10 @@ def test_malformed_symbol_citations_are_rejected() -> None:
     [
         ("change_lpar_processors", "operations/lpar/processors.py"),
         ("set_lpar_accelerator_qos", "operations/lpar/accelerator.py"),
+        ("update_network_adapter", "operations/virtualization/adapters.py"),
     ],
 )
-def test_processor_quantity_row_and_guard(operation: str, raw_path: str) -> None:
+def test_reconfiguration_row_and_guard(operation: str, raw_path: str) -> None:
     section = _ADR_PATH.read_text().split("#### 3.2 ", 1)[1].split("#### 3.3 ", 1)[0]
     rows = [
         line for line in section.splitlines() if line.startswith(f"| `{operation}` |")

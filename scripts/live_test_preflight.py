@@ -978,6 +978,7 @@ def main(argv: list[str] | None = None) -> int:
             "system-profile-activation-source",
             "lpar-serial-adapter",
             "lpar-boot-start",
+            "client-ethernet-update",
             "vios-ame-source",
             "vios-boot-source",
         ),
@@ -1039,6 +1040,29 @@ def main(argv: list[str] | None = None) -> int:
                 "VIOS boot source preflight requires packet, digest, private output and live read-only checks"
             )
         return vios_boot_source.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
+
+    if args.group == "client-ethernet-update":
+        from live_test import ethernet_update
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error("ST69 requires exact packet, digest and private output")
+        return ethernet_update.main(
             [
                 "preflight",
                 "--packet",
