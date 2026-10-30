@@ -684,7 +684,7 @@ async def test_dispatch_timeout_uses_time_remaining_after_intent_save(
     wire, packet, tmp_path, monkeypatch
 ):
     await prepare(wire, packet, tmp_path)
-    now = [time.monotonic()]
+    now = [1000.0]
     monkeypatch.setattr(
         arm, "time", SimpleNamespace(time=time.time, monotonic=lambda: now[0])
     )
