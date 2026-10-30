@@ -171,25 +171,30 @@ def checked_path(path, *, fresh=False, maximum=4 * MIB):
     return files.private_path(path, fresh=fresh, maximum=maximum)
 
 
-def read_private(path, maximum=4 * MIB):
+def read_record(path, maximum=4 * MIB):
     path = checked_path(path, maximum=maximum)
     with path.open("rb") as stream:
         raw = stream.read(maximum + 1)
     if len(raw) > maximum:
         raise ValueError("ST69 private record exceeds byte bound")
-    return json.loads(
+    document = json.loads(
         raw.decode("utf-8"),
         object_pairs_hook=no_duplicates,
         parse_constant=lambda _: (_ for _ in ()).throw(
             ValueError("ST69 nonfinite JSON refused")
         ),
     )
+    return document, hashlib.sha256(raw).hexdigest()
+
+
+def read_private(path, maximum=4 * MIB):
+    return read_record(path, maximum)[0]
 
 
 def load_packet(path, digest):
     sha(digest)
-    packet = read_private(path, MIB)
-    if hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest:
+    packet, observed_digest = read_record(path, MIB)
+    if observed_digest != digest:
         raise ValueError("ST69 packet digest differs")
     return validate_packet(packet)
 
@@ -851,10 +856,10 @@ async def execute(packet, digest, preflight_path, output_path, grant, exclusive)
         raise ValueError(
             "ST69 separate current packet grant/writer acknowledgement required"
         )
-    predecessor = validate_document(read_private(preflight_path), "preflight")
+    predecessor, preflight_hash = read_record(preflight_path)
+    validate_document(predecessor, "preflight")
     if not predecessor["complete"] or predecessor["packet_sha256"] != digest:
         raise ValueError("ST69 complete matching preflight required")
-    preflight_hash = hashlib.sha256(Path(preflight_path).read_bytes()).hexdigest()
 
     async def action(hmc, document):
         document["preflight_sha256"] = preflight_hash
@@ -929,11 +934,11 @@ async def execute(packet, digest, preflight_path, output_path, grant, exclusive)
 
 
 async def recover(run_path, output_path):
-    original = validate_document(read_private(run_path), "run")
+    original, original_hash = read_record(run_path)
+    validate_document(original, "run")
     packet = original_packet(original)
     # Expiry limits effects, not a later read-only investigation of retained intent.
     exact(packet["candidate"], ("commit", "tree"))
-    original_hash = hashlib.sha256(Path(run_path).read_bytes()).hexdigest()
 
     async def action(hmc, document):
         document.update(

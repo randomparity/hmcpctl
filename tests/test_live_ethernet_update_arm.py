@@ -654,3 +654,31 @@ async def test_missing_closeout_never_becomes_complete_or_retained(
     assert document["complete"] is False
     assert document["session"]["logoff_acknowledged"] is False
     assert document["result"] != "retained_verified_change"
+
+
+def test_packet_hash_binds_the_same_bytes_that_were_parsed(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    tmp_path.chmod(0o700)
+    source = tmp_path / "packet.json"
+    first = json.dumps(packet()).encode()
+    second_packet = packet()
+    second_packet["case"] = "qos-disable"
+    second = json.dumps(second_packet).encode()
+    source.write_bytes(first)
+    source.chmod(0o600)
+    original_open = Path.open
+    swapped = []
+
+    @contextmanager
+    def changing_open(path, mode="r", *args, **kwargs):
+        with original_open(path, mode, *args, **kwargs) as stream:
+            yield stream
+        if path == source and mode == "rb" and not swapped:
+            swapped.append(True)
+            with original_open(source, "wb") as stream:
+                stream.write(second)
+
+    monkeypatch.setattr(Path, "open", changing_open)
+    with pytest.raises(ValueError, match="digest"):
+        arm.load_packet(source, hashlib.sha256(second).hexdigest())
