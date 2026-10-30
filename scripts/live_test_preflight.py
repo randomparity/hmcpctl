@@ -981,6 +981,7 @@ def main(argv: list[str] | None = None) -> int:
             "client-ethernet-update",
             "vios-ame-source",
             "vios-boot-source",
+            "vnic-creation-policy",
         ),
         help="predict one arm instead of every arm",
     )
@@ -1001,6 +1002,31 @@ def main(argv: list[str] | None = None) -> int:
     if args.group and len(args.group) != 1:
         parser.error("exactly one preflight group may be selected")
     args.group = args.group[0] if args.group else None
+    if args.group == "vnic-creation-policy":
+        from live_test import vnic_creation_policy
+
+        if (
+            not args.packet
+            or not args.packet_sha256
+            or not args.output
+            or args.skip_hardware
+            or args.detach_probe
+        ):
+            parser.error(
+                "vNIC policy preflight requires packet, digest, private output and read-only hardware checks"
+            )
+        return vnic_creation_policy.main(
+            [
+                "preflight",
+                "--packet",
+                str(args.packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--output",
+                str(args.output),
+            ]
+        )
+
     if args.group == "vios-ame-source":
         from live_test import vios_ame_source
 

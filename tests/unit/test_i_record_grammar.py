@@ -720,12 +720,13 @@ def _unguarded_a_values(
 ) -> list[str]:
     """Trace the vNIC preflight helper's returned record through the same builder."""
     builder = BUILDER_NAME
-    if (source_path, func.name) == (
-        _REPO_ROOT / "src/hmcpctl/ssh/vnic.py",
-        "add_vnic_backing",
-    ):
+    vnic_source = _REPO_ROOT / "src/hmcpctl/ssh/vnic.py"
+    if (source_path, func.name) in {
+        (vnic_source, "add_vnic_backing"),
+        (_REPO_ROOT / "scripts/live_test/vnic_creation_policy.py", "_capture"),
+    }:
         builder = "build_vnic_add_attributes"
-        tree = ast.parse(source_path.read_text())
+        tree = ast.parse(vnic_source.read_text())
         helper = next(
             node
             for node in tree.body
@@ -896,6 +897,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "unassign_sriov_logical_port_profile",
     }
     assert by_label["-a"] == {
+        "_capture",
         "_set_ethernet_adapter",
         "assign_sriov_logical_port_dynamic",
         "add_vnic_backing",

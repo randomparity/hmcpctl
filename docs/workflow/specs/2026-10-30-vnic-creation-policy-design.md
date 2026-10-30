@@ -130,7 +130,10 @@ expected_commit; system_uuid; lpar_uuid; expected_lpar_id; owner_token; selector
 vios_lpar_id,adapter_id,physical_port_id,capacity_percent}; port_vlan_id; policy (the five
 optional inputs); baseline_sha256; expires_at; exclusive_writer_window:true;
 allow_one_create:true; allow_captured_slot_cleanup:true. Reject unknown keys, duplicate JSON
-keys, invalid types and nonfinite numbers. Secrets stay in the configured connection.
+keys, invalid types and nonfinite numbers. Read at most 1 MiB of packet bytes before JSON
+parsing or client creation. expected_lpar_id and expires_at are positive integers (Unix
+seconds for expiry); selector members are strings, with decimal-string capacity.
+Secrets stay in the configured connection.
 Initial read-only preflight may accept null baseline and emit its digest; capture requires the
 operator’s updated packet/hash and matching fresh baseline. Never rewrite a packet implicitly.
 

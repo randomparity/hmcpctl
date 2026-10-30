@@ -2294,6 +2294,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     source_packets.add_argument("--vios-ame-source-packet", type=Path)
     source_packets.add_argument("--vios-boot-source-packet", type=Path)
+    source_packets.add_argument("--vnic-creation-policy-packet", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
     args = parser.parse_args(argv)
@@ -2315,6 +2316,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.output or args.packet_sha256:
             parser.error("ST67 recovery uses retained results only")
         return _statistics_recovery(args.results)
+    if args.vnic_creation_policy_packet:
+        from live_test import vnic_creation_policy
+
+        if not args.packet_sha256 or not args.output:
+            parser.error(
+                "vNIC policy recovery requires packet digest and private output"
+            )
+        return vnic_creation_policy.main(
+            [
+                "recover",
+                "--packet",
+                str(args.vnic_creation_policy_packet),
+                "--packet-sha256",
+                args.packet_sha256,
+                "--results",
+                str(args.results),
+                "--output",
+                str(args.output),
+            ]
+        )
+
     if args.vios_ame_source_packet:
         from live_test import vios_ame_source
 
