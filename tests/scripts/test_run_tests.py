@@ -1468,7 +1468,12 @@ def test_group_coverage_invalid_inputs_refuse(tmp_path, fault):
         member.unlink()
         member.mkdir()
     elif fault == "version":
-        version = "0.0"
+        other = "3.13" if version != "3.13" else "3.12"
+        for parent in list(directory.iterdir()):
+            parent.rename(
+                parent.with_name(parent.name.replace(f"py{version}-", f"py{other}-"))
+            )
+        version = other
     elif fault == "parent-symlink":
         parent = member.parent
         saved = tmp_path / "saved-parent"

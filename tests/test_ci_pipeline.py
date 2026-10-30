@@ -601,19 +601,19 @@ def test_github_ci_uses_a_bounded_native_architecture_matrix() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     active_workflow, _ = _inactive_ppc64le_job(workflow)
 
-    matrix = re.search(
-        r"^      matrix:\n(?P<body>.*?)(?=^    steps:)",
-        active_workflow,
-        re.MULTILINE | re.DOTALL,
-    )
-    assert matrix
     expected_matrix = "        include:\n" + "".join(
         f"          - architecture: {architecture}\n"
         f"            runner: {runner}\n"
         f'            python-version: "{version}"\n'
         for architecture, runner, version in NATIVE_MATRIX
     )
-    assert matrix["body"] == expected_matrix
+    for name in ("static", "ci"):
+        matrix = re.search(
+            r"^      matrix:\n(?P<body>.*?)(?=^    steps:)",
+            _job_body(active_workflow, name),
+            re.MULTILINE | re.DOTALL,
+        )
+        assert matrix and matrix["body"] == expected_matrix
     assert (
         "name: ${{ matrix.architecture }} / Python "
         "${{ matrix.python-version }} / verify" in workflow
@@ -1668,10 +1668,22 @@ def test_distributed_test_groups_keep_complete_native_producers() -> None:
     assert "UV_NO_SYNC=1 uv run --no-sync prek run --all-files" in static
     assert "needs: static" in groups
     assert "max-parallel: 16" in groups and "fail-fast: false" in groups
-    for version in SUPPORTED_PYTHONS:
-        assert f'"{version}"' in groups
-    for group in ("domain-and-unit", "application", "procedure-arms", "tooling"):
-        assert group in groups
+    axes = {
+        name: shlex.split(values.replace(",", " "))
+        for name, values in re.findall(
+            r"^        ([a-z-]+): \[([^\n]+)\]$",
+            groups,
+            re.MULTILINE,
+        )
+    }
+    assert axes == {
+        "architecture": ["amd64"],
+        "runner": ["ubuntu-24.04"],
+        "python-version": SUPPORTED_PYTHONS,
+        "group": ["domain-and-unit", "application", "procedure-arms", "tooling"],
+    }
+    assert "TEST_GROUP: ${{ matrix.group }}" in groups
+    assert "TEST_PYTHON: ${{ matrix.python-version }}" in final
     assert 'run: just test-group "$TEST_GROUP"' in groups
     assert "include-hidden-files: true" in groups
     assert "path: |\n            .coverage\n            dist/test-results.xml" in groups
@@ -1691,6 +1703,7 @@ def test_distributed_test_groups_keep_complete_native_producers() -> None:
         "Retain validated wheel"
     )
     for body in (static, groups, final):
+        assert "continue-on-error" not in body
         assert "timeout-minutes: 30" in body
         assert "fetch-depth: 0" in body
 
