@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import ctypes
+import json
 import os
 import shutil
 import signal
@@ -16,6 +17,13 @@ from pathlib import Path
 from typing import BinaryIO
 
 SERIAL = False
+GROUP: str | None = None
+COMBINE: tuple[str, str] | None = None
+TEST_GROUPS = ("domain-and-unit", "application", "procedure-arms", "tooling")
+APPLICATION_UNITS = (
+    "tests/unit/test_tool_registry.py",
+    "tests/unit/test_tool_schema_templates.py",
+)
 CHUNK_SIZE = 64 * 1024
 INTERRUPT_GRACE_SECONDS = 300
 TERMINATE_GRACE_SECONDS = 3
@@ -244,10 +252,106 @@ def _exit_status(returncode: int) -> int:
     return 128 + abs(returncode) if returncode < 0 else returncode
 
 
+def _group_arguments(group: str, root: Path = Path(".")) -> list[str]:
+    if group not in TEST_GROUPS:
+        raise ValueError(f"unknown test group: {group}")
+    if group == "application":
+        return ["tests/app", *APPLICATION_UNITS]
+    if group == "tooling":
+        return ["tests/scripts"]
+    arms = sorted(
+        path.relative_to(root).as_posix()
+        for path in root.glob("tests/test_live*.py")
+        if path.is_file()
+    )
+    if group == "procedure-arms":
+        if not arms:
+            raise ValueError(
+                "procedure-arms has no test files; check the working directory"
+            )
+        return arms
+    excluded = ["tests/app", "tests/scripts", *APPLICATION_UNITS, *arms]
+    return ["tests", *(f"--ignore={path}" for path in excluded)]
+
+
+def _coverage_command(arguments: list[str], environment: dict[str, str]) -> None:
+    subprocess.run(
+        [sys.executable, "-m", "coverage", *arguments],
+        env=environment,
+        check=True,
+        timeout=120,
+    )
+
+
+def _combine_coverage(version: str, directory: Path) -> int:
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if version not in ("3.11", "3.12", "3.13", "3.14") or version != current:
+        raise ValueError(
+            f"coverage version {version} requires its matching Python interpreter"
+        )
+    expected = {f"test-coverage-amd64-py{version}-{group}" for group in TEST_GROUPS}
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError("coverage artifact directory must be a real directory")
+    if {path.name for path in directory.iterdir()} != expected:
+        raise ValueError(
+            "coverage requires exactly the four selected-version group artifacts"
+        )
+    inputs = []
+    for name in sorted(expected):
+        parent = directory / name
+        source = parent / ".coverage"
+        if parent.is_symlink() or not parent.is_dir():
+            raise ValueError("coverage group artifacts must be real directories")
+        if source.is_symlink() or not source.is_file() or source.stat().st_size == 0:
+            raise ValueError(
+                "coverage inputs must be nonempty regular files, not symlinks"
+            )
+        inputs.append(source)
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _PYTEST_ENVIRONMENT_OVERRIDES
+    }
+    with tempfile.TemporaryDirectory() as temporary:
+        copies = []
+        for number, source in enumerate(inputs):
+            print(f"test: validating coverage for {source.parent.name}", flush=True)
+            member = Path(temporary) / str(number)
+            member.mkdir()
+            data = member / ".coverage"
+            shutil.copyfile(source, data)
+            report = member / "report.json"
+            _coverage_command(
+                ["json", "--data-file", str(data), "--fail-under=0", "-o", str(report)],
+                environment,
+            )
+            payload = json.loads(report.read_text())
+            metadata = payload.get("meta") if isinstance(payload, dict) else None
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("branch_coverage") is not True
+            ):
+                raise ValueError("coverage requires branch data from every group")
+            copies.append(str(data))
+        aggregate = Path(temporary) / "aggregate"
+        aggregate.mkdir()
+        destination = str(aggregate / ".coverage")
+        # Reports auto-discover suffixed siblings: use only fresh private directories.
+        _coverage_command(
+            ["combine", "--keep", "--data-file", destination, *copies], environment
+        )
+        _coverage_command(["report", "--data-file", destination], environment)
+    print("test: combined coverage gate passed")
+    return 0
+
+
 def _run_suite(parallel: bool) -> int:
     """Run the configured pytest suite and report its result compactly."""
     timings = os.environ.get("HMCPCTL_TEST_TIMINGS") == "1"
     command = [sys.executable, "-m", "pytest"]
+    if GROUP is not None:
+        command.extend(_group_arguments(GROUP))
+        command.extend(["--cov-fail-under=0", "--junitxml=dist/test-results.xml"])
     if parallel:
         command.extend(["-n", "2", "--dist=loadfile", "--max-worker-restart=0"])
     if timings:
@@ -323,23 +427,53 @@ def _run_suite(parallel: bool) -> int:
 def main() -> int:
     """Select a bounded execution mode and restore its process-level ownership."""
     try:
+        if COMBINE is not None:
+            if GROUP is not None:
+                raise ValueError(
+                    "coverage combination and test-group execution are separate modes"
+                )
+            return _combine_coverage(COMBINE[0], Path(COMBINE[1]))
         with _parallel_mode() as parallel:
             status = _run_suite(parallel)
         if status == 0:
             print(
-                "test: passed; configured coverage gate passed"
+                (
+                    f"test: {GROUP} passed; combined coverage pending"
+                    if GROUP is not None
+                    else "test: passed; configured coverage gate passed"
+                )
                 + ("; workers=2" if parallel else "")
             )
         return status
     except KeyboardInterrupt:
         return 130
-    except OSError as error:
-        print(f"test: cannot run or clean up pytest: {error}", file=sys.stderr)
+    except subprocess.CalledProcessError as error:
+        print(
+            f"test: coverage command failed with exit {error.returncode}",
+            file=sys.stderr,
+        )
+        return _exit_status(error.returncode)
+    except subprocess.TimeoutExpired:
+        print("test: coverage command timed out after 120s", file=sys.stderr)
+        return 124
+    except (OSError, ValueError) as error:
+        operation = "coverage" if COMBINE is not None else "pytest"
+        print(f"test: cannot run or clean up {operation}: {error}", file=sys.stderr)
         return 1
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--group", choices=TEST_GROUPS, help="run one coverage-producing group"
+    )
+    mode.add_argument(
+        "--combine-coverage",
+        nargs=2,
+        metavar=("PYTHON", "DIRECTORY"),
+        help="validate and combine all four coverage artifacts",
+    )
     parser.add_argument(
         "--timings", action="store_true", help="retain pytest phase durations"
     )
@@ -348,6 +482,8 @@ if __name__ == "__main__":
     )
     arguments = parser.parse_args()
     SERIAL = arguments.serial
+    GROUP = arguments.group
+    COMBINE = tuple(arguments.combine_coverage) if arguments.combine_coverage else None
     if arguments.timings:
         os.environ["HMCPCTL_TEST_TIMINGS"] = "1"
     raise SystemExit(main())

@@ -1266,3 +1266,318 @@ def test_real_parallel_interrupt_keeps_pytest_diagnostic(
     assert b"KeyboardInterrupt" in result["stderr"]
     assert b"INTERNALERROR" not in result["stderr"]
     assert result["state"] == 1 and result["handler_restored"]
+
+
+_GROUPS = ("domain-and-unit", "application", "procedure-arms", "tooling")
+
+
+def _group_project(root: Path) -> None:
+    root.joinpath("pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\npythonpath = ["."]\n'
+        'addopts = "--cov=target --cov-report="\n'
+        '[tool.coverage.run]\nbranch = true\nsource = ["target"]\n'
+        "[tool.coverage.report]\nfail_under = 90.5\nprecision = 2\n"
+    )
+    root.joinpath("target.py").write_text(
+        "def choose(flag):\n    if flag:\n        return 1\n    return 2\n"
+    )
+    for name in (
+        "tests/app/test_application.py",
+        "tests/scripts/test_tooling.py",
+        "tests/test_live_case.py",
+        "tests/unit/test_tool_registry.py",
+        "tests/unit/test_tool_schema_templates.py",
+        "tests/domain/test_domain.py",
+        "tests/new/future_test.py",
+    ):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "def test_case():\n    import target\n    assert target.choose(False) == 2\n"
+        )
+
+
+def _group_command(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(MODULE_PATH), *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_group_selection_partitions_current_and_future_files(tmp_path: Path) -> None:
+    _group_project(tmp_path)
+
+    def collect(args):
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "--no-cov", "-q", *args],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        return {
+            line
+            for line in result.stdout.splitlines()
+            if line.startswith("tests/") and "::" in line
+        }
+
+    baseline = collect(["tests"])
+    members = [
+        collect(run_tests._group_arguments(group, tmp_path)) for group in _GROUPS
+    ]
+    assert set.union(*members) == baseline
+    assert sum(map(len, members)) == len(baseline) == 7
+    assert any("future_test.py" in item for item in members[0])
+    assert len(members[1]) == 3
+
+
+@pytest.mark.parametrize("group", ["unknown", "procedure-arms"])
+def test_group_unknown_and_empty_arm_refuse_before_popen(tmp_path, monkeypatch, group):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(run_tests, "GROUP", group, raising=False)
+    monkeypatch.setattr(
+        run_tests.subprocess,
+        "Popen",
+        lambda *_a, **_k: pytest.fail("unexpected pytest"),
+    )
+    assert run_tests.main() == 1
+
+
+@pytest.mark.parametrize("status", [0, 1, 5, -9])
+def test_group_argv_preserves_lifecycle_and_pending_summary(
+    monkeypatch, capsys, status
+):
+    monkeypatch.setattr(run_tests, "GROUP", "tooling", raising=False)
+    calls, output = _stub_pytest(monkeypatch, b"group diagnostics\n", status)
+    assert run_tests.main() == run_tests._exit_status(status)
+    command = calls[0][0]
+    assert "tests/scripts" in command
+    assert "--cov-fail-under=0" in command
+    assert "--junitxml=dist/test-results.xml" in command
+    captured = capsys.readouterr()
+    assert "configured coverage gate passed" not in captured.out
+    assert ("combined coverage pending" in captured.out) is (status == 0)
+    assert output.closed
+
+
+def test_real_group_run_retains_junit_and_partial_branch_data(tmp_path):
+    _group_project(tmp_path)
+    partial = _group_command(tmp_path, "--group", "tooling", "--serial")
+    assert partial.returncode == 0, partial.stdout + partial.stderr
+    assert "combined coverage pending" in partial.stdout
+    assert (tmp_path / ".coverage").is_file()
+    assert (tmp_path / "dist/test-results.xml").is_file()
+    full = _group_command(tmp_path, "--serial")
+    assert full.returncode == 1
+    assert "Required test coverage of 90.5% not reached" in full.stderr
+
+
+def _group_data(root: Path, *, complete: bool = True, statement: bool = False) -> Path:
+    _group_project(root)
+    directory = root / "coverage-parts"
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    environment = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in run_tests._PYTEST_ENVIRONMENT_OVERRIDES
+    }
+    for number, group in enumerate(_GROUPS):
+        member = directory / f"test-coverage-amd64-py{version}-{group}"
+        member.mkdir(parents=True)
+        (root / "drive.py").write_text(
+            f"import target; target.choose({complete and number % 2 == 1})\n"
+        )
+        args = [
+            sys.executable,
+            "-m",
+            "coverage",
+            "run",
+            "--data-file",
+            str(member / ".coverage"),
+        ]
+        if statement:
+            config = root / "statement.toml"
+            config.write_text(
+                '[tool.coverage.run]\nsource = ["target"]\nbranch = false\n'
+            )
+            args.extend(["--rcfile", str(config)])
+        subprocess.run(
+            [*args, "drive.py"],
+            cwd=root,
+            env=environment,
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+    return directory
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_real_group_coverage_union_and_exact_floor(tmp_path, complete):
+    directory = _group_data(tmp_path, complete=complete)
+    originals = {p: p.read_bytes() for p in directory.glob("*/.coverage")}
+    result = _group_command(
+        tmp_path,
+        "--combine-coverage",
+        f"{sys.version_info.major}.{sys.version_info.minor}",
+        str(directory),
+    )
+    assert result.returncode == (0 if complete else 2), result.stdout + result.stderr
+    assert ("combined coverage gate passed" in result.stdout) is complete
+    assert all(p.read_bytes() == data for p, data in originals.items())
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing",
+        "extra",
+        "empty",
+        "corrupt",
+        "statement",
+        "symlink",
+        "directory",
+        "version",
+        "parent-symlink",
+        "root-symlink",
+        "root-missing",
+    ],
+)
+def test_group_coverage_invalid_inputs_refuse(tmp_path, fault):
+    directory = _group_data(tmp_path, statement=fault == "statement")
+    member = next(directory.glob("*/.coverage"))
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if fault == "missing":
+        member.unlink()
+    elif fault == "extra":
+        (directory / "unexpected").mkdir()
+    elif fault == "empty":
+        member.write_bytes(b"")
+    elif fault == "corrupt":
+        member.write_bytes(b"not coverage data")
+    elif fault == "symlink":
+        saved = tmp_path / "saved"
+        member.rename(saved)
+        member.symlink_to(saved)
+    elif fault == "directory":
+        member.unlink()
+        member.mkdir()
+    elif fault == "version":
+        version = "0.0"
+    elif fault == "parent-symlink":
+        parent = member.parent
+        saved = tmp_path / "saved-parent"
+        parent.rename(saved)
+        parent.symlink_to(saved, target_is_directory=True)
+    elif fault == "root-symlink":
+        alias = tmp_path / "alias"
+        alias.symlink_to(directory, target_is_directory=True)
+        directory = alias
+    elif fault == "root-missing":
+        directory = tmp_path / "absent"
+    result = _group_command(tmp_path, "--combine-coverage", version, str(directory))
+    assert result.returncode != 0
+    assert "combined coverage gate passed" not in result.stdout
+    assert "coverage" in result.stderr.lower()
+
+
+def test_group_coverage_foreign_shards_are_untouched(tmp_path):
+    directory = _group_data(tmp_path, complete=False)
+    (tmp_path / "drive.py").write_text("import target; target.choose(True)\n")
+    shard = tmp_path / ".coverage.previous"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "coverage",
+            "run",
+            "--data-file",
+            str(shard),
+            "drive.py",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    caller = tmp_path / ".coverage"
+    caller.write_bytes(b"caller-owned prior coverage")
+    foreign = [shard, next(directory.iterdir()) / ".coverage.previous"]
+    foreign[1].write_bytes(shard.read_bytes())
+    original = {
+        p: p.read_bytes() for p in [caller, *foreign, *directory.glob("*/.coverage")]
+    }
+    result = _group_command(
+        tmp_path,
+        "--combine-coverage",
+        f"{sys.version_info.major}.{sys.version_info.minor}",
+        str(directory),
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert all(p.read_bytes() == data for p, data in original.items())
+
+
+@pytest.mark.parametrize(
+    "failure", ["json", "combine", "report", "timeout", "malformed", "shape"]
+)
+def test_group_coverage_native_failure_and_ambient_env(
+    tmp_path, monkeypatch, capsys, failure
+):
+    directory = _group_data(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        run_tests,
+        "COMBINE",
+        (f"{sys.version_info.major}.{sys.version_info.minor}", str(directory)),
+    )
+    for name in run_tests._PYTEST_ENVIRONMENT_OVERRIDES:
+        monkeypatch.setenv(name, "must-not-reach-child")
+    calls = []
+
+    def native(command, **kwargs):
+        calls.append(command[3])
+        assert kwargs["timeout"] == 120 and kwargs["check"] is True
+        assert not (set(kwargs["env"]) & run_tests._PYTEST_ENVIRONMENT_OVERRIDES)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, 120)
+        if command[3] == failure:
+            raise subprocess.CalledProcessError(37, command)
+        if command[3] == "json":
+            payload = (
+                "[1]"
+                if failure == "shape"
+                else "not json"
+                if failure == "malformed"
+                else '{"meta":{"branch_coverage":true}}'
+            )
+            Path(command[-1]).write_text(payload)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(run_tests.subprocess, "run", native)
+    monkeypatch.setattr(
+        run_tests,
+        "_parallel_mode",
+        lambda: pytest.fail("coverage entered pytest admission"),
+    )
+    expected = (
+        124 if failure == "timeout" else 1 if failure in ("shape", "malformed") else 37
+    )
+    assert run_tests.main() == expected
+    captured = capsys.readouterr()
+    assert "combined coverage gate passed" not in captured.out
+    assert "coverage" in captured.err
+    if failure == "report":
+        assert calls == ["json"] * 4 + ["combine", "report"]
+
+
+def test_group_and_combine_modes_are_exclusive(tmp_path):
+    result = _group_command(
+        tmp_path, "--group", "tooling", "--combine-coverage", "3.12", "."
+    )
+    assert result.returncode == 2
+    assert "not allowed" in result.stderr
