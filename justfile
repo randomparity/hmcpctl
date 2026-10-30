@@ -103,6 +103,13 @@ test:
 test-timings:
     uv run --no-sync python scripts/run_tests.py --timings
 
+# named subsets produce data; the per-version aggregate owns the coverage floor
+test-group group:
+    uv run --no-sync python scripts/run_tests.py --group {{quote(group)}} --timings
+
+test-collected python:
+    uv run --no-sync python scripts/run_tests.py --combine-coverage {{quote(python)}} coverage-parts
+
 # time each recipe body in the canonical graph and retain pytest durations
 verify-timings:
     HMCPCTL_TEST_TIMINGS=1 just --time verify
@@ -133,7 +140,11 @@ verify: static verify-runtime
 # runtime checks; CI covers static gates through the real hooks first
 # The root help goes through the installed console script, so the entry point is
 # covered; the group helps are derived from the Typer app rather than listed here.
-verify-runtime: test smoke build verify-artifacts
+verify-runtime: test verify-runtime-checks
+
+verify-collected python: (test-collected python) verify-runtime-checks
+
+verify-runtime-checks: smoke build verify-artifacts
     uv run --no-sync hmcpctl --help >/dev/null
     uv run --no-sync python scripts/smoke_cli_groups.py
     @echo "verify: all groups load OK"

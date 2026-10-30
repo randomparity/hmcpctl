@@ -20,6 +20,8 @@ from types import MappingProxyType
 from typing import Any, Literal, TypeVar, get_args, get_origin, get_type_hints
 
 from fastmcp import FastMCP
+from fastmcp.tools.base import Tool
+from fastmcp.tools.function_tool import FunctionTool
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 
@@ -192,6 +194,36 @@ class ToolDefinition:
     name: str
     handler: Callable[..., Any]
     security: ToolSecurity
+
+    @functools.cached_property
+    def _schema_template(self) -> FunctionTool:
+        # FastMCP normalizes injected-parameter signatures in place.
+        handler = self.handler
+        if inspect.iscoroutinefunction(handler):
+
+            @functools.wraps(handler)
+            async def metadata_handler(*args: Any, **kwargs: Any) -> Any:
+                return await handler(*args, **kwargs)
+
+        else:
+
+            @functools.wraps(handler)
+            def metadata_handler(*args: Any, **kwargs: Any) -> Any:
+                return handler(*args, **kwargs)
+
+        return Tool.from_function(
+            metadata_handler, annotations=annotations_for(self.security.effect)
+        )
+
+    def _bind(self, authorize: Authorize) -> FunctionTool:
+        return self._schema_template.model_copy(
+            deep=True,
+            update={
+                "fn": authorized(
+                    self.name, self.security, self._schema_template.fn, authorize
+                )
+            },
+        )
 
 
 # The access policy's dispatch-time question, taken as a callable for the reason
@@ -570,15 +602,7 @@ class _ToolModuleBuilder:
         for definition in self.definitions:
             if not permits(definition.name):
                 continue
-            mcp.tool(
-                authorized(
-                    definition.name,
-                    definition.security,
-                    definition.handler,
-                    authorize,
-                ),
-                annotations=annotations_for(definition.security.effect),
-            )
+            mcp.add_tool(definition._bind(authorize))
 
     def tool_security(self) -> Mapping[str, ToolSecurity]:
         return MappingProxyType(
