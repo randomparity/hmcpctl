@@ -171,6 +171,10 @@ No caller-supplied command or arbitrary settings record. Values/cases are enumer
 Require separate matching packet grant, writer acknowledgement and retained-change permission.
 Retain the requested change; no restoration or cleanup writer is authorized by this procedure.
 Always run read-only recovery independently, including after apparent success or a held run.
+Submission witnesses must match the fixed case/baseline and their status lists; no-write
+qualifies only for an already-empty VLAN-only request. Baseline/prewrite admission remains
+strict. Postwrite/recovery may retain bounded inventory growth or a positively absent
+target, represented by a null observed slot while preserving the original integer binding.
 Recovery classifies retained verified change, observed drift or unconfirmed state; never CLEAN.
 Proposed budgets: 72 REST + 8 SSH transports, 16 MiB logical payload allowances, 1,200 seconds;
 logical allowances cover configured retained response/output caps plus requests/commands, not

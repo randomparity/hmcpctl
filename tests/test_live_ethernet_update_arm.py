@@ -782,3 +782,121 @@ async def test_observed_identity_drift_roundtrips_through_recovery_and_evidence(
     assert rendered is not None and "observed_drift" in rendered
     assert "sys-R1" not in rendered and "sys-R2" not in rendered
     assert len(live_boundary.writes) == 1
+
+
+async def healthy(boundary):
+    digest, path, _ = await run_preflight(boundary)
+    run_path = boundary.root / "run.json"
+    run = await arm.execute(boundary.packet, digest, path, run_path, digest, True)
+    recovery = await arm.recover(run_path, boundary.root / "recovery.json")
+    assert run["complete"] and recovery["result"] == "retained_verified_change"
+    return run_path, run, recovery
+
+
+def corrupt(document, case):
+    value = document["submission"]
+    witness = value["verification"]
+    if case == "nonempty_no_write":
+        value.update(
+            submission="not_dispatched",
+            mutation_dispatched=False,
+            reason="already_satisfied",
+        )
+        document["result"] = "no_write_verified"
+    elif case == "expected":
+        witness["expected"] = {"qos_priority": 7}
+    elif case == "observed":
+        witness["observed"] = {"qos_priority": 0}
+    elif case == "mismatch_list":
+        witness["mismatched_fields"] = ["qos_priority"]
+    elif case == "unavailable_type":
+        witness["unavailable_fields"] = "malformed"
+    elif case == "preservation":
+        value["preservation"]["changed_adapter_uuids"] = [
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        ]
+    elif case == "boolean_number":
+        witness["observed"] = {"qos_priority": True}
+    else:
+        value["errors"] = [17]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        "nonempty_no_write",
+        "expected",
+        "observed",
+        "mismatch_list",
+        "unavailable_type",
+        "preservation",
+        "boolean_number",
+        "error_type",
+    ],
+)
+async def test_corrupt_history_refuses_in_both_readers(
+    live_boundary, monkeypatch, case
+):
+    import live_test_evidence as evidence
+
+    run_path, run, recovery = await healthy(live_boundary)
+    corrupt(run, case)
+    corrupt(recovery, case)
+    arm.checkpoint(run_path, run)
+    assert evidence.render(recovery) is None
+    monkeypatch.setattr(
+        arm, "load_profile", lambda _: pytest.fail("credentials reached")
+    )
+    with pytest.raises((ValueError, TypeError)):
+        await arm.recover(run_path, live_boundary.root / "bad-recovery.json")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["disappeared", "inventory_growth"])
+async def test_positive_inventory_drift_is_retained(live_boundary, change):
+    import live_test_evidence as evidence
+
+    run_path, run, _ = await healthy(live_boundary)
+    if change == "disappeared":
+        live_boundary.rows.clear()
+    else:
+        for index in range(1, 10):
+            row = copy.deepcopy(live_boundary.rows[0])
+            row["UUID"] = f"{index:08x}-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            row["Resource"]["VirtualSlotNumber"] = str(4 + index)
+            live_boundary.rows.append(row)
+    recovery = await arm.recover(run_path, live_boundary.root / "changed-recovery.json")
+    assert recovery["result"] == "observed_drift"
+    assert recovery["observations"]["recovery"] is not None
+    assert recovery["binding"] == run["binding"]
+    assert (
+        arm.validate_document(json.loads(json.dumps(recovery)), "recover") == recovery
+    )
+    if change == "disappeared":
+        assert recovery["observations"]["recovery"]["slot"] is None
+        assert recovery["binding"]["slot"] == 4
+    assert "observed_drift" in evidence.render(recovery)
+    assert len(live_boundary.writes) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case", ["baseline_absent", "prewrite_absent", "absent_nonnull", "present_null"]
+)
+async def test_absence_policy_does_not_weaken_admission_or_invent_slot(
+    live_boundary, case
+):
+    _, _, document = await healthy(live_boundary)
+    if case == "baseline_absent":
+        selected = document["baseline"]
+    elif case == "prewrite_absent":
+        selected = document["observations"]["prewrite"]
+    else:
+        selected = document["observations"]["recovery"]
+    if case != "present_null":
+        selected["adapters"] = []
+    if case != "absent_nonnull":
+        selected["slot"] = None
+    with pytest.raises((ValueError, TypeError)):
+        arm.validate_document(document, "recover")

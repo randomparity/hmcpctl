@@ -2692,7 +2692,10 @@ Choose exactly one fixed case: `tagging-enable`/`tagging-disable`, `vlan-replace
 (tagged, 101/102), `vlan-add` (tagged, 101), `vlan-remove` (101), `vlan-empty`,
 `qos-set` (3), `qos-disable`, `vsi-set` (manager/type/version 1/2/3), or
 `vsi-remove`. A case incompatible with its baseline refuses; do not substitute values.
-The inventory may contain at most eight client adapters. Native SSH and REST are
+Baseline and prewrite admission allow at most eight client adapters. Later bounded
+observations retain inventory growth or disappearance as drift. A postwrite/recovery
+slot is null only when a complete feed positively lacks the target; the original
+binding retains its exact integer slot. Native SSH and REST are
 both required. The clean deployed source/import path must match the packet commit/tree.
 Select the existing connection profile consistently for all three commands with
 `export HMC_PROFILE=your-profile` when needed; otherwise the default profile is used.

@@ -319,7 +319,7 @@ class CountedHMC(HMCClient):
             return await self.native(config, command, max_output_bytes=SSH_CAP)
 
 
-async def snapshot(hmc, packet):
+async def snapshot(hmc, packet, *, admitted=True):
     consoles = await hmc.list_uom("ManagementConsole")
     if not isinstance(consoles, list) or len(consoles) != 1:
         raise ValueError("ST69 unique console identity required")
@@ -340,10 +340,13 @@ async def snapshot(hmc, packet):
     )
     entries = deepcopy(await hmc._network_adapter_creation_feed(packet["lpar_uuid"]))
     inventory = adapters._network_update_inventory(entries)
-    if len(inventory) > 8 or packet["adapter_uuid"] not in inventory:
+    if admitted and (len(inventory) > 8 or packet["adapter_uuid"] not in inventory):
         raise ValueError("ST69 bounded contained adapter inventory required")
-    slot = adapters._network_integer(
-        inventory[packet["adapter_uuid"]].get("VirtualSlotNumber"), 0, 65535
+    target = inventory.get(packet["adapter_uuid"])
+    slot = (
+        adapters._network_integer(target.get("VirtualSlotNumber"), 0, 65535)
+        if target is not None
+        else None
     )
     return {
         "hmc_uuid": packet["hmc_uuid"],
@@ -566,7 +569,17 @@ def validate_history(document):
         ):
             raise ValueError("ST69 complete postwrite observation required")
     if document["submission"] is not None:
-        validate_submission(document["submission"], bound)
+        if intent is None:
+            raise ValueError("ST69 submission requires original fixed-case intent")
+        expected, attributes = configured(
+            document["baseline"], original_packet(document)
+        )
+        validate_submission(
+            document["submission"],
+            bound,
+            expected,
+            no_write_allowed=intent["case"] == "vlan-empty" and not attributes,
+        )
     if document["result"] in ("retained_verified_change", "no_write_verified"):
         observed = document["observations"][
             "recovery" if document["phase"] == "recover" else "postwrite"
@@ -611,22 +624,24 @@ def validate_snapshot(value, bound, *, admitted):
         )
         or type(value["partition_id"]) is not int
         or value["partition_id"] <= 0
-        or type(value["slot"]) is not int
     ):
         raise ValueError("ST69 snapshot native identities invalid")
     exact(value["sync"], ("current_profile_sync", "lives_in", "profile_name"))
     if value["sync"]["lives_in"] != "unknown":
         raise ValueError("ST69 cannot claim saved-profile propagation")
     inventory = adapters._network_update_inventory(value["adapters"])
-    if (
-        len(inventory) > 8
-        or bound["adapter_uuid"] not in inventory
-        or adapters._network_integer(
-            inventory[bound["adapter_uuid"]].get("VirtualSlotNumber"), 0, 65535
-        )
+    target = inventory.get(bound["adapter_uuid"])
+    if admitted and (len(inventory) > 8 or target is None):
+        raise ValueError("ST69 admitted adapter inventory invalid")
+    if target is None:
+        if value["slot"] is not None:
+            raise ValueError("ST69 absent observed target requires null slot")
+    elif (
+        type(value["slot"]) is not int
+        or adapters._network_integer(target.get("VirtualSlotNumber"), 0, 65535)
         != value["slot"]
     ):
-        raise ValueError("ST69 snapshot adapter identity/slot invalid")
+        raise ValueError("ST69 observed adapter slot invalid")
     # Admission stays exact; later observations must retain readable drift as evidence.
     if admitted and any(
         value[key] != bound[key]
@@ -635,7 +650,7 @@ def validate_snapshot(value, bound, *, admitted):
         raise ValueError("ST69 snapshot native tuple differs")
 
 
-def validate_submission(value, bound):
+def validate_submission(value, bound, expected, *, no_write_allowed):
     exact(
         value,
         (
@@ -670,6 +685,8 @@ def validate_submission(value, bound):
     ) or value["reason"] not in (None, "already_satisfied"):
         raise ValueError("ST69 submission state invalid")
     no_write = value["submission"] == "not_dispatched"
+    if no_write and not no_write_allowed:
+        raise ValueError("ST69 no-write requires already-empty VLAN-only intent")
     if no_write != (value["mutation_dispatched"] is False) or no_write != (
         value["reason"] == "already_satisfied"
     ):
@@ -686,6 +703,83 @@ def validate_submission(value, bound):
         or not isinstance(value["errors"], list)
     ):
         raise ValueError("ST69 submission observation enums invalid")
+    witness = value["verification"]
+    exact(witness["expected"], expected)
+    if witness["expected"] != expected or any(
+        type(witness["expected"][key]) is not type(wanted)
+        for key, wanted in expected.items()
+    ):
+        raise ValueError("ST69 submission expected fields differ from fixed case")
+    if any(
+        isinstance(item, list) and any(type(member) is not int for member in item)
+        for item in witness["expected"].values()
+    ):
+        raise ValueError("ST69 expected VLAN members must be integers")
+    observed = witness["observed"]
+    if not isinstance(observed, dict) or not set(observed) <= set(expected):
+        raise ValueError("ST69 observed fields differ from selected closure")
+    for name, observed_value in observed.items():
+        validate_observed_value(name, observed_value)
+    missing = [
+        name
+        for name in expected
+        if observed.get(name) is None or name == "remove_vsi_profile"
+    ]
+    mismatched = [
+        name
+        for name in expected
+        if name not in missing and observed[name] != expected[name]
+    ]
+    status = "mismatched" if mismatched else "unavailable" if missing else "verified"
+    if (
+        witness["status"] != status
+        or witness["mismatched_fields"] != mismatched
+        or witness["unavailable_fields"] != missing
+    ):
+        raise ValueError("ST69 verification status contradicts its witnesses")
+    preservation = value["preservation"]
+    changes = preservation["changed_adapter_uuids"]
+    if (
+        preservation["scope"]
+        != "parsed_adapter_resources_except_metadata_and_selected_fields"
+        or not isinstance(changes, list)
+        or any(
+            not isinstance(identity, str) or not is_uuid(identity)
+            for identity in changes
+        )
+        or len({identity.casefold() for identity in changes}) != len(changes)
+    ):
+        raise ValueError("ST69 preservation witness invalid")
+    if (preservation["status"] == "drifted") != bool(changes):
+        raise ValueError("ST69 preservation status contradicts changed identities")
+    if any(not isinstance(error, str) or len(error) > 256 for error in value["errors"]):
+        raise ValueError("ST69 bounded local submission errors required")
+
+
+def validate_observed_value(name, value):
+    if value is None:
+        return
+    if name == "tagged":
+        valid = type(value) is bool
+    elif name == "addl_vlan_ids":
+        valid = (
+            isinstance(value, list)
+            and len(value) <= 4094
+            and all(type(member) is int and 1 <= member <= 4094 for member in value)
+            and len(set(value)) == len(value)
+        )
+    elif name == "qos_priority":
+        valid = value == "none" or (type(value) is int and 0 <= value <= 7)
+    elif name == "remove_vsi_profile":
+        exact(value, ("vsi_manager_id", "vsi_type_id", "vsi_type_version"))
+        valid = all(
+            member is None or (type(member) is int and -(2**31) <= member < 2**31)
+            for member in value.values()
+        )
+    else:
+        valid = type(value) is int and -(2**31) <= value < 2**31
+    if not valid:
+        raise ValueError("ST69 observed field type/range invalid")
 
 
 def original_packet(document):
@@ -942,7 +1036,9 @@ async def execute(packet, digest, preflight_path, output_path, grant, exclusive)
         hmc.allowed_write = None
         document["submission"] = asdict(result)
         checkpoint(output_path, document)
-        document["observations"]["postwrite"] = await snapshot(hmc, packet)
+        document["observations"]["postwrite"] = await snapshot(
+            hmc, packet, admitted=False
+        )
 
     return await phase(packet, digest, "run", output_path, action)
 
@@ -965,7 +1061,7 @@ async def recover(run_path, output_path):
         )
         if files.connection(hmc.config) != original["binding"]["connection"]:
             raise ValueError("ST69 recovery connection differs")
-        current = await snapshot(hmc, packet)
+        current = await snapshot(hmc, packet, admitted=False)
         document["observations"] = deepcopy(original["observations"])
         document["observations"]["recovery"] = current
         document["result"] = outcome(original, packet, current)
