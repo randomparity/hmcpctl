@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import shlex
 
 import pytest
@@ -291,3 +292,50 @@ async def test_remove_vnic_uses_p_and_s(monkeypatch, config) -> None:
         "-s",
         "slot one",
     ]
+
+
+@pytest.mark.asyncio
+async def test_two_policy_lists_keep_separate_hmc_attributes(monkeypatch, config):
+    calls = []
+
+    async def run(_config, command):
+        calls.append(command)
+        return "ok"
+
+    monkeypatch.setattr("hmcpctl.ssh.vnic.run_hmc_command", run)
+    await add_vnic_backing(
+        config,
+        "system",
+        "client",
+        "sriov/vios/1/1/1/2",
+        0,
+        policy={
+            "pvid_priority": "0",
+            "allowed_vlan_ids": "2,3",
+            "allowed_os_mac_addrs": "aabbccddeeff,001122334455",
+            "auto_priority_failover": "0",
+        },
+    )
+    assert len(calls) == 1
+    pairs = next(csv.reader([shlex.split(calls[0])[-1]], strict=True))
+    assert pairs == [
+        "port_vlan_id=0",
+        "backing_devices=sriov/vios/1/1/1/2",
+        "pvid_priority=0",
+        "allowed_vlan_ids=2,3",
+        "allowed_os_mac_addrs=aabbccddeeff,001122334455",
+        "auto_priority_failover=0",
+    ]
+
+
+def test_policy_encoded_record_byte_boundary():
+    from hmcpctl.ssh.vnic import build_vnic_add_attributes
+
+    prefix = build_vnic_add_attributes("", 0, {"pvid_priority": "0"})
+    backing = "x" * (65_536 - len(prefix.encode("utf-8")))
+    assert (
+        len(build_vnic_add_attributes(backing, 0, {"pvid_priority": "0"}).encode())
+        == 65_536
+    )
+    with pytest.raises(ValueError, match="65536-byte"):
+        build_vnic_add_attributes(backing + "é", 0, {"pvid_priority": "0"})

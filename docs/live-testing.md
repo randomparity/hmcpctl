@@ -2737,3 +2737,94 @@ Raw packets and journals contain private identifiers. Generated evidence names t
 exact tested commit and fixed case; it makes no runtime traffic, VSI-registration,
 saved-profile equality or universal eligibility claim. VSI removal remains unavailable
 without a qualified positive oracle. Registration and offline tests add no live evidence.
+
+## Single-backing vNIC creation policy (standalone #1827)
+
+`scripts/live_vnic_creation_policy.py` exercises optional creation policy on an
+**already owned, eligible LPAR**. It is separate from default/all runner groups.
+It permits one vNIC create and, only after a complete successful result plus fresh
+identity and baseline checks, one removal of that captured slot. It never creates
+or activates an LPAR, changes another backing, or updates an existing vNIC.
+The current SR-IOV mutation admission remains HMC V10R3 M1060 / model 8375-42A.
+This procedure is implemented but optional-policy hardware qualification is unrun.
+
+Use an exclusive writer window and a clean checkout at the exact candidate commit.
+Run `just setup` there; the procedure verifies that the imported package comes from
+that checkout. Keep credentials in the configured profile. Prepare a private,
+mode-0600 UTF-8 JSON packet in an existing private directory. Unknown or duplicate
+keys, nonfinite numbers and invalid types are refused. Its exact fields are:
+
+| Field | Value |
+|---|---|
+| `version` | Integer `1` |
+| `configured_profile` | Existing connection profile name |
+| `hmc_identity` | Object with exact `host` string and integer `port` |
+| `expected_commit` | Full lowercase 40-hex candidate commit |
+| `system_uuid`, `lpar_uuid` | Existing contained system and LPAR UUID strings |
+| `expected_lpar_id` | Positive integer native partition ID |
+| `owner_token` | Exact unique caller token from the fixture's ownership stamp |
+| `selector` | Object containing string `vios_name`, `vios_lpar_id`, `adapter_id`, `physical_port_id`, and decimal-string `capacity_percent` |
+| `port_vlan_id` | Integer `0..4094` |
+| `policy` | Object with any selected subset of the five creation arguments below |
+| `baseline_sha256` | Initially `null`; subsequently the preflight's 64-hex digest |
+| `expires_at` | Positive integer Unix expiry time for the exclusive writer window |
+| `exclusive_writer_window` | `true` |
+| `allow_one_create` | `true` |
+| `allow_captured_slot_cleanup` | `true` |
+
+The configured agent must own the fixture and its REST/SSH descriptions must agree
+with `owner_token`. Policy values use the normal add contract: integer
+`pvid_priority` (`0..7`); `allowed_vlan_ids` (unique integer list `1..4094`, or
+`"all"`/`"none"`); `allowed_os_mac_addrs` (unique 12-hex MAC list, or `"all"`/`"none"`);
+boolean `auto_priority_failover`; and 12-hex `mac_addr`. Empty lists are refused;
+use `"none"`. Omitted/null fields remain unselected. A packet with no selected
+policies exercises the legacy path and earns no optional-policy verification credit.
+The complete encoded optional-policy attribute record is limited to 65,536 UTF-8
+bytes; this is application policy, not a claimed HMC list-count limit.
+
+Run read-only preflight with the initial packet and a fresh output directory:
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py \
+  --group vnic-creation-policy --packet "$PACKET" \
+  --packet-sha256 "$PACKET_SHA256" --output "$PREFLIGHT_OUTPUT"
+```
+
+`PACKET_SHA256` is the SHA-256 of the exact packet bytes. Preflight writes its
+`baseline_sha256` into private `results.json`; it never rewrites the packet.
+After `READY`, copy that digest into the packet, recompute its hash, and repeat
+preflight with a new output directory. `SKIP` is an ineligible environment and
+provides no live proof. A refused or uncertain preflight does not authorize capture.
+
+For the approved, still-unexpired window, invoke the actual named arm once:
+
+```sh
+uv run --no-sync python scripts/live_vnic_creation_policy.py \
+  --packet "$PACKET" --packet-sha256 "$PACKET_SHA256" --output "$CAPTURE_OUTPUT"
+```
+
+Always run independent read-only recovery, including after `CLEAN` or an error:
+
+```sh
+uv run --no-sync python scripts/live_test_recovery.py \
+  --vnic-creation-policy-packet "$PACKET" --packet-sha256 "$PACKET_SHA256" \
+  --results "$CAPTURE_OUTPUT/results.json" --output "$RECOVERY_OUTPUT"
+```
+
+Each output path must be new, with a private existing parent and no symlink
+components. Journals are atomically saved before each allowed mutation and limited
+to 5 MiB. Packet input and every REST response/SSH output are limited to 1 MiB.
+Preflight/recovery each allow 120 seconds and at most 24 REST plus 24 SSH calls;
+capture allows 300 seconds and at most 48 plus 48. Counts include this process's
+own logon/logoff and reserve one REST slot for logoff. The exercised offline happy
+path uses 8 REST/15 SSH for preflight, 20/45 for capture and 5/4 for recovery;
+these are synthetic transport measurements, not hardware results.
+
+Any unknown completion, changed identity, slot/backing replacement, policy mismatch,
+foreign inventory drift, journal failure or exhausted bound prevents further
+mutation. `MANUAL_RECOVERY` is not a retry instruction: retain the original packet
+and journal for operator investigation. Read-only recovery may run after expiry;
+it cannot declare `CLEAN` from absence alone when the original journal is incomplete
+or uncertain. `CLEAN` confirms the observed baseline and captured history, not
+traffic, failover behavior, cross-process locking or product maturity. Raw results
+contain private identities and must never be pasted into public issues or PRs.

@@ -1407,3 +1407,32 @@ def test_simultaneous_st66_st68_preflight_refuses_before_credentials(
     with pytest.raises(SystemExit) as error:
         preflight.main(groups)
     assert error.value.code == 2
+
+
+def test_vnic_creation_policy_preflight_route(monkeypatch):
+    from unittest.mock import Mock
+
+    from live_test import vnic_creation_policy
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(vnic_creation_policy, "main", route)
+    args = ["--packet", "p.json", "--packet-sha256", "a" * 64, "--output", "private"]
+    assert preflight.main(["--group", "vnic-creation-policy", *args]) == 2
+    route.assert_called_once_with(["preflight", *args])
+
+
+@pytest.mark.parametrize("extra", [[], ["--skip-hardware"], ["--detach-probe"]])
+def test_vnic_creation_preflight_refuses_bypass(monkeypatch, extra):
+    from unittest.mock import Mock
+
+    from live_test import vnic_creation_policy
+
+    route = Mock()
+    monkeypatch.setattr(vnic_creation_policy, "main", route)
+    args = ["--group", "vnic-creation-policy"]
+    if extra:
+        args += ["--packet", "p", "--packet-sha256", "a" * 64, "--output", "o"]
+    with pytest.raises(SystemExit) as caught:
+        preflight.main(args + extra)
+    assert caught.value.code == 2
+    route.assert_not_called()

@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Single-backing vNIC creation accepts priority, VLAN and MAC allowlists, automatic
+  priority failover and an explicit MAC address through Python, CLI and MCP. Selected
+  policy readback is independent of topology verification, including existing-match
+  requests that perform no write. A named procedure bounds one create and guarded
+  captured-slot cleanup on an existing owned LPAR, with independent read-only
+  recovery. Optional policy hardware qualification remains unrun (#1827).
+
 - Running client Ethernet updates through Python, `adapters update-network` and
   `hmc_update_network_adapter` support tagging, VLAN replacement/add/remove,
   QoS priority/disable and VSI values/profile removal. A coordinated writer

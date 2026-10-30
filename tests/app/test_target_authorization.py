@@ -162,6 +162,9 @@ def test_add_vnic_requires_authorization_for_backing_vios():
         "physical_port_id": "0",
         "capacity_percent": 20.0,
         "port_vlan_id": 100,
+        "pvid_priority": 0,
+        "auto_priority_failover": False,
+        "allowed_vlan_ids": [2, 3],
         "profile": "lab",
     }
     with pytest.raises(

@@ -104,18 +104,36 @@ async def read_vios_identity(
     )
 
 
+def build_vnic_add_attributes(
+    backing_device: str, port_vlan_id: int, policy: dict[str, str] | None = None
+) -> str:
+    payload = build_attribute_record(
+        [
+            ("port_vlan_id", port_vlan_id),
+            ("backing_devices", backing_device),
+            *(policy or {}).items(),
+        ],
+        quoted=("backing_devices", "allowed_vlan_ids", "allowed_os_mac_addrs"),
+        surface="`chhwres -a`",
+        allow_nontrailing_quoted=bool(policy),
+    )
+    if policy and len(payload.encode("utf-8")) > 65_536:
+        raise ValueError(
+            "vNIC creation attribute record exceeds the 65536-byte application limit"
+        )
+    return payload
+
+
 async def add_vnic_backing(
     config: HMCConfig,
     system_name: str,
     lpar_name: str,
     backing_device: str,
     port_vlan_id: int,
+    *,
+    policy: dict[str, str] | None = None,
 ) -> str:
-    payload = build_attribute_record(
-        [("port_vlan_id", port_vlan_id), ("backing_devices", backing_device)],
-        quoted=("backing_devices",),
-        surface="`chhwres -a`",
-    )
+    payload = build_vnic_add_attributes(backing_device, port_vlan_id, policy)
     command = f"chhwres -r virtualio --rsubtype vnic -o a -m {shlex.quote(system_name)} -p {shlex.quote(lpar_name)} -a {shlex.quote(payload)}"
     return await run_hmc_command(config, command)
 

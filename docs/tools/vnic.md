@@ -8,6 +8,6 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_add_vnic` | `mutate` | `vnic.add` | `lpar` | `partial` | `unevidenced` | `existing-runtime-guards` | Add a vNIC (SR-IOV-backed Virtual NIC) to an LPAR via the HMC CLI. |
+| `hmc_add_vnic` | `mutate` | `vnic.add` | `lpar` | `partial` | `unevidenced` | `existing-runtime-guards` | Add and verify one SR-IOV-backed vNIC with optional creation policies. |
 | `hmc_list_vnics` | `read` | `vnic.list` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | List vNICs (SR-IOV-backed Virtual NICs) on an LPAR via the HMC CLI. |
 | `hmc_remove_vnic` | `destructive` | `vnic.remove` | `lpar` | `partial` | `unevidenced` | `existing-runtime-guards` | Remove a vNIC from an LPAR via the HMC CLI. |

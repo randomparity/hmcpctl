@@ -3511,3 +3511,42 @@ def test_simultaneous_st66_st68_recovery_refuses_before_credentials(
     with pytest.raises(SystemExit) as error:
         recovery.main(selectors)
     assert error.value.code == 2
+
+
+def test_vnic_creation_policy_recovery_route(monkeypatch):
+    from live_test import vnic_creation_policy
+
+    route = Mock(return_value=2)
+    monkeypatch.setattr(vnic_creation_policy, "main", route)
+    args = [
+        "--packet-sha256",
+        "a" * 64,
+        "--results",
+        "capture/results.json",
+        "--output",
+        "private",
+    ]
+    assert recovery.main(["--vnic-creation-policy-packet", "p.json", *args]) == 2
+    route.assert_called_once_with(["recover", "--packet", "p.json", *args])
+
+
+@pytest.mark.parametrize("missing", ["--packet-sha256", "--output"])
+def test_vnic_creation_policy_recovery_requires_binding(monkeypatch, missing):
+    from live_test import vnic_creation_policy
+
+    route = Mock()
+    monkeypatch.setattr(vnic_creation_policy, "main", route)
+    args = [
+        "--vnic-creation-policy-packet",
+        "p",
+        "--packet-sha256",
+        "a" * 64,
+        "--output",
+        "o",
+    ]
+    offset = args.index(missing)
+    del args[offset : offset + 2]
+    with pytest.raises(SystemExit) as caught:
+        recovery.main(args)
+    assert caught.value.code == 2
+    route.assert_not_called()

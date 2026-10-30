@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import StrictBool, StrictInt
 
 from ..._app import (
     serialize_tool_result,
@@ -136,11 +138,19 @@ def hmc_add_vnic(
     port_vlan_id: int,
     ownership_override: bool = False,
     profile: str | None = None,
+    *,
+    pvid_priority: StrictInt | None = None,
+    allowed_vlan_ids: list[StrictInt] | Literal["all", "none"] | None = None,
+    allowed_os_mac_addrs: list[str] | Literal["all", "none"] | None = None,
+    auto_priority_failover: StrictBool | None = None,
+    mac_addr: str | None = None,
 ) -> dict[str, Any]:
-    """Add a vNIC (SR-IOV-backed Virtual NIC) to an LPAR via the HMC CLI.
+    """Add and verify one SR-IOV-backed vNIC with optional creation policies.
 
     Verifies the selected VIOS, adapter, physical port, capacity, and final
-    HMC readback. Returns a structured mutation and reconciliation result.
+    HMC readback. Returns separate topology and selected-policy verification.
+    Omitted policies retain HMC defaults; explicit zero and false remain selected.
+    Readback proves configuration only, not traffic or failover behavior.
 
     Args:
         system_name_or_uuid: System name or UUID from ``hmc_list_systems``.
@@ -153,7 +163,22 @@ def hmc_add_vnic(
         port_vlan_id: Port VLAN ID assigned to untagged traffic.
         ownership_override: Bypass ownership rejection only after operator approval.
         profile: TOML profile name, or the environment-default HMC when omitted.
+        pvid_priority: Untagged traffic priority, integer 0 through 7.
+        allowed_vlan_ids: Unique VLAN integers 1 through 4094, or all/none.
+            Empty lists are refused; use none to allow no tagged VLANs.
+        allowed_os_mac_addrs: Unique 12-hex MAC addresses, or all/none.
+            Addresses normalize lowercase; use none instead of an empty list.
+        auto_priority_failover: Enable or disable automatic priority failover.
+        mac_addr: Adapter MAC address, exactly 12 hexadecimal characters.
     """
+
+    policy: dict[str, Any] = {
+        "pvid_priority": pvid_priority,
+        "allowed_vlan_ids": allowed_vlan_ids,
+        "allowed_os_mac_addrs": allowed_os_mac_addrs,
+        "auto_priority_failover": auto_priority_failover,
+        "mac_addr": mac_addr,
+    }
 
     async def _go(hmc):
         try:
@@ -170,6 +195,7 @@ def hmc_add_vnic(
                 port_vlan_id,
                 ownership_override=ownership_override,
                 system_name_or_uuid=system_name_or_uuid,
+                **{name: value for name, value in policy.items() if value is not None},
             )
         except VnicPartialError as exc:
             evidence = json.dumps(serialize_tool_result(exc.result), default=str)
