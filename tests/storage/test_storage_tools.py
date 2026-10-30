@@ -138,9 +138,14 @@ def test_list_adapters_vscsi_type(monkeypatch, mock_hmc):
 def test_all_adapter_types_reach_the_matching_resource(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     for adapter_type in ADAPTER_TYPES:
+        body = (
+            '<feed xmlns="http://www.w3.org/2005/Atom"/>'
+            if adapter_type == "ClientNetworkAdapter"
+            else ""
+        )
         route = mock_hmc.get(
             f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/{adapter_type}"
-        ).mock(return_value=httpx.Response(200, text=""))
+        ).mock(return_value=httpx.Response(200, text=body))
         hmc_list_adapters(LPAR_UUID, adapter_type=adapter_type)
         assert route.called
 

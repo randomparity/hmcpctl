@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 import typer
 from rich.text import Text
 
 from ...client.client_contracts import ADAPTER_TYPES, AdapterType
+from ...documents.adapters import validate_network_adapter_creation_fields
 from ...operations.virtualization.adapters import (
     AdapterResult,
     add_network_adapter,
@@ -59,8 +63,46 @@ def adapters_add_network(
     system: str | None = typer.Option(
         None, "--system", "-s", help="Managed system name or UUID"
     ),
+    *,
+    addl_vlan_ids: str | None = typer.Option(
+        None,
+        "--addl-vlan-ids",
+        help="JSON array of additional VLAN IDs (1–4094, max20); requires --tagged",
+    ),
+    allowed_os_mac_addrs: str | None = typer.Option(
+        None,
+        "--allowed-os-mac-addrs",
+        help="all, none, or JSON array of one to four 12-hex MACs",
+    ),
+    qos_priority: str | None = typer.Option(
+        None,
+        "--qos-priority",
+        help="0–7, or none to disable QoS; omitted leaves defaults",
+    ),
+    vsi_manager_id: int | None = typer.Option(
+        None, "--vsi-manager-id", help="VSI manager ID; HMC validates semantic limits"
+    ),
+    vsi_type_id: int | None = typer.Option(
+        None, "--vsi-type-id", help="VSI type ID; HMC validates semantic limits"
+    ),
+    vsi_type_version: int | None = typer.Option(
+        None,
+        "--vsi-type-version",
+        help="VSI type version; HMC validates semantic limits",
+    ),
 ) -> None:
     """Add a Virtual Ethernet (network) adapter to an LPAR."""
+    selected = _network_cli_creation_fields(
+        tagged,
+        {
+            "addl_vlan_ids": addl_vlan_ids,
+            "allowed_os_mac_addrs": allowed_os_mac_addrs,
+            "qos_priority": qos_priority,
+            "vsi_manager_id": vsi_manager_id,
+            "vsi_type_id": vsi_type_id,
+            "vsi_type_version": vsi_type_version,
+        },
+    )
 
     if not yes and not typer.confirm(
         f"Add network adapter (VLAN {terminal_field(vlan)}) to '{terminal_field(lpar)}'?"
@@ -78,9 +120,44 @@ def adapters_add_network(
             mac_address=mac,
             ownership_override=ownership_override,
             system_name_or_uuid=system,
+            **selected,
         )
     )
     _adapter_mutation(result, lpar, "network")
+
+
+def _network_cli_creation_fields(
+    tagged: bool, values: dict[str, Any]
+) -> dict[str, Any]:
+    selected = {name: value for name, value in values.items() if value is not None}
+    for name in ("addl_vlan_ids", "allowed_os_mac_addrs"):
+        if name not in selected:
+            continue
+        raw = selected[name]
+        if name == "allowed_os_mac_addrs" and raw in ("all", "none"):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError) as exc:
+            raise typer.BadParameter(
+                terminal_field(f"{name} must be a JSON array", err=True)
+            ) from exc
+        if not isinstance(parsed, list):
+            raise typer.BadParameter(
+                terminal_field(f"{name} must be a JSON array", err=True)
+            )
+        selected[name] = parsed
+    if "qos_priority" in selected and selected["qos_priority"] != "none":
+        try:
+            selected["qos_priority"] = int(selected["qos_priority"], 10)
+        except (ValueError, TypeError) as exc:
+            raise typer.BadParameter("qos_priority must be 0–7 or none") from exc
+    if selected:
+        try:
+            validate_network_adapter_creation_fields(tagged=tagged, **selected)
+        except ValueError as exc:
+            raise typer.BadParameter(terminal_field(str(exc), err=True)) from exc
+    return selected
 
 
 def adapters_add_vscsi(
@@ -195,14 +272,27 @@ def adapters_delete(
 
 
 def _adapter_mutation(result: AdapterResult, lpar: str, kind: str) -> None:
-    console.print(
-        Text.assemble(
-            (f"Added {terminal_field(kind)} adapter", "green"),
-            f" to {terminal_field(result.lpar_uuid)}",
+    if result.creation_verification is None:
+        console.print(
+            Text.assemble(
+                (f"Added {terminal_field(kind)} adapter", "green"),
+                f" to {terminal_field(result.lpar_uuid)}",
+            )
         )
-    )
+    else:
+        console.print(
+            "Creation acknowledged; selected-field verification follows.", markup=False
+        )
     print_json(result.resource)
     console.print(terminal_field(result.change_location.summary()), markup=False)
+    if result.creation_verification is not None:
+        print_json(result.creation_verification)
+        if result.creation_verification["status"] != "verified":
+            console.print(
+                "Creation may have occurred. Inspect the adapter; do not retry blindly.",
+                markup=False,
+            )
+            raise typer.Exit(code=1)
 
 
 def register_commands(group: typer.Typer) -> None:

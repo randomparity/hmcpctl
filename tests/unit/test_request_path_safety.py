@@ -1180,6 +1180,7 @@ _UOM_SEGMENT_POLICIES = {
     "console_path_id": "bounded-quoted-console",
 }
 _UUID_UOM_REQUEST_SITES = {
+    "client_adapters.AdaptersMixin._network_adapter_creation_feed": "lpar_uuid",
     "client_cluster.ClusterMixin.create_logical_unit": "cluster_uuid",
     "client_cluster.ClusterMixin.delete_logical_unit": "cluster_uuid",
     "client_lpars.LparsMixin.create_logical_partition": "system_uuid",

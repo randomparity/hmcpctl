@@ -18,6 +18,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- Client Ethernet creation accepts additional VLANs, allowed OS MAC policies, QoS priority
+  and VSI identifiers through Python, CLI and MCP. Independent selected-field readback
+  reports verified, mismatched or unavailable metadata. Unverified CLI creation exits
+  nonzero and warns against retry. Client-network listings reject missing or partial
+  inventory; positively complete empty feeds remain empty lists. ST9 binds cleanup to
+  the selected switch and requires positive restoration evidence. Hardware qualification
+  remains unrun (#1821).
+
 - LPAR and VIOS creation accept typed boot/start settings with contained power-controller
   authorization and independent required saved/current observations. Raw pending boot text
   preserves printable Unicode/spacing through existing LPAR XML and a separate VIOS CSV

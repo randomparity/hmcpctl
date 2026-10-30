@@ -340,7 +340,7 @@ delete the line.
 The network arm verifies the virtual-network, client-adapter and VIOS-label
 operations (#629). Subtask 2 only reads. Subtask 9 runs only in this arm; round2
 and `all` skip it. Each round trip reads its own baseline first, re-reads after
-every change whatever the call returned, and reverses the difference:
+every change whatever the call returned, and verifies restoration:
 
 - **Preconditions.** The test partition must read `Not Activated`, or nothing is
   changed. The adapter and label round trips also need exactly one VIOS with a
@@ -352,6 +352,24 @@ every change whatever the call returned, and reverses the difference:
   adapter on that VLAN to the test partition, deletes an unknown adapter UUID
   (expected refused), then removes the adapter and the run's own networks. Any
   other network on that VLAN is reported, never deleted.
+  The same single adapter create selects `addl_vlan_ids=[]`, `allowed_os_mac_addrs="all"`,
+  `qos_priority="none"`, `vsi_manager_id=0`, `vsi_type_id=0` and `vsi_type_version=0`.
+  These are explicit test values, not defaults or a guarantee of HMC acceptance.
+  Credit requires verified creation metadata with all six checked fields and independent
+  contained identity/field readback, including the selected `VirtualSwitchID`. A switch
+  mismatch or missing switch stops before cleanup. Client-network listings require a
+  complete HTTP/Atom envelope: HTTP 204, blank bodies, `Link`/`Content-Range` headers,
+  XML `next` links in any case, or ambiguous entries are errors;
+  a positively complete empty feed remains an empty list. Refusal or missing evidence
+  leaves qualification failed or unevidenced. Cleanup deletes only that verified fixture UUID once, after
+  a fresh read proves unchanged baseline placements plus exactly that fixture on its
+  selected switch.
+  Acknowledged deletion and independent baseline equality must precede later writes.
+  Drift or uncertain creation, verification or deletion stops subsequent effects and
+  records manual recovery, retaining residue rather than inferring cleanup. Foreign
+  adapter UUIDs are never additional deletion targets. Use the existing preflight,
+  `scripts/live_network.py` and mandatory read-only recovery commands above; no new arm,
+  activation or second adapter create is added.
 - **vSCSI and vFC clients.** Each first tries an add on the virtual slot the
   test partition's own vSCSI client uses (expected refused), then adds a client
   adapter to the test partition paired to the lowest server slot of the serving

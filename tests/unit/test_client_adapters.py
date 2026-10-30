@@ -21,25 +21,28 @@ def test_adapter_type_validation_accepts_only_the_published_vocabulary():
 
 
 @pytest.mark.asyncio
-async def test_list_and_delete_adapter_delegate_to_child_resources():
+@pytest.mark.parametrize(
+    "adapter_type", ["ClientNetworkAdapter", "VirtualSCSIClientAdapter"]
+)
+async def test_list_and_delete_adapter_delegate_to_child_resources(adapter_type):
     client = SimpleNamespace(
         list_child=AsyncMock(return_value=[{"UUID": "adapter-1"}]),
+        _network_adapter_creation_feed=AsyncMock(return_value=[{"UUID": "adapter-1"}]),
         delete_child=AsyncMock(),
     )
-
-    adapters = await AdaptersMixin.list_adapters(
-        client, "lpar-1", "ClientNetworkAdapter"
-    )
-    await AdaptersMixin.delete_adapter(
-        client, "lpar-1", "ClientNetworkAdapter", "adapter-1"
-    )
-
+    adapters = await AdaptersMixin.list_adapters(client, "lpar-1", adapter_type)
+    await AdaptersMixin.delete_adapter(client, "lpar-1", adapter_type, "adapter-1")
     assert adapters == [{"UUID": "adapter-1"}]
-    client.list_child.assert_awaited_once_with(
-        "LogicalPartition", "lpar-1", "ClientNetworkAdapter"
-    )
+    if adapter_type == "ClientNetworkAdapter":
+        client._network_adapter_creation_feed.assert_awaited_once_with("lpar-1")
+        client.list_child.assert_not_awaited()
+    else:
+        client.list_child.assert_awaited_once_with(
+            "LogicalPartition", "lpar-1", adapter_type
+        )
+        client._network_adapter_creation_feed.assert_not_awaited()
     client.delete_child.assert_awaited_once_with(
-        "LogicalPartition", "lpar-1", "ClientNetworkAdapter", "adapter-1"
+        "LogicalPartition", "lpar-1", adapter_type, "adapter-1"
     )
 
 
@@ -112,3 +115,236 @@ async def test_list_and_delete_adapter_reject_unknown_adapter_types():
 
     client.list_child.assert_not_awaited()
     client.delete_child.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_network_creation_selected_xml_uses_one_real_child_put(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.xmlutil import parse_feed
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    feed = '<feed xmlns="http://www.w3.org/2005/Atom"/>'
+    route = mock_hmc.put(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(200, text=feed))
+    async with HMCClient(make_config()) as client:
+        await client.add_network_adapter(
+            partition,
+            100,
+            tagged=True,
+            addl_vlan_ids=[2],
+            allowed_os_mac_addrs="none",
+            qos_priority=0,
+            vsi_manager_id=1,
+            vsi_type_id=2,
+            vsi_type_version=3,
+        )
+    assert route.call_count == 1
+    resource = parse_feed(route.calls[0].request.content.decode())[0]["Resource"]
+    assert resource["TaggedVLANIDs"] == "2"
+    assert resource["AllowedOperatingSystemMACAddresses"] == "NONE"
+    assert resource["QualityOfServicePriority"] == "0"
+    assert resource["QualityOfServicePriorityEnabled"] == "true"
+    assert resource["VirtualStationInterfaceManagerID"] == "1"
+    assert resource["VirtualStationInterfaceTypeID"] == "2"
+    assert resource["VirtualStationInterfaceTypeVersion"] == "3"
+    assert "X-HMC-Schema-Version" not in route.calls[0].request.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status, body",
+    [
+        (200, ""),
+        (204, ""),
+        (200, "<broken"),
+        (200, "<feed/>"),
+        (200, '<entry xmlns="http://www.w3.org/2005/Atom"/>'),
+        (
+            200,
+            '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="next" href="/more"/></feed>',
+        ),
+    ],
+)
+async def test_network_creation_feed_refuses_missing_or_incomplete_inventory(
+    mock_hmc, status, body
+):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    route = mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(status, text=body))
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError):
+            await client._network_adapter_creation_feed(partition)
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_network_creation_feed_accepts_positively_empty_atom_feed(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(
+        return_value=httpx.Response(
+            200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>'
+        )
+    )
+    async with HMCClient(make_config()) as client:
+        assert await client._network_adapter_creation_feed(partition) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entry",
+    [
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111</id>"
+            "<id>urn:uuid:22222222-2222-4222-8222-222222222222</id>"
+            "<content><ClientNetworkAdapter/></content>"
+        ),
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111</id>"
+            "<content><ClientNetworkAdapter/></content>"
+            "<content><ClientNetworkAdapter/></content>"
+        ),
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111</id>"
+            "<content><ClientNetworkAdapter/><ClientNetworkAdapter/></content>"
+        ),
+        (
+            "<id>urn:uuid:11111111-1111-4111-8111-111111111111<Nested/></id>"
+            "<content><ClientNetworkAdapter/></content>"
+        ),
+    ],
+)
+async def test_creation_inventory_refuses_ambiguous_raw_atom_entries(mock_hmc, entry):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    route = mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            text=f'<feed xmlns="http://www.w3.org/2005/Atom"><entry>{entry}</entry></feed>',
+        )
+    )
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError, match="unambiguous"):
+            await client._network_adapter_creation_feed(partition)
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_creation_inventory_preserves_one_valid_contained_entry(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    xml = (
+        '<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+        f"<id>urn:uuid:{identity}</id><content>"
+        '<ClientNetworkAdapter xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">'
+        "<VirtualStationInterfaceTypeID>0</VirtualStationInterfaceTypeID>"
+        "</ClientNetworkAdapter></content></entry></feed>"
+    )
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(200, text=xml))
+    async with HMCClient(make_config()) as client:
+        result = await client._network_adapter_creation_feed(identity)
+    assert len(result) == 1
+    assert result[0]["UUID"] == identity
+    assert result[0]["ResourceType"] == "ClientNetworkAdapter"
+    assert result[0]["Resource"]["VirtualStationInterfaceTypeID"] == "0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,body", [(204, ""), (200, "")])
+async def test_network_listing_refuses_missing_http_inventory(mock_hmc, status, body):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(status, text=body))
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError, match="unavailable"):
+            await client.list_adapters(identity, "ClientNetworkAdapter")
+
+
+@pytest.mark.asyncio
+async def test_network_listing_accepts_positive_complete_empty_feed(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(
+        return_value=httpx.Response(
+            200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>'
+        )
+    )
+    async with HMCClient(make_config()) as client:
+        assert await client.list_adapters(identity, "ClientNetworkAdapter") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers,body",
+    [
+        (
+            {"Link": '</more>; rel="next"'},
+            '<feed xmlns="http://www.w3.org/2005/Atom"/>',
+        ),
+        (
+            {"Content-Range": "items 0-0/2"},
+            '<feed xmlns="http://www.w3.org/2005/Atom"/>',
+        ),
+        (
+            {},
+            '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="NEXT" href="/more"/></feed>',
+        ),
+    ],
+)
+async def test_network_listing_refuses_explicit_continuation(mock_hmc, headers, body):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(200, text=body, headers=headers))
+    async with HMCClient(make_config()) as client:
+        with pytest.raises(HMCError, match="complete"):
+            await client.list_adapters(identity, "ClientNetworkAdapter")

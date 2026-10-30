@@ -343,8 +343,13 @@ def test_power_on_lpar_tool_forwards_activation_parameters(monkeypatch, mock_hmc
         "VirtualFibreChannelClientAdapter",
         "ClientNetworkAdapter",
     ):
+        response = (
+            httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>')
+            if adapter_type == "ClientNetworkAdapter"
+            else httpx.Response(204)
+        )
         mock_hmc.get(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/{adapter_type}").mock(
-            return_value=httpx.Response(204)
+            return_value=response
         )
     route = mock_hmc.put(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn").mock(
         return_value=httpx.Response(202, text=JOB_ENTRY)

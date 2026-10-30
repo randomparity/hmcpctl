@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from ..xmlutil import escapes_string_arguments
 from .common import document_envelope
@@ -80,6 +81,56 @@ def build_vfc_adapter_document(
     )
 
 
+def _require_network_integer(name: str, value: object, low: int, high: int) -> None:
+    if value is not None and (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not low <= value <= high
+    ):
+        raise ValueError(f"{name} must be an integer from {low} to {high}")
+
+
+def validate_network_adapter_creation_fields(
+    *,
+    tagged: bool,
+    addl_vlan_ids: list[int] | None = None,
+    allowed_os_mac_addrs: list[str] | Literal["all", "none"] | None = None,
+    qos_priority: int | Literal["none"] | None = None,
+    vsi_manager_id: int | None = None,
+    vsi_type_id: int | None = None,
+    vsi_type_version: int | None = None,
+) -> None:
+    """Validate the bounded optional client Ethernet creation policies (#1821)."""
+    if addl_vlan_ids is not None:
+        if not isinstance(addl_vlan_ids, list) or len(addl_vlan_ids) > 20:
+            raise ValueError("addl_vlan_ids must be a list of at most twenty VLAN IDs")
+        for value in addl_vlan_ids:
+            _require_network_integer("addl_vlan_ids", value, 1, 4094)
+            if value is None:
+                raise ValueError("addl_vlan_ids must contain integers from 1 to 4094")
+        if addl_vlan_ids and tagged is not True:
+            raise ValueError("nonempty addl_vlan_ids requires tagged=True")
+    if allowed_os_mac_addrs is not None:
+        valid = allowed_os_mac_addrs in ("all", "none")
+        if isinstance(allowed_os_mac_addrs, list):
+            valid = 1 <= len(allowed_os_mac_addrs) <= 4 and all(
+                isinstance(value, str) and _MAC_ADDRESS.fullmatch(value)
+                for value in allowed_os_mac_addrs
+            )
+        if not valid:
+            raise ValueError(
+                "allowed_os_mac_addrs must be all, none, or one to four 12-hex MAC addresses"
+            )
+    if qos_priority != "none":
+        _require_network_integer("qos_priority", qos_priority, 0, 7)
+    for name, value in (
+        ("vsi_manager_id", vsi_manager_id),
+        ("vsi_type_id", vsi_type_id),
+        ("vsi_type_version", vsi_type_version),
+    ):
+        _require_network_integer(name, value, -(2**31), 2**31 - 1)
+
+
 @escapes_string_arguments
 def build_client_network_adapter_document(
     port_vlan_id: int,
@@ -87,6 +138,13 @@ def build_client_network_adapter_document(
     virtual_switch_id: int | None = None,
     tagged: bool = False,
     mac_address: str | None = None,
+    *,
+    addl_vlan_ids: list[int] | None = None,
+    allowed_os_mac_addrs: list[str] | Literal["all", "none"] | None = None,
+    qos_priority: int | Literal["none"] | None = None,
+    vsi_manager_id: int | None = None,
+    vsi_type_id: int | None = None,
+    vsi_type_version: int | None = None,
 ) -> str:
     """Virtual Ethernet client network adapter.
 
@@ -95,6 +153,15 @@ def build_client_network_adapter_document(
     makes this a tagged (VLAN-trunking) adapter; mac_address pins the MAC
     (otherwise the HMC generates one).
     """
+    validate_network_adapter_creation_fields(
+        tagged=tagged,
+        addl_vlan_ids=addl_vlan_ids,
+        allowed_os_mac_addrs=allowed_os_mac_addrs,
+        qos_priority=qos_priority,
+        vsi_manager_id=vsi_manager_id,
+        vsi_type_id=vsi_type_id,
+        vsi_type_version=vsi_type_version,
+    )
     if mac_address and not _MAC_ADDRESS.fullmatch(mac_address):
         raise ValueError(
             f"mac_address {mac_address!r} must be 12 hexadecimal digits with "
@@ -107,16 +174,51 @@ def build_client_network_adapter_document(
         parts.append(
             f'  <VirtualSlotNumber kb="COD" kxe="false">{slot_number}</VirtualSlotNumber>'
         )
+    if allowed_os_mac_addrs is not None:
+        mac_policy = (
+            allowed_os_mac_addrs.upper()
+            if isinstance(allowed_os_mac_addrs, str)
+            else " ".join(value.upper() for value in allowed_os_mac_addrs)
+        )
+        parts.append(
+            f'  <AllowedOperatingSystemMACAddresses kb="CUD" kxe="false">'
+            f"{mac_policy}</AllowedOperatingSystemMACAddresses>"
+        )
     if mac_address:
         parts.append(f'  <MACAddress kb="CUR" kxe="false">{mac_address}</MACAddress>')
     parts.append(f'  <PortVLANID kb="CUR" kxe="false">{port_vlan_id}</PortVLANID>')
+    if qos_priority is not None:
+        if qos_priority != "none":
+            parts.append(
+                f'  <QualityOfServicePriority kb="CUD" kxe="false">'
+                f"{qos_priority}</QualityOfServicePriority>"
+            )
+        enabled = "false" if qos_priority == "none" else "true"
+        parts.append(
+            f'  <QualityOfServicePriorityEnabled kb="CUD" kxe="false">'
+            f"{enabled}</QualityOfServicePriorityEnabled>"
+        )
+    if addl_vlan_ids is not None:
+        vlans = " ".join(str(value) for value in addl_vlan_ids)
+        parts.append(f'  <TaggedVLANIDs kb="CUA" kxe="false">{vlans}</TaggedVLANIDs>')
     if tagged:
         parts.append(
             '  <TaggedVLANSupported kb="CUA" kxe="false">true</TaggedVLANSupported>'
         )
+    for name, value in (
+        ("VirtualStationInterfaceManagerID", vsi_manager_id),
+        ("VirtualStationInterfaceTypeID", vsi_type_id),
+    ):
+        if value is not None:
+            parts.append(f'  <{name} kb="CUD" kxe="false">{value}</{name}>')
     if virtual_switch_id is not None:
         parts.append(
             f'  <VirtualSwitchID kb="ROR" kxe="false">{virtual_switch_id}</VirtualSwitchID>'
+        )
+    if vsi_type_version is not None:
+        parts.append(
+            f'  <VirtualStationInterfaceTypeVersion kb="CUD" kxe="false">'
+            f"{vsi_type_version}</VirtualStationInterfaceTypeVersion>"
         )
     body = "\n".join(parts)
     return document_envelope("ClientNetworkAdapter", body)
