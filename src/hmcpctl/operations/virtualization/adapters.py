@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+import math
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.documents.adapters import validate_network_adapter_creation_fields
+from hmcpctl.documents.adapters import (
+    validate_network_adapter_creation_fields,
+    validate_network_adapter_update_fields,
+)
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_location
+from hmcpctl.operations.lpar.ownership import (
+    authorize_lpar_mutation,
+    resolve_and_authorize_lpar_mutation,
+)
+from hmcpctl.operations.lpar.profile_sync import (
+    ChangeLocation,
+    change_location_of,
+    read_change_location,
+)
 
 from ...client.client_contracts import AdapterType, validate_adapter_type
-from ...resource_identity import is_uuid, resolve_lpar_uuid
+from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
+from ...ssh.ethernet import _set_ethernet_adapter
+from ...ssh.transport import HMCCLIError
 from ...xmlutil import leaf_text
 from .network import require_vlan_id
 
@@ -41,6 +55,38 @@ class AdapterResult:
     resource: dict[str, Any] | None
     change_location: ChangeLocation
     creation_verification: NetworkCreationVerification | None = None
+
+
+@dataclass(frozen=True)
+class NetworkUpdateVerification:
+    status: Literal["verified", "mismatched", "unavailable"]
+    expected: dict[str, object]
+    observed: dict[str, object]
+    mismatched_fields: tuple[str, ...]
+    unavailable_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class NetworkUpdatePreservation:
+    status: Literal["unchanged", "drifted", "unavailable"]
+    scope: str
+    changed_adapter_uuids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class NetworkUpdateResult:
+    system_uuid: str
+    lpar_uuid: str
+    adapter_uuid: str
+    slot_number: int
+    mutation_dispatched: bool
+    submission: Literal["not_dispatched", "completed", "rejected", "unknown"]
+    reason: Literal["already_satisfied"] | None
+    refusal_code: str | None
+    verification: NetworkUpdateVerification
+    preservation: NetworkUpdatePreservation
+    change_location: ChangeLocation
+    errors: tuple[str, ...]
 
 
 async def list_adapters(
@@ -132,6 +178,482 @@ async def add_network_adapter(
         else None
     )
     return AdapterResult(lpar_uuid, resource, location, verification)
+
+
+async def update_network_adapter(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    adapter_uuid: str,
+    *,
+    system_name_or_uuid: str,
+    exclusive_writer_window: bool,
+    tagged: bool | None = None,
+    addl_vlan_ids: list[int] | None = None,
+    vlan_action: Literal["replace", "add", "remove"] = "replace",
+    qos_priority: int | Literal["none"] | None = None,
+    vsi_manager_id: int | None = None,
+    vsi_type_id: int | None = None,
+    vsi_type_version: int | None = None,
+    remove_vsi_profile: bool = False,
+    ownership_override: bool = False,
+) -> NetworkUpdateResult:
+    """Attempt one coordinated native update, independently observing its stored result."""
+    fields: dict[str, Any] = {
+        "tagged": tagged,
+        "addl_vlan_ids": addl_vlan_ids,
+        "vlan_action": vlan_action,
+        "qos_priority": qos_priority,
+        "vsi_manager_id": vsi_manager_id,
+        "vsi_type_id": vsi_type_id,
+        "vsi_type_version": vsi_type_version,
+        "remove_vsi_profile": remove_vsi_profile,
+    }
+    validate_network_adapter_update_fields(**fields)
+    if exclusive_writer_window is not True or type(ownership_override) is not bool:
+        raise ValueError(
+            "network update requires exclusive_writer_window=true and boolean override"
+        )
+    if (
+        not isinstance(adapter_uuid, str)
+        or not is_uuid(adapter_uuid)
+        or any(
+            not isinstance(value, str) or not value.strip()
+            for value in (system_name_or_uuid, lpar_name_or_uuid)
+        )
+    ):
+        raise ValueError(
+            "network update requires system, partition and valid adapter UUID selectors"
+        )
+    if not math.isfinite(hmc.config.ssh_timeout) or hmc.config.ssh_timeout <= 0:
+        raise ValueError("network update requires a finite positive ssh_timeout")
+    selected = {
+        name: value.copy() if isinstance(value, list) else value
+        for name, value in fields.items()
+        if value is not None and name not in ("vlan_action", "remove_vsi_profile")
+    }
+    if addl_vlan_ids is not None:
+        selected["vlan_action"] = vlan_action
+    if remove_vsi_profile:
+        selected["remove_vsi_profile"] = True
+    adapter_uuid = adapter_uuid.casefold()
+    system_uuid = (await resolve_system_uuid(hmc, system_name_or_uuid)).casefold()
+    system_name = await _network_update_system(hmc, system_uuid)
+    lpar_uuid = (
+        await resolve_lpar_uuid(
+            hmc,
+            lpar_name_or_uuid,
+            system_name_or_uuid=system_uuid,
+        )
+    ).casefold()
+    parent = await _network_update_parent(hmc, system_uuid, lpar_uuid)
+    await authorize_lpar_mutation(
+        hmc, system_name, parent[0], ownership_override=ownership_override
+    )
+    before = deepcopy(await hmc._network_adapter_creation_feed(lpar_uuid))
+    inventory = _network_update_inventory(before)
+    if adapter_uuid not in inventory:
+        raise ValueError(
+            "selected adapter UUID is absent from the contained client inventory"
+        )
+    expected, attributes = _network_update_expectation(
+        inventory[adapter_uuid], selected
+    )
+    fresh_parent = await _network_update_parent(hmc, system_uuid, lpar_uuid)
+    fresh = deepcopy(await hmc._network_adapter_creation_feed(lpar_uuid))
+    if (
+        await _network_update_system(hmc, system_uuid) != system_name
+        or fresh_parent[:2] != parent[:2]
+        or _network_update_inventory_projection(before)
+        != _network_update_inventory_projection(fresh)
+    ):
+        raise ValueError(
+            "network update baseline changed; inspect and establish a fresh writer window"
+        )
+    slot = _network_integer(inventory[adapter_uuid].get("VirtualSlotNumber"), 0, 65535)
+    assert slot is not None  # The complete baseline inventory proved every slot.
+    if not attributes:
+        verification, preservation = _network_update_observation(
+            before, fresh, adapter_uuid, expected, selected
+        )
+        return NetworkUpdateResult(
+            system_uuid,
+            lpar_uuid,
+            adapter_uuid,
+            slot,
+            False,
+            "not_dispatched",
+            "already_satisfied",
+            None,
+            verification,
+            preservation,
+            parent[2],
+            (),
+        )
+    submission, code, errors = await _network_update_submission(
+        hmc, system_name, parent[1], slot, attributes
+    )
+    verification, preservation, after_errors = await _network_update_after(
+        hmc,
+        system_uuid,
+        lpar_uuid,
+        parent[:2],
+        before,
+        adapter_uuid,
+        expected,
+        selected,
+    )
+    return NetworkUpdateResult(
+        system_uuid,
+        lpar_uuid,
+        adapter_uuid,
+        slot,
+        True,
+        submission,
+        None,
+        code,
+        verification,
+        preservation,
+        parent[2],
+        errors + after_errors,
+    )
+
+
+async def _network_update_system(hmc: HMCClient, system_uuid: str) -> str:
+    summaries = await hmc.list_system_summaries()
+    if (
+        not isinstance(system_uuid, str)
+        or not is_uuid(system_uuid)
+        or not isinstance(summaries, list)
+    ):
+        raise ValueError("network update requires a complete native system-name index")
+    identities: set[str] = set()
+    names: list[str] = []
+    selected = None
+    for entry in summaries:
+        identity = entry.get("UUID") if isinstance(entry, dict) else None
+        name = entry.get("SystemName") if isinstance(entry, dict) else None
+        if (
+            not isinstance(identity, str)
+            or not is_uuid(identity)
+            or not isinstance(name, str)
+            or not name.strip()
+            or any(ord(character) < 32 or ord(character) == 127 for character in name)
+        ):
+            raise ValueError(
+                "native system-name index contains unavailable identities or names"
+            )
+        if identity.casefold() in identities:
+            raise ValueError("native system-name index repeats a system UUID")
+        identities.add(identity.casefold())
+        names.append(name)
+        if identity.casefold() == system_uuid:
+            selected = name
+    if selected is None or names.count(selected) != 1:
+        raise ValueError(
+            "ambiguous native system name; use a uniquely named system before updating"
+        )
+    return selected
+
+
+async def _network_update_parent(
+    hmc: HMCClient,
+    system_uuid: str,
+    lpar_uuid: str,
+) -> tuple[str, int, ChangeLocation]:
+    await resolve_lpar_uuid(hmc, lpar_uuid, system_name_or_uuid=system_uuid)
+    entry = await hmc.get_logical_partition(lpar_uuid)
+    if not isinstance(entry, dict) or (
+        str(entry.get("UUID", "")).casefold() != lpar_uuid
+        or entry.get("ResourceType") != "LogicalPartition"
+        or not isinstance(entry.get("Resource"), dict)
+    ):
+        raise ValueError("network update partition identity is unavailable")
+    resource = entry["Resource"]
+    name = _network_leaf(resource.get("PartitionName"))
+    identifier = _network_leaf(resource.get("PartitionID"))
+    if not name or identifier is None or not re.fullmatch(r"[0-9]+", identifier):
+        raise ValueError(
+            "network update requires partition name and positive native ID"
+        )
+    try:
+        native_id = int(identifier)
+    except ValueError:
+        raise ValueError("network update native partition ID is unavailable") from None
+    if native_id <= 0 or _network_leaf(resource.get("PartitionState")) != "running":
+        raise ValueError(
+            "network update requires a running partition and positive native ID"
+        )
+    location = change_location_of(entry)
+    return (
+        name,
+        native_id,
+        ChangeLocation(location.current_profile_sync, "unknown", location.profile_name),
+    )
+
+
+def _network_update_inventory(
+    entries: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    _network_inventory_identities(entries)
+    inventory: dict[str, dict[str, Any]] = {}
+    slots: set[int] = set()
+    for entry in entries:
+        resource = entry.get("Resource")
+        if not isinstance(resource, dict):
+            raise HMCError("network adapter resource is unavailable")
+        slot = _network_integer(resource.get("VirtualSlotNumber"), 0, 65535)
+        if slot is None or slot in slots:
+            raise ValueError(
+                "network adapter inventory requires unique observed virtual slots"
+            )
+        slots.add(slot)
+        inventory[entry["UUID"].casefold()] = resource
+    return inventory
+
+
+def _network_update_inventory_projection(
+    entries: list[dict[str, Any]],
+) -> dict[str, object]:
+    return {
+        identity: {key: value for key, value in resource.items() if key != "Metadata"}
+        for identity, resource in _network_update_inventory(entries).items()
+    }
+
+
+def _network_update_vlans(resource: dict[str, Any]) -> list[int] | None:
+    text = _network_leaf(resource.get("TaggedVLANIDs"))
+    if text is None:
+        return None
+    values = [_network_integer(value, 1, 4094) for value in text.split()]
+    if len(values) > 4094 or None in values or len(set(values)) != len(values):
+        return None
+    return sorted(value for value in values if value is not None)
+
+
+def _network_update_value(name: str, resource: dict[str, Any]) -> object:
+    if name == "tagged":
+        text = _network_leaf(resource.get("TaggedVLANSupported"))
+        return (
+            True if text in ("true", "1") else False if text in ("false", "0") else None
+        )
+    if name == "addl_vlan_ids":
+        return _network_update_vlans(resource)
+    if name == "remove_vsi_profile":
+        return {
+            field: _network_observed_value(field, resource)
+            for field in ("vsi_manager_id", "vsi_type_id", "vsi_type_version")
+        }
+    return _network_observed_value(name, resource)
+
+
+def _network_update_expectation(
+    resource: dict[str, Any],
+    selected: dict[str, Any],
+) -> tuple[dict[str, object], list[tuple[str, object]]]:
+    expected: dict[str, object] = {}
+    attributes: list[tuple[str, object]] = []
+    for name in (
+        "tagged",
+        "qos_priority",
+        "vsi_manager_id",
+        "vsi_type_id",
+        "vsi_type_version",
+    ):
+        if name in selected:
+            expected[name] = selected[name]
+            attributes.append(
+                ("ieee_virtual_eth", int(selected[name]))
+                if name == "tagged"
+                else (name, selected[name])
+            )
+    if selected.get("remove_vsi_profile") is True:
+        expected["remove_vsi_profile"] = True
+        attributes.append(("vsi_manager_id", "none"))
+    baseline = _network_update_vlans(resource)
+    if "addl_vlan_ids" in selected:
+        values, action = selected["addl_vlan_ids"], selected["vlan_action"]
+        if (action != "replace" or not values) and baseline is None:
+            raise ValueError("VLAN action requires a complete observed baseline list")
+        result = (
+            set(values)
+            if action == "replace"
+            else (
+                set(baseline or []) | set(values)
+                if action == "add"
+                else set(baseline or []) - set(values)
+            )
+        )
+        if len(result) > 20:
+            raise ValueError("the resulting VLAN set must contain at most twenty IDs")
+        tagging = selected.get("tagged", _network_update_value("tagged", resource))
+        if result and tagging is not True:
+            raise ValueError(
+                "nonempty resulting VLANs require positively enabled tagging"
+            )
+        expected["addl_vlan_ids"] = sorted(result)
+        if values:
+            operator = {"replace": "", "add": "+", "remove": "-"}[action]
+            attributes.append(("addl_vlan_ids" + operator, ",".join(map(str, values))))
+        elif baseline:
+            attributes.append(("addl_vlan_ids-", ",".join(map(str, baseline))))
+        baseline = sorted(result)
+    if selected.get("tagged") is False and (baseline is None or baseline):
+        raise ValueError(
+            "disabling tagging requires a positively empty resulting VLAN set"
+        )
+    return expected, attributes
+
+
+def _network_update_observation(
+    before: list[dict[str, Any]],
+    after: list[dict[str, Any]] | None,
+    adapter_uuid: str,
+    expected: dict[str, object],
+    selected: dict[str, Any],
+) -> tuple[NetworkUpdateVerification, NetworkUpdatePreservation]:
+    scope = "parsed_adapter_resources_except_metadata_and_selected_fields"
+    unavailable = NetworkUpdateVerification(
+        "unavailable", expected, {}, (), tuple(expected)
+    )
+    if after is None:
+        return unavailable, NetworkUpdatePreservation("unavailable", scope, ())
+    try:
+        _network_inventory_identities(after)
+    except HMCError:
+        return unavailable, NetworkUpdatePreservation("unavailable", scope, ())
+    old = {entry["UUID"].casefold(): entry["Resource"] for entry in before}
+    new = {entry["UUID"].casefold(): entry.get("Resource") for entry in after}
+    changed = set(old) ^ set(new)
+    incomplete = False
+    closure = {
+        _NETWORK_CREATION_ELEMENTS[name]
+        for name in expected
+        if name in _NETWORK_CREATION_ELEMENTS
+    }
+    if "tagged" in expected:
+        closure.add("TaggedVLANSupported")
+    if "qos_priority" in expected:
+        closure.add("QualityOfServicePriorityEnabled")
+    if "remove_vsi_profile" in expected:
+        closure.update(
+            _NETWORK_CREATION_ELEMENTS[name]
+            for name in ("vsi_manager_id", "vsi_type_id", "vsi_type_version")
+        )
+    for identity in set(old) & set(new):
+        observed_resource = new[identity]
+        if not isinstance(observed_resource, dict):
+            incomplete = True
+            continue
+        excluded = {"Metadata"} | (closure if identity == adapter_uuid else set())
+        left = {
+            key: value for key, value in old[identity].items() if key not in excluded
+        }
+        right = {
+            key: value
+            for key, value in observed_resource.items()
+            if key not in excluded
+        }
+        if left != right:
+            changed.add(identity)
+    preservation = NetworkUpdatePreservation(
+        "drifted" if changed else "unavailable" if incomplete else "unchanged",
+        scope,
+        tuple(sorted(changed)),
+    )
+    target = new.get(adapter_uuid)
+    if not isinstance(target, dict) or _network_integer(
+        target.get("VirtualSlotNumber"), 0, 65535
+    ) != _network_integer(old[adapter_uuid].get("VirtualSlotNumber"), 0, 65535):
+        return unavailable, preservation
+    observed = {name: _network_update_value(name, target) for name in expected}
+    missing = tuple(
+        name
+        for name in expected
+        if observed[name] is None or name == "remove_vsi_profile"
+    )
+    mismatched = tuple(
+        name
+        for name in expected
+        if name not in missing and observed[name] != expected[name]
+    )
+    verification = NetworkUpdateVerification(
+        "mismatched" if mismatched else "unavailable" if missing else "verified",
+        expected,
+        observed,
+        mismatched,
+        missing,
+    )
+    return verification, preservation
+
+
+async def _network_update_submission(
+    hmc: HMCClient,
+    system_name: str,
+    partition_id: int,
+    slot: int,
+    attributes: list[tuple[str, object]],
+) -> tuple[Literal["completed", "rejected", "unknown"], str | None, tuple[str, ...]]:
+    try:
+        await _set_ethernet_adapter(
+            hmc.config, system_name, partition_id, slot, attributes
+        )
+    except HMCCLIError as error:
+        if error.remote_nonzero_completed:
+            return (
+                "rejected",
+                error.remote_refusal_code,
+                ("native command returned nonzero; inspect readback before retrying",),
+            )
+        return (
+            "unknown",
+            None,
+            ("native completion is unknown; inspect readback before retrying",),
+        )
+    except HMCError:
+        return (
+            "unknown",
+            None,
+            ("native completion is unknown; inspect readback before retrying",),
+        )
+    return "completed", None, ()
+
+
+async def _network_update_after(
+    hmc: HMCClient,
+    system: str,
+    lpar: str,
+    parent: tuple[str, int],
+    before: list[dict[str, Any]],
+    identity: str,
+    expected: dict[str, object],
+    selected: dict[str, Any],
+) -> tuple[NetworkUpdateVerification, NetworkUpdatePreservation, tuple[str, ...]]:
+    errors: tuple[str, ...] = ()
+    try:
+        after_parent = await _network_update_parent(hmc, system, lpar)
+        parent_matches = after_parent[:2] == parent
+    except (HMCError, ValueError):
+        parent_matches = False
+    try:
+        after = await hmc._network_adapter_creation_feed(lpar)
+    except HMCError:
+        after = None
+        errors += ("adapter readback is unavailable",)
+    verification, preservation = _network_update_observation(
+        before, after, identity, expected, selected
+    )
+    if not parent_matches:
+        errors += (
+            "partition identity changed or is unavailable in independent readback",
+        )
+        verification = NetworkUpdateVerification(
+            "unavailable", expected, verification.observed, (), tuple(expected)
+        )
+        if preservation.status != "drifted":
+            preservation = NetworkUpdatePreservation(
+                "unavailable", preservation.scope, ()
+            )
+    return verification, preservation, errors
 
 
 def _network_identity(entry: object) -> str | None:
