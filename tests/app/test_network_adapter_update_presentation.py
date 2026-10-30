@@ -282,3 +282,26 @@ def test_cli_confirmation_refusal_and_terminal_encoding(boundary, monkeypatch):
     assert result.exit_code != 0
     assert len(prompts) == 1 and "\x1b" not in prompts[0]
     assert not boundary.connections
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("lpar_name_or_uuid", " "),
+        ("system_name_or_uuid", ""),
+        ("adapter_uuid", "not-a-uuid"),
+    ],
+)
+def test_mcp_invalid_target_refuses_before_client(boundary, field, value):
+    with pytest.raises(ValueError):
+        tools.hmc_update_network_adapter(**{**ARGS, field: value})
+    assert not boundary.connections
+
+
+@pytest.mark.parametrize("index,value", [(2, " "), (4, "not-a-uuid"), (6, " ")])
+def test_cli_invalid_target_refuses_before_client(boundary, index, value):
+    command = COMMAND.copy()
+    command[index] = value
+    result = CliRunner().invoke(app, command + ["--exclusive-writer-window", "--yes"])
+    assert result.exit_code == 2
+    assert not boundary.connections

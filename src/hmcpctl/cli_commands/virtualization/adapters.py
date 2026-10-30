@@ -16,6 +16,7 @@ from ...documents.adapters import (
 )
 from ...operations.virtualization.adapters import (
     AdapterResult,
+    _validate_network_update_target,
     add_network_adapter,
     add_vfc_adapter,
     add_vscsi_adapter,
@@ -168,6 +169,7 @@ def adapters_update_network(
             "--exclusive-writer-window is required, including with --yes"
         )
     try:
+        _validate_network_update_target(lpar, adapter_uuid, system)
         vlans = json.loads(addl_vlan_ids) if addl_vlan_ids is not None else None
         qos = (
             int(qos_priority, 10)

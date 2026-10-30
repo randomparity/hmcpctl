@@ -16,6 +16,7 @@ from ...documents.adapters import (
 )
 from ...operations.lpar.profile_sync import resource_with_change_location
 from ...operations.virtualization.adapters import (
+    _validate_network_update_target,
     add_network_adapter,
     add_vfc_adapter,
     add_vscsi_adapter,
@@ -197,6 +198,9 @@ def hmc_update_network_adapter(
     """
     if exclusive_writer_window is not True:
         raise ValueError("exclusive_writer_window=True is required")
+    _validate_network_update_target(
+        lpar_name_or_uuid, adapter_uuid, system_name_or_uuid
+    )
     fields: dict[str, Any] = {
         "tagged": tagged,
         "addl_vlan_ids": addl_vlan_ids,

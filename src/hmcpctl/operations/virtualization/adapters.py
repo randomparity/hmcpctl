@@ -180,6 +180,22 @@ async def add_network_adapter(
     return AdapterResult(lpar_uuid, resource, location, verification)
 
 
+def _validate_network_update_target(
+    lpar_name_or_uuid: str, adapter_uuid: str, system_name_or_uuid: str
+) -> None:
+    if (
+        not isinstance(adapter_uuid, str)
+        or not is_uuid(adapter_uuid)
+        or any(
+            not isinstance(value, str) or not value.strip()
+            for value in (system_name_or_uuid, lpar_name_or_uuid)
+        )
+    ):
+        raise ValueError(
+            "network update requires system, partition and valid adapter UUID selectors"
+        )
+
+
 async def update_network_adapter(
     hmc: HMCClient,
     lpar_name_or_uuid: str,
@@ -213,17 +229,9 @@ async def update_network_adapter(
         raise ValueError(
             "network update requires exclusive_writer_window=true and boolean override"
         )
-    if (
-        not isinstance(adapter_uuid, str)
-        or not is_uuid(adapter_uuid)
-        or any(
-            not isinstance(value, str) or not value.strip()
-            for value in (system_name_or_uuid, lpar_name_or_uuid)
-        )
-    ):
-        raise ValueError(
-            "network update requires system, partition and valid adapter UUID selectors"
-        )
+    _validate_network_update_target(
+        lpar_name_or_uuid, adapter_uuid, system_name_or_uuid
+    )
     if not math.isfinite(hmc.config.ssh_timeout) or hmc.config.ssh_timeout <= 0:
         raise ValueError("network update requires a finite positive ssh_timeout")
     selected = {
