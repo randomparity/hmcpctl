@@ -34,6 +34,23 @@ just test
 
 Use `just test-verbose` for native pytest diagnostics and missing-lines coverage.
 
+CI distributes each supported Python version across four groups:
+`domain-and-unit`, `application` (CLI/MCP), `procedure-arms` (offline), and
+`tooling`. Files and test identities stay in place, and shared fixtures still
+require the application dependencies. For a focused local run:
+
+```bash
+just test-group application
+```
+
+A group retains branch data in `.coverage`, JUnit results in
+`dist/test-results.xml`, and phase timings. Its success reports **combined
+coverage pending**. The per-version CI verification check requires successful
+producers and all four matching artifacts before enforcing the unchanged 90.5%
+coverage floor, running smoke/build checks and retaining a wheel. Failed,
+skipped, cancelled or malformed inputs cannot produce a green verification.
+`just test` and `just verify` remain complete standalone local commands.
+
 ### 2. MCP protocol smoke test (no HMC needed)
 
 Verifies the MCP handshake in process with a real FastMCP client and reports

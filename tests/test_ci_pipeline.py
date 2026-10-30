@@ -272,7 +272,12 @@ def test_justfile_exposes_one_composed_verification_graph() -> None:
         in justfile
     )
     assert "\nverify: static verify-runtime\n" in justfile
-    assert "\nverify-runtime: test smoke build verify-artifacts\n" in justfile
+    assert "\nverify-runtime: test verify-runtime-checks\n" in justfile
+    assert "\nverify-runtime-checks: smoke build verify-artifacts\n" in justfile
+    assert (
+        "\nverify-collected python: (test-collected python) verify-runtime-checks\n"
+        in justfile
+    )
     assert "\ntest:\n    uv run --no-sync python scripts/run_tests.py\n" in justfile
     assert (
         "\ntest-verbose:\n"
@@ -452,18 +457,19 @@ def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:
     for action, (sha, version) in ACTION_PINS.items():
         assert f"uses: {action}@{sha}  # {version}" in workflow
     assert "persist-credentials: false" in workflow
-    assert workflow.count('version: "0.12.10"') == 5
+    assert workflow.count('version: "0.12.10"') == 7
     assert 'just-version: "1.58.0"' in workflow
     for command in (
         "just setup",
-        "just verify-runtime",
+        'just verify-collected "$TEST_PYTHON"',
         "UV_NO_SYNC=1 uv run --no-sync prek run --all-files",
     ):
         assert f"run: {command}" in workflow
-    verification = workflow.index("run: just verify-runtime")
-    hooks = workflow.index("run: UV_NO_SYNC=1 uv run --no-sync prek run --all-files")
-    upload = workflow.index("uses: actions/upload-artifact@")
-    assert hooks < verification < upload
+    final = _job_body(workflow, "ci")
+    verification = final.index('run: just verify-collected "$TEST_PYTHON"')
+    upload = final.index("uses: actions/upload-artifact@")
+    assert verification < upload
+    assert "needs: [static, test-groups]" in final
     assert (
         "name: release-wheel-${{ matrix.architecture }}-py${{ matrix.python-version }}"
         in workflow
@@ -516,20 +522,16 @@ def _checkout_settings(workflow: str) -> list[str]:
 
 
 def test_only_the_source_building_ci_job_fetches_full_history() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    active_workflow, _ = _inactive_ppc64le_job(workflow)
-    checkout_settings = _checkout_settings(active_workflow)
-
-    assert len(checkout_settings) == 5
-    # The `ci` job builds and installs from source, and hatch-vcs derives the version
-    # from tags and history there (ADR 0250). Every other job installs the retained
-    # wheel, so it keeps the shallow default.
-    full_history = [s for s in checkout_settings if "fetch-depth: 0\n" in s]
-    assert len(full_history) == 1
-    assert _checkout_settings(_job_body(active_workflow, "ci")) == full_history
-    assert sum("fetch-depth" in settings for settings in checkout_settings) == 1
-    for settings in checkout_settings:
-        assert "persist-credentials: false\n" in settings
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    active, _ = _inactive_ppc64le_job(workflow)
+    settings = _checkout_settings(active)
+    assert len(settings) == 7
+    full = [item for item in settings if "fetch-depth: 0\n" in item]
+    assert len(full) == 3
+    for name in ("static", "test-groups", "ci"):
+        assert "fetch-depth: 0\n" in _checkout_settings(_job_body(active, name))[0]
+    assert sum("fetch-depth" in item for item in settings) == 3
+    assert all("persist-credentials: false\n" in item for item in settings)
 
 
 def test_dirty_project_commands_do_not_rebuild_editable_metadata(
@@ -618,7 +620,8 @@ def test_github_ci_uses_a_bounded_native_architecture_matrix() -> None:
     )
     assert "      fail-fast: false\n      matrix:\n" in active_workflow
     assert "python-version: ${{ matrix.python-version }}" in workflow
-    assert active_workflow.count("run: just verify-runtime\n") == 1
+    assert "run: just verify-runtime\n" not in active_workflow
+    assert active_workflow.count('run: just verify-collected "$TEST_PYTHON"\n') == 1
     assert not re.search(r"^  ppc64le:", active_workflow, re.MULTILINE)
     assert "docker/setup-qemu-action" not in active_workflow
     assert "architecture: [amd64, arm64]" not in workflow
@@ -1473,17 +1476,22 @@ def verification_route(tmp_path: Path):
             """
         )
     )
-    leaves = STATIC_GATES | (RUNTIME_GATES - {"cli-root", "cli-groups"})
+    leaves = (
+        STATIC_GATES
+        | (RUNTIME_GATES - {"cli-root", "cli-groups"})
+        | {"test-group", "test-collected"}
+    )
     lines = []
     recipe = ""
     emitted = False
     for line in (ROOT / "justfile").read_text().splitlines():
-        header = re.match(r"^([a-z][a-z-]*):", line)
+        header = re.match(r"^([a-z][a-z-]*)(?: [^:]*)?:", line)
         if header:
             recipe, emitted = header[1], False
         if line.startswith("    ") and recipe in leaves:
             if not emitted:
-                lines.append(f"    {shlex.quote(sys.executable)} probe.py {recipe}")
+                gate = "test" if recipe == "test-collected" else recipe
+                lines.append(f"    {shlex.quote(sys.executable)} probe.py {gate}")
                 emitted = True
         else:
             lines.append(line)
@@ -1500,25 +1508,42 @@ def verification_route(tmp_path: Path):
     def run(route: str, failure: str = "", workflow: str | None = None):
         if workflow is None:
             workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-        names = ("Run static gates through hooks", "Run runtime verification suite")
-        steps = list(
-            re.finditer(
+        names = (
+            "Run static gates through hooks",
+            "Run test group",
+            "Run runtime verification suite",
+        )
+        steps = [
+            step
+            for job in ("static", "test-groups", "ci")
+            for step in re.finditer(
                 r"^      - name: (?P<name>[^\n]+)\n(?P<body>.*?)"
                 r"(?=^      - |\Z)",
-                _job_body(workflow, "ci"),
+                _job_body(workflow, job),
                 re.MULTILINE | re.DOTALL,
             )
-        )
+        ]
         for name in names:
             assert sum(step["name"] == name for step in steps) == 1, name
         hosted = []
         for step in steps:
-            if step["name"] in names:
-                commands = re.findall(
-                    r"^        run: (.+)$", step["body"], re.MULTILINE
+            if step["name"] not in names:
+                continue
+            commands = re.findall(r"^        run: (.+)$", step["body"], re.MULTILINE)
+            assert len(commands) == 1 and not commands[0].startswith(("|", ">"))
+            command = commands[0].replace('"$TEST_PYTHON"', "3.12")
+            if step["name"] == "Run test group":
+                hosted.extend(
+                    command.replace('"$TEST_GROUP"', group)
+                    for group in (
+                        "domain-and-unit",
+                        "application",
+                        "procedure-arms",
+                        "tooling",
+                    )
                 )
-                assert len(commands) == 1 and not commands[0].startswith(("|", ">"))
-                hosted.append(commands[0])
+            else:
+                hosted.append(command)
         command = "just verify" if route == "local" else "\n".join(hosted)
         result = subprocess.run(
             ["bash", "-e", "-c", command],
@@ -1542,7 +1567,13 @@ def verification_route(tmp_path: Path):
 def test_verification_routes_execute_gates_once(verification_route, route: str) -> None:
     result, trace = verification_route(route)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert sorted(trace) == sorted(STATIC_GATES | RUNTIME_GATES)
+    assert sorted(trace) == sorted(
+        [
+            *STATIC_GATES,
+            *RUNTIME_GATES,
+            *(["test-group"] * 4 if route == "hosted" else []),
+        ]
+    )
     assert trace.index("build") < trace.index("verify-artifacts")
 
 
@@ -1556,7 +1587,7 @@ def test_verification_routes_propagate_gate_failure(
     assert failure in trace
     assert f"deliberate gate failure: {failure}" in result.stdout + result.stderr
     if failure in STATIC_GATES:
-        assert not (set(trace) & RUNTIME_GATES)
+        assert not (set(trace) & (RUNTIME_GATES | {"test-group"}))
     else:
         assert trace[-1] == failure
 
@@ -1576,7 +1607,9 @@ def test_hosted_verification_ignores_multiline_preparation(verification_route) -
     result, trace = verification_route("hosted", workflow=workflow)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert sorted(trace) == sorted(STATIC_GATES | RUNTIME_GATES)
+    assert sorted(trace) == sorted(
+        [*STATIC_GATES, *RUNTIME_GATES, *(["test-group"] * 4)]
+    )
     assert trace.index("scenario-gap") < trace.index("test")
     assert trace.index("build") < trace.index("verify-artifacts")
 
@@ -1596,6 +1629,8 @@ def test_hosted_verification_rejects_missing_or_duplicate_steps(
     verification_route, step_name: str, command: str, copies: int
 ) -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    if command == "just verify-runtime":
+        command = 'just verify-collected "$TEST_PYTHON"'
     step = f"      - name: {step_name}\n        run: {command}\n"
     assert workflow.count(step) == 1
     workflow = workflow.replace(step, step * copies)
@@ -1610,7 +1645,7 @@ def test_hosted_verification_preserves_workflow_order(verification_route) -> Non
         "      - name: Run static gates through hooks\n"
         "        run: UV_NO_SYNC=1 uv run --no-sync prek run --all-files\n"
     )
-    runtime = "      - name: Run runtime verification suite\n        run: just verify-runtime\n"
+    runtime = '      - name: Run runtime verification suite\n        run: just verify-collected "$TEST_PYTHON"\n'
     assert workflow.count(static) == workflow.count(runtime) == 1
     workflow = workflow.replace(static, "GATE_PLACEHOLDER\n").replace(runtime, static)
     workflow = workflow.replace("GATE_PLACEHOLDER\n", runtime)
@@ -1618,6 +1653,80 @@ def test_hosted_verification_preserves_workflow_order(verification_route) -> Non
     result, trace = verification_route("hosted", workflow=workflow)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert sorted(trace) == sorted(STATIC_GATES | RUNTIME_GATES)
+    assert sorted(trace) == sorted(
+        [*STATIC_GATES, *RUNTIME_GATES, *(["test-group"] * 4)]
+    )
     assert trace.index("cli-groups") < trace.index("lint")
     assert trace.index("build") < trace.index("verify-artifacts")
+
+
+def test_distributed_test_groups_keep_complete_native_producers() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    static = _job_body(workflow, "static")
+    groups = _job_body(workflow, "test-groups")
+    final = _job_body(workflow, "ci")
+    assert "UV_NO_SYNC=1 uv run --no-sync prek run --all-files" in static
+    assert "needs: static" in groups
+    assert "max-parallel: 16" in groups and "fail-fast: false" in groups
+    for version in SUPPORTED_PYTHONS:
+        assert f'"{version}"' in groups
+    for group in ("domain-and-unit", "application", "procedure-arms", "tooling"):
+        assert group in groups
+    assert 'run: just test-group "$TEST_GROUP"' in groups
+    assert "include-hidden-files: true" in groups
+    assert "path: |\n            .coverage\n            dist/test-results.xml" in groups
+    assert "needs: [static, test-groups]" in final
+    assert "if: always()" in final
+    assert "merge-multiple: false" in final
+    assert 'run: just verify-collected "$TEST_PYTHON"' in final
+    assert (
+        "pattern: test-coverage-${{ matrix.architecture }}-py${{ matrix.python-version }}-*"
+        in final
+    )
+    assert "run-id:" not in final and "github-token:" not in final
+    assert final.index("Require successful test producers") < final.index(
+        "Check out repository"
+    )
+    assert final.index("Run runtime verification suite") < final.index(
+        "Retain validated wheel"
+    )
+    for body in (static, groups, final):
+        assert "timeout-minutes: 30" in body
+        assert "fetch-depth: 0" in body
+
+
+@pytest.mark.parametrize(
+    "static_result,test_result",
+    [
+        ("success", "success"),
+        ("failure", "success"),
+        ("skipped", "success"),
+        ("cancelled", "success"),
+        ("success", "failure"),
+        ("success", "skipped"),
+        ("success", "cancelled"),
+        ("success", ""),
+    ],
+)
+def test_distributed_dependency_guard_fails_closed(static_result, test_result):
+    body = _job_body((ROOT / ".github/workflows/ci.yml").read_text(), "ci")
+    guard = re.search(
+        r"name: Require successful test producers\n.*?run: \|\n(?P<code>(?:          [^\n]*\n)+)",
+        body,
+        re.DOTALL,
+    )
+    assert guard
+    command = textwrap.dedent(guard["code"])
+    result = subprocess.run(
+        ["bash", "-e", "-c", command],
+        env={
+            **os.environ,
+            "STATIC_GATE_RESULT": static_result,
+            "GROUP_TEST_RESULT": test_result,
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert (result.returncode == 0) is (static_result == test_result == "success")
