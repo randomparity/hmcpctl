@@ -2,6 +2,8 @@
 
 ## Status
 
+> **Superseded by [0309](0309-distributed-test-groups.md)** (2026-10-29), per-version job colocation only.
+
 > **Superseded by [0210](0210-amd64-hosted-ci.md)** (2026-10-09), architecture coverage only.
 
 Accepted

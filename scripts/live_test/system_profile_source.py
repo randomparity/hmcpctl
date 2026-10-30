@@ -207,7 +207,7 @@ async def snapshot(hmc: HMCClient, packet: dict) -> dict:
 
 
 def save(directory: Path, document: dict) -> None:
-    data = json.dumps(document, indent=2).encode()
+    data = json.dumps(document).encode()
     if len(data) > LIMIT:
         raise ValueError("source journal exceeds five MiB; retain existing evidence")
     fd, name = tempfile.mkstemp(prefix=".source-", dir=directory)

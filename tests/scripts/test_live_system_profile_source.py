@@ -129,6 +129,94 @@ def grant(p):
     }
 
 
+def test_save_uses_single_line_json_without_changing_evidence(tmp_path):
+    document = {
+        "second": {"children": [None, False, 3.5, {"label": "a b\n\u2603"}]},
+        "first": [{"z": 1, "a": 2}],
+    }
+    digest = source.digest(document)
+
+    source.save(tmp_path, document)
+
+    raw = (tmp_path / "results.json").read_bytes()
+    assert b"\n" not in raw
+    assert b"\\n" in raw and b"\\u2603" in raw
+    restored = json.loads(raw)
+    assert restored == document
+    assert list(restored) == ["second", "first"]
+    assert list(restored["first"][0]) == ["z", "a"]
+    assert source.digest(restored) == digest == source.digest(document)
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_save_enforces_exact_encoded_size_and_retains_previous_evidence(
+    tmp_path, extra
+):
+    source.save(tmp_path, {"phase": "previous"})
+    path = tmp_path / "results.json"
+    previous = path.read_bytes()
+    overhead = len(json.dumps({"payload": ""}).encode())
+    document = {"payload": "x" * (source.LIMIT - overhead + extra)}
+
+    if extra:
+        with pytest.raises(ValueError, match="source journal exceeds five MiB"):
+            source.save(tmp_path, document)
+        assert path.read_bytes() == previous
+    else:
+        source.save(tmp_path, document)
+        assert path.stat().st_size == source.LIMIT
+        assert json.loads(path.read_bytes()) == document
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("operation", ["serialization", "fsync", "replace"])
+def test_save_failure_preserves_private_journal_and_removes_temporary_file(
+    monkeypatch, tmp_path, operation
+):
+    source.save(tmp_path, {"phase": "previous"})
+    path = tmp_path / "results.json"
+    previous = path.read_bytes()
+    document = {"phase": "next"}
+
+    def fail(*args):
+        raise OSError("controlled checkpoint I/O failure")
+
+    with monkeypatch.context() as patch:
+        if operation == "serialization":
+            document["invalid"] = object()
+            error = TypeError
+        else:
+            patch.setattr(source.os, operation, fail)
+            error = OSError
+        with pytest.raises(error):
+            source.save(tmp_path, document)
+    assert path.read_bytes() == previous
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_recovery_accepts_saved_and_legacy_pretty_journals(
+    monkeypatch, tmp_path, legacy
+):
+    p, h = packet(), client()
+    monkeypatch.setattr(source, "run_hmc_command", AsyncMock(return_value="name\n"))
+    document = completed_document(p, await source.snapshot(h, p), h)
+    path = tmp_path / "results.json"
+    if legacy:
+        path.write_text(json.dumps(document, indent=2))
+    else:
+        source.save(tmp_path, document)
+
+    restored = json.loads(path.read_bytes())
+    assert source.digest(restored) == source.digest(document)
+    assert await source.recover(h, p, restored) == "clean"
+    h.submit_job.assert_not_awaited()
+    h.delete_job.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_capture_only_three_jobs_and_independent_recovery(monkeypatch, tmp_path):
     p, h = packet(), client()

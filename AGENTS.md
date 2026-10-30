@@ -361,13 +361,21 @@ documentation, or anything whose output is a rendered type, expect the version
 legs to disagree with your machine and read the CI matrix rather than re-running
 locally. Hosted CI no longer supplies native arm64 evidence (ADR 0210).
 
-**CI runs static gates through real hooks, then `just verify-runtime`.** Each
-native `ci` leg invokes `UV_NO_SYNC=1 uv run --no-sync prek run --all-files` once before
-runtime verification and wheel retention (ADR 0207). The two documentation guards
-remain separately named hooks with their own failure diagnostics. `just verify`
-still composes static and runtime checks for complete standalone local use; it
-does not execute prek. `verify-runtime` alone omits static checks and is intended
-for composition after they have passed.
+**CI distributes tests and combines coverage per Python version (ADR 0309).**
+Each version runs `UV_NO_SYNC=1 uv run --no-sync prek run --all-files` once,
+then four separate test groups: `domain-and-unit`, `application`,
+`procedure-arms` and `tooling`. `just test-group <group>` retains timings,
+JUnit and branch data; its success means combined coverage is still pending.
+The existing per-version `ci` verification checks require successful producers
+and exactly four matching artifacts, then run `just verify-collected <python>`
+to enforce the configured coverage floor before smoke/build checks and wheel
+retention. Explicit dependency guards fail on failed, skipped or cancelled
+producers. Native coverage reads use isolated copies so unrelated shards cannot
+inflate or be deleted by reporting. Hooks remain separately identifiable;
+permissions, pins and downstream wheel/library checks stay intact.
+`just verify` remains complete standalone local verification and does not execute
+prek. `verify-runtime` still owns a full local test run; both it and
+`verify-collected` share `verify-runtime-checks` for the remaining runtime gates.
 
 Before pushing, run both `just verify` and `uv run --no-sync prek run --all-files`.
 Use the latter instead of bare `prek`: the dev group pins its version, while a
