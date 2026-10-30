@@ -10,6 +10,7 @@ import sys
 import time
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -643,3 +644,73 @@ def test_packet_byte_boundary(wire, packet, tmp_path, monkeypatch, excess):
     assert code == (2 if excess else 0)
     assert profile.call_count == (0 if excess else 1)
     assert not wire.writes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intent", ["create", "remove"])
+@pytest.mark.parametrize("clock", ["wall", "monotonic"])
+async def test_intent_save_crossing_time_boundary_refuses_physical_write(
+    wire, packet, tmp_path, monkeypatch, intent, clock
+):
+    await prepare(wire, packet, tmp_path)
+    now = {"wall": time.time(), "monotonic": time.monotonic()}
+    monkeypatch.setattr(
+        arm,
+        "time",
+        SimpleNamespace(time=lambda: now["wall"], monotonic=lambda: now["monotonic"]),
+    )
+    original = arm.save
+
+    def delayed_save(directory, document):
+        original(directory, document)
+        if document["intents"] and document["intents"][-1] == intent:
+            if clock == "wall":
+                now["wall"] = packet["expires_at"]
+            else:
+                now["monotonic"] += arm.LIMITS["capture"][2] + 1
+
+    monkeypatch.setattr(arm, "save", delayed_save)
+    result = await arm.capture(wire.client(), packet, tmp_path / "capture")
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert result["complete"] is False
+    assert len(wire.writes) == (0 if intent == "create" else 1)
+    assert wire.created is (intent == "remove")
+    journal = json.loads((tmp_path / "capture" / "results.json").read_text())
+    assert journal["intents"][-1] == intent
+
+
+@pytest.mark.asyncio
+async def test_dispatch_timeout_uses_time_remaining_after_intent_save(
+    wire, packet, tmp_path, monkeypatch
+):
+    await prepare(wire, packet, tmp_path)
+    now = [time.monotonic()]
+    monkeypatch.setattr(
+        arm, "time", SimpleNamespace(time=time.time, monotonic=lambda: now[0])
+    )
+    original_save, original_ssh, timeout = arm.save, wire.ssh, arm.asyncio.timeout
+    allowances, write_allowances = [], []
+    saved_intents = set()
+
+    def delayed_save(directory, document):
+        original_save(directory, document)
+        for intent in set(document["intents"]) - saved_intents:
+            now[0] += 10
+            saved_intents.add(intent)
+
+    def observed_timeout(seconds):
+        allowances.append(seconds)
+        return timeout(seconds)
+
+    async def observed_ssh(config, cmd, include_stderr, **kwargs):
+        if cmd.startswith("chhwres "):
+            write_allowances.append(allowances[-1])
+        return await original_ssh(config, cmd, include_stderr, **kwargs)
+
+    monkeypatch.setattr(arm, "save", delayed_save)
+    monkeypatch.setattr(arm, "asyncio", SimpleNamespace(timeout=observed_timeout))
+    monkeypatch.setattr(transport, "_run_hmc_command", observed_ssh)
+    result = await arm.capture(wire.client(), packet, tmp_path / "capture")
+    assert result["status"] == "CLEAN"
+    assert write_allowances == [290, 280]
+    assert result["counts"] == {"rest": 20, "ssh": 45}

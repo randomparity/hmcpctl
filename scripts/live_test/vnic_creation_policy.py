@@ -235,6 +235,10 @@ class _Budget:
         self.spent.add(kind)
         self.document["intents"].append(kind)
         save(self.output, self.document)
+        if time.time() >= self.packet["expires_at"]:
+            raise ValueError(
+                "vNIC mutation allowance expired during intent persistence"
+            )
 
 
 @contextmanager
@@ -274,6 +278,11 @@ def _bounded(budget: _Budget):
         tokens = shlex.split(cmd)
         if not tokens or tokens[0] not in ("lshmc", "lssyscfg", "lshwres"):
             budget.before_write(cmd)
+            remaining = budget.deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError(
+                    "vNIC procedure deadline exhausted before SSH dispatch"
+                )
         async with asyncio.timeout(remaining):
             return await ssh(
                 config, cmd, include_stderr, shown=shown, max_output_bytes=MIB
