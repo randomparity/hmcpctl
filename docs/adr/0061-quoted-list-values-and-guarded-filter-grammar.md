@@ -5,6 +5,8 @@
 Accepted (2026-08-21). Amends ADR 0045 in part: the "the grammar rejects; it does not encode"
 clause no longer governs attributes whose HMC-side value grammar is itself comma-separated.
 
+> **Amended by [ADR 0311](0311-vnic-creation-policy.md)** (2026-10-30): typed vNIC creation alone may opt in to documented nontrailing quoted pairs; the default refusal and remaining grammar guards stand.
+
 ## Context
 
 ADR 0045 gave `build_attribute_record` sole ownership of the HMC `-i` attribute-record grammar
