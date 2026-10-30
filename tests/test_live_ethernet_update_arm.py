@@ -729,3 +729,56 @@ async def test_recovery_known_drift_precedes_original_uncertainty(live_boundary)
     assert recovered["result"] == "observed_drift"
     assert recovered["submission"]["submission"] == "unknown"
     assert len(live_boundary.writes) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("drift", ["system_name", "slot", "hmc_version"])
+async def test_observed_identity_drift_roundtrips_through_recovery_and_evidence(
+    live_boundary, monkeypatch, drift
+):
+    import live_test_evidence as evidence
+
+    from hmcpctl.client.core import HMCClient
+
+    original_summaries = HMCClient.list_system_summaries
+    original_console = HMCClient.list_uom
+
+    async def summaries(self):
+        result = await original_summaries(self)
+        if drift == "system_name" and live_boundary.writes:
+            result[0]["SystemName"] = "sys-R2"
+        return result
+
+    async def console(self, *args):
+        result = await original_console(self, *args)
+        if drift == "hmc_version" and live_boundary.writes:
+            result[0]["Resource"]["VersionInfo"]["ServicePackName"] = "1061"
+        return result
+
+    monkeypatch.setattr(HMCClient, "list_system_summaries", summaries)
+    monkeypatch.setattr(HMCClient, "list_uom", console)
+    native = live_boundary.native.side_effect
+
+    async def changed(config, command, **kwargs):
+        result = await native(config, command, **kwargs)
+        if drift == "slot" and command.startswith("chhwres"):
+            live_boundary.rows[0]["Resource"]["VirtualSlotNumber"] = "6"
+        return result
+
+    live_boundary.native.side_effect = changed
+    digest, path, _ = await run_preflight(live_boundary)
+    run_path = live_boundary.root / "run.json"
+    document = await arm.execute(
+        live_boundary.packet, digest, path, run_path, digest, True
+    )
+    assert document["complete"] and document["result"] == "observed_drift"
+    recovered = await arm.recover(run_path, live_boundary.root / "recovery.json")
+    assert recovered["result"] == "observed_drift"
+    assert recovered["binding"] == document["binding"]
+    assert (
+        arm.validate_document(json.loads(json.dumps(recovered)), "recover") == recovered
+    )
+    rendered = evidence.render(recovered)
+    assert rendered is not None and "observed_drift" in rendered
+    assert "sys-R1" not in rendered and "sys-R2" not in rendered
+    assert len(live_boundary.writes) == 1

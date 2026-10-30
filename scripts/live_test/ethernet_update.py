@@ -511,9 +511,12 @@ def validate_history(document):
         )
     ):
         raise ValueError("ST69 retained connection invalid")
-    for snapshot_value in (document["baseline"], *document["observations"].values()):
+    snapshots = {"baseline": document["baseline"], **document["observations"]}
+    for label, snapshot_value in snapshots.items():
         if snapshot_value is not None:
-            validate_snapshot(snapshot_value, bound)
+            validate_snapshot(
+                snapshot_value, bound, admitted=label in ("baseline", "prewrite")
+            )
     intent = document["intent"]
     if intent is not None:
         exact(
@@ -577,7 +580,7 @@ def validate_history(document):
             raise ValueError("ST69 qualifying result contradicts observations/history")
 
 
-def validate_snapshot(value, bound):
+def validate_snapshot(value, bound, *, admitted):
     exact(
         value,
         (
@@ -594,7 +597,8 @@ def validate_snapshot(value, bound):
     )
     if (
         value["hmc_uuid"] != bound["hmc_uuid"]
-        or value["hmc_version"] != bound["hmc_version"]
+        or not isinstance(value["hmc_version"], str)
+        or re.fullmatch(r"V[0-9]+R[0-9]+M[0-9]+", value["hmc_version"]) is None
         or value["state"] != "running"
     ):
         raise ValueError("ST69 snapshot console/state identity differs")
@@ -623,9 +627,10 @@ def validate_snapshot(value, bound):
         != value["slot"]
     ):
         raise ValueError("ST69 snapshot adapter identity/slot invalid")
-    # Native tuple in the baseline must be the tuple admitted by the retained binding.
-    if value is not None and any(
-        value[key] != bound[key] for key in ("system_name", "partition_id", "slot")
+    # Admission stays exact; later observations must retain readable drift as evidence.
+    if admitted and any(
+        value[key] != bound[key]
+        for key in ("hmc_version", "system_name", "partition_id", "slot")
     ):
         raise ValueError("ST69 snapshot native tuple differs")
 
