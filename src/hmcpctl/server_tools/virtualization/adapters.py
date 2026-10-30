@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Literal
 
-from pydantic import StrictInt, StrictStr
+from pydantic import StrictBool, StrictInt, StrictStr
 
 from ..._app import run_limited_collection, with_client
 from ...client.client_contracts import AdapterType
 from ...client.core import HMCClient
-from ...documents.adapters import validate_network_adapter_creation_fields
+from ...documents.adapters import (
+    validate_network_adapter_creation_fields,
+    validate_network_adapter_update_fields,
+)
 from ...operations.lpar.profile_sync import resource_with_change_location
 from ...operations.virtualization.adapters import (
     add_network_adapter,
@@ -17,6 +21,7 @@ from ...operations.virtualization.adapters import (
     add_vscsi_adapter,
     delete_adapter,
     list_adapters,
+    update_network_adapter,
 )
 from ...tool_registry import tool_module
 
@@ -143,6 +148,81 @@ def hmc_add_network_adapter(
         if result.creation_verification is not None:
             rendered["creation_verification"] = result.creation_verification
         return rendered
+
+    return with_client(operation, profile=profile)
+
+
+@tool(effect="mutate", operation="adapter.update_network", target_kind="lpar")
+def hmc_update_network_adapter(
+    lpar_name_or_uuid: str,
+    adapter_uuid: str,
+    *,
+    system_name_or_uuid: str,
+    exclusive_writer_window: StrictBool,
+    tagged: StrictBool | None = None,
+    addl_vlan_ids: list[StrictInt] | None = None,
+    vlan_action: Literal["replace", "add", "remove"] = "replace",
+    qos_priority: StrictInt | Literal["none"] | None = None,
+    vsi_manager_id: StrictInt | None = None,
+    vsi_type_id: StrictInt | None = None,
+    vsi_type_version: StrictInt | None = None,
+    remove_vsi_profile: StrictBool = False,
+    ownership_override: StrictBool = False,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    """Update one contained running client Ethernet adapter with one native attempt.
+
+    Requires SSH and coordinated writers; the acknowledgement provides no HMC lock.
+    Omitted fields remain unchanged. False, zero and empty VLAN replacement are explicit.
+    Reports native submission, independent selected-field verification and parsed adapter
+    preservation separately. Missing evidence is unavailable; VSI removal has no qualified
+    positive readback oracle. No runtime traffic or saved-profile equality is established.
+    Refusal or uncertainty may have effects: inspect observations, never retry blindly.
+
+    Args:
+        lpar_name_or_uuid: Running LPAR name or UUID.
+        adapter_uuid: Existing client network adapter UUID contained by this LPAR.
+        system_name_or_uuid: Required containing managed system name or UUID.
+        exclusive_writer_window: Must be true; caller coordinates all writers.
+        tagged: Set IEEE tagging; omitted preserves it.
+        addl_vlan_ids: Unique VLAN IDs 1–4094; resulting set has at most twenty.
+        vlan_action: Replace, add or remove; relative actions require complete baseline.
+        qos_priority: Priority 0–7, or none to disable QoS.
+        vsi_manager_id: Signed 32-bit VSI manager; HMC validates remaining limits.
+        vsi_type_id: Signed 32-bit VSI type; HMC validates remaining limits.
+        vsi_type_version: Signed 32-bit VSI version; HMC validates remaining limits.
+        remove_vsi_profile: Remove whole VSI profile; cannot combine with numeric VSI.
+        ownership_override: Standard audited ownership exception; containment still required.
+        profile: TOML connection profile, or environment-default HMC when omitted.
+    """
+    if exclusive_writer_window is not True:
+        raise ValueError("exclusive_writer_window=True is required")
+    fields: dict[str, Any] = {
+        "tagged": tagged,
+        "addl_vlan_ids": addl_vlan_ids,
+        "vlan_action": vlan_action,
+        "qos_priority": qos_priority,
+        "vsi_manager_id": vsi_manager_id,
+        "vsi_type_id": vsi_type_id,
+        "vsi_type_version": vsi_type_version,
+        "remove_vsi_profile": remove_vsi_profile,
+    }
+    validate_network_adapter_update_fields(**fields)
+    if addl_vlan_ids is not None:
+        fields["addl_vlan_ids"] = addl_vlan_ids.copy()
+
+    async def operation(hmc: HMCClient):
+        return asdict(
+            await update_network_adapter(
+                hmc,
+                lpar_name_or_uuid,
+                adapter_uuid,
+                system_name_or_uuid=system_name_or_uuid,
+                exclusive_writer_window=True,
+                ownership_override=ownership_override,
+                **fields,
+            )
+        )
 
     return with_client(operation, profile=profile)
 

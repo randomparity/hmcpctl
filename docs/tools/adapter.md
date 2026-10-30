@@ -2,7 +2,7 @@
 
 # `adapter` tools
 
-5 tools in the `adapter` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+6 tools in the `adapter` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -13,3 +13,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_add_vscsi_adapter` | `mutate` | `adapter.add_vscsi` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Add a virtual SCSI client adapter paired to a VIOS server slot. |
 | `hmc_delete_adapter` | `destructive` | `adapter.delete` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Remove an adapter by UUID, detaching its network or storage path. |
 | `hmc_list_adapters` | `read` | `adapter.list` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List one LPAR's virtual adapters of the selected adapter type. |
+| `hmc_update_network_adapter` | `mutate` | `adapter.update_network` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Update one contained running client Ethernet adapter with one native attempt. |

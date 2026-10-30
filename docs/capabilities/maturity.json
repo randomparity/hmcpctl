@@ -6268,6 +6268,25 @@
         "missing_scope": []
       },
       "evidence": []
+    },
+    {
+      "operation": "adapter.update_network",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "running-client-ethernet",
+            "parameters": [
+              {
+                "name": "selected_fields",
+                "constraint": "six typed fields; one coordinated native attempt; independent bounded observation"
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
     }
   ]
 }

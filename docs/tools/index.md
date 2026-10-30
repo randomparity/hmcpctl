@@ -6,14 +6,14 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **201** tools are registered.
-- **200** are exposed by a default deployment.
+- **202** tools are registered.
+- **201** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
 | `destructive` | 45 |
-| `mutate` | 64 |
+| `mutate` | 65 |
 | `read` | 91 |
 
 ## Maturity vocabulary
@@ -28,7 +28,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 
 | Domain | Tools | Page |
 | --- | --- | --- |
-| `adapter` | 5 | [adapter.md](adapter.md) |
+| `adapter` | 6 | [adapter.md](adapter.md) |
 | `boot_order` | 3 | [boot_order.md](boot_order.md) |
 | `capacity` | 1 | [capacity.md](capacity.md) |
 | `cluster` | 5 | [cluster.md](cluster.md) |
@@ -271,6 +271,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_unmount_optical_media` | `destructive` | [media.md](media.md) |
 | `hmc_update_console_software` | `destructive` | [update.md](update.md) |
 | `hmc_update_firmware` | `destructive` | [update.md](update.md) |
+| `hmc_update_network_adapter` | `mutate` | [adapter.md](adapter.md) |
 | `hmc_update_partition_profile` | `mutate` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_update_system_profile` | `mutate` | [system_profile.md](system_profile.md) |
 | `hmc_update_vios_partition_profile` | `mutate` | [vios_profile.md](vios_profile.md) |

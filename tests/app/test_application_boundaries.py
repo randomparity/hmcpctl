@@ -125,8 +125,8 @@ def test_create_mcp_returns_independent_complete_applications():
     # #1777 adds the guarded entitled-memory statistics reset.
     # #1776 adds the guarded paging-VIOS switchover.
     # #1770 adds independent VIOS pending-boot read and guarded set tools.
-    assert len(asyncio.run(first.list_tools())) == 200
-    assert len(asyncio.run(second.list_tools())) == 200
+    assert len(asyncio.run(first.list_tools())) == 201
+    assert len(asyncio.run(second.list_tools())) == 201
 
 
 def test_operations_do_not_import_application_modules():

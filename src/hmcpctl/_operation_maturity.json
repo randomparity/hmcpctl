@@ -38,6 +38,13 @@
       "observed_at": "2026-10-07T11:36:47Z"
     },
     {
+      "operation": "adapter.update_network",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "boot_order.clear",
       "implementation": "partial",
       "verification": "current",
