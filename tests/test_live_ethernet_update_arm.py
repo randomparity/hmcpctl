@@ -74,12 +74,12 @@ def test_private_json_duplicate_and_bounds(tmp_path):
     source.write_text('{"case":"qos-set","case":"vsi-remove"}')
     source.chmod(0o600)
     with pytest.raises(ValueError, match="duplicate"):
-        arm.read_private(source, arm.MIB)
+        arm.read_record(source, arm.MIB)
     source.write_bytes(b" " * (arm.MIB + 1))
     with pytest.raises(ValueError):
-        arm.read_private(source, arm.MIB)
+        arm.read_record(source, arm.MIB)
     with pytest.raises(ValueError):
-        arm.read_private(Path("relative.json"), arm.MIB)
+        arm.read_record(Path("relative.json"), arm.MIB)
 
 
 def test_budget_reserves_logical_caps_and_original_deadline(monkeypatch):
@@ -627,7 +627,7 @@ async def test_postwrite_checkpoint_failure_retains_original_intent_and_logs_off
     run_path = live_boundary.root / "run.json"
     with pytest.raises(OSError):
         await arm.execute(live_boundary.packet, digest, path, run_path, digest, True)
-    retained = arm.read_private(run_path)
+    retained = arm.read_record(run_path)[0]
     assert retained["intent"] is not None and retained["submission"] is None
     assert len(live_boundary.writes) == 1
     assert live_boundary.reads[-1] == ("DELETE", "/rest/api/web/Logon")

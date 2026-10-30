@@ -189,10 +189,6 @@ def read_record(path, maximum=4 * MIB):
     return document, hashlib.sha256(raw).hexdigest()
 
 
-def read_private(path, maximum=4 * MIB):
-    return read_record(path, maximum)[0]
-
-
 def load_packet(path, digest):
     sha(digest)
     packet, observed_digest = read_record(path, MIB)
