@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import hmcpctl
+from hmcpctl.client import core as client_core
 from hmcpctl.client.client_profiles import PartitionKind, read_native_profile
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, load_profile
@@ -674,6 +675,13 @@ class _Budget:
         self.spent: set[str] = set()
         self.logged_on = self.logged_off = False
 
+    def private_warning(self, message, *args, **kwargs):
+        self.document.setdefault("warnings", []).append(
+            message % args if args else message
+        )
+        if self.output is not None:
+            save(self.output, self.document)
+
     def take(self, kind: str, *, logout: bool = False) -> float:
         reserve = self.reserve_seconds if not logout else 0
         remaining = self.deadline - reserve - time.monotonic()
@@ -786,6 +794,7 @@ def _bounded(budget: _Budget):
     with (
         patch.object(HMCClient, "_request", counted_request),
         patch.object(transport, "_run_hmc_command", counted_ssh),
+        patch.object(client_core._logger, "warning", budget.private_warning),
     ):
         yield
 
@@ -1047,18 +1056,13 @@ def _fixture_bounded(budget):
             budget.settle(kind, "acknowledged")
         return result
 
-    def private_warning(message, *args, **kwargs):
-        budget.document.setdefault("warnings", []).append(
-            message % args if args else message
-        )
-        save(budget.output, budget.document)
-
     with (
         patch.object(HMCClient, "_request", counted_request),
         patch.object(transport, "_run_hmc_command", counted_ssh),
+        patch.object(client_core._logger, "warning", budget.private_warning),
         patch.object(lpar_core, "stamp_created_lpar_ownership", guarded_stamp),
-        patch.object(lpar_core._logger, "warning", private_warning),
-        patch.object(ownership._logger, "warning", private_warning),
+        patch.object(lpar_core._logger, "warning", budget.private_warning),
+        patch.object(ownership._logger, "warning", budget.private_warning),
     ):
         yield
 

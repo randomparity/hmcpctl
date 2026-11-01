@@ -2321,3 +2321,52 @@ async def test_description_fresh_removal(
 
 def test_fixture_packet_accepts_explicit_prepare(fixture_packet):
     arm.validate_packet(fixture_packet)
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.asyncio
+async def test_logout_transport_warning_stays_private(
+    version,
+    wire,
+    source_wire,
+    fixture_wire,
+    packet,
+    source_packet,
+    fixture_packet,
+    monkeypatch,
+    tmp_path,
+    caplog,
+):
+    w, p = {
+        1: (wire, packet),
+        2: (source_wire, source_packet),
+        3: (fixture_wire, fixture_packet),
+    }[version]
+    native_http = w.http
+
+    def http(request):
+        if request.method == "DELETE" and request.url.path.endswith("/Logon"):
+            raise httpx.ReadTimeout("synthetic transport failure")
+        return native_http(request)
+
+    monkeypatch.setattr(transport, "_run_hmc_command", w.ssh)
+    monkeypatch.setattr(
+        HMCClient,
+        "_new_http_client",
+        lambda self, port: httpx.AsyncClient(
+            base_url="https://hmc.test:443", transport=httpx.MockTransport(http)
+        ),
+    )
+    client = w.client()
+    output = tmp_path / "logout-preflight"
+    result = await arm.preflight(client, p, output)
+    assert result["status"] == "MANUAL_RECOVERY" and not result["complete"]
+    if version != 1:
+        assert result["session"] == {"logged_on": True, "logged_off": False}
+    assert client._http.is_closed
+    assert "hmc.test" not in caplog.text
+    assert any("HMC logoff to hmc.test failed" in item for item in result["warnings"])
+    saved = json.loads((output / "results.json").read_text())
+    assert saved["warnings"] == result["warnings"] and not saved["complete"]
+    arm.client_core._logger.warning("outside bounded procedure")
+    assert "outside bounded procedure" in caplog.text
