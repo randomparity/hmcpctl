@@ -4,7 +4,10 @@ Design for #1828 at `4d500831b1a197204cbb2a47cc08526a4bb95fbf`.
 Authority is the issue's `WORK:SCOPE` token `q1828-eed0dad6`, recorded in
 [the frozen scope](https://github.com/randomparity/hmcpctl/issues/1828#issuecomment-6557892997).
 [ADR 0312](../../adr/0312-vnic-policy-updates.md) records the owner decision.
-Status: formal source-only design; implementation and hardware execution held.
+Status: source-version-2 implemented and offline verified at `07d8a360`.
+Hardware admission, public updater implementation and publication remain held.
+The separately approved [retained-fixture prerequisite](2026-11-01-vnic-retained-fixture-design.md)
+extends the same owner without changing source-version-2 semantics.
 
 ## Problem and retained parent scope
 
@@ -26,8 +29,9 @@ coverage decision; individual samples do not prove an operator/mode cross-produc
 
 Creation/mac_addr remain #1827; backing updates/failover #669; system defaults
 #680; multi-backing and ledger allocation #638; profile CRUD #1724/#637.
-No eligible current owned fixture has been identified; absence is not established.
-Root separately owns exact fixture admission and any preparation/teardown.
+No current fixture with this invocation's caller token has been admitted.
+Root separately owns exact fixture and stage admission; the retained-fixture
+prerequisite supplies preparation/cleanup only after its own quality gates.
 
 ## Global Constraints
 
@@ -35,8 +39,9 @@ Python >=3.11; local pinned Python 3.11 and CI Python 3.11–3.14 on amd64 Linux
 Local arm64 macOS verification is distinct evidence. Add no dependency or tool.
 Use `just setup` and `uv run --no-sync`; preserve the six-name `hmcpctl.api` facade.
 Keep plans ignored, use existing operation/transport ownership, and redact public
-evidence. Version-1 behavior and limits remain unchanged. No hardware invocation,
-implementation, push, PR, merge or support promotion is authorized by this design.
+evidence. Version-1 behavior and limits remain unchanged. Implementation has
+separate maintainer approval; this design grants no hardware invocation, push,
+PR, merge or support promotion.
 
 ## Owner and interfaces
 
@@ -44,8 +49,9 @@ Extend `scripts/live_test/vnic_creation_policy.py`; keep `validate_packet(packet
 `preflight(hmc, packet, output)`, `capture(hmc, packet, output)` and
 `recover(hmc, packet, journal)` signatures. Existing dispatchers remain
 `live_test_preflight.py --group vnic-creation-policy`, `live_vnic_creation_policy.py`
-and `live_test_recovery.py --vnic-creation-policy-packet`. These names identify
-future entrypoints; version 2 is currently rejected and is not runnable guidance.
+and `live_test_recovery.py --vnic-creation-policy-packet`. Version 2 is implemented;
+[the operator procedure](../../live-testing.md#source-only-vnic-update-qualification-version-2-1828)
+documents these installed entrypoints and their separate admission requirements.
 
 No owner move, new public API, generic driver or wrapper is needed. Reuse
 `vnic.add_vnic`, `vnic.remove_vnic`, `creation_policy`, `observed_policy`,
@@ -298,3 +304,13 @@ Local source evidence: `scripts/live_test/vnic_creation_policy.py:77-606`,
 fields and VLAN `+=` nontrailing example at
 `docs/refs/hmc-commands-p11/commands/chhwres.md:241,289-292`; it did not establish
 update sentinel/clear or two-list semantics. No reference prose is copied here.
+
+## Retained-fixture integration correction
+
+The retained-fixture subcycle also corrects the existing source description
+comparison boundary: extract attributed REST leaf text and remove at most one
+native LF/CRLF record terminator. Preserve semantic ownership/caller checks,
+raw transport return values and unknown resource fields. Malformed leaves,
+multiple records and changed text still refuse. The fixture design and its
+verification inventory cover bare/attributed and native-ending lifecycle controls;
+this does not change source-v2 qualification semantics or limits.

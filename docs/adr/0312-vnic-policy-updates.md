@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed design for #1828, 2026-11-01. The maintainer approved this source-only
-direction for formal design. Implementation, final budget admission and hardware
-execution remain held. This record does not settle the complete updater design.
+Source-only version 2 implemented and offline verified at `07d8a360`, 2026-11-01.
+The maintainer subsequently approved the retained-fixture prerequisite through
+design and implementation in issuecomment-6563667424. Its exact design is under
+review. Hardware/window admission and publication remain separate holds. This
+record does not settle the complete updater design.
 
 ## Context
 
@@ -32,11 +34,22 @@ derived update and one removal conditional on acknowledged expected policy and
 bounded preservation. Rejection or uncertainty disarms removal. Cleanup compares
 the captured object with precisely its selected cell changed to the fixed oracle.
 
-LPAR preparation stays outside this owner. No activation, reseed, alternative
-encoding, automatic retry, rollback or maturity promotion follows. The full
+LPAR preparation stays outside source-version-2 effects. The separately approved
+fixture purpose extends this same owner with explicit prepare and cleanup stages,
+required-stamp creation and inactive-only deletion. A retained identity handoff
+does not run a source case or authorize a later stage. Cleanup requires original
+preparation, declared complete source histories and fresh protected-state equality;
+an explicit no-source declaration is distinct from missing history. Root owns
+declaration completeness within the coordinated writer deployment. Configured
+resources come from the unique contained default saved profile; inactive current
+placeholders and unknown fields remain observations, not desired-value defaults.
+No activation, reseed, alternative encoding, automatic retry, rollback or maturity
+promotion follows. The full
 five-field updater, later list modes and two-list composition remain #1828 work.
 The [source qualification design](../workflow/specs/2026-11-01-vnic-update-source-design.md)
 defines the packet, evidence, proposed bounds and implementation admission gates.
+The [retained-fixture design](../workflow/specs/2026-11-01-vnic-retained-fixture-design.md)
+defines the separate prerequisite and its bounded lifecycle.
 
 ## Consequences
 
@@ -54,6 +67,12 @@ failover, public updater support or completion of #1828.
   update semantics. This is source interpretation, not a hardware result.
 - **A separate general diagnostic driver.** judgment: duplicating the existing
   destination, ownership, journal and recovery owner adds unnecessary surface.
+- **Borrow an existing inactive partition.** judgment: advisory ownership without
+  this invocation's caller token cannot establish the required fresh identity.
+- **Reuse a whole configuration/profile test arm as preparation.** verified:
+  `scripts/live_test/lpar_config.py:1410,1529` and
+  `scripts/live_test/profile_contract_run.py:455` at `07d8a360` perform their own
+  experiments and teardown, without a successful retained-fixture handoff.
 - **Reset between cases or clean up after refusal.** judgment: either requires an
   unqualified mutation or authority beyond the approved qualified-cleanup boundary.
 - **Do nothing or implement finite modes first.** judgment: neither satisfies the
