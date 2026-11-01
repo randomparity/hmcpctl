@@ -132,7 +132,9 @@ eligibility; preparing this fixture earns no source admission or positive oracle
    insufficient. Any unknown outcome stops, retaining residue for recovery.
 4. Successful prepare records `PREPARED` only with confirmed identity/preservation
    and own logout. Separate read-only recovery may report `RETAINED` only from
-   complete successful history plus a fresh equal retained observation.
+   complete successful history plus a fresh equal retained observation. Bound failed
+   histories still receive an independent bounded snapshot (or an explicit observation
+   error); persist that residue evidence and keep MANUAL_RECOVERY without retry.
 5. Cleanup validates the original preparation and declared source evidence. Each
    source packet must bind the same candidate/system/fresh UUID/id/caller/state;
    its complete CLEAN capture is recomputed with the existing `_source_history`
