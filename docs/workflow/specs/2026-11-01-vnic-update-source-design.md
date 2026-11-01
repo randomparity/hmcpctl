@@ -132,14 +132,22 @@ parser's case folding and is deliberate for these candidate source observations.
    count reserve and remaining time at actual dispatch. No alternative encoding.
 5. Take B2 independently after completed, rejected or unknown submission when
    bounded reads remain. Classify submission, selected policy and preservation
-   independently. Read failure means unavailable, not rejected or unchanged.
+   independently. Retain the contained selected row and selected-policy axis before
+   backing/direct reads; a later preservation failure leaves policy evidence intact
+   and preservation unavailable. Read failure cannot imply rejected or unchanged.
 6. Only a qualified case may arm removal. Require B2 to equal B1 except the one
    selected raw policy cell, now equal to the fixed oracle. Validate the complete
    captured identity, generated MAC, backing/capacity/state and foreign projection.
    Derive expected post-update object from B1 plus precisely that cell; do not
    pass old creation policy unchanged into cleanup or mask the full policy object.
    Reuse `remove_vnic`, retaining its own contained ownership/environment/backing
-   checks. No external operation intervenes between B2 and these removal checks.
+   checks. A source-local scoped guard compares those already-performed fresh
+   vNIC/backing, contained REST fixture identity/state and native ownership reads
+   to qualified B2 before the physical remove token is consumed. Persist those
+   bounded observations with the intent; recovery recomputes their agreement.
+   An observed discrepancy disarms removal. No extra read is added. Compare the
+   removal result's vnic_before, backing_before and selector to B2 in capture and
+   recovery. The residual unobservable race after the last read remains accepted.
 7. Require acknowledged complete removal, fresh B3 equal to B0, captured slot
    and backing absent, and acknowledged own logout. Persist final source history.
    Any failed predicate holds later effects and subsequent windows.
@@ -162,7 +170,8 @@ and its generated MAC must be a valid 12-hex observation before update.
 Version 2 retains private lifecycle fields and adds `version=2`,
 `purpose=update-mode-source`, `evidence_class=source-only`, and exact `case`.
 Its `source` object contains captured_slot, before_update (B1), native_record,
-expected `{field,value}`, submission, remote_refusal_code, after_update (B2),
+expected `{field,value}`, submission, remote_refusal_code, selected_after (the
+independently contained selected raw row), after_update (complete B2),
 policy_verification, preservation and qualification. Missing evidence is retained
 with an error; no success is reconstructed from requested data.
 
@@ -183,7 +192,8 @@ proof, checks exact discriminators, candidate and packet binding, complete histo
 unique ordered intents `[create, update, remove]` and their persisted exact commands,
 original acknowledged session
 closure, qualified B1/B2 comparisons and captured identities. Re-run the creation
-proof on B1; re-run the selected-cell cleanup proof on B2; require successful add
+proof on B1; re-run the selected-cell cleanup and removal-before-state proofs on B2;
+require selected_after to agree with B2 and require successful add
 and remove result identities/flags/errors, B3/B0 equality and independent current
 B0 equality/absence. Compare serialized derived evidence with recomputation.
 Its own login/logout must also complete. A forged label, removed history field,
