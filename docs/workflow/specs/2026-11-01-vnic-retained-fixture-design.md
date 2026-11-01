@@ -1,10 +1,12 @@
 # Retained fixture for vNIC source qualification
 
-Design for #1828 at `07d8a360460aedd8d502fbad5755b7b6e67f7238`.
+Retained-fixture prerequisite for #1828, built on source-v2 at
+`07d8a360460aedd8d502fbad5755b7b6e67f7238`.
 Authority: [amended scope](https://github.com/randomparity/hmcpctl/issues/1828#issuecomment-6563693890),
 token `q1828-eed0dad6`, and the maintainer's explicit prerequisite approval in
 issuecomment-6563667424. [ADR 0312](../../adr/0312-vnic-policy-updates.md) records
-the owner decision. Status: design; no fixture stage is yet runnable.
+the owner decision. Status: implemented with offline lifecycle and physical-boundary
+proofs; hardware execution and publication remain separately held.
 
 ## Problem and scope
 

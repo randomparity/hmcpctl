@@ -13,13 +13,19 @@ import time
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, fields
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
 import hmcpctl
+from hmcpctl.client.client_profiles import PartitionKind, read_native_profile
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, load_profile
+from hmcpctl.documents.lpar import LparResources, build_lpar_document
+from hmcpctl.documents.partition_profile import _records
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.lpar import core as lpar_core
 from hmcpctl.operations.lpar import ownership
 from hmcpctl.operations.lpar.ownership import (
     authorize_lpar_ownership_description,
@@ -41,6 +47,7 @@ from hmcpctl.operations.virtualization.vnic_policy import (
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh import transport
 from hmcpctl.ssh.commands import build_attribute_record
+from hmcpctl.ssh.lpar import _lpar_resource_pairs
 from hmcpctl.ssh.profiles import get_lpar_description
 from hmcpctl.ssh.sriov import list_sriov_configured_logical_port_rows
 from hmcpctl.ssh.vnic import (
@@ -48,6 +55,7 @@ from hmcpctl.ssh.vnic import (
     list_vnic_backing_rows,
     list_vnic_rows,
 )
+from hmcpctl.xmlutil import leaf_text
 
 from .system_profile_source import _revision, digest, save
 from .vios_ame_source import _json, _private, _read_private
@@ -190,11 +198,368 @@ _SOURCE_POLICY = {
 }
 
 
+_FIXTURE_FIELDS = {
+    "version",
+    "purpose",
+    "action",
+    "configured_profile",
+    "hmc_identity",
+    "expected_commit",
+    "system_uuid",
+    "fixture_name",
+    "caller_token",
+    "baseline_sha256",
+    "expires_at",
+    "exclusive_writer_window",
+    "allow_fixture_effect",
+    "prepare_journal",
+    "source_declaration",
+    "source_evidence",
+}
+FIXTURE_LIMITS = {
+    "preflight": (64, 40, 120),
+    "prepare": (96, 24, 300),
+    "cleanup": (128, 64, 300),
+    "recover": (32, 24, 120),
+}
+FIXTURE_SUFFIX = {
+    "create-rest": (64, 16),
+    "create-native": (60, 14),
+    "stamp": (32, 8),
+    "delete": (24, 4),
+}
+
+
+def _fixture(packet):
+    return (
+        isinstance(packet, dict)
+        and type(packet.get("version")) is int
+        and packet["version"] == 3
+    )
+
+
+def _validate_fixture(packet):
+    _keys(packet, _FIXTURE_FIELDS)
+    if packet["purpose"] != "vnic-source-fixture" or packet["action"] not in (
+        "prepare",
+        "cleanup",
+    ):
+        raise ValueError("fixture requires its fixed purpose and explicit action")
+    for key in ("configured_profile", "fixture_name", "caller_token"):
+        if (
+            not isinstance(packet[key], str)
+            or not packet[key]
+            or not packet[key].isprintable()
+        ):
+            raise ValueError("fixture identity requires printable strings")
+    match = re.fullmatch(r"hmcpctl-vnic-fixture-([0-9a-f]{16})", packet["fixture_name"])
+    if match is None or packet["caller_token"] != "q1828-fixture-" + match[1]:
+        raise ValueError("fixture name and caller nonce differ")
+    _keys(packet["hmc_identity"], {"host", "port"})
+    host, port = packet["hmc_identity"]["host"], packet["hmc_identity"]["port"]
+    if (
+        not isinstance(host, str)
+        or not host
+        or not host.isprintable()
+        or type(port) is not int
+        or not 1 <= port <= 65535
+    ):
+        raise ValueError("fixture destination is invalid")
+    if not isinstance(packet["system_uuid"], str) or not is_uuid(packet["system_uuid"]):
+        raise ValueError("fixture requires the exact system UUID")
+    for key, length in (("expected_commit", 40), ("baseline_sha256", 64)):
+        value = packet[key]
+        if key == "baseline_sha256" and value is None:
+            continue
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(f"[0-9a-f]{{{length}}}", value) is None
+        ):
+            raise ValueError("fixture candidate or baseline digest is invalid")
+    if type(packet["expires_at"]) is not int or packet["expires_at"] <= 0:
+        raise ValueError("fixture expiry must be a positive integer")
+    if (
+        packet["exclusive_writer_window"] is not True
+        or packet["allow_fixture_effect"] is not True
+    ):
+        raise ValueError("fixture requires current bounded writer acknowledgements")
+    records = packet["source_evidence"]
+    if not isinstance(records, list) or len(records) > 6:
+        raise ValueError("fixture source evidence exceeds six records")
+    if packet["source_declaration"] == "none-invoked":
+        if records:
+            raise ValueError("no-source declaration contradicts known records")
+    elif packet["source_declaration"] != "complete-set" or not records:
+        raise ValueError("fixture requires an explicit source invocation declaration")
+    paths = []
+    for record in records:
+        _keys(record, {"packet", "capture", "recovery"})
+        for value in record.values():
+            if not isinstance(value, str) or not value or not value.isprintable():
+                raise ValueError("fixture evidence paths must be printable strings")
+            paths.append(value)
+    if len(set(paths)) != len(paths):
+        raise ValueError("fixture source evidence repeats an input")
+    original = packet["prepare_journal"]
+    if packet["action"] == "prepare":
+        if (
+            original is not None
+            or records
+            or packet["source_declaration"] != "none-invoked"
+        ):
+            raise ValueError("fixture preparation cannot adopt prior work")
+    elif not isinstance(original, str) or not original or not original.isprintable():
+        raise ValueError("fixture cleanup requires original preparation")
+
+
+def _fixture_resources():
+    return LparResources(
+        min_memory=512,
+        desired_memory=512,
+        max_memory=1024,
+        dedicated=False,
+        min_procs=0.05,
+        desired_procs=0.05,
+        max_procs=0.05,
+        min_vcpus=1,
+        desired_vcpus=1,
+        max_vcpus=1,
+        uncapped=False,
+    )
+
+
+def _scalar_text(value):
+    if isinstance(value, dict):
+        attrs = value.get("@attrs")
+        if (
+            set(value) != {"@attrs", "text"}
+            or not isinstance(attrs, dict)
+            or any(
+                not isinstance(k, str) or not isinstance(v, str)
+                for k, v in attrs.items()
+            )
+        ):
+            raise ValueError("vNIC observed scalar leaf is malformed")
+        value = leaf_text(value)
+    if not isinstance(value, str):
+        raise TypeError("vNIC observed scalar text is unavailable")
+    return value
+
+
+def _fixture_number(value):
+    result = Decimal(_scalar_text(value))
+    if not result.is_finite() or result < 0:
+        raise ValueError("fixture numeric observation is unavailable")
+    return result
+
+
+def _fixture_capacity(system):
+    memory = system["AssociatedSystemMemoryConfiguration"]
+    cpu = system["AssociatedSystemProcessorConfiguration"]
+    block = _fixture_number(memory["CurrentLogicalMemoryBlockSize"])
+    minimum = _fixture_number(cpu["MinimumProcessorUnitsPerVirtualProcessor"])
+    if (
+        block <= 0
+        or 512 % block
+        or 1024 % block
+        or not 0 < minimum <= Decimal("0.05")
+        or _fixture_number(memory["CurrentAvailableSystemMemory"]) < 1024
+        or _fixture_number(cpu["CurrentAvailableSystemProcessorUnits"])
+        < Decimal("0.05")
+    ):
+        raise ValueError("fixed fixture resources are not freshly eligible")
+
+
+async def _fixture_snapshot(hmc, packet):
+    system = await hmc.get_managed_system(packet["system_uuid"])
+    r = system["Resource"]
+    if (
+        system.get("UUID", "").casefold() != packet["system_uuid"].casefold()
+        or _scalar_text(r.get("State")) != "operating"
+    ):
+        raise ValueError("fixture operating system identity unavailable")
+    system_name = _scalar_text(r.get("SystemName"))
+    if not isinstance(system_name, str) or not system_name:
+        raise ValueError("fixture system command name unavailable")
+    rows: list[tuple[PartitionKind, dict]] = []
+    kinds: tuple[PartitionKind, ...] = ("LogicalPartition", "VirtualIOServer")
+    for kind in kinds:
+        for entry in await hmc.list_child("ManagedSystem", packet["system_uuid"], kind):
+            rows.append((kind, entry))
+    if len(rows) > 5:
+        raise ValueError("fixture partition observation exceeds five entries")
+    observed, profile_count, names, numbers = {}, 0, set(), set()
+    for kind, entry in rows:
+        uid, resource = entry["UUID"], entry["Resource"]
+        name, number = (
+            _scalar_text(resource.get("PartitionName")),
+            _scalar_text(resource.get("PartitionID")),
+        )
+        if (
+            not isinstance(uid, str)
+            or not is_uuid(uid)
+            or uid.casefold() in observed
+            or not isinstance(name, str)
+            or not name
+            or name in names
+            or number in numbers
+            or not isinstance(number, str)
+            or re.fullmatch(r"[1-9][0-9]*", number) is None
+        ):
+            raise ValueError("fixture contained identities are ambiguous")
+        names.add(name)
+        numbers.add(number)
+        detail = await hmc.get_uom(kind, uid, group="Advanced")
+        full = detail["Resource"]
+        if (
+            detail["UUID"].casefold() != uid.casefold()
+            or _scalar_text(full.get("PartitionName")) != name
+            or _scalar_text(full.get("PartitionID")) != number
+            or any(
+                not isinstance(full.get(k), dict)
+                for k in (
+                    "PartitionMemoryConfiguration",
+                    "PartitionProcessorConfiguration",
+                    "PartitionIOConfiguration",
+                )
+            )
+        ):
+            raise ValueError("fixture feed/detail or full resource observation differs")
+        saved = {}
+        feed = await hmc.list_child(kind, uid, "LogicalPartitionProfile")
+        if not isinstance(feed, list) or profile_count + len(feed) > 9:
+            raise ValueError("fixture profile observation exceeds nine entries")
+        for item in feed:
+            profile = await read_native_profile(
+                hmc, kind, uid, item["UUID"], packet["system_uuid"]
+            )
+            if (
+                profile.uuid.casefold() in saved
+                or not profile.etag
+                or profile.name in [p["name"] for p in saved.values()]
+            ):
+                raise ValueError("fixture saved profile identity/ETag unavailable")
+            saved[profile.uuid.casefold()] = {
+                "name": profile.name,
+                "setting_id": profile.setting_id,
+                "etag": profile.etag,
+                "resource": profile.resource,
+                "semantic": _plain(_records(profile.element, False)),
+            }
+        profile_count += len(saved)
+        full = deepcopy(full)
+        full.pop("Uptime", None)
+        observed[uid.casefold()] = {
+            "kind": kind,
+            "name": name,
+            "id": number,
+            "resource": full,
+            "profiles": saved,
+        }
+    return _plain(
+        {
+            "system": {
+                "uuid": packet["system_uuid"].casefold(),
+                "name": system_name,
+                "memory": r["AssociatedSystemMemoryConfiguration"],
+                "cpu": r["AssociatedSystemProcessorConfiguration"],
+            },
+            "partitions": dict(sorted(observed.items())),
+            "profiles": profile_count,
+            "backings": sorted(
+                await list_vnic_backing_rows(hmc.config, system_name),
+                key=lambda row: (row["adapter_id"], row["logical_port_id"]),
+            ),
+        }
+    )
+
+
+def _fixture_foreign(snapshot, uid=None):
+    value = deepcopy(snapshot)
+    if uid is not None:
+        target = value["partitions"].pop(uid)
+        value["profiles"] -= len(target["profiles"])
+    value["system"]["memory"].pop("CurrentAvailableSystemMemory", None)
+    value["system"]["cpu"].pop("CurrentAvailableSystemProcessorUnits", None)
+    return value
+
+
+def _fixture_target(packet, current, baseline):
+    matches = [
+        (uid, item)
+        for uid, item in current["partitions"].items()
+        if item["name"] == packet["fixture_name"]
+    ]
+    if len(matches) != 1:
+        raise ValueError("fixture identity is not unique")
+    uid, target = matches[0]
+    r = target["resource"]
+    if (
+        uid in baseline["partitions"]
+        or target["kind"] != "LogicalPartition"
+        or _scalar_text(r.get("PartitionType")) != "AIX/Linux"
+        or _scalar_text(r.get("PartitionState")) != "not activated"
+        or _scalar_text(r.get("DefaultProfileName")) != "default_profile"
+        or _fixture_foreign(current, uid) != _fixture_foreign(baseline)
+    ):
+        raise ValueError(
+            "fixture fresh inactive identity or foreign preservation differs"
+        )
+    profiles = list(target["profiles"].values())
+    if len(profiles) != 1 or profiles[0]["name"] != "default_profile":
+        raise ValueError("fixture requires one contained saved default")
+    profile = profiles[0]["resource"]
+    memory, cpu = profile["ProfileMemory"], profile["ProcessorAttributes"]
+    shared = cpu["SharedProcessorConfiguration"]
+    if (
+        _scalar_text(cpu.get("HasDedicatedProcessors")) != "false"
+        or _scalar_text(cpu.get("SharingMode")) != "capped"
+    ):
+        raise ValueError("fixture configured shared/capped mode differs")
+    for mapping, field_names, values in (
+        (memory, ("MinimumMemory", "DesiredMemory", "MaximumMemory"), (512, 512, 1024)),
+        (
+            shared,
+            (
+                "MinimumProcessingUnits",
+                "DesiredProcessingUnits",
+                "MaximumProcessingUnits",
+            ),
+            ("0.05",) * 3,
+        ),
+        (
+            shared,
+            (
+                "MinimumVirtualProcessors",
+                "DesiredVirtualProcessors",
+                "MaximumVirtualProcessors",
+            ),
+            (1,) * 3,
+        ),
+    ):
+        if any(
+            _fixture_number(mapping.get(k)) != Decimal(str(v))
+            for k, v in zip(field_names, values, strict=True)
+        ):
+            raise ValueError("fixture saved resource tuple differs")
+    io = profile["IOConfigurationInstance"]
+    if _scalar_text(io.get("MaximumVirtualIOSlots")) != "8" or any(
+        value not in ({}, [], None, "", "false")
+        for key, value in io.items()
+        if key not in ("Metadata", "MaximumVirtualIOSlots")
+    ):
+        raise ValueError("fixture configured I/O exceeds its envelope")
+    return {"uuid": uid, **target}
+
+
 def _source(packet: dict) -> bool:
     return type(packet.get("version")) is int and packet["version"] == 2
 
 
 def validate_packet(packet: dict) -> None:
+    if _fixture(packet):
+        _validate_fixture(packet)
+        return
     if not isinstance(packet, dict) or not _source(packet):
         _validate_creation_packet(packet)
         return
@@ -284,7 +649,9 @@ SOURCE_SUFFIX = {"create": (24, 26), "update": (17, 18), "remove": (7, 6)}
 
 
 class _Budget:
-    def __init__(self, hmc, packet, stage, document, output):
+    def __init__(
+        self, hmc, packet, stage, document, output, *, limits=None, reserve_seconds=None
+    ):
         self.hmc, self.packet, self.document, self.output = (
             hmc,
             packet,
@@ -292,8 +659,13 @@ class _Budget:
             output,
         )
         self.rest_limit, self.ssh_limit, seconds = (
-            SOURCE_LIMITS if _source(packet) else LIMITS
+            limits or (SOURCE_LIMITS if _source(packet) else LIMITS)
         )[stage]
+        self.reserve_seconds = (
+            (15 if _source(packet) else 0)
+            if reserve_seconds is None
+            else reserve_seconds
+        )
         self.dispatched: set[str] = set()
         self.remove_reads: set[str] = set()
         self.deadline = time.monotonic() + seconds
@@ -303,7 +675,7 @@ class _Budget:
         self.logged_on = self.logged_off = False
 
     def take(self, kind: str, *, logout: bool = False) -> float:
-        reserve = 15 if _source(self.packet) and not logout else 0
+        reserve = self.reserve_seconds if not logout else 0
         remaining = self.deadline - reserve - time.monotonic()
         limit = self.rest_limit - (not logout) if kind == "rest" else self.ssh_limit
         if remaining <= 0 or self.counts[kind] >= limit:
@@ -418,8 +790,296 @@ def _bounded(budget: _Budget):
         yield
 
 
+def _fixture_commands(packet, system_name, description):
+    create_record = build_attribute_record(
+        [
+            ("name", packet["fixture_name"]),
+            ("lpar_env", "aixlinux"),
+            ("profile_name", "default_profile"),
+            *_lpar_resource_pairs(_fixture_resources(), 8),
+        ]
+    )
+    create = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(create_record)}"
+    stamp_record = build_attribute_record(
+        [("name", packet["fixture_name"]), ("description", description)]
+    )
+    stamp = (
+        f"chsyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(stamp_record)}"
+    )
+    return {"create-native": create, "stamp": stamp}
+
+
+async def _fixture_held(hmc, packet, baseline):
+    current = await _fixture_snapshot(hmc, packet)
+    target = _fixture_target(packet, current, baseline)
+    native = await get_lpar_description(
+        hmc.config, current["system"]["name"], packet["fixture_name"]
+    )
+    description = _description_text(native, native=True)
+    if description != _description_text(target["resource"].get("Description")):
+        raise ValueError("fixture native/REST description differs")
+    rows = await list_vnic_rows(
+        hmc.config, current["system"]["name"], packet["fixture_name"]
+    )
+    if rows:
+        raise ValueError(
+            "fixture vNIC baseline is not empty; enclosing deletion disarmed"
+        )
+    return {
+        "snapshot": current,
+        "target": target,
+        "description": description,
+        "native_description_raw": native,
+        "vnics": rows,
+    }
+
+
+def _fixture_owned(hmc, packet, held):
+    description = held["description"]
+    authorize_lpar_ownership_description(
+        hmc,
+        held["snapshot"]["system"]["name"],
+        packet["fixture_name"],
+        description,
+        operation="lpar-mutation",
+    )
+    if parse_lpar_ownership_caller_token(description) != packet["caller_token"]:
+        raise ValueError("fixture caller token differs")
+
+
+class _FixtureBudget(_Budget):
+    def __init__(self, hmc, packet, stage, document, output):
+        super().__init__(
+            hmc,
+            packet,
+            stage,
+            document,
+            output,
+            limits=FIXTURE_LIMITS,
+            reserve_seconds=15,
+        )
+        self.stage = stage
+        self.qualified = None
+        self.captured: dict | None = None
+        self.description = f"[hmcpctl owner:{hmc.config.agent_id or 'hmcpctl'} created:{date.today().isoformat()}] [caller {packet['caller_token']}]"  # noqa: DTZ011 - match the existing ADR0011 stamp owner's local calendar date
+        self.creation = build_lpar_document(
+            name=packet["fixture_name"],
+            partition_type="AIX/Linux",
+            resources=_fixture_resources(),
+            max_virtual_slots=8,
+        )
+
+    def signature(self, kind):
+        system = self.document["baseline"]["system"]["name"]
+        if kind in ("create-native", "stamp"):
+            return _fixture_commands(self.packet, system, self.description)[kind]
+        if kind == "create-rest":
+            return {
+                "method": "PUT",
+                "path": f"/rest/api/uom/ManagedSystem/{self.packet['system_uuid']}/LogicalPartition",
+                "body_sha256": hashlib.sha256(self.creation.encode()).hexdigest(),
+            }
+        if self.captured is None:
+            raise ValueError("fixture deletion requires a captured identity")
+        return {
+            "method": "DELETE",
+            "path": f"/rest/api/uom/LogicalPartition/{self.captured['uuid']}",
+        }
+
+    def reserve(self, kind):
+        rest, ssh = FIXTURE_SUFFIX[kind]
+        if (
+            self.rest_limit - self.counts["rest"] < rest
+            or self.ssh_limit - self.counts["ssh"] < ssh
+            or self.deadline - 15 - time.monotonic() < 15
+            or time.time() >= self.packet["expires_at"]
+        ):
+            raise ValueError("fixture effect lacks fresh observation/logout reserve")
+
+    def intent(self, kind, signature):
+        if signature != self.signature(kind) or kind in self.spent:
+            raise ValueError("fixture effect differs from its once-only allowance")
+        previous = [
+            (item["kind"], item["settlement"]) for item in self.document["effects"]
+        ]
+        allowed = {
+            "create-rest": self.stage == "prepare" and not previous,
+            "create-native": self.stage == "prepare"
+            and previous == [("create-rest", "refused")],
+            "stamp": self.stage == "prepare"
+            and self.captured is not None
+            and previous
+            in (
+                [("create-rest", "acknowledged")],
+                [("create-rest", "refused"), ("create-native", "acknowledged")],
+            ),
+            "delete": self.stage == "cleanup"
+            and self.qualified is not None
+            and not previous,
+        }
+        if not allowed[kind]:
+            raise ValueError("fixture effect order or current authority differs")
+        self.reserve(kind)
+        self.spent.add(kind)
+        self.document["effects"].append(
+            {"kind": kind, "signature": signature, "settlement": "unknown"}
+        )
+        save(self.output, self.document)
+        self.reserve(kind)
+
+    def settle(self, kind, result):
+        if self.document["effects"][-1]["kind"] != kind:
+            raise ValueError("fixture effect settlement order differs")
+        self.document["effects"][-1]["settlement"] = result
+        save(self.output, self.document)
+
+
+@contextmanager
+def _fixture_bounded(budget):
+    request, ssh = HMCClient._request, transport._run_hmc_command
+    stamp_owner = lpar_core.stamp_created_lpar_ownership
+
+    async def guarded_stamp(hmc, system_uuid, fallback, created, caller_token=None):
+        if (
+            hmc is not budget.hmc
+            or system_uuid != budget.packet["system_uuid"]
+            or caller_token != budget.packet["caller_token"]
+        ):
+            raise ValueError("fixture stamp owner context differs")
+        held = await _fixture_held(hmc, budget.packet, budget.document["baseline"])
+        if created.get("UUID", "").casefold() != held["target"]["uuid"]:
+            raise ValueError("fixture returned and independently contained UUID differ")
+        budget.captured = held["target"]
+        budget.document["before_stamp"] = held
+        save(budget.output, budget.document)
+        return await stamp_owner(
+            hmc, system_uuid, fallback, created, caller_token=caller_token
+        )
+
+    async def counted_request(hmc, method, path, **kwargs):
+        if hmc is not budget.hmc:
+            raise ValueError("fixture refuses an unrelated REST client")
+        own_session = path == "/rest/api/web/Logon" and method in ("PUT", "DELETE")
+        kind = None
+        if method != "GET" and not own_session:
+            kind = (
+                "create-rest"
+                if method == "PUT"
+                else "delete"
+                if method == "DELETE"
+                else None
+            )
+            if kind is None:
+                raise ValueError("fixture refuses an unrelated REST effect")
+            if kind == "delete":
+                if budget.qualified is None:
+                    raise ValueError("fixture deletion is not currently qualified")
+                fresh = await _fixture_held(
+                    hmc, budget.packet, budget.document["original"]["baseline"]
+                )
+                _fixture_owned(hmc, budget.packet, fresh)
+                if fresh != budget.qualified:
+                    raise ValueError("fixture changed at physical deletion boundary")
+                budget.document["delete_observation"] = fresh
+            signature = {"method": method, "path": path}
+            if method == "PUT":
+                body = kwargs.get("content")
+                if not isinstance(body, str):
+                    raise ValueError(
+                        "fixture create body is not the exact text document"
+                    )
+                signature["body_sha256"] = hashlib.sha256(body.encode()).hexdigest()
+        if own_session and method == "PUT" and budget.logged_on:
+            raise ValueError("fixture allows one own logon")
+        remaining = budget.take("rest", logout=own_session and method == "DELETE")
+        if kind is not None:
+            budget.intent(kind, signature)
+            remaining = budget.deadline - 15 - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("fixture dispatch deadline expired after intent")
+        async with asyncio.timeout(remaining):
+            response = await request(hmc, method, path, **kwargs)
+        if own_session:
+            if method == "PUT":
+                budget.logged_on = response.status_code == 200
+            else:
+                budget.logged_off = response.status_code in (200, 202, 204)
+        elif kind is not None:
+            refused = kind == "create-rest" and lpar_core._rest_create_refused(
+                HMCError(
+                    "fixture REST creation refusal", response.status_code, response.text
+                )
+            )
+            budget.settle(
+                kind,
+                "refused"
+                if refused
+                else "acknowledged"
+                if response.status_code in (200, 201, 202, 204)
+                else "unknown",
+            )
+        return response
+
+    async def counted_ssh(
+        config, command, include_stderr, *, shown, max_output_bytes=None
+    ):
+        if config is not budget.hmc.config:
+            raise ValueError("fixture refuses an unrelated SSH connection")
+        tokens = shlex.split(command)
+        kind = None
+        if not tokens or tokens[0] not in ("lshmc", "lssyscfg", "lshwres"):
+            kind = {"mksyscfg": "create-native", "chsyscfg": "stamp"}.get(
+                tokens[0] if tokens else ""
+            )
+            if kind is None:
+                raise ValueError("fixture refuses an unrelated native effect")
+        remaining = budget.take("ssh")
+        if kind is not None:
+            budget.intent(kind, command)
+            remaining = budget.deadline - 15 - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("fixture dispatch deadline expired after intent")
+        async with asyncio.timeout(remaining):
+            result = await ssh(
+                config, command, include_stderr, shown=shown, max_output_bytes=MIB
+            )
+        if kind is not None:
+            budget.settle(kind, "acknowledged")
+        return result
+
+    def private_warning(message, *args, **kwargs):
+        budget.document.setdefault("warnings", []).append(
+            message % args if args else message
+        )
+        save(budget.output, budget.document)
+
+    with (
+        patch.object(HMCClient, "_request", counted_request),
+        patch.object(transport, "_run_hmc_command", counted_ssh),
+        patch.object(lpar_core, "stamp_created_lpar_ownership", guarded_stamp),
+        patch.object(lpar_core._logger, "warning", private_warning),
+        patch.object(ownership._logger, "warning", private_warning),
+    ):
+        yield
+
+
 def _plain(value):
     return json.loads(json.dumps(value, default=str))
+
+
+def _description_text(value, *, native=False):
+    if not native:
+        value = _scalar_text(value)
+    if not isinstance(value, str):
+        raise TypeError("vNIC Description text is unavailable")
+    if native:
+        if value.endswith("\r\n"):
+            value = value[:-2]
+        elif value.endswith("\n"):
+            value = value[:-1]
+    if value and not value.isprintable():
+        raise ValueError("vNIC Description contains control or multiple records")
+    return value
 
 
 async def snapshot(
@@ -448,9 +1108,11 @@ async def snapshot(
     lpar_name = resource["PartitionName"]
     if str(resource.get("PartitionID")) != str(packet["expected_lpar_id"]):
         raise ValueError("vNIC numeric partition identity changed")
-    description = await get_lpar_description(hmc.config, system_name, lpar_name)
+    description = _description_text(
+        await get_lpar_description(hmc.config, system_name, lpar_name), native=True
+    )
     if (
-        description != resource.get("Description")
+        description != _description_text(resource.get("Description"))
         or parse_lpar_ownership_owner(description) != (hmc.config.agent_id or "hmcpctl")
         or parse_lpar_ownership_caller_token(description) != packet["owner_token"]
     ):
@@ -715,7 +1377,7 @@ def _source_remove_guard(qualified, budget):
             "lpar": resource["PartitionName"],
             "id": identity["id"],
             "state": resource["PartitionState"],
-            "description": resource["Description"],
+            "description": _description_text(resource["Description"]),
         }
         expected = {key: identity[key] for key in value}
         if (
@@ -754,14 +1416,15 @@ def _source_remove_guard(qualified, budget):
     async def checked_description(client, system, lpar, **kwargs):
         description = await read_description(client, system, lpar, **kwargs)
         if "remove" not in budget.dispatched:
+            semantic = _description_text(description, native=True)
             if (
                 client is not hmc
                 or system != identity["system"]
                 or lpar != identity["lpar"]
-                or description != identity["description"]
+                or semantic != identity["description"]
             ):
                 raise ValueError("source fresh removal ownership drifted")
-            evidence["description"] = description
+            evidence["description"] = semantic
             budget.remove_reads.add("description")
         return description
 
@@ -1072,7 +1735,420 @@ def _source_history(packet, journal, current) -> bool:
     return _source_cleanup(packet, current, b1, b2, created) == slot
 
 
+def _fixture_read(path, limit):
+    target = Path(path)
+    _private(target, directory=False)
+    with target.open("rb") as stream:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("fixture evidence input exceeds its byte bound")
+    return _json(raw), {"path": str(target), "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def _fixture_closed(document, packet, stage, status):
+    limits = FIXTURE_LIMITS[stage]
+    counts = document.get("counts")
+    return (
+        type(document.get("version")) is int
+        and document.get("version") == 3
+        and document.get("purpose") == "vnic-source-fixture"
+        and document.get("group") == GROUP
+        and document.get("stage") == stage
+        and document.get("packet_sha256") == digest(packet)
+        and document.get("packet") == packet
+        and document.get("complete") is True
+        and document.get("status") == status
+        and document.get("session") == {"logged_on": True, "logged_off": True}
+        and isinstance(counts, dict)
+        and set(counts) == {"rest", "ssh"}
+        and all(
+            type(counts[k]) is int and 0 <= counts[k] <= limit
+            for k, limit in zip(("rest", "ssh"), limits[:2], strict=True)
+        )
+    )
+
+
+def _fixture_prepared(hmc, packet, original):
+    p = original["packet"]
+    _validate_fixture(p)
+    if p["action"] != "prepare" or not _fixture_closed(
+        original, p, "prepare", "PREPARED"
+    ):
+        raise ValueError("fixture original preparation is incomplete")
+    if any(
+        p[k] != packet[k]
+        for k in (
+            "expected_commit",
+            "configured_profile",
+            "hmc_identity",
+            "system_uuid",
+            "fixture_name",
+            "caller_token",
+        )
+    ):
+        raise ValueError("fixture original preparation binding differs")
+    baseline, held, before = (
+        original["baseline"],
+        original["retained"],
+        original["before_stamp"],
+    )
+    if p["baseline_sha256"] != digest(baseline):
+        raise ValueError("fixture original baseline digest differs")
+    target = _fixture_target(p, held["snapshot"], baseline)
+    if (
+        held["target"] != target
+        or held["vnics"] != []
+        or original["returned"]
+        != {"resource_created": True, "ownership_stamped": True, "uuid": target["uuid"]}
+    ):
+        raise ValueError(
+            "fixture original retained identity or creation result differs"
+        )
+    _fixture_owned(hmc, p, held)
+    if held["description"] != _description_text(
+        target["resource"].get("Description")
+    ) or held["description"] != _description_text(
+        held["native_description_raw"], native=True
+    ):
+        raise ValueError("fixture retained description contradicts current resource")
+    prior = _fixture_target(p, before["snapshot"], baseline)
+    if (
+        before["target"] != prior
+        or before["vnics"] != []
+        or prior["uuid"] != target["uuid"]
+    ):
+        raise ValueError("fixture original pre-stamp identity differs")
+    expected_prior = deepcopy(prior)
+    expected_prior["resource"]["Description"] = target["resource"]["Description"]
+    if expected_prior != target:
+        raise ValueError("fixture changed beyond ownership during stamping")
+    commands = _fixture_commands(p, baseline["system"]["name"], held["description"])
+    body = build_lpar_document(
+        name=p["fixture_name"],
+        partition_type="AIX/Linux",
+        resources=_fixture_resources(),
+        max_virtual_slots=8,
+    )
+    commands["create-rest"] = {
+        "method": "PUT",
+        "path": f"/rest/api/uom/ManagedSystem/{p['system_uuid']}/LogicalPartition",
+        "body_sha256": hashlib.sha256(body.encode()).hexdigest(),
+    }
+    effects = original["effects"]
+    order = [(e["kind"], e["settlement"]) for e in effects]
+    if order not in (
+        [("create-rest", "acknowledged"), ("stamp", "acknowledged")],
+        [
+            ("create-rest", "refused"),
+            ("create-native", "acknowledged"),
+            ("stamp", "acknowledged"),
+        ],
+    ):
+        raise ValueError("fixture original effect history is unconfirmed")
+    if any(e["signature"] != commands[e["kind"]] for e in effects):
+        raise ValueError("fixture original effect signature differs")
+    return held
+
+
+async def _fixture_inputs(hmc, packet, *, source_baselines=None):
+    original, binding = _fixture_read(packet["prepare_journal"], 5 * MIB)
+    _fixture_prepared(hmc, packet, original)
+    sources, bindings = [], {"prepare": binding, "sources": []}
+    for index, paths in enumerate(packet["source_evidence"]):
+        source_packet, packet_binding = _fixture_read(paths["packet"], MIB)
+        capture_record, capture_binding = _fixture_read(paths["capture"], 5 * MIB)
+        recovery_record, recovery_binding = _fixture_read(paths["recovery"], 5 * MIB)
+        if not _source(source_packet):
+            raise ValueError("fixture source evidence is not version 2")
+        validate_packet(source_packet)
+        captured = original["retained"]["target"]
+        expected = {
+            "expected_commit": packet["expected_commit"],
+            "system_uuid": packet["system_uuid"],
+            "lpar_uuid": captured["uuid"],
+            "expected_lpar_id": int(captured["id"]),
+            "owner_token": packet["caller_token"],
+            "expected_lpar_state": "not activated",
+            "configured_profile": packet["configured_profile"],
+            "hmc_identity": packet["hmc_identity"],
+        }
+        if any(source_packet[k] != value for k, value in expected.items()):
+            raise ValueError("fixture source evidence targets a different context")
+        current = (
+            await snapshot(hmc, source_packet)
+            if source_baselines is None
+            else source_baselines[index]
+        )
+        if not _source_history(source_packet, capture_record, current):
+            raise ValueError(
+                "fixture source capture is not independently qualified and restored"
+            )
+        if not (
+            recovery_record.get("group") == GROUP
+            and recovery_record.get("stage") == "recover"
+            and recovery_record.get("version") == 2
+            and recovery_record.get("purpose") == "update-mode-source"
+            and recovery_record.get("evidence_class") == "source-only"
+            and recovery_record.get("case") == source_packet["case"]
+            and recovery_record.get("packet_sha256") == digest(source_packet)
+            and recovery_record.get("expected_commit") == packet["expected_commit"]
+            and recovery_record.get("complete") is True
+            and recovery_record.get("status") == "CLEAN"
+            and recovery_record.get("intents") == []
+            and recovery_record.get("baseline") == current
+            and recovery_record.get("session")
+            == {"logged_on": True, "logged_off": True}
+        ):
+            raise ValueError("fixture source recovery is missing or unconfirmed")
+        sources.append(current)
+        bindings["sources"].append(
+            {
+                "packet": packet_binding,
+                "capture": capture_binding,
+                "recovery": recovery_binding,
+            }
+        )
+    if source_baselines is not None and len(source_baselines) != len(sources):
+        raise ValueError("fixture declared source histories differ")
+    return original, sources, bindings
+
+
+def _fixture_absent(packet, current):
+    if (
+        len(current["partitions"]) > 4
+        or current["profiles"] > 8
+        or any(
+            item["name"] == packet["fixture_name"]
+            or parse_lpar_ownership_caller_token(
+                _scalar_text(item["resource"].get("Description", ""))
+            )
+            == packet["caller_token"]
+            for item in current["partitions"].values()
+        )
+    ):
+        raise ValueError(
+            "fixture name/caller already exists or original inventory exceeds bounds"
+        )
+
+
+async def _fixture_recover(hmc, packet, document, journal):
+    stage = journal["stage"]
+    status = {"preflight": "READY", "prepare": "PREPARED", "cleanup": "CLEAN"}.get(
+        stage
+    )
+    if (
+        stage not in ("preflight", "prepare", "cleanup")
+        or journal.get("group") != GROUP
+        or type(journal.get("version")) is not int
+        or journal.get("version") != 3
+        or journal.get("purpose") != "vnic-source-fixture"
+        or journal.get("packet_sha256") != digest(packet)
+        or journal.get("packet") != packet
+        or (stage in ("prepare", "cleanup") and stage != packet["action"])
+    ):
+        raise ValueError("fixture original stage binding is unavailable")
+    if not _fixture_closed(journal, packet, stage, status):
+        document["recovery_observation_attempted"] = True
+        document["observation"] = await _fixture_snapshot(hmc, packet)
+        raise ValueError(
+            "fixture failed history remains uncertain after independent observation"
+        )
+    if stage == "prepare":
+        expected = _fixture_prepared(hmc, packet, journal)
+        current = await _fixture_held(hmc, packet, journal["baseline"])
+        _fixture_owned(hmc, packet, current)
+        if current != expected:
+            raise ValueError("retained fixture differs during outside recovery")
+        document.update(status="RETAINED", observation=current)
+        return
+    if packet["action"] == "cleanup":
+        original, _sources, bindings = await _fixture_inputs(
+            hmc, packet, source_baselines=journal["source_baselines"]
+        )
+        if original != journal["original"] or bindings != journal["input_bindings"]:
+            raise ValueError("fixture original evidence bytes changed")
+    if stage == "preflight":
+        if journal["effects"]:
+            raise ValueError("fixture preflight history contains effects")
+        current = (
+            await _fixture_snapshot(hmc, packet)
+            if packet["action"] == "prepare"
+            else await _fixture_held(hmc, packet, original["baseline"])
+        )
+        if current != journal["observation"]:
+            raise ValueError("fixture preflight baseline changed during recovery")
+        document.update(status="UNCHANGED", observation=current)
+        return
+    target = original["retained"]["target"]
+    if journal["effects"] != [
+        {
+            "kind": "delete",
+            "signature": {
+                "method": "DELETE",
+                "path": f"/rest/api/uom/LogicalPartition/{target['uuid']}",
+            },
+            "settlement": "acknowledged",
+        }
+    ]:
+        raise ValueError("fixture cleanup effect history is incomplete")
+    if (
+        journal["delete_observation"] != journal["qualified"]
+        or journal["qualified"] != original["retained"]
+    ):
+        raise ValueError("fixture cleanup protected-state history differs")
+    current = await _fixture_snapshot(hmc, packet)
+    _fixture_absent(packet, current)
+    if current != original["baseline"] or journal["after"] != current:
+        raise ValueError("fixture cleanup baseline is not independently restored")
+    document.update(status="CLEAN", observation=current)
+
+
+async def _fixture_run(hmc, packet, stage, output=None, journal=None):
+    _context(hmc, packet, stage)
+    action = packet["action"] if stage == "capture" else stage
+    document = {
+        "group": GROUP,
+        "version": 3,
+        "purpose": "vnic-source-fixture",
+        "stage": action,
+        "packet": packet,
+        "packet_sha256": digest(packet),
+        "complete": False,
+        "status": "MANUAL_RECOVERY",
+        "effects": [],
+    }
+    if output is not None:
+        _private(output.parent, directory=True)
+        output.mkdir(mode=0o700)
+        _private(output, directory=True)
+        save(output, document)
+    budget = _FixtureBudget(hmc, packet, action, document, output)
+    try:
+        with _fixture_bounded(budget):
+            async with hmc:
+                if stage == "recover":
+                    await _fixture_recover(hmc, packet, document, journal)
+                else:
+                    if packet["action"] == "prepare":
+                        current = await _fixture_snapshot(hmc, packet)
+                        _fixture_absent(packet, current)
+                        _fixture_capacity(
+                            {
+                                "AssociatedSystemMemoryConfiguration": current[
+                                    "system"
+                                ]["memory"],
+                                "AssociatedSystemProcessorConfiguration": current[
+                                    "system"
+                                ]["cpu"],
+                            }
+                        )
+                    else:
+                        original, sources, bindings = await _fixture_inputs(hmc, packet)
+                        document.update(
+                            original=original,
+                            source_baselines=sources,
+                            input_bindings=bindings,
+                        )
+                        current = await _fixture_held(hmc, packet, original["baseline"])
+                        _fixture_owned(hmc, packet, current)
+                        if current != original["retained"]:
+                            raise ValueError(
+                                "fixture differs from its retained empty baseline"
+                            )
+                    document["observation"] = current
+                    if stage == "preflight":
+                        if packet["baseline_sha256"] not in (None, digest(current)):
+                            raise ValueError(
+                                "fixture preflight supplied baseline differs"
+                            )
+                        document.update(status="READY", baseline_sha256=digest(current))
+                    else:
+                        if packet["baseline_sha256"] != digest(current):
+                            raise ValueError(
+                                "fixture capture requires its fresh bound baseline"
+                            )
+                        if action == "prepare":
+                            document["baseline"] = current
+                            result = await lpar_core.create_and_stamp_lpar(
+                                hmc,
+                                packet["system_uuid"],
+                                lpar_core.LparCreation(
+                                    packet["fixture_name"],
+                                    "AIX/Linux",
+                                    _fixture_resources(),
+                                    max_virtual_slots=8,
+                                    caller_token=packet["caller_token"],
+                                    stamp_policy="required",
+                                    apply_profile=False,
+                                ),
+                            )
+                            if result.lpar is None:
+                                raise ValueError(
+                                    "fixture creation returned no identity"
+                                )
+                            document["returned"] = {
+                                "resource_created": result.resource_created,
+                                "ownership_stamped": result.ownership_stamped,
+                                "uuid": result.lpar["UUID"].casefold(),
+                            }
+                            held = await _fixture_held(hmc, packet, current)
+                            _fixture_owned(hmc, packet, held)
+                            document["retained"] = held
+                            document["status"] = "PREPARED"
+                        else:
+                            document["baseline"] = original["baseline"]
+                            budget.captured = original["retained"]["target"]
+                            budget.qualified = document["qualified"] = current
+                            removed = await lpar_core.delete_lpar(
+                                hmc,
+                                budget.captured["uuid"],
+                                system_name_or_uuid=packet["system_uuid"],
+                                ownership_override=False,
+                            )
+                            if removed.casefold() != budget.captured["uuid"]:
+                                raise ValueError(
+                                    "fixture delete returned a different UUID"
+                                )
+                            after = document["after"] = await _fixture_snapshot(
+                                hmc, packet
+                            )
+                            _fixture_absent(packet, after)
+                            if after != original["baseline"]:
+                                raise ValueError(
+                                    "fixture deletion did not restore its original baseline"
+                                )
+                            document["status"] = "CLEAN"
+        if not budget.logged_on or not budget.logged_off:
+            raise ValueError("fixture own session closure is unconfirmed")
+        document["complete"] = True
+        if action == "prepare":
+            document.update(
+                counts=budget.counts,
+                session={
+                    "logged_on": budget.logged_on,
+                    "logged_off": budget.logged_off,
+                },
+            )
+            _fixture_prepared(hmc, packet, document)
+    except Exception as error:  # noqa: BLE001 - persist uncertain stage without retry or cleanup authority
+        document.update(
+            status="MANUAL_RECOVERY",
+            complete=False,
+            error=type(error).__name__,
+            reason=str(error),
+        )
+    document.update(
+        counts=budget.counts,
+        session={"logged_on": budget.logged_on, "logged_off": budget.logged_off},
+    )
+    if output is not None:
+        save(output, document)
+    return document
+
+
 async def _stage(hmc, packet, stage, output=None, journal=None):
+    if _fixture(packet):
+        return await _fixture_run(hmc, packet, stage, output, journal)
     _context(hmc, packet, stage)
     document = {
         "group": GROUP,
@@ -1181,6 +2257,17 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:  # noqa: BLE001 - operator output never includes private packet or HMC data
         print(f"vNIC procedure held: {type(error).__name__}", file=sys.stderr)
         return 2
-    label = "vnic-update-source SOURCE ONLY" if _source(packet) else GROUP
+    label = (
+        "vnic-fixture PREREQUISITE ONLY"
+        if _fixture(packet)
+        else "vnic-update-source SOURCE ONLY"
+        if _source(packet)
+        else GROUP
+    )
     print(f"{label}: {result['status']}")
-    return 0 if result["status"] in ("READY", "CLEAN", "SKIP") else 2
+    accepted = (
+        ("READY", "CLEAN", "SKIP", "PREPARED", "RETAINED", "UNCHANGED")
+        if _fixture(packet)
+        else ("READY", "CLEAN", "SKIP")
+    )
+    return 0 if result["status"] in accepted else 2

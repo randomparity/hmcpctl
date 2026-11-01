@@ -2903,3 +2903,67 @@ carries `evidence_class=source-only`, never optional-policy verification credit.
 CLEAN establishes only the bounded stored-policy/history observations. All five
 parent adapter fields, later delta/two-list modes and the public updater remain
 #1828 work; `all` minus finite members still has no justified positive oracle.
+
+
+### Retained fixture prerequisite for vNIC source qualification
+
+The `vnic-creation-policy` named owner also accepts a separate version-3
+`vnic-source-fixture` packet. Its explicit action is `prepare` or `cleanup`.
+This is a prerequisite only: it creates no vNIC, runs no source case, proves no
+native update support and grants no hardware window. Use the packet schema and
+fixed refusal policy in [the fixture design](workflow/specs/2026-11-01-vnic-retained-fixture-design.md).
+Root must admit the exact candidate, target, input histories and each window.
+
+Use fresh private0700 directories and0600 packet/history files. A prepare packet
+names one fresh `hmcpctl-vnic-fixture-<16hex>` and matching
+`q1828-fixture-<16hex>` caller, the configured profile, exact candidate commit,
+HMC host/port, system UUID, expiry and explicit writer/effect acknowledgements.
+It has null baseline/preparation journal, `none-invoked` and an empty source list.
+Never adopt or re-stamp an existing inactive partition.
+
+Run the ordinary named preflight with the original packet bytes and their SHA256:
+
+    uv run --no-sync python scripts/live_test_preflight.py --group vnic-creation-policy --packet /private/prepare.json --packet-sha256 <SHA256> --output /private/prepare-preflight
+
+Then independently recover that exact preflight packet/result before progressing:
+
+    uv run --no-sync python scripts/live_test_recovery.py --vnic-creation-policy-packet /private/prepare.json --packet-sha256 <SHA256> --results /private/prepare-preflight/results.json --output /private/prepare-preflight-recovery
+
+Require READY followed by UNCHANGED. Bind the returned canonical baseline SHA256
+in a new packet file, retaining the old bytes, and compute the new raw packet hash.
+Only then use the existing capture wrapper with the bound packet:
+
+    uv run --no-sync python scripts/live_vnic_creation_policy.py --packet /private/prepare-bound.json --packet-sha256 <SHA256> --output /private/prepare
+
+Independently run the same recovery entrypoint using the bound packet and
+`/private/prepare/results.json`, with a new output directory. Require PREPARED
+followed by RETAINED before any separately admitted source-v2 preflight. Preserve
+captured UUID/id, saved default profile/ETag, caller and empty-vNIC baseline.
+The fixed tuple is512/512/1024MiB, shared capped0.05/0.05/0.05 units,
+vCPU1/1/1 and8virtual slots. Missing capacity/alignment/minimum eligibility
+refuses; never increase resources or switch modes to force the test through.
+
+Cleanup is another explicit packet and window. Bind the original successful
+preparation journal and either an explicit `none-invoked` declaration with no
+source records, or `complete-set` with every invoked source packet, capture and
+independent recovery path (at most six). Empty or omitted evidence is not a
+no-source declaration. Known failed, uncertain or partial attempts disarm
+cleanup even when current vNIC inventory is empty. Do not rerun or delete the
+containing LPAR to conceal partial source residue.
+
+Run cleanup's preflight/recovery, bind its fresh retained baseline into a new
+cleanup packet, then run the same capture wrapper and independent recovery with
+that packet. Require CLEAN from both cleanup and recovery. Identity, caller,
+profile/ETag, inactive state, foreign preservation and empty-vNIC equality must
+still hold at the physical DELETE boundary. No override or power operation exists
+in this purpose. Any MANUAL_RECOVERY result stops the enclosing workflow; retain
+private artifacts and let root determine a separately authorized recovery.
+
+Fixture caps are preflight64REST/40SSH/120s, prepare96/24/300,
+cleanup128/64/300 and recovery32/24/120. These include physical fallback paths
+and own sessions; source-v2 retains its separate caps. Body effects require fresh
+post-intent suffix/time reserves; one REST slot and15s are reserved for logout.
+REST/native output is1MiB, own journal5MiB, source evidence at most66MiB across
+six separately bounded records. No cap is an operational admission. Keep raw
+packets/results private; publish only redacted evidence generated through the
+normal evidence route. HMC execution and publication remain root-owned holds.
