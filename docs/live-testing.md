@@ -2965,5 +2965,5 @@ and own sessions; source-v2 retains its separate caps. Body effects require fres
 post-intent suffix/time reserves; one REST slot and15s are reserved for logout.
 REST/native output is1MiB, own journal5MiB, source evidence at most66MiB across
 six separately bounded records. No cap is an operational admission. Keep raw
-packets/results private; publish only redacted evidence generated through the
+packets/results and terminal captures private; publish only redacted evidence through the
 normal evidence route. HMC execution and publication remain root-owned holds.

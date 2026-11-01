@@ -212,8 +212,11 @@ current effect grant; do not trust packet shape, stale journal contents or remot
 claims without validation. Closed schemas, candidate/destination binding, contained
 profile identity/ETag, required owner/caller equality, exact once-only effects,
 independent histories and finite physical budgets govern these crossings.
-No credentials enter packets; terminal output contains safe status/type only;
-private raw evidence remains0600 under0700. Same-user malicious file replacement,
+No credentials enter packets. Procedure-owned status/error messages contain only
+safe status/type; inherited SDK audit and security diagnostics can contain private
+identifiers. Keep terminal captures private, including constructor/TLS and SSH
+diagnostics; preserve their mandatory audit emission. Private raw evidence remains
+0600 under0700. Same-user malicious file replacement,
 compromised HMC truth and uncoordinated writers are outside atomic protection;
 existing private-file checks and the explicit operational trust model apply.
 

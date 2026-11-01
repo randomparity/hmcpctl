@@ -275,8 +275,10 @@ never CLEAN. No silent truncation or compressed-away preservation evidence.
 - **Controls:** strict schema/byte bounds/private paths; exact candidate/import,
   destination and owner binding; native+REST containment; fixed case grammar and
   shell quoting; exact physical tokens and durable intent; independent readback
-  and suffix reserves. Keep raw errors/identifiers in private results; terminal
+  and suffix reserves. Keep raw errors/identifiers in private results. Procedure-owned
   output reports source-only stage/status and error type, never private payload.
+  Inherited SDK audit/security diagnostics can contain private identifiers; retain
+  all terminal captures privately and preserve mandatory audit emission.
 - **Outside this design:** malicious same-user rewriting of code/journal, hostile
   kernel and uncompromised-HMC guarantees; existing platform trust. No claim of
   cryptographic journal authenticity or atomic HMC compare-and-swap is made.
