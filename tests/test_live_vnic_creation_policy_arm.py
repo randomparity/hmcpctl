@@ -714,3 +714,667 @@ async def test_dispatch_timeout_uses_time_remaining_after_intent_save(
     assert result["status"] == "CLEAN"
     assert write_allowances == [290, 280]
     assert result["counts"] == {"rest": 20, "ssh": 45}
+
+
+@pytest.fixture
+def source_packet(packet):
+    result = deepcopy(packet)
+    result.update(
+        version=2,
+        purpose="update-mode-source",
+        case="vlan-replace-none",
+        expected_lpar_state="not activated",
+        allow_one_update=True,
+    )
+    result["policy"].update(allowed_vlan_ids=[2], allowed_os_mac_addrs=["001122334455"])
+    result["policy"].pop("mac_addr")
+    return result
+
+
+class SourceWire(Wire):
+    def __init__(self, packet):
+        super().__init__(packet)
+        self.state = "not activated"
+        self.updated = False
+        self.source_fault = None
+        self.effect_counts = []
+        self.source_values = {
+            "allowed_vlan_ids": "2",
+            "allowed_os_mac_addrs": "001122334455",
+        }
+
+    def http(self, request):
+        if (
+            self.updated
+            and self.source_fault == "late_state"
+            and self.created_reads >= 3
+        ):
+            self.state = "running"
+        response = super().http(request)
+        text = response.text
+        if "</LogicalPartition>" in text:
+            text = text.replace(
+                "</LogicalPartition>",
+                field("PartitionState", self.state) + "</LogicalPartition>",
+            )
+            return httpx.Response(response.status_code, text=text)
+        return response
+
+    async def ssh(
+        self, config, command, include_stderr, *, shown, max_output_bytes=None
+    ):
+        tokens = shlex.split(command)
+        if tokens[0] == "chhwres":
+            self.effect_counts.append(
+                (
+                    tokens[tokens.index("-o") + 1],
+                    len(self.requests),
+                    len(self.commands) + 1,
+                )
+            )
+        if (
+            self.updated
+            and self.source_fault == "late_owner"
+            and self.created_reads >= 3
+            and tokens[-1] == "description"
+        ):
+            self.commands.append(command)
+            return self.description.replace("test-owner", "other-owner")
+        if tokens[0] == "chhwres" and tokens[tokens.index("-o") + 1] == "s":
+            assert max_output_bytes == arm.MIB
+            self.commands.append(command)
+            self.updated = True
+            record = tokens[tokens.index("-a") + 1]
+            name, value = record.split("=", 1)
+            if self.source_fault == "refused":
+                raise transport.HMCCLIError(
+                    "synthetic refusal",
+                    remote_nonzero_completed=True,
+                    remote_refusal_code="HSCL1234",
+                )
+            if self.source_fault == "unknown":
+                raise TimeoutError("synthetic uncertain update")
+            if self.source_fault == "generic":
+                raise transport.HMCCLIError("synthetic unstructured nonzero")
+            key = name.removesuffix("-")
+            self.source_values[key] = "none" if name.endswith("-") else value
+            if self.source_fault in ("blank", "malformed", "mismatch"):
+                self.source_values[key] = {
+                    "blank": "",
+                    "malformed": "bad=value",
+                    "mismatch": "all",
+                }[self.source_fault]
+            return ""
+        if (
+            self.updated
+            and self.source_fault == "preservation_timeout"
+            and "vnicbkdev" in tokens
+        ):
+            self.commands.append(command)
+            raise TimeoutError("synthetic backing observation failure")
+        output = await super().ssh(
+            config,
+            command,
+            include_stderr,
+            shown=shown,
+            max_output_bytes=max_output_bytes,
+        )
+        if not output or output == "No results were found." or "-F" not in tokens:
+            return output
+        reader = csv.DictReader(io.StringIO(output))
+        rows = list(reader)
+        names = reader.fieldnames
+        if names is None or "slot_num" not in names:
+            if (
+                self.updated
+                and self.source_fault == "backing"
+                and names
+                and "desired_capacity" in names
+            ):
+                rows[0]["desired_capacity"] = "3"
+            else:
+                return output
+        else:
+            for row in rows:
+                row.update(self.source_values)
+                if self.updated and self.source_fault == "unselected":
+                    row["pvid_priority"] = "7"
+                if self.updated and self.source_fault == "mac":
+                    row["mac_addr"] = "aabbccddee02"
+                if self.updated and self.source_fault == "slot":
+                    row["slot_num"] = "9"
+                if (
+                    self.updated
+                    and self.source_fault == "late_mac"
+                    and self.created_reads >= 4
+                ):
+                    row["mac_addr"] = "aabbccddee02"
+        stream = io.StringIO()
+        writer = csv.DictWriter(stream, fieldnames=names)
+        writer.writeheader()
+        writer.writerows(rows)
+        return stream.getvalue()
+
+
+@pytest.fixture
+def source_wire(monkeypatch, source_packet):
+    wire = SourceWire(source_packet)
+    monkeypatch.setattr(transport, "_run_hmc_command", wire.ssh)
+    monkeypatch.setattr(
+        HMCClient,
+        "_new_http_client",
+        lambda self, port: httpx.AsyncClient(
+            base_url="https://hmc.test:443", transport=httpx.MockTransport(wire.http)
+        ),
+    )
+    monkeypatch.setattr(arm, "_revision", lambda: ("a" * 40, True))
+    return wire
+
+
+@pytest.mark.parametrize(
+    "case,record",
+    [
+        ("vlan-replace-all", "allowed_vlan_ids=all"),
+        ("vlan-replace-none", "allowed_vlan_ids=none"),
+        ("vlan-remove-last", "allowed_vlan_ids-=2"),
+        ("mac-replace-all", "allowed_os_mac_addrs=all"),
+        ("mac-replace-none", "allowed_os_mac_addrs=none"),
+        ("mac-remove-last", "allowed_os_mac_addrs-=001122334455"),
+    ],
+)
+def test_source_packet_and_case(source_packet, case, record):
+    source_packet["case"] = case
+    arm.validate_packet(source_packet)
+    command = arm._source_command(
+        source_packet, {"system": "system-a", "lpar": "client-a"}, "2"
+    )
+    tokens = shlex.split(command)
+    assert tokens[tokens.index("-a") + 1] == record
+    assert tokens[tokens.index("-s") + 1] == "2"
+    assert "--force" not in tokens and "--allownetdisrupt" not in tokens
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("version", True),
+        ("case", []),
+        ("case", "other"),
+        ("purpose", "creation"),
+        ("allow_one_update", 1),
+        ("expected_lpar_state", ""),
+        ("command", "chhwres"),
+        ("target_slot", "2"),
+        ("policy", {}),
+        ("expires_at", False),
+    ],
+)
+def test_source_invalid_packet(source_packet, key, value):
+    source_packet[key] = value
+    with pytest.raises((ValueError, TypeError)):
+        arm.validate_packet(source_packet)
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("allowed_vlan_ids", []),
+        ("allowed_vlan_ids", [True]),
+        ("allowed_vlan_ids", [1, 2]),
+        ("allowed_vlan_ids", "none"),
+        ("allowed_os_mac_addrs", None),
+        ("pvid_priority", None),
+        ("auto_priority_failover", 0),
+        ("mac_addr", "001122334455"),
+    ],
+)
+def test_source_invalid_policy(source_packet, name, value):
+    source_packet["policy"][name] = value
+    with pytest.raises((ValueError, TypeError)):
+        arm.validate_packet(source_packet)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["", "running"])
+async def test_source_state_binding(source_wire, source_packet, tmp_path, state):
+    source_wire.state = state
+    result = await arm.preflight(
+        source_wire.client(), source_packet, tmp_path / "preflight"
+    )
+    assert result["status"] == "MANUAL_RECOVERY" and not source_wire.writes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        "vlan-replace-all",
+        "vlan-replace-none",
+        "vlan-remove-last",
+        "mac-replace-all",
+        "mac-replace-none",
+        "mac-remove-last",
+    ],
+)
+async def test_source_case_lifecycle(source_wire, source_packet, tmp_path, case):
+    source_packet["case"] = case
+    await prepare(source_wire, source_packet, tmp_path)
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["status"] == "CLEAN", result
+    assert [
+        shlex.split(c)[shlex.split(c).index("-o") + 1] for c in source_wire.writes
+    ] == ["a", "s", "r"]
+    assert result["source"]["submission"] == "completed"
+    assert result["source"]["qualification"] == "qualified"
+    assert (
+        result["evidence_class"] == "source-only"
+        and "optional_policy_verified" not in result
+    )
+    assert result["counts"] == {"rest": 23, "ssh": 50}
+    assert source_wire.effect_counts == [("a", 10, 27), ("s", 13, 34), ("r", 19, 44)]
+    assert len(source_wire.requests) == 23 and len(source_wire.commands) == 50
+    recovered = await arm.recover(source_wire.client(), source_packet, result)
+    assert recovered["status"] == "CLEAN"
+    assert recovered["counts"] == {"rest": 5, "ssh": 4}
+    assert json.loads((tmp_path / "preflight" / "results.json").read_text())[
+        "counts"
+    ] == {"rest": 8, "ssh": 15}
+    assert len(source_wire.writes) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault,submission,qualification",
+    [
+        ("refused", "rejected", "refused"),
+        ("unknown", "unknown", "unresolved"),
+        ("generic", "unknown", "unresolved"),
+        ("blank", "completed", "unresolved"),
+        ("malformed", "completed", "unresolved"),
+        ("mismatch", "completed", "unresolved"),
+        ("unselected", "completed", "unresolved"),
+        ("mac", "completed", "unresolved"),
+        ("slot", "completed", "unresolved"),
+        ("backing", "completed", "unresolved"),
+    ],
+)
+async def test_source_holds_cleanup(
+    source_wire, source_packet, tmp_path, fault, submission, qualification
+):
+    await prepare(source_wire, source_packet, tmp_path)
+    source_wire.source_fault = fault
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert result["source"]["submission"] == submission
+    assert result["source"]["qualification"] == qualification
+    assert len(source_wire.writes) == 2
+    source_wire.created = False
+    recovered = await arm.recover(source_wire.client(), source_packet, result)
+    assert recovered["status"] == "MANUAL_RECOVERY" and len(source_wire.writes) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["late_mac", "late_state", "late_owner"])
+async def test_source_holds_late_removal_drift(
+    source_wire, source_packet, tmp_path, fault
+):
+    await prepare(source_wire, source_packet, tmp_path)
+    source_wire.source_fault = fault
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["source"]["qualification"] == "qualified"
+    assert result["status"] == "MANUAL_RECOVERY" and len(source_wire.writes) == 2
+    assert "remove" not in result["intents"]
+
+
+@pytest.mark.asyncio
+async def test_source_holds_partial_preservation(source_wire, source_packet, tmp_path):
+    await prepare(source_wire, source_packet, tmp_path)
+    source_wire.source_fault = "preservation_timeout"
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    source = result["source"]
+    assert source["policy_verification"] == "verified"
+    assert source["selected_after"]["allowed_vlan_ids"] == "none"
+    assert source["preservation"] == "unavailable" and source["after_update"] is None
+    assert source["qualification"] == "unresolved" and len(source_wire.writes) == 2
+
+
+@pytest.mark.asyncio
+async def test_source_history_recomputed(source_wire, source_packet, tmp_path):
+    await prepare(source_wire, source_packet, tmp_path)
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["status"] == "CLEAN"
+    for key in (
+        "source",
+        "create",
+        "remove",
+        "complete",
+        "session",
+        "case",
+        "intents",
+        "effect_commands",
+        "removal_observations",
+        "packet_sha256",
+    ):
+        changed = deepcopy(result)
+        changed.pop(key)
+        assert (await arm.recover(source_wire.client(), source_packet, changed))[
+            "status"
+        ] == "MANUAL_RECOVERY"
+    for key in (
+        "captured_slot",
+        "native_record",
+        "expected",
+        "submission",
+        "qualification",
+        "before_update",
+        "after_update",
+    ):
+        changed = deepcopy(result)
+        changed["source"][key] = None
+        assert (await arm.recover(source_wire.client(), source_packet, changed))[
+            "status"
+        ] == "MANUAL_RECOVERY"
+    changed = deepcopy(result)
+    changed["remove"]["vnic_before"][0]["policy"]["pvid_priority"] = 7
+    assert (await arm.recover(source_wire.client(), source_packet, changed))[
+        "status"
+    ] == "MANUAL_RECOVERY"
+    changed = deepcopy(result)
+    changed["remove"]["selector"]["capacity_percent"] = "3"
+    assert (await arm.recover(source_wire.client(), source_packet, changed))[
+        "status"
+    ] == "MANUAL_RECOVERY"
+    assert len(source_wire.writes) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["create", "update", "remove"])
+@pytest.mark.parametrize("fault", ["expiry", "deadline", "journal", "overflow"])
+async def test_source_intent_latency(
+    source_wire, source_packet, tmp_path, monkeypatch, kind, fault
+):
+    client = source_wire.client()
+    document = {"intents": []}
+    output = tmp_path / "journal"
+    output.mkdir(mode=0o700)
+    now = {"wall": 1000.0, "monotonic": 1000.0}
+    monkeypatch.setattr(
+        arm,
+        "time",
+        SimpleNamespace(time=lambda: now["wall"], monotonic=lambda: now["monotonic"]),
+    )
+    source_packet["expires_at"] = 1300
+    budget = arm._Budget(client, source_packet, "capture", document, output)
+    original = arm.save
+    original(output, document)
+    preceding = (output / "results.json").read_bytes()
+
+    def delayed(path, value):
+        if fault == "journal":
+            raise OSError("synthetic full journal")
+        if fault == "overflow":
+            value["padding"] = "x" * (5 * arm.MIB)
+        original(path, value)
+        if fault == "expiry":
+            now["wall"] = 1301
+        else:
+            now["monotonic"] = 1280
+
+    monkeypatch.setattr(arm, "save", delayed)
+    command = "chhwres -r virtualio --rsubtype vnic -o s -m system-a -p client-a -s 2 -a allowed_vlan_ids=none"
+    budget.arm(kind, command)
+    budget.remove_reads = {"vnics", "backings", "target", "members", "description"}
+    with arm._bounded(budget), pytest.raises((ValueError, OSError)):
+        await transport.run_hmc_command(client.config, command)
+    assert not source_wire.writes and not budget.dispatched
+    assert budget.spent == {kind}
+    if fault in ("journal", "overflow"):
+        assert (output / "results.json").read_bytes() == preceding
+    with pytest.raises(ValueError):
+        budget.arm(kind, command)
+    await client._http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_source_logout_reserve(source_wire, source_packet, monkeypatch):
+    client = source_wire.client()
+    now = [1000.0]
+    monkeypatch.setattr(arm.time, "monotonic", lambda: now[0])
+    budget = arm._Budget(client, source_packet, "capture", {"intents": []}, None)
+    now[0] = 1286.0
+    with arm._bounded(budget):
+        with pytest.raises(ValueError):
+            await client._request("GET", f"/rest/api/uom/ManagedSystem/{SYS}")
+        await client._request("DELETE", "/rest/api/web/Logon")
+    assert budget.logged_off and len(source_wire.requests) == 1
+    await client._http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_source_physical_bounds(source_wire, source_packet):
+    client = source_wire.client()
+    budget = arm._Budget(client, source_packet, "capture", {"intents": []}, None)
+    with arm._bounded(budget):
+        for _ in range(47):
+            await client._request("GET", f"/rest/api/uom/ManagedSystem/{SYS}")
+        with pytest.raises(ValueError):
+            await client._request("GET", f"/rest/api/uom/ManagedSystem/{SYS}")
+        await client._request("DELETE", "/rest/api/web/Logon")
+        for _ in range(56):
+            await transport.run_hmc_command(client.config, "lshmc -V")
+        with pytest.raises(ValueError):
+            await transport.run_hmc_command(client.config, "lshmc -V")
+    assert len(source_wire.requests) == 48 and len(source_wire.commands) == 56
+    await client._http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_source_physical_null_fallback(
+    source_wire, source_packet, tmp_path, monkeypatch
+):
+    original = source_wire.http
+
+    def expanded(request):
+        path = request.url.path
+        if path.endswith(f"/ManagedSystem/{SYS}"):
+            source_wire.requests.append((request.method, path))
+            return httpx.Response(500, text="Nested path contains null property")
+        if "/ManagedSystem/search/" in path:
+            source_wire.requests.append((request.method, path))
+            return httpx.Response(
+                200,
+                text=feed(
+                    [entry("ManagedSystem", SYS, field("SystemName", "system-a"))], path
+                ),
+            )
+        return original(request)
+
+    monkeypatch.setattr(source_wire, "http", expanded)
+    await prepare(source_wire, source_packet, tmp_path)
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["status"] == "CLEAN", result
+    assert result["counts"] == {"rest": 31, "ssh": 50}
+    assert source_wire.effect_counts == [("a", 12, 27), ("s", 17, 34), ("r", 25, 44)]
+    assert len(source_wire.requests) == 31
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("null_fallback", [False, True])
+async def test_source_physical_ownership_fallback(
+    source_wire, source_packet, tmp_path, monkeypatch, null_fallback
+):
+    original_http, original_ssh = source_wire.http, source_wire.ssh
+
+    def failed_summary(request):
+        path = request.url.path
+        if null_fallback and path.endswith(f"/ManagedSystem/{SYS}"):
+            source_wire.requests.append((request.method, path))
+            return httpx.Response(500, text="Nested path contains null property")
+        if null_fallback and "/ManagedSystem/search/" in path:
+            source_wire.requests.append((request.method, path))
+            return httpx.Response(
+                200,
+                text=feed(
+                    [entry("ManagedSystem", SYS, field("SystemName", "system-a"))], path
+                ),
+            )
+        if path.endswith("/ManagedSystem/quick/All"):
+            resolving_null = null_fallback and source_wire.requests[-1][1].endswith(
+                f"/ManagedSystem/{SYS}"
+            )
+            if not resolving_null:
+                source_wire.requests.append((request.method, path))
+                return httpx.Response(500, text="synthetic summary unavailable")
+        return original_http(request)
+
+    async def native_name(
+        config, command, include_stderr, *, shown, max_output_bytes=None
+    ):
+        if command == "lssyscfg -r sys -F uuid,name":
+            assert max_output_bytes == arm.MIB
+            source_wire.commands.append(command)
+            return f"{SYS},system-a"
+        return await original_ssh(
+            config,
+            command,
+            include_stderr,
+            shown=shown,
+            max_output_bytes=max_output_bytes,
+        )
+
+    monkeypatch.setattr(source_wire, "http", failed_summary)
+    monkeypatch.setattr(transport, "_run_hmc_command", native_name)
+    await prepare(source_wire, source_packet, tmp_path)
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["status"] == "CLEAN", result
+    assert result["counts"] == {"rest": 31 if null_fallback else 23, "ssh": 53}
+    assert source_wire.effect_counts == (
+        [("a", 12, 29), ("s", 17, 36), ("r", 25, 47)]
+        if null_fallback
+        else [("a", 10, 29), ("s", 13, 36), ("r", 19, 47)]
+    )
+    assert source_wire.commands.count("lssyscfg -r sys -F uuid,name") == 3
+    assert len(source_wire.writes) == 3 and result["session"]["logged_off"]
+
+
+@pytest.mark.asyncio
+async def test_source_physical_empty_feed(
+    source_wire, source_packet, tmp_path, monkeypatch
+):
+    original = source_wire.http
+
+    def empty(request):
+        path = request.url.path
+        if path.endswith(f"/ManagedSystem/{SYS}/LogicalPartition"):
+            source_wire.requests.append((request.method, path))
+            return httpx.Response(200, text=feed([], path))
+        return original(request)
+
+    monkeypatch.setattr(source_wire, "http", empty)
+    result = await arm.preflight(
+        source_wire.client(), source_packet, tmp_path / "preflight"
+    )
+    assert result["status"] == "MANUAL_RECOVERY" and not source_wire.writes
+    assert result["counts"] == {"rest": 6, "ssh": 0}
+    assert source_wire.requests[-1][0] == "DELETE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["create", "update", "remove"])
+@pytest.mark.parametrize("counter", ["rest", "ssh"])
+async def test_source_physical_suffix(
+    source_wire, source_packet, tmp_path, kind, counter
+):
+    client = source_wire.client()
+    output = tmp_path / "journal"
+    output.mkdir(mode=0o700)
+    budget = arm._Budget(client, source_packet, "capture", {"intents": []}, output)
+    required = dict(zip(("rest", "ssh"), arm.SOURCE_SUFFIX[kind], strict=True))
+    limit = budget.rest_limit if counter == "rest" else budget.ssh_limit
+    budget.counts[counter] = limit - required[counter] + (0 if counter == "ssh" else 1)
+    command = "chhwres -r virtualio --rsubtype vnic -o s -m system-a -p client-a -s 2 -a allowed_vlan_ids=none"
+    budget.arm(kind, command)
+    with arm._bounded(budget), pytest.raises(ValueError, match="reserves"):
+        await transport.run_hmc_command(client.config, command)
+    assert not source_wire.writes
+    await client._http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_source_logout_failure(source_wire, source_packet, tmp_path, monkeypatch):
+    await prepare(source_wire, source_packet, tmp_path)
+    original = source_wire.http
+
+    def broken_logout(request):
+        if request.method == "DELETE":
+            source_wire.requests.append((request.method, request.url.path))
+            return httpx.Response(500, text="synthetic logout failure")
+        return original(request)
+
+    monkeypatch.setattr(source_wire, "http", broken_logout)
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert result["source"]["qualification"] == "qualified"
+    assert result["session"]["logged_off"] is False
+    monkeypatch.setattr(source_wire, "http", original)
+    assert (await arm.recover(source_wire.client(), source_packet, result))[
+        "status"
+    ] == "MANUAL_RECOVERY"
+
+
+@pytest.mark.asyncio
+async def test_source_intent_dispatch_timeout(
+    source_wire, source_packet, tmp_path, monkeypatch
+):
+    await prepare(source_wire, source_packet, tmp_path)
+    now = [1000.0]
+    monkeypatch.setattr(
+        arm, "time", SimpleNamespace(time=time.time, monotonic=lambda: now[0])
+    )
+    original_save, original_ssh, timeout = (
+        arm.save,
+        source_wire.ssh,
+        arm.asyncio.timeout,
+    )
+    allowances, write_allowances, saved = [], [], set()
+
+    def delayed_save(directory, document):
+        original_save(directory, document)
+        for intent in set(document["intents"]) - saved:
+            now[0] += 10
+            saved.add(intent)
+
+    def observed_timeout(seconds):
+        allowances.append(seconds)
+        return timeout(seconds)
+
+    async def observed_ssh(config, cmd, include_stderr, **kwargs):
+        if cmd.startswith("chhwres "):
+            write_allowances.append(allowances[-1])
+        return await original_ssh(config, cmd, include_stderr, **kwargs)
+
+    monkeypatch.setattr(arm, "save", delayed_save)
+    monkeypatch.setattr(arm, "asyncio", SimpleNamespace(timeout=observed_timeout))
+    monkeypatch.setattr(transport, "_run_hmc_command", observed_ssh)
+    result = await arm.capture(
+        source_wire.client(), source_packet, tmp_path / "capture"
+    )
+    assert result["status"] == "CLEAN"
+    assert write_allowances == [275, 265, 255]
+    assert result["session"]["logged_off"]

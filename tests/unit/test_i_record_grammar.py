@@ -724,6 +724,8 @@ def _unguarded_a_values(
     if (source_path, func.name) in {
         (vnic_source, "add_vnic_backing"),
         (_REPO_ROOT / "scripts/live_test/vnic_creation_policy.py", "_capture"),
+        (_REPO_ROOT / "scripts/live_test/vnic_creation_policy.py", "_capture_source"),
+        (_REPO_ROOT / "scripts/live_test/vnic_creation_policy.py", "_source_history"),
     }:
         builder = "build_vnic_add_attributes"
         tree = ast.parse(vnic_source.read_text())
@@ -898,6 +900,9 @@ def test_the_scan_finds_every_known_site(scanned_modules):
     }
     assert by_label["-a"] == {
         "_capture",
+        "_source_command",
+        "_capture_source",
+        "_source_history",
         "_set_ethernet_adapter",
         "assign_sriov_logical_port_dynamic",
         "add_vnic_backing",

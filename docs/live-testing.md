@@ -2740,7 +2740,7 @@ without a qualified positive oracle. Registration and offline tests add no live 
 
 ## Single-backing vNIC creation policy (standalone #1827)
 
-`scripts/live_vnic_creation_policy.py` exercises optional creation policy on an
+Version 1 of `scripts/live_vnic_creation_policy.py` exercises optional creation policy on an
 **already owned, eligible LPAR**. It is separate from default/all runner groups.
 It permits one vNIC create and, only after a complete successful result plus fresh
 identity and baseline checks, one removal of that captured slot. It never creates
@@ -2828,3 +2828,78 @@ it cannot declare `CLEAN` from absence alone when the original journal is incomp
 or uncertain. `CLEAN` confirms the observed baseline and captured history, not
 traffic, failover behavior, cross-process locking or product maturity. Raw results
 contain private identities and must never be pasted into public issues or PRs.
+
+## Source-only vNIC update qualification (version 2, #1828)
+
+The same registered preflight, standalone capture and independent recovery commands
+above accept a separately admitted version-2 source packet. This is an implemented
+offline-tested diagnostic, not qualified native update support. Hardware execution,
+final budget/window admission and product maturity remain separate operator decisions.
+It remains outside default/all groups; it never prepares or activates an LPAR.
+
+Version 2 has exactly the same sixteen top-level keys as version 1, plus the four
+keys below. Set `version` to integer `2`; all other identity, destination, commit,
+expiry, private-file, baseline and writer acknowledgements retain their constraints.
+There is no supplied slot or command: the one created vNIC determines the target.
+
+| Additional key | Required value |
+|---|---|
+| `purpose` | `"update-mode-source"` |
+| `case` | Exactly one fixed case from the list below |
+| `expected_lpar_state` | Exact nonempty printable partition state; both contained REST views must agree |
+| `allow_one_update` | `true` |
+
+The `policy` object has exactly `pvid_priority`, `auto_priority_failover`,
+`allowed_vlan_ids` and `allowed_os_mac_addrs`: scalars must be explicit (including
+zero/false), and each list must contain exactly one valid finite member. No
+`mac_addr` input is allowed; generated MAC is independently observed and preserved.
+`port_vlan_id` remains an explicit integer `0..4094`. The six fixed cases are
+`vlan-replace-all`, `vlan-replace-none`, `vlan-remove-last`, `mac-replace-all`,
+`mac-replace-none` and `mac-remove-last`. Use one packet and one separately admitted
+window per case, never an automatic six-case batch or alternative-encoding retry.
+
+After the usual preflight/digest binding, capture records B0, creates one fresh
+single-backing vNIC, independently verifies its singleton B1 baseline, and attempts
+one native update. B2 independently observes the selected raw policy and bounded
+preservation of the captured identity, MAC, backing/capacity and foreign inventory.
+Only acknowledged completion, literal expected `all`/`none` and unchanged
+preservation qualify the case. Clear means explicit `=none`, never reset or omitted
+policy; an empty, missing or malformed readback is unavailable, not positive `none`.
+Remove-last is a distinct hypothesis with the same literal `none` candidate oracle.
+
+Submission is `not_dispatched`, `completed`, `rejected` or `unknown`. Rejection
+requires a completed native nonzero refusal code; `refused` qualification also needs
+independent unchanged readback. Other uncertain outcomes remain unresolved and
+stop later effects. Selected-policy evidence survives a later preservation read
+failure, but cannot authorize cleanup by itself. No retry, rollback or reseed occurs.
+
+Only a qualified B2 permits removal. Existing fresh removal checks must still match
+the exact qualified object and owned fixture; observed drift disarms the remove.
+B3 must restore B0. Always run the separate read-only recovery command against the
+original packet and capture journal, even after CLEAN. It recomputes source history,
+ordered exact commands/intents, removal observations, original session closure and
+current baseline. Absence alone cannot clear incomplete or uncertain history.
+The residual race after the final observation is not an atomic HMC guarantee.
+
+Version-2 caps are 24 REST/24 SSH/120 seconds for preflight and recovery, and
+48 REST/56 SSH/300 seconds for capture. These implemented bounds still require
+operator admission before hardware. Offline physical-boundary traces measured
+8/15 for preflight, 23/50 for ordinary capture and 5/4 for recovery. Capture with
+ManagedSystem null-property fallback measured 31/50; native ownership-name fallback
+measured 23/53, and both expansions together measured 31/53. An empty containment
+feed stopped preflight at 6/0 with own logout.
+These are synthetic observations, not hardware ceilings or measurements of every
+combination. Version-1 limits remain unchanged.
+
+One REST slot and the final 15 seconds are reserved for own logout. Before each
+physical create/update/remove, require respective remaining REST/SSH budgets of
+24/26, 17/18 and 7/6, plus 15 body seconds after durable intent persistence. Tests
+exercise count exhaustion, independent wall expiry, journal latency and refreshed
+dispatch time. The inherited 1 MiB I/O and 5 MiB atomic journal limits apply; a
+failed/oversized intent save prevents dispatch and preserves the preceding journal.
+
+Output is labelled `vnic-update-source SOURCE ONLY`. Its private version-2 history
+carries `evidence_class=source-only`, never optional-policy verification credit.
+CLEAN establishes only the bounded stored-policy/history observations. All five
+parent adapter fields, later delta/two-list modes and the public updater remain
+#1828 work; `all` minus finite members still has no justified positive oracle.
