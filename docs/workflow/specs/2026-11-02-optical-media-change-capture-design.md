@@ -19,7 +19,9 @@ V11R2 HMC once that HMC is authorized for mutation. A new runner group `vmedia-m
 dispatches `[16, 70, 22]`: ST16 resolves the VIOS, the test partition and the repository (it
 creates a repository only when the VIOS has none, as the vmedia arm already does), ST70 is the
 new capture, and ST22's existing teardown removes any run medium ST70 left. The group is not in
-`all` or `vmedia`. Its wrapper is `scripts/live_vmedia_media_change.py`.
+`all` or `vmedia`, 70 joins the runner's bare-run exclusion set, and ST70 SKIPs unless
+`state.group` is its own group (as `vios_backup.py` does), so no other invocation reaches it.
+Its wrapper is `scripts/live_vmedia_media_change.py`.
 
 ST70 (`scripts/live_test/vmedia_media_change.py`) runs only when the test partition is
 unprotected and `Not Activated`, the repository has 2 GiB free, and ST16 resolved the VIOS
@@ -27,30 +29,37 @@ UUID, its partition id and the partition UUID. Otherwise it records SKIP rows an
 nothing. Every HMC call inside ST70 runs under `live_test.capture.capture()` (default, redacting
 mode), writing `hmc-captures/vmedia-media-change-<8 hex>.capture.jsonl`, which is git-ignored.
 Rows use `state.record`/`state.skip`, never `record_verified`: a capture promotes no maturity.
+Every row for a tool call is labelled `<tool name> (<step>)`, because recovery matches a row
+by its label's first word.
 Steps, in order:
 
 1. Baselines: VIOS storage mappings and both vSCSI adapter listings (existing `storage`
    helpers). Create blank media A and B (`hmcpctl_live_<8 hex>`, 1 GiB, names recorded in the
    new artifact `vmedia_change_names` before each create). Mount A to the test partition with
-   the tool and read the VTD name V from its optical mapping. V must match
+   the tool, read the VTD name V from its optical mapping, and re-read both adapter listings
+   (the post-mount set; the mount may add an adapter pair). V must match
    `[A-Za-z0-9_]{1,15}` before it enters any command; else stop.
 2. Read-only `viosvrcmd -m <sys> --id <vios id> -c "help loadopt"`, `"help unloadopt"`,
    `"lsvopt -vtd V"`.
 3. Q4: `_rmw_vios_mapping` appending `build_virtual_optical_mapping_document(B, link, V)`,
    bypassing the #1283 refusal. Record the status and verbatim body; then re-read mappings and
-   adapters. Any adapter not in the post-mount listing is the orphan answer and a
+   adapters. Any adapter not in step 1's post-mount set is the orphan answer and a
    `MANUAL RECOVERY REQUIRED` row (the arm never removes an adapter). A mapping count change
    (the POST was accepted) stops ST70.
 4. Q1: `_rmw_vios_mapping` replacing V's `Storage/VirtualOpticalMedia` with one naming only B.
-   Record the response, then the tool's optical mappings and `lsvopt -vtd V`.
+   Record the response, then the tool's optical mappings and `lsvopt -vtd V`. Re-derive V from
+   the lp3 mapping naming A or B (a changed name is part of the Q1 answer and is validated
+   again); when none remains, Q2 and Q3 SKIP with that reason.
 5. Q2: `unloadopt -vtd V`, `lsvopt -vtd V`, `loadopt -disk A -vtd V`, `lsvopt -vtd V`.
 6. Q3: power the test partition on (tool, `wait=True`, 120 s) and off (`immediate=True`), then
    `unloadopt -vtd V`; only if that fails, `unloadopt -release -vtd V`; then
    `loadopt -disk B -vtd V`; only if that fails and `help loadopt` listed `-release`,
    `loadopt -release -disk B -vtd V`; then `lsvopt -vtd V`.
 7. Cleanup, in a `finally`: power off if ST70 powered on and the state is not `Not Activated`;
-   unmount whichever run medium the mapping names (tool); delete A and B (tool); compare
-   mappings and adapters with step 1's baselines. An empty drive, a run medium still mapped or
+   when V's drive is empty, `loadopt -disk A -vtd V` (once more with `-release` if that
+   fails) so the tool can address the mapping; unmount whichever run medium the mapping names
+   (tool); delete A and B (tool); compare mappings and adapters with step 1's baselines. An
+   empty drive, a run medium still mapped or
    listed, or any drift is a `MANUAL RECOVERY REQUIRED` row naming the command that clears it.
 
 Recovery: `_VMEDIA_SUBTASKS` gains 70, `iso_names` reads `vmedia_change_names`, and
@@ -58,8 +67,18 @@ Recovery: `_VMEDIA_SUBTASKS` gains 70, `iso_names` reads `vmedia_change_names`, 
 unmapped server adapter, run media left, partition running) witness ST70. `run_media_names`
 also reads `vmedia_change_names`, so ST22 removes what ST70 left.
 
-After the window: tokenize the capture with `scripts/live_capture_export.py tokenize`, and
-commit one fixture per decisive record (the Q1 and Q4 responses; the `help`, `loadopt`,
+The window runs on the lab-reachable host, per docs/live-testing.md: preflight
+`--group vmedia-media-change`, the wrapper, then `scripts/live_test_recovery.py` and
+`scripts/live_test_evidence.py` over `test-results-vmedia-media-change.json`, at the commit that
+adds the arm; later commits change only fixtures, docs and the pin test, so that commit is an
+ancestor of the PR head and the PR cites it. The raw capture and results stay on that host and
+move to the operator's private evidence directory (`~/hmc-live-evidence/<date>-<profile>/`)
+before export; the README records them as retained privately. The window's outcome is recorded
+as a `WORK:TRAJECTORY` note on #1284.
+
+After the window: tokenize the capture with `scripts/live_capture_export.py tokenize
+--private '<lab-pattern>'`, the pattern covering the system, VIOS and test-partition names and
+the HMC host prefix (docs/live-testing.md), and commit one fixture per decisive record (the Q1 and Q4 responses; the `help`, `loadopt`,
 `unloadopt` and `-release` CLI records that ran) with README rows. Update `_VTD_NAME_IN_USE`'s
 comment, and its value only if the capture contradicts it, with a test reading the Q4 fixture.
 Record Q1–Q4's answers in the README and `docs/live-testing.md`; Q1 on V11R2 stays unanswered
@@ -74,8 +93,10 @@ Exclusions: #1285's operation, physical optical, repository creation and ISO upl
 2. Invariants and assets: the test VIOS's other mappings and adapters; the test partition's
    power state; the operator's media; fixtures carry no lab identifier.
 3. Accepted failure classes: a Q4 orphan adapter needs a manual `chhwres -o r` (bounded:
-   one adapter, named in a row and by recovery); an empty drive after a failed `loadopt` needs
-   a manual `loadopt` before unmount (named in a row); one firmware level is captured.
+   one adapter, named in a row and by recovery); one firmware level is captured. An empty VTD
+   left when cleanup's reload also fails is a stated gap against criterion 6: recovery cannot
+   see a mapping with no media, so the arm's FAIL row (with `rmvdev -vtd V`) is its only
+   witness; bounded to one device on the test partition.
 4. Covered elsewhere: tokenization (`live_capture_export.py`); the `-release` behaviour of a
    product operation (#1285).
 
@@ -95,11 +116,14 @@ Exclusions: #1285's operation, physical optical, repository creation and ISO upl
    mapping or power-on behind; each refusal path (protected, running, no room, bad V) touches
    nothing; a failed `unloadopt` triggers exactly one `-release` retry.
 2. Recovery reports a run medium named in `vmedia_change_names`, and a running partition after
-   an ST70 power-on; ST22 removes a leftover `vmedia_change_names` medium.
+   the arm's own ST70 power-on row; ST22 removes a leftover `vmedia_change_names` medium; a
+   bare runner selection and a bare `70` touch nothing.
 3. The wrapper dispatches exactly `--group vmedia-media-change`; preflight names the arm.
 4. The committed fixtures answer Q1–Q4 (or record why one is unanswered), carry no lab
    identifier, and a test pins `_VTD_NAME_IN_USE` against the Q4 fixture.
-5. `just verify` and `prek run --all-files` pass.
+5. Recovery after the window reports clean (or names each manual row), and the evidence
+   matrix from `scripts/live_test_evidence.py` stamps the arm's commit.
+6. `just verify` and `prek run --all-files` pass.
 
 ## Validation
 
@@ -109,5 +133,7 @@ Exclusions: #1285's operation, physical optical, repository creation and ISO upl
 - Success 3: focused-test, `tests/scripts/test_live_vmedia_media_change.py`,
   `tests/scripts/test_live_test_preflight.py`.
 - Success 4: focused-test for the `_VTD_NAME_IN_USE` pin; task-test-not-applicable for the
-  fixtures' identifier scan — the exporter's fail-closed scan plus a manual `rg` before commit.
+  fixtures' identifier scan — the exporter's fail-closed scan with `--private`, then
+  `rg -n -e '<lab-pattern>'` over the new fixture files, empty before commit.
+- Success 5: task-test-not-applicable — a live run's output, not a repository behaviour.
 - Docs and README prose: task-test-not-applicable; prose gated by `just doc-freshness`.
