@@ -519,11 +519,9 @@ def _trunked_switches(vioses: Iterable[Mapping[str, object]]) -> frozenset[int] 
         if not isinstance(adapters, list):
             return None
         for adapter in adapters:
-            switch = (
-                as_int(_network_text(adapter.get("VirtualSwitchID")))
-                if isinstance(adapter, Mapping)
-                else None
-            )
+            if not isinstance(adapter, Mapping):
+                return None
+            switch = as_int(_network_text(adapter.get("VirtualSwitchID")))
             if switch is None:
                 return None
             found.add(switch)
