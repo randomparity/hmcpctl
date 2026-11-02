@@ -292,6 +292,11 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- `report utilization` refuses to run while `HMC_CA_BUNDLE` or `HMC_TRUST_SYSTEM_STORE` is
+  exported, as it already does for the other per-profile overrides. An exported value overrode
+  every profile's own TLS trust setting, so profiles signed by a different CA failed as
+  per-profile survey errors (#1743).
+
 - The opt-in VIOS boot-source diagnostic verifies configured resources from the
   unique contained saved default profile while preserving inactive current resource
   observations and strict snapshot equality. Uninitialized current placeholders no
