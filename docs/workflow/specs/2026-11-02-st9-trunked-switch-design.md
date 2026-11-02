@@ -9,18 +9,20 @@ untrunked one on 2026-11-02, where the adapter add failed; its `_Stop` then skip
 ## Scope
 
 - **Switch (A).** `vlan_baseline` also reads `hmc_list_vios` for the test system and
-  collects each entry's `TrunkAdapters.TrunkAdapter` `VirtualSwitchID` (mapping or list,
-  per the live-captured VIOS entry), then selects the lowest listed `SwitchID` in that set.
+  collects each `TrunkAdapters.TrunkAdapter` `VirtualSwitchID` (mapping or list), then
+  selects the lowest listed `SwitchID` in that set.
   A failed or unparsable read, or no trunked listed switch, SKIPs
-  `hmc_create_virtual_network` with that reason. Never falls back; storage still runs.
+  `hmc_create_virtual_network` with that reason; storage still runs.
 - **Cleanup (B).** On a `_Stop` from `client_network_adapter`, `vlan_round_trip` re-reads
   the test partition's client network adapters. Only when the read succeeds and every
   adapter has an integer `PortVLANID` and a parsable `TaggedVLANIDs`, none equal to the
   run's VLAN, does it continue the normal path (`delete_run_networks`, both observations,
   the networks manual row if not restored), then re-raise the original `_Stop`. Otherwise
-  it records the existing manual row and retains the network.
+  it keeps the existing manual row and the network.
 - **Request (C, operator 2026-11-02).** After HSCLB021 recurred on the trunked switch,
   the add sends only the pre-b75c838e fields; qualification drops the creation fields.
+  This departs from ADR 0307's six-field ST9 request until a follow-up restores or
+  supersedes it.
 - `docs/live-testing.md` VLAN bullet states all three.
 - Out of scope: `src/hmcpctl/`, fixture-custody refactor, other arms, the stale switch.
 
@@ -31,7 +33,7 @@ untrunked one on 2026-11-02, where the adapter add failed; its `_Stop` then skip
    is on the run's VLAN; no mutation on an untrunked switch.
 3. Accepted: a trunk adapter not varied on still counts (the proof run checks); an
    adapter added between re-read and delete (the HMC refuses; cleanup records failed).
-4. Covered elsewhere: product creation-field handling (follow-up).
+4. Covered elsewhere: creation-field handling and ADR 0307 (follow-up).
 
 ## Success
 
@@ -43,14 +45,14 @@ untrunked one on 2026-11-02, where the adapter add failed; its `_Stop` then skip
 4. A stop with an adapter on the VLAN, or an unparsable VLAN field, keeps the network.
 5. `just verify` green; one live ST9 run adds the adapter on a trunked switch (a SKIP
    fails the proof) and passes the vSCSI round trip.
-6. The add carries exactly four arguments; its observation asserts no creation field.
+6. The add carries four arguments; its observation asserts no creation field.
 
 ## Validation
 
 | Contract | Mode | Evidence |
 |---|---|---|
-| Trunked-switch preference (S1) | focused-test | `test_the_lowest_trunked_switch_is_selected`; red: switch 1 used |
-| No-trunk / unreadable skip (S2) | focused-test | `test_no_trunked_switch_skips_the_vlan_round_trip` (parametrized); red: create called |
+| Trunked preference (S1) | focused-test | `test_the_lowest_trunked_switch_is_selected`; red: switch 1 |
+| No-trunk skip (S2) | focused-test | `test_no_trunked_switch_skips_the_vlan_round_trip`; red: create called |
 | Cleanup after failed add (S3) | focused-test | `test_a_failed_adapter_add_deletes_the_runs_network`; red: network remains |
 | Retention (S4) | focused-test | `test_an_adapter_on_the_vlan_keeps_the_network`, `test_an_unparsable_adapter_vlan_keeps_the_network`; red: `_vlan_free` forced true |
 | Docs bullet | task-test-not-applicable | unasserted prose |
