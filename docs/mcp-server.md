@@ -86,8 +86,9 @@ the permitted `tools` without granting the `read` effect class.
 
 The next two sections, and [Logical operation state](#logical-operation-state) for
 `hmc_operation_status`, describe the logical LPAR workflow tools: tool search and invocation,
-`hmc_inventory`, `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_reconfigure_lpar`, `hmc_inspect_lpar`
-and `hmc_operation_status`. They are in the 0.1.0 catalog (`hmc_reconfigure_lpar` since 0.2.0), but the workflow they belong to is
+`hmc_inventory`, `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_reconfigure_lpar`,
+`hmc_inspect_lpar` and `hmc_operation_status`. All but `hmc_reconfigure_lpar`, which is
+unreleased, are in the 0.1.0 catalog, but the workflow they belong to is
 planned for 0.2.0 and 0.1.0 makes no live-verification claim for them
 ([what 0.1.0 supports](compatibility.md#what-010-supports)).
 
@@ -502,9 +503,9 @@ reason codes, and how to route or silence them.
 
 The logical LPAR tools record their progress in a local SQLite store, `operations.sqlite3`,
 beside `store-id` and `execution.lock` in one state directory: `HMCPCTL_STATE_DIR` when set,
-otherwise the platform state directory. In this release `hmc_power_lpar` and `hmc_reconfigure_lpar` are the tools
-that start a logical operation, so the store is created by the first call of either; operator commands for
-the store are #1286. The
+otherwise the platform state directory. `hmc_power_lpar` and `hmc_reconfigure_lpar` are the tools
+that start a logical operation, so the store is created by the first call of either; operator
+commands for the store are #1286. The
 directory is created with mode `0700` and its files with `0600`; hmcpctl refuses a directory or
 file that other users can access.
 

@@ -613,6 +613,73 @@ def test_resume_after_the_current_write_renames(hmc, monkeypatch, state):
     assert hmc.name == "web2"
 
 
+@pytest.mark.parametrize(
+    ("refusal", "message"),
+    [
+        ("last_profile", "last activated a profile other than its default"),
+        ("no_default", "has no default profile"),
+        ("mode", "processor mode differs"),
+        ("memory_bound", "configurable memory"),
+    ],
+)
+def test_planning_refusals_write_nothing(hmc, monkeypatch, refusal, message):
+    real = hmc.get_logical_partition
+
+    async def entry(uuid):
+        found = await real(uuid)
+        resource = found["Resource"]
+        if refusal == "last_profile":
+            resource["LastActivatedProfile"] = "other"
+        elif refusal == "no_default":
+            resource["DefaultProfileName"] = ""
+        elif refusal == "mode":
+            resource["PartitionProcessorConfiguration"] = {
+                "CurrentHasDedicatedProcessors": "true",
+                "CurrentDedicatedProcessorConfiguration": {
+                    "CurrentMinimumProcessors": "1",
+                    "CurrentProcessors": "1",
+                    "CurrentMaximumProcessors": "2",
+                },
+            }
+        return found
+
+    async def too_large(*_args):
+        raise ValueError("desired_memory exceeds ConfigurableSystemMemory")
+
+    monkeypatch.setattr(hmc, "get_logical_partition", entry)
+    if refusal == "memory_bound":
+        monkeypatch.setattr(
+            reconfigure, "require_memory_within_selected_system", too_large
+        )
+    record = _run({"memory_mib": 1024})
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert message in record.warnings[0]
+    assert record.effects == ()
+    assert [c for c in hmc.calls if c != "authorize"] == []
+
+
+def test_result_warns_of_preservation_drift_and_sync(hmc, monkeypatch):
+    hmc.rmc, hmc.sync = "inactive", "On"
+    real = hmc.update_partition_profile
+
+    async def drifted(*args, **kwargs):
+        outcome = await real(*args, **kwargs)
+        outcome.preservation = "drifted"
+        return outcome
+
+    monkeypatch.setattr(reconfigure, "update_partition_profile", drifted)
+    record = _run({"memory_mib": 1024})
+    assert record.outcome == "completed"
+    warnings = record.result["warnings"]
+    assert any("preservation drift" in w for w in warnings)
+    assert any("profile sync is on" in w for w in warnings)
+
+
+def test_a_name_too_long_for_the_plan_is_refused():
+    with pytest.raises(ValueError, match="at most 256"):
+        ReconfigurePatch(name="a" * 257)
+
+
 def test_open_plan_effect_is_recomputed():
     verdict = _await(reconfigure._classify_plan(None, None))
     assert verdict.status == "not_applied"

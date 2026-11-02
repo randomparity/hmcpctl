@@ -61,8 +61,11 @@ class ReconfigurePatch(BaseModel):
     """What to change; an omitted field is never read into a write (ADR 0314 Decision 1)."""
 
     model_config = ConfigDict(extra="forbid")
+    # Bounded so the recorded plan stays inside the store's 4 KiB effect identity.
     name: StrictStr | None = Field(
-        default=None, description="New partition name; profile names never change."
+        default=None,
+        max_length=256,
+        description="New partition name; profile names never change.",
     )
     processors: StrictInt | None = Field(
         default=None,
