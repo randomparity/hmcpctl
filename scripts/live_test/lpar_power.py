@@ -981,8 +981,6 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
     if not await _create_volume(client, state, run):
         return False
     request_id = f"{run.token}-p"
-    run.provisions.add(request_id)
-    run.requests.setdefault(request_id, False)
     st, data = await state.call(
         client,
         "hmc_provision_lpar",
@@ -1006,6 +1004,8 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
     run.data["provision.lpar"] = data
     operation = _plain(result_field(data, "operation")) if st == "PASS" else None
     if isinstance(operation, Mapping):
+        # Registered only once recorded: a refused provision has nothing to abandon.
+        run.provisions.add(request_id)
         run.requests[request_id] = operation.get("state") == "terminal"
     found = result_field(data, "lpar_uuid") if st == "PASS" else None
     run.p_uuid = found if isinstance(found, str) else None

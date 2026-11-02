@@ -325,6 +325,16 @@ async def _provision_from_baseline(
     if isinstance(data, dict):
         for step in data.get("steps") or []:
             print(f"provision step [{step.get('step')}]: {step.get('status')}")
+        operation = data.get("operation")
+        if isinstance(operation, dict) and operation.get("state") != "terminal":
+            # A paused operation holds the partition guard past the fixture teardown.
+            st, abandoned = await state.call(
+                client,
+                "hmc_provision_lpar",
+                request_id=f"st14-{fixture['token']}",
+                continuation="abandon",
+            )
+            state.record(14, "hmc_provision_lpar (abandon)", st, abandoned)
 
 
 async def exercise_storage_provisioning(client: Client, state: RunState) -> None:
