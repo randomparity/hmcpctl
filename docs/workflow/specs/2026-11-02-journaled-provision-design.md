@@ -31,7 +31,8 @@ No profile write, `install`, `boot`, `adapters.mac` or `exclusive_writer_window`
   optional, not exhaustive.
 - The handler: validate inputs; on a continuation read the recorded arguments; authorize the
   delegated tools (ADR 0313 Decision 8); when `expected_plan_digest` is given and
-  `engine.recorded_arguments` finds no record, run the plan check; `dry_run` returns `ProvisionResult(dry_run=True, operation=None)`; otherwise
+  `engine.recorded_arguments` finds no record, run the plan check; for a new request run the
+  preconditions (ADR 0313 Decision 9); `dry_run` returns `ProvisionResult(dry_run=True, operation=None)`; otherwise
   `engine.submit` with the classifiers and builds the result from the record.
 - Arguments are recorded as JSON through a pydantic `TypeAdapter` and rebuilt the same way on
   a continuation.
@@ -48,16 +49,17 @@ No profile write, `install`, `boot`, `adapters.mac` or `exclusive_writer_window`
   (`engine.join` gains `timeout=None`), renders the result plus operation id, state and
   outcome, and exits 1 unless the outcome is `completed`. A refused submission (such as a held
   execution lock) is a CLI error naming the reason.
-- Live scripts pass a run-unique `request_id` and `wait_seconds=600` and also judge
-  `operation.outcome == "completed"`; `lpar_power` adds its provision request to the requests
-  its teardown abandons. `live_test_recovery.py` needs no change: it keys on tool names.
+- Live scripts pass a run-unique `request_id` and `wait_seconds=600`; their existing judge
+  already fails a result whose `workflow_completed` is false, which every outcome but
+  `completed` reports. `lpar_power` adds its provision request to the requests its teardown
+  abandons. `live_test_recovery.py` needs no change: it keys on tool names.
 - Other readers of `provision_lpar` move to the body: `tests/unit/test_adr_0092_citations.py`
   (inventory paths and mutators), `tests/unit/test_unscoped_lookup_fail_closed.py`,
   `tests/lpar/test_sharing_creation_barriers.py`, `tests/lpar/test_physical_io.py`; the
   `_app.py` instructions gain `request_id` and drop the best-effort stamp repair for provision.
 
-**Body.** Phase `validating`: when `create` is not applied, run the existing preconditions,
-plus "no disk of that name in the volume group" with `capacity_mib`. Once `create` is
+**Body.** Phase `validating`: on a continuation whose `create` is not applied, re-run the
+preconditions (which add "no disk of that name on the VIOS" with `capacity_mib`). Once `create` is
 applied the body holds the guard on its system and partition UUID. Phase `creating`: the
 effects in ADR 0313's order, each skipped when its request field is absent; ledger writes after `create` and `disk`
 are applied; the change-location read after `network`. Messages name UUIDs and exception

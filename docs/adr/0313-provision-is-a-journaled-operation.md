@@ -27,10 +27,11 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
    adds `wait_seconds` and `expected_plan_digest`; `storage` adds `capacity_mib`. A
    continuation needs only `request_id`; any other value it gives must match the record.
 2. **Result.** `ProvisionResult` keeps its fields and adds `operation`, the operation record.
-   The top-level fields are the body's result when the outcome is `completed`; otherwise they
-   are rebuilt from the effects (applied → `ok` step, any other → `error` step,
-   `workflow_completed` false), because a failed or reconciled run keeps an older result. A
-   clean run ends `completed`; `configured` stays reserved for #1840's profile readback.
+   The top-level fields are the body's result when the outcome is `completed`, or
+   `needs_attention` with steps that agree with the journal; otherwise they are rebuilt from
+   the effects (applied → `ok` step, any other → `error` step, `workflow_completed` false),
+   because a failed or reconciled run keeps an older result. A clean run ends `completed`;
+   `configured` stays reserved for #1840's profile readback.
 3. **Effects, in order** (keys, kinds, targets and identities are persisted):
 
    | Key | Kind | Target | Identity | Classifier (H1 *Resume*) |
@@ -72,8 +73,11 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
    `hmc_assign_sriov_logical_port` with `assignments.sriov`; `hmc_add_vnic` with
    `assignments.vnics`; `hmc_power_on_lpar` with `power_on`. The `power_on` write keeps
    `ownership_override=True` against the stamp this operation just confirmed (ADR 0092).
-9. **`dry_run`** validates `request_id` and runs the preconditions (and the digest check)
-   without submitting: no operation, lock or guard.
+9. **Preconditions refuse before recording.** For a new request the handler runs the
+   preconditions, as `dry_run` does, and raises their error to the caller; the body re-runs
+   them only on a continuation whose `create` is not applied, ending `failed` on a refusal.
+   `dry_run` validates `request_id` and stops there: no operation, lock or guard.
+   `affinity_assessment` without `power_on` is refused, since it waits for activation.
 
 ## Consequences
 
