@@ -1339,7 +1339,8 @@ async def test_an_unproven_storage_create_is_never_cleaned_up(
     assert (
         len(hmc.adapters[adapter_type]) == len(PRE_EXISTING_ADAPTERS[adapter_type]) + 1
     )
-    assert _manual(state)
+    (text,) = _manual(state)
+    assert "ownership not proven" in text
     assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
 
 
@@ -1374,3 +1375,63 @@ def test_placement_drift_never_names_new_uuids_as_removable():
     assert FOREIGN in text
     assert "remove only" not in text
     assert "not proven to be the run's" in text
+
+
+@pytest.mark.asyncio
+async def test_a_moved_baseline_adapter_stops_storage_cleanup(monkeypatch):
+    adapter_type = "VirtualSCSIClientAdapter"
+    hmc = FakeHMC()
+
+    def move(listed):
+        listed[next(iter(PRE_EXISTING_ADAPTERS[adapter_type]))]["VirtualSlotNumber"] = (
+            "9"
+        )
+
+    _on_post_add_read(hmc, adapter_type, move)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _storage_deletes(hmc, adapter_type) == []
+    (text,) = _manual(state)
+    assert "ownership not proven" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+async def test_a_fixture_paired_elsewhere_than_requested_is_never_deleted(
+    monkeypatch, adapter_type
+):
+    hmc = FakeHMC()
+    original = getattr(hmc, f"_{ADD_TOOL[adapter_type]}")
+    slot_field = REMOTE_FIELDS[adapter_type][1]
+
+    def add(kwargs):
+        status, data = original(kwargs)
+        if kwargs["slot_number"] is None:
+            data["Resource"][slot_field] = "99"
+            hmc.adapters[adapter_type][data["UUID"]][slot_field] = "99"
+        return status, data
+
+    setattr(hmc, f"_{ADD_TOOL[adapter_type]}", add)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _storage_deletes(hmc, adapter_type) == []
+    assert _manual(state)
+
+
+@pytest.mark.asyncio
+async def test_a_baseline_with_an_unusable_identity_creates_no_storage_adapter(
+    monkeypatch,
+):
+    hmc = FakeHMC()
+    hmc.adapters["VirtualSCSIClientAdapter"]["not-a-uuid"] = {
+        "VirtualSlotNumber": "5",
+        "RemoteLogicalPartitionID": "1",
+        "RemoteSlotNumber": "11",
+    }
+
+    state = await _run(monkeypatch, hmc)
+
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+    assert any("baseline identity is unavailable" in text for text in _manual(state))
