@@ -453,6 +453,8 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         "hmc_migrate_abort_lpar",
         # ADR 0199: its stop and restart actions power the partition off.
         "hmc_power_lpar",
+        # ADR 0314: allow_disruption=true removes memory or processors live.
+        "hmc_reconfigure_lpar",
         "hmc_remote_restart_lpar",
         # Reset discards existing statistics history irreversibly (ADR 0288).
         "hmc_reset_lpar_memory_statistics",
@@ -481,6 +483,7 @@ _FACTORY_TOOLS = frozenset(
         "hmc_inventory",
         "hmc_plan_lpar",
         "hmc_power_lpar",
+        "hmc_reconfigure_lpar",
     }
 )
 
@@ -1287,6 +1290,7 @@ _NOT_EXHAUSTIVE = frozenset(
         "hmc_plan_lpar",
         # Selectors, but a continuation names none; the delegated tool binds (ADR 0199).
         "hmc_power_lpar",
+        "hmc_reconfigure_lpar",
         "hmc_reset_lpar_memory_statistics",
         "hmc_switch_lpar_paging_vios",
         # Selectors, but the VIOS reads sit below the signature (ADR 0200).
@@ -1343,6 +1347,7 @@ def test_every_selector_less_tool_is_unbounded_and_no_other_is_by_accident():
         "hmc_modify_lpar",
         "hmc_plan_lpar",
         "hmc_power_lpar",
+        "hmc_reconfigure_lpar",
         "hmc_reset_lpar_memory_statistics",
         "hmc_switch_lpar_paging_vios",
         "hmc_provision_lpar",

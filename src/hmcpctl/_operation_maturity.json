@@ -451,6 +451,13 @@
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
+      "operation": "lpar.reconfigure",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.remote_restart",
       "implementation": "implemented",
       "verification": "unevidenced",

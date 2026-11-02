@@ -44,8 +44,9 @@ carries `limit` and `truncated`. Effects are as registered under ADR 0189.
 - `continuation`: `none` (default), `resume` or `abandon`, plus `boot` for provision only;
 - `wait_seconds`.
 
-All of these follow ADR 0190. Provision (for `install`) and decommission (for `delete_owned`)
-also take `exclusive_writer_window` (see *Ownership and shared VIOS state*). Specialist and
+All of these follow ADR 0190. Provision (for `install`), decommission (for `delete_owned`) and
+reconfigure (for `processors` or `memory_mib`, ADR 0314) also take `exclusive_writer_window`
+(see *Ownership and shared VIOS state*). Specialist and
 logical partition mutations take an optional `hold_id` (ADR 0193).
 
 | Tool | Effect | Inputs (beyond `profile` and the common fields) | Result |
@@ -53,7 +54,7 @@ logical partition mutations take an optional `hold_id` (ADR 0193).
 | `hmc_inventory` | read | `systems?` (≤ 16 selectors), `lpar_state?`, `owner?`, `limit` 1–200 (default 50), `cursor?` | systems and partitions with scoped ids, state, capacity and owner; `sources` with per-source `ok` / `unavailable` / `denied` |
 | `hmc_plan_lpar` | read | provision's inputs, with `system_name_or_uuid` optional and a `placement` constraint as the alternative | `plan_digest` (SHA-256 of the canonical inputs and resolved targets), resolved targets, `blockers[]`, `intended_changes[]`, `unverified[]` |
 | `hmc_provision_lpar` | mutate | today's inputs plus `adapters.mac?`, `expected_plan_digest?`, `install?`, `exclusive_writer_window?` and `boot` (`immediate` default / `deferred`) | `ProvisionResult` (today's fields) plus the operation fields |
-| `hmc_reconfigure_lpar` | destructive | `lpar`, `patch`, `allow_disruption` (default false) | operation fields plus `changes[]`, each `live` / `profile` / `pending_activation` |
+| `hmc_reconfigure_lpar` | destructive | `lpar`, `system_name_or_uuid` (required, as ADR 0199), `patch`, `allow_disruption` (default false), `exclusive_writer_window` (required true for `processors` or `memory_mib`; ADR 0314) | operation fields plus `changes[]`, each `live` / `profile` / `pending_activation` |
 | `hmc_decommission_lpar` | destructive | ADR 0027 inputs plus `storage_cleanup` (`retain` default / `delete_owned`) | `DecommissionResult` plus `storage` (`deleted[]`, `retained[]` with reasons, `pending[]`) and the operation fields |
 | `hmc_power_lpar` | destructive | `lpar`, `system_name_or_uuid` (required, ADR 0199), `action` (`start` / `stop` / `restart`), `mode` (`graceful` default / `immediate`) | operation fields plus `already_in_state` and `observed_state` |
 | `hmc_inspect_lpar` | read | `lpar`, `system_name_or_uuid` (required, ADR 0200), `include` ⊆ {`resources`, `rmc`, `profile_drift`, `refcodes`} | state, RMC, resources, profile drift, ≤ 20 refcodes, `next_actions[]` (tool names only) |
@@ -146,7 +147,7 @@ the dispatch authorizer admits the call, as that tool, for each resolved target.
 | provision (no install) | `hmc_create_lpar`, `hmc_add_network_adapter`, `hmc_add_vscsi_adapter`, `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar`, #637's profile write |
 | provision `install` | the row above, plus `hmc_upload_iso`, `hmc_mount_optical_media`, `hmc_set_lpar_boot_order`, `hmc_power_on_lpar`, `hmc_read_lpar_refcodes` |
 | `power_on=true` (no `install`) | adds `hmc_power_on_lpar` |
-| reconfigure | `hmc_modify_lpar`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, #637's profile write; #1228 adds `hmc_unmount_optical_media`, `hmc_set_lpar_boot_order` and its attach tools |
+| reconfigure | `hmc_modify_lpar` and `hmc_rename_lpar` for `name`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, `hmc_update_partition_profile` (ADR 0314 Decision 6); #1228 adds `hmc_unmount_optical_media`, `hmc_set_lpar_boot_order` and its attach tools |
 | power `start` | `hmc_power_on_lpar` |
 | power `stop` / `restart` | `hmc_power_off_lpar` |
 | decommission `retain` | `hmc_decommission_lpar`'s existing set |
@@ -183,7 +184,8 @@ identity. It continues only when every effect classifies:
 | mount | optical mapping listing |
 | boot order | `PendingBootString` |
 | ownership stamp | the description |
-| profile write | #637's profile readback |
+| profile write (`lpar.profile_write`, ADR 0314) | profile readback: requested values `applied`, earlier values `not_applied` |
+| rename | partition name |
 | power-on / power-off | partition state, plus the HMC JobID if one was recorded |
 | DLPAR change | none — always `needs_attention` |
 
@@ -232,6 +234,9 @@ under any agent id, and list and release holds (ADR 0190, ADR 0193).
   reports a blocker, and the mutating tool refuses before recording any intent, naming the flag;
   `delete_owned` never degrades to `retain`. Provision without `install` and the specialist tools
   keep today's behavior and do not take the flag. A 412 response is `failed` and is not retried.
+- Reconfigure's profile write requires `exclusive_writer_window=true` whenever the patch has
+  `processors` or `memory_mib` (operator decision 2026-11-02; ADR 0242 unchanged, ADR 0314). The
+  tool refuses before recording any intent, naming the flag; a rename alone does not take it.
 - Decommission storage cleanup follows ADR 0192.
 
 ## Installation media and boot

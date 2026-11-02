@@ -86,8 +86,8 @@ the permitted `tools` without granting the `read` effect class.
 
 The next two sections, and [Logical operation state](#logical-operation-state) for
 `hmc_operation_status`, describe the logical LPAR workflow tools: tool search and invocation,
-`hmc_inventory`, `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_inspect_lpar` and
-`hmc_operation_status`. They are in the 0.1.0 catalog, but the workflow they belong to is
+`hmc_inventory`, `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_reconfigure_lpar`, `hmc_inspect_lpar`
+and `hmc_operation_status`. They are in the 0.1.0 catalog (`hmc_reconfigure_lpar` since 0.2.0), but the workflow they belong to is
 planned for 0.2.0 and 0.1.0 makes no live-verification claim for them
 ([what 0.1.0 supports](compatibility.md#what-010-supports)).
 
@@ -167,6 +167,21 @@ attention, so one operation never writes a second power job. `start` needs
 `hmc_power_on_lpar`, and `stop` and `restart` need `hmc_power_off_lpar`: the policy must permit
 that tool and admit the partition for it, on every call including a continuation. Crash with
 dump stays `hmc_dump_restart_lpar`.
+
+`hmc_reconfigure_lpar` (`destructive`) changes one LPAR's processors, memory or partition name
+as a durable operation (ADR 0314). It needs `request_id`, `lpar_name_or_uuid`,
+`system_name_or_uuid` and a `patch` of `name`, `processors` and `memory_mib`; omitted fields are
+not touched. Every change is planned before anything is written, and `result.changes` says where
+each one lives: `live` (running, RMC active, inside the running minimum and maximum, and an
+increase unless `allow_disruption` is true), `profile` (a not-activated partition: its default
+profile and current configuration both hold it) or `pending_activation` (saved in the default
+profile only; `result.activation` names the profile whose activation applies it). A value outside
+the profile's minimum or maximum widens that bound and is always `pending_activation`. Nothing
+reboots the partition or changes its processor mode. `processors` or `memory_mib` need
+`exclusive_writer_window=true` (ADR 0242). `name` needs `hmc_modify_lpar` and `hmc_rename_lpar`;
+`memory_mib` needs `hmc_dlpar_mem`, and `processors` `hmc_dlpar_proc`, each with
+`hmc_update_partition_profile`. An interrupted profile write resumes by reading the profile back;
+an interrupted DLPAR write always needs attention.
 
 `hmc_inspect_lpar` (`read`) reports one LPAR's state and the sections named in `include`:
 `rmc`, `refcodes` (at most 20, newest first, over SSH), `resources` (memory and processor
@@ -487,8 +502,8 @@ reason codes, and how to route or silence them.
 
 The logical LPAR tools record their progress in a local SQLite store, `operations.sqlite3`,
 beside `store-id` and `execution.lock` in one state directory: `HMCPCTL_STATE_DIR` when set,
-otherwise the platform state directory. In this release `hmc_power_lpar` is the only tool that
-starts a logical operation, so the store is created by its first call; operator commands for
+otherwise the platform state directory. In this release `hmc_power_lpar` and `hmc_reconfigure_lpar` are the tools
+that start a logical operation, so the store is created by the first call of either; operator commands for
 the store are #1286. The
 directory is created with mode `0700` and its files with `0600`; hmcpctl refuses a directory or
 file that other users can access.

@@ -35,6 +35,10 @@ from hmcpctl.server_tools.lpar import (
 from hmcpctl.server_tools.lpar.inspect import INSPECT_SECURITY, INSPECT_TOOL_NAME
 from hmcpctl.server_tools.lpar.plan import PLAN_SECURITY, PLAN_TOOL_NAME
 from hmcpctl.server_tools.lpar.power import POWER_SECURITY, POWER_TOOL_NAME
+from hmcpctl.server_tools.lpar.reconfigure import (
+    RECONFIGURE_SECURITY,
+    RECONFIGURE_TOOL_NAME,
+)
 from hmcpctl.server_tools.metrics import pcm as metrics
 from hmcpctl.server_tools.permissions import EFFECTIVE_PERMISSIONS_SECURITY
 from hmcpctl.server_tools.storage import resources as storage
@@ -90,6 +94,7 @@ TOOL_SECURITY: Mapping[str, ToolSecurity] = build_tool_security(
         INVENTORY_TOOL_NAME: INVENTORY_SECURITY,
         PLAN_TOOL_NAME: PLAN_SECURITY,
         POWER_TOOL_NAME: POWER_SECURITY,
+        RECONFIGURE_TOOL_NAME: RECONFIGURE_SECURITY,
         INSPECT_TOOL_NAME: INSPECT_SECURITY,
     },
 )
@@ -102,7 +107,7 @@ PRIMARY_TOOLS: frozenset[str] = frozenset(
         INVENTORY_TOOL_NAME,
         PLAN_TOOL_NAME,
         "hmc_provision_lpar",
-        "hmc_reconfigure_lpar",
+        RECONFIGURE_TOOL_NAME,
         "hmc_decommission_lpar",
         POWER_TOOL_NAME,
         INSPECT_TOOL_NAME,
