@@ -576,7 +576,11 @@ class _Capture:
             await self.reload_empty_target()
         targets = await self.optical("cleanup")
         if targets is None:
-            self.manual("the optical mappings could not be read", self.unmount_hint())
+            self.manual(
+                "the optical mappings could not be read",
+                f"hmcpctl storage list-mappings {shlex.quote(self.vios)} "
+                f"--lpar {shlex.quote(self.lpar)} --system {shlex.quote(self.system)}",
+            )
         for media, _ in targets or []:
             if media in self.media:
                 self.note(
@@ -614,12 +618,6 @@ class _Capture:
                 f"{self.vtd} may be mapped with no medium",
                 self.on_vios(f"rmvdev -vtd {self.vtd}"),
             )
-
-    def unmount_hint(self) -> str:
-        return (
-            f"hmcpctl storage list-mappings {shlex.quote(self.vios)} "
-            f"--lpar {shlex.quote(self.lpar)} --system {shlex.quote(self.system)}"
-        )
 
     async def delete_media(self) -> None:
         created = [
