@@ -593,8 +593,9 @@ system the HMC cannot list is absent from the report, with only a warning on std
 replaces `PATH` only once it is complete. A run killed by a signal other than Ctrl-C can leave
 an empty, owner-only `.<name>.*.tmp` file beside `PATH`; delete it.
 
-The command refuses to run when `HMC_HOST`, `HMC_USER`, `HMC_PASSWORD`, `HMC_PORT` or
-`HMC_VERIFY_SSL` is exported, even as an empty value, or when a global connection option
+The command refuses to run when `HMC_HOST`, `HMC_USER`, `HMC_PASSWORD`, `HMC_PORT`,
+`HMC_VERIFY_SSL`, `HMC_CERT_FINGERPRINT`, `HMC_CA_BUNDLE` or `HMC_TRUST_SYSTEM_STORE` is
+exported, even as an empty value, or when a global connection option
 (`--host`, `--user`, `--password`, `--verify-ssl`, `--profile`) is given. An exported value
 overrides every profile's own, so one HMC's host, credentials or TLS setting would reach all of
 them; the global options would be ignored. `HMC_TIMEOUT` and `HMC_SCHEMA_VERSION` still apply
