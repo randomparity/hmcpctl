@@ -451,10 +451,12 @@ test partition unprotected and `Not Activated` and 2 GiB free in the repository.
 - unmounts and deletes its media, reloading an empty device first so the unmount
   can name it, and compares mappings and adapters with its baseline.
 
-A server adapter the refused create added (Q4) is never removed by the arm: its
-`MANUAL RECOVERY REQUIRED` row and recovery's unmapped-adapter class both name the
-`chhwres -r virtualio --rsubtype scsi -o r` that clears it. A device the cleanup
-cannot reload is a row and a recovery finding naming `rmvdev -vtd <name>`.
+An adapter the refused create added (Q4), on the VIOS or the test partition or a
+pair of both, is never removed by the arm: each gets a `MANUAL RECOVERY REQUIRED`
+row naming its own `chhwres -r virtualio --rsubtype scsi -o r` and slot, and
+recovery's unmapped-adapter class reports the VIOS side. A device of ST70's the
+cleanup cannot reload is a row and a recovery finding naming `rmvdev -vtd <name>`;
+recovery reports only the device names ST70 recorded, never another empty device.
 
 Every HMC call ST70 makes is recorded to
 `hmc-captures/vmedia-media-change-<8 hex>.capture.jsonl`, the path its `capture` row

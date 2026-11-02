@@ -1471,17 +1471,24 @@ def test_a_media_change_document_reads_its_media_and_power_on():
     """ST70 (#1284) leaves the same test-partition residue as the vmedia arm."""
     document = _lpar_document(
         [16, 70, 22],
-        [_row(70, "hmc_power_on_lpar (q3)")],
+        [
+            _row(70, "vtd", data={"vtd": "vtopt1"}),
+            _row(70, "vtd", data={"vtd": "vt;rm"}),
+            _row(70, "hmc_power_on_lpar (q3)"),
+        ],
         vmedia_change_names=[_BLANK, "operator.iso"],
     )
 
     inputs = _inputs(document)
 
-    assert inputs.vmedia_ran and inputs.media_change_ran and inputs.powered_on
+    assert inputs.vmedia_ran and inputs.powered_on
+    assert inputs.media_change_vtds == {"vtopt1"}
     assert inputs.iso_names == {_BLANK}
 
 
-_MEDIA_CHANGE = _inputs(_lpar_document([16, 70, 22]))
+_MEDIA_CHANGE = _inputs(
+    _lpar_document([16, 70, 22], [_row(70, "vtd", data={"vtd": "vtopt1"})])
+)
 _EMPTY_TARGET = {
     "id": "vhost1/vtopt1",
     "lpar_uuid": "LPAR-UUID",
@@ -1504,6 +1511,22 @@ async def test_an_empty_optical_target_after_st70_is_reported():
     (empty,) = [f for f in findings if f.what == "empty optical target left"]
     assert "vtopt1" in empty.detail
     assert "rmvdev -vtd vtopt1" in empty.remedy
+
+
+@pytest.mark.asyncio
+async def test_an_empty_optical_device_st70_never_named_is_not_reported():
+    """An operator's own empty device on the test partition is baseline (#1250 capture)."""
+    other = {**_EMPTY_TARGET, "id": "vhost1/vtopt0"}
+    responses = _lpar_responses(
+        hmc_list_storage_mappings=[{"id": "vhost0/vtscsi0"}, other],
+        hmc_run_command=f"5,{_TEST_LPAR},3\n7,{_TEST_LPAR},4\n",
+    )
+
+    findings = await recovery.check_test_partition(
+        _lpar_caller(responses), _MEDIA_CHANGE
+    )
+
+    assert "empty optical target left" not in [f.what for f in findings]
 
 
 @pytest.mark.asyncio

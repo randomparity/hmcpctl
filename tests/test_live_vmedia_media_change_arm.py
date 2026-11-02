@@ -321,8 +321,8 @@ async def test_an_orphan_adapter_is_reported_and_q1_to_q3_still_run(arm):
     await _run(state, 16, 70)
 
     (answer,) = _rows(state, "q4 orphan adapter")
-    assert answer["data"] == {"added": ["13,sys-A-lp3,4"]}
-    assert any("chhwres" in note for note in _manual(state))
+    assert answer["data"] == {"vios": ["13,sys-A-lp3,4"], "lpar": []}
+    assert any("-o r --id 1 -s 13)" in note for note in _manual(state))
     assert "capture q1 replace storage" in hmc.posts
     assert _rows(state, "hmc_power_on_lpar (q3)")
 
@@ -336,7 +336,7 @@ async def test_the_mounts_own_adapter_is_not_a_q4_orphan(arm):
     (delta,) = _rows(state, "mount adapter delta")
     assert delta["data"] == {"added": ["12,sys-A-lp3,3", "3,vios-A,12"]}
     (answer,) = _rows(state, "q4 orphan adapter")
-    assert answer["data"] == {"added": []}
+    assert answer["data"] == {"vios": [], "lpar": []}
 
 
 @pytest.mark.asyncio
@@ -379,6 +379,26 @@ async def test_an_empty_drive_cleanup_cannot_reload_is_a_manual_row(arm):
 
 
 @pytest.mark.asyncio
+async def test_an_unreadable_empty_check_in_cleanup_is_a_manual_row(arm, monkeypatch):
+    state, hmc, _ = arm
+    base_call = hmc.call
+
+    async def call(_state, client, tool, **kwargs):
+        if tool == "hmc_list_storage_mappings" and kwargs.get("lpar_name_or_uuid"):
+            return "FAIL", _failure("HMCError: HTTP 500")
+        return await base_call(client, tool, **kwargs)
+
+    monkeypatch.setattr(runner.RunState, "call", call)
+
+    await _run(state, 16, 70)
+
+    assert any(
+        "could not be read" in note and "rmvdev -vtd vtopt1" in note
+        for note in _manual(state)
+    )
+
+
+@pytest.mark.asyncio
 async def test_the_vtd_is_rederived_when_q1_renames_it(arm):
     state, hmc, _ = arm
     hmc.rest_swaps = True
@@ -415,7 +435,8 @@ async def test_recovery_reads_the_arms_own_power_on_and_media(arm):
     inputs = recovery.lpar_inputs_from_document(document, [16, 70, 22])
 
     assert inputs is not None
-    assert inputs.powered_on and inputs.vmedia_ran and inputs.media_change_ran
+    assert inputs.powered_on and inputs.vmedia_ran
+    assert inputs.media_change_vtds == {"vtopt1"}
     assert inputs.iso_names == {"hmcpctl_live_0a1b2c3d"}
 
 

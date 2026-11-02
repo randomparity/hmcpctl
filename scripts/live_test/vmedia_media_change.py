@@ -54,6 +54,9 @@ SIZE_MIB = 1024
 #: A VIOS device name. The HMC chooses it at mount, and it enters `viosvrcmd` commands.
 VTD_NAME = re.compile(r"[A-Za-z0-9_]{1,15}")
 _ROW = "vmedia media change"
+#: The row naming each VTD ST70 uses, written before any command touches it; recovery
+#: reports an empty optical device only when one of these names it.
+VTD_ROW = "vtd"
 _POST = "ViosSCSIMapping POST"
 _CAPTURES = Path("hmc-captures")
 _EARLIER_CAPTURE = (
@@ -363,6 +366,7 @@ class _Capture:
         if not VTD_NAME.fullmatch(vtd):
             raise _Stop(f"unusable VTD name {vtd!r}")
         self.vtd = vtd
+        self.state.record(SUBTASK, VTD_ROW, "PASS", {"vtd": vtd})
 
     async def help(self) -> None:
         status, text = await self.vios_run("help loadopt", "help loadopt")
@@ -444,14 +448,25 @@ class _Capture:
                 "--level lpar",
             )
         else:
-            orphan = sorted((now[0] - mounted[0]) | (now[1] - mounted[1]))
-            self.state.record(SUBTASK, "q4 orphan adapter", "PASS", {"added": orphan})
-            if orphan:
-                self.manual(
-                    f"server adapters the refused create added: {', '.join(orphan)}",
-                    f"chhwres -r virtualio --rsubtype scsi -m "
-                    f"{shlex.quote(self.system)} -o r --id {self.vios_id} -s <slot>",
-                )
+            vios_side = sorted(now[0] - mounted[0])
+            lpar_side = sorted(now[1] - mounted[1])
+            self.state.record(
+                SUBTASK,
+                "q4 orphan adapter",
+                "PASS",
+                {"vios": vios_side, "lpar": lpar_side},
+            )
+            for rows, where in (
+                (vios_side, f"--id {self.vios_id}"),
+                (lpar_side, f"-p {shlex.quote(self.lpar)}"),
+            ):
+                for row in rows:
+                    self.manual(
+                        f"an adapter the refused create added ({row})",
+                        f"chhwres -r virtualio --rsubtype scsi -m "
+                        f"{shlex.quote(self.system)} -o r {where} "
+                        f"-s {shlex.quote(row.split(',', 1)[0])}",
+                    )
         if before is None or after != before:
             raise _Stop("the collision write changed the mapping set, or it is unread")
 
@@ -567,7 +582,14 @@ class _Capture:
 
     async def reload_empty_target(self) -> None:
         """Load medium A into an empty V so the tool can address the mapping."""
-        if not await self.empty_target():
+        empty = await self.empty_target()
+        if empty is None:
+            self.manual(
+                f"whether {self.vtd} is mapped with no medium could not be read",
+                self.on_vios(f"rmvdev -vtd {self.vtd}"),
+            )
+            return
+        if not empty:
             return
         load = f"-disk {self.media[0]} -vtd {self.vtd}"
         status, _ = await self.vios_run("cleanup loadopt", f"loadopt {load}")

@@ -1487,7 +1487,7 @@ class LparResidueInputs:
     boot_written: bool
     boot_baseline: str | None
     storage_ran: bool = False
-    media_change_ran: bool = False
+    media_change_vtds: frozenset[str] = frozenset()
     scratch_vg_ran: bool = False
     scratch_vg_pending: str | None = None
     volume_group: str = ""
@@ -1548,6 +1548,21 @@ def _boot_baseline(document: dict[str, Any], saved: list[str]) -> str | None:
     return " ".join(saved) if saved else None
 
 
+def _media_change_vtds(document: dict[str, Any]) -> frozenset[str]:
+    """The VTD names ST70 recorded before it touched them (#1284)."""
+    rows = document.get("results")
+    return frozenset(
+        row["data"]["vtd"]
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, dict)
+        and row.get("subtask") == vmedia_media_change.SUBTASK
+        and row.get("tool") == vmedia_media_change.VTD_ROW
+        and isinstance(row.get("data"), dict)
+        and isinstance(row["data"].get("vtd"), str)
+        and vmedia_media_change.VTD_NAME.fullmatch(row["data"]["vtd"])
+    )
+
+
 def lpar_inputs_from_document(
     document: Any, subtasks: list[int]
 ) -> LparResidueInputs | None:
@@ -1591,7 +1606,7 @@ def lpar_inputs_from_document(
         or bool(_calls(document, {20, 22}, {"hmc_set_lpar_boot_order"})),
         boot_baseline=_boot_baseline(document, saved_boot),
         storage_ran=storage_lifecycle.SUBTASK in subtasks,
-        media_change_ran=vmedia_media_change.SUBTASK in subtasks,
+        media_change_vtds=_media_change_vtds(document),
         scratch_vg_ran=storage_volume_group.SUBTASK in subtasks
         or artifacts.get("storage_volume_group_name") is not None,
         scratch_vg_pending=artifacts.get("storage_volume_group_name"),
@@ -1738,9 +1753,15 @@ async def _empty_optical_target_left(call, inputs: LparResidueInputs) -> Finding
     The optical listing keeps only media-backed mappings and the adapter count treats
     the device as mapping its adapter, so neither class above sees an empty device.
     """
-    if not inputs.media_change_ran:
+    if not inputs.media_change_vtds:
         return None
     vios = _required(inputs.vios_uuid, "artifacts.vios_uuid", "storage mappings")
+    vios_id = inputs.vios_partition_id
+    if type(vios_id) is not int:
+        raise StateUnreadable(
+            "the document records no integer artifacts.vios_partition_id, "
+            "needed to name an empty optical device's removal"
+        )
     status, mappings = await call(
         "hmc_list_storage_mappings",
         vios_name_or_uuid=vios,
@@ -1760,6 +1781,7 @@ async def _empty_optical_target_left(call, inputs: LparResidueInputs) -> Finding
         and "backing_kind" in entry
         and entry["backing_kind"] is None
         and entry.get("backing_name") is None
+        and entry["id"].split("/", 1)[1] in inputs.media_change_vtds
     )
     if not empty:
         return None
@@ -1767,7 +1789,7 @@ async def _empty_optical_target_left(call, inputs: LparResidueInputs) -> Finding
         "empty optical target left",
         f"{', '.join(empty)} on VIOS {vios} maps {inputs.lpar_name} with no medium",
         "; ".join(
-            f"viosvrcmd -m {_q(inputs.system_name)} --id {inputs.vios_partition_id} "
+            f"viosvrcmd -m {_q(inputs.system_name)} --id {vios_id} "
             f"-c {_q(f'rmvdev -vtd {target}')}"
             for target in empty
         ),
