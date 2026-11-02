@@ -141,6 +141,12 @@ def _authorize(
                 f"{name} is not permitted by this server's access policy; "
                 f"{PROVISION_TOOL_NAME} needs it for this request (ADR 0189)"
             )
+        if name == "hmc_add_vnic":
+            # Each vNIC is backed by its own VIOS, not the storage VIOS.
+            for vnic in request.assignments.vnics:
+                backing = {**by_kind, "vios": vnic.backing.vios_name}
+                authorize_as(tool_security, authorize, name, backing, profile)
+            continue
         authorize_as(tool_security, authorize, name, by_kind, profile)
 
 

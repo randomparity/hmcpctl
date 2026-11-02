@@ -1721,3 +1721,37 @@ def test_an_assignment_error_never_resumes_to_completed(monkeypatch, mock_hmc):
 )
 def test_mac_colon_form(value, mac):
     assert mac_colon_form(value) == mac
+
+
+def test_each_vnic_is_authorized_against_its_backing_vios(monkeypatch, mock_hmc):
+    from hmcpctl.operations.lpar.assignments import VnicAssignment
+    from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
+
+    _hmc_env(monkeypatch)
+    vnic = VnicAssignment(VnicBackingSelector("vios-b", "2", "1", "0", Decimal(5)), 1)
+    seen: list[tuple[str, dict]] = []
+
+    def authorize(name, _security, arguments):
+        seen.append((name, dict(arguments)))
+        if arguments.get("vios_name") == "vios-b":
+            raise PermissionError(f"{name} denied for vios-b")
+
+    handler = provision_handler(TOOL_SECURITY, lambda _name: True, authorize)
+    with pytest.raises(PermissionError, match="vios-b"):
+        handler(
+            request_id="r-vnic",
+            **_provision_args(assignments=LparPcieAssignments(vnics=(vnic,))),
+        )
+    vnics = [arguments for name, arguments in seen if name == "hmc_add_vnic"]
+    assert vnics == [
+        {
+            "system_name_or_uuid": SYSTEM_UUID,
+            "lpar_name_or_uuid": "web01",
+            "vios_name": "vios-b",
+            "profile": None,
+        }
+    ]
+    mapping = next(a for name, a in seen if name == "hmc_map_storage_to_lpar")
+    assert mapping["vios_name_or_uuid"] == VIOS_UUID
+    assert not mock_hmc.calls
+    assert not _store_root().exists()
