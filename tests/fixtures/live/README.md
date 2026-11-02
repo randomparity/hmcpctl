@@ -53,7 +53,8 @@ system above. They answer how media change in an existing virtual optical device
   Activated test partition `sys-R1-lp3`, whose profile had never been applied: HTTP 500 REST0269,
   "Perform Apply profile or Partition activation". That refused create still left a VIOS server
   adapter with no mapping (slot 5 toward the partition's slot 4); its `lshwres` listing (record
-  `#91`) is byte-identical to `cli-vios-scsi-unmapped-adapter`, so it is not committed again. The
+  `#91`, not committed) has the same shape as `cli-vios-scsi-unmapped-adapter`: one extra VIOS
+  slot toward the partition, with no client slot. The
   adapter was removed by hand, and the operator then applied the partition's existing profile,
   which stays applied.
 - **Second run** (`run2/vmedia-media-change-b62996d0.capture.jsonl`), after that apply. The mount
@@ -71,16 +72,17 @@ system above. They answer how media change in an existing virtual optical device
     in between. So `viosvrcmd` is a working path, but not the only one (Q1). A CLIRunner job is
     not exercised: it is a REST transport for the same VIOS command, and hmcpctl's CLI transport
     is SSH.
-  - Q3: the partition was powered on (PowerOn job `COMPLETED_OK`, state `running`) and
-    immediately off, then plain `unloadopt` and `loadopt` both exited 0 (records `#106`, `#107`,
-    the same answers as the Q2 fixtures). `-release` was not needed at this level, so the
+  - Q3: the partition was powered on (`rest-job-poweron-completed-q1284`, the PowerOn job
+    `COMPLETED_OK`; the partition then read `running`) and immediately off, then plain
+    `unloadopt` and `loadopt` both exited 0 (`cli-vios-unloadopt-after-power-off`,
+    `cli-vios-loadopt-after-power-off`). `-release` was not needed at this level, so the
     with-release form is unexercised. The partition has no operating system that opens the
     device, so the client reservation #1280 hit was not reproduced.
   - Q4: `rest-vios-optical-mapping-vtd-in-use` is the verbatim HTTP 500 for a second mapping
     naming the mounted VTD: `VTD <name> name is already used in another mapping`, with a trailing
-    newline inside `Message`. The adapter listings before and after it (records `#56`/`#57` and
-    `#72`/`#73`) are identical, so this refused create left no orphan adapter, unlike the REST0269
-    refusal above.
+    newline inside `Message`. The adapter listings before it (`cli-vios-scsi-adapters-before-collision`,
+    `cli-lpar-scsi-adapters-before-collision`) and after it (`…-after-collision`) are identical, so
+    this refused create left no orphan adapter, unlike the REST0269 refusal above.
 
 The raw captures and results are retained privately on the operator host, not in any repository.
 Their token maps are their own, and each run's tokens are local to its own fixtures (the VTD

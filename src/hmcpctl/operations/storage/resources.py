@@ -1273,8 +1273,9 @@ async def unmount_optical_media(
     inside it, so detaching the mapping and unmounting the image are one
     operation here. The #1284 live survey (V10R3) found two paths that change the
     loaded medium without detaching: a mapping-group POST that replaces the
-    mapping's ``Storage``, and the VIOS ``unloadopt``/``loadopt`` commands. This
-    client uses neither yet (#1285).
+    mapping's ``Storage`` (fixture rest-vios-scsi-mapping-replace-storage), and the
+    VIOS ``unloadopt``/``loadopt`` commands (cli-vios-unloadopt, cli-vios-loadopt).
+    This client uses neither yet (#1285).
 
     Empty, missing, ambiguous, or malformed identities fail without a POST, as
     required by ADR 0079.
