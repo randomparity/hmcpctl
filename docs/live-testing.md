@@ -905,7 +905,7 @@ uv run --no-sync python scripts/live_test_recovery.py --results test-results-ded
 
 After the other arms pass `test-results-<arm>.json` the same way: `vmedia`,
 `bare-cec`, `round2`, `sriov`, `profiles`, `users`, `vios-backup`, `pcm`,
-`network`, `lpar-config`, `storage` or `lpar-power`.
+`network`, `lpar-config`, `storage`, `lpar-power` or `vmedia-media-change`.
 
 The check reads the subtasks the run dispatched from the document, and witnesses
 these sets of them:
@@ -913,6 +913,7 @@ these sets of them:
 | Subtasks | What it reads |
 |---|---|
 | 16–22 (vmedia) | the test partition left running, its pending boot string changed, a medium of the run's still mounted to it or still in the repository, a VIOS vSCSI server adapter toward it with no mapping, and the media repository the run created |
+| 70 (vmedia-media-change) | everything 16–22 reads, for its own two media and its power-on, and a virtual optical device toward the test partition mapped with no medium |
 | 11 (users) | any HMC user named `hmcpctl-live-*`, whichever run's document you pass |
 | 24–25 (dedicated, bare-cec) | a partition carrying this run's marker, its dedicated slot still owned, its profile's `io_slots` off the baseline |
 | 37 (vios-backup) | the run's backup still in the VIOS catalog, the test partition's disk mapping missing, and a final read the run recorded as off its baseline |
