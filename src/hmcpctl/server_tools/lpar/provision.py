@@ -58,16 +58,14 @@ from .plan import PLAN_TOOL_NAME, _admitter
 
 PROVISION_TOOL_NAME = "hmc_provision_lpar"
 # "console" and not exhaustive, as hmc_power_lpar: a continuation names no target, so
-# the delegated specialists carry the target bound (ADR 0189 Decision 2). The
-# selectors are declared so the audit record and denials name them.
+# the delegated specialists carry the target bound (ADR 0189 Decision 2), the VIOS
+# included. No nested storage.vios_uuid selector: a continuation omits storage, and a
+# selector in a None container is unreadable, which denies even under all-targets.
 PROVISION_SECURITY = ToolSecurity(
     effect="mutate",
     operation="provision.lpar",
     target_kind="console",
-    targets=(
-        TargetSelector("managed_system", "system_name_or_uuid", False),
-        TargetSelector("vios", "vios_uuid", False, container="storage"),
-    ),
+    targets=(TargetSelector("managed_system", "system_name_or_uuid", False),),
 )
 Continuation = Literal["none", "resume", "abandon"]
 _REQUIRED = ("system_name_or_uuid", "name", "adapters", "storage")

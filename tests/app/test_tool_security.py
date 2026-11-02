@@ -326,10 +326,11 @@ def test_provision_lpar_declares_its_nested_selectors():
     security = TOOL_SECURITY["hmc_provision_lpar"]
     assert security.exhaustive_targets is False
     # Optional since ADR 0313: a continuation names no target, so the delegated
-    # specialists carry the target bound, as hmc_power_lpar's do (ADR 0199).
+    # specialists carry the target bound, as hmc_power_lpar's do (ADR 0199). The
+    # VIOS selector is gone: a continuation's storage is None, which a nested
+    # selector would read as unreadable and deny under every grant.
     assert [(t.kind, t.path, t.required) for t in security.targets] == [
         ("managed_system", "system_name_or_uuid", False),
-        ("vios", "storage.vios_uuid", False),
     ]
 
 
