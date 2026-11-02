@@ -475,16 +475,6 @@ def _storage_number(value: object) -> str | None:
     return None if number is None else str(number)
 
 
-_NETWORK_CREATION_SETTINGS: dict[str, Any] = {
-    "addl_vlan_ids": [],
-    "allowed_os_mac_addrs": "all",
-    "qos_priority": "none",
-    "vsi_manager_id": 0,
-    "vsi_type_id": 0,
-    "vsi_type_version": 0,
-}
-
-
 def _network_keys(snapshot: Mapping[str, object] | None) -> dict[str, str] | None:
     if snapshot is None:
         return None
@@ -546,38 +536,6 @@ def _vlan_free(listed: Listing | None, vlan: int) -> bool:
     return True
 
 
-def _network_fields_match(resource: Mapping[str, object]) -> bool:
-    vlans = _network_text(resource.get("TaggedVLANIDs"))
-    return (
-        isinstance(vlans, str)
-        and not vlans.strip()
-        and _network_text(resource.get("AllowedOperatingSystemMACAddresses")) == "ALL"
-        and _network_text(resource.get("QualityOfServicePriorityEnabled"))
-        in ("false", "0")
-        and all(
-            as_int(_network_text(resource.get(name))) == 0
-            for name in (
-                "VirtualStationInterfaceManagerID",
-                "VirtualStationInterfaceTypeID",
-                "VirtualStationInterfaceTypeVersion",
-            )
-        )
-    )
-
-
-def _network_metadata_verified(data: Any) -> bool:
-    metadata = data.get("creation_verification") if isinstance(data, Mapping) else None
-    return (
-        isinstance(metadata, dict)
-        and set(metadata)
-        == {"status", "checked_fields", "mismatched_fields", "unavailable_fields"}
-        and metadata["status"] == "verified"
-        and metadata["checked_fields"] == list(_NETWORK_CREATION_SETTINGS)
-        and metadata["mismatched_fields"] == []
-        and metadata["unavailable_fields"] == []
-    )
-
-
 def _network_fixture(
     listed: Listing | None,
     baseline: Adapters,
@@ -606,7 +564,6 @@ def _network_fixture(
     if (
         as_int(_network_text(resource.get("PortVLANID"))) != vlan
         or as_int(_network_text(resource.get("VirtualSwitchID"))) != switch
-        or not _network_fields_match(resource)
     ):
         return None
     if expected_placement is not None and placement != expected_placement:
@@ -1067,25 +1024,14 @@ class _Arm:
             port_vlan_id=vlan,
             virtual_switch_id=switch,
             system_name_or_uuid=self.system,
-            addl_vlan_ids=[],
-            allowed_os_mac_addrs="all",
-            qos_priority="none",
-            vsi_manager_id=0,
-            vsi_type_id=0,
-            vsi_type_version=0,
         )
         added = self.note("test VLAN", "hmc_add_network_adapter", result)
         after = await self.adapters(kind, "after add")
         identity = result[1].get("UUID") if isinstance(result[1], Mapping) else None
         fixture = _network_fixture(after, baseline, identity, vlan, switch)
-        qualified = (
-            added == "PASS"
-            and _network_metadata_verified(result[1])
-            and fixture is not None
-        )
-        if not qualified or after is None or fixture is None:
+        if added != "PASS" or after is None or fixture is None:
             self.manual(
-                "N1 creation identity or selected fields are unverified",
+                "N1 creation identity is unverified",
                 "inspect adapter residue; no automatic cleanup or retry",
             )
         placement = _placements(after)[fixture]
@@ -1126,7 +1072,6 @@ class _Arm:
             assertions=[
                 Assertion("adapter-added", added == "PASS"),
                 Assertion("pvid-matches", fixture is not None),
-                Assertion("creation-fields-verified", qualified),
             ],
             cleanup="passed" if restored else "failed",
             data=None,

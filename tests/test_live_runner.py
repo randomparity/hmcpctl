@@ -7461,7 +7461,6 @@ def test_scenarios_declare_their_expected_assertion_ids():
         "st9-client-network-adapter": {
             "adapter-added",
             "pvid-matches",
-            "creation-fields-verified",
             "delete-accepted",
             "unknown-uuid-refused",
             "adapters-equal-baseline",

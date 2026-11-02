@@ -355,11 +355,12 @@ every change whatever the call returned, and verifies restoration:
   adapter on that VLAN to the test partition, deletes an unknown adapter UUID
   (expected refused), then removes the adapter and the run's own networks. Any
   other network on that VLAN is reported, never deleted.
-  The same single adapter create selects `addl_vlan_ids=[]`, `allowed_os_mac_addrs="all"`,
-  `qos_priority="none"`, `vsi_manager_id=0`, `vsi_type_id=0` and `vsi_type_version=0`.
-  These are explicit test values, not defaults or a guarantee of HMC acceptance.
-  Credit requires verified creation metadata with all six checked fields and independent
-  contained identity/field readback, including the selected `VirtualSwitchID`. A switch
+  The single adapter create sends only the partition, `port_vlan_id`, `virtual_switch_id`
+  and the system: the request the October 2026 pass sent. The optional creation fields
+  (`addl_vlan_ids`, `allowed_os_mac_addrs`, `qos_priority` and the `vsi_*` fields) are left
+  out while #1861 tests whether they cause HSCLB021 on this boundary.
+  Credit requires an accepted create and independent contained identity readback with
+  the run's `PortVLANID` and the selected `VirtualSwitchID`. A switch
   mismatch or missing switch stops before cleanup. Client-network listings require a
   complete HTTP/Atom envelope: HTTP 204, blank bodies, `Link`/`Content-Range` headers,
   XML `next` links in any case, or ambiguous entries are errors;
