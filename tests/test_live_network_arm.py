@@ -1435,3 +1435,24 @@ async def test_a_baseline_with_an_unusable_identity_creates_no_storage_adapter(
 
     assert "hmc_add_vscsi_adapter" not in hmc.mutations()
     assert any("baseline identity is unavailable" in text for text in _manual(state))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+async def test_a_refused_storage_fixture_delete_stops_st9(monkeypatch, adapter_type):
+    hmc = FakeHMC()
+    original = hmc._hmc_delete_adapter
+
+    def delete(kwargs):
+        if kwargs["adapter_type"] == adapter_type:
+            return "FAIL", "refused"
+        return original(kwargs)
+
+    hmc._hmc_delete_adapter = delete
+
+    state = await _run(monkeypatch, hmc)
+
+    (fixture,) = _storage_deletes(hmc, adapter_type)
+    (text,) = _manual(state)
+    assert f"verified fixture {fixture}: deletion or restoration is unconfirmed" in text
+    assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
