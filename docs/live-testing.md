@@ -158,6 +158,7 @@ below. The table does not grant hardware or VIOS access.
 |---|---|---|
 | round2 | `uv run --no-sync python scripts/live_round2.py` | subtasks 0–15 except 11 |
 | vmedia | `uv run --no-sync python scripts/live_vmedia.py` | subtasks 16–22 |
+| vmedia-media-change | `uv run --no-sync python scripts/live_vmedia_media_change.py` | subtasks 16, 70 and 22; a capture, not a release arm |
 | sriov | `uv run --no-sync python scripts/live_sriov.py` | subtask 23 |
 | dedicated | `uv run --no-sync python scripts/live_dedicated.py` | subtask 24 |
 | bare-cec | `uv run --no-sync python scripts/live_bare_cec.py` | subtask 25 |
@@ -429,6 +430,48 @@ unmount, or an unmount the arm cannot confirm, is a FAIL row marked
 `MANUAL RECOVERY REQUIRED` with the command that clears it. The arm never
 removes an adapter. Subtask 22 unmounts and deletes any medium of this run's
 that is left, and nothing else.
+
+### The vmedia-media-change arm
+
+This arm captures how the HMC and VIOS change the medium in an existing virtual
+optical device, for #1285 (#1284). It is not in `all` or `vmedia`, and subtask 70
+SKIPs outside its own group. ST16 resolves the VIOS, the test partition and the
+repository as the vmedia arm does; ST22 removes any medium ST70 left. ST70 needs the
+test partition unprotected and `Not Activated` and 2 GiB free in the repository. It:
+
+- creates two blank media `hmcpctl_live_<8 hex>` and mounts the first to the test
+  partition, reading the device (VTD) name the HMC chose;
+- runs `help loadopt`, `help unloadopt` and `lsvopt` on the VIOS through `viosvrcmd`;
+- Q4: posts the VIOS `ViosSCSIMapping` group with a second mapping naming that VTD
+  (expected HTTP 500), then compares the adapter listings with the post-mount ones;
+- Q1: posts the group with that mapping's `Storage` naming the second medium;
+- Q2: `unloadopt` and `loadopt` through `viosvrcmd`;
+- Q3: powers the test partition on, then immediately off, and repeats them, retrying
+  each with `-release` only when the plain command fails;
+- unmounts and deletes its media, reloading an empty device first so the unmount
+  can name it, and compares mappings and adapters with its baseline.
+
+A server adapter the refused create added (Q4) is never removed by the arm: its
+`MANUAL RECOVERY REQUIRED` row and recovery's unmapped-adapter class both name the
+`chhwres -r virtualio --rsubtype scsi -o r` that clears it. A device the cleanup
+cannot reload is a row and a recovery finding naming `rmvdev -vtd <name>`.
+
+Every HMC call ST70 makes is recorded to
+`hmc-captures/vmedia-media-change-<8 hex>.capture.jsonl`, the path its `capture` row
+names. That file and `test-results-vmedia-media-change.json` hold lab names: after
+recovery and `scripts/live_test_evidence.py test-results-vmedia-media-change.json`,
+move both to a private directory outside every repository
+(`~/hmc-live-evidence/<date>-<profile>/`). Tokenize the capture there, passing every
+system, VIOS and partition name and the HMC host prefix as `--private`:
+
+```sh
+uv run --no-sync python scripts/live_capture_export.py tokenize \
+  ~/hmc-live-evidence/<date>-<profile>/vmedia-media-change-*.capture.jsonl \
+  --out ~/hmc-live-evidence/<date>-<profile>/corpus.json --private '<lab-pattern>'
+```
+
+Fixtures taken from that corpus follow `tests/fixtures/live/README.md`, and
+`rg -n -e '<lab-pattern>' tests/fixtures/live/` must print nothing before commit.
 
 ### The storage arm
 
