@@ -524,7 +524,7 @@ def test_partial_apply_pauses_and_resume_keeps_it_paused(hmc):
     assert ("profile", "lpar.profile_write", "applied") in _effects(record)
     assert ("current", "lpar.current_config", "uncertain") in _effects(record)
     assert record.result["changes"][0]["applied"] == "live"
-    assert "LparUpdateError" in record.result["warnings"][-1]
+    assert "HMCError while reconfiguring" in record.result["warnings"][-1]
     record = _run({"memory_mib": 1024}, continuation="resume")
     assert (record.state, record.outcome) == ("paused", "needs_attention")
     assert "has no live check" in record.warnings[0]

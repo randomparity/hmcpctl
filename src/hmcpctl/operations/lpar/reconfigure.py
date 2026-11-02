@@ -452,7 +452,7 @@ async def _read_view(hmc: HMCClient, lpar_uuid: str) -> dict[str, Any]:
         return partition_view(await hmc.get_logical_partition(lpar_uuid))
     except (HMCError, ValueError, TypeError) as exc:
         raise OperationFailed(
-            f"LPAR {lpar_uuid} could not be read ({type(exc).__name__}: {exc})"
+            f"LPAR {lpar_uuid} could not be read ({type(exc).__name__})"
         ) from exc
 
 
@@ -627,7 +627,12 @@ def _partition_write(
                     f"the HMC refused the write to {subject}: the partition changed "
                     "since it was read"
                 ) from exc
-            raise
+            # The HMC's text can quote the submitted name, so only the shape is kept.
+            raise HMCError(
+                f"the write to {subject} ended {exc.submission} "
+                f"(HTTP {exc.status_code}); inspect LPAR {lpar_uuid} before resuming",
+                exc.status_code,
+            ) from exc
         except (HMCError, ValueError, TypeError) as exc:
             # Raised by the read or the edit, before the single POST.
             raise EffectNotApplied(
@@ -821,7 +826,7 @@ def reconfigure_body(
                 # Something already landed, so "failed" would hide it: pause, report
                 # what the plan changed, and let resume retry and re-verify.
                 result = _result(ctx, plan)
-                result["warnings"].append(f"{type(exc).__name__}: {exc}"[:512])
+                result["warnings"].append(_failure_note(exc, plan["lpar_uuid"]))
                 return BodyResult("needs_attention", result)
 
     return body
@@ -832,6 +837,15 @@ async def _classify_plan(
 ) -> Classification:
     # Recording the plan writes nothing to the HMC, so an open one is recomputed.
     return Classification("not_applied")
+
+
+def _failure_note(exc: Exception, lpar_uuid: str) -> str:
+    """A warning naming the failure's type, never its text (``engine`` module note)."""
+    if isinstance(exc, (OperationFailed, EffectNotApplied)):
+        return f"{type(exc).__name__}: {exc}"[:512]
+    return (
+        f"{type(exc).__name__} while reconfiguring LPAR {lpar_uuid}; resume or abandon"
+    )
 
 
 def _touched(ctx: OperationContext, key: str) -> bool:
