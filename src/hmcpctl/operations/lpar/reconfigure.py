@@ -55,6 +55,7 @@ _NOT_ACTIVATED = "not activated"
 _SYNC_OFF = frozenset({"disabled", "suspended"})
 _RESOURCES = ("memory", "processors")
 _FIELD = {"memory": "memory_mib", "processors": "processors"}
+_LEVELS = ("min", "desired", "max")
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
 
 
@@ -260,6 +261,51 @@ def _classify(
     return ("pending_activation", reason) if reason else ("live", None)
 
 
+def _suffix(resource: str, view: dict[str, Any]) -> str:
+    """The ``LparResources`` field suffix that writes *resource* in the partition's mode."""
+    if resource == "memory":
+        return "memory"
+    return "procs" if view["dedicated"] else "vcpus"
+
+
+def _profile_patch(
+    resource: str, saved: list[int], new_saved: list[int]
+) -> tuple[dict[str, int], dict[str, int]]:
+    """The profile fields to write for one resource, and their earlier values."""
+    if new_saved == saved:
+        return {}, {}
+    kept = [
+        (level, old, new)
+        for level, old, new in zip(_LEVELS, saved, new_saved, strict=True)
+        if old != new or level == "desired"
+    ]
+    patch = {f"{level}_{resource}": new for level, _, new in kept}
+    before = {f"{level}_{resource}": old for level, old, _ in kept}
+    return patch, before
+
+
+def _current_write(
+    resource: str, value: int, view: dict[str, Any], applied: str
+) -> dict[str, int]:
+    """The current-configuration fields to write for one resource, if any."""
+    current = view[resource]
+    suffix = _suffix(resource, view)
+    if view["state"] == _NOT_ACTIVATED:
+        pending = _widen(current, value)
+        if resource == "processors":
+            _check_units(view["units"], pending, "partition's")
+        return {
+            f"{level}_{suffix}": new
+            for level, old, new in zip(_LEVELS, current, pending, strict=True)
+            if old != new
+        }
+    if applied == "live" and value != current[1]:
+        if resource == "processors":
+            _check_units(view["units"], [current[0], value, current[2]], "partition's")
+        return {f"desired_{suffix}": value}
+    return {}
+
+
 def _resource_plan(
     resource: str,
     value: int,
@@ -268,52 +314,15 @@ def _resource_plan(
     allow_disruption: bool,
 ) -> tuple[dict[str, Any], dict[str, int], dict[str, int], dict[str, int]]:
     """One resource's change, profile patch, profile before-values and current write."""
-    saved = profile[resource]
+    saved, current = profile[resource], view[resource]
     new_saved = _widen(saved, value)
     widened = new_saved != [saved[0], value, saved[2]]
     if view["state"] == _NOT_ACTIVATED:
-        pending = _widen(view[resource], value)
-        widened = widened or [pending[0], pending[2]] != [
-            view[resource][0],
-            view[resource][2],
-        ]
-    applied, reason = _classify(resource, value, view, widened, allow_disruption)
-    key = "memory" if resource == "memory" else "processors"
-    patch: dict[str, int] = {}
-    before: dict[str, int] = {}
-    if new_saved != saved:
-        for level, old, new in zip(
-            ("min", "desired", "max"), saved, new_saved, strict=True
-        ):
-            if old != new or level == "desired":
-                patch[f"{level}_{key}"] = new
-                before[f"{level}_{key}"] = old
-    write: dict[str, int] = {}
-    current = view[resource]
-    if view["state"] == _NOT_ACTIVATED:
         pending = _widen(current, value)
-        names = ("min", "desired", "max")
-        suffix = (
-            "memory"
-            if resource == "memory"
-            else ("procs" if view["dedicated"] else "vcpus")
-        )
-        write = {
-            f"{n}_{suffix}": new
-            for n, old, new in zip(names, current, pending, strict=True)
-            if old != new
-        }
-        if resource == "processors":
-            _check_units(view["units"], pending, "partition's")
-    elif applied == "live" and value != current[1]:
-        suffix = (
-            "memory"
-            if resource == "memory"
-            else ("procs" if view["dedicated"] else "vcpus")
-        )
-        write = {f"desired_{suffix}": value}
-        if resource == "processors" and view["units"] is not None:
-            _check_units(view["units"], [current[0], value, current[2]], "partition's")
+        widened = widened or (pending[0], pending[2]) != (current[0], current[2])
+    applied, reason = _classify(resource, value, view, widened, allow_disruption)
+    patch, before = _profile_patch(resource, saved, new_saved)
+    write = _current_write(resource, value, view, applied)
     if resource == "processors":
         _check_units(profile["units"], new_saved, "profile's")
     change = {
@@ -444,36 +453,44 @@ async def _read_profile(
         ) from exc
 
 
+async def _default_profile(
+    hmc: HMCClient, view: dict[str, Any], system_uuid: str, lpar_uuid: str
+) -> tuple[Any, dict[str, Any]]:
+    """The profile a change must persist in (ADR 0314 Decision 2), and its view."""
+    name = view["default_profile"]
+    if not name:
+        raise OperationFailed(f"LPAR {lpar_uuid} has no default profile")
+    if view["last_profile"] and view["last_profile"] != name:
+        raise OperationFailed(
+            f"LPAR {lpar_uuid} last activated a profile other than its default; "
+            "a change to one would not persist through activation of the other"
+        )
+    record, profile = await _read_profile(hmc, system_uuid, lpar_uuid, name)
+    if profile["dedicated"] != view["dedicated"]:
+        raise OperationFailed(
+            f"LPAR {lpar_uuid}'s processor mode differs from its default profile's"
+        )
+    return record, profile
+
+
 async def _make_plan(
     hmc: HMCClient,
     patch: ReconfigurePatch,
     allow_disruption: bool,
     system_uuid: str,
     lpar_uuid: str,
-    others: list[str],
 ) -> dict[str, Any]:
     view = await _read_view(hmc, lpar_uuid)
     if patch.name is not None:
         escape_xml(patch.name)
+        others = await _other_names(hmc, system_uuid, lpar_uuid)
         if patch.name != view["name"] and patch.name in others:
             raise OperationFailed(
                 f"another partition on managed system {system_uuid} already has the new name"
             )
     profile = record = None
     if patch.writes_profile:
-        name = view["default_profile"]
-        if not name:
-            raise OperationFailed(f"LPAR {lpar_uuid} has no default profile")
-        if view["last_profile"] and view["last_profile"] != name:
-            raise OperationFailed(
-                f"LPAR {lpar_uuid} last activated a profile other than its default; "
-                "a change to one would not persist through activation of the other"
-            )
-        record, profile = await _read_profile(hmc, system_uuid, lpar_uuid, name)
-        if profile["dedicated"] != view["dedicated"]:
-            raise OperationFailed(
-                f"LPAR {lpar_uuid}'s processor mode differs from its default profile's"
-            )
+        record, profile = await _default_profile(hmc, view, system_uuid, lpar_uuid)
         if patch.memory_mib is not None:
             try:
                 await require_memory_within_selected_system(
@@ -730,13 +747,8 @@ def reconfigure_body(
                 ctx.set_phase("validating")
                 system_uuid, lpar_uuid = await _resolve(hmc, system, lpar)
                 ctx.guard(system_uuid, lpar_uuid)
-                others = (
-                    await _other_names(hmc, system_uuid, lpar_uuid)
-                    if patch.name is not None
-                    else []
-                )
                 made = await _make_plan(
-                    hmc, patch, allow_disruption, system_uuid, lpar_uuid, others
+                    hmc, patch, allow_disruption, system_uuid, lpar_uuid
                 )
 
                 if len(json.dumps(made, sort_keys=True)) > store.MAX_IDENTITY_BYTES:
