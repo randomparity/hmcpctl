@@ -2898,6 +2898,13 @@ exercise count exhaustion, independent wall expiry, journal latency and refreshe
 dispatch time. The inherited 1 MiB I/O and 5 MiB atomic journal limits apply; a
 failed/oversized intent save prevents dispatch and preserves the preceding journal.
 
+Future submission exceptions retain `source.submission_error`: type, a private
+64KiB UTF-8 message prefix, explicit truncation and existing native metadata.
+The field is null before/no submission error. Invalid text is replaced safely;
+unprintable exception text gets an explicit marker. This diagnostic cannot promote
+unknown submission or authorize cleanup. Keep it private with the complete journal;
+never paste it into an issue, PR or matrix. It cannot recover a previously lost error.
+
 Output is labelled `vnic-update-source SOURCE ONLY`. Its private version-2 history
 carries `evidence_class=source-only`, never optional-policy verification credit.
 CLEAN establishes only the bounded stored-policy/history observations. All five

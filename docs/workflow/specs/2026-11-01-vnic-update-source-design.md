@@ -5,7 +5,8 @@ Authority is the issue's `WORK:SCOPE` token `q1828-eed0dad6`, recorded in
 [the frozen scope](https://github.com/randomparity/hmcpctl/issues/1828#issuecomment-6557892997).
 [ADR 0312](../../adr/0312-vnic-policy-updates.md) records the owner decision.
 Status: source-version-2 implemented and offline verified at `07d8a360`.
-Hardware admission, public updater implementation and publication remain held.
+The approved bounded private submission-error extension is under design.
+Further hardware admission, public updater implementation and publication remain held.
 The separately approved [retained-fixture prerequisite](2026-11-01-vnic-retained-fixture-design.md)
 extends the same owner without changing source-version-2 semantics.
 
@@ -29,8 +30,8 @@ coverage decision; individual samples do not prove an operator/mode cross-produc
 
 Creation/mac_addr remain #1827; backing updates/failover #669; system defaults
 #680; multi-backing and ledger allocation #638; profile CRUD #1724/#637.
-No current fixture with this invocation's caller token has been admitted.
-Root separately owns exact fixture and stage admission; the retained-fixture
+Root separately owns each exact fixture and stage admission; this document grants
+none. The retained-fixture
 prerequisite supplies preparation/cleanup only after its own quality gates.
 
 ## Global Constraints
@@ -181,6 +182,33 @@ independently contained selected raw row), after_update (complete B2),
 policy_verification, preservation and qualification. Missing evidence is retained
 with an error; no success is reconstructed from requested data.
 
+The approved diagnostic extension adds `source.submission_error`, initialized null
+when the source object is created and left null after a successful submission.
+On a caught submission exception it contains exactly `type`, `message`, `truncated`,
+`remote_nonzero_completed` and `remote_refusal_code`. It replaces the redundant
+new-record `source.error` type-only field; old journals are not rewritten and their
+existing history validation remains unchanged. Diagnostics confer no authority.
+
+`type` is the original exception class name. `message` is a prefix of `str(error)`,
+capped at 65536 UTF-8 bytes without a partial trailing code point. Encode at most
+65537 characters, replacing invalid surrogates with `?`; `truncated` is true iff
+characters or encoded bytes were omitted by the cap. If exception rendering itself
+fails, retain `<unprintable exception message>` with the original type and false
+truncation. This marker describes unavailable text, not a recovered error message.
+Only `HMCCLIError` supplies its existing native completion boolean and refusal code;
+other exceptions use false/null even if they expose similarly named attributes.
+A completed nonzero without a recognized native code stays `unknown`, not rejected.
+No code is extracted from diagnostic text. Existing submission and qualification
+predicates, removal/history barriers and physical budgets remain unchanged.
+
+This is private diagnostic data under the existing 0600 atomic journal and 5MiB
+cap. Serialization expansion still counts against that whole-journal bound; a
+failed save preserves the last durable intents and cannot trigger cleanup/retry.
+The procedure console retains only stage/status or exception type, and the public
+matrix does not admit source-v2 history. Keep raw journals/terminal captures private.
+The extension does not reconstruct text lost by an earlier candidate or explain
+an earlier native failure. Root must separately admit any future invocation.
+
 | Axis | Values and evidence |
 | --- | --- |
 | submission | `not_dispatched`, `completed`, `rejected`, `unknown`; zero native exit acknowledges completed; rejected requires structured `HMCCLIError.remote_nonzero_completed` and `remote_refusal_code`; all other dispatched errors are unknown |
@@ -268,7 +296,9 @@ never CLEAN. No silent truncation or compressed-away preservation evidence.
 
 - **Boundaries:** widened packet/history parser and source-case discriminator;
   existing local private journal, credential-bearing connection, REST identity and
-  native observations, and derived HMC command record. No new network listener.
+  native observations, and derived HMC command record. The diagnostic extension
+  widens only exception-text/metadata persistence into the private journal.
+  No new network listener.
 - **Actors:** local operator supplies packet/history; remote responses can be
   malformed or stale; an uncoordinated writer can change inventory. Trust the local
   process/code and authorized operator, not observations as mutation authority.
@@ -291,6 +321,9 @@ axes, unchanged v1 behavior and read-only historical recovery. Focused tests mus
 bite under controlled faults, including journal latency crossing expiry or body
 deadline with a deterministic injected clock, not a host-clock race.
 
+Diagnostic proof includes ASCII/multibyte exact limits, truncation, malformed
+Unicode/unprintable exceptions, actual native error-builder metadata, opaque
+classification, null success, private/public output and failed journal persistence.
 Offline verification covers every case and error boundary listed in the plan,
 physical count expansion/suffix reserves, response/journal caps and original/own
 logout failure. Run relevant guardrails and pinned hooks; no live evidence follows

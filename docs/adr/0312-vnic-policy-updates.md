@@ -9,7 +9,8 @@ design and implementation in issuecomment-6563667424; it was offline verified at
 Description correction is implemented with offline boundary proof and independent
 product/security review at `ebb5808e`. Native vNIC update qualification and the
 public setter remain unfinished; hardware windows and publication need separate
-admission. This record does not settle the complete updater design.
+admission. A separately approved bounded private submission-error extension is
+under design. This record does not settle the complete updater design.
 
 ## Context
 
@@ -56,6 +57,12 @@ created target with independently blank native text. Explicit empty remains
 valid; null, malformed or nonempty values do not become absence. Stamped/owned
 checks and failed-history cleanup rules remain strict.
 
+Retain source submission exception type, a 64KiB UTF-8 message prefix with explicit
+truncation, and existing native completion/refusal metadata in the private journal.
+Absent or opaque native provenance remains unknown; diagnostic text is never an
+oracle or cleanup authority. Preserve private-file/journal limits and public
+exclusion. This does not recover an already discarded error or admit a retry.
+
 No activation, reseed, alternative encoding, automatic retry, rollback or maturity
 promotion follows. The full
 five-field updater, later list modes and two-list composition remain #1828 work.
@@ -90,3 +97,8 @@ failover, public updater support or completion of #1828.
   unqualified mutation or authority beyond the approved qualified-cleanup boundary.
 - **Do nothing or implement finite modes first.** judgment: neither satisfies the
   maintainer's chosen qualification-first sequence; later modes cannot disappear.
+
+- **Keep type-only diagnostics or print raw errors.** verified: at `6af8d409`,
+  `_capture_source` stores only the caught exception class, while `main` emits only
+  stage/status or exception type. The former loses the failure detail; widening
+  public output would violate the approved private evidence boundary.
