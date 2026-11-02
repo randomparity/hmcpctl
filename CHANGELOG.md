@@ -249,8 +249,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   `needs_attention` instead of returning a partial result. The ownership stamp is required:
   a stamp that does not land makes the operation `failed`. Steps gain `stamp`, and the
   `create` step reports only the UUID and name. `affinity_assessment` without `power_on` is
-  refused. A policy must now permit the specialist tools whose writes a provision performs
-  (#1839).
+  refused. A policy must now permit the specialist tools whose writes a provision performs.
+  `hmcpctl lpars provision` is refused while another process holds the ADR 0190 execution
+  lock, such as an MCP server that has started a logical operation (#1839).
 
 - Builds derive the package version from Git tags with `hatch-vcs`: a release tag `vX.Y.Z`
   builds `X.Y.Z`, and every other commit builds `X.Y.(Z+1).devN+g<sha>`, so a development

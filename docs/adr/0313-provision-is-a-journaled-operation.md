@@ -29,23 +29,27 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
 2. **Result.** `ProvisionResult` keeps its fields and adds `operation`, the operation record.
    The top-level fields are the body's result when the outcome is `completed`, or
    `needs_attention` with steps that agree with the journal; otherwise they are rebuilt from
-   the effects (applied → `ok` step, any other → `error` step, `workflow_completed` false),
-   because a failed or reconciled run keeps an older result. A clean run ends `completed`;
-   `configured` stays reserved for #1840's profile readback.
+   the effects (applied → `ok` step, any other → `error` step, `workflow_completed` false;
+   while the operation is still running, a write in flight is left out), because a failed or
+   reconciled run keeps an older result. A clean run ends `completed`, a departure from the
+   H1 spec's provision outcomes: `configured` needs #1840's profile readback, and #1840 owns
+   switching the outcome and its CHANGELOG entry.
 3. **Effects, in order** (keys, kinds, targets and identities are persisted):
 
    | Key | Kind | Target | Identity | Classifier (H1 *Resume*) |
    | --- | --- | --- | --- | --- |
-   | `create` | `lpar.create` | `system:<uuid>` | `{lpar_uuid, name}` | one partition of that name, not ledgered by another operation, not foreign-stamped, no physical I/O requested → applied; none → not applied; else attention |
+   | `create` | `lpar.create` | `system:<uuid>` | `{lpar_uuid, name, follow_ups}` | one partition of that name, not ledgered by another operation, not foreign-stamped, no physical I/O requested → applied; none → not applied; else attention |
    | `stamp` | `lpar.ownership_stamp` | `lpar:<uuid>` | `{owner}` | description owner and caller token: this agent → applied; none → not applied; other → attention |
    | `affinity_policy` | `lpar.minimum_affinity_policy` | `lpar:<uuid>` | `{}` | none |
    | `network` | `lpar.client_network_adapter` | `lpar:<uuid>` | `{adapter_uuid, mac}` | adapters on the VLAN: one → applied; none → not applied; several → attention |
    | `disk` | `vios.virtual_disk` | `vios:<uuid>` | `{vios_uuid, vg_uuid, disk_name, capacity_mib}` | disk in the group, not ledgered by another operation → applied; absent → not applied; else attention |
    | `storage` | `vios.storage_map` | `lpar:<uuid>` | `{vios_uuid, storage_name}` | mapping to this partition → applied, else not applied |
-   | `assignments` | `lpar.pcie_assignments` | `lpar:<uuid>` | `{}` | none |
+   | `assignments` | `lpar.pcie_assignments` | `lpar:<uuid>` | `{steps}` | none |
    | `power_on` | `lpar.power_on` | `lpar:<uuid>` | `{job_id}` | activated → applied, else attention (ADR 0199) |
 
-   The MAC is lower-case colon form. An applied classification returns the write's identity
+   `follow_ups` lists the create's own profile-apply and physical-I/O steps as
+   `[step, status, text]`; `steps` lists each assignment step as `[step, status]`. The MAC is
+   lower-case colon form. An applied classification returns the write's identity
    shape, read live; a classified `create` adds `resumed: true`, and the body then warns that
    a `mksyscfg` profile apply is unconfirmed.
 4. **The stamp is required.** The `stamp` effect confirms the stamp the create wrote and
