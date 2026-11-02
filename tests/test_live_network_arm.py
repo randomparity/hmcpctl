@@ -225,11 +225,20 @@ class FakeHMC:
             for key in list(listed):
                 listed[f"F{key[1:]}"] = listed.pop(key)
         for _ in range(2 if self.adds_twice else 1):
-            self.adapters[adapter_type][self._new_uuid()] = {
+            identity = self._new_uuid()
+            resource = {
+                "VirtualSlotNumber": str(
+                    kwargs.get("slot_number") or 20 + self.counter
+                ),
                 partition: str(kwargs["vios_partition_id"]),
                 slot: str(kwargs["vios_slot"]),
             }
-        return "PASS", {}
+            self.adapters[adapter_type][identity] = resource
+        return "PASS", {
+            "UUID": identity,
+            "ResourceType": adapter_type,
+            "Resource": dict(resource),
+        }
 
     def _hmc_add_vscsi_adapter(self, kwargs):
         return self._add_client("VirtualSCSIClientAdapter", kwargs)
@@ -340,6 +349,45 @@ def _manual(state) -> list[str]:
         for row in state.results
         if "MANUAL RECOVERY REQUIRED" in str(row["data"])
     ]
+
+
+STORAGE = ("VirtualSCSIClientAdapter", "VirtualFibreChannelClientAdapter")
+ADD_TOOL = dict(zip(STORAGE, ("hmc_add_vscsi_adapter", "hmc_add_vfc_adapter")))
+FOREIGN = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+
+
+def _storage_deletes(hmc: FakeHMC, adapter_type: str) -> list[str]:
+    return [
+        kwargs["adapter_uuid"]
+        for tool, kwargs in hmc.calls
+        if tool == "hmc_delete_adapter" and kwargs["adapter_type"] == adapter_type
+    ]
+
+
+def _paired_added(hmc: FakeHMC, adapter_type: str) -> bool:
+    return any(
+        tool == ADD_TOOL[adapter_type] and kwargs["slot_number"] is None
+        for tool, kwargs in hmc.calls
+    )
+
+
+def _on_post_add_read(hmc: FakeHMC, adapter_type: str, change) -> None:
+    """Apply `change` to the fake's listing just before the first read after the paired add."""
+    original = hmc._hmc_list_adapters
+    done = False
+
+    def read(kwargs):
+        nonlocal done
+        if (
+            not done
+            and kwargs["adapter_type"] == adapter_type
+            and _paired_added(hmc, adapter_type)
+        ):
+            done = True
+            change(hmc.adapters[adapter_type])
+        return original(kwargs)
+
+    hmc._hmc_list_adapters = read
 
 
 ST9_OPERATIONS = {
@@ -515,7 +563,9 @@ async def test_a_client_slot_collision_is_refused_and_asserted(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_an_accepted_slot_collision_fails_and_is_removed(monkeypatch):
+async def test_an_accepted_slot_collision_fails_and_stops_without_deleting(
+    monkeypatch,
+):
     hmc = FakeHMC(collision_accepted=True)
 
     state = await _run(monkeypatch, hmc)
@@ -523,11 +573,13 @@ async def test_an_accepted_slot_collision_fails_and_is_removed(monkeypatch):
     observation = _observation(state, "adapter.add_vscsi")
     assert observation["result"] == "failed"
     assert "slot-collision-refused" not in observation["assertions"]
-    assert hmc.adapters == _pre_existing()
+    assert _storage_deletes(hmc, "VirtualSCSIClientAdapter") == []
+    assert _manual(state)
+    assert "hmc_add_vfc_adapter" not in hmc.mutations()
 
 
 @pytest.mark.asyncio
-async def test_two_new_adapters_fail_the_add_and_are_both_removed(monkeypatch):
+async def test_two_new_adapters_fail_the_add_and_stop_without_deleting(monkeypatch):
     hmc = FakeHMC(adds_twice=True)
 
     state = await _run(monkeypatch, hmc)
@@ -535,8 +587,9 @@ async def test_two_new_adapters_fail_the_add_and_are_both_removed(monkeypatch):
     observation = _observation(state, "adapter.add_vscsi")
     assert observation["result"] == "failed"
     assert "adapter-added" not in observation["assertions"]
-    assert observation["cleanup"] == "passed"
-    assert hmc.adapters == _pre_existing()
+    assert observation["cleanup"] == "failed"
+    assert _storage_deletes(hmc, "VirtualSCSIClientAdapter") == []
+    assert _manual(state)
 
 
 @pytest.mark.asyncio
@@ -748,10 +801,9 @@ async def test_a_collision_that_repairs_the_existing_adapter_is_caught(monkeypat
     assert "slot-collision-refused" not in observation["assertions"]
     assert observation["result"] == "failed"
     (text,) = _manual(state)
-    pre_existing = next(iter(PRE_EXISTING_ADAPTERS["VirtualSCSIClientAdapter"]))
-    # The pre-existing adapter is named only as one to restore, never to remove.
-    assert "remove only the new UUIDs []" in text
-    assert f"restore each of ['{pre_existing}']" in text
+    assert "slot collision was not cleanly refused" in text
+    assert "no automatic deletion" in text
+    assert _storage_deletes(hmc, "VirtualSCSIClientAdapter") == []
 
 
 @pytest.mark.asyncio
@@ -762,7 +814,8 @@ async def test_a_refused_collision_that_still_applied_fails_its_assertion(monkey
 
     observation = _observation(state, "adapter.add_vscsi")
     assert "slot-collision-refused" not in observation["assertions"]
-    assert hmc.adapters == _pre_existing()
+    assert _storage_deletes(hmc, "VirtualSCSIClientAdapter") == []
+    assert _manual(state)
 
 
 @pytest.mark.asyncio
@@ -1185,3 +1238,221 @@ async def test_n1_empty_restoration_requires_positive_http_inventory(
         assert "hmc_add_vscsi_adapter" not in hmc.mutations()
     else:
         assert "hmc_delete_virtual_network" in hmc.mutations()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+async def test_a_foreign_storage_adapter_is_never_deleted(monkeypatch, adapter_type):
+    hmc = FakeHMC()
+    foreign = {
+        "VirtualSlotNumber": "77",
+        **dict.fromkeys(REMOTE_FIELDS[adapter_type], "1"),
+    }
+    _on_post_add_read(
+        hmc, adapter_type, lambda listed: listed.update({FOREIGN: foreign})
+    )
+
+    state = await _run(monkeypatch, hmc)
+
+    assert FOREIGN in hmc.adapters[adapter_type]
+    assert FOREIGN not in _storage_deletes(hmc, adapter_type)
+    assert _manual(state)
+    assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
+
+
+def _reidentify_new(listed: dict[str, dict[str, Any]]) -> None:
+    (key,) = set(listed) - set().union(*PRE_EXISTING_ADAPTERS.values())
+    listed["eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"] = listed.pop(key)
+
+
+def _vanish_new(listed: dict[str, dict[str, Any]]) -> None:
+    (key,) = set(listed) - set().union(*PRE_EXISTING_ADAPTERS.values())
+    del listed[key]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+@pytest.mark.parametrize("change", [_vanish_new, _reidentify_new])
+async def test_a_storage_fixture_changed_after_create_is_never_deleted(
+    monkeypatch, adapter_type, change
+):
+    hmc = FakeHMC()
+    _on_post_add_read(hmc, adapter_type, change)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _storage_deletes(hmc, adapter_type) == []
+    assert _manual(state)
+    assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
+
+
+def _unproven(fault: str):
+    def corrupt(status: str, data: dict[str, Any]) -> tuple[str, Any]:
+        if fault == "add-fail-applied":
+            return "FAIL", "timed out"
+        if fault == "no-uuid":
+            del data["UUID"]
+        elif fault == "not-a-uuid":
+            data["UUID"] = "adapter-1"
+        elif fault == "wrong-type":
+            data["ResourceType"] = "ClientNetworkAdapter"
+        elif fault == "slot-mismatch":
+            data["Resource"]["VirtualSlotNumber"] = "99"
+        elif fault == "no-resource":
+            del data["Resource"]
+        return status, data
+
+    return corrupt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "add-fail-applied",
+        "no-uuid",
+        "not-a-uuid",
+        "wrong-type",
+        "slot-mismatch",
+        "no-resource",
+    ],
+)
+async def test_an_unproven_storage_create_is_never_cleaned_up(
+    monkeypatch, adapter_type, fault
+):
+    hmc = FakeHMC()
+    original = getattr(hmc, f"_{ADD_TOOL[adapter_type]}")
+    corrupt = _unproven(fault)
+
+    def add(kwargs):
+        status, data = original(kwargs)
+        return (
+            corrupt(status, data) if kwargs["slot_number"] is None else (status, data)
+        )
+
+    setattr(hmc, f"_{ADD_TOOL[adapter_type]}", add)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _storage_deletes(hmc, adapter_type) == []
+    assert (
+        len(hmc.adapters[adapter_type]) == len(PRE_EXISTING_ADAPTERS[adapter_type]) + 1
+    )
+    (text,) = _manual(state)
+    assert "ownership not proven" in text
+    assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+async def test_an_unreadable_storage_listing_after_create_deletes_nothing(
+    monkeypatch, adapter_type
+):
+    hmc = FakeHMC()
+    original = hmc._hmc_list_adapters
+
+    def read(kwargs):
+        if kwargs["adapter_type"] == adapter_type and _paired_added(hmc, adapter_type):
+            return "FAIL", "HTTP 500"
+        return original(kwargs)
+
+    hmc._hmc_list_adapters = read
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _storage_deletes(hmc, adapter_type) == []
+    assert _manual(state)
+    assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
+
+
+def test_placement_drift_never_names_new_uuids_as_removable():
+    baseline = {"0000C05C-0000-4000-8000-000000000000": ("2", "", "1", "11", "", "")}
+    after = {**baseline, FOREIGN: ("77", "", "1", "11", "", "")}
+
+    text = network.placement_drift(baseline, after)
+
+    assert FOREIGN in text
+    assert "remove only" not in text
+    assert "not proven to be the run's" in text
+
+
+@pytest.mark.asyncio
+async def test_a_moved_baseline_adapter_stops_storage_cleanup(monkeypatch):
+    adapter_type = "VirtualSCSIClientAdapter"
+    hmc = FakeHMC()
+
+    def move(listed):
+        listed[next(iter(PRE_EXISTING_ADAPTERS[adapter_type]))]["VirtualSlotNumber"] = (
+            "9"
+        )
+
+    _on_post_add_read(hmc, adapter_type, move)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _storage_deletes(hmc, adapter_type) == []
+    (text,) = _manual(state)
+    assert "ownership not proven" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+async def test_a_fixture_paired_elsewhere_than_requested_is_never_deleted(
+    monkeypatch, adapter_type
+):
+    hmc = FakeHMC()
+    original = getattr(hmc, f"_{ADD_TOOL[adapter_type]}")
+    slot_field = REMOTE_FIELDS[adapter_type][1]
+
+    def add(kwargs):
+        status, data = original(kwargs)
+        if kwargs["slot_number"] is None:
+            data["Resource"][slot_field] = "99"
+            hmc.adapters[adapter_type][data["UUID"]][slot_field] = "99"
+        return status, data
+
+    setattr(hmc, f"_{ADD_TOOL[adapter_type]}", add)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _storage_deletes(hmc, adapter_type) == []
+    assert _manual(state)
+
+
+@pytest.mark.asyncio
+async def test_a_baseline_with_an_unusable_identity_creates_no_storage_adapter(
+    monkeypatch,
+):
+    hmc = FakeHMC()
+    hmc.adapters["VirtualSCSIClientAdapter"]["not-a-uuid"] = {
+        "VirtualSlotNumber": "5",
+        "RemoteLogicalPartitionID": "1",
+        "RemoteSlotNumber": "11",
+    }
+
+    state = await _run(monkeypatch, hmc)
+
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+    assert any("baseline identity is unavailable" in text for text in _manual(state))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_type", STORAGE)
+async def test_a_refused_storage_fixture_delete_stops_st9(monkeypatch, adapter_type):
+    hmc = FakeHMC()
+    original = hmc._hmc_delete_adapter
+
+    def delete(kwargs):
+        if kwargs["adapter_type"] == adapter_type:
+            return "FAIL", "refused"
+        return original(kwargs)
+
+    hmc._hmc_delete_adapter = delete
+
+    state = await _run(monkeypatch, hmc)
+
+    (fixture,) = _storage_deletes(hmc, adapter_type)
+    (text,) = _manual(state)
+    assert f"verified fixture {fixture}: deletion or restoration is unconfirmed" in text
+    assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
