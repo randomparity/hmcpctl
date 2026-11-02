@@ -11,6 +11,7 @@ import time
 import uuid
 import xml.etree.ElementTree as ET
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1405,6 +1406,24 @@ def fixture_packet():
     }
 
 
+FIXTURE_OBSERVED_DELTAS = (
+    ("AssociatedSystemMemoryConfiguration", "CurrentAvailableSystemMemory", "-560"),
+    ("AssociatedSystemMemoryConfiguration", "PendingAvailableSystemMemory", "-560"),
+    ("AssociatedSystemMemoryConfiguration", "CurrentAssignedMemoryToPartitions", "512"),
+    ("AssociatedSystemMemoryConfiguration", "MemoryUsedByHypervisor", "48"),
+    (
+        "AssociatedSystemProcessorConfiguration",
+        "CurrentAvailableSystemProcessorUnits",
+        "-0.05",
+    ),
+    (
+        "AssociatedSystemProcessorConfiguration",
+        "PendingAvailableSystemProcessorUnits",
+        "-0.05",
+    ),
+)
+
+
 class FixtureWire(SourceWire):
     def __init__(self, packet):
         super().__init__(packet)
@@ -1424,10 +1443,14 @@ class FixtureWire(SourceWire):
             "AssociatedSystemMemoryConfiguration": {
                 "CurrentLogicalMemoryBlockSize": "16",
                 "CurrentAvailableSystemMemory": "8192",
+                "PendingAvailableSystemMemory": "8192",
+                "CurrentAssignedMemoryToPartitions": "4096",
+                "MemoryUsedByHypervisor": "1000",
             },
             "AssociatedSystemProcessorConfiguration": {
                 "MinimumProcessorUnitsPerVirtualProcessor": "0.05",
                 "CurrentAvailableSystemProcessorUnits": "1.0",
+                "PendingAvailableSystemProcessorUnits": "1.0",
             },
         }
 
@@ -1495,6 +1518,17 @@ class FixtureWire(SourceWire):
             }
         return r
 
+    def create(self):
+        self.before_create = deepcopy(self.system)
+        self.add().pop("Description")
+        for group, key, delta in FIXTURE_OBSERVED_DELTAS:
+            prior = self.system[group][key]
+            text = prior["text"] if isinstance(prior, dict) else prior
+            value = str(Decimal(text) + Decimal(delta))
+            self.system[group][key] = (
+                {**prior, "text": value} if isinstance(prior, dict) else value
+            )
+
     def http(self, request):
         method, path = request.method, request.url.path
         self.requests.append((method, path))
@@ -1511,7 +1545,7 @@ class FixtureWire(SourceWire):
         if method == "PUT":
             if self.fallback:
                 return httpx.Response(self.fallback, text="REST0001")
-            self.add()
+            self.create()
             if self.fixture_fault == "create":
                 raise httpx.ReadTimeout("synthetic ambiguous creation")
             return httpx.Response(
@@ -1520,6 +1554,7 @@ class FixtureWire(SourceWire):
         if method == "DELETE":
             assert path.endswith(LPAR)
             del self.entries[LPAR], self.profiles[LPAR]
+            self.system = deepcopy(self.before_create)
             if self.fixture_fault == "delete":
                 raise httpx.ReadTimeout("synthetic ambiguous deletion")
             return httpx.Response(204)
@@ -1597,7 +1632,7 @@ class FixtureWire(SourceWire):
             )
             assert values["name"] == self.packet["fixture_name"]
             if words[0] == "mksyscfg":
-                self.add()
+                self.create()
             else:
                 assert set(values) == {"name", "description"}
                 self.description = values["description"]
@@ -1775,6 +1810,41 @@ async def test_fixture_physical_lifecycle(
         limits = arm.FIXTURE_LIMITS[record["stage"]]
         assert 0 < record["counts"]["rest"] <= limits[0]
         assert 0 < record["counts"]["ssh"] <= limits[1]
+    sessions = []
+    for item in w.trace:
+        if item == ("rest", "PUT", "/rest/api/web/Logon"):
+            sessions.append([])
+        sessions[-1].append(item)
+    stages = (
+        "preflight",
+        "recover",
+        "prepare",
+        "recover",
+        "preflight",
+        "recover",
+        "cleanup",
+        "recover",
+    )
+    assert len(sessions) == len(stages)
+    physical = []
+    for stage, trace in zip(stages, sessions, strict=True):
+        counts = {
+            kind: sum(item[0] == kind for item in trace) for kind in ("rest", "ssh")
+        }
+        assert trace[-1] == ("rest", "DELETE", "/rest/api/web/Logon")
+        assert counts["rest"] <= arm.FIXTURE_LIMITS[stage][0]
+        assert counts["ssh"] <= arm.FIXTURE_LIMITS[stage][1]
+        physical.append({"stage": stage, **counts})
+    print(
+        json.dumps(
+            {
+                "fallback": fallback,
+                "null_property": null_property,
+                "name_fallback": name_fallback,
+                "physical": physical,
+            }
+        )
+    )
 
 
 @pytest.mark.parametrize("fault", ["create", "native", "stamp", "logout", "response"])
@@ -2370,3 +2440,192 @@ async def test_logout_transport_warning_stays_private(
     assert saved["warnings"] == result["warnings"] and not saved["complete"]
     arm.client_core._logger.warning("outside bounded procedure")
     assert "outside bounded procedure" in caplog.text
+
+
+@pytest.mark.parametrize("group,key,delta", FIXTURE_OBSERVED_DELTAS)
+@pytest.mark.parametrize("bad", [None, "NaN", "-1", {"text": "3", "Child": "bad"}])
+@pytest.mark.parametrize("stage", ["preflight", "capture"])
+@pytest.mark.asyncio
+async def test_fixture_accounting_unavailable_before_create(
+    fixture_wire, fixture_packet, tmp_path, group, key, delta, bad, stage
+):
+    w, p = fixture_wire, fixture_packet
+    if stage == "capture":
+        ready = await arm.preflight(w.client(), p, tmp_path / "ready")
+        assert ready["status"] == "READY"
+        p["baseline_sha256"] = ready["baseline_sha256"]
+    if bad is None:
+        w.system[group].pop(key)
+    else:
+        w.system[group][key] = bad
+    result = await getattr(arm, stage)(w.client(), p, tmp_path / "refused")
+    assert result["status"] == "MANUAL_RECOVERY" and not result["complete"]
+    assert not w.fixture_writes
+
+
+@pytest.mark.parametrize("group,key,delta", FIXTURE_OBSERVED_DELTAS)
+@pytest.mark.asyncio
+async def test_fixture_accounting_wrong_delta_disarms_stamp(
+    fixture_wire, fixture_packet, tmp_path, monkeypatch, group, key, delta
+):
+    w = fixture_wire
+    create = w.create
+
+    def changed_create():
+        create()
+        w.system[group][key] = str(Decimal(w.system[group][key]) + 1)
+
+    monkeypatch.setattr(w, "create", changed_create)
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert [e["kind"] for e in result["effects"]] == ["create-rest"]
+    assert len(w.fixture_writes) == 1 and LPAR in w.entries
+
+
+@pytest.mark.parametrize("drift", ["none", "attributes", "shape", "unknown"])
+@pytest.mark.asyncio
+async def test_fixture_accounting_attributed_preservation(
+    fixture_wire, fixture_packet, tmp_path, monkeypatch, drift
+):
+    w = fixture_wire
+    for group, key, _delta in FIXTURE_OBSERVED_DELTAS:
+        w.system[group][key] = {"@attrs": {"ksv": "V1_0"}, "text": w.system[group][key]}
+    create = w.create
+
+    def changed_create():
+        create()
+        memory = w.system["AssociatedSystemMemoryConfiguration"]
+        if drift == "attributes":
+            memory["MemoryUsedByHypervisor"]["@attrs"] = {"ksv": "V1_1"}
+        elif drift == "shape":
+            memory["MemoryUsedByHypervisor"] = memory["MemoryUsedByHypervisor"]["text"]
+        elif drift == "unknown":
+            memory["UnknownAllocationField"] = "changed"
+
+    monkeypatch.setattr(w, "create", changed_create)
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == ("PREPARED" if drift == "none" else "MANUAL_RECOVERY")
+    assert len(w.fixture_writes) == (2 if drift == "none" else 1)
+    if drift == "none":
+        assert (await arm.recover(w.client(), fixture_packet, result))[
+            "status"
+        ] == "RETAINED"
+        assert "Description" not in result["before_stamp"]["target"]["resource"]
+
+
+@pytest.mark.parametrize(
+    "rest,native",
+    [
+        (None, ""),
+        ("foreign", ""),
+        ("foreign", "foreign"),
+        ({"@attrs": {"ksv": "V1_0"}, "Child": "bad"}, ""),
+        ("", "\n\n"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_fixture_fresh_description_refuses(
+    fixture_wire, fixture_packet, tmp_path, monkeypatch, rest, native
+):
+    w = fixture_wire
+    create = w.create
+
+    def changed_create():
+        create()
+        w.entries[LPAR]["Description"] = rest
+        w.description = native
+
+    monkeypatch.setattr(w, "create", changed_create)
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert [e["kind"] for e in result["effects"]] == ["create-rest"]
+    assert len(w.fixture_writes) == 1
+
+
+@pytest.mark.parametrize("fault", ["native", "reported", "rest", "owned-absence"])
+@pytest.mark.asyncio
+async def test_fixture_fresh_description_history_stays_strict(
+    fixture_wire, fixture_packet, tmp_path, fault
+):
+    w, p = fixture_wire, fixture_packet
+    result = await fixture_prepare(w, p, tmp_path)
+    assert result["status"] == "PREPARED"
+    if fault == "owned-absence":
+        w.entries[LPAR].pop("Description")
+        with pytest.raises(TypeError):
+            arm._fixture_description(w.entries[LPAR], w.description)
+        cleanup = fixture_cleanup_packet(p, tmp_path)
+        refused = await arm.preflight(
+            w.client(), cleanup, tmp_path / "cleanup-preflight"
+        )
+        assert refused["status"] == "MANUAL_RECOVERY"
+    else:
+        forged = json.loads(json.dumps(result))
+        before = forged["before_stamp"]
+        if fault == "native":
+            before["native_description_raw"] = "foreign"
+        elif fault == "reported":
+            before["description"] = "foreign"
+        else:
+            before["target"]["resource"]["Description"] = "foreign"
+            before["snapshot"]["partitions"][LPAR]["resource"]["Description"] = (
+                "foreign"
+            )
+        with pytest.raises((ValueError, TypeError)):
+            arm._fixture_prepared(w.client(), p, forged)
+    assert len(w.fixture_writes) == 2
+
+
+@pytest.mark.asyncio
+async def test_fixture_accounting_cleanup_lag_remains_manual(
+    fixture_wire, fixture_packet, tmp_path, monkeypatch
+):
+    w, p = fixture_wire, fixture_packet
+    prepared = await fixture_prepare(w, p, tmp_path)
+    cleanup = fixture_cleanup_packet(p, tmp_path)
+    ready = await arm.preflight(w.client(), cleanup, tmp_path / "cleanup-preflight")
+    cleanup["baseline_sha256"] = ready["baseline_sha256"]
+    held_system = deepcopy(w.system)
+    http = w.http
+
+    def lagged_delete(request):
+        response = http(request)
+        if request.method == "DELETE" and request.url.path.endswith(LPAR):
+            for group, key, _delta in FIXTURE_OBSERVED_DELTAS:
+                if key != "CurrentAssignedMemoryToPartitions":
+                    w.system[group][key] = held_system[group][key]
+        return response
+
+    monkeypatch.setattr(w, "http", lagged_delete)
+    completed = await arm.capture(w.client(), cleanup, tmp_path / "cleanup")
+    assert completed["status"] == "MANUAL_RECOVERY" and not completed["complete"]
+    assert LPAR not in w.entries and len(w.fixture_writes) == 3
+    w.system = deepcopy(w.before_create)
+    recovered = await arm.recover(w.client(), cleanup, completed)
+    assert recovered["status"] == "MANUAL_RECOVERY" and not recovered["complete"]
+    assert recovered["observation"] == prepared["baseline"]
+    assert len(w.fixture_writes) == 3
+
+
+@pytest.mark.parametrize("ending", ["", "\n", "\r\n"])
+@pytest.mark.asyncio
+async def test_fixture_fresh_description_explicit_empty_still_valid(
+    fixture_wire, fixture_packet, tmp_path, monkeypatch, ending
+):
+    w = fixture_wire
+    create = w.create
+
+    def empty_create():
+        create()
+        w.entries[LPAR]["Description"] = ""
+        w.description = ending
+
+    monkeypatch.setattr(w, "create", empty_create)
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "PREPARED", result
+
+
+@pytest.mark.parametrize("before_stamp", [False, True])
+def test_fixture_description_present_null_refused(before_stamp):
+    with pytest.raises(TypeError):
+        arm._fixture_description({"Description": None}, "", before_stamp=before_stamp)

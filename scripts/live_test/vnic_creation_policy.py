@@ -354,9 +354,23 @@ def _fixture_number(value):
     return result
 
 
+_FIXTURE_ALLOCATION_DELTAS = {
+    ("memory", "CurrentAvailableSystemMemory"): Decimal(-560),
+    ("memory", "PendingAvailableSystemMemory"): Decimal(-560),
+    ("memory", "CurrentAssignedMemoryToPartitions"): Decimal(512),
+    ("memory", "MemoryUsedByHypervisor"): Decimal(48),
+    ("cpu", "CurrentAvailableSystemProcessorUnits"): Decimal("-0.05"),
+    ("cpu", "PendingAvailableSystemProcessorUnits"): Decimal("-0.05"),
+}
+
+
 def _fixture_capacity(system):
     memory = system["AssociatedSystemMemoryConfiguration"]
     cpu = system["AssociatedSystemProcessorConfiguration"]
+    for (section, key), delta in _FIXTURE_ALLOCATION_DELTAS.items():
+        value = _fixture_number((memory if section == "memory" else cpu)[key])
+        if value + delta < 0:
+            raise ValueError("fixed fixture allocation counters are unavailable")
     block = _fixture_number(memory["CurrentLogicalMemoryBlockSize"])
     minimum = _fixture_number(cpu["MinimumProcessorUnitsPerVirtualProcessor"])
     if (
@@ -475,13 +489,20 @@ async def _fixture_snapshot(hmc, packet):
     )
 
 
-def _fixture_foreign(snapshot, uid=None):
+def _fixture_foreign(snapshot, uid, baseline):
     value = deepcopy(snapshot)
-    if uid is not None:
-        target = value["partitions"].pop(uid)
-        value["profiles"] -= len(target["profiles"])
-    value["system"]["memory"].pop("CurrentAvailableSystemMemory", None)
-    value["system"]["cpu"].pop("CurrentAvailableSystemProcessorUnits", None)
+    target = value["partitions"].pop(uid)
+    value["profiles"] -= len(target["profiles"])
+    for (section, key), delta in _FIXTURE_ALLOCATION_DELTAS.items():
+        before = baseline["system"][section][key]
+        after = value["system"][section][key]
+        if _fixture_number(after) - _fixture_number(before) != delta:
+            raise ValueError("fixture allocation differs from the approved fixed tuple")
+        if isinstance(after, dict) != isinstance(before, dict) or (
+            isinstance(after, dict) and after["@attrs"] != before["@attrs"]
+        ):
+            raise ValueError("fixture allocation scalar attributes changed")
+        value["system"][section][key] = deepcopy(before)
     return value
 
 
@@ -501,7 +522,7 @@ def _fixture_target(packet, current, baseline):
         or _scalar_text(r.get("PartitionType")) != "AIX/Linux"
         or _scalar_text(r.get("PartitionState")) != "not activated"
         or _scalar_text(r.get("DefaultProfileName")) != "default_profile"
-        or _fixture_foreign(current, uid) != _fixture_foreign(baseline)
+        or _fixture_foreign(current, uid, baseline) != baseline
     ):
         raise ValueError(
             "fixture fresh inactive identity or foreign preservation differs"
@@ -818,15 +839,27 @@ def _fixture_commands(packet, system_name, description):
     return {"create-native": create, "stamp": stamp}
 
 
-async def _fixture_held(hmc, packet, baseline):
+def _fixture_description(resource, native, *, before_stamp=False):
+    description = _description_text(native, native=True)
+    rest = (
+        ""
+        if before_stamp and "Description" not in resource
+        else _description_text(resource.get("Description"))
+    )
+    if description != rest or (before_stamp and description != ""):
+        raise ValueError("fixture native/REST description differs")
+    return description
+
+
+async def _fixture_held(hmc, packet, baseline, *, before_stamp=False):
     current = await _fixture_snapshot(hmc, packet)
     target = _fixture_target(packet, current, baseline)
     native = await get_lpar_description(
         hmc.config, current["system"]["name"], packet["fixture_name"]
     )
-    description = _description_text(native, native=True)
-    if description != _description_text(target["resource"].get("Description")):
-        raise ValueError("fixture native/REST description differs")
+    description = _fixture_description(
+        target["resource"], native, before_stamp=before_stamp
+    )
     rows = await list_vnic_rows(
         hmc.config, current["system"]["name"], packet["fixture_name"]
     )
@@ -955,7 +988,9 @@ def _fixture_bounded(budget):
             or caller_token != budget.packet["caller_token"]
         ):
             raise ValueError("fixture stamp owner context differs")
-        held = await _fixture_held(hmc, budget.packet, budget.document["baseline"])
+        held = await _fixture_held(
+            hmc, budget.packet, budget.document["baseline"], before_stamp=True
+        )
         if created.get("UUID", "").casefold() != held["target"]["uuid"]:
             raise ValueError("fixture returned and independently contained UUID differ")
         budget.captured = held["target"]
@@ -1809,10 +1844,8 @@ def _fixture_prepared(hmc, packet, original):
             "fixture original retained identity or creation result differs"
         )
     _fixture_owned(hmc, p, held)
-    if held["description"] != _description_text(
-        target["resource"].get("Description")
-    ) or held["description"] != _description_text(
-        held["native_description_raw"], native=True
+    if held["description"] != _fixture_description(
+        target["resource"], held["native_description_raw"]
     ):
         raise ValueError("fixture retained description contradicts current resource")
     prior = _fixture_target(p, before["snapshot"], baseline)
@@ -1820,6 +1853,10 @@ def _fixture_prepared(hmc, packet, original):
         before["target"] != prior
         or before["vnics"] != []
         or prior["uuid"] != target["uuid"]
+        or before["description"]
+        != _fixture_description(
+            prior["resource"], before["native_description_raw"], before_stamp=True
+        )
     ):
         raise ValueError("fixture original pre-stamp identity differs")
     expected_prior = deepcopy(prior)

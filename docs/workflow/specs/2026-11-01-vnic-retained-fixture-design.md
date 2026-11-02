@@ -8,7 +8,7 @@ issuecomment-6563667424. [ADR 0312](../../adr/0312-vnic-policy-updates.md) recor
 the owner decision. Status: implemented with offline lifecycle and physical-boundary
 proofs at `9d1bbb43`. A hardware preparation exposed allocation-counter and
 fresh absent-Description mismatches; the maintainer approved the exact bounded
-correction below on 2026-11-02. Its design is in progress. Subsequent windows and
+correction below on 2026-11-02. It is implemented with offline boundary proof; code-quality gates are in progress. Subsequent windows and
 publication remain separately held; native vNIC update support is unqualified.
 
 ## Problem and scope
