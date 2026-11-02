@@ -27,8 +27,8 @@ No profile write, `install`, `boot`, `adapters.mac` or `exclusive_writer_window`
 - `server_tools/lpar/provision.py` becomes a factory handler, as `hmc_power_lpar`'s is:
   `provision_handler(tool_security, permits, authorize)` and `register_provision_tool`, listed
   in `catalog.py`, `server.py` and `scripts/check_capability_inventory.py`. Security: `mutate`,
-  target kind `console`, selectors `system_name_or_uuid` and nested `storage.vios_uuid`, both
-  optional, not exhaustive.
+  target kind `console`, optional selector `system_name_or_uuid`, not exhaustive; the VIOS is
+  authorized through the specialists, since a continuation omits `storage`.
 - The handler: validate inputs; on a continuation read the recorded arguments; authorize the
   delegated tools (ADR 0313 Decision 8); when `expected_plan_digest` is given and
   `engine.recorded_arguments` finds no record, run the plan check; for a new request run the
@@ -109,8 +109,9 @@ types, never request arguments (engine module note).
 6. `dry_run` records nothing and still rejects a malformed `request_id`.
 7. With `capacity_mib`, the disk is created, mapped and ledgered as `virtual_disk`.
 8. Each withheld Decision 8 tool refuses before anything is recorded.
-9. A step that reports an error (assignment, PowerOn job) never resumes to `completed`, and a
-   failed run's top-level `steps` carry an `error`.
+9. An assignment or affinity-policy step that reports an error never resumes to `completed`
+   (no classifier); a PowerOn error resumes to `completed` only once the partition reads
+   activated (ADR 0199). A failed run's top-level `steps` carry an `error`.
 
 ## Validation
 
