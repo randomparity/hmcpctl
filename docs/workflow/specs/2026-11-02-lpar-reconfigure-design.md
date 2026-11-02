@@ -106,11 +106,18 @@ Live and inactive current-configuration writes use `HMCClient.update_logical_par
    (criterion 6)
 6. Tool docs regenerate, CHANGELOG and the capability inventory/maturity record the operation,
    and the H1 spec names the window and ADR 0314. (criteria 6, 9)
-7. Live proof per criterion 10 within the established boundary (docs/live-testing.md).
+7. Live proof per criterion 10 through the named `lpar-reconfigure` arm (subtask 68) on one
+   owned scratch partition (lpar-config's fixture, `hmcpctl-live-lpar-` prefix): a not-activated
+   change reads back `profile` and survives a profile activation; a rename persists; a
+   `pending_activation` change made while the partition sits at SMS (RMC inactive) survives power
+   off and a second profile activation; live DLPAR is recorded as an explicit SKIP (operator
+   2026-11-02). Teardown always runs; recovery already covers the prefix.
 
 ## Validation
 
 Focused tests in `tests/unit/test_lpar_reconfigure.py` (body, classifiers, plan) and
 `tests/app/test_lpar_reconfigure_tool.py` (handler gates, registration, schema) with respx
 fixtures shaped like `tests/unit/test_lpar_power.py`; repository guardrails `just verify` and
-`uv run --no-sync prek run --all-files`. Live arm afterwards, under a LIVE-GRANT.
+`uv run --no-sync prek run --all-files`. The arm is tested without hardware
+(`tests/test_live_lpar_reconfigure_arm.py`, `tests/scripts/test_live_lpar_reconfigure.py`) and
+run once under a LIVE-GRANT: preflight → arm → recovery → `scripts/live_test_evidence.py`.
