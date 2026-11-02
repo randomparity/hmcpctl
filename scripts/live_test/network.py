@@ -9,8 +9,9 @@ VIOS's FC-port and vFC group labels.
 
 Every ST9 scenario reads its own baseline and re-reads after each mutation.
 The client-network scenario deletes only its independently verified fixture UUID;
-storage scenarios delete only the UUID their own create returned, after the same proof. Uncertain verification or
-cleanup records a manual-recovery row and stops ST9: no later mutation runs.
+storage scenarios delete only the UUID their own create returned, after the same
+proof. Uncertain verification or cleanup records a manual-recovery row and stops
+ST9: no later mutation runs.
 """
 
 from __future__ import annotations
@@ -1225,12 +1226,7 @@ class _Arm:
             after, baseline, response, adapter_type, (boundary.vios_id, slot)
         )
         if added != "PASS" or after is None or fixture is None:
-            return (
-                added,
-                None,
-                False,
-                unproven,
-            )
+            return added, None, False, unproven
         result = await self.state.call(
             self.client,
             "hmc_delete_adapter",
@@ -1249,16 +1245,13 @@ class _Arm:
             and {key.casefold(): value for key, value in final.items()}
             == {key.casefold(): value for key, value in baseline.items()}
         )
+        if accepted and restored:
+            return added, [after[fixture]], True, None
         unconfirmed = (
             f"{adapter_type} verified fixture {fixture}: deletion or restoration "
             "is unconfirmed"
         )
-        return (
-            added,
-            [after[fixture]],
-            restored,
-            (None if accepted and restored else unconfirmed),
-        )
+        return added, [after[fixture]], restored, unconfirmed
 
     async def client_round_trip(self, adapter_type: str, boundary: _Boundary) -> None:
         found = await self.client_baseline(adapter_type, boundary)
