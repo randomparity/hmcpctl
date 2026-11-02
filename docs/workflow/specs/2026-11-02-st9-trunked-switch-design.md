@@ -51,8 +51,8 @@ escaped `vlan_round_trip` before `delete_run_networks`, stranding the run's netw
 | Trunked-switch preference (S1) | focused-test | `test_the_lowest_trunked_switch_is_selected`; red: switch 1 used |
 | No-trunk / unreadable skip (S2) | focused-test | `test_no_trunked_switch_skips_the_vlan_round_trip` (parametrized); red: create called |
 | Cleanup after failed add (S3) | focused-test | `test_a_failed_adapter_add_deletes_the_runs_network`; red: network remains |
-| Malformed VLAN fields retain (S4) | focused-test | `test_an_unparsable_adapter_vlan_keeps_the_network`; red: network deleted |
-| Retention with adapter (S4) | focused-test | `test_an_adapter_on_the_vlan_keeps_the_network`; red: no manual row |
+| Malformed VLAN fields retain (S4) | focused-test | `test_an_unparsable_adapter_vlan_keeps_the_network`; red: same mutation |
+| Retention with adapter (S4) | focused-test | `test_an_adapter_on_the_vlan_keeps_the_network`; red: `_vlan_free` forced true |
 | Docs bullet | task-test-not-applicable | unasserted prose; nothing parses it |
 | Live run (S5) | task-test-not-applicable | needs a real HMC |
 
