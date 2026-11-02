@@ -114,7 +114,8 @@ def reconfigure_handler(
         ``hmc_dlpar_mem`` and ``hmc_update_partition_profile``; ``processors`` needs
         ``hmc_dlpar_proc`` and ``hmc_update_partition_profile``: the policy must permit
         each and admit this partition, or nothing is recorded. An interrupted DLPAR
-        write always needs attention: inspect the partition, then ``abandon``.
+        write always needs attention: inspect the partition, then ``abandon``. The
+        rename is written last; when unsure the HMC accepts a name, rename separately.
 
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.

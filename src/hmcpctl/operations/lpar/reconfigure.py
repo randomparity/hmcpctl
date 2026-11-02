@@ -815,8 +815,8 @@ def reconfigure_body(
             try:
                 await _apply(ctx, hmc, plan)
                 return await _verify(ctx, hmc, plan)
-            except (OperationFailed, EffectNotApplied) as exc:
-                if not any(_written(ctx, key) for key, _, _ in _steps(plan)):
+            except Exception as exc:
+                if not any(_touched(ctx, key) for key, _, _ in _steps(plan)):
                     raise
                 # Something already landed, so "failed" would hide it: pause, report
                 # what the plan changed, and let resume retry and re-verify.
@@ -834,9 +834,10 @@ async def _classify_plan(
     return Classification("not_applied")
 
 
-def _written(ctx: OperationContext, key: str) -> bool:
+def _touched(ctx: OperationContext, key: str) -> bool:
+    """Whether the write under *key* landed or may have (applied or still open)."""
     recorded = ctx.recorded(key)
-    return recorded is not None and recorded.status == "applied"
+    return recorded is not None and recorded.status != "not_applied"
 
 
 def _plan_of(ctx: OperationContext) -> Mapping[str, Any]:

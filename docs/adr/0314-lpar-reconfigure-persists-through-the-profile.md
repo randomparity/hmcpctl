@@ -86,6 +86,8 @@ resume choices below to this record.
   activates the current configuration and does not apply it.
 - Requiring the DLPAR permissions for an unrunning partition is stricter than the plan needs.
 - An interrupted DLPAR always needs a human: inspect, then `abandon`.
+- The rename is the last write, so a name the HMC refuses after the resource writes landed leaves
+  the operation paused on every resume until it is abandoned; rename separately when unsure.
 
 ## Considered & rejected
 
