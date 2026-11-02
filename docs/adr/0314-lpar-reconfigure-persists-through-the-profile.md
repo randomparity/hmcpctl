@@ -67,8 +67,8 @@ resume choices below to this record.
    `hmc_dlpar_proc` and `hmc_update_partition_profile` for `processors`, and `hmc_modify_lpar`
    plus `hmc_rename_lpar` for `name` (the
    served `hmc_modify_lpar` cannot rename) — the tools the patch can
-   use, whatever the plan later selects. The body re-runs the ADR 0011 check every run; no
-   `ownership_override`.
+   use, whatever the plan later selects. The body re-resolves the partition by UUID within its
+   system and re-runs the ADR 0011 check before every write; no `ownership_override`.
 7. **Stale plan and verification.** Before the first write not yet applied, whichever key it is,
    the body re-reads what the plan rests on — partition state, RMC, `CurrentProfileSync` and the
    current values; the recorded ETag is also the profile's concurrency check (a 412 or ETag
