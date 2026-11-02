@@ -64,8 +64,9 @@ arms; the client network adapter (Ethernet) cleanup path; VIOS mapping managemen
 6. **Removal.** `remove_new_adapters` and `_new` are deleted; no storage path deletes by delta.
 7. **Recovery advice.** `placement_drift` keeps its signature (recovery calls it) but no longer
    tells the operator to remove every new UUID: new UUIDs are listed as not proven to be the
-   run's; delete by hand only an adapter the run's results prove is its own (a storage
-   manual-recovery row names its fixture UUID). The text is kind-independent, so Ethernet
+   run's; delete by hand only an adapter the run's results prove is its own (only a storage
+   row reporting an unconfirmed deletion names a verified fixture UUID; a custody-failure row
+   names the claimed UUID as not proven). The text is kind-independent, so Ethernet
    recovery output changes wording too; no Ethernet logic changes.
 
 ## Considered & rejected

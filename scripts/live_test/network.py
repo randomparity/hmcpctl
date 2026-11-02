@@ -456,8 +456,9 @@ def placement_drift(baseline: Adapters, after: Adapters | None) -> str:
     off = sorted(k for k in baseline if after.get(k) != baseline[k])
     return (
         f"new UUIDs {new} are not proven to be the run's: delete by hand only an "
-        "adapter the run's results prove is its own (a storage MANUAL RECOVERY "
-        f"REQUIRED row names its fixture UUID); restore each of {off} to its "
+        "adapter the run's results prove is its own (only a storage MANUAL "
+        "RECOVERY REQUIRED row reporting an unconfirmed deletion names a verified "
+        f"fixture UUID); restore each of {off} to its "
         f"baseline placement ({fields}) {[baseline[k] for k in off]}"
     )
 
@@ -1215,7 +1216,10 @@ class _Arm:
         """
         added, response = await self.add_client("paired", adapter_type, boundary, slot)
         identity = response.get("UUID") if isinstance(response, Mapping) else None
-        stop = f"{adapter_type} fixture {identity or 'with no UUID'}"
+        unproven = (
+            f"{adapter_type} create (its response claimed UUID {identity or 'none'}; "
+            "ownership not proven): creation identity or pairing is unverified"
+        )
         after = await self.adapters(adapter_type, "after add")
         fixture = _storage_fixture(
             after, baseline, response, adapter_type, (boundary.vios_id, slot)
@@ -1225,7 +1229,7 @@ class _Arm:
                 added,
                 None,
                 False,
-                f"{stop}: creation identity or pairing is unverified",
+                unproven,
             )
         result = await self.state.call(
             self.client,
@@ -1245,7 +1249,10 @@ class _Arm:
             and {key.casefold(): value for key, value in final.items()}
             == {key.casefold(): value for key, value in baseline.items()}
         )
-        unconfirmed = f"{stop}: deletion or restoration is unconfirmed"
+        unconfirmed = (
+            f"{adapter_type} verified fixture {fixture}: deletion or restoration "
+            "is unconfirmed"
+        )
         return (
             added,
             [after[fixture]],
