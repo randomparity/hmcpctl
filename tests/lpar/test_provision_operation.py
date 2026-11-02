@@ -217,3 +217,39 @@ def test_power_on_classifies_by_partition_state(state, status):
     hmc = FakeHMC()
     hmc.state = state
     assert _classify(hmc, "power_on", f"lpar:{LPAR}").status == status
+
+
+def test_a_running_operation_reports_no_step_for_a_write_in_flight():
+    from hmcpctl.operations.logical.models import OperationRecord
+    from hmcpctl.operations.lpar.provision_operation import result_from_record
+
+    effects = (
+        EffectRecord(
+            "create", "lpar.create", "system:s", "applied", {"lpar_uuid": LPAR}
+        ),
+        EffectRecord("stamp", "lpar.ownership_stamp", f"lpar:{LPAR}", "intended", None),
+    )
+    record = OperationRecord(
+        "0" * 32,
+        "r",
+        "hmc_provision_lpar",
+        "<default>",
+        SYSTEM,
+        LPAR,
+        "running",
+        "creating",
+        None,
+        effects,
+        (),
+        False,
+        (),
+        (),
+        None,
+        "t",
+        "t",
+    )
+    result = result_from_record(record)
+    assert [(s.step, s.status) for s in result.steps] == [("create", "ok")]
+    assert result.ownership_stamped is None
+    paused = replace(record, state="paused", outcome="needs_attention")
+    assert [s.status for s in result_from_record(paused).steps] == ["ok", "error"]

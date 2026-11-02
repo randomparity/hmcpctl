@@ -698,6 +698,8 @@ def result_from_record(record: OperationRecord) -> ProvisionResult:
                 effect.identity,
             )
             for effect in record.effects
+            # A write still in flight has no outcome to report yet.
+            if record.state != "running" or effect.status in ("applied", "not_applied")
         ),
         warnings=record.warnings,
         operation=record,
