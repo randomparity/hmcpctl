@@ -780,3 +780,32 @@ def test_corrupt_control_vocabulary_refuses_before_effect_execution(field):
         _submit(body=_body(writer), continuation="resume")
     assert caught.value.reason == "store_corrupt"
     assert writer.calls == 0
+
+
+def test_join_without_timeout_waits_for_the_worker():
+    release = threading.Event()
+
+    async def write():
+        await asyncio.to_thread(release.wait, 10)
+        return {"uuid": "u1"}
+
+    record = _submit(body=_body(write), wait_seconds=0)
+    threading.Timer(0.2, release.set).start()
+    engine.join(record.operation_id, None)
+    later = store.operation_status(
+        agent_id="agent-a", connection="<default>", host="hmc.test"
+    ).operations[0]
+    assert (later.state, later.outcome) == ("terminal", "completed")
+
+
+def test_ledger_entries_lists_one_kind_on_one_system():
+    async def body(ctx):
+        ctx.ledger_add("root_disk", "virtual_disk", "sys", "lpar", {"disk_name": "d1"})
+        ctx.ledger_add("partition", "partition", "sys", "lpar", {"lpar_uuid": "lpar"})
+        ctx.ledger_add("other", "virtual_disk", "sys2", None, {"disk_name": "d2"})
+        return BodyResult("completed")
+
+    record = _submit(body=body)
+    with store.session() as conn:
+        entries = store.ledger_entries(conn, "virtual_disk", "sys")
+    assert entries == [(record.operation_id, "lpar", {"disk_name": "d1"})]

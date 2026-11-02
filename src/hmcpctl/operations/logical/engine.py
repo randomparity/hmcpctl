@@ -312,19 +312,21 @@ def _has_worker(operation_id: str) -> bool:
         return operation_id in _WORKERS
 
 
-def join(operation_id: str, timeout: float) -> None:
-    """Wait up to *timeout* seconds for this process's worker on *operation_id*.
+def join(operation_id: str, timeout: float | None) -> None:
+    """Wait up to *timeout* seconds, or without a bound when None, for this process's
+    worker on *operation_id*.
 
     A worker that finishes may already have a successor started by a resume, so the
     wait follows the map until no worker is registered or the time is spent.
     """
-    deadline, joined = time.monotonic() + timeout, None
+    deadline = None if timeout is None else time.monotonic() + timeout
+    joined = None
     while True:
         with _WORKERS_GUARD:
             thread = _WORKERS.get(operation_id)
         if thread is None or thread is joined:
             return
-        thread.join(max(0.0, deadline - time.monotonic()))
+        thread.join(None if deadline is None else max(0.0, deadline - time.monotonic()))
         if thread.is_alive():
             return
         joined = thread
