@@ -399,6 +399,26 @@ async def test_mount_refused_on_an_unapplied_partition_reports_the_adapter(mock_
 
 
 @pytest.mark.asyncio
+async def test_the_captured_vtd_collision_is_recognised(mock_hmc):
+    """The HMC's own VTD-name refusal, captured live on V10R3 (#1284).
+
+    `_VTD_NAME_IN_USE` was written from one observation in #1280; this pins it to
+    the captured body, whose VTD and name are tokenized.
+    """
+    _, refused = live_response("rest-vios-optical-mapping-vtd-in-use")
+    mock_hmc.get(PATH).mock(return_value=_ok())
+    mock_hmc.post(PATH).mock(return_value=refused)
+
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="possible side effect") as raised:
+            await _mount(hmc)
+
+    message = str(raised.value)
+    assert "'vtopt9' is already mapped" in message
+    assert message.index("unmount-optical-media") < message.index(ADAPTER_LISTING)
+
+
+@pytest.mark.asyncio
 async def test_mount_5xx_name_in_use_names_the_collision(mock_hmc):
     """The HMC's own VTD-name refusal keeps the side-effect report and adds the remedy."""
     get = mock_hmc.get(PATH).mock(return_value=_ok())

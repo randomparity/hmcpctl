@@ -437,7 +437,10 @@ This arm captures how the HMC and VIOS change the medium in an existing virtual
 optical device, for #1285 (#1284). It is not in `all` or `vmedia`, and subtask 70
 SKIPs outside its own group. ST16 resolves the VIOS, the test partition and the
 repository as the vmedia arm does; ST22 removes any medium ST70 left. ST70 needs the
-test partition unprotected and `Not Activated` and 2 GiB free in the repository. It:
+test partition unprotected and `Not Activated` and 2 GiB free in the repository. The
+partition's profile must have been applied once: on one never applied the mount is refused
+with HTTP 500 REST0269 and leaves a VIOS server adapter behind. The 2026-11-02 answers are
+in `tests/fixtures/live/README.md`. It:
 
 - creates two blank media `hmcpctl_live_<8 hex>` and mounts the first to the test
   partition, reading the device (VTD) name the HMC chose;
