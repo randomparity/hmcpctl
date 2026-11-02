@@ -19,6 +19,7 @@ from ...documents.lpar import LparResources, validate_partition_type
 from ...errors import HMCError
 from ...jobs import JobOutcome, job_identifier
 from ...resource_identity import resolve_system_uuid
+from ...ssh.affinity import MinimumAffinityPolicy
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import leaf_text
 from ..affinity.ssh import set_minimum_affinity_policy
@@ -33,7 +34,11 @@ from ..logical.engine import (
 from ..logical.models import EffectRecord, OperationRecord
 from ..storage.resources import storage_mapping
 from .activation import ACTIVATED_STATES
-from .assignments import apply_validated_lpar_pcie_assignments, assignment_step_names
+from .assignments import (
+    LparPcieAssignments,
+    apply_validated_lpar_pcie_assignments,
+    assignment_step_names,
+)
 from .core import LparCreation, create_and_stamp_lpar
 from .ownership import (
     lpar_ownership_entry,
@@ -54,6 +59,7 @@ from .provision import (
     _skip_steps,
     validate_provision_assignments,
     validate_provision_storage,
+    virtual_disk_names,
 )
 from .workflow_contract import WorkflowStep
 
@@ -80,10 +86,9 @@ STEP_NAMES: Mapping[str, str] = {
     "assignments": "assignments",
     "power_on": "power_on",
 }
-# Ledger kinds (ADR 0313 Decision 6). INSTALLER_MEDIA is reserved for #1842.
+# Ledger kinds (ADR 0313 Decision 6); #1842 adds the reserved "installer_media".
 PARTITION_LEDGER = "partition"
 DISK_LEDGER = "virtual_disk"
-INSTALLER_MEDIA_LEDGER = "installer_media"
 _RESULT = TypeAdapter(ProvisionResult)
 _REQUEST = TypeAdapter(ProvisionRequest)
 
@@ -208,13 +213,6 @@ async def _adapters_on_vlan(
         for a in adapters
         if str(leaf_text((a.get("Resource") or {}).get("PortVLANID"))) == str(vlan)
     ]
-
-
-def _disk_names(entry: Mapping[str, Any]) -> set[str]:
-    disks = ((entry.get("Resource") or {}).get("VirtualDisks") or {}).get("VirtualDisk")
-    items = disks if isinstance(disks, list) else [disks]
-    names = (leaf_text(d.get("DiskName")) for d in items if isinstance(d, Mapping))
-    return {name for name in names if isinstance(name, str)}
 
 
 class _Run:
@@ -445,7 +443,7 @@ class _Run:
                 )
         return True
 
-    def _assignments(self):
+    def _assignments(self) -> LparPcieAssignments:
         assignments = self.request.assignments
         if self.request.physical_io.requested:
             # The create applied these with its physical I/O.
@@ -456,7 +454,7 @@ class _Run:
         if self.assignment_steps and self.steps[-1].step == "assignments":
             self.steps[-1:] = list(self.assignment_steps)
 
-    async def _write_policy(self, policy) -> dict[str, Any]:
+    async def _write_policy(self, policy: MinimumAffinityPolicy) -> dict[str, Any]:
         await set_minimum_affinity_policy(
             self.hmc, self.request.name, policy, system_name_or_uuid=self.system
         )
@@ -601,7 +599,7 @@ def provision_classifiers(
             return Classification(
                 "needs_attention", reason="the volume group is unreadable"
             )
-        if storage.storage_name not in _disk_names(group[0]):
+        if storage.storage_name not in virtual_disk_names(group[0]):
             return Classification("not_applied")
         identity = {
             "vios_uuid": storage.vios_uuid.lower(),

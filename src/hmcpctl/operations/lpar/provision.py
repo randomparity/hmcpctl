@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -482,21 +482,23 @@ def validate_provision_storage(storage: ProvisionStorage) -> None:
     validate_virtual_disk(storage.storage_name, storage.capacity_mib)
 
 
+def virtual_disk_names(group: Mapping[str, Any]) -> set[str]:
+    """The virtual-disk names in one parsed VolumeGroup entry."""
+    disks = ((group.get("Resource") or {}).get("VirtualDisks") or {}).get("VirtualDisk")
+    items = disks if isinstance(disks, list) else [disks]
+    names = (leaf_text(d.get("DiskName")) for d in items if isinstance(d, Mapping))
+    return {name for name in names if isinstance(name, str)}
+
+
 async def _check_new_disk_absent(hmc: HMCClient, storage: ProvisionStorage) -> None:
     """Raise ValueError if the new disk's name is already taken on its VIOS."""
     for group in await hmc.list_volume_groups(storage.vios_uuid):
-        disks = ((group.get("Resource") or {}).get("VirtualDisks") or {}).get(
-            "VirtualDisk"
-        )
-        for disk in disks if isinstance(disks, list) else [disks]:
-            if isinstance(disk, dict) and leaf_text(disk.get("DiskName")) == (
-                storage.storage_name
-            ):
-                raise ValueError(
-                    f"A virtual disk named {storage.storage_name!r} already exists on "
-                    f"VIOS {storage.vios_uuid!r}; choose another name or omit "
-                    "capacity_mib to map it"
-                )
+        if storage.storage_name in virtual_disk_names(group):
+            raise ValueError(
+                f"A virtual disk named {storage.storage_name!r} already exists on "
+                f"VIOS {storage.vios_uuid!r}; choose another name or omit "
+                "capacity_mib to map it"
+            )
 
 
 async def _preflight_provision_request(
