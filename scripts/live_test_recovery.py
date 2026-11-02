@@ -89,6 +89,7 @@ from live_test import (
     storage_lifecycle,
     storage_volume_group,
     vios_backup,
+    vmedia_media_change,
 )
 from live_test.dedicated_pcie import (
     _DEFAULT_DEDICATED_PROFILE,
@@ -163,9 +164,10 @@ _VOLUME_LISTING = re.compile(
 #: one behind an admitted prefix.
 _SHELL_METACHARACTERS = frozenset(";|&$`<>()\n")
 
-#: The vMedia arm (`SUBTASK_GROUPS["vmedia"]`) and the PCIe arms the marker
-#: checks cover. Any other dispatched subtask is reported as not witnessed.
-_VMEDIA_SUBTASKS = frozenset(range(16, 23))
+#: The vMedia arm (`SUBTASK_GROUPS["vmedia"]`) and its media-change capture (#1284),
+#: whose residue is the same test-partition classes. Any other dispatched subtask is
+#: reported as not witnessed.
+_VMEDIA_SUBTASKS = frozenset(range(16, 23)) | {vmedia_media_change.SUBTASK}
 #: The users arm (#632). Its scratch users are found by their reserved prefix,
 #: not by the document's name, so a run killed before it wrote its document, or
 #: overwritten by a later run's, still has its user reported.
@@ -1485,6 +1487,7 @@ class LparResidueInputs:
     boot_written: bool
     boot_baseline: str | None
     storage_ran: bool = False
+    media_change_ran: bool = False
     scratch_vg_ran: bool = False
     scratch_vg_pending: str | None = None
     volume_group: str = ""
@@ -1571,6 +1574,7 @@ def lpar_inputs_from_document(
             for name in (
                 artifacts.get("vmedia_iso_name"),
                 artifacts.get("vmedia_blank_name"),
+                *(artifacts.get("vmedia_change_names") or []),
             )
             if is_run_media_name(name, str(config.get("iso_media_name") or ""))
         ),
@@ -1580,11 +1584,14 @@ def lpar_inputs_from_document(
         ),
         repository_owned=artifacts.get("vmedia_repo_created") is True
         or bool(_calls(document, _VMEDIA_SUBTASKS, _REPOSITORY_TOOLS)),
-        powered_on=bool(_calls(document, {20}, {"hmc_power_on_lpar"})),
+        powered_on=bool(
+            _calls(document, {20, vmedia_media_change.SUBTASK}, {"hmc_power_on_lpar"})
+        ),
         boot_written=bool(saved_boot)
         or bool(_calls(document, {20, 22}, {"hmc_set_lpar_boot_order"})),
         boot_baseline=_boot_baseline(document, saved_boot),
         storage_ran=storage_lifecycle.SUBTASK in subtasks,
+        media_change_ran=vmedia_media_change.SUBTASK in subtasks,
         scratch_vg_ran=storage_volume_group.SUBTASK in subtasks
         or artifacts.get("storage_volume_group_name") is not None,
         scratch_vg_pending=artifacts.get("storage_volume_group_name"),
@@ -1722,6 +1729,48 @@ async def _unmapped_server_adapters(call, inputs: LparResidueInputs) -> Finding 
         f"{inputs.lpar_name} (slots {', '.join(slots)}) but {len(mapped)} mapped",
         f"{compare}; remove each unmapped one with `chhwres -r virtualio --rsubtype "
         f"scsi -m {_q(inputs.system_name)} -o r --id {vios_id} -s <slot>`",
+    )
+
+
+async def _empty_optical_target_left(call, inputs: LparResidueInputs) -> Finding | None:
+    """Whether ST70 left a virtual optical device with no medium loaded (#1284).
+
+    The optical listing keeps only media-backed mappings and the adapter count treats
+    the device as mapping its adapter, so neither class above sees an empty device.
+    """
+    if not inputs.media_change_ran:
+        return None
+    vios = _required(inputs.vios_uuid, "artifacts.vios_uuid", "storage mappings")
+    status, mappings = await call(
+        "hmc_list_storage_mappings",
+        vios_name_or_uuid=vios,
+        lpar_name_or_uuid=inputs.lpar_name,
+        system_name_or_uuid=inputs.system_name,
+    )
+    if status != "PASS" or not isinstance(mappings, list):
+        raise StateUnreadable(
+            f"could not list storage mappings for {inputs.lpar_name} ({status})"
+        )
+    empty = sorted(
+        entry["id"].split("/", 1)[1]
+        for entry in mappings
+        if isinstance(entry, dict)
+        and isinstance(entry.get("id"), str)
+        and "/" in entry["id"]
+        and "backing_kind" in entry
+        and entry["backing_kind"] is None
+        and entry.get("backing_name") is None
+    )
+    if not empty:
+        return None
+    return Finding(
+        "empty optical target left",
+        f"{', '.join(empty)} on VIOS {vios} maps {inputs.lpar_name} with no medium",
+        "; ".join(
+            f"viosvrcmd -m {_q(inputs.system_name)} --id {inputs.vios_partition_id} "
+            f"-c {_q(f'rmvdev -vtd {target}')}"
+            for target in empty
+        ),
     )
 
 
@@ -1959,6 +2008,7 @@ _PARTITION_CHECKS = (
     _unmapped_server_adapters,
     _repository_left,
     _boot_string_drift,
+    _empty_optical_target_left,
 )
 
 

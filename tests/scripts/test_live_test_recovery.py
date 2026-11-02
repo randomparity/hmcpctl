@@ -882,11 +882,16 @@ def test_every_mutating_vmedia_call_has_a_trigger():
 
     from hmcpctl.server import TOOL_SECURITY
 
-    source = (SCRIPTS_ROOT / "live_test" / "vmedia.py").read_text(encoding="utf-8")
+    source = "".join(
+        (SCRIPTS_ROOT / "live_test" / name).read_text(encoding="utf-8")
+        for name in ("vmedia.py", "vmedia_media_change.py")
+    )
     # Every tool-name literal, not only `state.call(client, ...)`: ST19 calls
     # through a helper that takes the name as its first argument.
     named = set(re.findall(r'"(hmc_\w+)"', source)) & set(TOOL_SECURITY)
-    # The arm sends only `scsi_adapter_listing`'s lshwres through it, pinned below.
+    # vmedia.py sends only `scsi_adapter_listing`'s lshwres through it, pinned below.
+    # ST70 also sends loadopt/unloadopt, whose residue is a medium or an empty
+    # device on the test partition, read by the mapping-left and empty-target classes.
     named.discard("hmc_run_command")
     mutating = {tool for tool in named if TOOL_SECURITY[tool].effect != "read"}
 
@@ -1460,6 +1465,57 @@ async def test_more_mapped_adapters_than_listed_ones_is_unreadable():
 
     with pytest.raises(recovery.StateUnreadable, match="2 mapped"):
         await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+
+
+def test_a_media_change_document_reads_its_media_and_power_on():
+    """ST70 (#1284) leaves the same test-partition residue as the vmedia arm."""
+    document = _lpar_document(
+        [16, 70, 22],
+        [_row(70, "hmc_power_on_lpar (q3)")],
+        vmedia_change_names=[_BLANK, "operator.iso"],
+    )
+
+    inputs = _inputs(document)
+
+    assert inputs.vmedia_ran and inputs.media_change_ran and inputs.powered_on
+    assert inputs.iso_names == {_BLANK}
+
+
+_MEDIA_CHANGE = _inputs(_lpar_document([16, 70, 22]))
+_EMPTY_TARGET = {
+    "id": "vhost1/vtopt1",
+    "lpar_uuid": "LPAR-UUID",
+    "backing_kind": None,
+    "backing_name": None,
+}
+
+
+@pytest.mark.asyncio
+async def test_an_empty_optical_target_after_st70_is_reported():
+    responses = _lpar_responses(
+        hmc_list_storage_mappings=[{"id": "vhost0/vtscsi0"}, _EMPTY_TARGET],
+        hmc_run_command=f"5,{_TEST_LPAR},3\n7,{_TEST_LPAR},4\n",
+    )
+
+    findings = await recovery.check_test_partition(
+        _lpar_caller(responses), _MEDIA_CHANGE
+    )
+
+    (empty,) = [f for f in findings if f.what == "empty optical target left"]
+    assert "vtopt1" in empty.detail
+    assert "rmvdev -vtd vtopt1" in empty.remedy
+
+
+@pytest.mark.asyncio
+async def test_an_empty_optical_target_is_not_read_unless_st70_ran():
+    responses = _lpar_responses(
+        hmc_list_storage_mappings=[{"id": "vhost0/vtscsi0"}, _EMPTY_TARGET],
+        hmc_run_command=f"5,{_TEST_LPAR},3\n7,{_TEST_LPAR},4\n",
+    )
+
+    findings = await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+
+    assert "empty optical target left" not in [f.what for f in findings]
 
 
 @pytest.mark.parametrize("state", ["not activated", "Not Activated"])
