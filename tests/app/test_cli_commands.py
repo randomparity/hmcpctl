@@ -1625,6 +1625,23 @@ def test_lpars_provision_resumes_a_paused_operation(monkeypatch, fake_hmc):
     assert "terminal/completed" in resumed.stdout
 
 
+def test_lpars_provision_reports_an_unusable_store_without_a_traceback(
+    monkeypatch, fake_hmc, tmp_path
+):
+    from hmcpctl.operations.logical import store
+
+    root = tmp_path / "state"
+    root.mkdir(mode=0o755)
+    root.chmod(0o755)
+    (root / "store-id").write_text("x", encoding="utf-8")
+    monkeypatch.setenv(store.STATE_DIR_ENV, str(root))
+    _fake_provision(monkeypatch, _PROVISIONED)
+    result = RUNNER.invoke(cli.app, [*_PROVISION_ARGS, "--request-id", "r1"])
+    assert result.exit_code == 1
+    assert "store_not_private" in result.stderr
+    assert "Traceback" not in result.output + result.stderr
+
+
 def test_lpars_provision_reports_a_held_execution_lock(monkeypatch, fake_hmc):
     from hmcpctl.operations.logical import store
 

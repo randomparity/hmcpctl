@@ -185,17 +185,19 @@ def lpars_provision(
         "physical_io": json_value(load_physical_io(physical_io)),
     }
     try:
-        request_from_arguments(arguments)
+        system_name, request = request_from_arguments(arguments)
     except ValueError as exc:
         usage_error(str(exc))
-    system_name, request = request_from_arguments(arguments)
-    if (
-        dry_run
-        or engine.recorded_arguments(
-            ssh_config().agent_id or "hmcpctl", request_id, TOOL
+    try:
+        new = dry_run or (
+            engine.recorded_arguments(
+                ssh_config().agent_id or "hmcpctl", request_id, TOOL
+            )
+            is None
         )
-        is None
-    ):
+    except ValueError as exc:
+        fail(exc)
+    if new:
         # Preconditions refuse a new operation before anything is recorded.
         result = with_client(lambda hmc: preview_provision(hmc, system_name, request))
         if dry_run:
