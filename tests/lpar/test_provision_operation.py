@@ -253,3 +253,54 @@ def test_a_running_operation_reports_no_step_for_a_write_in_flight():
     assert result.ownership_stamped is None
     paused = replace(record, state="paused", outcome="needs_attention")
     assert [s.status for s in result_from_record(paused).steps] == ["ok", "error"]
+
+
+def test_a_paused_result_carries_the_engine_s_reason():
+    from hmcpctl.operations.logical.models import OperationRecord
+    from hmcpctl.operations.lpar.provision_operation import result_from_record
+
+    effects = (
+        EffectRecord(
+            "create", "lpar.create", "system:s", "applied", {"lpar_uuid": LPAR}
+        ),
+        EffectRecord(
+            "network", EFFECT_KINDS["network"], f"lpar:{LPAR}", "uncertain", None
+        ),
+    )
+    body_result = {
+        "resource_created": True,
+        "workflow_completed": False,
+        "lpar_uuid": LPAR,
+        "dry_run": False,
+        "ownership_stamped": True,
+        "steps": [
+            {"step": "create", "status": "ok"},
+            {"step": "network", "status": "error", "result": "HMCError: x"},
+        ],
+        "warnings": ["Change location not read"],
+    }
+    record = OperationRecord(
+        "0" * 32,
+        "r",
+        "hmc_provision_lpar",
+        "<default>",
+        SYSTEM,
+        LPAR,
+        "paused",
+        "creating",
+        "needs_attention",
+        effects,
+        (),
+        False,
+        ("effect network: the VLAN's adapters are ambiguous",),
+        ("resume", "abandon"),
+        body_result,
+        "t",
+        "t",
+    )
+    result = result_from_record(record)
+    assert result.steps[1].result == "HMCError: x"
+    assert result.warnings == (
+        "Change location not read",
+        "effect network: the VLAN's adapters are ambiguous",
+    )

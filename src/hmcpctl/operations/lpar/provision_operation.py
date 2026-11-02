@@ -676,7 +676,10 @@ def result_from_record(record: OperationRecord) -> ProvisionResult:
     if record.result and record.outcome in ("completed", "needs_attention"):
         result = _RESULT.validate_python(record.result)
         if record.outcome == "completed" or _agrees(result, record):
-            return dataclasses.replace(result, operation=record)
+            # A pause the engine added (an open effect, a classifier's reason) is why
+            # the operation stopped, so it joins the body's own warnings.
+            warnings = tuple(dict.fromkeys((*result.warnings, *record.warnings)))
+            return dataclasses.replace(result, warnings=warnings, operation=record)
     effects = {effect.key: effect for effect in record.effects}
 
     def applied(key: str) -> bool | None:
