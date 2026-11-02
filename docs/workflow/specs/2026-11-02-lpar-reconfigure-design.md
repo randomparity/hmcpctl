@@ -36,7 +36,7 @@ computes the plan: every change and its classification (ADR 0314 Decisions 2–4
 write. It records the plan as effect `plan`. Phase `applying` then writes, in order: `profile`,
 `current`, `rename` — skipping each one the plan does not need. A replay (any run after `plan`
 is applied) re-resolves the partition by its recorded UUID, re-runs the ownership check and the
-stale-plan checks for writes not yet applied, then continues from the recorded plan. Finally it
+stale-plan check before the first write not yet applied, then continues from the recorded plan. Finally it
 polls the partition and profile and verifies each change (Decision 7).
 
 **Result** (`result` of the record): `system_uuid`, `lpar_uuid`, `profile_name`,
@@ -93,7 +93,8 @@ Live and inactive current-configuration writes use `HMCClient.update_logical_par
 1. A patch with only the given fields changes only those fields; the plan records every change
    before the first write. (criterion 1)
 2. Classification follows ADR 0314 Decisions 2–3 for each of: not activated; running with RMC
-   active and the value within current bounds; RMC inactive; beyond current bounds; beyond
+   active and the value within current bounds; RMC inactive; `open firmware`; empty state
+   (refused); shared units above virtual processors (refused); beyond current bounds; beyond
    profile bounds; a decrease with `allow_disruption` false and true; profile and current values
    that disagree; sync on with a mixed plan (refused). (criteria 2, 3)
 3. A continuation re-authorizes and re-checks the owner; a write not yet applied whose basis
@@ -106,11 +107,11 @@ Live and inactive current-configuration writes use `HMCClient.update_logical_par
    (criterion 6)
 6. Tool docs regenerate, CHANGELOG and the capability inventory/maturity record the operation,
    and the H1 spec names the window and ADR 0314. (criteria 6, 9)
-7. Live proof per criterion 10 through the named `lpar-reconfigure` arm (subtask 68) on one
+7. Live proof per criterion 10 through the named `lpar-reconfigure` arm (subtask 70) on one
    owned scratch partition (lpar-config's fixture, `hmcpctl-live-lpar-` prefix): a not-activated
-   change reads back `profile` and survives a profile activation; a rename persists; a
-   `pending_activation` change made while the partition sits at SMS (RMC inactive) survives power
-   off and a second profile activation; live DLPAR is recorded as an explicit SKIP (operator
+   change reads back `profile` and survives a profile activation; a `pending_activation` change
+   made while the partition sits at SMS (`open firmware`, RMC inactive) survives power off and a
+   second profile activation; the rename still reads back after both activations; live DLPAR is recorded as an explicit SKIP (operator
    2026-11-02). Teardown always runs; recovery already covers the prefix.
 
 ## Validation

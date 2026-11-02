@@ -25,7 +25,8 @@ resume choices below to this record.
 1. **Patch meaning.** `name` is the partition name (`PartitionName`); profile names never
    change. `memory_mib` is desired memory. `processors` is desired dedicated processors in
    dedicated mode and desired virtual processors in shared mode; processing units and the
-   processor mode are never changed.
+   processor mode are never changed, and a shared-mode value that leaves desired, minimum or
+   maximum units above virtual processors is refused before any write.
 2. **One target profile:** the partition's `DefaultProfileName`. A non-empty
    `LastActivatedProfile` that differs is refused before any write: a write to one would not
    persist through activation of the other.
@@ -37,12 +38,13 @@ resume choices below to this record.
      written, so activation from either source applies it;
    - `running`, RMC `active`, the value within current min/max, and either an increase or
      `allow_disruption=true` → **`live`**: profile written, then the current configuration;
-   - otherwise `running` → **`pending_activation`**: profile only; `activation` names the
-     profile to activate. Hmcpctl never reboots;
+   - any other non-empty state (`running` without the above, `open firmware`, `starting`, …) →
+     **`pending_activation`**: profile only; `activation` names the profile to activate. Hmcpctl
+     never reboots. An empty or unreadable state is refused;
    - a value outside the profile's min/max widens that bound in the same profile write, and the
-     change is then `pending_activation` in every state;
-   - any other partition state is refused, naming it. A rename is always `live`;
-   - with `CurrentProfileSync` not `Disabled`/`Suspended`, a running partition's plan holding both
+     change is then `pending_activation` in every state; on `not activated` the current
+     configuration is still written too, as for `profile`. A rename is always `live`;
+   - with `CurrentProfileSync` not `Disabled`/`Suspended`, an activated partition's plan holding both
      a `pending_activation` change and a current-configuration write (a `live` change or a
      rename) is refused before any write: the HMC would copy the current configuration over the
      pending profile values. The refusal names `hmc_sync_lpar_profile` and splitting the patch.
@@ -57,19 +59,23 @@ resume choices below to this record.
    for #1225 to reuse.
    `lpar.rename` classifies by the partition name. The two current-configuration kinds register no
    classifier: an interrupted one always pauses `needs_attention` (H1 spec *Resume*). A
-   pre-write refusal from `update_partition_profile`, or a 412, is `EffectNotApplied`.
+   pre-write refusal from `update_partition_profile` or a 412 there, and a `LparUpdateError` with
+   `submission="rejected"` or an error before the POST from `update_logical_partition`, are
+   `EffectNotApplied`.
 6. **Authority.** Before anything is recorded the handler permits and authorizes, for this
-   partition and system, `hmc_update_partition_profile` plus `hmc_dlpar_mem` for `memory_mib`,
-   `hmc_dlpar_proc` for `processors`, and `hmc_modify_lpar` plus `hmc_rename_lpar` for `name` (the
+   partition and system, `hmc_dlpar_mem` and `hmc_update_partition_profile` for `memory_mib`,
+   `hmc_dlpar_proc` and `hmc_update_partition_profile` for `processors`, and `hmc_modify_lpar`
+   plus `hmc_rename_lpar` for `name` (the
    served `hmc_modify_lpar` cannot rename) — the tools the patch can
    use, whatever the plan later selects. The body re-runs the ADR 0011 check every run; no
    `ownership_override`.
-7. **Stale plan and verification.** Before a write not yet applied, the body re-reads what the
-   plan rests on — partition state, RMC, `CurrentProfileSync` and the current values for
-   `current`; the recorded ETag is the check for `profile` (a 412 or ETag refusal is
-   `not_applied`, then `failed`). A difference fails the operation without writing. An applied
-   effect is not re-checked. After the writes the body polls up to 120 seconds until the profile
-   holds every planned value and the current configuration every `live` and `profile` value; a
+7. **Stale plan and verification.** Before the first write not yet applied, whichever key it is,
+   the body re-reads what the plan rests on — partition state, RMC, `CurrentProfileSync` and the
+   current values; the recorded ETag is also the profile's concurrency check (a 412 or ETag
+   refusal is `not_applied`, then `failed`). A difference fails the operation without writing.
+   An applied effect is not re-checked. After the writes the body polls up to 120 seconds until
+   the profile holds every planned value and the current configuration every value the plan
+   wrote there; a
    mismatch pauses `needs_attention`, and `resume` re-verifies.
 
 ## Consequences
