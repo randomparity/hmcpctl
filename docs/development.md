@@ -149,7 +149,9 @@ the maintainer who owns the release.
 
 ### Scope
 
-A release is scoped by a release epic, an issue that names:
+A release is a GitHub milestone (`0.2.0`, `0.3.0`, …): every open issue carries the
+milestone it ships in, and the milestone's release epic (the 0.1.0 precedent is #871; 0.2.0 is
+#1836) is the issue that names:
 
 - the consumer contract the release serves, and
 - the committed claimed-set file under `docs/capabilities/releases/vX.Y.Z.json`, whose
@@ -353,4 +355,6 @@ release.
 
 Pushing the tag ends the freeze, and `main` reopens to every change. Close the release epic
 and open the next one, or adopt an existing epic for it, naming its claimed operations and
-consumer contract as in [scope](#scope). The 0.2.0 epic is #1215.
+consumer contract as in [scope](#scope). The 0.2.0 release epic is #1836; its content epic
+is #1215. A milestone's content is whatever is still assigned to it when the candidate is
+named; move an unfinished issue to a later milestone rather than holding the release for it.
