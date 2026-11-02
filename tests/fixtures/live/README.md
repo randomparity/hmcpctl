@@ -44,6 +44,21 @@ partition with no mapping, read while it existed, and removed. The REST body is 
 `ViosSCSIMapping` group, and the listing is the #1237 `lshwres` command. Its `MACAddressPrefix`
 is zeroed, which the exporter does not do. Their token map is their own, as for the exports above.
 
+`rest-vios-optical-mapping-create-refused` (`capture` prefix `2026-11-02-q1284/`) comes from an
+operator-authorized window for #1284 on the V10R3 HMC and POWER9 system above, running the
+`vmedia-media-change` arm (`docs/live-testing.md`). Its first VIOS write, `hmc_mount_optical_media`
+of a blank medium to the Not Activated test partition `sys-R1-lp3`, was refused with HTTP 500
+REST0269: the partition's state does not support the operation until a profile is applied or it
+is activated. The refused create still left a VIOS server adapter with no mapping (slot 5 toward
+the partition's slot 4). The `lshwres` listing that showed it (record `#91`) is byte-identical to
+`cli-vios-scsi-unmapped-adapter`, so it is not committed again; the adapter was removed by hand in
+the same window. No later step ran, so this window answered none of #1284's Q1–Q4: a Storage
+replacement POST, `viosvrcmd` `loadopt`/`unloadopt`, `-release` after an immediate power-off, and
+the VTD-name collision 500 all remain uncaptured, as does Q1 on the V11R2 HMC (read-only under the
+current authority). A CLIRunner job is not exercised: it is a REST transport for the same VIOS
+command, and hmcpctl's CLI transport is SSH. The raw capture and results are retained privately
+on the operator host, not in any repository. Its token map is its own, as for the exports above.
+
 `rest-user-create-remote-user-id-refused` and `rest-user-profile-kerberos` (`capture` prefix
 `2026-10-13-q1414/`) come from an operator-authorized window for #1414 on the V10R3 HMC, each
 run making at most one disposable Kerberos-type user with a synthetic principal, then deleting

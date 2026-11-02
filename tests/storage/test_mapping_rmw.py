@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import live_fixture, make_config
+from conftest import live_fixture, live_response, make_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
@@ -374,6 +374,28 @@ async def test_mount_posts_when_target_device_is_free(mock_hmc, target_device):
         await _mount_onto(hmc, target_device)
 
     assert post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_mount_refused_on_an_unapplied_partition_reports_the_adapter(mock_hmc):
+    """The captured REST0269 refusal of an optical create (#1284, 2026-11-02 window).
+
+    That refusal left a VIOS server adapter with no mapping, shown by the lshwres
+    listing alone, so the error names that listing and no VTD collision.
+    """
+    _, refused = live_response("rest-vios-optical-mapping-create-refused")
+    mock_hmc.get(PATH).mock(return_value=_ok())
+    mock_hmc.post(PATH).mock(return_value=refused)
+
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="possible side effect") as raised:
+            await _mount(hmc)
+
+    assert raised.value.status_code == 500
+    message = str(raised.value)
+    assert "REST0269" in message
+    assert ADAPTER_LISTING in message
+    assert "is already mapped" not in message
 
 
 @pytest.mark.asyncio
