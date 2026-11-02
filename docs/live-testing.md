@@ -2740,7 +2740,7 @@ without a qualified positive oracle. Registration and offline tests add no live 
 
 ## Single-backing vNIC creation policy (standalone #1827)
 
-`scripts/live_vnic_creation_policy.py` exercises optional creation policy on an
+Version 1 of `scripts/live_vnic_creation_policy.py` exercises optional creation policy on an
 **already owned, eligible LPAR**. It is separate from default/all runner groups.
 It permits one vNIC create and, only after a complete successful result plus fresh
 identity and baseline checks, one removal of that captured slot. It never creates
@@ -2828,3 +2828,157 @@ it cannot declare `CLEAN` from absence alone when the original journal is incomp
 or uncertain. `CLEAN` confirms the observed baseline and captured history, not
 traffic, failover behavior, cross-process locking or product maturity. Raw results
 contain private identities and must never be pasted into public issues or PRs.
+
+## Source-only vNIC update qualification (version 2, #1828)
+
+The same registered preflight, standalone capture and independent recovery commands
+above accept a separately admitted version-2 source packet. This is an implemented
+offline-tested diagnostic, not qualified native update support. Hardware execution,
+final budget/window admission and product maturity remain separate operator decisions.
+It remains outside default/all groups; it never prepares or activates an LPAR.
+
+Version 2 has exactly the same sixteen top-level keys as version 1, plus the four
+keys below. Set `version` to integer `2`; all other identity, destination, commit,
+expiry, private-file, baseline and writer acknowledgements retain their constraints.
+There is no supplied slot or command: the one created vNIC determines the target.
+
+| Additional key | Required value |
+|---|---|
+| `purpose` | `"update-mode-source"` |
+| `case` | Exactly one fixed case from the list below |
+| `expected_lpar_state` | Exact nonempty printable partition state; both contained REST views must agree |
+| `allow_one_update` | `true` |
+
+The `policy` object has exactly `pvid_priority`, `auto_priority_failover`,
+`allowed_vlan_ids` and `allowed_os_mac_addrs`: scalars must be explicit (including
+zero/false), and each list must contain exactly one valid finite member. No
+`mac_addr` input is allowed; generated MAC is independently observed and preserved.
+`port_vlan_id` remains an explicit integer `0..4094`. The six fixed cases are
+`vlan-replace-all`, `vlan-replace-none`, `vlan-remove-last`, `mac-replace-all`,
+`mac-replace-none` and `mac-remove-last`. Use one packet and one separately admitted
+window per case, never an automatic six-case batch or alternative-encoding retry.
+
+After the usual preflight/digest binding, capture records B0, creates one fresh
+single-backing vNIC, independently verifies its singleton B1 baseline, and attempts
+one native update. B2 independently observes the selected raw policy and bounded
+preservation of the captured identity, MAC, backing/capacity and foreign inventory.
+Only acknowledged completion, literal expected `all`/`none` and unchanged
+preservation qualify the case. Clear means explicit `=none`, never reset or omitted
+policy; an empty, missing or malformed readback is unavailable, not positive `none`.
+Remove-last is a distinct hypothesis with the same literal `none` candidate oracle.
+
+Submission is `not_dispatched`, `completed`, `rejected` or `unknown`. Rejection
+requires a completed native nonzero refusal code; `refused` qualification also needs
+independent unchanged readback. Other uncertain outcomes remain unresolved and
+stop later effects. Selected-policy evidence survives a later preservation read
+failure, but cannot authorize cleanup by itself. No retry, rollback or reseed occurs.
+
+Only a qualified B2 permits removal. Existing fresh removal checks must still match
+the exact qualified object and owned fixture; observed drift disarms the remove.
+B3 must restore B0. Always run the separate read-only recovery command against the
+original packet and capture journal, even after CLEAN. It recomputes source history,
+ordered exact commands/intents, removal observations, original session closure and
+current baseline. Absence alone cannot clear incomplete or uncertain history.
+The residual race after the final observation is not an atomic HMC guarantee.
+
+Version-2 caps are 24 REST/24 SSH/120 seconds for preflight and recovery, and
+48 REST/56 SSH/300 seconds for capture. These implemented bounds still require
+operator admission before hardware. Offline physical-boundary traces measured
+8/15 for preflight, 23/50 for ordinary capture and 5/4 for recovery. Capture with
+ManagedSystem null-property fallback measured 31/50; native ownership-name fallback
+measured 23/53, and both expansions together measured 31/53. An empty containment
+feed stopped preflight at 6/0 with own logout.
+These are synthetic observations, not hardware ceilings or measurements of every
+combination. Version-1 limits remain unchanged.
+
+One REST slot and the final 15 seconds are reserved for own logout. Before each
+physical create/update/remove, require respective remaining REST/SSH budgets of
+24/26, 17/18 and 7/6, plus 15 body seconds after durable intent persistence. Tests
+exercise count exhaustion, independent wall expiry, journal latency and refreshed
+dispatch time. The inherited 1 MiB I/O and 5 MiB atomic journal limits apply; a
+failed/oversized intent save prevents dispatch and preserves the preceding journal.
+
+Future submission exceptions retain `source.submission_error`: type, a private
+64KiB UTF-8 message prefix, explicit truncation and existing native metadata.
+The field is null before/no submission error. Invalid text is replaced safely;
+unprintable exception text gets an explicit marker. This diagnostic cannot promote
+unknown submission or authorize cleanup. Keep it private with the complete journal;
+never paste it into an issue, PR or matrix. It cannot recover a previously lost error.
+
+Output is labelled `vnic-update-source SOURCE ONLY`. Its private version-2 history
+carries `evidence_class=source-only`, never optional-policy verification credit.
+CLEAN establishes only the bounded stored-policy/history observations. All five
+parent adapter fields, later delta/two-list modes and the public updater remain
+#1828 work; `all` minus finite members still has no justified positive oracle.
+
+
+### Retained fixture prerequisite for vNIC source qualification
+
+The `vnic-creation-policy` named owner also accepts a separate version-3
+`vnic-source-fixture` packet. Its explicit action is `prepare` or `cleanup`.
+This is a prerequisite only: it creates no vNIC, runs no source case, proves no
+native update support and grants no hardware window. Use the packet schema and
+fixed refusal policy in [the fixture design](workflow/specs/2026-11-01-vnic-retained-fixture-design.md).
+Root must admit the exact candidate, target, input histories and each window.
+
+Use fresh private0700 directories and0600 packet/history files. A prepare packet
+names one fresh `hmcpctl-vnic-fixture-<16hex>` and matching
+`q1828-fixture-<16hex>` caller, the configured profile, exact candidate commit,
+HMC host/port, system UUID, expiry and explicit writer/effect acknowledgements.
+It has null baseline/preparation journal, `none-invoked` and an empty source list.
+Never adopt or re-stamp an existing inactive partition.
+
+Run the ordinary named preflight with the original packet bytes and their SHA256:
+
+    uv run --no-sync python scripts/live_test_preflight.py --group vnic-creation-policy --packet /private/prepare.json --packet-sha256 <SHA256> --output /private/prepare-preflight
+
+Then independently recover that exact preflight packet/result before progressing:
+
+    uv run --no-sync python scripts/live_test_recovery.py --vnic-creation-policy-packet /private/prepare.json --packet-sha256 <SHA256> --results /private/prepare-preflight/results.json --output /private/prepare-preflight-recovery
+
+Require READY followed by UNCHANGED. Bind the returned canonical baseline SHA256
+in a new packet file, retaining the old bytes, and compute the new raw packet hash.
+Only then use the existing capture wrapper with the bound packet:
+
+    uv run --no-sync python scripts/live_vnic_creation_policy.py --packet /private/prepare-bound.json --packet-sha256 <SHA256> --output /private/prepare
+
+Independently run the same recovery entrypoint using the bound packet and
+`/private/prepare/results.json`, with a new output directory. Require PREPARED
+followed by RETAINED before any separately admitted source-v2 preflight. Preserve
+captured UUID/id, saved default profile/ETag, caller and empty-vNIC baseline.
+The fixed tuple is512/512/1024MiB, shared capped0.05/0.05/0.05 units,
+vCPU1/1/1 and8virtual slots. Missing capacity/alignment/minimum eligibility
+refuses; never increase resources or switch modes to force the test through.
+All six allocation counters must be available and strictly scalar before create.
+This fixed fixture requires assigned memory+512MiB, hypervisor+48MiB, current and
+pending available memory-560MiB, and current and pending available CPU-0.05.
+These are empirical acceptance values, not general allocation costs. Other raw
+fields and scalar attributes remain exact. Only a proven fresh pre-stamp target
+may omit REST Description, paired with independently blank native text; owned
+and stamped descriptions remain mandatory. A cleanup counter lag is a failure,
+even if independent recovery later sees the exact original baseline.
+
+Cleanup is another explicit packet and window. Bind the original successful
+preparation journal and either an explicit `none-invoked` declaration with no
+source records, or `complete-set` with every invoked source packet, capture and
+independent recovery path (at most six). Empty or omitted evidence is not a
+no-source declaration. Known failed, uncertain or partial attempts disarm
+cleanup even when current vNIC inventory is empty. Do not rerun or delete the
+containing LPAR to conceal partial source residue.
+
+Run cleanup's preflight/recovery, bind its fresh retained baseline into a new
+cleanup packet, then run the same capture wrapper and independent recovery with
+that packet. Require CLEAN from both cleanup and recovery. Identity, caller,
+profile/ETag, inactive state, foreign preservation and empty-vNIC equality must
+still hold at the physical DELETE boundary. No override or power operation exists
+in this purpose. Any MANUAL_RECOVERY result stops the enclosing workflow; retain
+private artifacts and let root determine a separately authorized recovery.
+
+Fixture caps are preflight64REST/40SSH/120s, prepare96/24/300,
+cleanup128/64/300 and recovery32/24/120. These include physical fallback paths
+and own sessions; source-v2 retains its separate caps. Body effects require fresh
+post-intent suffix/time reserves; one REST slot and15s are reserved for logout.
+REST/native output is1MiB, own journal5MiB, source evidence at most66MiB across
+six separately bounded records. No cap is an operational admission. Keep raw
+packets/results and terminal captures private; publish only redacted evidence through the
+normal evidence route. HMC execution and publication remain root-owned holds.

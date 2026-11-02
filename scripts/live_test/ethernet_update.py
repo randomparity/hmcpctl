@@ -1070,15 +1070,22 @@ async def recover(run_path, output_path):
 def supervise(arguments, seconds):
     """Own one process group from spawn through reap; interrupted workers prove no closeout."""
     process = None
-    previous = signal.getsignal(signal.SIGTERM)
-    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
+    cancelled = False
+    watched = {signal.SIGTERM, signal.SIGINT}
+    previous = {sig: signal.getsignal(sig) for sig in watched}
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
 
     def stop(_signum, _frame):
-        raise InterruptedError("ST69 supervisor interrupted")
+        nonlocal cancelled
+        # Another unblocked thread can deliver a Python signal during Popen or reap.
+        cancelled = True
 
-    signal.signal(signal.SIGTERM, stop)
-    started = time.monotonic()
+    code = 2
     try:
+        signal.pthread_sigmask(signal.SIG_BLOCK, watched)
+        for sig in watched:
+            signal.signal(sig, stop)
+        started = time.monotonic()
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -1091,12 +1098,20 @@ def supervise(arguments, seconds):
             start_new_session=True,
         )
         signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
-        return process.wait(timeout=max(0.001, seconds - (time.monotonic() - started)))
-    except (subprocess.TimeoutExpired, InterruptedError, KeyboardInterrupt):
-        return 2
+        while not cancelled:
+            remaining = seconds - (time.monotonic() - started)
+            if remaining <= 0:
+                break
+            try:
+                code = process.wait(timeout=min(0.1, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except (InterruptedError, KeyboardInterrupt):
+        cancelled = True
     finally:
-        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
         try:
+            signal.pthread_sigmask(signal.SIG_BLOCK, watched)
             if process is not None:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
@@ -1104,8 +1119,14 @@ def supervise(arguments, seconds):
                     pass
                 process.wait()
         finally:
-            signal.signal(signal.SIGTERM, previous)
-            signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+            try:
+                signal.signal(signal.SIGINT, previous[signal.SIGINT])
+            finally:
+                try:
+                    signal.signal(signal.SIGTERM, previous[signal.SIGTERM])
+                finally:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+    return 2 if cancelled else code
 
 
 def parser():

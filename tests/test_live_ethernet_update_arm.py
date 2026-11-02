@@ -945,3 +945,115 @@ def test_supervisor_cleanup_defers_a_second_interrupt(monkeypatch):
             if process.poll() is None:
                 original_kill(process.pid, signal.SIGKILL)
                 process.wait()
+
+
+@pytest.mark.parametrize(
+    ("when", "signum"),
+    [
+        ("spawn", "SIGINT"),
+        ("spawn", "SIGTERM"),
+        ("cleanup", "SIGINT"),
+        ("cleanup", "SIGTERM"),
+        ("setup", "SIGINT"),
+        ("restore", "SIGINT"),
+    ],
+)
+def test_supervisor_reaps_after_signal_via_another_thread(monkeypatch, when, signum):
+    import os
+    import signal
+    import subprocess
+    import sys
+    import threading
+
+    requested, sent = threading.Event(), threading.Event()
+    created = []
+    original_spawn, original_kill = subprocess.Popen, os.killpg
+    original_signal = signal.signal
+    selected = getattr(signal, signum)
+    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+
+    def sender():
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {selected})
+        if requested.wait(2):
+            signal.pthread_kill(threading.get_ident(), selected)
+            sent.set()
+
+    def interrupt():
+        requested.set()
+        assert sent.wait(2), "signal sender did not reach delivery boundary"
+
+    def spawn(*args, **kwargs):
+        process = original_spawn(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        created.append(process)
+        if when == "spawn":
+            interrupt()
+        return process
+
+    def kill(group, sig):
+        if when == "cleanup" and not requested.is_set():
+            interrupt()
+        return original_kill(group, sig)
+
+    def install(sig, handler):
+        if (
+            sig == selected
+            and not requested.is_set()
+            and when == "setup"
+            and handler != previous[selected]
+        ):
+            interrupt()
+        result = original_signal(sig, handler)
+        if (
+            sig == selected
+            and not requested.is_set()
+            and when == "restore"
+            and handler == previous[selected]
+        ):
+            interrupt()
+        return result
+
+    sender_thread = threading.Thread(target=sender)
+    sender_thread.start()
+    monkeypatch.setattr(arm.subprocess, "Popen", spawn)
+    monkeypatch.setattr(arm.os, "killpg", kill)
+    monkeypatch.setattr(arm.signal, "signal", install)
+    try:
+        try:
+            result = arm.supervise([], 0.03)
+        except (KeyboardInterrupt, InterruptedError):
+            result = 2
+        assert result == 2
+        assert len(created) == (0 if when == "setup" else 1)
+        assert all(c.returncode is not None and c.poll() is not None for c in created)
+        assert sent.is_set()
+        assert {sig: signal.getsignal(sig) for sig in previous} == previous
+        assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == old_mask
+    finally:
+        for process in created:
+            if process.poll() is None:
+                original_kill(process.pid, signal.SIGKILL)
+            process.wait()
+        for sig, handler in previous.items():
+            original_signal(sig, handler)
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        sender_thread.join(3)
+        assert not sender_thread.is_alive()
+
+
+def test_supervisor_preserves_normal_child_exit(monkeypatch):
+    import subprocess
+    import sys
+
+    original = subprocess.Popen
+
+    def spawn(*args, **kwargs):
+        return original(
+            [sys.executable, "-c", "raise SystemExit(7)"], start_new_session=True
+        )
+
+    monkeypatch.setattr(arm.subprocess, "Popen", spawn)
+    assert arm.supervise([], 3) == 7
