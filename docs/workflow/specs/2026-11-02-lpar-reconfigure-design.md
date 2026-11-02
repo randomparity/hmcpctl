@@ -34,10 +34,10 @@ Decision 1. Omitted fields are never read into a write.
 guard, runs the ADR 0011 ownership check, reads the partition and its target profile, and
 computes the plan: every change and its classification (ADR 0314 Decisions 2–4) before any
 write. It records the plan as effect `plan`. Phase `applying` then writes, in order: `profile`,
-`memory.current`, `processors.current`, `rename` — skipping each one the plan does not need.
-A replay (any run after `plan` is applied) re-resolves the partition by its recorded UUID,
-re-runs the ownership check and the stale-plan checks, then continues from the recorded plan.
-Finally it re-reads the partition and profile and verifies each change (Decision 5).
+`current`, `rename` — skipping each one the plan does not need. A replay (any run after `plan`
+is applied) re-resolves the partition by its recorded UUID, re-runs the ownership check and the
+stale-plan checks for writes not yet applied, then continues from the recorded plan. Finally it
+polls the partition and profile and verifies each change (Decision 7).
 
 **Result** (`result` of the record): `system_uuid`, `lpar_uuid`, `profile_name`,
 `changes[]` (`field`, `before`, `after`, `applied` ∈ `live` / `profile` /
@@ -65,10 +65,11 @@ Live and inactive current-configuration writes use `HMCClient.update_logical_par
 3. **Accepted failure classes**
    - an interrupted current-configuration write always needs attention (no classifier): DLPAR
      cannot be told from a concurrent change (H1 spec *Resume*);
-   - with profile sync on, a later current-configuration change can overwrite a
-     `pending_activation` profile value; reported as a warning (ADR 0201);
-   - other HMC writers inside the window are not fenced; the caller's
-     `exclusive_writer_window` assertion and the ETag are the controls (ADR 0242);
+   - with profile sync on, a later current-configuration change by another writer can overwrite
+     a `pending_activation` profile value; the result warns (ADR 0201). This operation's own
+     writes cannot: such a plan is refused (ADR 0314 Decision 3);
+   - other HMC writers inside the window are not fenced; the caller's `exclusive_writer_window`
+     assertion, the profile ETag and the pre-write re-read are the controls (ADR 0242);
    - a guest that does not take a DLPAR memory removal is HMC-reported failure → uncertain →
      `needs_attention`.
 4. **Covered elsewhere**
@@ -91,11 +92,13 @@ Live and inactive current-configuration writes use `HMCClient.update_logical_par
 
 1. A patch with only the given fields changes only those fields; the plan records every change
    before the first write. (criterion 1)
-2. Classification follows ADR 0314 Decisions 2–4 for each of: not activated; running with RMC
+2. Classification follows ADR 0314 Decisions 2–3 for each of: not activated; running with RMC
    active and the value within current bounds; RMC inactive; beyond current bounds; beyond
-   profile bounds; a decrease with `allow_disruption` false and true. (criteria 2, 3)
-3. A continuation re-authorizes and re-checks the owner; a replay against a changed partition or
-   profile (`before` values differ) fails without writing. (criterion 4; stale plan)
+   profile bounds; a decrease with `allow_disruption` false and true; profile and current values
+   that disagree; sync on with a mixed plan (refused). (criteria 2, 3)
+3. A continuation re-authorizes and re-checks the owner; a write not yet applied whose basis
+   changed (state, RMC, sync, current values, profile ETag) fails without writing; a resume after
+   an applied write continues past it. (criterion 4; stale plan)
 4. An open `profile` effect resumes by readback; an open current-configuration effect pauses
    `needs_attention`; a partial apply (profile applied, DLPAR uncertain) pauses with both
    recorded. (criterion 5)
