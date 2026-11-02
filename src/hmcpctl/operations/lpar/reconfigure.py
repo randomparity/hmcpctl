@@ -11,6 +11,7 @@ Messages name partitions and profiles by UUID and never echo a caller's selector
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
@@ -23,7 +24,7 @@ from ...documents.partition_profile import ProfilePatch
 from ...errors import HMCError, LparUpdateError
 from ...resource_identity import resolve_system_uuid
 from ...xmlutil import escape_xml, leaf_text
-from ..logical import engine, profile_write
+from ..logical import engine, profile_write, store
 from ..logical.engine import (
     BodyResult,
     Classification,
@@ -61,7 +62,7 @@ class ReconfigurePatch(BaseModel):
     """What to change; an omitted field is never read into a write (ADR 0314 Decision 1)."""
 
     model_config = ConfigDict(extra="forbid")
-    # Bounded so the recorded plan stays inside the store's 4 KiB effect identity.
+    # Bounded for the recorded plan; reconfigure_body still checks its encoded size.
     name: StrictStr | None = Field(
         default=None,
         max_length=256,
@@ -737,6 +738,12 @@ def reconfigure_body(
                 made = await _make_plan(
                     hmc, patch, allow_disruption, system_uuid, lpar_uuid, others
                 )
+
+                if len(json.dumps(made, sort_keys=True)) > store.MAX_IDENTITY_BYTES:
+                    raise OperationFailed(
+                        "the plan exceeds the operation store's effect identity bound; "
+                        "use a shorter or ASCII partition name"
+                    )
 
                 async def record() -> Mapping[str, Any]:
                     return made

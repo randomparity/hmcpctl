@@ -680,6 +680,13 @@ def test_a_name_too_long_for_the_plan_is_refused():
         ReconfigurePatch(name="a" * 257)
 
 
+def test_a_plan_too_large_to_record_fails_before_any_effect(hmc):
+    record = _run({"name": "\U0001f600" * 256})
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert "effect identity bound" in record.warnings[0]
+    assert record.effects == ()
+
+
 def test_open_plan_effect_is_recomputed():
     verdict = _await(reconfigure._classify_plan(None, None))
     assert verdict.status == "not_applied"
