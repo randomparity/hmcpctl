@@ -4,9 +4,11 @@
 
 Source-only version 2 implemented and offline verified at `07d8a360`, 2026-11-01.
 The maintainer subsequently approved the retained-fixture prerequisite through
-design and implementation in issuecomment-6563667424. Its exact design is under
-review. Hardware/window admission and publication remain separate holds. This
-record does not settle the complete updater design.
+design and implementation in issuecomment-6563667424; it was offline verified at
+`9d1bbb43`. The subsequently approved fixed-fixture allocation and fresh-only
+Description correction is under design. Native vNIC update qualification and the
+public setter remain unfinished; hardware windows and publication need separate
+admission. This record does not settle the complete updater design.
 
 ## Context
 
@@ -43,6 +45,16 @@ an explicit no-source declaration is distinct from missing history. Root owns
 declaration completeness within the coordinated writer deployment. Configured
 resources come from the unique contained default saved profile; inactive current
 placeholders and unknown fields remain observations, not desired-value defaults.
+For this fixed 512MiB/0.05-unit fixture only, require six observed allocation
+changes: assigned memory +512MiB, hypervisor +48MiB, current/pending available
+memory -560MiB and current/pending available CPU -0.05. Validate the baseline
+counter leaves before create and preserve their attributes and other observations.
+These empirical values are an explicit refusal policy, not universal HMC costs.
+A missing REST Description is permitted only before stamping a proven fresh
+created target with independently blank native text. Explicit empty remains
+valid; null, malformed or nonempty values do not become absence. Stamped/owned
+checks and failed-history cleanup rules remain strict.
+
 No activation, reseed, alternative encoding, automatic retry, rollback or maturity
 promotion follows. The full
 five-field updater, later list modes and two-list composition remain #1828 work.

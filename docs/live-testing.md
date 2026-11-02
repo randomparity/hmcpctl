@@ -2942,6 +2942,14 @@ captured UUID/id, saved default profile/ETag, caller and empty-vNIC baseline.
 The fixed tuple is512/512/1024MiB, shared capped0.05/0.05/0.05 units,
 vCPU1/1/1 and8virtual slots. Missing capacity/alignment/minimum eligibility
 refuses; never increase resources or switch modes to force the test through.
+All six allocation counters must be available and strictly scalar before create.
+This fixed fixture requires assigned memory+512MiB, hypervisor+48MiB, current and
+pending available memory-560MiB, and current and pending available CPU-0.05.
+These are empirical acceptance values, not general allocation costs. Other raw
+fields and scalar attributes remain exact. Only a proven fresh pre-stamp target
+may omit REST Description, paired with independently blank native text; owned
+and stamped descriptions remain mandatory. A cleanup counter lag is a failure,
+even if independent recovery later sees the exact original baseline.
 
 Cleanup is another explicit packet and window. Bind the original successful
 preparation journal and either an explicit `none-invoked` declaration with no

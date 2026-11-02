@@ -6,7 +6,10 @@ Authority: [amended scope](https://github.com/randomparity/hmcpctl/issues/1828#i
 token `q1828-eed0dad6`, and the maintainer's explicit prerequisite approval in
 issuecomment-6563667424. [ADR 0312](../../adr/0312-vnic-policy-updates.md) records
 the owner decision. Status: implemented with offline lifecycle and physical-boundary
-proofs; hardware execution and publication remain separately held.
+proofs at `9d1bbb43`. A hardware preparation exposed allocation-counter and
+fresh absent-Description mismatches; the maintainer approved the exact bounded
+correction below on 2026-11-02. Its design is in progress. Subsequent windows and
+publication remain separately held; native vNIC update support is unqualified.
 
 ## Problem and scope
 
@@ -98,9 +101,32 @@ Read contained feeds and independent full current resources, retaining unknown
 resource/I/O fields. Read each bounded contained saved profile with the existing
 native profile reader, including UUID, name, SettingID, parent association and
 ETag. Reject duplicate/ambiguous identities and unavailable full resources.
-Only the explicitly volatile uptime observation is excluded from preservation;
-it supplies no fixture or resource authority. The remaining foreign projection
-must remain equal before/after this procedure's effects.
+Only volatile uptime is excluded from the raw resource snapshot. Before creation,
+require present, strictly scalar, finite nonnegative values for each of the six
+allocation counters below, in addition to the existing capacity checks. A negative
+expected post-create value refuses before effects. Missing/compound/nonfinite
+counters are not discovered for the first time after an admitted create.
+
+| Counter | Required change for this fixed fixture |
+| --- | ---: |
+| CurrentAssignedMemoryToPartitions | +512MiB |
+| MemoryUsedByHypervisor | +48MiB |
+| CurrentAvailableSystemMemory | -560MiB |
+| PendingAvailableSystemMemory | -560MiB |
+| CurrentAvailableSystemProcessorUnits | -0.05 |
+| PendingAvailableSystemProcessorUnits | -0.05 |
+
+This is the operator-approved empirical envelope for the fixed tuple, not a
+universal allocation formula. Compare both numeric values and strict leaf shape;
+bare/attributed scalars remain supported, but changing representation or attributes
+across the effect refuses. Preserve raw snapshots. Only after each exact delta is
+proved may a comparison copy restore its baseline leaf; remove only the captured
+fresh target/profile from that copy and require the entire remainder equal the
+original baseline. No blanket dropped-counter projection remains. Unknown fields,
+foreign partitions/profiles/backings and scalar attributes remain exact.
+Post-delete comparison still requires the complete original raw baseline. Transient
+counter lag remains MANUAL_RECOVERY, even if later independent observation restores
+the baseline; failed history is not repaired or promoted to CLEAN.
 
 Configured tuple proof comes from the uniquely contained `default_profile`, bound
 to the current default pointer and exact parent/candidate. Check its shared/capped
@@ -128,7 +154,12 @@ eligibility; preparing this fixture earns no source admission or positive oracle
    ambiguous success, unrecognized refusal or failed readback never permits retry.
 3. Before the one stamp, independently confirm a fresh contained UUID/name/id,
    inactive state, exact saved resource tuple, preserved foreign baseline and no
-   vNICs. Scope the check around the existing stamp owner. Persist stamp intent
+   vNICs. Only this guarded pre-stamp path may compare genuinely absent REST
+   Description as empty, paired with independently blank native text. Preserve an
+   already-valid explicit-empty pair. Present null, malformed leaves, nonempty text
+   or disagreement refuse. Recompute this phase-specific proof when validating
+   successful preparation history; retained/owned/source reads keep strict present
+   descriptions. Scope the check around the existing stamp owner. Persist stamp intent
    before its physical SSH dispatch. Afterward independently compare REST/native
    descriptions, effective owner and caller token. Acknowledgement alone is
    insufficient. Any unknown outcome stops, retaining residue for recovery.
@@ -182,6 +213,15 @@ claims over known history, complete/partial source evidence, byte/count/time
 exhaustion, delayed intent, own logout failure and independent recovery. Controlled
 faults must demonstrate validation, history, cleanup and budget tests bite. Test
 the unchanged v1/v2 contracts and actual wrapper/preflight/recovery boundaries.
+The forward correction adds real-parser cases for each unavailable baseline
+counter before preflight/capture effects, each wrong allocation delta, scalar
+attribute/shape and unknown-field drift, absent/explicit-empty pre-stamp positives,
+malformed/nonempty/null negatives and stamped absence/history tampering. The existing
+physical lifecycle covers REST/native fallback and combined null-property/name
+fallback with independent per-session transport counts. Model post-delete counter
+lag explicitly: fresh later baseline equality does not promote failed cleanup.
+Use controlled faults to show these guards reject their specific unsafe state.
+
 Run affected tests/static checks, then normal independent product/security review,
 simplification and one exact final `just verify` plus separate pinned all-files hooks.
 
