@@ -18,6 +18,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `hmc_provision_lpar` runs as one journaled logical operation (ADR 0313): each HMC write is
+  recorded before and after it runs, a repeat returns the same operation instead of creating
+  a second partition, and `continuation=resume` checks an interrupted write live before
+  continuing. `storage.capacity_mib` creates the root disk and records it as owned. The
+  client adapter's MAC is recorded. `expected_plan_digest` refuses a request whose fresh
+  `hmc_plan_lpar` digest differs. Each write is authorized as its specialist tool
+  (ADR 0189). No partition profile is written (#1839).
+
 - Single-backing vNIC creation accepts priority, VLAN and MAC allowlists, automatic
   priority failover and an explicit MAC address through Python, CLI and MCP. Selected
   policy readback is independent of topology verification, including existing-match
@@ -234,6 +242,15 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   mappings and volume-group volumes (#1479).
 
 ### Changed
+
+- **Breaking:** `hmc_provision_lpar` requires `request_id`, and `hmcpctl lpars provision`
+  requires `--request-id`, with no compatibility path. The tool's result gains `operation`,
+  a clean run ends `completed`, and a later step's error pauses the operation
+  `needs_attention` instead of returning a partial result. The ownership stamp is required:
+  a stamp that does not land makes the operation `failed`. Steps gain `stamp`, and the
+  `create` step reports only the UUID and name. `affinity_assessment` without `power_on` is
+  refused. A policy must now permit the specialist tools whose writes a provision performs
+  (#1839).
 
 - Builds derive the package version from Git tags with `hatch-vcs`: a release tag `vX.Y.Z`
   builds `X.Y.Z`, and every other commit builds `X.Y.(Z+1).devN+g<sha>`, so a development

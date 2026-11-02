@@ -487,9 +487,10 @@ reason codes, and how to route or silence them.
 
 The logical LPAR tools record their progress in a local SQLite store, `operations.sqlite3`,
 beside `store-id` and `execution.lock` in one state directory: `HMCPCTL_STATE_DIR` when set,
-otherwise the platform state directory. In this release `hmc_power_lpar` is the only tool that
-starts a logical operation, so the store is created by its first call; operator commands for
-the store are #1286. The
+otherwise the platform state directory. `hmc_power_lpar`, `hmc_provision_lpar` and its CLI
+mirror `hmcpctl lpars provision` start logical operations, so the store is created by the first
+of them to run (a provision `dry_run` records nothing); operator commands for the store are
+#1286. The
 directory is created with mode `0700` and its files with `0600`; hmcpctl refuses a directory or
 file that other users can access.
 

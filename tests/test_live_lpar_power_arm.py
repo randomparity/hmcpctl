@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +28,7 @@ from live_test import (  # noqa: E402
 from pydantic import TypeAdapter  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402
+from hmcpctl.operations.logical.models import OperationRecord  # noqa: E402
 from hmcpctl.operations.lpar.assignments import LparPcieAssignments  # noqa: E402
 from hmcpctl.operations.lpar.provision import (  # noqa: E402
     validate_provision_assignments,
@@ -370,6 +372,8 @@ class World:
         return {"mapping_id": kwargs["mapping_id"]}
 
     def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
+        if kwargs.get("continuation") == "abandon":
+            return {**_provisioned(False, "terminal"), "steps": []}
         assignments = kwargs.get("assignments", {})
         try:
             validate_provision_assignments(
@@ -406,6 +410,9 @@ class World:
             "ownership_stamped": True,
             "steps": steps,
             "warnings": [],
+            "operation": _record(
+                "paused" if self.provision_fails_after_storage else "terminal"
+            ),
         }
 
     def _hmc_list_adapters(self, kwargs: dict[str, Any]) -> Any:
@@ -484,6 +491,44 @@ class World:
             "steps": [{"step": "delete_lpar", "status": "ok"}],
             "blast_radius": radius,
         }
+
+
+def _record(state: str) -> dict[str, Any]:
+    """An ADR 0313 operation record in *state*, as the served result carries it."""
+    outcome = "completed" if state == "terminal" else "needs_attention"
+    return asdict(
+        OperationRecord(
+            "0" * 32,
+            "r",
+            "hmc_provision_lpar",
+            "<default>",
+            None,
+            None,
+            state,
+            "creating",
+            outcome,
+            (),
+            (),
+            False,
+            (),
+            (),
+            None,
+            "t",
+            "t",
+        )
+    )
+
+
+def _provisioned(completed: bool, state: str) -> dict[str, Any]:
+    return {
+        "resource_created": True,
+        "workflow_completed": completed,
+        "lpar_uuid": None,
+        "dry_run": False,
+        "ownership_stamped": True,
+        "warnings": [],
+        "operation": _record(state),
+    }
 
 
 class FakeClient:

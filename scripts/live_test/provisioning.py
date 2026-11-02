@@ -42,6 +42,7 @@ async def validate_provisioning_dry_run(client: Client, state: RunState) -> None
     st, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id="st13-dry-run",
         dry_run=True,
         system_name_or_uuid=config.system_name,
         name=config.dry_run_lpar_name,
@@ -301,6 +302,8 @@ async def _provision_from_baseline(
     status, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id=f"st14-{fixture['token']}",
+        wait_seconds=600,
         system_name_or_uuid=config.system_name,
         name=fixture["name"],
         caller_token=fixture["token"],

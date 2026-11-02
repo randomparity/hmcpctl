@@ -104,13 +104,13 @@ override is exercised. Always `WARNING`.
 
 **Not every record is a human decision.** Most are: a caller passing
 `ownership_override` is an operator-approved exception to a single mutation. One
-internal caller also emits it — `provision_lpar`'s activation leg passes the
+internal caller also emits it — `hmc_provision_lpar`'s activation leg passes the
 override unconditionally, because the ownership token it would authorize against is
 the one the same workflow stamped moments earlier
 ([ADR 0092](adr/0092-uniform-lpar-ownership-authorization-rule.md) Consequences).
 That leg is reached only when `HMC_AUTHORIZE_POWER_OPERATIONS` is on, so with the
 guard off — the default — every record in this stream is caller-supplied. With it
-on, expect one record per `provision_lpar(power_on=True)`. The record carries no
+on, expect one record per provision with `power_on`. The record carries no
 field distinguishing the two sources; an alert on this event should account for that
 before the guard is enabled.
 
@@ -193,7 +193,7 @@ prescribes retry-after-refusal as the sanctioned override procedure, so a legiti
 override is now *preceded* by a denial record carrying the same `system`, `lpar`, and
 `attribution.claim` as the `ownership-override` record seconds later. There is no
 correlation identifier, so pairing them means matching those three fields inside a
-time window — and an override that was never refused (`provision_lpar`'s activation
+time window — and an override that was never refused (`hmc_provision_lpar`'s activation
 leg, or any caller who passes `ownership_override` on the first attempt) will pair
 against an unrelated earlier denial if one is in the window. A refused `--dry-run`
 decommission preflight — the sequence the [CLI guide](cli.md) prescribes — emits the same record

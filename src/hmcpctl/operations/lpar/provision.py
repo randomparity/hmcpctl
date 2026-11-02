@@ -1,14 +1,13 @@
-"""Presentation-neutral LPAR provisioning workflow.
+"""Presentation-neutral LPAR provisioning: request types, preconditions and legs.
 
-Composes create_logical_partition + add_network_adapter + map_storage_to_lpar +
-power-on into a single call with a structured per-step
-result and an optional dry-run that validates preconditions only.
+``provision_operation`` runs the legs as one journaled operation (ADR 0313);
+``preview_provision`` is the dry run, which validates preconditions only.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
@@ -24,7 +23,7 @@ from ...documents.lpar import (
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.storage import StorageKind, validate_virtual_disk
 from ...errors import HMCError
-from ...jobs import JobOutcome, job_identifier, job_outcome
+from ...jobs import JobOutcome, job_outcome
 from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
 from ...ssh.affinity import (
     MinimumAffinityPolicy,
@@ -34,21 +33,21 @@ from ...ssh.affinity import (
 from ...ssh.lpar import validate_caller_token
 from ...ssh.selectors import resolve_ssh_names
 from ...ssh.transport import HMCCLIError
+from ...xmlutil import leaf_text
 from ..affinity.rest import (
     ProvisionAffinityAssessment,
     assess_post_activation_affinity,
     validate_affinity_request,
 )
-from ..affinity.ssh import set_minimum_affinity_policy
+from ..logical.models import OperationRecord
 from ..storage.resources import create_virtual_disk, resolve_volume_group_uuid
 from .activation import submit_power_on_lpar
 from .assignments import (
     LparPcieAssignments,
-    apply_validated_lpar_pcie_assignments,
     assignment_step_names,
     prevalidate_lpar_pcie_assignments,
 )
-from .core import LparCreation, LparCreationResult, create_and_stamp_lpar
+from .core import LparCreation
 from .physical_io import admit_creation_io
 from .workflow_contract import WorkflowStep
 
@@ -81,6 +80,13 @@ class ProvisionStorage:
         default=None,
         metadata={
             "description": "Volume-group UUID used when creating a virtual disk."
+        },
+    )
+    capacity_mib: int | None = field(
+        default=None,
+        metadata={
+            "description": "Create storage_name as a new virtual disk of this size in "
+            "vg_uuid, owned by the operation; omit to map existing storage."
         },
     )
 
@@ -141,6 +147,13 @@ class ProvisionResult:
                 "its current profile too. Null when no adapter or mapping step "
                 "ran, or when the read failed (see warnings)."
             )
+        },
+    )
+    operation: OperationRecord | None = field(
+        default=None,
+        metadata={
+            "description": "The logical operation that ran the provision (ADR 0313), "
+            "or null for a dry run."
         },
     )
 
@@ -412,93 +425,6 @@ async def attach_disk_to_lpar(
     )
 
 
-def _provision_result(
-    creation: LparCreationResult | None,
-    created_uuid: str | None,
-    steps: list[WorkflowStep],
-    workflow_completed: bool,
-    warnings: tuple[str, ...] = (),
-    change_location: ChangeLocation | None = None,
-) -> ProvisionResult:
-    return ProvisionResult(
-        resource_created=creation.resource_created if creation else False,
-        workflow_completed=workflow_completed,
-        lpar_uuid=created_uuid,
-        dry_run=False,
-        ownership_stamped=creation.ownership_stamped if creation else None,
-        steps=tuple(steps),
-        warnings=(*(creation.warnings if creation else ()), *warnings),
-        change_location=change_location,
-    )
-
-
-async def _run_policy_leg(
-    steps: list[WorkflowStep],
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    lpar_name: str,
-    policy: MinimumAffinityPolicy | None,
-) -> bool:
-    if policy is None:
-        return True
-    return await _record_hmc_step(
-        steps,
-        "minimum_affinity_policy",
-        set_minimum_affinity_policy(
-            hmc, lpar_name, policy, system_name_or_uuid=system_name_or_uuid
-        ),
-    )
-
-
-async def _run_network_leg(
-    steps: list[WorkflowStep], hmc: HMCClient, lpar_uuid: str, vlan_id: int
-) -> bool:
-    return await _record_hmc_step(
-        steps, "network", _add_network(hmc, lpar_uuid, vlan_id)
-    )
-
-
-async def _run_assignment_leg(
-    steps: list[WorkflowStep],
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    lpar_name: str,
-    assignments: LparPcieAssignments,
-) -> bool:
-    result = await apply_validated_lpar_pcie_assignments(
-        hmc, system_name_or_uuid, lpar_name, assignments
-    )
-    steps.extend(result.steps)
-    return result.workflow_completed
-
-
-async def _run_power_leg(
-    steps: list[WorkflowStep],
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    lpar_uuid: str,
-    assessment: ProvisionAffinityAssessment | None,
-) -> bool:
-    try:
-        result = await _power_on(hmc, system_name_or_uuid, lpar_uuid, assessment)
-    except (HMCError, ValueError) as exc:
-        steps.append(WorkflowStep("power_on", "error", str(exc)))
-        return False
-    if isinstance(result, JobOutcome):
-        if result.timed_out or result.error is not None:
-            message = result.error or (
-                "PowerOn did not reach a successful terminal status before timeout"
-            )
-            steps.append(WorkflowStep("power_on", "error", message, result))
-            return False
-        steps.append(WorkflowStep("power_on", "ok", asdict(result), result))
-    else:
-        identifier = job_identifier(result) if result else None
-        job = job_outcome(identifier, result) if identifier else None
-        steps.append(WorkflowStep("power_on", "ok", result, job))
-    return True
-
-
 async def _run_affinity_leg(
     steps: list[WorkflowStep],
     hmc: HMCClient,
@@ -525,32 +451,6 @@ async def _run_affinity_leg(
     return True, (f"Post-activation affinity assessment: {classification}",)
 
 
-def _append_apply_step(
-    steps: list[WorkflowStep], step_names: list[str], creation: LparCreationResult
-) -> bool:
-    """Record the mksyscfg path's profile apply after ``create``; False on error."""
-    apply_step = creation.apply_step
-    if apply_step is None:
-        return True
-    step_names.insert(1, apply_step.step)
-    steps.append(apply_step)
-    return apply_step.status != "error"
-
-
-def _failed_provision_result(
-    creation: LparCreationResult,
-    created_uuid: str,
-    steps: list[WorkflowStep],
-    step_names: list[str],
-    warnings: tuple[str, ...] = (),
-    change_location: ChangeLocation | None = None,
-) -> ProvisionResult:
-    _skip_steps(steps, step_names[len(steps) :])
-    return _provision_result(
-        creation, created_uuid, steps, False, warnings, change_location
-    )
-
-
 def validate_provision_assignments(assignments: LparPcieAssignments) -> None:
     """Refuse a dedicated-slot request, which provision cannot activate (#1390).
 
@@ -571,6 +471,34 @@ def validate_provision_assignments(assignments: LparPcieAssignments) -> None:
         )
 
 
+def validate_provision_storage(storage: ProvisionStorage) -> None:
+    """Refuse a new-disk request that names no volume group or a non-virtual kind."""
+    if storage.capacity_mib is None:
+        return
+    if storage.kind != "VirtualDisk" or not storage.vg_uuid:
+        raise ValueError(
+            "storage.capacity_mib creates a VirtualDisk: pass kind VirtualDisk and vg_uuid"
+        )
+    validate_virtual_disk(storage.storage_name, storage.capacity_mib)
+
+
+async def _check_new_disk_absent(hmc: HMCClient, storage: ProvisionStorage) -> None:
+    """Raise ValueError if the new disk's name is already taken on its VIOS."""
+    for group in await hmc.list_volume_groups(storage.vios_uuid):
+        disks = ((group.get("Resource") or {}).get("VirtualDisks") or {}).get(
+            "VirtualDisk"
+        )
+        for disk in disks if isinstance(disks, list) else [disks]:
+            if isinstance(disk, dict) and leaf_text(disk.get("DiskName")) == (
+                storage.storage_name
+            ):
+                raise ValueError(
+                    f"A virtual disk named {storage.storage_name!r} already exists on "
+                    f"VIOS {storage.vios_uuid!r}; choose another name or omit "
+                    "capacity_mib to map it"
+                )
+
+
 async def _preflight_provision_request(
     hmc: HMCClient,
     system_name_or_uuid: str,
@@ -579,6 +507,11 @@ async def _preflight_provision_request(
     """Validate a provisioning request and every external dependency it names."""
     reject_update_weight_on_create(request.resources)
     validate_provision_assignments(request.assignments)
+    validate_provision_storage(request.storage)
+    if request.affinity_assessment is not None and not request.power_on:
+        raise ValueError(
+            "affinity_assessment waits for a successful power-on; pass power_on=true"
+        )
     if request.affinity_assessment is not None and (
         request.affinity_assessment.system_name_or_uuid != system_name_or_uuid
         or request.affinity_assessment.lpar_name != request.name
@@ -619,6 +552,8 @@ async def _preflight_provision_request(
     await check_vlan_exists(hmc, system_uuid, request.adapters.port_vlan_id)
     if request.storage.vg_uuid is not None:
         await _check_vg_exists(hmc, request.storage.vios_uuid, request.storage.vg_uuid)
+    if request.storage.capacity_mib is not None:
+        await _check_new_disk_absent(hmc, request.storage)
     await prevalidate_lpar_pcie_assignments(
         hmc, system_name_or_uuid, request.assignments
     )
@@ -628,63 +563,18 @@ def _provision_step_names(
     request: ProvisionRequest,
 ) -> list[str]:
     """Return the ordered workflow-step names for one provision request."""
-    names = ["create"]
+    names = ["create", "stamp"]
     if request.minimum_affinity_policy is not None:
         names.append("minimum_affinity_policy")
-    names.extend(["network", "storage", *assignment_step_names(request.assignments)])
+    names.append("network")
+    if request.storage.capacity_mib is not None:
+        names.append("create_disk")
+    names.extend(["storage", *assignment_step_names(request.assignments)])
     if request.power_on:
         names.append("power_on")
     if request.affinity_assessment is not None:
         names.append("affinity_assessment")
     return names
-
-
-async def _run_legs_through_power(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    request: ProvisionRequest,
-    lpar_uuid: str,
-    steps: list[WorkflowStep],
-    step_names: list[str],
-) -> tuple[bool, tuple[str, ...], ChangeLocation | None]:
-    """Run the policy through power legs; on failure, skip the remaining steps.
-
-    Returns the completed flag, the change-location read's warnings, and the
-    change location. Both are empty until the read, which follows the network
-    leg.
-    """
-    change_location: ChangeLocation | None = None
-    warnings: tuple[str, ...] = ()
-    completed = await _run_policy_leg(
-        steps,
-        hmc,
-        system_name_or_uuid,
-        request.name,
-        request.minimum_affinity_policy,
-    )
-    completed = completed and await _run_network_leg(
-        steps, hmc, lpar_uuid, request.adapters.port_vlan_id
-    )
-    if completed:
-        # Read once here, not through the standalone adapter/storage operations,
-        # which would repeat the authorization read once per step (#1056).
-        change_location, warnings = await _read_change_location(hmc, lpar_uuid)
-        storage_steps, completed = await _run_storage_leg(
-            hmc, lpar_uuid, request.storage
-        )
-        steps.extend(storage_steps)
-    completed = completed and await _run_assignment_leg(
-        steps, hmc, system_name_or_uuid, request.name, request.assignments
-    )
-    completed = completed and (
-        not request.power_on
-        or await _run_power_leg(
-            steps, hmc, system_name_or_uuid, lpar_uuid, request.affinity_assessment
-        )
-    )
-    if not completed:
-        _skip_steps(steps, step_names[len(steps) :])
-    return completed, warnings, change_location
 
 
 async def _run_affinity_stage(
@@ -693,102 +583,22 @@ async def _run_affinity_stage(
     """Run the optional post-activation affinity assessment."""
     if request.affinity_assessment is None:
         return True, ()
-    if not request.power_on:
-        steps.append(WorkflowStep("affinity_assessment", "skipped"))
-        return False, ()
     return await _run_affinity_leg(
         steps, hmc, request.affinity_assessment, request.minimum_affinity_policy
     )
 
 
-async def provision_lpar(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    request: ProvisionRequest,
+async def preview_provision(
+    hmc: HMCClient, system_name_or_uuid: str, request: ProvisionRequest
 ) -> ProvisionResult:
-    """Provision an LPAR after validating every requested dependency.
-
-    ``dry_run`` performs only the precondition checks and marks each planned
-    step ``dry_run``. On partial failure, completed, failed, and remaining
-    steps are reported as ``ok``, ``error``, and ``skipped`` respectively;
-    no automatic rollback is attempted.
-
-    Ownership stamping is best effort. ``ownership_stamped`` distinguishes a
-    confirmed write, a failed write, and a dry run where no stamp was
-    attempted. When ``caller_token`` is supplied, it is written together with
-    the ownership stamp, so the result describes both values as one write.
-    """
-
-    await _preflight_provision_request(
-        hmc,
-        system_name_or_uuid,
-        request,
-    )
-    step_names = _provision_step_names(request)
-
-    if request.dry_run:
-        return ProvisionResult(
-            resource_created=False,
-            workflow_completed=False,
-            lpar_uuid=None,
-            dry_run=True,
-            ownership_stamped=None,
-            steps=tuple(WorkflowStep(n, "dry_run") for n in step_names),
-            warnings=(),
-        )
-
-    steps: list[WorkflowStep] = []
-    try:
-        creation = await create_and_stamp_lpar(
-            hmc,
-            system_name_or_uuid,
-            LparCreation(
-                request.name,
-                request.partition_type,
-                request.resources,
-                caller_token=request.caller_token,
-                apply_profile=True,
-                physical_io=request.physical_io,
-                creation_sriov=request.assignments.sriov
-                if request.physical_io.requested
-                else (),
-            ),
-        )
-    except HMCError as exc:
-        steps.append(WorkflowStep("create", "error", str(exc)))
-        _skip_steps(steps, step_names[1:])
-        failed = _provision_result(None, None, steps, False)
-        return (
-            replace(failed, resource_created=None)
-            if request.physical_io.requested
-            else failed
-        )
-
-    created_lpar = creation.lpar
-    created_uuid = (created_lpar or {}).get("UUID")
-    if not isinstance(created_uuid, str) or not created_uuid:
-        steps.append(WorkflowStep("create", "error", "LPAR creation returned no UUID"))
-        _append_apply_step(steps, step_names, creation)
-        _skip_steps(steps, step_names[len(steps) :])
-        return _provision_result(creation, None, steps, False)
-    steps.append(WorkflowStep("create", "ok", created_lpar))
-    if creation.physical_io_step is not None:
-        step_names.insert(len(steps), "physical_io")
-        steps.append(creation.physical_io_step)
-        if creation.physical_io_step.status != "ok":
-            return _failed_provision_result(creation, created_uuid, steps, step_names)
-    if not _append_apply_step(steps, step_names, creation):
-        return _failed_provision_result(creation, created_uuid, steps, step_names)
-
-    if request.physical_io.requested:
-        request = replace(request, assignments=replace(request.assignments, sriov=()))
-        step_names = [n for n in step_names if not n.startswith("sriov[")]
-    completed, warnings, change_location = await _run_legs_through_power(
-        hmc, system_name_or_uuid, request, created_uuid, steps, step_names
-    )
-    if completed:
-        completed, affinity_warnings = await _run_affinity_stage(steps, hmc, request)
-        warnings += affinity_warnings
-    return _provision_result(
-        creation, created_uuid, steps, completed, warnings, change_location
+    """Validate every precondition and report the planned steps as ``dry_run``."""
+    await _preflight_provision_request(hmc, system_name_or_uuid, request)
+    return ProvisionResult(
+        resource_created=False,
+        workflow_completed=False,
+        lpar_uuid=None,
+        dry_run=True,
+        ownership_stamped=None,
+        steps=tuple(WorkflowStep(n, "dry_run") for n in _provision_step_names(request)),
+        warnings=(),
     )

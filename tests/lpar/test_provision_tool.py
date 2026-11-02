@@ -9,7 +9,12 @@ interactions are mocked with the respx ``mock_hmc`` fixture from conftest.py.
 from __future__ import annotations
 
 import asyncio
+import itertools
+import os
 from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
 import httpx
@@ -29,13 +34,27 @@ from hmcpctl.operations.affinity.rest import (
     PostActivationAffinityAssessment,
     validate_affinity_request,
 )
+from hmcpctl.operations.logical import store
+from hmcpctl.operations.logical.store import OperationRefused
 from hmcpctl.operations.lpar.activation import LparPowerResult
 from hmcpctl.operations.lpar.assignments import (
+    AssignmentResult,
     DedicatedPcieAssignment,
     LparPcieAssignments,
+    SriovLogicalPortAssignment,
     WorkflowStep,
 )
 from hmcpctl.operations.lpar.core import LparCreationResult
+from hmcpctl.operations.lpar.plan import (
+    PlanAdapters,
+    PlanRequest,
+    PlanResource,
+    PlanStorage,
+    PlanSystem,
+    PlanTargets,
+    check_request,
+    plan_digest,
+)
 from hmcpctl.operations.lpar.provision import (
     ProvisionAdapters,
     ProvisionAffinityAssessment,
@@ -43,8 +62,11 @@ from hmcpctl.operations.lpar.provision import (
     ProvisionStorage,
     _check_vg_exists,
     _power_on,
+    preview_provision,
 )
-from hmcpctl.server_tools.lpar.provision import hmc_provision_lpar
+from hmcpctl.operations.lpar.provision_operation import mac_colon_form
+from hmcpctl.server_tools.catalog import TOOL_SECURITY
+from hmcpctl.server_tools.lpar.provision import delegated_tools, provision_handler
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy
 from hmcpctl.ssh.transport import HMCCLIError
 
@@ -61,6 +83,17 @@ def _patch_stamp_ownership():
         new=AsyncMock(return_value="[hmcpctl owner:hmcpctl created:2026-08-13]"),
     ):
         yield
+
+
+_REQUEST_IDS = itertools.count()
+
+
+def hmc_provision_lpar(**arguments):
+    """Call the tool handler with permissive gates and a fresh request id."""
+    handler = provision_handler(TOOL_SECURITY, lambda _name: True, lambda *_args: None)
+    arguments.setdefault("request_id", f"r{next(_REQUEST_IDS)}")
+    arguments.setdefault("wait_seconds", 30)
+    return handler(**arguments)
 
 
 SYSTEM_UUID = "00000000-0000-0000-0000-000000000001"
@@ -100,6 +133,7 @@ EXISTING_LPAR_FEED = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 
 # A target system that holds a partition, but none with the requested name.
 OTHER_LPAR_FEED = EXISTING_LPAR_FEED.replace("existing-lpar", "other-lpar")
+OWNER_STAMP = "[hmcpctl owner:hmcpctl created:2026-08-13]"
 
 CREATED_LPAR_FEED = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -237,16 +271,17 @@ def _mock_preconditions(
     # has_lpar it holds "existing-lpar", otherwise only an unrelated partition.
     lpar_feed_text = EXISTING_LPAR_FEED if has_lpar else OTHER_LPAR_FEED
     name_lookup = mock_hmc.get(
-        f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition"
+        f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition",
+        name="partitions",
     ).mock(return_value=httpx.Response(200, text=lpar_feed_text))
     mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/VirtualNetwork").mock(
         return_value=httpx.Response(
             200, text=vlan_feed or (VLAN_FEED if has_vlan else EMPTY_FEED)
         )
     )
-    mock_hmc.get(f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup").mock(
-        return_value=httpx.Response(200, text=VG_FEED if has_vg else EMPTY_FEED)
-    )
+    mock_hmc.get(
+        f"/rest/api/uom/VirtualIOServer/{VIOS_UUID}/VolumeGroup", name="groups"
+    ).mock(return_value=httpx.Response(200, text=VG_FEED if has_vg else EMPTY_FEED))
     return name_lookup
 
 
@@ -261,11 +296,30 @@ SYSTEM_ENTRY = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </entry>"""
 
 
+def _created_feed(description=OWNER_STAMP):
+    """The system's partition feed once web01 exists, stamped with *description*."""
+    return CREATED_LPAR_FEED.replace(
+        "<PartitionState>", f"<Description>{description}</Description><PartitionState>"
+    )
+
+
+def _partitions_after(mock_hmc, create_route, description=OWNER_STAMP):
+    """The partition feed reads web01 (stamped) once *create_route* has run."""
+    before = mock_hmc.routes["partitions"].return_value.text
+
+    def feed(_request):
+        text = _created_feed(description) if create_route.called else before
+        return httpx.Response(200, text=text)
+
+    mock_hmc.routes["partitions"].side_effect = feed
+
+
 def _mock_execution_steps(mock_hmc, *, sync="Disabled"):
-    """Register the 4 execution step routes (create, network, storage, power-on)."""
+    """Register the execution step routes (create, network, storage, power-on)."""
     create_route = mock_hmc.put(
         f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition"
     ).mock(return_value=httpx.Response(201, text=CREATED_LPAR_FEED))
+    _partitions_after(mock_hmc, create_route)
     # The full system entry for the memory bound; quick/All for the stamp's name.
     mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}").mock(
         return_value=httpx.Response(200, text=SYSTEM_ENTRY)
@@ -477,20 +531,15 @@ def test_provision_affinity_dry_run_never_powers_on_or_assesses(monkeypatch, moc
     assert_no_mutating_requests(mock_hmc)
 
 
-def test_provision_affinity_power_off_is_skipped(monkeypatch, mock_hmc):
+def test_provision_affinity_without_power_on_is_refused(monkeypatch, mock_hmc):
+    """An assessment waits for activation, so it needs power_on (ADR 0313)."""
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
-    _mock_execution_steps(mock_hmc)
-    with patch(
-        "hmcpctl.operations.lpar.provision.assess_post_activation_affinity",
-        new=AsyncMock(),
-    ) as assess:
-        result = hmc_provision_lpar(
+    with pytest.raises(ValueError, match="power_on=true"):
+        hmc_provision_lpar(
             **_provision_args(power_on=False, affinity_assessment=_affinity_request())
         )
-    assert result.workflow_completed is False
-    assert result.steps[-1] == WorkflowStep("affinity_assessment", "skipped")
-    assess.assert_not_awaited()
+    assert_no_mutating_requests(mock_hmc)
 
 
 @pytest.mark.parametrize(
@@ -510,7 +559,7 @@ def test_provision_affinity_response_is_explicit(
     _mock_execution_steps(mock_hmc)
     with (
         patch(
-            "hmcpctl.operations.lpar.provision._power_on",
+            "hmcpctl.operations.lpar.provision_operation._power_on",
             new=AsyncMock(return_value=_successful_power_outcome()),
         ),
         patch(
@@ -538,7 +587,7 @@ def test_provision_affinity_timeout_never_assesses(monkeypatch, mock_hmc):
     timed_out = JobOutcome("job-1", "RUNNING", True, None, {"Resource": {}}, True, None)
     with (
         patch(
-            "hmcpctl.operations.lpar.provision._power_on",
+            "hmcpctl.operations.lpar.provision_operation._power_on",
             new=AsyncMock(return_value=timed_out),
         ),
         patch(
@@ -568,7 +617,7 @@ def test_provision_keeps_its_result_when_the_power_guard_fails(monkeypatch, mock
     _mock_preconditions(mock_hmc)
     _mock_execution_steps(mock_hmc)
     with patch(
-        "hmcpctl.operations.lpar.provision._power_on",
+        "hmcpctl.operations.lpar.provision_operation._power_on",
         new=AsyncMock(side_effect=ValueError("LPAR 'x' has no partition name")),
     ):
         result = hmc_provision_lpar(**_provision_args())
@@ -579,6 +628,8 @@ def test_provision_keeps_its_result_when_the_power_guard_fails(monkeypatch, mock
     steps = {s.step: s for s in result.steps}
     assert steps["power_on"].status == "error"
     assert "no partition name" in steps["power_on"].result
+    assert result.operation is not None
+    assert result.operation.outcome == "needs_attention"
 
 
 # ---------------------------------------------------------------------- #
@@ -604,17 +655,35 @@ def test_provision_lpar_full_workflow(monkeypatch, mock_hmc):
     assert result.lpar_uuid == LPAR_UUID
     assert result.dry_run is False
     # The explicit uniqueness precondition and the create workflow's own
-    # race-safe resolution each verify the name; power-on verifies UUID containment.
-    assert name_lookup.call_count == 3
+    # race-safe resolution each verify the name; the stamp effect reads the
+    # description; power-on verifies UUID containment.
+    assert name_lookup.call_count == 4
     steps = {s.step: s for s in result.steps}
-    assert steps["create"].status == "ok"
-    assert steps["network"].status == "ok"
-    assert steps["storage"].status == "ok"
-    assert steps["power_on"].status == "ok"
-    assert steps["power_on"].job is not None
-    assert steps["power_on"].job.job == steps["power_on"].result
-    assert steps["network"].job is None
-    assert steps["storage"].job is None
+    assert [s.step for s in result.steps] == [
+        "create",
+        "apply_profile",
+        "stamp",
+        "network",
+        "storage",
+        "power_on",
+    ]
+    assert all(s.status in ("ok", "skipped") for s in result.steps)
+    assert steps["stamp"].result == {"owner": "hmcpctl"}
+    assert steps["network"].result == {
+        "adapter_uuid": ADAPTER_UUID,
+        "mac": "aa:bb:cc:dd:ee:ff",
+    }
+    assert steps["power_on"].result == {"job_id": ANY}
+    operation = result.operation
+    assert operation is not None
+    assert (operation.state, operation.outcome) == ("terminal", "completed")
+    assert [(e.key, e.kind, e.status) for e in operation.effects] == [
+        ("create", "lpar.create", "applied"),
+        ("stamp", "lpar.ownership_stamp", "applied"),
+        ("network", "lpar.client_network_adapter", "applied"),
+        ("storage", "vios.storage_map", "applied"),
+        ("power_on", "lpar.power_on", "applied"),
+    ]
     assert "vscsi" not in steps
     assert not vscsi_route.called
     assert isinstance(result.warnings, tuple)
@@ -663,9 +732,7 @@ def test_provision_lpar_step_results_contain_data(monkeypatch, mock_hmc):
 
     steps = {s.step: s for s in result.steps}
     # create step should contain partition data
-    create_result = steps["create"].result
-    assert create_result is not None
-    assert create_result.get("Resource", {}).get("PartitionName") == "web01"
+    assert steps["create"].result == {"UUID": LPAR_UUID, "PartitionName": "web01"}
 
 
 @pytest.mark.parametrize("dedicated", [False, True])
@@ -828,9 +895,10 @@ def test_provision_lpar_partial_failure_skips_remaining(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
 
-    mock_hmc.put(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").mock(
-        return_value=httpx.Response(201, text=CREATED_LPAR_FEED)
-    )
+    create_route = mock_hmc.put(
+        f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition"
+    ).mock(return_value=httpx.Response(201, text=CREATED_LPAR_FEED))
+    _partitions_after(mock_hmc, create_route)
     mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}").mock(
         return_value=httpx.Response(200, text=SYSTEM_ENTRY)
     )
@@ -872,14 +940,17 @@ def test_provision_lpar_partial_failure_skips_remaining(monkeypatch, mock_hmc):
     # The network adapter that did land still has a location to report (#1056).
     assert result.change_location is not None
     assert result.change_location.current_profile_sync == "Disabled"
+    assert result.operation is not None
+    assert result.operation.outcome == "needs_attention"
 
 
 def test_policy_provision_network_failure_records_each_step_once(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
-    mock_hmc.put(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").mock(
-        return_value=httpx.Response(201, text=CREATED_LPAR_FEED)
-    )
+    create_route = mock_hmc.put(
+        f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition"
+    ).mock(return_value=httpx.Response(201, text=CREATED_LPAR_FEED))
+    _partitions_after(mock_hmc, create_route)
     mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}").mock(
         return_value=httpx.Response(200, text=SYSTEM_ENTRY)
     )
@@ -897,7 +968,7 @@ def test_policy_provision_network_failure_records_each_step_once(monkeypatch, mo
             AsyncMock(),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision.set_minimum_affinity_policy",
+            "hmcpctl.operations.lpar.provision_operation.set_minimum_affinity_policy",
             AsyncMock(return_value="changed"),
         ),
     ):
@@ -913,24 +984,31 @@ def test_policy_provision_network_failure_records_each_step_once(monkeypatch, mo
     assert result.change_location is None
 
 
-def test_provision_lpar_propagates_unexpected_step_failure(monkeypatch, mock_hmc):
-    """Programming defects are not disguised as ordinary partial results."""
+def test_provision_lpar_pauses_on_an_unexpected_step_failure(monkeypatch, mock_hmc):
+    """A programming defect is not disguised as an ordinary step error: the
+    operation pauses with the defect named and its write left of unknown outcome."""
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     _mock_execution_steps(mock_hmc)
 
-    with (
-        patch(
-            "hmcpctl.client.core.HMCClient.map_storage_to_lpar",
-            new=AsyncMock(side_effect=TypeError("mapping defect")),
-        ),
-        pytest.raises(TypeError, match="mapping defect"),
+    with patch(
+        "hmcpctl.client.core.HMCClient.map_storage_to_lpar",
+        new=AsyncMock(side_effect=TypeError("mapping defect")),
     ):
-        hmc_provision_lpar(**_provision_args())
+        result = hmc_provision_lpar(**_provision_args())
+
+    operation = result.operation
+    assert operation is not None
+    assert operation.outcome == "needs_attention"
+    assert any("mapping defect" in w for w in operation.warnings)
+    assert [(e.key, e.status) for e in operation.effects][-1] == (
+        "storage",
+        "uncertain",
+    )
 
 
 def test_provision_lpar_reports_created_resource_without_uuid(monkeypatch, mock_hmc):
-    """A successful create with no response body is not reported as no creation."""
+    """A create with no response body is an unknown outcome, not no creation."""
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}").mock(
@@ -943,13 +1021,14 @@ def test_provision_lpar_reports_created_resource_without_uuid(monkeypatch, mock_
 
     result = hmc_provision_lpar(**_provision_args())
 
-    assert result.resource_created is True
+    assert result.resource_created is None
     assert result.workflow_completed is False
     assert result.lpar_uuid is None
-    assert result.steps[0].status == "error"
-    assert "no UUID" in result.steps[0].result
+    assert [(s.step, s.status) for s in result.steps] == [("create", "error")]
     assert result.ownership_stamped is None
-    assert any("no LPAR body" in w for w in result.warnings)
+    assert result.operation is not None
+    assert result.operation.outcome == "needs_attention"
+    assert any("no partition UUID" in w for w in result.operation.warnings)
 
 
 def test_provision_lpar_dry_run_issues_no_mutating_request(monkeypatch, mock_hmc):
@@ -989,17 +1068,14 @@ def test_provision_invalid_caller_token_fails_before_preconditions(
 
 
 def test_provision_operation_rejects_bad_token_before_any_round_trip(monkeypatch):
-    """Direct provision_lpar callers bypass hmc_provision_lpar's entry check,
-    so the operation validates first, before any HMC round trip."""
+    """The preconditions validate the token before any HMC round trip."""
     _hmc_env(monkeypatch)
-    from hmcpctl.operations.lpar.provision import provision_lpar
-
     args = _provision_args(caller_token="a=b")
 
     with pytest.raises(ValueError, match="caller_token"):
         asyncio.run(
-            provision_lpar(
-                None,
+            preview_provision(
+                None,  # type: ignore[arg-type]
                 args["system_name_or_uuid"],
                 ProvisionRequest(
                     name=args["name"],
@@ -1008,14 +1084,15 @@ def test_provision_operation_rejects_bad_token_before_any_round_trip(monkeypatch
                     resources=args["resources"],
                     caller_token=args["caller_token"],
                 ),
-            )  # type: ignore[arg-type]
+            )
         )
 
 
 def test_provision_passes_caller_token_to_creation(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
-    _mock_execution_steps(mock_hmc)
+    create_route = _mock_execution_steps(mock_hmc)
+    _partitions_after(mock_hmc, create_route, f"{OWNER_STAMP} [caller CHG-9]")
     result = hmc_provision_lpar(
         **_provision_args(name="p-lpar", power_on=False, caller_token="CHG-9")
     )
@@ -1059,15 +1136,19 @@ def test_provision_applies_explicit_fail_policy_before_network(monkeypatch, mock
             "hmcpctl.operations.lpar.provision.require_minimum_affinity_policy_capability",
             AsyncMock(),
         ),
-        patch("hmcpctl.operations.lpar.provision.set_minimum_affinity_policy", setter),
+        patch(
+            "hmcpctl.operations.lpar.provision_operation.set_minimum_affinity_policy",
+            setter,
+        ),
     ):
         result = hmc_provision_lpar(
             **_provision_args(minimum_affinity_policy=policy, power_on=False)
         )
     assert result.workflow_completed is True
-    assert [step.step for step in result.steps][:4] == [
+    assert [step.step for step in result.steps][:5] == [
         "create",
         "apply_profile",
+        "stamp",
         "minimum_affinity_policy",
         "network",
     ]
@@ -1092,14 +1173,13 @@ def _provision_via_406(
         [
             httpx.Response(200, text=OTHER_LPAR_FEED),
             httpx.Response(200, text=OTHER_LPAR_FEED),
-            readback or httpx.Response(200, text=CREATED_LPAR_FEED),
-            httpx.Response(200, text=CREATED_LPAR_FEED),
+            readback or httpx.Response(200, text=_created_feed()),
         ]
     )
-    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").mock(
-        side_effect=lambda request: next(lookups)
-    )
     _mock_execution_steps(mock_hmc).mock(return_value=httpx.Response(406))
+    mock_hmc.routes["partitions"].side_effect = lambda request: next(
+        lookups, httpx.Response(200, text=_created_feed())
+    )
     network = mock_hmc.put(
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/ClientNetworkAdapter"
     ).mock(
@@ -1140,7 +1220,12 @@ def test_provision_mksyscfg_path_applies_profile_before_network(monkeypatch, moc
 
     assert apply.await_args.args[1:] == ("sys1", "web01")
     assert order == ["mksyscfg", "apply", "network"]
-    assert [s.step for s in result.steps][:3] == ["create", "apply_profile", "network"]
+    assert [s.step for s in result.steps][:4] == [
+        "create",
+        "apply_profile",
+        "stamp",
+        "network",
+    ]
     assert result.steps[1] == WorkflowStep("apply_profile", "ok", "default_profile")
     assert result.workflow_completed is True
 
@@ -1157,17 +1242,12 @@ def test_provision_readback_error_after_mksyscfg_reports_the_create(
     result, network = _provision_via_406(mock_hmc, AsyncMock(), order, readback)
 
     assert not network.called
-    assert result.resource_created is True
+    assert result.resource_created is None
     assert result.workflow_completed is False
     assert result.lpar_uuid is None
-    assert [(s.step, s.status) for s in result.steps] == [
-        ("create", "error"),
-        ("apply_profile", "ok"),
-        ("network", "skipped"),
-        ("storage", "skipped"),
-        ("power_on", "skipped"),
-    ]
-    assert any("read-back after mksyscfg failed" in w for w in result.warnings)
+    assert [(s.step, s.status) for s in result.steps] == [("create", "error")]
+    assert result.operation is not None
+    assert result.operation.outcome == "needs_attention"
 
 
 def test_provision_apply_error_skips_remaining_legs(monkeypatch, mock_hmc):
@@ -1182,16 +1262,11 @@ def test_provision_apply_error_skips_remaining_legs(monkeypatch, mock_hmc):
     assert result.resource_created is True
     assert result.workflow_completed is False
     assert result.lpar_uuid == LPAR_UUID
-    assert result.steps[1].step == "apply_profile"
-    assert result.steps[1].status == "error"
-    assert "HSCL boom" in result.steps[1].result
-    assert [(s.step, s.status) for s in result.steps[2:]] == [
-        ("network", "skipped"),
-        ("storage", "skipped"),
-        ("power_on", "skipped"),
-    ]
-    assert "'default_profile' was not applied" in result.warnings[0]
-    assert "redo any skipped steps" in result.warnings[0]
+    assert [(s.step, s.status) for s in result.steps] == [("create", "ok")]
+    operation = result.operation
+    assert operation is not None
+    assert (operation.state, operation.outcome) == ("terminal", "failed")
+    assert "apply_profile step reported an error" in operation.warnings[0]
 
 
 def test_provision_rest_create_reports_skipped_apply_step(monkeypatch, mock_hmc):
@@ -1211,28 +1286,22 @@ def test_provision_rest_create_reports_skipped_apply_step(monkeypatch, mock_hmc)
     assert result.workflow_completed is True
 
 
-def test_provision_reports_apply_step_when_create_returns_no_uuid(
-    monkeypatch, mock_hmc
-):
+def test_provision_pauses_when_create_returns_no_uuid(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     apply_step = WorkflowStep("apply_profile", "ok", "default_profile")
     creation = LparCreationResult(True, None, None, (), apply_step)
 
     with patch(
-        "hmcpctl.operations.lpar.provision.create_and_stamp_lpar",
+        "hmcpctl.operations.lpar.provision_operation.create_and_stamp_lpar",
         new=AsyncMock(return_value=creation),
     ):
         result = hmc_provision_lpar(**_provision_args())
 
-    assert [(s.step, s.status) for s in result.steps] == [
-        ("create", "error"),
-        ("apply_profile", "ok"),
-        ("network", "skipped"),
-        ("storage", "skipped"),
-        ("power_on", "skipped"),
-    ]
+    assert [(s.step, s.status) for s in result.steps] == [("create", "error")]
     assert result.workflow_completed is False
+    assert result.operation is not None
+    assert result.operation.outcome == "needs_attention"
 
 
 @pytest.mark.asyncio
@@ -1253,23 +1322,21 @@ async def test_volume_group_check_ignores_uuid_case() -> None:
 def test_provision_operation_refuses_a_vios_type_before_any_round_trip(monkeypatch):
     """V10R3 answers a LogicalPartition PUT typed Virtual IO Server with 500 REST0140."""
     _hmc_env(monkeypatch)
-    from hmcpctl.operations.lpar.provision import provision_lpar
-
     args = _provision_args()
 
     with pytest.raises(ValueError, match="hmc_create_vios"):
         asyncio.run(
-            provision_lpar(
-                None,
+            preview_provision(
+                None,  # type: ignore[arg-type]
                 args["system_name_or_uuid"],
                 ProvisionRequest(
                     name=args["name"],
                     adapters=args["adapters"],
                     storage=args["storage"],
                     resources=args["resources"],
-                    partition_type="Virtual IO Server",
+                    partition_type="Virtual IO Server",  # type: ignore[arg-type]
                 ),
-            )  # type: ignore[arg-type]
+            )
         )
 
 
@@ -1288,31 +1355,27 @@ _DEDICATED = LparPcieAssignments(
 )
 
 
-@pytest.mark.parametrize("dry_run", [False, True])
 def test_provision_operation_refuses_a_dedicated_slot_before_any_round_trip(
-    monkeypatch, dry_run
+    monkeypatch,
 ):
     """Provision's PowerOn activates the current configuration, so a slot written to
     the profile is never owned (#1390); refuse before reading or writing anything."""
     _hmc_env(monkeypatch)
-    from hmcpctl.operations.lpar.provision import provision_lpar
-
     args = _provision_args()
 
     with pytest.raises(ValueError, match="hmc_assign_dedicated_pcie_slot"):
         asyncio.run(
-            provision_lpar(
-                None,
+            preview_provision(
+                None,  # type: ignore[arg-type]
                 args["system_name_or_uuid"],
                 ProvisionRequest(
                     name=args["name"],
                     adapters=args["adapters"],
                     storage=args["storage"],
                     resources=args["resources"],
-                    dry_run=dry_run,
                     assignments=_DEDICATED,
                 ),
-            )  # type: ignore[arg-type]
+            )
         )
 
 
@@ -1323,87 +1386,338 @@ def test_provision_tool_refuses_a_dedicated_slot_before_logon(monkeypatch, mock_
     assert not mock_hmc.calls
 
 
-@pytest.mark.parametrize("assessment", [False, True])
-@pytest.mark.parametrize("status", ["RUNNING", "COMPLETED_OK", "COMPLETED_WITH_ERROR"])
-@pytest.mark.parametrize("handle", ["JobID", "UUID", "link"])
-@pytest.mark.asyncio
-async def test_power_leg_carries_job_without_changing_raw_projection(
-    assessment, status, handle
-):
-    from dataclasses import asdict
+# ---------------------------------------------------------------------- #
+# Journaled operation (ADR 0313)
+# ---------------------------------------------------------------------- #
 
-    from hmcpctl.jobs import job_outcome
-    from hmcpctl.operations.lpar.provision import _run_power_leg
 
-    raw = {"Resource": {"Status": status}}
-    if handle == "JobID":
-        raw["Resource"]["JobID"] = "job-1"
-    else:
-        raw[handle] = "job-1" if handle == "UUID" else "/rest/api/uom/jobs/job-1"
-    outcome = job_outcome("PowerOn", raw)
-    steps = []
+def _store_root() -> Path:
+    return Path(os.environ[store.STATE_DIR_ENV])
+
+
+def test_repeat_returns_the_same_operation_and_creates_once(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    create_route = _mock_execution_steps(mock_hmc)
+
+    first = hmc_provision_lpar(**_provision_args(request_id="same"))
+    again = hmc_provision_lpar(**_provision_args(request_id="same"))
+
+    assert first.operation is not None and again.operation is not None
+    assert again.operation.operation_id == first.operation.operation_id
+    assert again.workflow_completed is True
+    assert create_route.call_count == 1
+
+
+def test_missing_request_id_is_refused_before_any_call(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    with pytest.raises(OperationRefused, match="request_id"):
+        hmc_provision_lpar(**_provision_args(request_id="bad id"))
+    assert not mock_hmc.calls
+
+
+def test_a_stamp_that_does_not_land_fails_the_operation(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    create_route = _mock_execution_steps(mock_hmc)
+    _partitions_after(mock_hmc, create_route, "no stamp here")
+
+    result = hmc_provision_lpar(**_provision_args())
+
+    operation = result.operation
+    assert operation is not None
+    assert (operation.state, operation.outcome) == ("terminal", "failed")
+    assert "stamp did not land" in operation.warnings[0]
+    assert result.ownership_stamped is False
+    assert [(s.step, s.status) for s in result.steps] == [
+        ("create", "ok"),
+        ("stamp", "error"),
+    ]
+
+
+def test_a_refused_create_with_no_partition_fails_the_operation(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}").mock(
+        return_value=httpx.Response(200, text=SYSTEM_ENTRY)
+    )
+    mock_system_summary(mock_hmc, SYSTEM_UUID, "sys1")
+    mock_hmc.put(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition").mock(
+        return_value=httpx.Response(500)
+    )
+
+    result = hmc_provision_lpar(**_provision_args())
+
+    operation = result.operation
+    assert operation is not None
+    assert (operation.state, operation.outcome) == ("terminal", "failed")
+    assert result.resource_created is False
+    assert [(e.key, e.status) for e in operation.effects] == [("create", "not_applied")]
+
+
+# A new disk's volume group is named by canonical UUID.
+GROUP_UUID = "00000000-0000-0000-0000-000000000051"
+
+
+def _canonical_groups(mock_hmc, disks=""):
+    text = VG_FEED.replace(VG_UUID, GROUP_UUID).replace(
+        "<GroupName>rootvg</GroupName>", f"<GroupName>rootvg</GroupName>{disks}"
+    )
+    mock_hmc.routes["groups"].return_value = httpx.Response(200, text=text)
+
+
+def test_capacity_creates_maps_and_ledgers_the_owned_disk(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _canonical_groups(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    storage = ProvisionStorage(
+        VIOS_UUID, "lv_root", vg_uuid=GROUP_UUID, capacity_mib=20480
+    )
+    create_disk = AsyncMock(return_value={})
+
     with patch(
-        "hmcpctl.operations.lpar.provision.submit_power_on_lpar",
-        new=AsyncMock(return_value=LparPowerResult(LPAR_UUID, raw)),
-    ) as submit:
-        completed = await _run_power_leg(
-            steps,
-            ANY,
-            SYSTEM_UUID,
-            LPAR_UUID,
-            _affinity_request() if assessment else None,
-        )
-    step = steps[0]
-    assert step.job == outcome
-    assert step.job.job is raw
-    assert step.job.job_id == "job-1"
-    failed = assessment and (outcome.timed_out or outcome.error is not None)
-    assert completed is not failed
-    assert step.status == ("error" if failed else "ok")
-    assert step.result == (
+        "hmcpctl.operations.lpar.provision_operation._create_disk", new=create_disk
+    ):
+        result = hmc_provision_lpar(**_provision_args(storage=storage))
+
+    assert result.workflow_completed is True
+    create_disk.assert_awaited_once()
+    assert [s.step for s in result.steps][3:6] == ["network", "create_disk", "storage"]
+    disk = next(e for e in result.operation.effects if e.key == "disk")
+    assert (disk.kind, disk.target) == ("vios.virtual_disk", f"vios:{VIOS_UUID}")
+    assert disk.identity == {
+        "vios_uuid": VIOS_UUID,
+        "vg_uuid": GROUP_UUID,
+        "disk_name": "lv_root",
+        "capacity_mib": 20480,
+    }
+    with store.session() as conn:
+        rows = conn.execute(
+            "SELECT key, kind, partition_uuid FROM ledger ORDER BY key"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("partition", "partition", LPAR_UUID),
+        ("root_disk", "virtual_disk", LPAR_UUID),
+    ]
+
+
+def test_mapped_existing_storage_is_never_ledgered(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+
+    hmc_provision_lpar(**_provision_args())
+
+    with store.session() as conn:
+        kinds = [row[0] for row in conn.execute("SELECT kind FROM ledger")]
+    assert kinds == ["partition"]
+
+
+@pytest.mark.parametrize(
+    ("storage", "match"),
+    [
+        (ProvisionStorage(VIOS_UUID, "lv", capacity_mib=1024), "vg_uuid"),
         (
-            outcome.error
-            or "PowerOn did not reach a successful terminal status before timeout"
-        )
-        if failed
-        else asdict(outcome)
-        if assessment
-        else raw
+            ProvisionStorage(
+                VIOS_UUID, "hdisk1", "PhysicalVolume", VG_UUID, capacity_mib=1024
+            ),
+            "VirtualDisk",
+        ),
+    ],
+)
+def test_capacity_requires_virtual_disk_and_group(
+    monkeypatch, mock_hmc, storage, match
+):
+    _hmc_env(monkeypatch)
+    with pytest.raises(ValueError, match=match):
+        hmc_provision_lpar(**_provision_args(storage=storage))
+    assert not mock_hmc.calls
+
+
+def test_existing_disk_name_refuses_new_disk(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _canonical_groups(
+        mock_hmc,
+        "<VirtualDisks><VirtualDisk><DiskName>lv_root</DiskName></VirtualDisk>"
+        "</VirtualDisks>",
     )
-    submit.assert_awaited_once()
+    storage = ProvisionStorage(
+        VIOS_UUID, "lv_root", vg_uuid=GROUP_UUID, capacity_mib=1024
+    )
+    with pytest.raises(ValueError, match="already exists"):
+        hmc_provision_lpar(**_provision_args(storage=storage, dry_run=True))
 
 
-@pytest.mark.asyncio
-async def test_power_leg_retains_normalized_identity():
-    from hmcpctl.operations.lpar.provision import _run_power_leg
+def test_dry_run_records_nothing(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    result = hmc_provision_lpar(**_provision_args(dry_run=True))
+    assert result.operation is None
+    assert [s.step for s in result.steps][:2] == ["create", "stamp"]
+    assert not _store_root().exists()
 
-    outcome = _successful_power_outcome()
-    steps = []
-    with patch(
-        "hmcpctl.operations.lpar.provision._power_on",
-        new=AsyncMock(return_value=outcome),
-    ):
-        assert await _run_power_leg(
-            steps, ANY, SYSTEM_UUID, LPAR_UUID, _affinity_request()
-        )
-    assert steps[0].job is outcome
-    assert (
-        WorkflowStep(
-            "storage", "ok", {"UUID": "volume-1", "Resource": {"Status": "RUNNING"}}
-        ).job
-        is None
+
+def test_a_withheld_delegated_tool_refuses_before_anything_is_recorded(
+    monkeypatch, mock_hmc
+):
+    _hmc_env(monkeypatch)
+    handler = provision_handler(
+        TOOL_SECURITY, lambda name: name != "hmc_add_network_adapter", lambda *_: None
+    )
+    with pytest.raises(PermissionError, match="hmc_add_network_adapter"):
+        handler(request_id="r-denied", **_provision_args())
+    assert not mock_hmc.calls
+    assert not _store_root().exists()
+
+
+def test_delegated_tools_follow_the_request():
+    request = ProvisionRequest(
+        name="web01",
+        adapters=ProvisionAdapters(VLAN_ID),
+        storage=ProvisionStorage(VIOS_UUID, "lv", vg_uuid=VG_UUID, capacity_mib=1024),
+        resources=LparResources(min_memory=256, desired_memory=512, max_memory=1024),
+        power_on=False,
+        assignments=LparPcieAssignments(sriov=(_SRIOV,)),
+        minimum_affinity_policy=MinimumAffinityPolicy(80, "warn"),
+    )
+    assert delegated_tools(request) == (
+        "hmc_create_lpar",
+        "hmc_add_network_adapter",
+        "hmc_map_storage_to_lpar",
+        "hmc_create_virtual_disk",
+        "hmc_set_minimum_affinity_policy",
+        "hmc_assign_sriov_logical_port",
     )
 
 
-@pytest.mark.parametrize("raw", [None, {}, {"Resource": {}}])
-@pytest.mark.asyncio
-async def test_empty_power_submission_has_no_fabricated_job(raw):
-    from hmcpctl.operations.lpar.provision import _run_power_leg
+def _plan_digest_of_tool_inputs() -> str:
+    """The digest hmc_plan_lpar computes for _provision_args() on SYSTEM_UUID."""
+    args = _provision_args()
+    request = check_request(
+        PlanRequest(
+            name=args["name"],
+            adapters=PlanAdapters(VLAN_ID),
+            storage=PlanStorage("lv_boot", vios_uuid=VIOS_UUID),
+            resources=args["resources"],
+            system_name_or_uuid=SYSTEM_UUID,
+        )
+    )
+    return plan_digest(request, _PLAN_TARGETS, "<default>")
 
-    steps = []
-    with patch(
-        "hmcpctl.operations.lpar.provision.submit_power_on_lpar",
-        new=AsyncMock(return_value=LparPowerResult(LPAR_UUID, raw)),
+
+_PLAN_TARGETS = PlanTargets(
+    PlanSystem(f"<default>/{SYSTEM_UUID}", SYSTEM_UUID, "sys1"),
+    PlanResource(VIOS_UUID, "vios1"),
+    PlanResource(VG_UUID, "rootvg"),
+)
+
+
+def _fake_plan(calls: list):
+    async def plan(hmc, *, connection, admit, request):
+        calls.append(request)
+        return SimpleNamespace(
+            plan_digest=plan_digest(request, _PLAN_TARGETS, connection)
+        )
+
+    return plan
+
+
+def test_a_matching_plan_digest_is_accepted_once(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    create_route = _mock_execution_steps(mock_hmc)
+    calls: list = []
+    digest = _plan_digest_of_tool_inputs()
+
+    with patch("hmcpctl.server_tools.lpar.provision.plan_lpar", new=_fake_plan(calls)):
+        first = hmc_provision_lpar(
+            **_provision_args(request_id="planned", expected_plan_digest=digest)
+        )
+        # The partition now exists, so a fresh plan would block; a repeat skips it.
+        again = hmc_provision_lpar(
+            **_provision_args(request_id="planned", expected_plan_digest=digest)
+        )
+
+    assert first.workflow_completed is True
+    assert again.operation.operation_id == first.operation.operation_id
+    assert len(calls) == 1
+    assert create_route.call_count == 1
+
+
+def test_a_mismatched_plan_digest_refuses_with_no_record(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    with (
+        patch("hmcpctl.server_tools.lpar.provision.plan_lpar", new=_fake_plan([])),
+        pytest.raises(OperationRefused, match="plan_digest_mismatch"),
     ):
-        assert await _run_power_leg(steps, ANY, SYSTEM_UUID, LPAR_UUID, None)
-    assert steps == [WorkflowStep("power_on", "ok", raw)]
+        hmc_provision_lpar(**_provision_args(expected_plan_digest="0" * 64))
+    assert not _store_root().exists()
+
+
+def test_resume_reclassifies_and_continues(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    create_route = _mock_execution_steps(mock_hmc)
+    network = mock_hmc.put(
+        f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(500))
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(200, text=EMPTY_FEED))
+
+    paused = hmc_provision_lpar(**_provision_args(request_id="resumed"))
+    assert paused.operation.outcome == "needs_attention"
+    network.mock(return_value=httpx.Response(201, text=NETWORK_ADAPTER_FEED))
+    done = hmc_provision_lpar(request_id="resumed", continuation="resume")
+
+    assert (done.operation.state, done.operation.outcome) == ("terminal", "completed")
+    assert done.workflow_completed is True
+    assert create_route.call_count == 1
+
+
+_SRIOV = SriovLogicalPortAssignment("default_profile", "1", "2", "3", Decimal(2))
+
+
+def test_an_assignment_error_never_resumes_to_completed(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    failed = AssignmentResult(False, False, (WorkflowStep("sriov[0]", "error", "x"),))
+    args = _provision_args(
+        request_id="assigned", assignments=LparPcieAssignments(sriov=(_SRIOV,))
+    )
+    with (
+        patch(
+            "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
+            new=AsyncMock(),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.provision_operation"
+            ".apply_validated_lpar_pcie_assignments",
+            new=AsyncMock(return_value=failed),
+        ),
+    ):
+        paused = hmc_provision_lpar(**args)
+        resumed = hmc_provision_lpar(request_id="assigned", continuation="resume")
+
+    assert paused.operation.outcome == "needs_attention"
+    assert ("sriov[0]", "error") in [(s.step, s.status) for s in paused.steps]
+    assert resumed.operation.outcome == "needs_attention"
+    assert "has no live check" in resumed.operation.warnings[0]
+
+
+@pytest.mark.parametrize(
+    ("value", "mac"),
+    [
+        ("AABBCCDDEEFF", "aa:bb:cc:dd:ee:ff"),
+        ("aa-bb-cc-dd-ee-ff", "aa:bb:cc:dd:ee:ff"),
+        (" AA:BB:CC:DD:EE:FF ", "aa:bb:cc:dd:ee:ff"),
+        ("AABBCCDDEE", None),
+        (None, None),
+    ],
+)
+def test_mac_colon_form(value, mac):
+    assert mac_colon_form(value) == mac

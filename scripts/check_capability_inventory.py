@@ -242,6 +242,10 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
     from hmcpctl.server_tools.lpar.inspect import INSPECT_TOOL_NAME, inspect_handler
     from hmcpctl.server_tools.lpar.plan import PLAN_TOOL_NAME, plan_handler
     from hmcpctl.server_tools.lpar.power import POWER_TOOL_NAME, power_handler
+    from hmcpctl.server_tools.lpar.provision import (
+        PROVISION_TOOL_NAME,
+        provision_handler,
+    )
 
     bound = gateway_handlers(FastMCP(name="capability-inventory"), TOOL_SECURITY)
     handlers = {name: handler for name, (handler, _security) in bound.items()}
@@ -252,6 +256,9 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
         TOOL_SECURITY, lambda _name: False, lambda *_args: None
     )
     handlers[POWER_TOOL_NAME] = power_handler(
+        TOOL_SECURITY, lambda _name: False, lambda *_args: None
+    )
+    handlers[PROVISION_TOOL_NAME] = provision_handler(
         TOOL_SECURITY, lambda _name: False, lambda *_args: None
     )
     handlers[INSPECT_TOOL_NAME] = inspect_handler(

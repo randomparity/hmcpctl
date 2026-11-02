@@ -1,5 +1,6 @@
 """C12 creation grammar and device relationship contracts."""
 
+import asyncio
 from dataclasses import fields
 from decimal import Decimal
 from types import SimpleNamespace
@@ -368,10 +369,33 @@ async def test_core_io_verification_precedes_profile_application(monkeypatch, ma
     assert result.physical_io_step.status == ("ok" if matched else "error")
 
 
+def _run_provision_body(request, partitions=()):
+    """Run provision's engine body once against a fake HMC; return the record."""
+    from hmcpctl.operations.logical import engine
+    from hmcpctl.operations.logical.engine import OperationRequest
+    from hmcpctl.operations.lpar.provision_operation import provision_body
+
+    class Fake:
+        config = SimpleNamespace(agent_id=None)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return None
+
+        async def list_logical_partitions(self, _system):
+            return list(partitions)
+
+    operation = OperationRequest("hmc_provision_lpar", "a", "<default>", "h", "r1", {})
+    body = provision_body("system", request, lambda _connection: Fake())
+    return engine.submit(operation, body, wait_seconds=10)
+
+
 @pytest.mark.asyncio
 async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import provision
+    from hmcpctl.operations.lpar import provision, provision_operation
     from hmcpctl.operations.lpar.core import LparCreationResult
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
@@ -383,7 +407,6 @@ async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch
         partition_type="OS400",
         physical_io=LparPhysicalIO(console_slot="hmc"),
     )
-    monkeypatch.setattr(provision, "_preflight_provision_request", AsyncMock())
     create = AsyncMock(
         return_value=LparCreationResult(
             True,
@@ -393,13 +416,17 @@ async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch
             physical_io_step=WorkflowStep("physical_io", "error"),
         )
     )
-    legs = AsyncMock()
-    monkeypatch.setattr(provision, "create_and_stamp_lpar", create)
-    monkeypatch.setattr(provision, "_run_legs_through_power", legs)
-    result = await provision.provision_lpar(object(), "system", request)
-    assert not result.workflow_completed
+    network = AsyncMock()
+    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(
+        provision_operation, "resolve_system_uuid", AsyncMock(return_value="sys")
+    )
+    monkeypatch.setattr(provision_operation, "_add_network", network)
+    record = await asyncio.to_thread(_run_provision_body, request)
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert "physical_io step reported an error" in record.warnings[0]
     assert create.call_args.args[2].physical_io.console_slot == "hmc"
-    legs.assert_not_awaited()
+    network.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -567,12 +594,13 @@ async def test_native_dispatch_failure_reports_unknown_without_retry(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("exists", [True, False])
 async def test_provision_unknown_create_preserves_uncertainty_and_stops_legs(
-    monkeypatch,
+    monkeypatch, exists
 ):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar import provision
+    from hmcpctl.operations.lpar import provision, provision_operation
 
     request = provision.ProvisionRequest(
         "new",
@@ -582,16 +610,25 @@ async def test_provision_unknown_create_preserves_uncertainty_and_stops_legs(
         partition_type="OS400",
         physical_io=LparPhysicalIO(console_slot="hmc"),
     )
-    monkeypatch.setattr(provision, "_preflight_provision_request", AsyncMock())
     create = AsyncMock(side_effect=HMCError("outcome unknown: inspect before retrying"))
-    legs = AsyncMock()
-    monkeypatch.setattr(provision, "create_and_stamp_lpar", create)
-    monkeypatch.setattr(provision, "_run_legs_through_power", legs)
-    result = await provision.provision_lpar(object(), "system", request)
-    assert result.resource_created is None and not result.workflow_completed
-    assert "inspect before retrying" in result.steps[0].result
+    network = AsyncMock()
+    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(
+        provision_operation, "resolve_system_uuid", AsyncMock(return_value="sys")
+    )
+    monkeypatch.setattr(provision_operation, "_add_network", network)
+    found = [{"UUID": "new", "Resource": {"PartitionName": "new"}}] if exists else []
+    record = await asyncio.to_thread(_run_provision_body, request, found)
+    # A partition of the name may be this create: unknown, so it pauses. None found
+    # proves the create did not happen, so the operation fails.
+    effect = record.effects[0]
+    if exists:
+        assert (effect.status, record.outcome) == ("uncertain", "needs_attention")
+        assert "inspect before retrying" in record.warnings[0]
+    else:
+        assert (effect.status, record.outcome) == ("not_applied", "failed")
     create.assert_awaited_once()
-    legs.assert_not_awaited()
+    network.assert_not_awaited()
 
 
 @pytest.mark.asyncio

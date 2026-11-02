@@ -279,7 +279,7 @@ LPAR-mutating exemption.
 | Operation | Reason |
 |---|---|
 | `create_and_stamp_lpar` (`operations/lpar/core.py::create_and_stamp_lpar`) | Creates the partition. No prior owner exists to authorize against; it stamps the token instead (ADR 0011). |
-| `provision_lpar` (`operations/lpar/provision.py::provision_lpar`) | Composite create-and-stamp. Its post-create legs act on the partition it just created and owns, inside one workflow. |
+| `provision_body` (`operations/lpar/provision_operation.py::provision_body`) | Composite create-and-stamp (ADR 0313). Its post-create legs act on the partition it just created and owns, inside one operation. |
 | `deploy_partition_template` (`operations/templates/core.py::deploy_partition_template`) | Creates the partition and stamps it per ADR 0014. |
 | `hmc_capture_lpar_console` (`server_tools/console.py::hmc_capture_lpar_console`) | Holds a console session and releases it. Changes no partition existence, configuration or run state. |
 | `hmc_backup_lpar_profiles` (`server_tools/lpar/profiles.py::hmc_backup_lpar_profiles`) | Reads every profile and writes an HMC-side backup file; it does not mutate a partition or profile. |

@@ -1331,6 +1331,7 @@ async def test_provision_dry_run_requires_vios_and_uses_configured_vlan() -> Non
         (
             "hmc_provision_lpar",
             {
+                "request_id": "st13-dry-run",
                 "dry_run": True,
                 "system_name_or_uuid": state.config.system_name,
                 "name": state.config.dry_run_lpar_name,

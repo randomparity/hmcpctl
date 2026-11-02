@@ -102,7 +102,7 @@ Use `HMC_HOST`, `HMC_USER`, and `HMC_PASSWORD` for single-HMC setups without a p
   Turning it on changes two things beyond the ownership check. A partition another
   agent owns is refused with a `PermissionError`; retry it as a deliberate, audited
   exception with `ownership_override` (`--ownership-override` on the CLI).
-  `provision_lpar` passes that override on its own activation leg, because the
+  `hmc_provision_lpar` passes that override on its own activation leg, because the
   partition it powers is the one the same workflow just created and stamped.
 
   And a call that omits the managed-system selector pays a bounded fleet walk: the

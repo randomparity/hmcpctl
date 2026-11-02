@@ -28,7 +28,7 @@ from hmcpctl.operations.lpar.provision import (
     ProvisionAdapters,
     ProvisionRequest,
     ProvisionStorage,
-    provision_lpar,
+    preview_provision,
 )
 
 SYS_B = "bbbbbbbb-0000-4000-8000-00000000000b"
@@ -210,7 +210,7 @@ async def test_provision_refuses_before_any_write_when_the_target_cannot_be_read
         pytest.raises(HMCError) as raised,
     ):
         async with HMCClient(make_config()) as hmc:
-            await provision_lpar(hmc, TARGET, request)
+            await preview_provision(hmc, TARGET, request)
 
     via_cli.assert_not_awaited()
     _assert_prompt_refusal(raised, mock_hmc, entry, hmc_wide)

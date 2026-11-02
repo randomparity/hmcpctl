@@ -137,6 +137,7 @@ class Run:
     volume_attempted: bool = False
     decommission_failed: bool = False
     requests: dict[str, bool] = field(default_factory=dict)
+    provisions: set[str] = field(default_factory=set)
     ran: set[str] = field(default_factory=set)
     held: dict[str, bool] = field(default_factory=dict)
     data: dict[str, Any] = field(default_factory=dict)
@@ -934,6 +935,7 @@ async def _dedicated_slot_refused(client: Client, state: RunState, run: Run) -> 
     st, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id=f"{run.token}-p-dry",
         system_name_or_uuid=run.system,
         name=run.p_name,
         adapters={"port_vlan_id": run.vlan},
@@ -978,9 +980,14 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
     refused = await _dedicated_slot_refused(client, state, run)
     if not await _create_volume(client, state, run):
         return False
+    request_id = f"{run.token}-p"
+    run.provisions.add(request_id)
+    run.requests.setdefault(request_id, False)
     st, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id=request_id,
+        wait_seconds=600,
         system_name_or_uuid=run.system,
         name=run.p_name,
         caller_token=run.token,
@@ -997,6 +1004,9 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
     record_status, note = judge_create_result(st, data)
     state.record(SUBTASK, "hmc_provision_lpar", record_status, data, note)
     run.data["provision.lpar"] = data
+    operation = _plain(result_field(data, "operation")) if st == "PASS" else None
+    if isinstance(operation, Mapping):
+        run.requests[request_id] = operation.get("state") == "terminal"
     found = result_field(data, "lpar_uuid") if st == "PASS" else None
     run.p_uuid = found if isinstance(found, str) else None
     if run.p_uuid is None:
@@ -1294,10 +1304,20 @@ async def _abandon(client: Client, state: RunState, run: Run) -> None:
     for request_id, terminal in run.requests.items():
         if terminal:
             continue
-        st, data = await state.call(
-            client, "hmc_power_lpar", request_id=request_id, continuation="abandon"
-        )
-        state.record(SUBTASK, f"hmc_power_lpar ({request_id} abandon)", st, data)
+        if request_id in run.provisions:
+            tool = "hmc_provision_lpar"
+            st, data = await state.call(
+                client,
+                "hmc_provision_lpar",
+                request_id=request_id,
+                continuation="abandon",
+            )
+        else:
+            tool = "hmc_power_lpar"
+            st, data = await state.call(
+                client, "hmc_power_lpar", request_id=request_id, continuation="abandon"
+            )
+        state.record(SUBTASK, f"{tool} ({request_id} abandon)", st, data)
 
 
 async def _remove(client: Client, state: RunState, run: Run, name: str) -> str | None:
