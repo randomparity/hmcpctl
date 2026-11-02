@@ -21,7 +21,7 @@ escaped `vlan_round_trip` before `delete_run_networks`, stranding the run's netw
   `delete_run_networks` and records both network observations, then re-raises the
   original `_Stop`, so later round trips still stop. Otherwise it records the existing
   manual-recovery row and retains the network, as today.
-- `docs/live-testing.md` VLAN bullet states both rules. No `src/` change or ADR.
+- `docs/live-testing.md` VLAN bullet states both rules. No `src/` change.
 - Out of scope (operator-approved): VSI-field omission, fixture-custody refactor, other
   arms, removing the stale switch.
 
