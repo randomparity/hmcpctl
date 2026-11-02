@@ -64,7 +64,10 @@ Steps, in order:
 
 Recovery: `_VMEDIA_SUBTASKS` gains 70, `iso_names` reads `vmedia_change_names`, and
 `powered_on` reads ST70's power-on rows, so the existing test-partition classes (mapping left,
-unmapped server adapter, run media left, partition running) witness ST70. `run_media_names`
+unmapped server adapter, run media left, partition running) witness ST70. One new class,
+for runs that dispatched ST70, reads `hmc_list_storage_mappings` and reports a mapping toward
+the test partition with an identity but no backing (an empty VTD, which the optical listing
+never shows), naming `rmvdev -vtd <V>`. `run_media_names`
 also reads `vmedia_change_names`, so ST22 removes what ST70 left.
 
 The window runs on the lab-reachable host, per docs/live-testing.md: preflight
@@ -81,7 +84,11 @@ After the window: tokenize the capture with `scripts/live_capture_export.py toke
 the HMC host prefix (docs/live-testing.md), and commit one fixture per decisive record (the Q1 and Q4 responses; the `help`, `loadopt`,
 `unloadopt` and `-release` CLI records that ran) with README rows. Update `_VTD_NAME_IN_USE`'s
 comment, and its value only if the capture contradicts it, with a test reading the Q4 fixture.
-Record Q1–Q4's answers in the README and `docs/live-testing.md`; Q1 on V11R2 stays unanswered
+When a plain `unloadopt`/`loadopt` succeeds after the power-off, its `-release` form is not
+run, and the README records "`-release` not needed at this level; with-release unexercised".
+When Q1 or Q2 shows a working load/unload path, the unmount docstring in
+`src/hmcpctl/operations/storage/resources.py` stops calling that survey outstanding and cites the
+fixture and #1285. Record Q1–Q4's answers in the README and `docs/live-testing.md`; Q1 on V11R2 stays unanswered
 (read-only authority). A CLIRunner job is not exercised: it is a REST transport for the same
 VIOS command and hmcpctl's CLI transport is SSH; this is recorded as unanswered too.
 Exclusions: #1285's operation, physical optical, repository creation and ISO upload as features.
@@ -93,10 +100,9 @@ Exclusions: #1285's operation, physical optical, repository creation and ISO upl
 2. Invariants and assets: the test VIOS's other mappings and adapters; the test partition's
    power state; the operator's media; fixtures carry no lab identifier.
 3. Accepted failure classes: a Q4 orphan adapter needs a manual `chhwres -o r` (bounded:
-   one adapter, named in a row and by recovery); one firmware level is captured. An empty VTD
-   left when cleanup's reload also fails is a stated gap against criterion 6: recovery cannot
-   see a mapping with no media, so the arm's FAIL row (with `rmvdev -vtd V`) is its only
-   witness; bounded to one device on the test partition.
+   one adapter, named in a row and by recovery); an empty VTD left when cleanup's reload also
+   fails needs a manual `rmvdev -vtd V` (named in a row and by recovery's empty-VTD class); one
+   firmware level is captured.
 4. Covered elsewhere: tokenization (`live_capture_export.py`); the `-release` behaviour of a
    product operation (#1285).
 
@@ -116,7 +122,7 @@ Exclusions: #1285's operation, physical optical, repository creation and ISO upl
    mapping or power-on behind; each refusal path (protected, running, no room, bad V) touches
    nothing; a failed `unloadopt` triggers exactly one `-release` retry.
 2. Recovery reports a run medium named in `vmedia_change_names`, and a running partition after
-   the arm's own ST70 power-on row; ST22 removes a leftover `vmedia_change_names` medium; a
+   the arm's own ST70 power-on row, and an empty VTD toward the test partition; ST22 removes a leftover `vmedia_change_names` medium; a
    bare runner selection and a bare `70` touch nothing.
 3. The wrapper dispatches exactly `--group vmedia-media-change`; preflight names the arm.
 4. The committed fixtures answer Q1–Q4 (or record why one is unanswered), carry no lab
