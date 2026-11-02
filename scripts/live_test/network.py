@@ -9,7 +9,7 @@ VIOS's FC-port and vFC group labels.
 
 Every ST9 scenario reads its own baseline and re-reads after each mutation.
 The client-network scenario deletes only its independently verified fixture UUID;
-storage scenarios reverse their baseline difference. Uncertain verification or
+storage scenarios delete only the UUID their own create returned, after the same proof. Uncertain verification or
 cleanup records a manual-recovery row and stops ST9: no later mutation runs.
 """
 
@@ -444,15 +444,21 @@ def _placements(listed: Listing) -> Adapters:
 
 
 def placement_drift(baseline: Adapters, after: Adapters | None) -> str:
-    """What differs from the baseline, so a manual recovery names only the run's own."""
+    """What differs from the baseline.
+
+    A new UUID is never named as the run's: ownership comes only from the run's own
+    results, which name the fixture a storage round trip created.
+    """
     if after is None:
         return "the adapters could not be read; compare by hand with the baseline"
     fields = ", ".join(_PLACEMENT_FIELDS)
     new = sorted(k for k in after if k not in baseline)
     off = sorted(k for k in baseline if after.get(k) != baseline[k])
     return (
-        f"remove only the new UUIDs {new}; restore each of {off} to its baseline "
-        f"placement ({fields}) {[baseline[k] for k in off]}"
+        f"new UUIDs {new} are not proven to be the run's: delete by hand only an "
+        "adapter the run's results prove is its own (a storage MANUAL RECOVERY "
+        f"REQUIRED row names its fixture UUID); restore each of {off} to its "
+        f"baseline placement ({fields}) {[baseline[k] for k in off]}"
     )
 
 
@@ -462,10 +468,9 @@ def adapter_placements(data: Any) -> Adapters | None:
     return None if listed is None else _placements(listed)
 
 
-def _new(
-    after: Listing | None, baseline: Adapters
-) -> list[Mapping[str, object]] | None:
-    return None if after is None else [after[k] for k in after if k not in baseline]
+def _storage_number(value: object) -> str | None:
+    number = as_int(_network_text(value))
+    return None if number is None else str(number)
 
 
 _NETWORK_CREATION_SETTINGS: dict[str, Any] = {
@@ -562,6 +567,49 @@ def _network_fixture(
     ):
         return None
     if expected_placement is not None and placement != expected_placement:
+        return None
+    return keys[wanted]
+
+
+def _storage_fixture(
+    listed: Listing | None,
+    baseline: Adapters,
+    response: object,
+    adapter_type: str,
+    pairing: tuple[str, str],
+) -> str | None:
+    """The listed UUID of the run's own storage client, or None unless it is certain.
+
+    The create response must name one new UUID of `adapter_type`; the listing must hold
+    exactly the baseline adapters, unmoved, plus that UUID; and the listed adapter must
+    agree with the response and with `pairing` on its slot and VIOS pairing.
+    """
+    keys, original = _network_keys(listed), _network_keys(baseline)
+    if (
+        keys is None
+        or original is None
+        or listed is None
+        or not isinstance(response, Mapping)
+        or response.get("ResourceType") != adapter_type
+    ):
+        return None
+    identity, created = response.get("UUID"), response.get("Resource")
+    if not isinstance(identity, str) or not is_uuid(identity):
+        return None
+    if not isinstance(created, Mapping):
+        return None
+    wanted = identity.casefold()
+    if wanted in original or set(keys) != set(original) | {wanted}:
+        return None
+    if not all(isinstance(resource, Mapping) for resource in listed.values()):
+        return None
+    placed = _placements(listed)
+    if any(placed[keys[key]] != baseline[original[key]] for key in original):
+        return None
+    fields = ("VirtualSlotNumber", *_REMOTE_FIELDS[adapter_type])
+    found = tuple(_storage_number(listed[keys[wanted]].get(field)) for field in fields)
+    claimed = tuple(_storage_number(created.get(field)) for field in fields)
+    if None in found or found != claimed or found[1:] != pairing:
         return None
     return keys[wanted]
 
@@ -1077,37 +1125,6 @@ class _Arm:
             )
         return accepted, restored
 
-    async def remove_new_adapters(
-        self, adapter_type: str, baseline: Adapters
-    ) -> tuple[bool | None, bool, str]:
-        """Delete every adapter of `adapter_type` the run added; confirm by re-reading.
-
-        A new UUID placed exactly where a vanished baseline adapter was is that
-        adapter re-identified, not the run's: it is left alone, and the set then
-        reads as off the baseline.
-        """
-        current = await self.placements(adapter_type, "before delete")
-        if current is None:
-            return False, False, placement_drift(baseline, None)
-        vanished = {baseline[k] for k in baseline if k not in current}
-        accepted: bool | None = None
-        for adapter_uuid in sorted(k for k in current if k not in baseline):
-            if current[adapter_uuid] in vanished:
-                accepted = False
-                continue
-            result = await self.state.call(
-                self.client,
-                "hmc_delete_adapter",
-                lpar_name_or_uuid=self.lpar,
-                adapter_type=adapter_type,
-                adapter_uuid=adapter_uuid,
-                system_name_or_uuid=self.system,
-            )
-            status = self.note("delete", "hmc_delete_adapter", result)
-            accepted = accepted is not False and status == "PASS"
-        after = await self.placements(adapter_type, "after delete")
-        return accepted, after == baseline, placement_drift(baseline, after)
-
     # -- (b, c) vSCSI and vFC clients ----------------------------------------
 
     async def client_baseline(
@@ -1147,7 +1164,8 @@ class _Arm:
         boundary: _Boundary,
         slot: str,
         slot_number: int | None = None,
-    ) -> str:
+    ) -> tuple[str, Any]:
+        """Add one client adapter; return the call's status and the created resource."""
         if adapter_type == "VirtualSCSIClientAdapter":
             result = await self.state.call(
                 self.client,
@@ -1158,7 +1176,7 @@ class _Arm:
                 slot_number=slot_number,
                 system_name_or_uuid=self.system,
             )
-            return self.note(label, "hmc_add_vscsi_adapter", result)
+            return self.note(label, "hmc_add_vscsi_adapter", result), result[1]
         result = await self.state.call(
             self.client,
             "hmc_add_vfc_adapter",
@@ -1168,7 +1186,7 @@ class _Arm:
             slot_number=slot_number,
             system_name_or_uuid=self.system,
         )
-        return self.note(label, "hmc_add_vfc_adapter", result)
+        return self.note(label, "hmc_add_vfc_adapter", result), result[1]
 
     async def slot_collision(
         self, adapter_type: str, boundary: _Boundary, slot: str, clients: Adapters
@@ -1176,27 +1194,84 @@ class _Arm:
         """Whether an add on a client slot already in use is refused and changes nothing.
 
         None when the test partition has no client slot to collide with. Anything
-        an accepted collision added is removed by the round trip's reversal.
+        else stops ST9: nothing an accepted collision added is the run's to delete.
         """
         if not boundary.used_slot:
             return None
-        status = await self.add_client(
+        status, _ = await self.add_client(
             "slot collision", adapter_type, boundary, slot, int(boundary.used_slot)
         )
         after = await self.placements(adapter_type, "after slot collision")
         return status == "FAIL" and after == clients
+
+    async def paired_fixture(
+        self, adapter_type: str, boundary: _Boundary, slot: str, baseline: Adapters
+    ) -> tuple[str, list[Mapping[str, object]] | None, bool, str | None]:
+        """Add the paired client, then delete only that verified fixture, once.
+
+        Returns the add status, the fixture as listed after the add, whether the set
+        reads back equal to the baseline, and why custody stopped (None if it did not).
+        Nothing in the round trip mutates between the post-add read and the delete.
+        """
+        added, response = await self.add_client("paired", adapter_type, boundary, slot)
+        identity = response.get("UUID") if isinstance(response, Mapping) else None
+        stop = f"{adapter_type} fixture {identity or 'with no UUID'}"
+        after = await self.adapters(adapter_type, "after add")
+        fixture = _storage_fixture(
+            after, baseline, response, adapter_type, (boundary.vios_id, slot)
+        )
+        if added != "PASS" or after is None or fixture is None:
+            return (
+                added,
+                None,
+                False,
+                f"{stop}: creation identity or pairing is unverified",
+            )
+        result = await self.state.call(
+            self.client,
+            "hmc_delete_adapter",
+            lpar_name_or_uuid=self.lpar,
+            adapter_type=adapter_type,
+            adapter_uuid=fixture,
+            system_name_or_uuid=self.system,
+        )
+        accepted = (
+            self.note("verified fixture delete", "hmc_delete_adapter", result) == "PASS"
+        )
+        final = await self.placements(adapter_type, "after verified fixture delete")
+        restored = (
+            final is not None
+            and _network_keys(final) is not None
+            and {key.casefold(): value for key, value in final.items()}
+            == {key.casefold(): value for key, value in baseline.items()}
+        )
+        unconfirmed = f"{stop}: deletion or restoration is unconfirmed"
+        return (
+            added,
+            [after[fixture]],
+            restored,
+            (None if accepted and restored else unconfirmed),
+        )
 
     async def client_round_trip(self, adapter_type: str, boundary: _Boundary) -> None:
         found = await self.client_baseline(adapter_type, boundary)
         if found is None:
             return
         servers, clients, mappings, slot = found
+        if _network_keys(clients) is None:
+            self.manual(
+                f"{self.lpar}'s {adapter_type} baseline identity is unavailable",
+                "inspect the baseline; no adapter was created",
+            )
         collision_refused = await self.slot_collision(
             adapter_type, boundary, slot, clients
         )
-        added = await self.add_client("paired", adapter_type, boundary, slot)
-        new = _new(await self.adapters(adapter_type, "after add"), clients)
-        _, restored, drift = await self.remove_new_adapters(adapter_type, clients)
+        added, new, restored = "SKIP", None, False
+        stop = f"{adapter_type} slot collision was not cleanly refused"
+        if collision_refused is not False:
+            added, new, restored, stop = await self.paired_fixture(
+                adapter_type, boundary, slot, clients
+            )
         servers_after = await self.server_rows(
             adapter_type, boundary.vios_id, "after delete"
         )
@@ -1231,8 +1306,12 @@ class _Arm:
                 cleanup=cleanup,
                 data=None,
             )
-        if not restored:
-            self.manual(f"{self.lpar}'s {adapter_type} set is off its baseline", drift)
+        if stop is not None:
+            self.manual(
+                f"{self.lpar}'s {stop}",
+                "reconcile by hand against the baseline in the results document; "
+                "no automatic deletion",
+            )
         if not vios_side:
             self.manual(
                 f"{boundary.vios}'s server adapters or {self.lpar}'s mappings changed",
