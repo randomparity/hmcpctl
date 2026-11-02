@@ -387,8 +387,12 @@ class _Run:
         try:
             identity = await self.ctx.effect(key, EFFECT_KINDS[key], target, write)
         except _LEG_ERRORS as exc:
+            # Bounded like an engine warning, so a verbose HMC error cannot push the
+            # result past store.MAX_RESULT_BYTES.
             self.steps.append(
-                WorkflowStep(STEP_NAMES[key], "error", f"{type(exc).__name__}: {exc}")
+                WorkflowStep(
+                    STEP_NAMES[key], "error", f"{type(exc).__name__}: {exc}"[:512]
+                )
             )
             return None
         self.steps.append(WorkflowStep(STEP_NAMES[key], "ok", dict(identity)))
