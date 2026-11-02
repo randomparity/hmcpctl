@@ -347,8 +347,11 @@ every change whatever the call returned, and verifies restoration:
   vSCSI server adapter toward the test partition (the serving VIOS); otherwise
   only the VLAN round trip runs.
 - **VLAN.** It creates `hmcpctl-live-vlan<id>-<8 hex>` on the first VLAN in
-  `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, tries a second network
-  on the same VLAN (expected refused; deleted if not), adds a client network
+  `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, on the lowest-numbered
+  virtual switch that carries a VIOS trunk adapter (read through `hmc_list_vios`). When
+  no listed switch has one, or the trunk adapters cannot be read, the VLAN round trip
+  SKIPs with that reason and never falls back to an untrunked switch. It tries a second
+  network on the same VLAN (expected refused; deleted if not), adds a client network
   adapter on that VLAN to the test partition, deletes an unknown adapter UUID
   (expected refused), then removes the adapter and the run's own networks. Any
   other network on that VLAN is reported, never deleted.
@@ -366,8 +369,11 @@ every change whatever the call returned, and verifies restoration:
   selected switch.
   Acknowledged deletion and independent baseline equality must precede later writes.
   Drift or uncertain creation, verification or deletion stops subsequent effects and
-  records manual recovery, retaining residue rather than inferring cleanup. Foreign
-  adapter UUIDs are never additional deletion targets. Use the existing preflight,
+  records manual recovery, retaining residue rather than inferring cleanup. When that
+  stop leaves a fresh read of the test partition's client adapters showing none on the
+  run's VLAN (every `PortVLANID` and `TaggedVLANIDs` parsed), the run still deletes its
+  own networks before stopping; otherwise the networks are retained for manual recovery.
+  Foreign adapter UUIDs are never additional deletion targets. Use the existing preflight,
   `scripts/live_network.py` and mandatory read-only recovery commands above; no new arm,
   activation or second adapter create is added.
 - **vSCSI and vFC clients.** Each first tries an add on the virtual slot the

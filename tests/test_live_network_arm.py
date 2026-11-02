@@ -114,6 +114,11 @@ class FakeHMC:
     duplicate_vlan_accepted: bool = False
     network_delete_fails: bool = False
     adapter_delete_fails: bool = False
+    adapter_add_status: str = "PASS"
+    adapter_add_takes_effect: bool = True
+    switches: list[str] = field(default_factory=lambda: ["0"])
+    trunk_switches: list[object] = field(default_factory=lambda: ["0"])
+    vios_status: str = "PASS"
     absent_port_accepted: bool = False
     labels_refused: bool = False
     group_remove_fails: bool = False
@@ -146,7 +151,22 @@ class FakeHMC:
         return "PASS", [dict(row) for row in self.fc]
 
     def _hmc_list_virtual_switches(self, _kwargs):
-        return "PASS", [{"UUID": "sw-0", "Resource": {"SwitchID": "0"}}]
+        return "PASS", [
+            {"UUID": f"sw-{switch}", "Resource": {"SwitchID": switch}}
+            for switch in self.switches
+        ]
+
+    def _hmc_list_vios(self, _kwargs):
+        if self.vios_status != "PASS":
+            return self.vios_status, "HTTP 500"
+        trunks = [{"VirtualSwitchID": switch} for switch in self.trunk_switches]
+        # A lone trunk adapter parses as a mapping, several as a list.
+        group = {"TrunkAdapter": trunks[0] if len(trunks) == 1 else trunks}
+        resource = {"TrunkAdapters": group} if trunks else {}
+        return "PASS", {
+            "entries": [{"UUID": "vios-A", "Resource": resource}],
+            "unreadable_systems": [],
+        }
 
     def _hmc_list_virtual_networks(self, _kwargs):
         return "PASS", [
@@ -176,6 +196,8 @@ class FakeHMC:
         ]
 
     def _hmc_add_network_adapter(self, kwargs):
+        if not self.adapter_add_takes_effect:
+            return self.adapter_add_status, "HTTP 500 HSCLB021"
         identity = self._new_uuid()
         resource = {
             "PortVLANID": str(kwargs["port_vlan_id"]),
@@ -188,7 +210,7 @@ class FakeHMC:
             "VirtualStationInterfaceTypeVersion": "0",
         }
         self.adapters["ClientNetworkAdapter"][identity] = resource
-        return "PASS", {
+        return self.adapter_add_status, {
             "UUID": identity,
             "Resource": dict(resource),
             "creation_verification": {
@@ -1456,3 +1478,88 @@ async def test_a_refused_storage_fixture_delete_stops_st9(monkeypatch, adapter_t
     (text,) = _manual(state)
     assert f"verified fixture {fixture}: deletion or restoration is unconfirmed" in text
     assert "hmc_set_vios_fc_port_label" not in hmc.mutations()
+
+
+def _created_on(hmc: FakeHMC) -> list[object]:
+    return [
+        kwargs["virtual_switch_id"]
+        for tool, kwargs in hmc.calls
+        if tool in ("hmc_create_virtual_network", "hmc_add_network_adapter")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_lowest_trunked_switch_is_selected(monkeypatch):
+    hmc = FakeHMC(switches=["2", "1", "0"], trunk_switches=["2", "0"])
+
+    state = await _run(monkeypatch, hmc)
+
+    assert set(_created_on(hmc)) == {0}
+    assert _results(state)["adapter.add_network"] == "passed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("knobs", "reason"),
+    [
+        ({"trunk_switches": []}, "no virtual switch carries a VIOS trunk adapter"),
+        ({"trunk_switches": ["5"]}, "no virtual switch carries a VIOS trunk adapter"),
+        ({"vios_status": "FAIL"}, "VIOS trunk adapters could not be read"),
+        ({"trunk_switches": ["0", "x"]}, "VIOS trunk adapters could not be read"),
+    ],
+)
+async def test_no_trunked_switch_skips_the_vlan_round_trip(monkeypatch, knobs, reason):
+    hmc = FakeHMC(switches=["1", "0"], **knobs)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert _created_on(hmc) == []
+    assert any(
+        row["status"] == "SKIP"
+        and row["tool"] == "hmc_create_virtual_network"
+        and row["note"] == reason
+        for row in state.results
+    )
+    assert _results(state)["adapter.add_vscsi"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_adapter_add_deletes_the_runs_network(monkeypatch):
+    hmc = FakeHMC(adapter_add_status="FAIL", adapter_add_takes_effect=False)
+
+    state = await _run(monkeypatch, hmc)
+
+    assert hmc.networks == EXISTING
+    assert _results(state)["network.delete_network"] == "passed"
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+    assert not any("networks named" in text for text in _manual(state))
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_on_the_vlan_keeps_the_network(monkeypatch):
+    hmc = FakeHMC(adapter_add_status="FAIL")
+
+    state = await _run(monkeypatch, hmc)
+
+    assert "hmc_delete_virtual_network" not in hmc.mutations()
+    assert any("networks named" in text for text in _manual(state))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields", [{"PortVLANID": "x"}, {"TaggedVLANIDs": "1 x"}, {"TaggedVLANIDs": {}}]
+)
+async def test_an_unparsable_adapter_vlan_keeps_the_network(monkeypatch, fields):
+    hmc = FakeHMC(adapter_add_status="FAIL", adapter_add_takes_effect=False)
+    original = hmc._hmc_add_network_adapter
+
+    def add(kwargs):
+        (existing,) = hmc.adapters["ClientNetworkAdapter"].values()
+        existing.update(fields)
+        return original(kwargs)
+
+    hmc._hmc_add_network_adapter = add
+    state = await _run(monkeypatch, hmc)
+
+    assert "hmc_delete_virtual_network" not in hmc.mutations()
+    assert any("networks named" in text for text in _manual(state))
