@@ -6,8 +6,8 @@ Source-only version 2 implemented and offline verified at `07d8a360`, 2026-11-01
 The maintainer subsequently approved the retained-fixture prerequisite through
 design and implementation in issuecomment-6563667424; it was offline verified at
 `9d1bbb43`. The subsequently approved fixed-fixture allocation and fresh-only
-Description correction is implemented with offline boundary proof; code-quality gates
-are in progress. Native vNIC update qualification and the
+Description correction is implemented with offline boundary proof and independent
+product/security review at `ebb5808e`. Native vNIC update qualification and the
 public setter remain unfinished; hardware windows and publication need separate
 admission. This record does not settle the complete updater design.
 
