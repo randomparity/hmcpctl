@@ -70,7 +70,8 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
    `hmc_add_network_adapter` and `hmc_map_storage_to_lpar` always; `hmc_create_virtual_disk`
    with `capacity_mib`; `hmc_set_minimum_affinity_policy` with a policy;
    `hmc_assign_sriov_logical_port` with `assignments.sriov`; `hmc_add_vnic` with
-   `assignments.vnics`; `hmc_power_on_lpar` with `power_on`.
+   `assignments.vnics`; `hmc_power_on_lpar` with `power_on`. The `power_on` write keeps
+   `ownership_override=True` against the stamp this operation just confirmed (ADR 0092).
 9. **`dry_run`** validates `request_id` and runs the preconditions (and the digest check)
    without submitting: no operation, lock or guard.
 

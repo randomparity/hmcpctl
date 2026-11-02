@@ -75,7 +75,8 @@ types, never request arguments (engine module note).
    resumes (not a fence, ADR 0190; an hmcpctl operation's own creations are excluded by the
    ledger check); any error in an affinity-policy or assignment write needs a human (no
    classifier, H1 *Resume*); a resumed create cannot confirm a `mksyscfg` apply and warns
-   (ADR 0313); the plan check races provisioning (the body re-runs the preconditions); a CLI
+   (ADR 0313); a stale ledger row for a reused disk name pauses a resumed disk write (it can
+   never adopt); the plan check races provisioning (the body re-runs the preconditions); a CLI
    killed mid-run leaves an interrupted operation for the CLI's or MCP's `continuation` under
    the same agent id, connection and host, or for `operations abandon`.
 4. **Covered elsewhere:** profile persistence #1840; VIOS writer window #1840/#1842; owned
