@@ -582,6 +582,23 @@ def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     return steps
 
 
+def _stale(
+    ctx: OperationContext, plan: Mapping[str, Any], view: dict[str, Any]
+) -> bool:
+    """Whether the partition differs from the plan's basis in what no applied write moved.
+
+    Once the plan's own ``current`` write is applied, the resources it changed are its
+    result rather than the basis, and a DLPAR may still be settling, so they are left out.
+    """
+    observed, expected = basis(view), dict(plan["basis"])
+    applied = ctx.recorded(CURRENT_KEY)
+    if applied is not None and applied.status == "applied":
+        for resource in _RESOURCES:
+            observed.pop(resource)
+            expected.pop(resource)
+    return observed != expected
+
+
 async def _apply(
     ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
 ) -> None:
@@ -594,10 +611,11 @@ async def _apply(
         # ADR 0314 Decisions 6 and 7: target and owner before every write; the plan's
         # basis before the first one this run makes.
         await _resolve(hmc, system_uuid, lpar_uuid)
-        if first and basis(await _read_view(hmc, lpar_uuid)) != plan["basis"]:
+        if first and _stale(ctx, plan, await _read_view(hmc, lpar_uuid)):
             raise OperationFailed(
                 f"LPAR {lpar_uuid} changed since the plan was made (state, RMC, profile "
-                "sync, name or resources); nothing more was written. Start a new request"
+                "sync, name or resources); this run wrote nothing, and the effects list "
+                "shows what earlier runs applied. Start a new request"
             )
         first = False
         if key == PROFILE_KEY:

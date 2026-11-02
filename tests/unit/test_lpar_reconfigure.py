@@ -591,6 +591,28 @@ def test_resume_after_profile_applied_continues(hmc, monkeypatch):
     assert hmc.memory[1] == 1024
 
 
+@pytest.mark.parametrize("state", ["running", "not activated"])
+def test_resume_after_the_current_write_renames(hmc, monkeypatch, state):
+    hmc.state = state
+    real = reconfigure._resolve
+    calls = []
+
+    async def dies_before_the_rename(*args):
+        calls.append(args)
+        if len(calls) == 4:  # validating, profile, current, then the rename
+            raise RuntimeError("process died")
+        return await real(*args)
+
+    monkeypatch.setattr(reconfigure, "_resolve", dies_before_the_rename)
+    record = _run({"memory_mib": 1024, "name": "web2"})
+    assert record.outcome == "needs_attention"
+    assert _effects(record)[-1] == ("current", "lpar.current_config", "applied")
+    record = _run({"memory_mib": 1024, "name": "web2"}, continuation="resume")
+    assert (record.state, record.outcome) == ("terminal", "completed")
+    assert hmc.calls.count("the current configuration") == 1
+    assert hmc.name == "web2"
+
+
 def test_open_plan_effect_is_recomputed():
     verdict = _await(reconfigure._classify_plan(None, None))
     assert verdict.status == "not_applied"
