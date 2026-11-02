@@ -498,17 +498,23 @@ class _Capture:
         """Q3: the same commands after an immediate power-off, then with -release."""
         vtd = self.vtd
         self.powered_on = True
-        self.note(
+        powered, _ = self.note(
             "hmc_power_on_lpar",
             "q3",
             await self.state.call(
                 self.client,
                 "hmc_power_on_lpar",
                 lpar_name_or_uuid=self.lpar,
+                system_name_or_uuid=self.system,
                 wait=True,
                 timeout_seconds=120,
             ),
         )
+        if powered != "PASS":
+            # No client opened the device, so a plain unloadopt would answer a
+            # question Q3 does not ask.
+            self.state.skip(SUBTASK, _ROW, f"q3 unanswered: power-on {powered}")
+            return
         self.note(
             "hmc_power_off_lpar",
             "q3 immediate",
@@ -516,6 +522,7 @@ class _Capture:
                 self.client,
                 "hmc_power_off_lpar",
                 lpar_name_or_uuid=self.lpar,
+                system_name_or_uuid=self.system,
                 immediate=True,
                 wait=True,
             ),
@@ -547,17 +554,24 @@ class _Capture:
                 ),
             )
             if not (isinstance(now, str) and now.strip().lower() == _NOT_ACTIVATED):
-                self.note(
+                off, _ = self.note(
                     "hmc_power_off_lpar",
                     "cleanup",
                     await self.state.call(
                         self.client,
                         "hmc_power_off_lpar",
                         lpar_name_or_uuid=self.lpar,
+                        system_name_or_uuid=self.system,
                         immediate=True,
                         wait=True,
                     ),
                 )
+                if off != "PASS":
+                    self.manual(
+                        f"{self.lpar} may still be running",
+                        f"chsysstate -m {shlex.quote(self.system)} -r lpar "
+                        f"-n {shlex.quote(self.lpar)} -o shutdown --immed",
+                    )
         if self.vtd:
             await self.reload_empty_target()
         targets = await self.optical("cleanup")
@@ -675,12 +689,12 @@ async def vmedia_media_change(client: Client, state: RunState) -> None:
         state.skip(SUBTASK, _ROW, reason)
         return
     arm = _Capture(client, state)
-    if not await arm.ready():
-        return
     _CAPTURES.mkdir(mode=0o700, exist_ok=True)
     path = capture_path(_run_tag())
     state.record(SUBTASK, "capture", "PASS", {"path": str(path)})
     with capture(path):
+        if not await arm.ready():
+            return
         try:
             await arm.run()
         except _Stop as stop:

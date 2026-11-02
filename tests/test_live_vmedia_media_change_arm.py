@@ -50,6 +50,9 @@ class MediaHMC(FakeHMC):
     collision_accepted: bool = False
     rename_on_swap: str | None = None
     loads_fail_after_power: int = 0
+    ignored_power_offs: int = 0
+    q1_unmaps: bool = False
+    optical_reads_before_failure: int | None = None
     failing_loads: int = 0
     cli: list[str] = field(default_factory=list)
     posts: list[str] = field(default_factory=list)
@@ -103,9 +106,25 @@ class MediaHMC(FakeHMC):
         if tool == "hmc_run_command" and kwargs["cmd"].startswith("viosvrcmd"):
             self.calls.append((tool, kwargs))
             return self._viosvrcmd(kwargs["cmd"])
-        if tool == "hmc_power_on_lpar":
+        if tool == "hmc_power_on_lpar" and not self.power_on_fails:
             self.reserved = True
             self.failing_loads = self.loads_fail_after_power
+            self.lpar_state = "Running"
+        if tool == "hmc_power_off_lpar":
+            self.calls.append((tool, kwargs))
+            if self.ignored_power_offs:
+                self.ignored_power_offs -= 1
+                return "FAIL", _failure("HMCError: power off failed")
+            self.lpar_state = "Not Activated"
+            return "PASS", {}
+        if (
+            tool == "hmc_list_optical_mappings"
+            and self.optical_reads_before_failure is not None
+        ):
+            if self.optical_reads_before_failure == 0:
+                self.calls.append((tool, kwargs))
+                return "FAIL", _failure("HMCError: HTTP 500")
+            self.optical_reads_before_failure -= 1
         if tool == "hmc_list_storage_mappings" and kwargs.get("lpar_name_or_uuid"):
             self.calls.append((tool, kwargs))
             return "PASS", [
@@ -153,6 +172,13 @@ class MediaHMC(FakeHMC):
                 return ""
             raise HMCError("POST failed", 500, COLLISION_BODY)
         names = mappings.findall(f".//{_tag('MediaName')}")
+        if self.q1_unmaps:
+            row = self._row()
+            assert row is not None
+            self.mappings.discard(row)
+            self.vios_rows.discard("12,sys-A-lp3,3")
+            self.lpar_rows.discard("3,vios-A,12")
+            return ""
         if self.rest_swaps:
             self._load(names[-1].text)
             if self.rename_on_swap:
@@ -275,13 +301,12 @@ async def test_the_capture_runs_q1_to_q4_and_leaves_the_vios_as_found(arm):
 )
 @pytest.mark.asyncio
 async def test_a_refusal_makes_no_mutation(arm, setup):
-    state, hmc, captured = arm
+    state, hmc, _ = arm
     setup(state, hmc)
 
     await _run(state, 16, 70)
 
     assert not _mutated(hmc)
-    assert captured == []
 
 
 @pytest.mark.asyncio
@@ -451,3 +476,63 @@ async def test_st22_removes_media_a_stopped_capture_left(arm):
 
     assert leftover not in hmc.media
     assert state.artifacts.vmedia_change_names == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_power_on_leaves_q3_unanswered(arm):
+    """No client opened the device, so a plain unloadopt answers nothing about Q3."""
+    state, hmc, _ = arm
+    hmc.power_on_fails = True
+
+    await _run(state, 16, 70, 22)
+
+    assert not _rows(state, "hmc_run_command (q3")
+    assert any("q3 unanswered" in r["note"] for r in state.results)
+    assert _manual(state) == []
+
+
+@pytest.mark.asyncio
+async def test_cleanup_powers_off_a_partition_q3_left_running(arm):
+    state, hmc, _ = arm
+    hmc.ignored_power_offs = 1
+
+    await _run(state, 16, 70, 22)
+
+    (off,) = _rows(state, "hmc_power_off_lpar (cleanup)")
+    assert off["status"] == "PASS"
+    assert hmc.lpar_state == "Not Activated"
+    assert _manual(state) == []
+
+
+@pytest.mark.asyncio
+async def test_a_cleanup_power_off_that_fails_is_a_manual_row(arm):
+    state, hmc, _ = arm
+    hmc.ignored_power_offs = 2
+
+    await _run(state, 16, 70)
+
+    assert any("chsysstate" in note and "--immed" in note for note in _manual(state))
+
+
+@pytest.mark.asyncio
+async def test_a_q1_that_unmaps_the_medium_skips_q2_and_q3(arm):
+    state, hmc, _ = arm
+    hmc.q1_unmaps = True
+
+    await _run(state, 16, 70, 22)
+
+    assert not any(c.startswith(("unloadopt", "loadopt")) for c in hmc.cli)
+    assert not _rows(state, "hmc_power_on_lpar")
+    assert any("no run medium is mapped after q1" in r["note"] for r in state.results)
+    assert _manual(state) == []
+    assert state.artifacts.vmedia_change_names == []
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_cleanup_listing_is_a_manual_row(arm):
+    state, hmc, _ = arm
+    hmc.optical_reads_before_failure = 2
+
+    await _run(state, 16, 70)
+
+    assert any("optical mappings could not be read" in n for n in _manual(state))

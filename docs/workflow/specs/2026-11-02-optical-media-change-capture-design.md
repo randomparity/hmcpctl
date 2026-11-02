@@ -64,10 +64,11 @@ Steps, in order:
 
 Recovery: `_VMEDIA_SUBTASKS` gains 70, `iso_names` reads `vmedia_change_names`, and
 `powered_on` reads ST70's power-on rows, so the existing test-partition classes (mapping left,
-unmapped server adapter, run media left, partition running) witness ST70. One new class,
-for runs that dispatched ST70, reads `hmc_list_storage_mappings` and reports a mapping toward
-the test partition with an identity but no backing (an empty VTD, which the optical listing
-never shows), naming `rmvdev -vtd <V>`. `run_media_names`
+unmapped server adapter, run media left, partition running) witness ST70. One new class reads
+`hmc_list_storage_mappings` and reports a mapping toward the test partition with an identity
+but no backing (an empty VTD, which the optical listing never shows), naming
+`rmvdev -vtd <V>`, only when its device is one ST70 recorded in a `vtd` row before touching
+it; an operator's own empty device is never reported. `run_media_names`
 also reads `vmedia_change_names`, so ST22 removes what ST70 left.
 
 The window runs on the lab-reachable host, per docs/live-testing.md: preflight
