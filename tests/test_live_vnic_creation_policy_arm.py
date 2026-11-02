@@ -24,6 +24,7 @@ from hmcpctl.documents.partition_profile import N
 from hmcpctl.ssh import transport
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+import live_test_evidence as public_evidence
 from live_test import vnic_creation_policy as arm
 from test_live_vios_ame_source_arm import entry, feed, field
 
@@ -971,6 +972,7 @@ async def test_source_case_lifecycle(source_wire, source_packet, tmp_path, case)
         shlex.split(c)[shlex.split(c).index("-o") + 1] for c in source_wire.writes
     ] == ["a", "s", "r"]
     assert result["source"]["submission"] == "completed"
+    assert result["source"]["submission_error"] is None
     assert result["source"]["qualification"] == "qualified"
     assert (
         result["evidence_class"] == "source-only"
@@ -2629,3 +2631,191 @@ async def test_fixture_fresh_description_explicit_empty_still_valid(
 def test_fixture_description_present_null_refused(before_stamp):
     with pytest.raises(TypeError):
         arm._fixture_description({"Description": None}, "", before_stamp=before_stamp)
+
+
+class UnprintableSubmissionError(Exception):
+    def __str__(self):
+        raise ValueError("broken diagnostic renderer")
+
+
+class MetadataSubmissionError(RuntimeError):
+    remote_nonzero_completed = True
+    remote_refusal_code = "HSCL1234"
+
+
+def _inject_submission_error(monkeypatch, wire, error):
+    original = wire.ssh
+
+    async def ssh(config, command, include_stderr, *, shown, max_output_bytes=None):
+        tokens = shlex.split(command)
+        if tokens[0] == "chhwres" and tokens[tokens.index("-o") + 1] == "s":
+            wire.commands.append(command)
+            wire.updated = True
+            raise error
+        return await original(
+            config,
+            command,
+            include_stderr,
+            shown=shown,
+            max_output_bytes=max_output_bytes,
+        )
+
+    monkeypatch.setattr(transport, "_run_hmc_command", ssh)
+
+
+@pytest.mark.parametrize(
+    "text,expected,truncated",
+    [
+        ("", "", False),
+        ("x" * 65536, "x" * 65536, False),
+        ("x" * 65537, "x" * 65536, True),
+        ("é" * 32768, "é" * 32768, False),
+        ("é" * 32768 + "x", "é" * 32768, True),
+        ("x" * 65535 + "é", "x" * 65535, True),
+        ("😀" * 16384, "😀" * 16384, False),
+        ("😀" * 16385, "😀" * 16384, True),
+        ("bad\ud800text", "bad?text", False),
+        ("x" * 65535 + "\ud800" + "z", "x" * 65535 + "?", True),
+    ],
+    ids=[
+        "empty",
+        "ascii-limit",
+        "ascii-over",
+        "two-byte-limit",
+        "two-byte-over",
+        "split-codepoint",
+        "four-byte-limit",
+        "four-byte-over",
+        "surrogate",
+        "surrogate-over",
+    ],
+)
+def test_submission_error_utf8_bound(text, expected, truncated):
+    detail = arm._source_submission_error(ValueError(text))
+    assert detail == {
+        "type": "ValueError",
+        "message": expected,
+        "truncated": truncated,
+        "remote_nonzero_completed": False,
+        "remote_refusal_code": None,
+    }
+    assert len(detail["message"].encode("utf-8")) <= 65536
+
+
+@pytest.mark.parametrize(
+    "kind", ["coded", "opaque", "signal", "timeout", "generic", "unprintable"]
+)
+@pytest.mark.asyncio
+async def test_submission_error_native_provenance(
+    source_wire, source_packet, tmp_path, monkeypatch, kind
+):
+    w, p = source_wire, source_packet
+    await prepare(w, p, tmp_path)
+    if kind in ("coded", "opaque", "signal"):
+        process = transport.asyncssh.ProcessError(
+            env={},
+            command="synthetic command",
+            subsystem=None,
+            exit_status=None if kind == "signal" else 1,
+            exit_signal=("TERM", False, "", "") if kind == "signal" else None,
+            returncode=-15 if kind == "signal" else 1,
+            stdout="HSCL1234 PRIVATE-DIAGNOSTIC"
+            if kind != "opaque"
+            else "PRIVATE-DIAGNOSTIC",
+            stderr="",
+        )
+        error = transport._process_error("synthetic command", process)
+    elif kind == "timeout":
+        error = transport._command_timeout_error(w.config(), "PRIVATE-DIAGNOSTIC")
+    elif kind == "generic":
+        error = MetadataSubmissionError("HSCL1234 PRIVATE-DIAGNOSTIC")
+    else:
+        error = UnprintableSubmissionError()
+    _inject_submission_error(monkeypatch, w, error)
+    output = tmp_path / "capture"
+    result = await arm.capture(w.client(), p, output)
+    source = result["source"]
+    detail = source["submission_error"]
+    assert detail["type"] == type(error).__name__ and not detail["truncated"]
+    assert detail["message"] == (
+        "<unprintable exception message>" if kind == "unprintable" else str(error)
+    )
+    assert detail["remote_nonzero_completed"] is (kind in ("coded", "opaque"))
+    assert detail["remote_refusal_code"] == ("HSCL1234" if kind == "coded" else None)
+    assert source["submission"] == ("rejected" if kind == "coded" else "unknown")
+    assert source["qualification"] == ("refused" if kind == "coded" else "unresolved")
+    assert source["remote_refusal_code"] == ("HSCL1234" if kind == "coded" else None)
+    assert result["status"] == "MANUAL_RECOVERY" and len(w.writes) == 2
+    path = output / "results.json"
+    assert json.loads(path.read_text())["source"]["submission_error"] == detail
+    assert path.stat().st_mode & 0o777 == 0o600 and path.stat().st_size <= 5 * arm.MIB
+    assert (await arm.recover(w.client(), p, result))["status"] == "MANUAL_RECOVERY"
+    assert len(w.writes) == 2
+
+
+@pytest.mark.parametrize("failure", ["disk", "overflow"])
+@pytest.mark.asyncio
+async def test_submission_error_journal_failure_preserves_intents(
+    source_wire, source_packet, tmp_path, monkeypatch, failure
+):
+    w, p = source_wire, source_packet
+    await prepare(w, p, tmp_path)
+    _inject_submission_error(monkeypatch, w, RuntimeError("private detail"))
+    original = arm.save
+    preceding = []
+
+    def fail_details(directory, document):
+        if document.get("source", {}).get("submission_error") is not None:
+            preceding.append((directory / "results.json").read_bytes())
+            if failure == "disk":
+                raise OSError("synthetic journal full")
+            oversized = deepcopy(document)
+            oversized["padding"] = "x" * (5 * arm.MIB)
+            original(directory, oversized)
+        else:
+            original(directory, document)
+
+    monkeypatch.setattr(arm, "save", fail_details)
+    output = tmp_path / "capture"
+    with pytest.raises((OSError, ValueError)):
+        await arm.capture(w.client(), p, output)
+    assert preceding and all(raw == preceding[0] for raw in preceding)
+    assert (output / "results.json").read_bytes() == preceding[0]
+    saved = json.loads(preceding[0])
+    assert len(saved["intents"]) == 2 and saved["source"]["submission_error"] is None
+    assert not saved["complete"] and len(w.writes) == 2
+
+
+def test_submission_error_cli_stays_private(
+    source_wire, source_packet, tmp_path, monkeypatch, capsys
+):
+    w, p = source_wire, source_packet
+    arm.asyncio.run(prepare(w, p, tmp_path))
+    _inject_submission_error(monkeypatch, w, RuntimeError("PRIVATE-DIAGNOSTIC-é"))
+    monkeypatch.setattr(arm, "load_profile", lambda name: w.config())
+    packet_path = tmp_path / "packet.json"
+    raw = json.dumps(p).encode()
+    packet_path.write_bytes(raw)
+    packet_path.chmod(0o600)
+    output = tmp_path / "capture"
+    assert (
+        arm.main(
+            [
+                "capture",
+                "--packet",
+                str(packet_path),
+                "--packet-sha256",
+                arm.hashlib.sha256(raw).hexdigest(),
+                "--output",
+                str(output),
+            ]
+        )
+        == 2
+    )
+    console = capsys.readouterr()
+    assert "SOURCE ONLY: MANUAL_RECOVERY" in console.out
+    assert "PRIVATE-DIAGNOSTIC" not in console.out + console.err
+    document = json.loads((output / "results.json").read_text())
+    assert document["source"]["submission_error"]["message"] == "PRIVATE-DIAGNOSTIC-é"
+    assert public_evidence.render(document) is None
+    assert len(w.writes) == 2

@@ -1545,6 +1545,23 @@ def _source_remove_before(qualified, slot, removed) -> bool:
     )
 
 
+def _source_submission_error(error):
+    limit = 64 * 1024
+    try:
+        text = str(error)
+    except Exception:  # noqa: BLE001 - broken diagnostic rendering must not replace submission uncertainty
+        text = "<unprintable exception message>"
+    encoded = text[: limit + 1].encode("utf-8", errors="replace")
+    native = isinstance(error, transport.HMCCLIError)
+    return {
+        "type": type(error).__name__,
+        "message": encoded[:limit].decode("utf-8", errors="ignore"),
+        "truncated": len(text) > limit or len(encoded) > limit,
+        "remote_nonzero_completed": error.remote_nonzero_completed if native else False,
+        "remote_refusal_code": error.remote_refusal_code if native else None,
+    }
+
+
 async def _capture_source(hmc, packet, document, output, budget):
     before = document["baseline"] = await snapshot(hmc, packet)
     if packet["baseline_sha256"] is None or digest(before) != packet["baseline_sha256"]:
@@ -1605,6 +1622,7 @@ async def _capture_source(hmc, packet, document, output, budget):
         ),
         "expected": {"field": field, "value": oracle},
         "submission": "not_dispatched",
+        "submission_error": None,
         "remote_refusal_code": None,
         "after_update": None,
         "selected_after": None,
@@ -1629,7 +1647,7 @@ async def _capture_source(hmc, packet, document, output, budget):
         ):
             source["submission"] = "rejected"
             source["remote_refusal_code"] = error.remote_refusal_code
-        source["error"] = type(error).__name__
+        source["submission_error"] = _source_submission_error(error)
     save(output, document)
     try:
         b2 = source["after_update"] = await snapshot(hmc, packet, source_result=source)

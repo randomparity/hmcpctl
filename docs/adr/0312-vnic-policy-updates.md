@@ -10,7 +10,8 @@ Description correction is implemented with offline boundary proof and independen
 product/security review at `ebb5808e`. Native vNIC update qualification and the
 public setter remain unfinished; hardware windows and publication need separate
 admission. A separately approved bounded private submission-error extension is
-under design. This record does not settle the complete updater design.
+implemented with offline boundary proof; quality gates are in progress. This record
+does not settle the complete updater design.
 
 ## Context
 

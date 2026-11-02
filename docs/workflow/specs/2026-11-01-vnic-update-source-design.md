@@ -5,7 +5,8 @@ Authority is the issue's `WORK:SCOPE` token `q1828-eed0dad6`, recorded in
 [the frozen scope](https://github.com/randomparity/hmcpctl/issues/1828#issuecomment-6557892997).
 [ADR 0312](../../adr/0312-vnic-policy-updates.md) records the owner decision.
 Status: source-version-2 implemented and offline verified at `07d8a360`.
-The approved bounded private submission-error extension is under design.
+The approved bounded private submission-error extension is implemented with offline
+boundary proof; independent review and final quality gates are in progress.
 Further hardware admission, public updater implementation and publication remain held.
 The separately approved [retained-fixture prerequisite](2026-11-01-vnic-retained-fixture-design.md)
 extends the same owner without changing source-version-2 semantics.
