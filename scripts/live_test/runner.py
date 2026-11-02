@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 67; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66 and ST67 require named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 70; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67 and ST70 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
@@ -103,6 +103,7 @@ from live_test.lpar_hardware_memory import exercise_lpar_hardware_memory
 from live_test.lpar_linux_roles import exercise_lpar_linux_roles
 from live_test.lpar_physical_io import exercise_lpar_physical_io
 from live_test.lpar_power import exercise_lpar_power
+from live_test.lpar_reconfigure import exercise_lpar_reconfigure
 from live_test.lpar_security_policy import exercise_lpar_security_policy
 from live_test.lpar_vtpm import exercise_lpar_vtpm
 from live_test.memory_move import exercise_memory_move
@@ -707,6 +708,7 @@ SUBTASKS = {
     49: exercise_lpar_physical_io,
     50: exercise_memory_quantities,
     51: exercise_lpar_vtpm,
+    70: exercise_lpar_reconfigure,
     52: exercise_lpar_security_policy,
     53: exercise_lpar_linux_roles,
     54: exercise_memory_move,
@@ -772,6 +774,9 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-processor-move": [61],
     "lpar-processor-quantities": [56],
     "lpar-vtpm": [51],
+    # Not in "all": the arm creates, reconfigures, activates and deletes its own
+    # partition (#1226).
+    "lpar-reconfigure": [70],
     "lpar-security-policy": [52],
     "lpar-hardware-memory": [55],
     "creation-memory": [65],
@@ -1085,7 +1090,8 @@ async def main(
         tasks = sorted(
             n
             for n in SUBTASKS
-            if n not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 65, 66, 67}
+            if n
+            not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 65, 66, 67, 70}
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.
