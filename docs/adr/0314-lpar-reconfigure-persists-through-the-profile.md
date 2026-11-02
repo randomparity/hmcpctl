@@ -25,8 +25,9 @@ resume choices below to this record.
 1. **Patch meaning.** `name` is the partition name (`PartitionName`); profile names never
    change. `memory_mib` is desired memory. `processors` is desired dedicated processors in
    dedicated mode and desired virtual processors in shared mode; processing units and the
-   processor mode are never changed, and a shared-mode value that leaves desired, minimum or
-   maximum units above virtual processors is refused before any write.
+   processor mode are never changed. A value above the system's per-partition processor limit,
+   or one that leaves shared units outside `floor x VPs <= units <= VPs` at any level (the
+   checks `hmc_dlpar_proc` applies), is refused before any write.
 2. **One target profile:** the partition's `DefaultProfileName`. A non-empty
    `LastActivatedProfile` that differs is refused before any write: a write to one would not
    persist through activation of the other.
@@ -69,11 +70,12 @@ resume choices below to this record.
    served `hmc_modify_lpar` cannot rename) — the tools the patch can
    use, whatever the plan later selects. The body re-resolves the partition by UUID within its
    system and re-runs the ADR 0011 check before every write; no `ownership_override`.
-7. **Stale plan and verification.** Before the first write not yet applied, whichever key it is,
-   the body re-reads what the plan rests on — partition state, RMC, `CurrentProfileSync` and the
+7. **Stale plan and verification.** Before every write not yet applied, the body re-reads what the plan rests on — partition state, RMC, `CurrentProfileSync` and the
    current values; the recorded ETag is also the profile's concurrency check (a 412 or ETag
    refusal is `not_applied`, then `failed`). A difference fails the operation without writing.
-   An applied effect is not re-checked. After the writes the body polls up to 120 seconds until
+   An applied effect is not re-checked, and resources the applied `current` write moved leave
+   the comparison. Once any write has applied, a later refusal or read failure pauses
+   `needs_attention` with the plan's result instead of `failed`, so the caller sees what landed. After the writes the body polls up to 120 seconds until
    the profile holds every planned value and the current configuration every value the plan
    wrote there; a
    mismatch pauses `needs_attention`, and `resume` re-verifies.

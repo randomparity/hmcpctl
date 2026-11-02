@@ -14,6 +14,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
@@ -33,6 +34,7 @@ from ..logical.engine import (
     OperationFailed,
 )
 from ..logical.models import EffectRecord
+from ..systems.fleet import read_system_entry
 from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
 from .power import open_client as _power_client
@@ -229,12 +231,20 @@ def _widen(triple: list[int], value: int) -> list[int]:
     return [min(triple[0], value), value, max(triple[2], value)]
 
 
-def _check_units(units: list[float] | None, vcpus: list[int], where: str) -> None:
-    if units is not None and any(u > v for u, v in zip(units, vcpus, strict=True)):
-        raise OperationFailed(
-            f"the {where} processing units would exceed its virtual processors at "
-            "minimum, desired or maximum; change the units first"
-        )
+def _check_units(
+    units: list[float] | None, vcpus: list[int], where: str, floor: float
+) -> None:
+    """Refuse shared units outside ``floor x VPs <= units <= VPs`` at any level."""
+    if units is None:
+        return
+    least = Decimal(str(floor))
+    for unit, count in zip(units, vcpus, strict=True):
+        if not least * count <= Decimal(str(unit)) <= count:
+            raise OperationFailed(
+                f"the {where} processing units would leave the managed system's "
+                "units-per-virtual-processor bounds at minimum, desired or maximum; "
+                "change the units first"
+            )
 
 
 def _classify(
@@ -293,7 +303,7 @@ def _current_write(
     if view["state"] == _NOT_ACTIVATED:
         pending = _widen(current, value)
         if resource == "processors":
-            _check_units(view["units"], pending, "partition's")
+            _check_units(view["units"], pending, "partition's", view.get("floor", 0))
         return {
             f"{level}_{suffix}": new
             for level, old, new in zip(_LEVELS, current, pending, strict=True)
@@ -301,7 +311,8 @@ def _current_write(
         }
     if applied == "live" and value != current[1]:
         if resource == "processors":
-            _check_units(view["units"], [current[0], value, current[2]], "partition's")
+            triple = [current[0], value, current[2]]
+            _check_units(view["units"], triple, "partition's", view.get("floor", 0))
         return {f"desired_{suffix}": value}
     return {}
 
@@ -324,7 +335,12 @@ def _resource_plan(
     patch, before = _profile_patch(resource, saved, new_saved)
     write = _current_write(resource, value, view, applied)
     if resource == "processors":
-        _check_units(profile["units"], new_saved, "profile's")
+        limit = view.get("count_limit")
+        if limit is not None and value > limit:
+            raise OperationFailed(
+                "processors exceeds the managed system's per-partition processor limit"
+            )
+        _check_units(profile["units"], new_saved, "profile's", view.get("floor", 0))
     change = {
         "field": _FIELD[resource],
         "before": {"profile": saved[1], "current": current[1]},
@@ -453,6 +469,38 @@ async def _read_profile(
         ) from exc
 
 
+async def _processor_limits(
+    hmc: HMCClient, system_uuid: str, dedicated: bool
+) -> dict[str, float]:
+    """The system's per-partition processor count and units-per-VP floor, when reported.
+
+    The fields ``hmc_dlpar_proc`` checks (``operations/lpar/processors.py``); a sparse
+    entry from a system that is not operating leaves them unchecked.
+    """
+    try:
+        entry = await read_system_entry(hmc, system_uuid)
+    except HMCError as exc:
+        raise OperationFailed(
+            f"managed system {system_uuid} could not be read ({type(exc).__name__})"
+        ) from exc
+    resource = (entry or {}).get("Resource") or {}
+    config = resource.get("AssociatedSystemProcessorConfiguration") or {}
+    fields = {
+        "count_limit": "CurrentMaximumAllowedProcessorsPerPartition"
+        if dedicated
+        else "MaximumAllowedVirtualProcessorsPerPartition",
+    }
+    if not dedicated:
+        fields["floor"] = "MinimumProcessorUnitsPerVirtualProcessor"
+    limits = {}
+    for key, name in fields.items():
+        try:
+            limits[key] = float(_text(config, name))
+        except ValueError:
+            continue
+    return limits
+
+
 async def _default_profile(
     hmc: HMCClient, view: dict[str, Any], system_uuid: str, lpar_uuid: str
 ) -> tuple[Any, dict[str, Any]]:
@@ -481,6 +529,8 @@ async def _make_plan(
     lpar_uuid: str,
 ) -> dict[str, Any]:
     view = await _read_view(hmc, lpar_uuid)
+    if patch.processors is not None:
+        view |= await _processor_limits(hmc, system_uuid, view["dedicated"])
     if patch.name is not None:
         escape_xml(patch.name)
         others = await _other_names(hmc, system_uuid, lpar_uuid)
@@ -624,21 +674,19 @@ async def _apply(
     ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
 ) -> None:
     lpar_uuid, system_uuid = plan["lpar_uuid"], plan["system_uuid"]
-    first = True
     for key, kind, target in _steps(plan):
         recorded = ctx.recorded(key)
         if recorded is not None and recorded.status == "applied":
             continue
-        # ADR 0314 Decisions 6 and 7: target and owner before every write; the plan's
-        # basis before the first one this run makes.
+        # ADR 0314 Decisions 6 and 7: target, owner and the plan's basis before every
+        # write not yet applied.
         await _resolve(hmc, system_uuid, lpar_uuid)
-        if first and _stale(ctx, plan, await _read_view(hmc, lpar_uuid)):
+        if _stale(ctx, plan, await _read_view(hmc, lpar_uuid)):
             raise OperationFailed(
                 f"LPAR {lpar_uuid} changed since the plan was made (state, RMC, profile "
                 "sync, name or resources); this run wrote nothing, and the effects list "
                 "shows what earlier runs applied. Start a new request"
             )
-        first = False
         if key == PROFILE_KEY:
             write = _profile_write(hmc, plan)
         elif key == CURRENT_KEY:
@@ -764,8 +812,17 @@ def reconfigure_body(
                     await ctx.effect(PLAN_KEY, PLAN_KIND, f"lpar:{lpar_uuid}", record)
                 )
             ctx.set_phase("applying")
-            await _apply(ctx, hmc, plan)
-            return await _verify(ctx, hmc, plan)
+            try:
+                await _apply(ctx, hmc, plan)
+                return await _verify(ctx, hmc, plan)
+            except (OperationFailed, EffectNotApplied) as exc:
+                if not any(_written(ctx, key) for key, _, _ in _steps(plan)):
+                    raise
+                # Something already landed, so "failed" would hide it: pause, report
+                # what the plan changed, and let resume retry and re-verify.
+                result = _result(ctx, plan)
+                result["warnings"].append(f"{type(exc).__name__}: {exc}"[:512])
+                return BodyResult("needs_attention", result)
 
     return body
 
@@ -775,6 +832,11 @@ async def _classify_plan(
 ) -> Classification:
     # Recording the plan writes nothing to the HMC, so an open one is recomputed.
     return Classification("not_applied")
+
+
+def _written(ctx: OperationContext, key: str) -> bool:
+    recorded = ctx.recorded(key)
+    return recorded is not None and recorded.status == "applied"
 
 
 def _plan_of(ctx: OperationContext) -> Mapping[str, Any]:

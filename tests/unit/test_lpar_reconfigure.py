@@ -358,6 +358,16 @@ def hmc(monkeypatch):
     monkeypatch.setattr(reconfigure, "resolve_system_uuid", system_uuid)
     monkeypatch.setattr(reconfigure, "resolve_and_authorize_lpar_mutation", authorize)
     monkeypatch.setattr(reconfigure, "require_memory_within_selected_system", within)
+
+    async def system_entry(_hmc, system):
+        assert system == SYS
+        return {"Resource": {"AssociatedSystemProcessorConfiguration": fake.limits}}
+
+    fake.limits = {
+        "MaximumAllowedVirtualProcessorsPerPartition": "64",
+        "MinimumProcessorUnitsPerVirtualProcessor": "0.05",
+    }
+    monkeypatch.setattr(reconfigure, "read_system_entry", system_entry)
     monkeypatch.setattr(
         reconfigure, "read_partition_profile", fake.read_partition_profile
     )
@@ -448,9 +458,9 @@ def test_pending_activation_writes_profile_only(hmc):
 
 def test_not_activated_writes_profile_and_current_configuration(hmc):
     hmc.state = "not activated"
-    record = _run({"memory_mib": 1024, "processors": 3})
+    record = _run({"memory_mib": 1024, "processors": 1})
     assert record.outcome == "completed"
-    assert (_saved_memory(hmc), hmc.memory[1], hmc.vcpus[1]) == (1024, 1024, 3)
+    assert (_saved_memory(hmc), hmc.memory[1], hmc.vcpus[1]) == (1024, 1024, 1)
     assert {c["applied"] for c in record.result["changes"]} == {"profile"}
 
 
@@ -518,18 +528,80 @@ def test_partial_apply_pauses_and_resume_keeps_it_paused(hmc):
     assert "has no live check" in record.warnings[0]
 
 
-def test_current_write_rejection_is_not_applied(hmc):
+@pytest.mark.parametrize(
+    "error",
+    [LparUpdateError("412", "rejected", 412), HMCError("read failed", 503)],
+    ids=["rejected", "before-the-post"],
+)
+def test_a_refused_write_after_an_applied_one_pauses_and_resumes(hmc, error):
+    hmc.partition_error = error
+    record = _run({"memory_mib": 1024})
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert ("profile", "lpar.profile_write", "applied") in _effects(record)
+    assert ("current", "lpar.current_config", "not_applied") in _effects(record)
+    assert record.result["changes"][0]["applied"] == "live"
+    hmc.partition_error = None
+    record = _run({"memory_mib": 1024}, continuation="resume")
+    assert (record.state, record.outcome) == ("terminal", "completed")
+    assert hmc.calls.count("profile") == 1
+    assert hmc.memory[1] == 1024
+
+
+def test_a_refused_first_write_fails(hmc):
     hmc.partition_error = LparUpdateError("412", "rejected", 412)
-    record = _run({"memory_mib": 1024})
+    record = _run({"name": "web2"})
     assert (record.state, record.outcome) == ("terminal", "failed")
-    assert ("current", "lpar.current_config", "not_applied") in _effects(record)
+    assert _effects(record)[-1] == ("rename", "lpar.rename", "not_applied")
 
 
-def test_error_before_the_post_is_not_applied(hmc):
-    hmc.partition_error = HMCError("read failed", 503)
+def test_a_read_failure_during_verification_pauses_and_resume_verifies(
+    hmc, monkeypatch
+):
+    real = hmc.get_logical_partition
+    reads = []
+
+    async def flaky(uuid):
+        reads.append(uuid)
+        if len(reads) == 4:  # plan, before profile, before current, then verify
+            raise HMCError("GET failed", 503)
+        return await real(uuid)
+
+    monkeypatch.setattr(hmc, "get_logical_partition", flaky)
     record = _run({"memory_mib": 1024})
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert "could not be read" in record.result["warnings"][-1]
+    record = _run({"memory_mib": 1024}, continuation="resume")
+    assert (record.state, record.outcome) == ("terminal", "completed")
+
+
+def test_basis_is_rechecked_before_every_write(hmc, monkeypatch):
+    real = hmc.update_partition_profile
+
+    async def then_rmc_drops(*args, **kwargs):
+        outcome = await real(*args, **kwargs)
+        hmc.rmc = "inactive"
+        return outcome
+
+    monkeypatch.setattr(reconfigure, "update_partition_profile", then_rmc_drops)
+    record = _run({"memory_mib": 1024})
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert "changed since the plan" in record.result["warnings"][-1]
+    assert "the current configuration" not in hmc.calls
+
+
+@pytest.mark.parametrize(
+    ("limits", "message"),
+    [
+        ({"MaximumAllowedVirtualProcessorsPerPartition": "2"}, "per-partition"),
+        ({"MinimumProcessorUnitsPerVirtualProcessor": "0.1"}, "units-per-virtual"),
+    ],
+)
+def test_system_processor_limits_refuse_before_writing(hmc, limits, message):
+    hmc.limits = limits
+    record = _run({"processors": 3})
     assert (record.state, record.outcome) == ("terminal", "failed")
-    assert ("current", "lpar.current_config", "not_applied") in _effects(record)
+    assert message in record.warnings[0]
+    assert record.effects == ()
 
 
 def test_profile_rejection_is_not_applied(hmc, monkeypatch):
