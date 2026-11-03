@@ -39,8 +39,8 @@ land.
    group; media match by `MediaName` on its VIOS. The same pass reads the item's group: an item
    no longer listed is retained as `absent`, and a name listed more than once as `ambiguous`;
    both keep their rows.
-3. **Effects**, after teardown and only when `delete_lpar` is applied, in ledger order, one item
-   at a time; UUIDs lower-cased, 16 hex digits the start of the SHA-256 of the `|`-joined parts:
+3. **Effects**, after teardown and only when `delete_lpar` is applied, one item at a time, disks
+   then media, each kind in ledger order; UUIDs lower-cased, 16 hex digits the start of the SHA-256 of the `|`-joined parts:
 
    | Key | Kind | Target | Identity | Classifier |
    | --- | --- | --- | --- | --- |
@@ -77,7 +77,7 @@ land.
    ends `needs_attention`, so `resume` re-reads; other retentions end `completed`. A dry run
    reports deletable items as `pending` and the rest as `retained`, records nothing, and needs
    neither the flag nor the specialists; without the flag it warns that the run will need it.
-   Cleanup effects are reported only in `storage`, never as teardown steps. A result rebuilt from the journal takes `storage` from
+   Cleanup deletes are reported only in `storage`, never as teardown steps. A result rebuilt from the journal takes `storage` from
    the record when present, else from the delete effects (applied → `deleted`, open → `pending`).
 
 ## Consequences

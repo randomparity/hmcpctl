@@ -21,18 +21,18 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
 
 **Components.**
 
-- `operations/logical/store.py`: `remove_ledger(conn, rows)` deletes rows by
-  `(operation_id, key)`.
-  `operations/logical/engine.py`: `OperationContext.ledger_remove(rows)` wraps it in a write
-  transaction; `engine.recorded_partition(agent_id, request_id, tool)` returns the record's
+- `operations/logical/store.py`: `remove_ledger(conn, kind, system_uuid, partition_uuid,
+  match)` deletes the partition's entries of that kind whose identity holds every `match` field,
+  whichever operation wrote them. `operations/logical/engine.py`:
+  `OperationContext.ledger_remove(...)` wraps it in a write transaction; `engine.recorded_partition(agent_id, request_id, tool)` returns the record's
   `(system_uuid, partition_uuid)` or None, read-only.
 - New `operations/lpar/decommission_storage.py` (ADR 0323 Decisions 1–4, 6): `OwnedItem`,
   `owned_items(system_uuid, partition_uuid)`, `assess(hmc, system_uuid, partition_uuid, items)`
   (the single pass; returns per-item `deletable` or a retained reason, plus the remaining
   mappings to this partition per item), `clean_storage(hmc, journal, …)` (the effects and ledger
-  removal), `storage_classifiers(client_factory)`, the effect key helpers, and the
-  `DecommissionStorage` result type.
-- `operations/lpar/decommission.py`: `DecommissionResult.storage: DecommissionStorage | None`.
+  removal), `storage_classifiers(client_factory)` and the effect key helpers.
+- `operations/lpar/decommission.py`: the `DecommissionStorage` type and
+  `DecommissionResult.storage: DecommissionStorage | None`.
   `decommission_operation.py`: `DEFAULT_ARGUMENTS` gains `storage_cleanup="retain"`; the body,
   given `authorized_vios`, runs cleanup after teardown (and on the fast path where `delete_lpar`
   is already applied) when `storage_cleanup` is `delete_owned`; `preview` adds the dry-run
@@ -45,8 +45,8 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
   specialists per owned VIOS against the effective (recorded) mode (Decision 5); every reader
   defaults a missing `storage_cleanup` to `retain`. Its docstring names the new mode. It is
   removed from `lifecycle.py` and registered in `server.py` and `catalog.py`.
-- `decommission_operation._settled` skips `disk.*` and `media.*` effects: they are reported in
-  `storage` only, so `_agrees` and the rebuilt steps are unchanged for them.
+- The rebuilt steps list only ADR 0320's four steps, so `disk.*` and `media.*` effects appear in
+  `storage` only.
 - CLI `hmcpctl lpars decommission`: `--storage-cleanup retain|delete_owned` and
   `--exclusive-writer-window`, with the same refusal read from the recorded mode on a
   continuation (which accepts `--exclusive-writer-window`); the confirmation prompts and the
@@ -65,8 +65,10 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
   list, `docs/capabilities/operations.json` (its gate reads the moved handler's path and
   signature), `docs/cli.md` (documents the command) and `docs/live-testing.md` (narrates the
   arm's retained volume).
-- `store.ledger_entries` returns each row's `key` too, so cleanup reuses it (filtering by
-  partition) instead of a second query; provision's one caller unpacks the extra field.
+- Cleanup reads owned items with the existing `store.ledger_entries`, filtered by partition, so
+  its callers in flight elsewhere keep their tuple shape.
+- `scripts/check_capability_inventory.py` builds the moved handler with the other factory-built
+  ones; its gate reads every registered handler.
 
 ## Failure model
 
