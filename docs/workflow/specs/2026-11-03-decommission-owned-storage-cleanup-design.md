@@ -21,9 +21,8 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
 
 **Components.**
 
-- `operations/logical/store.py`: `partition_ledger(conn, system_uuid, partition_uuid, kinds)`
-  returns `(operation_id, key, kind, identity)` rows in insertion order;
-  `remove_ledger(conn, rows)` deletes rows by `(operation_id, key)`.
+- `operations/logical/store.py`: `remove_ledger(conn, rows)` deletes rows by
+  `(operation_id, key)`.
   `operations/logical/engine.py`: `OperationContext.ledger_remove(rows)` wraps it in a write
   transaction; `engine.recorded_partition(agent_id, request_id, tool)` returns the record's
   `(system_uuid, partition_uuid)` or None, read-only.
@@ -57,11 +56,17 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
   (`storage.capacity_mib` in the arm's volume group) instead of mapping a pre-created volume, and
   decommissioned with `delete_owned`; the judged assertion `backing-volume-retained` becomes
   `owned-disk-deleted`, and the existing foreign-mapping comparison is joined by
-  `foreign-volumes-retained`: every other volume `lsvg -lv` listed in the group before is listed
-  after.
+  `shared-storage-retained`: every other volume `lsvg -lv` listed in the group, every physical
+  volume `lspv` listed and the repository `lsrep` listed before are listed after. The arm then no
+  longer exercises `retain` or provision mapping an existing volume natively; their recorded
+  evidence (#1847's run) stays, and the CLI and unit tests keep covering both.
 - Docs: `CHANGELOG.md`, `docs/tools/` (regenerated), `docs/mcp-server.md`,
-  `docs/capabilities/maturity.json`, `docs/capabilities/operations.json`, `docs/cli.md`,
-  `docs/live-testing.md`'s arm narrative.
+  `docs/capabilities/maturity.json`; and, as unavoidable consequences outside the frozen surface
+  list, `docs/capabilities/operations.json` (its gate reads the moved handler's path and
+  signature), `docs/cli.md` (documents the command) and `docs/live-testing.md` (narrates the
+  arm's retained volume).
+- `store.ledger_entries` returns each row's `key` too, so cleanup reuses it (filtering by
+  partition) instead of a second query; provision's one caller unpacks the extra field.
 
 ## Failure model
 
@@ -122,8 +127,8 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
 8. With no ledger rows (store loss, pre-store partition), `delete_owned` deletes nothing.
 9. A dry run with `delete_owned` reports the plan in `storage`, warns when the flag is absent, and
    records nothing.
-10. The live arm deletes P's owned disk and leaves every other volume in its group and every
-    foreign mapping it listed before.
+10. The live arm deletes P's owned disk and leaves every other volume in its group, every
+    physical volume, the repository and every foreign mapping it listed before.
 
 ## Validation
 

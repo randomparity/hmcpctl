@@ -56,7 +56,9 @@ land.
    (`precondition_failed`), the remaining items are still processed, and the run then ends
    `failed` with a warning naming the item and the specialist that removes it.
 4. **Ledger removal.** Once an item's delete effect is `applied`, every ledger row naming it for
-   this partition is deleted in one transaction. Retained items keep their rows.
+   this partition is deleted in one transaction. Retained items and the `partition` row keep
+   their rows: this implements ADR 0190 Decision 7's removal for deleted resources only, and its
+   removal of retained ones is left open.
 5. **Inputs and authority.** `storage_cleanup` (`retain` default / `delete_owned`) is recorded with
    the request; `exclusive_writer_window=true` is required with `delete_owned` on a new request
    or `resume` and refused before anything is recorded, naming the flag. The mode is read from the
