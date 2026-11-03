@@ -83,23 +83,22 @@ an HMC console below 10.3.1060, and the handler refuses a `resume` that does not
 handles the name form; `parse_target` is unchanged for the UUID form. The handler and CLI
 require `exclusive_writer_window`, so the CLI gains `--exclusive-writer-window`.
 
-**Proof arm.** A new opt-in arm `provision-persistence` (subtask 71) on one owned scratch
-partition, with lpar-power's prefix, volume prefix and teardown, runs as follows:
-1. Provision with `capacity_mib` and `power_on=false`; this must end `configured`.
-2. Require the default profile to be the saved name and to hold the adapter and the vSCSI
-   client adapter.
-3. Activate that profile to SMS; the current configuration must show the client adapter on the
-   VLAN, the vSCSI client adapter, and the requested memory and processors.
-4. Power off, then decommission and delete the volume.
-
-It is registered in the runner, preflight, recovery and `docs/live-testing.md`.
+**Proof arm.** No new arm: the existing lpar-power arm (subtask 41, scenario
+`st41-lpar-power`) already provisions its partition P with `capacity_mib` and `power_on=true`
+and decommissions it. With `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` it holds
+`saved-profile-activated`: the operation ended `configured`, and once P is activated
+`lssyscfg` reports P's `default_profile` and `curr_profile` as the saved name. The client
+adapter is listed only after that activation, so `network-adapter-on-vlan` proves the adapter
+survived it. Without the variable the arm skips the real provision. Memory and processors are
+checked by the product readback, not re-read by the arm.
 
 **Body.** Phase `validating`: on a continuation whose `create` is not applied, re-run the
 preconditions (which add "no disk of that name on the VIOS" with `capacity_mib`). Once `create` is
 applied the body holds the guard on its system and partition UUID. Phase `creating`: the
 effects in ADR 0313's order, each skipped when its request field is absent; ledger writes after `create` and `disk`
-are applied; the change-location read after `network`. Messages name UUIDs and exception
-types, never request arguments (engine module note).
+are applied; the change-location read after `network`. A leg's step error keeps its exception
+text, bounded to 512 characters; the reader is `hmc_operation_status` under the same agent
+binding.
 
 ## Failure model
 
@@ -158,12 +157,12 @@ types, never request arguments (engine module note).
     memory, processors and adapters; the profile is the default, and `power_on` activates it.
 12. A save the helper reports as `unknown` is applied when the readback passes; an absent
     profile is `not_applied` on a resume.
-13. On hardware, the proof arm shows the adapters, memory and processors surviving a profile
-    activation.
+13. On hardware, the lpar-power arm's partition P holds `saved-profile-activated` and lists its
+    client adapter on the VLAN after activating the saved profile.
 
 ## Validation
 
 Focused tests, rewritten from `tests/lpar/test_provision_tool.py` onto the handler against a
-temporary store, cover Success 1–12 and the classifiers. Success 13 is the live proof arm. `tests/app` schema, security, gateway
+temporary store, cover Success 1–12 and the classifiers. Success 13 is the lpar-power arm's live run. `tests/app` schema, security, gateway
 and CLI tests follow the new signature. `just tool-docs`, `just capability-metadata`, the
 maturity record and `CHANGELOG.md` are regenerated or edited; `just verify` is the gate.
