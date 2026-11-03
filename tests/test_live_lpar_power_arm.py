@@ -104,6 +104,7 @@ class World:
     def __init__(self) -> None:
         self.partitions: dict[str, dict[str, Any]] = {}
         self.volumes = {"hd5", "lv_op"}
+        self.owned: set[str] = set()
         self.mappings = [
             {
                 "id": "vhost0/vtscsi0",
@@ -184,6 +185,16 @@ class World:
             return f"{DRC},{self.slot_owner}\n"
         if "virtualio" in cmd:
             return "\n".join(sorted(self.adapters)) + "\n"
+        if cmd.startswith("viosvrcmd") and cmd.endswith("'lspv'"):
+            return "NAME PVID VG STATUS\nhdisk0 00f1 rootvg active\n"
+        if cmd.startswith("viosvrcmd") and cmd.endswith("'lsrep'"):
+            # Parent Free follows the group's volumes, as live V10R3 VIOS prints it.
+            free = 459264 - 1024 * len(self.volumes)
+            return (
+                "Size(mb) Free(mb) Parent Pool Parent Size Parent Free\n"
+                f"10240 10093 rootvg 571904 {free}\n\nName File Size Optical Access\n"
+                "lpar-a.iso 105 lpar-a-vopt ro\n"
+            )
         if cmd.startswith("viosvrcmd") and f"lsvg -lv {GROUP}" in cmd:
             rows = [f"{GROUP}:", "LV NAME TYPE LPs PPs PVs LV STATE MOUNT POINT"]
             rows += [f"{v} jfs2 1 1 1 open/syncd N/A" for v in sorted(self.volumes)]
@@ -394,6 +405,10 @@ class World:
         except ValueError as exc:
             return exc
         uuid = self._new(kwargs["name"], kwargs["caller_token"], kwargs["resources"])
+        if kwargs["storage"].get("capacity_mib"):
+            # Provision creates the disk, so the operation ledger owns it (ADR 0313).
+            self.volumes.add(kwargs["storage"]["storage_name"])
+            self.owned.add(kwargs["storage"]["storage_name"])
         self.mappings.append(
             {
                 "id": "vhost1/vtscsi1",
@@ -493,6 +508,7 @@ class World:
                 "warnings": [],
                 "steps": steps,
                 "blast_radius": radius,
+                "storage": self._storage(kwargs, entry, "pending"),
             }
         if self.decommission_pauses:
             return {
@@ -501,6 +517,7 @@ class World:
                 "blast_radius": radius,
                 "operation": _record("paused"),
             }
+        storage = self._storage(kwargs, entry, "deleted")
         for mapping in list(self.mappings):
             if mapping["lpar_uuid"] == entry["uuid"]:
                 self._hmc_detach_storage_mapping({"mapping_id": mapping["id"]})
@@ -508,6 +525,9 @@ class World:
         del self.partitions[name]
         if self.slot_owner == name:
             self.slot_owner = "null"
+        for item in (storage or {}).get("deleted", ()):
+            self.volumes.discard(item["disk_name"])
+            self.owned.discard(item["disk_name"])
         return {
             "resource_deleted": True,
             "workflow_completed": True,
@@ -517,7 +537,27 @@ class World:
             "steps": [{"step": "delete_lpar", "status": "ok"}],
             "blast_radius": radius,
             "operation": _record("terminal"),
+            "storage": storage,
         }
+
+    def _storage(
+        self, kwargs: dict[str, Any], entry: dict[str, Any], disposition: str
+    ) -> dict[str, Any] | None:
+        """ADR 0323's storage block: the partition's owned disks under *disposition*."""
+        if kwargs.get("storage_cleanup") != "delete_owned":
+            return None
+        owned = [
+            {
+                "kind": "virtual_disk",
+                "vios_uuid": VIOS_UUID,
+                "disk_name": m["backing_name"],
+            }
+            for m in self.mappings
+            if m["lpar_uuid"] == entry["uuid"] and m["backing_name"] in self.owned
+        ]
+        storage: dict[str, Any] = {"deleted": [], "retained": [], "pending": []}
+        storage[disposition] = owned
+        return storage
 
 
 def _record(state: str) -> dict[str, Any]:
@@ -707,7 +747,7 @@ def test_names_and_token_share_the_run_suffix(schemas):
     name = world.calls_to("hmc_provision_lpar")[0]["name"]
     suffix = name.removeprefix(lpar_power.NAME_PREFIX).removesuffix("-p")
     assert create["caller_token"] == lpar_power.TOKEN_PREFIX + suffix
-    disk = world.calls_to("hmc_create_virtual_disk")[0]["disk_name"]
+    disk = world.calls_to("hmc_provision_lpar")[0]["storage"]["storage_name"]
     assert disk == lpar_power.VOLUME_PREFIX + suffix and len(disk) <= 15
 
 
@@ -1018,7 +1058,10 @@ def test_product_decommission_runs_without_prior_detach(schemas):
         for i, (tool, k) in enumerate(world.calls)
         if tool == "hmc_decommission_lpar" and not k.get("dry_run")
     ]
-    assert real and tools.index("hmc_delete_virtual_disk") > real[0]
+    # delete_owned deletes the provisioned run volume, so teardown deletes no disk.
+    assert real and world.calls[real[0]][1]["storage_cleanup"] == "delete_owned"
+    assert world.calls[real[0]][1]["exclusive_writer_window"] is True
+    assert "hmc_delete_virtual_disk" not in tools
 
 
 def test_failed_decommission_preserves_mapping_and_backing_volume(schemas):
@@ -1203,8 +1246,10 @@ def test_header_only_volume_inventory_allows_normal_power_cleanup(schemas):
 
     state = _run(schemas, world)
 
-    assert world.calls_to("hmc_create_virtual_disk")
-    assert world.calls_to("hmc_delete_virtual_disk")
+    (provision,) = world.calls_to("hmc_provision_lpar")
+    assert provision["storage"]["capacity_mib"] == lpar_power.VOLUME_MIB
+    assert not world.calls_to("hmc_create_virtual_disk")
+    assert not world.calls_to("hmc_delete_virtual_disk")
     assert not world.volumes
     assert _rows(state, "system baseline compare")[0]["status"] == "PASS"
 
@@ -1399,6 +1444,38 @@ def _decommission_keeps_partition(w: World) -> None:
     _wrap(w, "hmc_decommission_lpar", change)
 
 
+def _decommission_keeps_owned_disk(w: World) -> None:
+    def change(k, real):
+        answer = real(k)
+        if not k["dry_run"]:
+            w.volumes.update(item["disk_name"] for item in answer["storage"]["deleted"])
+        return answer
+
+    _wrap(w, "hmc_decommission_lpar", change)
+
+
+def _decommission_takes_a_foreign_volume(w: World) -> None:
+    def change(k, real):
+        answer = real(k)
+        if not k["dry_run"]:
+            w.volumes.discard("lv_op")
+        return answer
+
+    _wrap(w, "hmc_decommission_lpar", change)
+
+
+def _repository_changes(w: World) -> None:
+    def change(k, real):
+        decommissioned = any(
+            not c["dry_run"] for c in w.calls_to("hmc_decommission_lpar")
+        )
+        if decommissioned and k["cmd"].endswith("'lsrep'"):
+            return "Size(mb) Free(mb)\n2048 2048 rootvg 571904 1\n"
+        return real(k)
+
+    _wrap(w, "hmc_run_command", change)
+
+
 _DEVIATIONS = [
     ("lpar.create", "units-over-vcpus-refused", _units_accepted),
     ("lpar.create", "resources-read-back", _skewed_read),
@@ -1458,6 +1535,13 @@ _DEVIATIONS = [
         _decommission_answer(False, workflow_completed=False),
     ),
     ("lpar.decommission", "lpar-name-absent", _decommission_keeps_partition),
+    ("lpar.decommission", "owned-disk-deleted", _decommission_keeps_owned_disk),
+    (
+        "lpar.decommission",
+        "shared-storage-retained",
+        _decommission_takes_a_foreign_volume,
+    ),
+    ("lpar.decommission", "shared-storage-retained", _repository_changes),
 ]
 
 
@@ -1602,7 +1686,7 @@ def test_failed_partition_absence_never_releases_decommission_cleanup(schemas):
         "invalid-metadata",
         "failed-detail",
         "failed-partition-read",
-        "missing-volume",
+        "missing-foreign-volume",
         "changed-foreign",
     ],
 )
@@ -1616,8 +1700,8 @@ def test_uncertain_post_decommission_proof_retains_manual_cleanup(schemas, failu
         result = original(kwargs)
         if not kwargs["dry_run"]:
             completed = True
-            if failure == "missing-volume":
-                world.volumes = {"hd5", "lv_op"}
+            if failure == "missing-foreign-volume":
+                world.volumes.discard("lv_op")
             elif failure == "changed-foreign":
                 world.mappings.append(
                     {
@@ -1686,7 +1770,8 @@ def test_cancellation_during_decommission_proof_preserves_remaining_scratch(
     assert any(name.endswith("-p") for name in world.partitions) == (
         boundary != "post-inventory"
     )
-    assert world.volumes > {"hd5", "lv_op"}
+    # After the decommission, delete_owned has already removed the run volume.
+    assert (world.volumes > {"hd5", "lv_op"}) == (boundary != "post-inventory")
     assert not world.calls_to("hmc_delete_virtual_disk")
     assert not world.calls_to("hmc_detach_storage_mapping")
 
@@ -1772,4 +1857,5 @@ def test_preview_adapter_uuid_case_matches_snapshot(schemas):
         len([k for k in world.calls_to("hmc_decommission_lpar") if not k["dry_run"]])
         == 1
     )
-    assert len(world.calls_to("hmc_delete_virtual_disk")) == 1
+    assert not world.calls_to("hmc_delete_virtual_disk")
+    assert world.volumes == {"hd5", "lv_op"}

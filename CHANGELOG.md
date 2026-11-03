@@ -18,6 +18,17 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `hmc_decommission_lpar` and `hmcpctl lpars decommission` take `storage_cleanup`
+  (`--storage-cleanup`): `retain`, the default and the old behaviour, or `delete_owned`. After
+  the partition is deleted, `delete_owned` deletes each virtual disk and installer medium the
+  operation store records as created for that partition, only when one read of every VIOS
+  shows no mapping to another partition, as journaled effects that `resume` reconciles, and
+  removes their ledger entries. Physical volumes, repositories and unrecorded storage are always
+  retained; an unreadable VIOS retains every owned item. It requires
+  `exclusive_writer_window=true` and a policy permitting `hmc_detach_storage_mapping`,
+  `hmc_unmount_optical_media`, `hmc_delete_optical_media` and `hmc_delete_virtual_disk` for each
+  owning VIOS. The result gains `storage` (`deleted`, `retained` with reasons, `pending`), null
+  under `retain` (ADR 0323, #1848).
 - `hmc_provision_lpar` runs as one journaled logical operation (ADR 0313): each HMC write is
   recorded before and after it runs, a repeat returns the same operation instead of creating
   a second partition, and `continuation=resume` checks an interrupted write live before

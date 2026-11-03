@@ -29,10 +29,7 @@ from hmcpctl.server import (
     TOOL_SECURITY,
     create_mcp,
 )
-from hmcpctl.server_tools.lpar.lifecycle import (
-    hmc_decommission_lpar,
-    hmc_delete_lpar,
-)
+from hmcpctl.server_tools.lpar.lifecycle import hmc_delete_lpar
 from hmcpctl.server_tools.vios.core import hmc_delete_vios
 
 # Composed here rather than imported: ADR 0041 removed the module-level application, so
@@ -465,8 +462,6 @@ def test_destructive_partition_tools_expose_system_scope():
 
 
 def test_decommission_lpar_is_public_destructive_and_schema_stable():
-    assert callable(hmc_decommission_lpar)
-
     tool = _tools_by_name()["hmc_decommission_lpar"]
     assert TOOL_SECURITY["hmc_decommission_lpar"].effect == "destructive"
     assert tool.annotations is not None and tool.annotations.destructive_hint is True
@@ -482,11 +477,15 @@ def test_decommission_lpar_is_public_destructive_and_schema_stable():
         "immediate",
         "timeout_seconds",
         "poll_interval",
+        "storage_cleanup",
+        "exclusive_writer_window",
         "continuation",
         "wait_seconds",
         "profile",
     }
     assert tool.parameters["required"] == ["request_id"]
+    # Null reads as retain (ADR 0323 Decision 5).
+    assert properties["storage_cleanup"]["default"] is None
     assert properties["dry_run"]["default"] is False
     # A new request fills these (ADR 0320 Decision 1); a continuation omits them.
     for name in ("ownership_override", "immediate", "timeout_seconds", "poll_interval"):
@@ -503,8 +502,10 @@ def test_decommission_lpar_is_public_destructive_and_schema_stable():
         "warnings",
         "blast_radius",
         "operation",
+        "storage",
     }
-    assert set(schema["required"]) == set(schema["properties"]) - {"operation"}
+    optional = {"operation", "storage"}
+    assert set(schema["required"]) == set(schema["properties"]) - optional
 
 
 def test_partition_creation_tools_share_resource_object_schema():
