@@ -599,10 +599,11 @@ def _lpar_reconfigure_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
         (
             (
                 f"one AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex> (renamed "
-                "<name>-r): hmc_reconfigure_lpar inactive, rename, two profile "
+                "<name>-r): hmc_reconfigure_lpar inactive, rename, three profile "
                 "activations to SMS, immediate power off, matching-token deletion; "
                 "one lprcf<8 hex> 1 GiB disk added, mapped, detached and deleted in "
-                f"{config.vdisk_volume_group_name}"
+                f"{config.vdisk_volume_group_name}; one client network adapter on "
+                f"VLAN {config.provision_vlan_id} added and removed by MAC"
             ),
             (
                 "no live DLPAR; a VIOS volume, mapping and server adapter are created "

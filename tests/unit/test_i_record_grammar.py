@@ -956,6 +956,8 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "_running_vscsi",
         "_activated_from_saved",
         "_optical_slot_current",
+        "_profile_eth_slots",
+        "_running_eth_slots",
     }
 
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 from ...client.core import HMCClient
@@ -26,7 +26,11 @@ from ...xmlutil import leaf_text
 from ..logical import engine
 from ..logical.engine import Classification, EffectNotApplied, OperationContext
 from ..logical.models import EffectRecord
-from .profile_sync import _profile_slots, adapters_missing_from_profile
+from .profile_sync import (
+    PROFILE_CHECKED_ADAPTER_TYPES,
+    _profile_slots,
+    adapters_missing_from_profile,
+)
 from .profiles import read_partition_profile, save_current_partition_profile
 
 # Persisted contract (ADR 0195 Consequences).
@@ -67,14 +71,35 @@ def _name(entry: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-async def persisted(
-    hmc: HMCClient, lpar_uuid: str, profile_name: str
-) -> tuple[list[str], list[str]]:
-    """The current client adapters *profile_name* lacks, and the recovery copies kept.
+async def _held_slots(hmc: HMCClient, lpar_uuid: str) -> set[str]:
+    """The virtual slots the partition's current client adapters hold."""
+    held = set()
+    for adapter_type in PROFILE_CHECKED_ADAPTER_TYPES:
+        for adapter in await hmc.list_child(
+            "LogicalPartition", lpar_uuid, adapter_type
+        ):
+            slot = leaf_text((adapter.get("Resource") or {}).get("VirtualSlotNumber"))
+            if isinstance(slot, str):
+                held.add(slot.strip())
+    return held
 
-    A profile listing no virtual adapter at all counts as lacking one: every caller
-    persists at least one added adapter, so an empty current-adapter read must not make
-    an unsaved profile look complete.
+
+async def persisted(
+    hmc: HMCClient,
+    lpar_uuid: str,
+    profile_name: str,
+    *,
+    removed_slots: Collection[str] = (),
+    require_adapter: bool = True,
+) -> tuple[list[str], list[str]]:
+    """What *profile_name* still lacks or still holds, and the recovery copies kept.
+
+    The profile lacks a current client adapter whose slot it does not list, and still
+    holds a removed adapter whose slot in *removed_slots* it lists while no current
+    client adapter does (ADR 0325 Decision 4). Under *require_adapter*, a profile listing
+    no virtual adapter at all counts as lacking one: a caller that persisted an added
+    adapter must not let an empty current-adapter read make an unsaved profile look
+    complete.
     """
     feed = await hmc.list_child(
         "LogicalPartition", lpar_uuid, "LogicalPartitionProfile"
@@ -88,8 +113,16 @@ async def persisted(
     recovery = sorted(
         name for entry in entries if (name := _name(entry)).startswith(RECOVERY_PREFIX)
     )
+    saved = _profile_slots(found[0])
     missing = await adapters_missing_from_profile(hmc, lpar_uuid, found[0])
-    if not _profile_slots(found[0]):
+    if removed_slots:
+        held = await _held_slots(hmc, lpar_uuid)
+        missing += [
+            f"removed adapter in virtual slot {slot} still in the profile"
+            for slot in removed_slots
+            if slot in saved and slot not in held
+        ]
+    if require_adapter and not saved:
         missing = missing or ["any virtual adapter"]
     return missing, recovery
 
@@ -105,13 +138,16 @@ async def save_current_over(
     profile_name: str,
     *,
     exclusive_writer_window: bool,
+    removed_slots: Collection[str] = (),
+    require_adapter: bool = True,
 ) -> dict[str, Any]:
     """Force-save the current configuration over *profile_name*; the effect's write.
 
     Returns ``{profile_name, recovery_profiles}``. Raises ``EffectNotApplied`` when no
     save job was submitted, and ``SaveUnconfirmed`` otherwise when the save cannot be
     confirmed, so the classifier decides it on resume. Either names the step that
-    failed and what it reported.
+    failed and what it reported. *removed_slots* and *require_adapter* pass to the
+    readback (``persisted``).
     """
     try:
         record = await read_partition_profile(hmc, system_uuid, lpar_uuid, profile_name)
@@ -143,7 +179,13 @@ async def save_current_over(
     while True:
         reads += 1
         try:
-            missing, recovery = await persisted(hmc, lpar_uuid, profile_name)
+            missing, recovery = await persisted(
+                hmc,
+                lpar_uuid,
+                profile_name,
+                removed_slots=removed_slots,
+                require_adapter=require_adapter,
+            )
         except (HMCError, ValueError, TypeError) as exc:
             if verified:
                 return {"profile_name": profile_name, "recovery_profiles": []}
@@ -218,15 +260,30 @@ def _diagnosis(outcome: Any, failure: Exception | None) -> str:
     )
 
 
+ReadbackOptions = Callable[[OperationContext], tuple[Collection[str], bool]]
+
+
 def profile_save_classifier(
     open_client: Callable[[str], HMCClient],
+    options: ReadbackOptions = lambda _ctx: ((), True),
 ) -> engine.Classifier:
-    """Classify an open save by the readback the write itself uses."""
+    """Classify an open save by the readback the write itself uses.
+
+    *options* gives the readback's ``(removed_slots, require_adapter)`` for the
+    operation, as its write passed them.
+    """
 
     async def classify(ctx: OperationContext, effect: EffectRecord) -> Classification:
         lpar_uuid, name = parse_target(effect.target)
+        removed, required = options(ctx)
         async with open_client(ctx.connection) as hmc:
-            missing, recovery = await persisted(hmc, lpar_uuid, name)
+            missing, recovery = await persisted(
+                hmc,
+                lpar_uuid,
+                name,
+                removed_slots=removed,
+                require_adapter=required,
+            )
         if missing:
             return Classification("not_applied")
         return Classification(

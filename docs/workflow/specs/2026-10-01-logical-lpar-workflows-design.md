@@ -101,7 +101,7 @@ chooses the first match.
 partition is Running) and writes them as `pending_activation`. `true` permits live removal
 through DLPAR. #1228 extends `patch` under the same rules with:
 
-- networks;
+- networks (implemented, #1845, ADR 0325);
 - added disks;
 - `installer_media: detach` (implemented, #1844, ADR 0321);
 - `boot: root_disk` (implemented, #1844, ADR 0321).
@@ -147,7 +147,7 @@ the dispatch authorizer admits the call, as that tool, for each resolved target.
 | provision (no install) | `hmc_create_lpar`, `hmc_add_network_adapter`, `hmc_add_vscsi_adapter`, `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar`, `hmc_save_current_partition_profile`, `hmc_set_default_partition_profile` (ADR 0313) |
 | provision `install` | the row above, plus `hmc_upload_iso`, `hmc_mount_optical_media`, `hmc_set_lpar_boot_order`, `hmc_power_on_lpar`, `hmc_read_lpar_refcodes` |
 | `power_on=true` (no `install`) | adds `hmc_power_on_lpar` |
-| reconfigure | `hmc_modify_lpar` and `hmc_rename_lpar` for `name`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, `hmc_update_partition_profile` (ADR 0314 Decision 6); `hmc_unmount_optical_media` for `installer_media` and `hmc_set_lpar_boot_order` for `boot` (ADR 0321 Decision 6); `disks.add` adds `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar` and `hmc_save_current_partition_profile`, and `disks.detach` adds `hmc_detach_storage_mapping`, each per VIOS (ADR 0322); #1228 adds its network attach tools |
+| reconfigure | `hmc_modify_lpar` and `hmc_rename_lpar` for `name`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, `hmc_update_partition_profile` (ADR 0314 Decision 6); `hmc_unmount_optical_media` for `installer_media` and `hmc_set_lpar_boot_order` for `boot` (ADR 0321 Decision 6); `disks.add` adds `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar` and `hmc_save_current_partition_profile`, and `disks.detach` adds `hmc_detach_storage_mapping`, each per VIOS (ADR 0322); `networks.add` adds `hmc_add_network_adapter` and `networks.remove` adds `hmc_delete_adapter`, each with `hmc_save_current_partition_profile` (ADR 0325) |
 | power `start` | `hmc_power_on_lpar` |
 | power `stop` / `restart` | `hmc_power_off_lpar` |
 | decommission `retain` | `hmc_decommission_lpar`'s existing set |
