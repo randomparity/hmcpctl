@@ -14,14 +14,12 @@ first and otherwise a readback does: the profile must lack no current client ada
 
 from __future__ import annotations
 
-import asyncio
-import time
 from collections.abc import Callable
 from typing import Any
 
 from ...client.core import HMCClient
 from ...errors import HMCError
-from ...xmlutil import leaf_text
+from ...xmlutil import find_text, leaf_text
 from ..logical import engine
 from ..logical.engine import Classification, EffectNotApplied, OperationContext
 from ..logical.models import EffectRecord
@@ -31,14 +29,10 @@ from .profiles import read_partition_profile, save_current_partition_profile
 # Persisted contract (ADR 0195 Consequences).
 KIND = "lpar.profile_save"
 RECOVERY_PREFIX = "hmcprec-"
-# A submitted save whose job status the helper misread (#1867) may land after it
-# returns, so the readback is repeated for a bounded time before it decides.
-SETTLE_SECONDS = 120
-POLL_SECONDS = 5
 
 
 class SaveUnconfirmed(HMCError):
-    """A submitted save the readback could not confirm; its text is hmcpctl's own."""
+    """A save the readback could not confirm; its text holds no raw HMC body."""
 
 
 def target(lpar_uuid: str, profile_name: str) -> str:
@@ -104,10 +98,17 @@ async def save_current_over(
     """Force-save the current configuration over *profile_name*; the effect's write.
 
     Returns ``{profile_name, recovery_profiles}``. Raises ``EffectNotApplied`` when no
-    save job was submitted and the profile lacks an adapter, and ``HMCError`` when the
-    save is unconfirmed, so the classifier decides it on resume.
+    save job was submitted, and ``SaveUnconfirmed`` otherwise when the save cannot be
+    confirmed, so the classifier decides it on resume. Either names the step that
+    failed and what it reported.
     """
-    record = await read_partition_profile(hmc, system_uuid, lpar_uuid, profile_name)
+    try:
+        record = await read_partition_profile(hmc, system_uuid, lpar_uuid, profile_name)
+    except (HMCError, ValueError, TypeError, LookupError) as exc:
+        raise EffectNotApplied(
+            f"the profile of LPAR {lpar_uuid} to save over could not be read "
+            f"(step=list, {_said(exc)}); nothing was submitted"
+        ) from exc
     outcome = failure = None
     try:
         outcome = await save_current_partition_profile(
@@ -125,16 +126,18 @@ async def save_current_over(
         outcome.execution,
         outcome.requested_change,
     ) == ("completed", "verified")
-    submitted = outcome is not None and outcome.job is not None
-    deadline = time.monotonic() + (SETTLE_SECONDS if submitted or failure else 0)
-    while True:
+    try:
         missing, recovery = await persisted(hmc, lpar_uuid, profile_name)
-        if verified or not missing:
-            return {"profile_name": profile_name, "recovery_profiles": recovery}
-        if time.monotonic() >= deadline:
-            break
-        await asyncio.sleep(POLL_SECONDS)
-    detail = _diagnosis(outcome, failure, len(missing))
+    except (HMCError, ValueError, TypeError) as exc:
+        if verified:
+            return {"profile_name": profile_name, "recovery_profiles": []}
+        raise SaveUnconfirmed(
+            f"the force-save of LPAR {lpar_uuid}'s profile is unconfirmed "
+            f"(step=readback, {_said(exc)}; {_diagnosis(outcome, failure)})"
+        ) from exc
+    if verified or not missing:
+        return {"profile_name": profile_name, "recovery_profiles": recovery}
+    detail = f"{_diagnosis(outcome, failure)}; {len(missing)} adapter(s) missing"
     copies = f"recovery profiles on the partition: {_copies(recovery)}"
     if outcome is not None and outcome.job is None:
         raise EffectNotApplied(
@@ -147,22 +150,45 @@ async def save_current_over(
     ) from failure
 
 
-def _diagnosis(outcome: Any, failure: Exception | None, missing: int) -> str:
-    """What the helper reported, without HMC response text (``engine`` module note)."""
+def _said(exc: BaseException) -> str:
+    """An exception's type, status and message, never a raw HMC body.
+
+    An ``HMCError`` built from a response keeps that body; only its ``<Message>`` is
+    shown (a body can echo request headers). A message hmcpctl wrote itself is shown
+    as it is. Any other exception is named by type only.
+    """
+    name = type(exc).__name__
+    if isinstance(exc, HMCError):
+        status = f", HTTP {exc.status_code}" if exc.status_code is not None else ""
+        if exc.body:
+            try:
+                message = find_text(exc.body, "Message") or "no <Message>"
+            except Exception:  # noqa: BLE001 - an unparsable body shows no text
+                message = "no <Message>"
+        else:
+            message = str(exc.args[0]) if exc.args else ""
+        return f"{name}{status}: {message[:200]}"
+    if isinstance(exc, (ValueError, TypeError, LookupError)):
+        return f"{name}: {str(exc)[:200]}"
+    return name
+
+
+def _diagnosis(outcome: Any, failure: Exception | None) -> str:
+    """What the save helper reported: its outcome fields, or what it raised."""
     if outcome is None:
-        # The helper's own refusals before any HMC call are ValueError/TypeError text
-        # it writes itself; any other exception may carry HMC text, so only its type.
-        own = isinstance(failure, (ValueError, TypeError))
-        said = f": {str(failure)[:200]}" if own else ""
         return (
-            f"the helper raised {type(failure).__name__}{said}; "
-            f"{missing} adapter(s) missing"
+            f"step=save, the helper raised {_said(failure) if failure else 'nothing'}"
         )
+    # The helper keeps ``str(HMCError)``, which falls back to a raw body slice when the
+    # response had no <Message>; markup there is withheld, as a body can echo headers.
+    text = outcome.error or ""
+    shown = "<body withheld>" if "<" in text else text[:200]
+    error = f", error={shown}" if text else ""
     return (
-        f"execution={outcome.execution}, requested_change={outcome.requested_change}, "
+        f"step=save, execution={outcome.execution}, "
+        f"requested_change={outcome.requested_change}, "
         f"job={'submitted' if outcome.job is not None else 'none'}, "
-        f"recovery_verified={outcome.recovery_verified}, "
-        f"error={'yes' if outcome.error else 'no'}; {missing} adapter(s) missing"
+        f"recovery_verified={outcome.recovery_verified}{error}"
     )
 
 

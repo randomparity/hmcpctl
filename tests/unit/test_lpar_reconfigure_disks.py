@@ -153,8 +153,6 @@ def hmc(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
         return vios
 
     monkeypatch.setattr(reconfigure, "resolve_vios_uuid", vios_on)
-    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
-    monkeypatch.setattr(profile_persist, "POLL_SECONDS", 0)
     monkeypatch.setattr(profile_persist, "read_partition_profile", read)
     monkeypatch.setattr(profile_persist, "save_current_partition_profile", save)
     return fake
@@ -390,6 +388,10 @@ def test_resume_after_an_uncertain_save_classifies_by_readback(hmc, monkeypatch)
     record = _run({"disks": {"add": [ADD]}})
     assert record.outcome == "needs_attention"
     assert _effects(record)[-1][2] == "uncertain"
+    assert any(
+        "step=save, the helper raised HMCError: job status misread" in w
+        for w in record.result["warnings"]
+    )
     hmc.saved_slots = {2, 3}
     record = _run({"disks": {"add": [ADD]}}, continuation="resume")
     assert (record.state, record.outcome) == ("terminal", "completed")
