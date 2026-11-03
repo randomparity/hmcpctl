@@ -620,14 +620,23 @@ def validate_provision_install(request: ProvisionRequest) -> None:
     bind_prepared(install, request.adapters.mac)
 
 
+def require_install_url(hmc: HMCClient, url: str) -> None:
+    """Refuse a media URL off ``HMC_ISO_URL_ALLOWLIST`` without echoing it."""
+    try:
+        require_allowlisted_iso_url(url, hmc.config.iso_url_allowlist_entries)
+    except ValueError:
+        raise ValueError(
+            "install.media.url: its host is not on HMC_ISO_URL_ALLOWLIST (an unset "
+            "allowlist permits nothing); publish the media on a listed origin"
+        ) from None
+
+
 async def preflight_install(hmc: HMCClient, request: ProvisionRequest) -> None:
     """Refuse install media the HMC side cannot take: an unlisted URL, no repository."""
     if request.install is None:
         return
     validate_provision_install(request)
-    require_allowlisted_iso_url(
-        request.install.media.url or "", hmc.config.iso_url_allowlist_entries
-    )
+    require_install_url(hmc, request.install.media.url or "")
     await repository_group(hmc, request.storage.vios_uuid)
 
 

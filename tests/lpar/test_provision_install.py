@@ -360,6 +360,18 @@ def test_a_digest_mismatch_uploads_nothing_and_fails(writes):
     assert upload.status == "not_applied"
 
 
+def test_an_allowlist_narrowed_before_the_upload_fails_without_the_url(writes):
+    writes.hmc.config.iso_url_allowlist_entries = parse_iso_url_allowlist(
+        "other.example.test"
+    )
+
+    record = _submit(writes)
+
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert "upload" not in writes.calls
+    assert "media.example.test" not in record.warnings[0]
+
+
 def test_a_mount_refused_for_rest0269_fails_and_names_the_server_adapter(writes):
     writes.mount_error = HMCError("REST0269 Perform Apply profile", 500, "")
 
@@ -567,8 +579,9 @@ def test_preflight_refuses_an_unlisted_url_and_a_vios_without_one_repository():
         asyncio.run(preflight_install(hmc, REQUEST))  # type: ignore[arg-type]
     hmc = FakeHMC()
     hmc.config.iso_url_allowlist_entries = parse_iso_url_allowlist("other.example.test")
-    with pytest.raises(ValueError, match="allowlist"):
+    with pytest.raises(ValueError, match="HMC_ISO_URL_ALLOWLIST") as caught:
         asyncio.run(preflight_install(hmc, REQUEST))  # type: ignore[arg-type]
+    assert "media.example.test" not in str(caught.value)
 
 
 def test_install_delegates_the_media_specialists_only_with_install():

@@ -70,6 +70,7 @@ from .provision import (
     _read_change_location,
     _run_affinity_stage,
     _skip_steps,
+    require_install_url,
     validate_provision_assignments,
     validate_provision_install,
     validate_provision_storage,
@@ -854,6 +855,7 @@ class _Run:
     async def _write_upload(self, binding: MediaBinding, name: str) -> dict[str, Any]:
         storage = self.request.storage
         try:
+            require_install_url(self.hmc, binding.url)
             group = await repository_group(self.hmc, storage.vios_uuid)
             await upload_iso(
                 self.hmc,
