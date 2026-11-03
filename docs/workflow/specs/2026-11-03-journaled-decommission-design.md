@@ -92,6 +92,11 @@ and removal, and `exclusive_writer_window` (#1848).
    given selectors must equal the record (engine binding check). Ownership is re-checked from a
    fresh inventory on every run before writing.
 4. **Explicitly out of scope:** an agent sharing another's `HMC_AGENT_ID` (ADR 0190 accepts it).
+   Audit attribution of a selector-less continuation: under `all-targets` its authorization
+   record carries absent targets and no `request_id`, so the partition it acts on is named only by
+   `hmc_operation_status` (`docs/authorization-audit.md`). No ungranted target is reachable, since
+   a table grant denies the absent selectors; re-authorizing the recorded targets needs a
+   factory-built handler and is a follow-up candidate.
 
 ## Success
 
