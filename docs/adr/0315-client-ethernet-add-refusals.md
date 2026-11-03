@@ -16,7 +16,7 @@ partition, one creation field at a time.
   - each `vsi_*` field sent alone was refused with REST0126, which names the missing manager or
     type ID;
   - all six fields together were refused with HSCLB021 (RMC return code 83), naming the serving
-    VIOS. So the HMC registers a complete VSI profile through the VIOS.
+    VIOS, so a complete VSI profile was observed to reach the VIOS.
 
 Callers received REST0269 and HSCLB021 as bare HTTP 500s with no next step.
 
