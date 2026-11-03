@@ -355,6 +355,16 @@ async def test_rmc_refusal_without_vsi_fields_names_no_vsi_cause(hmc):
 
 
 @pytest.mark.asyncio
+async def test_known_code_outside_a_500_passes_through(hmc):
+    capture = live_fixture("rest-client-network-add-state-refused")
+    original = HMCError("PUT failed", 400, capture["body"])
+    hmc.add_network_adapter.side_effect = original
+    with pytest.raises(HMCError) as error:
+        await create(hmc)
+    assert error.value is original
+
+
+@pytest.mark.asyncio
 async def test_lone_vsi_field_refusal_passes_through(hmc):
     """A regression guard: REST0126 alone is not one of the classified refusals."""
     original = captured_refusal("rest-client-network-add-vsi-incomplete")
