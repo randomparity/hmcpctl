@@ -4,6 +4,7 @@ from copy import deepcopy
 from unittest.mock import AsyncMock
 
 import pytest
+from conftest import live_fixture
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
@@ -298,6 +299,54 @@ async def test_native_submission_error_preserves_exception_and_does_not_retry(
     hmc.add_network_adapter.assert_awaited_once()
     assert hmc._network_adapter_creation_feed.await_count == 1
     hmc.delete_adapter.assert_not_awaited()
+
+
+def captured_refusal(name):
+    """The native add's HMCError for a captured #1864 refusal (ADR 0315)."""
+    capture = live_fixture(name)
+    return HMCError(f"PUT {capture['path']} failed", capture["status"], capture["body"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "values", "guidance"),
+    [
+        (
+            "rest-client-network-add-vsi-rmc-refused",
+            FIELDS,
+            ("serving VIOS", "RMC", "vsi_manager_id"),
+        ),
+        (
+            "rest-client-network-add-state-refused",
+            {},
+            ("resource_config", "chsyscfg -r lpar -o apply"),
+        ),
+    ],
+)
+async def test_known_add_refusals_are_classified(hmc, name, values, guidance):
+    original = captured_refusal(name)
+    hmc.add_network_adapter.side_effect = original
+    with pytest.raises(HMCError) as error:
+        await create(hmc, **values)
+    assert error.value is not original
+    assert error.value.__cause__ is original
+    assert error.value.status_code == 500
+    assert error.value.body == original.body
+    message = str(error.value)
+    assert message.startswith("Client network adapter add refused:")
+    assert all(text in message for text in (*guidance, "hmc_list_adapters"))
+    hmc.add_network_adapter.assert_awaited_once()
+    hmc.delete_adapter.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lone_vsi_field_refusal_passes_through(hmc):
+    """A regression guard: REST0126 alone is not one of the classified refusals."""
+    original = captured_refusal("rest-client-network-add-vsi-incomplete")
+    hmc.add_network_adapter.side_effect = original
+    with pytest.raises(HMCError) as error:
+        await create(hmc, vsi_manager_id=0)
+    assert error.value is original
 
 
 @pytest.mark.asyncio
