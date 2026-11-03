@@ -15,7 +15,7 @@ import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
@@ -39,12 +39,27 @@ from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
 from .power import open_client as _power_client
 from .profiles import read_partition_profile, update_partition_profile
+from .reconfigure_media import (
+    BOOT_KEY,
+    BOOT_KIND,
+    MEDIA_KEY,
+    MEDIA_KIND,
+    boot_classifier,
+    boot_write,
+    media_classifier,
+    media_write,
+    observed,
+    plan_boot,
+    plan_media,
+)
 
 # ADR 0314 Decision 6: the specialists whose authority each patch field uses.
 DELEGATED: Mapping[str, tuple[str, ...]] = {
     "name": ("hmc_modify_lpar", "hmc_rename_lpar"),
     "memory_mib": ("hmc_dlpar_mem", "hmc_update_partition_profile"),
     "processors": ("hmc_dlpar_proc", "hmc_update_partition_profile"),
+    "boot": ("hmc_set_lpar_boot_order",),
+    "installer_media": ("hmc_unmount_optical_media",),
 }
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 PLAN_KEY, PLAN_KIND = "plan", "lpar.reconfigure_plan"
@@ -80,11 +95,24 @@ class ReconfigurePatch(BaseModel):
     memory_mib: StrictInt | None = Field(
         default=None, gt=0, description="Desired memory in MiB."
     )
+    boot: Literal["root_disk"] | None = Field(
+        default=None,
+        description="Set the pending boot order to the root disk provision created; "
+        "it applies at the next activation (ADR 0321).",
+    )
+    installer_media: Literal["detach"] | None = Field(
+        default=None,
+        description="Remove the mapping of the installer media provision mounted; the "
+        "medium stays in the repository (ADR 0321).",
+    )
 
     @model_validator(mode="after")
     def _not_empty(self) -> ReconfigurePatch:
-        if self.name is None and self.processors is None and self.memory_mib is None:
-            raise ValueError("patch needs at least one of name, processors, memory_mib")
+        if all(getattr(self, field) is None for field in DELEGATED):
+            raise ValueError(
+                "patch needs at least one of name, processors, memory_mib, boot, "
+                "installer_media"
+            )
         if self.name is not None and not self.name.strip():
             raise ValueError("patch.name must not be blank")
         return self
@@ -92,6 +120,11 @@ class ReconfigurePatch(BaseModel):
     @property
     def writes_profile(self) -> bool:
         return self.processors is not None or self.memory_mib is not None
+
+    @property
+    def needs_window(self) -> bool:
+        """A profile or VIOS mapping write: the caller must assert the writer window."""
+        return self.writes_profile or self.installer_media is not None
 
 
 def delegated_tools(patch: ReconfigurePatch) -> tuple[str, ...]:
@@ -356,8 +389,13 @@ def plan_changes(
     view: dict[str, Any],
     profile: dict[str, Any] | None,
     allow_disruption: bool,
+    boot_write: bool = False,
 ) -> dict[str, Any]:
-    """Every change *patch* makes and where it lands, computed before any write."""
+    """Every change *patch* makes and where it lands, computed before any write.
+
+    *boot_write* says a boot-string write is planned; it is a partition write, so the
+    sync refusal counts it with the rename (ADR 0321 Decision 3).
+    """
     if not view["state"]:
         raise OperationFailed("the partition state is unavailable; nothing was written")
     changes: list[dict[str, Any]] = []
@@ -393,8 +431,10 @@ def plan_changes(
             }
         )
     pending = any(c["applied"] == "pending_activation" for c in changes)
-    live_writes = bool(rename) or (
-        bool(current_write) and view["state"] != _NOT_ACTIVATED
+    live_writes = (
+        bool(rename)
+        or boot_write
+        or (bool(current_write) and view["state"] != _NOT_ACTIVATED)
     )
     if (
         view["state"] != _NOT_ACTIVATED
@@ -551,7 +591,13 @@ async def _make_plan(
                     f"memory_mib exceeds managed system {system_uuid}'s configurable "
                     f"memory, or that bound could not be read ({type(exc).__name__})"
                 ) from exc
-    plan = plan_changes(patch, view, profile, allow_disruption)
+    boot = media = boot_change = media_change = None
+    if patch.boot is not None:
+        boot, boot_change = await plan_boot(hmc, system_uuid, lpar_uuid)
+    if patch.installer_media is not None:
+        media, media_change = await plan_media(hmc, system_uuid, lpar_uuid)
+    plan = plan_changes(patch, view, profile, allow_disruption, boot is not None)
+    plan["changes"] += [c for c in (boot_change, media_change) if c is not None]
     pending = any(c["applied"] == "pending_activation" for c in plan["changes"])
     plan |= {
         "system_uuid": system_uuid,
@@ -560,6 +606,8 @@ async def _make_plan(
         "profile_name": None if record is None else record.name,
         "profile_etag": None if record is None else record.etag,
         "activation": record.name if record is not None and pending else None,
+        "boot": boot,
+        "media": media,
     }
     return plan
 
@@ -655,6 +703,10 @@ def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
         steps.append((CURRENT_KEY, CURRENT_KIND, f"lpar:{lpar_uuid}"))
     if plan["rename"]:
         steps.append((RENAME_KEY, RENAME_KIND, f"lpar:{lpar_uuid}"))
+    if plan.get("boot"):
+        steps.append((BOOT_KEY, BOOT_KIND, f"lpar:{lpar_uuid}"))
+    if plan.get("media"):
+        steps.append((MEDIA_KEY, MEDIA_KIND, f"lpar:{lpar_uuid}"))
     return steps
 
 
@@ -684,8 +736,13 @@ async def _apply(
         if recorded is not None and recorded.status == "applied":
             continue
         # ADR 0314 Decisions 6 and 7: target, owner and the plan's basis before every
-        # write not yet applied.
+        # write not yet applied. An installer changes state and RMC by itself, so the
+        # boot and media writes skip the basis (ADR 0321 Decision 4).
         await _resolve(hmc, system_uuid, lpar_uuid)
+        if key in (BOOT_KEY, MEDIA_KEY):
+            write = (boot_write if key == BOOT_KEY else media_write)(hmc, plan)
+            await ctx.effect(key, kind, target, write)
+            continue
         if _stale(ctx, plan, await _read_view(hmc, lpar_uuid)):
             raise OperationFailed(
                 f"LPAR {lpar_uuid} changed since the plan was made (state, RMC, profile "
@@ -748,7 +805,13 @@ async def _verify(
             seen_profile = _observed(profile, want_profile)
         seen_current = _observed(view, want_current)
         renamed = plan["rename"] is None or view["name"] == plan["rename"]["after"]
-        done = seen_profile == want_profile and seen_current == want_current and renamed
+        legs, seen_legs = await observed(hmc, plan)
+        done = (
+            seen_profile == want_profile
+            and seen_current == want_current
+            and renamed
+            and legs
+        )
         if done or time.monotonic() >= deadline:
             break
         await asyncio.sleep(POLL_SECONDS)
@@ -757,6 +820,7 @@ async def _verify(
         "profile": seen_profile,
         "current": seen_current,
         "name": view["name"],
+        **seen_legs,
     }
     return BodyResult("completed" if done else "needs_attention", result)
 
@@ -769,6 +833,11 @@ def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
         warnings.append(
             "the profile write was applied with preservation drift: fields other than "
             "the requested ones differ from the earlier profile; inspect it"
+        )
+    if plan.get("media") and plan["basis"]["state"] != _NOT_ACTIVATED:
+        warnings.append(
+            "the installer media was detached from an activated partition: that "
+            "assumes the install had finished"
         )
     pending = plan["activation"] is not None
     if pending and plan["basis"]["sync"] not in _SYNC_OFF:
@@ -894,4 +963,6 @@ RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
         _profile_values, lambda connection: open_client(connection)
     ),
     RENAME_KIND: _classify_rename,
+    BOOT_KIND: boot_classifier(_plan_of, lambda connection: open_client(connection)),
+    MEDIA_KIND: media_classifier(_plan_of, lambda connection: open_client(connection)),
 }
