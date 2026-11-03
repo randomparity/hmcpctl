@@ -119,7 +119,7 @@ def reconfigure_handler(
         the profile's earlier content is kept in an ``hmcprec-`` recovery profile the
         result names. An add is refused while the partition holds pending profile values
         or a ``pending_activation`` change, on an activated partition without RMC, and on
-        an HMC older than 10.3.1060. ``disks.detach`` removes only that disk's one mapping
+        an HMC older than 10.3.1060, and beside ``boot`` or ``installer_media``. ``disks.detach`` removes only that disk's one mapping
         to this partition, never the disk; on an activated partition it needs
         ``allow_disruption``. Processors, memory or disks need
         ``exclusive_writer_window=true``: your assertion that no other writer changes

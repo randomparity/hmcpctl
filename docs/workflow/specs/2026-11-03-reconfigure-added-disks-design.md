@@ -21,6 +21,8 @@ current configuration only, and a profile activation drops an adapter the profil
   multiple of 1024).
 - `detach[]` (0–4): `vios_uuid` and `name`.
 - At least one item. No `(vios_uuid, name)` pair appears twice across both lists.
+- `add` cannot share a patch with #1844's `boot` or `installer_media`: those legs skip the
+  plan's state basis (ADR 0321 Decision 4), and the save after them re-checks it.
 
 **Plan (phase `validating`, before any write).** A patch with `disks` always reads the default
 profile under ADR 0314 Decision 2: a missing default, or a last-activated profile other than
