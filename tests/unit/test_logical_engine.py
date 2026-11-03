@@ -856,3 +856,14 @@ def test_recorded_partition_reads_the_guard_without_creating_a_store():
     assert engine.recorded_partition("agent-a", "r1", "other_tool") is None
     _submit(_request("r2"))
     assert engine.recorded_partition("agent-a", "r2", "hmc_test_tool") is None
+
+
+def test_operation_failed_can_carry_the_result_to_store():
+    async def body(ctx):
+        raise OperationFailed("refused", result={"kept": ["d1"]})
+
+    record = _submit(body=body)
+
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert record.result == {"kept": ["d1"]}
+    assert "refused" in record.warnings[0]

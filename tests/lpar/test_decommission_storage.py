@@ -109,10 +109,13 @@ def _run(
 ) -> OperationRecord:
     async def body(ctx):
         ctx.guard(SYSTEM, LPAR)
-        retained = await clean_storage(
+        retained, failure = await clean_storage(
             hmc, ctx, SYSTEM, LPAR, authorized_vios=authorized
         )
-        return BodyResult("completed", {"retained": [dict(r) for r in retained]})
+        result = {"retained": [dict(r) for r in retained]}
+        if failure is not None:
+            raise engine.OperationFailed(failure, result=result)
+        return BodyResult("completed", result)
 
     classifiers = {
         **storage_classifiers(_factory(hmc)),
@@ -403,6 +406,7 @@ def test_a_412_retains_that_item_finishes_the_others_and_fails(hmc):
     assert "hmc_delete_virtual_disk" in record.warnings[0]
     assert [e.status for e in record.effects] == ["not_applied", "applied"]
     assert _rows() == [(LPAR, DISK)]
+    assert _reasons(record) == ["precondition_failed"]
 
 
 def test_a_run_that_stopped_before_the_ledger_write_finishes_it(hmc, monkeypatch):

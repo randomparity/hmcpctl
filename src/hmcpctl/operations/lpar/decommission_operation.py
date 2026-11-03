@@ -37,7 +37,6 @@ from .decommission_storage import (
     deleted_from_effects,
     owned_items,
     plan_storage,
-    refused_from_effects,
     same_item,
     storage_classifiers,
     storage_from_effects,
@@ -186,7 +185,7 @@ def decommission_body(
                 return BodyResult(outcome, _RESULT.dump_python(result, mode="json"))
         assert ctx.partition is not None
         ctx.set_phase("cleaning_storage")
-        retained = await clean_storage(
+        retained, failure = await clean_storage(
             hmc, ctx, *ctx.partition, authorized_vios=authorized_vios
         )
         storage: DecommissionStorage = {
@@ -199,11 +198,17 @@ def decommission_body(
             if any(item.get("reason") == INCOMPLETE for item in retained)
             else "completed"
         )
-        if result is None:
-            # The partition went in an earlier run; result_from_record rebuilds the rest.
-            return BodyResult(outcome, {"storage": storage})
-        result = dataclasses.replace(result, storage=storage)
-        return BodyResult(outcome, _RESULT.dump_python(result, mode="json"))
+        # With the partition gone in an earlier run, result_from_record rebuilds the rest.
+        stored = (
+            {"storage": storage}
+            if result is None
+            else _RESULT.dump_python(
+                dataclasses.replace(result, storage=storage), mode="json"
+            )
+        )
+        if failure is not None:
+            raise engine.OperationFailed(failure, result=stored)
+        return BodyResult(outcome, stored)
 
     async def body(ctx: OperationContext) -> BodyResult:
         deleted = ctx.recorded(DELETE_LPAR_KEY)
@@ -358,17 +363,16 @@ def _storage(
     record: OperationRecord, stored: DecommissionResult | None
 ) -> DecommissionStorage:
     """``deleted`` and ``pending`` from the journal, so they span every run; ``retained``
-    from the latest pass the record holds, less what a later run deleted, plus a failed
-    run's refused deletes, which no stored result holds (ADR 0323 Decision 6)."""
+    from the latest pass the record holds, less what a later run deleted (ADR 0323
+    Decision 6)."""
     latest = (
         stored.storage if stored is not None else (record.result or {}).get("storage")
     )
     journal = storage_from_effects(record.effects)
     deleted = deleted_from_effects(record.effects)
-    refused = refused_from_effects(record.effects) if record.outcome == "failed" else ()
-    settled = {same_item(item) for item in (*deleted, *refused)}
+    gone = {same_item(item) for item in deleted}
     earlier = (latest or {}).get("retained", ())
-    retained = [*(i for i in earlier if same_item(i) not in settled), *refused]
+    retained = [i for i in earlier if same_item(i) not in gone]
     return {
         "deleted": deleted,
         "retained": tuple(retained),

@@ -775,3 +775,21 @@ def test_a_failed_resume_reports_earlier_retentions_it_deleted_only_as_deleted(h
             "reason": "precondition_failed",
         },
     )
+
+
+def test_a_failed_run_still_reports_its_other_retained_items(hmc):
+    _owned_disks(hmc, "disk-a", "disk-b")
+    hmc.get_volume_group.return_value = {
+        "Resource": {"VirtualDisks": {"VirtualDisk": [{"DiskName": "disk-b"}]}}
+    }
+    hmc.delete_virtual_disk.side_effect = HMCError("changed", 412)
+
+    failed = _submit(hmc, arguments=OWNED)
+
+    assert (failed.state, failed.outcome) == ("terminal", "failed")
+    result = result_from_record(failed, delete_owned=True)
+    assert result.resource_deleted is True
+    assert result.blast_radius["lpar_name"] == "aix-prod"
+    reasons = {item["disk_name"]: item["reason"] for item in result.storage["retained"]}
+    assert reasons == {"disk-a": "absent", "disk-b": "precondition_failed"}
+    assert "disk-b" in failed.warnings[0]

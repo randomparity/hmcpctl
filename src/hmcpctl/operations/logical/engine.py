@@ -47,7 +47,14 @@ _LOG = logging.getLogger(__name__)
 
 
 class OperationFailed(Exception):
-    """The operation cannot proceed; every effect it recorded is accounted for."""
+    """The operation cannot proceed; every effect it recorded is accounted for.
+
+    *result*, when given, is stored as the operation's result, as a returned body's is.
+    """
+
+    def __init__(self, message: str, *, result: Mapping[str, Any] | None = None):
+        super().__init__(message)
+        self.result = result
 
 
 class EffectNotApplied(Exception):
@@ -419,11 +426,13 @@ async def _run(
         result_json = _result_json(result)
     except (OperationFailed, EffectNotApplied) as exc:
         definite = not ctx.has_uncertain()
+        carried = getattr(exc, "result", None)
         _end(
             operation_id,
             "terminal" if definite else "paused",
             "failed" if definite else "needs_attention",
             (_warning(_failure(exc)),),
+            None if carried is None else _result_json(BodyResult("completed", carried)),
         )
         return
     except Exception as exc:  # noqa: BLE001 - any body defect pauses for attention

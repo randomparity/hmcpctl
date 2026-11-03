@@ -384,12 +384,10 @@ async def clean_storage(
     partition_uuid: str,
     *,
     authorized_vios: frozenset[str],
-) -> tuple[dict[str, str], ...]:
-    """Delete the partition's deletable owned items; return the retained ones.
-
-    Raises ``engine.OperationFailed`` after every item was tried when a delete got HTTP
-    412 (ADR 0323 Decision 3); any other HMC error propagates with its effect open.
-    """
+) -> tuple[tuple[dict[str, str], ...], str | None]:
+    """Delete the partition's deletable owned items; return the retained ones, and the
+    failure to end with when a delete got HTTP 412 (ADR 0323 Decision 3) after every item
+    was tried. Any other HMC error propagates with its effect open."""
     items, retained = owned_items(system_uuid, partition_uuid)
     done = [i for i in items if _applied(journal.recorded(delete_key(i)))]
     for item in done:
@@ -423,13 +421,14 @@ async def clean_storage(
             kept.append(item.entry(reason="precondition_failed"))
             continue
         journal.ledger_remove(item.kind, system_uuid, partition_uuid, item.identity())
+    failure = None
     if refused:
         names = ", ".join(f"{i.name} on VIOS {i.vios_uuid}" for i in refused)
-        raise engine.OperationFailed(
+        failure = (
             f"precondition_failed: the HMC refused deleting {names} (HTTP 412); remove "
             "it with hmc_delete_virtual_disk or hmc_delete_optical_media"
         )
-    return tuple(kept)
+    return tuple(kept), failure
 
 
 def _applied(effect: EffectRecord | None) -> bool:
@@ -463,26 +462,6 @@ def same_item(entry: Mapping[str, Any]) -> tuple[Any, ...]:
     """What identifies one item across report entries, whatever else they carry."""
     name = entry.get("disk_name", entry.get("media_name"))
     return entry.get("kind"), entry.get("vios_uuid"), name
-
-
-def refused_from_effects(effects: Iterable[EffectRecord]) -> tuple[dict[str, str], ...]:
-    """The deletes a failed run settled ``not_applied``: the HMC refused them (412)."""
-    kinds = {kind: ledger for ledger, kind in DELETE_KINDS.items()}
-    refused = []
-    for effect in effects:
-        if effect.kind in kinds and effect.status == "not_applied":
-            vios, group, name = _parse_target(effect)
-            field = "disk_name" if kinds[effect.kind] == DISK_LEDGER else "media_name"
-            refused.append(
-                {
-                    "kind": kinds[effect.kind],
-                    "vios_uuid": vios,
-                    "vg_uuid": group,
-                    field: name,
-                    "reason": "precondition_failed",
-                }
-            )
-    return tuple(refused)
 
 
 def storage_from_effects(effects: Iterable[EffectRecord]) -> DecommissionStorage:
