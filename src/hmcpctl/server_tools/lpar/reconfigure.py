@@ -1,7 +1,8 @@
-"""``hmc_reconfigure_lpar``: change processors, memory and name as one logical operation.
+"""``hmc_reconfigure_lpar``: change processors, memory, name and virtual disks as one
+logical operation.
 
 Each patch field runs only as the specialists it can use (ADR 0189 Decision 2, ADR 0314
-Decision 6). A handler therefore needs the application's ``permits`` and ``authorize``
+Decision 6, ADR 0322 Decision 6). A handler therefore needs the application's ``permits`` and ``authorize``
 gates, so it is built by a factory, as ``hmc_power_lpar`` is.
 """
 
@@ -21,6 +22,7 @@ from ...operations.lpar.reconfigure import (
     RECONFIGURE_CLASSIFIERS,
     ReconfigurePatch,
     delegated_tools,
+    disk_tool,
     reconfigure_body,
 )
 from ...tool_registry import (
@@ -94,7 +96,8 @@ def reconfigure_handler(
         wait_seconds: int = 60,
         profile: str | None = None,
     ) -> OperationRecord:
-        """Change an LPAR's processors, memory or name, and say where each change lives.
+        """Change an LPAR's processors, memory, name or virtual disks, and say where each
+        change lives.
 
         Durable (ADR 0190): the call returns within ``wait_seconds`` and the work
         continues; poll ``hmc_operation_status`` with ``request_id``. Every change is
@@ -107,12 +110,24 @@ def reconfigure_handler(
         is inside the running minimum and maximum, and it is an increase or
         ``allow_disruption`` is true. A value outside the profile's minimum or maximum
         widens that bound and is always ``pending_activation``. Nothing reboots the
-        partition or changes its processor mode. Processors or memory need
+        partition or changes its processor mode. ``disks.add`` creates each disk in the
+        named volume group (an existing name is refused; nothing is resized), maps it,
+        records it as owned for decommission's delete_owned, then overwrites the default
+        profile with the current configuration so the disk survives a profile activation;
+        the profile's earlier content is kept in an ``hmcprec-`` recovery profile the
+        result names. An add is refused while the partition holds pending profile values
+        or a ``pending_activation`` change, on an activated partition without RMC, and on
+        an HMC older than 10.3.1060. ``disks.detach`` removes only that disk's one mapping
+        to this partition, never the disk; on an activated partition it needs
+        ``allow_disruption``. Processors, memory or disks need
         ``exclusive_writer_window=true``: your assertion that no other writer changes
-        this partition or its profiles until the operation ends. ``name`` needs
+        this partition, its profiles or the named VIOS storage until the operation ends. ``name`` needs
         ``hmc_modify_lpar`` and ``hmc_rename_lpar``; ``memory_mib`` needs
         ``hmc_dlpar_mem`` and ``hmc_update_partition_profile``; ``processors`` needs
-        ``hmc_dlpar_proc`` and ``hmc_update_partition_profile``: the policy must permit
+        ``hmc_dlpar_proc`` and ``hmc_update_partition_profile``; ``disks.add`` needs
+        ``hmc_create_virtual_disk``, ``hmc_map_storage_to_lpar`` and
+        ``hmc_save_current_partition_profile``, and ``disks.detach`` needs
+        ``hmc_detach_storage_mapping``, each for every named VIOS: the policy must permit
         each and admit this partition, or nothing is recorded. An interrupted DLPAR
         write always needs attention: inspect the partition, then ``abandon``. The
         rename is written last; when unsure the HMC accepts a name, rename separately.
@@ -122,12 +137,13 @@ def reconfigure_handler(
             lpar_name_or_uuid: PartitionName or UUID; required for a new operation.
             system_name_or_uuid: The managed system holding it; required for a new
                 operation.
-            patch: name, processors and/or memory_mib; omitted fields are unchanged.
-                Required for a new operation.
+            patch: name, processors, memory_mib and/or disks; omitted fields are
+                unchanged. Required for a new operation.
             allow_disruption: Permit live removal of memory or processors (default
-                false: a removal on a running partition is pending_activation).
-            exclusive_writer_window: Required true when the patch has processors or
-                memory_mib.
+                false: a removal on a running partition is pending_activation), and a
+                disk detach from an activated partition.
+            exclusive_writer_window: Required true when the patch has processors,
+                memory_mib or disks.
             continuation: none, resume or abandon; a continuation needs only
                 request_id, and any other value given must match the operation's.
             wait_seconds: Seconds to wait before returning, 0-600.
@@ -144,28 +160,31 @@ def reconfigure_handler(
         agent_id = config.agent_id or "hmcpctl"
         effective = _effective(given, agent_id, request_id, continuation)
         model = ReconfigurePatch.model_validate(effective["patch"])
-        if model.writes_profile and effective["exclusive_writer_window"] is not True:
+        if model.needs_window and effective["exclusive_writer_window"] is not True:
             raise PermissionError(
-                "processors and memory_mib write the partition's profile: assert "
-                "exclusive_writer_window=true after coordinating other writers of this "
-                "partition and its profiles (ADR 0242)"
+                "processors, memory_mib and disks write the partition's profile or VIOS "
+                "storage: assert exclusive_writer_window=true after coordinating other "
+                "writers of this partition, its profiles and that storage (ADR 0242)"
             )
+        by_kind = {
+            "lpar": effective["lpar_name_or_uuid"],
+            "managed_system": effective["system_name_or_uuid"],
+        }
+        vioses = model.disks.vios_uuids if model.disks is not None else ()
         for delegated in delegated_tools(model):
             if not permits(delegated):
                 raise PermissionError(
                     f"{delegated} is not permitted by this server's access policy; "
                     f"{RECONFIGURE_TOOL_NAME} needs it for this patch (ADR 0189)"
                 )
-            authorize_as(
-                tool_security,
-                authorize,
-                delegated,
-                {
-                    "lpar": effective["lpar_name_or_uuid"],
-                    "managed_system": effective["system_name_or_uuid"],
-                },
-                profile,
-            )
+            for vios in vioses if disk_tool(delegated) else (None,):
+                authorize_as(
+                    tool_security,
+                    authorize,
+                    delegated,
+                    by_kind if vios is None else {**by_kind, "vios": vios},
+                    profile,
+                )
         request = OperationRequest(
             RECONFIGURE_TOOL_NAME,
             agent_id,
