@@ -140,4 +140,6 @@ exclusions in the issue's `WORK:SCOPE`.
 - `tests/storage/test_storage_tools.py`, `tests/app/test_cli_commands.py`: wrappers forward
   arguments; a declined CLI prompt does not call the operation.
 - `tests/test_live_vmedia_media_change_arm.py`: Q2/Q3 call the tools in the stated order.
+  ST71 stays a capture arm: its `check` rows are the live proof for this change and promote
+  no maturity, so `media.load`/`media.unload` remain `unevidenced` in the ledger.
 - Registry and documentation gates: `just static` (capability inventory, tool docs, ADR numbering).

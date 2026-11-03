@@ -467,7 +467,9 @@ in `tests/fixtures/live/README.md`. It:
   only when the plain unload fails), loads with `release`, unloads with `release` and
   loads again, all through the tools;
 - after each tool step reads `lsvopt` and records a `<step> check` row, PASS only when the
-  tool succeeded and the device holds the expected medium or `No Media`;
+  tool succeeded and the device holds the expected medium or `No Media`. These rows are
+  evidence for the reviewer of the run; like every ST71 row they promote no maturity, so
+  `media.load` and `media.unload` stay unevidenced in the capability ledger;
 - unmounts and deletes its media, reloading an empty device first so the unmount
   can name it, and compares mappings and adapters with its baseline.
 
