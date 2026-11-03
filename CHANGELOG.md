@@ -27,6 +27,17 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   (ADR 0189). The configuration is saved into a new partition profile named
   `hmcpctl_<12 hex>`, read back by name, and made the partition's default, and power-on
   activates that profile, so the client adapter survives the next activation (#1839, #1840).
+- `hmc_provision_lpar` accepts `install` with prepared iso-chain-loader media, `adapters.mac`
+  and `boot=deferred` (#1842, ADR 0319). The `iso-chain-media-v1` producer result must match the
+  request and the created adapter's MAC field by field; a mismatch refuses the call or ends the
+  operation `failed`, and nothing is rebuilt or overwritten. The media is uploaded as
+  `hmcpctl_<12 hex>.iso` into the storage VIOS's one media repository only when the download
+  matches the bound SHA-256 and size. It is mounted before the profile save, so the saved
+  profile carries its adapter. After the default profile is set, the boot order puts the media
+  first, and the operation pauses at `ready_to_boot` with the partition powered off. The result's
+  `unverified` lists the VIOS copy and the guest's reach to its installer source. Built media
+  (#1843) and the installer power-on (#1849) are not available yet. `upload_iso` gains
+  `expected_sha256` and `expected_size`.
 
 - `hmc_load_optical_media` and `hmc_unload_optical_media` (`hmcpctl storage
   load-optical-media` and `unload-optical-media`) change the medium in an LPAR's existing
@@ -267,6 +278,16 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Changed
 
+- **Breaking:** `hmc_decommission_lpar` requires `request_id`, and `hmcpctl lpars
+  decommission` requires `--request-id`, with no compatibility path (ADR 0320). The decommission
+  runs as one journaled logical operation: a repeat returns the same operation and never powers
+  off, detaches or deletes twice, and a failed step pauses the operation `needs_attention` for
+  `continuation=resume` or `abandon` instead of returning a partial result. The tool's result
+  gains `operation` (null for a dry run, which records nothing). `ownership_override`,
+  `immediate`, `timeout_seconds` and `poll_interval` default to null in the tool schema so a
+  continuation can omit them; a new request still uses false, false, 300 and 5. A table grant
+  still bounds the tool, but a continuation under one must repeat both selectors. `hmcpctl lpars
+  decommission` is refused while another process holds the ADR 0190 execution lock (#1847).
 - **Breaking:** `hmc_provision_lpar` requires `request_id`, and `hmcpctl lpars provision`
   requires `--request-id`, with no compatibility path. The tool's result gains `operation`,
   a clean run ends `configured` only after the saved profile reads back, and a later step's

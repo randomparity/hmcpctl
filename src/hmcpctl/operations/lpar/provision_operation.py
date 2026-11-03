@@ -33,14 +33,25 @@ from ..logical.engine import (
     OperationFailed,
 )
 from ..logical.models import EffectRecord, OperationRecord
-from ..storage.resources import storage_mapping
+from ..storage.resources import mount_optical_media, storage_mapping, upload_iso
 from .activation import ACTIVATED_STATES
 from .assignments import (
     LparPcieAssignments,
     apply_validated_lpar_pcie_assignments,
     assignment_step_names,
 )
+from .boot_order import read_lpar_boot_order, set_lpar_boot_order
 from .core import LparCreation, create_and_stamp_lpar
+from .install_media import (
+    UNVERIFIED,
+    MediaBinding,
+    MediaMismatch,
+    bind_prepared,
+    client_slot,
+    device_path,
+    media_name_for,
+    repository_group,
+)
 from .ownership import (
     lpar_ownership_entry,
     parse_lpar_ownership_caller_token,
@@ -59,7 +70,9 @@ from .provision import (
     _read_change_location,
     _run_affinity_stage,
     _skip_steps,
+    require_install_url,
     validate_provision_assignments,
+    validate_provision_install,
     validate_provision_storage,
     virtual_disk_names,
 )
@@ -80,6 +93,10 @@ EFFECT_KINDS: Mapping[str, str] = {
     "dedicated": "lpar.pcie_assignments",
     "default_profile": "lpar.default_profile",
     "power_on": "lpar.power_on",
+    # Installer media (ADR 0319).
+    "upload": "vios.optical_media_upload",
+    "mount": "vios.optical_mapping",
+    "boot_order": "lpar.boot_order",
 }
 # The step each effect reports under in ProvisionResult.steps.
 STEP_NAMES: Mapping[str, str] = {
@@ -94,10 +111,14 @@ STEP_NAMES: Mapping[str, str] = {
     "dedicated": "dedicated",
     "default_profile": "default_profile",
     "power_on": "power_on",
+    "upload": "upload_media",
+    "mount": "mount_media",
+    "boot_order": "set_boot_order",
 }
-# Ledger kinds (ADR 0313 Decision 6); #1842 adds the reserved "installer_media".
+# Ledger kinds (ADR 0313 Decision 6).
 PARTITION_LEDGER = "partition"
 DISK_LEDGER = "virtual_disk"
+MEDIA_LEDGER = "installer_media"
 _RESULT = TypeAdapter(ProvisionResult)
 _REQUEST = TypeAdapter(ProvisionRequest)
 
@@ -124,6 +145,14 @@ DEFAULT_ARGUMENTS: Mapping[str, Any] = {
 _HEX12 = re.compile(r"[0-9a-f]{12}")
 # Legs whose result is reported as their per-assignment steps.
 _ASSIGNMENT_KEYS = ("assignments", "dedicated")
+_MEDIA_STEPS = ("bind_media", "upload_media", "mount_media")
+_REST0269_MOUNT = (
+    "the HMC refused the installer media mapping because the partition has no applied "
+    "current configuration (REST0269). A refused mapping create can leave a VIOS virtual "
+    "SCSI server adapter with no target device; compare `lshwres -r virtualio --rsubtype "
+    "scsi -m <managed-system> --level lpar --filter lpar_names=<vios-name> -F "
+    "slot_num,remote_lpar_name,remote_slot_num` with the VIOS mappings, then decommission"
+)
 _LEG_ERRORS = (HMCError, HMCCLIError, ValueError, LookupError, EffectNotApplied)
 
 
@@ -146,6 +175,7 @@ def request_from_arguments(
     request = _REQUEST.validate_python(fields)
     validate_provision_assignments(request.assignments)
     validate_provision_storage(request.storage)
+    validate_provision_install(request)
     return arguments["system_name_or_uuid"], request
 
 
@@ -199,8 +229,28 @@ def _vlan_adapter(element: Any, vlan: int) -> bool:
     return False
 
 
-def readback_problem(element: Any, request: ProvisionRequest, sriov: int) -> str | None:
-    """Why the saved profile does not hold what provision built, or None when it does."""
+def _vscsi_in_slot(element: Any, slot: int) -> bool:
+    for node in element.iter():
+        if localname(node.tag) == "ProfileVirtualSCSIClientAdapter":
+            for child in node:
+                if localname(child.tag) == "VirtualSlotNumber" and (
+                    child.text or ""
+                ).strip() == str(slot):
+                    return True
+    return False
+
+
+def readback_problem(
+    element: Any,
+    request: ProvisionRequest,
+    sriov: int,
+    optical_slot: int | None = None,
+) -> str | None:
+    """Why the saved profile does not hold what provision built, or None when it does.
+
+    With installer media mounted, the profile must carry the optical mapping's client
+    adapter, or activating it would drop the media (ADR 0319).
+    """
     if not profile_write.holds(element, expected_profile(request)):
         return "the saved profile's memory, processors or units differ from the request"
     if not _vlan_adapter(element, request.adapters.port_vlan_id):
@@ -212,6 +262,11 @@ def readback_problem(element: Any, request: ProvisionRequest, sriov: int) -> str
         return "the saved profile lacks a requested vNIC"
     if _count(element, "ProfileSRIOVEthernetLogicalPort") < sriov:
         return "the saved profile lacks a requested SR-IOV logical port"
+    if optical_slot is not None and not _vscsi_in_slot(element, optical_slot):
+        return (
+            "the saved profile has no virtual SCSI client adapter in the installer "
+            f"media's slot {optical_slot}"
+        )
     return None
 
 
@@ -283,6 +338,49 @@ def _adapter_identity(entry: Mapping[str, Any]) -> dict[str, Any] | None:
     return {"adapter_uuid": uuid.lower(), "mac": mac}
 
 
+async def _media_paths(
+    hmc: HMCClient, vios_uuid: str, lpar_uuid: str, media_name: str
+) -> list[str | None]:
+    """Device paths of *lpar_uuid*'s optical mappings that hold *media_name*."""
+    paths = []
+    for mapping in await hmc.list_optical_mappings(vios_uuid, lpar_uuid):
+        storage = mapping.get("Storage") if isinstance(mapping, dict) else None
+        optical = (
+            storage.get("VirtualOpticalMedia") if isinstance(storage, dict) else None
+        )
+        if (
+            isinstance(optical, dict)
+            and leaf_text(optical.get("MediaName")) == media_name
+        ):
+            paths.append(device_path(mapping))
+    return paths
+
+
+def _mount_identity(vios_uuid: str, media_name: str, path: str) -> dict[str, Any]:
+    return {
+        "vios_uuid": vios_uuid,
+        "media_name": media_name,
+        "client_slot": client_slot(path),
+        "device_path": path,
+    }
+
+
+async def boot_devices(
+    hmc: HMCClient, request: ProvisionRequest, lpar_uuid: str, optical_path: str
+) -> list[str]:
+    """Installer media first, then the root disk (ADR 0191 Decision 6)."""
+    storage = request.storage
+    for entry in await hmc.list_storage_mappings(storage.vios_uuid):
+        found = storage_mapping(entry)
+        if found.backing_name == storage.storage_name and (
+            (found.lpar_uuid or "").lower() == lpar_uuid
+        ):
+            disk = device_path(entry)
+            if disk is not None:
+                return [optical_path, disk]
+    raise HMCError(f"the root disk mapping of LPAR {lpar_uuid} lists no device path")
+
+
 async def _adapters_on_vlan(
     hmc: HMCClient, lpar_uuid: str, vlan: int
 ) -> list[dict[str, Any]]:
@@ -309,8 +407,12 @@ class _Run:
         self.warnings: list[str] = []
         self.change_location = None
         self.assignment_steps: tuple[WorkflowStep, ...] = ()
+        self.optical_slot: int | None = None
+        self.optical_path = ""
 
-    def _result(self, lpar_uuid: str, completed: bool) -> dict[str, Any]:
+    def _result(
+        self, lpar_uuid: str, completed: bool, unverified: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
         result = ProvisionResult(
             resource_created=True,
             workflow_completed=completed,
@@ -320,6 +422,7 @@ class _Run:
             steps=tuple(self.steps),
             warnings=tuple(self.warnings),
             change_location=self.change_location,
+            unverified=unverified,
         )
         return _RESULT.dump_python(result, mode="json")
 
@@ -349,10 +452,14 @@ class _Run:
         )
         self.steps.append(WorkflowStep("stamp", "ok", dict(identity)))
         completed = await self._legs(system_uuid, lpar_uuid)
+        if completed and self.request.install is not None:
+            completed = await self._media(system_uuid, lpar_uuid)
         profile_uuid = (
             await self._persist(system_uuid, lpar_uuid) if completed else None
         )
         completed = profile_uuid is not None
+        if self.request.install is not None:
+            return await self._ready(lpar_uuid, completed)
         if completed and self.request.power_on:
             completed = (
                 await self._leg(
@@ -373,9 +480,89 @@ class _Run:
         return BodyResult(outcome, self._result(lpar_uuid, completed))
 
     def _skip_rest(self, *steps: str) -> None:
-        _skip_steps(
-            self.steps, [*steps, *(["power_on"] if self.request.power_on else [])]
+        if self.request.install is not None:
+            tail = ["set_boot_order"]
+        else:
+            tail = ["power_on"] if self.request.power_on else []
+        _skip_steps(self.steps, [*steps, *tail])
+
+    async def _media(self, system_uuid: str, lpar_uuid: str) -> bool:
+        """Bind, upload and mount the installer media before the save (ADR 0319)."""
+        request = self.request
+        install = request.install
+        assert install is not None
+        self.ctx.set_phase("media_bound")
+        try:
+            binding = bind_prepared(install, request.adapters.mac)
+        except MediaMismatch as exc:
+            raise OperationFailed(str(exc)) from exc
+        network = self.ctx.recorded("network")
+        if network is None or (network.identity or {}).get("mac") != binding.mac:
+            raise OperationFailed(
+                f"the adapter on LPAR {lpar_uuid} does not carry adapters.mac, which the "
+                "media binds; nothing was uploaded"
+            )
+        disk = self.ctx.recorded("disk")
+        if disk is None or (disk.identity or {}).get("disk_name") != (
+            request.storage.storage_name
+        ):
+            raise OperationFailed(
+                "the media's root disk is not one this operation created"
+            )
+        name = media_name_for(self.ctx.operation_id)
+        self.steps.append(
+            WorkflowStep(
+                "bind_media",
+                "ok",
+                {"media_name": name, "iso_sha256": binding.iso_sha256},
+            )
         )
+        vios = request.storage.vios_uuid.lower()
+        rest = ("mount_media", *self._persist_steps())
+        uploaded = await self._leg(
+            "upload",
+            f"vios:{vios}",
+            lambda: self._write_upload(binding, name),
+            definite=True,
+        )
+        if uploaded is None:
+            self._skip_rest(*rest)
+            return False
+        self.ctx.ledger_add(
+            MEDIA_LEDGER,
+            MEDIA_LEDGER,
+            system_uuid,
+            lpar_uuid,
+            {"vios_uuid": vios, "media_name": name},
+        )
+        mounted = await self._leg(
+            "mount",
+            f"lpar:{lpar_uuid}",
+            lambda: self._write_mount(lpar_uuid, name),
+            definite=True,
+        )
+        if mounted is None:
+            self._skip_rest(*self._persist_steps())
+            return False
+        self.optical_slot = int(mounted["client_slot"])
+        self.optical_path = str(mounted["device_path"])
+        return True
+
+    async def _ready(self, lpar_uuid: str, completed: bool) -> BodyResult:
+        """Write the boot order after the default profile, then pause (ADR 0319)."""
+        if completed:
+            completed = (
+                await self._leg(
+                    "boot_order",
+                    f"lpar:{lpar_uuid}",
+                    lambda: self._write_boot(lpar_uuid, self.optical_path),
+                )
+                is not None
+            )
+        if not completed:
+            return BodyResult("needs_attention", self._result(lpar_uuid, False))
+        self.ctx.set_phase("ready_to_boot")
+        return BodyResult("ready_to_boot", self._result(lpar_uuid, True, UNVERIFIED))
 
     async def _persist(self, system_uuid: str, lpar_uuid: str) -> str | None:
         """Save, read back and default the profile; its UUID, or None to pause."""
@@ -397,7 +584,10 @@ class _Run:
             "the saved profile is missing"
             if profile is None
             else readback_problem(
-                profile.element, self.request, len(self._assignments().sriov)
+                profile.element,
+                self.request,
+                len(self._assignments().sriov),
+                self.optical_slot,
             )
         )
         if problem is not None:
@@ -530,12 +720,18 @@ class _Run:
         key: str,
         target: str,
         write: Callable[[], Awaitable[Mapping[str, Any]]],
+        *,
+        definite: bool = False,
     ) -> Mapping[str, Any] | None:
+        """Run one effect; an error pauses the run, or with *definite* an
+        ``EffectNotApplied`` propagates so the run ends ``failed``."""
         # Only the steps this leg's own write produced may replace its summary step.
         self.assignment_steps = ()
         try:
             identity = await self.ctx.effect(key, EFFECT_KINDS[key], target, write)
         except _LEG_ERRORS as exc:
+            if definite and isinstance(exc, EffectNotApplied):
+                raise
             # Bounded like an engine warning, so a verbose HMC error cannot push the
             # result past store.MAX_RESULT_BYTES.
             self.steps.append(
@@ -571,12 +767,11 @@ class _Run:
             if key == "assignments":
                 self._replace_assignment_step()
             if identity is None:
+                media = _MEDIA_STEPS if self.request.install is not None else ()
                 self._skip_rest(
                     *(STEP_NAMES[k] for k, _, _ in legs[index + 1 :]),
-                    "save_profile",
-                    "profile_readback",
-                    *self._dedicated_steps(),
-                    "default_profile",
+                    *media,
+                    *self._persist_steps(),
                 )
                 return False
             if key == "network":
@@ -603,6 +798,14 @@ class _Run:
             return dataclasses.replace(assignments, sriov=())
         return assignments
 
+    def _persist_steps(self) -> list[str]:
+        return [
+            "save_profile",
+            "profile_readback",
+            *self._dedicated_steps(),
+            "default_profile",
+        ]
+
     def _dedicated_steps(self) -> list[str]:
         return assignment_step_names(
             LparPcieAssignments(self.request.assignments.dedicated)
@@ -620,7 +823,9 @@ class _Run:
 
     async def _write_network(self, lpar_uuid: str) -> dict[str, Any]:
         vlan = self.request.adapters.port_vlan_id
-        created = await _add_network(self.hmc, lpar_uuid, vlan)
+        created = await _add_network(
+            self.hmc, lpar_uuid, vlan, self.request.adapters.mac
+        )
         identity = _adapter_identity(created or {})
         if identity is None:
             found = await _adapters_on_vlan(self.hmc, lpar_uuid, vlan)
@@ -646,6 +851,61 @@ class _Run:
             "vios_uuid": storage.vios_uuid.lower(),
             "storage_name": storage.storage_name,
         }
+
+    async def _write_upload(self, binding: MediaBinding, name: str) -> dict[str, Any]:
+        storage = self.request.storage
+        try:
+            require_install_url(self.hmc, binding.url)
+            group = await repository_group(self.hmc, storage.vios_uuid)
+            await upload_iso(
+                self.hmc,
+                storage.vios_uuid,
+                group,
+                name,
+                binding.url,
+                system_name_or_uuid=self.system,
+                expected_sha256=binding.iso_sha256,
+                expected_size=binding.iso_size,
+            )
+        except ValueError as exc:
+            # Every ValueError here is raised before the web File exists.
+            raise EffectNotApplied(
+                f"the installer media was not uploaded: {exc}"
+            ) from exc
+        return {
+            "vios_uuid": storage.vios_uuid.lower(),
+            "vg_uuid": group,
+            "media_name": name,
+        }
+
+    async def _write_mount(self, lpar_uuid: str, name: str) -> dict[str, Any]:
+        vios = self.request.storage.vios_uuid.lower()
+        try:
+            await mount_optical_media(
+                self.hmc,
+                vios,
+                lpar_uuid,
+                system_name_or_uuid=self.system,
+                media_name=name,
+            )
+        except HMCError as exc:
+            if "REST0269" in f"{exc} {exc.body or ''}":
+                raise EffectNotApplied(_REST0269_MOUNT) from exc
+            raise
+        paths = await _media_paths(self.hmc, vios, lpar_uuid, name)
+        if len(paths) != 1 or paths[0] is None:
+            raise HMCError(
+                f"the installer media mapping of LPAR {lpar_uuid} is not listed once "
+                "with a device path"
+            )
+        return _mount_identity(vios, name, paths[0])
+
+    async def _write_boot(self, lpar_uuid: str, optical: str) -> dict[str, Any]:
+        devices = await boot_devices(self.hmc, self.request, lpar_uuid, optical)
+        await set_lpar_boot_order(
+            self.hmc, lpar_uuid, devices, system_name_or_uuid=self.system
+        )
+        return {"pending_boot_string": " ".join(devices)}
 
     async def _write_assignments(self) -> dict[str, Any]:
         result = await apply_validated_lpar_pcie_assignments(
@@ -802,6 +1062,11 @@ def provision_classifiers(
                 "needs_attention",
                 reason="the VLAN's adapters are ambiguous or lack a MAC",
             )
+        pinned = request.adapters.mac
+        if pinned is not None and identity["mac"] != pinned:
+            return Classification(
+                "needs_attention", reason="the adapter's MAC is not adapters.mac"
+            )
         return Classification("applied", identity)
 
     async def disk(ctx: OperationContext, effect: EffectRecord) -> Classification:
@@ -876,6 +1141,52 @@ def provision_classifiers(
             return Classification("applied", {"profile_name": name})
         return Classification("not_applied")
 
+    async def upload(ctx: OperationContext, effect: EffectRecord) -> Classification:
+        vios, name = request.storage.vios_uuid.lower(), media_name_for(ctx.operation_id)
+        async with client_factory(ctx.connection) as hmc:
+            try:
+                group = await repository_group(hmc, vios)
+            except ValueError:
+                return Classification(
+                    "needs_attention", reason="the media repository is not one group"
+                )
+            media = await hmc.list_optical_media(vios, group)
+        if any(leaf_text(m.get("MediaName")) == name for m in media):
+            identity = {"vios_uuid": vios, "vg_uuid": group, "media_name": name}
+            return Classification("applied", identity)
+        return Classification("not_applied")
+
+    async def mount(ctx: OperationContext, effect: EffectRecord) -> Classification:
+        vios, name = request.storage.vios_uuid.lower(), media_name_for(ctx.operation_id)
+        async with client_factory(ctx.connection) as hmc:
+            paths = await _media_paths(hmc, vios, _target_uuid(effect), name)
+        if not paths:
+            return Classification("not_applied")
+        if len(paths) > 1 or paths[0] is None:
+            return Classification(
+                "needs_attention",
+                reason="the media's mappings are several or list no device path",
+            )
+        return Classification("applied", _mount_identity(vios, name, paths[0]))
+
+    async def boot_order(ctx: OperationContext, effect: EffectRecord) -> Classification:
+        mount = ctx.recorded("mount")
+        optical = (mount.identity or {}).get("device_path") if mount else None
+        if not optical or ctx.partition is None:
+            return Classification(
+                "needs_attention", reason="no mounted media is recorded"
+            )
+        lpar_uuid = _target_uuid(effect)
+        async with client_factory(ctx.connection) as hmc:
+            devices = await boot_devices(hmc, request, lpar_uuid, str(optical))
+            observed = await read_lpar_boot_order(
+                hmc, lpar_uuid, system_name_or_uuid=ctx.partition[0]
+            )
+        wanted = " ".join(devices)
+        if observed["pending_boot_string"] == wanted:
+            return Classification("applied", {"pending_boot_string": wanted})
+        return Classification("not_applied")
+
     expected = expected_profile(request)
 
     return {
@@ -889,6 +1200,9 @@ def provision_classifiers(
         ),
         EFFECT_KINDS["default_profile"]: default_profile,
         EFFECT_KINDS["power_on"]: power_on,
+        EFFECT_KINDS["upload"]: upload,
+        EFFECT_KINDS["mount"]: mount,
+        EFFECT_KINDS["boot_order"]: boot_order,
     }
 
 
@@ -908,9 +1222,10 @@ def _agrees(result: ProvisionResult, record: OperationRecord) -> bool:
 def result_from_record(record: OperationRecord) -> ProvisionResult:
     """The tool result: the body's own result where it agrees with the journal, else
     one rebuilt from the effects (ADR 0313 Decision 2)."""
-    if record.result and record.outcome in ("configured", "needs_attention"):
+    finished = ("configured", "ready_to_boot")
+    if record.result and record.outcome in (*finished, "needs_attention"):
         result = _RESULT.validate_python(record.result)
-        if record.outcome == "configured" or _agrees(result, record):
+        if record.outcome in finished or _agrees(result, record):
             # A pause the engine added (an open effect, a classifier's reason) is why
             # the operation stopped, so it joins the body's own warnings.
             warnings = tuple(dict.fromkeys((*result.warnings, *record.warnings)))

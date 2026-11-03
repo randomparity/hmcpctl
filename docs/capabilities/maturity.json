@@ -4894,6 +4894,23 @@
                 "constraint": "SystemName or UUID"
               }
             ]
+          },
+          {
+            "variant": "journaled-operation",
+            "parameters": [
+              {
+                "name": "continuation",
+                "constraint": "none, resume or abandon"
+              },
+              {
+                "name": "request_id",
+                "constraint": "required; 1-64 of A-Z a-z 0-9 . _ -"
+              },
+              {
+                "name": "wait_seconds",
+                "constraint": "0-600; the operation continues after the call returns"
+              }
+            ]
           }
         ],
         "missing_scope": []
@@ -5021,9 +5038,40 @@
                 "constraint": "profile_name default_profile; an unowned slot no profile lists, written into the saved hmcpctl_ profile before activation (ADR 0318)"
               }
             ]
+          },
+          {
+            "variant": "prepared-install-media",
+            "parameters": [
+              {
+                "name": "adapters.mac",
+                "constraint": "lower-case colon form; required with prepared media and created as given"
+              },
+              {
+                "name": "install",
+                "constraint": "media.mode prepared with an iso-chain-media-v1 producer result bound field by field; digest-checked upload, mount before the profile save, media-first boot order; boot deferred pauses at ready_to_boot (ADR 0319)"
+              }
+            ]
           }
         ],
         "missing_scope": [
+          {
+            "variant": "built-install-media",
+            "parameters": [
+              {
+                "name": "install.media.mode",
+                "constraint": "built refused before provisioning; the operator-configured build entry is owned by issue #1843"
+              }
+            ]
+          },
+          {
+            "variant": "installer-boot",
+            "parameters": [
+              {
+                "name": "boot",
+                "constraint": "immediate with install refused; installer power-on, continuation boot and boot_started are owned by issue #1849"
+              }
+            ]
+          },
           {
             "variant": "c12-positive-virtual-slot-linkage",
             "parameters": [

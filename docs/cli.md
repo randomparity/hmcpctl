@@ -94,7 +94,7 @@ hmcpctl lpars plan-system-memopt-score sys1 --prioritize-id 3 --exclude-id 9 --j
 hmcpctl lpars create web01 --system <uuid> --mem 8192 --vcpus 2 --procs 0.2
 hmcpctl lpars modify web01 --mem 16384 --procs 2.0   # assign resources
 hmcpctl lpars delete web01 --system <uuid> # destroy (must be powered off)
-hmcpctl lpars decommission web01 --system <uuid> --dry-run   # preview blast radius
+hmcpctl lpars decommission web01 --request-id cleanup-1 --system <uuid> --dry-run   # preview blast radius
 hmcpctl lpars power-on mylpar        # submits a PowerOn job (asks first)
 hmcpctl lpars power-off mylpar --immediate
 hmcpctl adapters list mylpar                    # network adapters (default type)
@@ -253,7 +253,7 @@ hmcpctl storage list-vgs "$VIOS" --system "$SYSTEM" --json
 VG='<selected VG name or UUID>'
 hmcpctl storage list-optical-media "$VIOS" --system "$SYSTEM" --vg "$VG" --json
 hmcpctl storage list-mappings "$VIOS" --system "$SYSTEM" --json
-hmcpctl lpars decommission "$LPAR" --system "$SYSTEM" --dry-run --json
+hmcpctl lpars decommission "$LPAR" --request-id cleanup-1 --system "$SYSTEM" --dry-run --json
 ```
 
 Inventory JSON for LPARs and VIOS has `entries` and `unreadable_systems`; do not
@@ -273,12 +273,16 @@ that evidence is resolved; `--yes` does not bypass containment or ownership chec
 After reviewing the plan and obtaining permission for the intended destruction:
 
 ```sh
-hmcpctl lpars decommission "$LPAR" --system "$SYSTEM" --yes --json
+hmcpctl lpars decommission "$LPAR" --request-id cleanup-1 --system "$SYSTEM" --yes --json
 ```
 
 Check the exit status and `workflow_completed`, `resource_deleted`, and each
 step's status. Partial failure can leave earlier mapping detaches completed while
-later steps are failed or skipped; inspect actual state before any retry. Do not
+later steps are failed or skipped; inspect actual state before any retry. The run is
+recorded under its `--request-id` (ADR 0320): repeating the same command returns the same
+operation, and after inspecting, `hmcpctl lpars decommission --request-id cleanup-1
+--continuation resume` checks each interrupted write live and continues, while
+`--continuation abandon` stops it without writing. Do not
 continue to backing-file deletion merely because some steps succeeded.
 Decommission retains backing storage. Once the LPAR cleanup is complete, make
 separate explicit decisions about the exact unused disk and ISO:
@@ -414,9 +418,9 @@ means its detach returned successfully; `retained` means no detach was attempted
 `unproven` identifies incomplete identity/inventory. Backing storage stays retained.
 
 ```sh
-hmcpctl lpars decommission web01 --system frame-a --dry-run --format tsv
+hmcpctl lpars decommission web01 --request-id cleanup-1 --system frame-a --dry-run --format tsv
 hmcpctl storage list-mappings <vios-uuid> --system frame-a --format tsv
-hmcpctl lpars decommission web01 --system frame-a --yes --json
+hmcpctl lpars decommission web01 --request-id cleanup-1 --system frame-a --yes --json
 ```
 
 Use the emitted inspection command for the observed VIOS. Do not add `--lpar` when

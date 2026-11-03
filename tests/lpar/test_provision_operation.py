@@ -334,6 +334,18 @@ def test_a_profile_missing_what_provision_built_is_named(
     assert found is not None and problem in found
 
 
+def test_installer_media_needs_its_vscsi_adapter_in_the_saved_profile():
+    from xml.etree import ElementTree as ET
+
+    element = _profile_element()
+    found = readback_problem(element, _request(), 0, optical_slot=4)
+    assert found is not None and "installer media's slot 4" in found
+    ns = "{http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/}"
+    adapter = next(element.iter(f"{ns}ProfileVirtualSCSIClientAdapter"))
+    ET.SubElement(adapter, f"{ns}VirtualSlotNumber").text = "4"
+    assert readback_problem(element, _request(), 0, optical_slot=4) is None
+
+
 def test_a_running_operation_reports_no_step_for_a_write_in_flight():
     from hmcpctl.operations.logical.models import OperationRecord
     from hmcpctl.operations.lpar.provision_operation import result_from_record
