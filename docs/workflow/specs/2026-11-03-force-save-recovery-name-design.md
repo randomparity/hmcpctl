@@ -26,9 +26,10 @@ say that no overwrite was submitted.
 1. Generate the recovery name as `"hmcprec-" + secrets.token_hex(8)`: 24 characters, 64
    random bits. The `hmcprec-` prefix is unchanged, so the live arm's namespace check
    (`scripts/live_test/partition_profiles.py`) still matches it.
-2. `write_native_profile` passes `response.text` to `HMCError`, as `client/core.py` does. The
-   shared `HMCError` renders only the `<Message>` element (bounded to 500 characters). Its
-   raw-body fallback applies only when no `Message` is present.
+2. `write_native_profile` passes only the HMC's `<Message>` text (or nothing) to `HMCError`,
+   never the raw body: that body echoes the session cookie and `X-API-Session` in
+   `<RequestHeaders>`, and `HMCError` would otherwise keep 4096 bytes of it in `.body` and fall
+   back to the first 500 characters when `<Message>` is absent.
 3. `_recovery`'s `except (HMCError, ValueError, TypeError)` — which covers the clone write,
    its readback and comparison, the post-copy freshness checks, and a selected existing
    recovery profile — makes the outcome's `error` begin `recovery step failed; overwrite not
@@ -76,10 +77,11 @@ Not changed:
   the cookie and `x-api-session`, in `<RequestHeaders>`.
 - **Actor:** the authenticated operator who reads the tool output. The HMC is trusted for
   content but not for leaking its echo.
-- **Control:** `HMCError` renders `find_text(body, "Message")`. That excludes
-  `RequestHeaders`, and a focused test asserts that no session token appears in the outcome.
-- **Out of scope:** the raw-body fallback for non-XML or Message-less bodies (existing
-  behavior, unchanged).
+- **Control:** `write_native_profile` extracts `<Message>` and hands `HMCError` nothing else.
+  Focused tests over the captured body, a Message-less cut and a non-XML cut assert that no
+  session token appears in the error text or `.body`.
+- **Out of scope:** the other client paths that hand raw HMC bodies to `HMCError`; reported as a
+  follow-up candidate.
 
 ## Validation
 

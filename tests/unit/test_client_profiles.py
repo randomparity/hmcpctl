@@ -187,6 +187,24 @@ async def test_native_write_failure_carries_hmc_message():
         await write_native_profile(hmc, "LogicalPartition", P, r.element)
     assert "HSCL059F" in str(raised.value) and "31 characters" in str(raised.value)
     assert "REDACTED-SESSION" not in str(raised.value)
+    assert "REDACTED-SESSION" not in (raised.value.body or "")
+
+
+@pytest.mark.parametrize("cut", ["message-less", "not-xml"])
+@pytest.mark.asyncio
+async def test_native_write_failure_never_carries_echoed_headers(cut):
+    body = live_fixture("rest-profile-create-name-too-long")["body"]
+    if cut == "message-less":
+        start, end = body.index("<Message"), body.index("</Message>") + 10
+        body = body[:start] + body[end:]
+    else:
+        body = body[body.index("<RequestHeaders") :]
+    hmc = client(response(), httpx.Response(500, text=body))
+    r = await read_native_profile(hmc, "LogicalPartition", P, F, S)
+    with pytest.raises(HMCError) as raised:
+        await write_native_profile(hmc, "LogicalPartition", P, r.element)
+    assert "REDACTED-SESSION" not in str(raised.value)
+    assert "REDACTED-SESSION" not in (raised.value.body or "")
 
 
 @pytest.mark.asyncio
