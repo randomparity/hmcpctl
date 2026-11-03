@@ -118,6 +118,9 @@ Before maturity is recorded, the Q5 answer is read back into the refusal message
    - the saved profile keeps the optical client vSCSI adapter (ADR 0319 D2). Adapters stay as the
      HMC leaves them after the unmount. Removing them is not a detach;
    - a partition that no provision recorded cannot use either field. It has no ledger owner.
+   - `boot: root_disk` governs only the next activation, because an activation consumes the
+     pending string (ADR 0321 Consequences). Later activations follow the firmware's own boot
+     list, which hmcpctl does not write. That persistence is unevidenced and is not claimed;
 4. **Covered elsewhere**
    - provision writing the `installer_media` ledger entry → #1842 / ADR 0319;
    - media and disk deletion → #1229 / #1848;

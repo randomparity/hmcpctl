@@ -60,6 +60,11 @@ It consumes the `installer_media` ledger entry that ADR 0319 (#1842) has provisi
 - The saved profile keeps the optical client adapter (ADR 0319 D2). Adapters stay as the HMC
   leaves them after the unmount.
 - Before #1842 merges, no ledger entry of kind `installer_media` exists, so detach always refuses.
+- The boot write governs the next activation only, profile activation included. The pending boot
+  string is partition state, not profile content (ADR 0319 D3). A profile activation was observed to
+  consume it on V10R3 (`operations/lpar/boot_order.py`, `_CLEAR_REFUSAL`). Two things are
+  unevidenced: whether the firmware keeps the root disk as its default for later activations, and
+  whether the activation boots from the string, which has had no native run yet.
 
 ## Considered & rejected
 
