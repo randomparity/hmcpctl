@@ -104,3 +104,23 @@ def test_an_unwritable_request_file_fails(tmp_path, monkeypatch):
     entry = _entry(tmp_path, "pass")
     with pytest.raises(BuildFailed, match="request file"):
         _run((entry, "{target}"))
+
+
+def test_a_timeout_kills_a_descendant_after_the_leader_exits(tmp_path):
+    entry = _entry(
+        tmp_path,
+        "import subprocess, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "open(record, 'w').write(str(child.pid))",
+    )
+    with pytest.raises(BuildFailed, match="0.5 seconds"):
+        _run((entry, "{target}"), timeout=0.5)
+    pid = int((tmp_path / "record.json").read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    pytest.fail("the build entry's descendant outlived the timeout")

@@ -20,6 +20,7 @@ from .install_media import MAX_PRODUCER_RESULT_BYTES
 
 BUILD_TIMEOUT_SECONDS = 3600.0
 _CHUNK = 8192
+_DRAIN_SECONDS = 5.0
 
 
 class BuildFailed(Exception):
@@ -72,9 +73,15 @@ async def _collect(process: asyncio.subprocess.Process) -> bytes:
 
 
 async def _reap(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is None:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
+    # The whole session's group, even after the leader exited: a descendant can hold
+    # stdout open. A group id is not reused while any member lives.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+    if process.stdout is not None:
+        # Reaching EOF lets the pipe close. A descendant that left the group can
+        # still hold it, so the drain is bounded rather than awaited outright.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.stdout.read(), _DRAIN_SECONDS)
     await process.wait()
 
 
