@@ -21,6 +21,19 @@ from .store import OperationRefused
 MAX_CONSUMER_LABEL = 64
 
 
+class HoldRefused(Exception):
+    """A guarded mutation refused because its partition is held (ADR 0193).
+
+    Deliberately not a ``ValueError``: domain code that turns a resolver's ``ValueError``
+    into its own message would otherwise hide the hold. Raised before any HMC write, so a
+    logical operation body that raises it ends ``failed`` rather than pausing for attention.
+    """
+
+    def __init__(self, reason: str, action: str) -> None:
+        super().__init__(f"{reason}: {action}")
+        self.reason = reason
+
+
 @dataclass(frozen=True)
 class Hold:
     """One partition's hold; ``created_at`` is ISO-8601 UTC."""
@@ -232,7 +245,7 @@ def enforce_hold(partition_uuid: str) -> None:
     held = find_hold(partition_uuid)
     if held is None or _matches(None if call is None else call.hold_id, held.hold_id):
         return
-    raise OperationRefused(
+    raise HoldRefused(
         "partition_held",
         f"partition {held.partition_uuid} is {describe(held)}; present its hold_id, or ask "
         "the operator to release it with hmcpctl holds release",

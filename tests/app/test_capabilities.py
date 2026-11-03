@@ -478,6 +478,7 @@ def test_decommission_lpar_is_public_destructive_and_schema_stable():
         "timeout_seconds",
         "poll_interval",
         "storage_cleanup",
+        "hold_id",
         "exclusive_writer_window",
         "continuation",
         "wait_seconds",

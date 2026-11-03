@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from ...errors import HMCError
-from ...resource_identity import is_uuid, resolve_system_uuid
+from ...resource_identity import guard_partition, is_uuid, resolve_system_uuid
 from ...ssh import memory as native
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import leaf_text
@@ -213,6 +213,8 @@ async def _resolve_target(
         raise ValueError("Paging consumer must resolve uniquely in the selected system")
     entry = matches[0]
     identity = _identity(entry, entry["ResourceType"])
+    if entry["ResourceType"] == "LogicalPartition":
+        guard_partition(identity.uuid)
     target = PartitionIdentity(
         identity.uuid, identity.name, identity.partition_id, entry["ResourceType"]
     )

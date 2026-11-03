@@ -10,7 +10,12 @@ import asyncssh
 from ...client.core import HMCClient
 from ...documents.lpar_accelerator import LparAcceleratorQos
 from ...errors import HMCError
-from ...resource_identity import is_uuid, resolve_system_uuid, system_name_from_uuid
+from ...resource_identity import (
+    guard_partition,
+    is_uuid,
+    resolve_system_uuid,
+    system_name_from_uuid,
+)
 from ...ssh.accelerator import read_accelerator_qos, set_accelerator_qos
 from ...xmlutil import leaf_text
 from ..inventory.composite import resource_container
@@ -51,6 +56,8 @@ async def _contained(
         raise ValueError(
             "Accelerator target is missing, ambiguous or outside selected system"
         )
+    if matches[0][0] == "LogicalPartition":
+        guard_partition(matches[0][1])
     return matches[0]
 
 

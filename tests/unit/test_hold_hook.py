@@ -13,7 +13,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCTransportError
 from hmcpctl.operations.logical import engine, holds
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
-from hmcpctl.operations.logical.store import OperationRefused
+from hmcpctl.operations.logical.holds import HoldRefused
 from hmcpctl.operations.lpar import decommission
 from hmcpctl.resource_identity import PartitionGuard, install_partition_guard
 from hmcpctl.ssh import selectors
@@ -105,7 +105,7 @@ def test_decommission_target_resolution_runs_the_guard(spy):
 def test_ssh_uuid_selector_runs_the_guard_before_any_read(hold_guard):
     _held()
     hmc = FakeHMC()
-    with calling(MUTATION), pytest.raises(OperationRefused) as info:
+    with calling(MUTATION), pytest.raises(HoldRefused) as info:
         asyncio.run(selectors.resolve_ssh_names(hmc, "sys-R1", LPAR))
     assert info.value.reason == "partition_held"
     assert hmc.reads == []
@@ -116,7 +116,7 @@ def test_ssh_name_selector_resolves_the_name_while_holds_exist(hold_guard, monke
     hmc = FakeHMC()
     monkeypatch.setattr(selectors, "HMCClient", lambda _config: hmc)
     config = HMCConfig.from_mapping({"host": "hmc.test", "user": "u"})
-    with calling(MUTATION), pytest.raises(OperationRefused) as info:
+    with calling(MUTATION), pytest.raises(HoldRefused) as info:
         asyncio.run(selectors.resolve_ssh_names(config, "sys-R1", NAME))
     assert info.value.reason == "partition_held"
     assert f"find:{NAME}" in hmc.reads
@@ -129,7 +129,7 @@ def test_ssh_name_selector_refuses_when_rest_cannot_identify_it(
     monkeypatch.setattr(selectors, "HMCClient", lambda _c: FakeHMC(transport_down=True))
     config = HMCConfig.from_mapping({"host": "hmc.test", "user": "u"})
     for name in (NAME, "lpar-unknown"):
-        with calling(MUTATION), pytest.raises(OperationRefused) as info:
+        with calling(MUTATION), pytest.raises(HoldRefused) as info:
             asyncio.run(selectors.resolve_ssh_names(config, "sys-R1", name))
         assert info.value.reason == "partition_hold_unverified"
 

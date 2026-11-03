@@ -8,6 +8,7 @@ from hmcpctl.client.core import HMCClient
 
 from ..config import HMCConfig
 from ..errors import HMCError, HMCTransportError
+from ..operations.logical.holds import HoldRefused
 from ..operations.logical.store import OperationRefused
 from ..resource_identity import (
     guard_partition,
@@ -119,7 +120,7 @@ async def _guard_named_partition(
     except OperationRefused:
         raise
     except (HMCError, ValueError) as error:
-        raise OperationRefused(
+        raise HoldRefused(
             "partition_hold_unverified",
             f"partitions on this host are held and LPAR {lpar_name!r} could not be identified "
             f"to check for a hold ({type(error).__name__}); name it by UUID or retry when the "

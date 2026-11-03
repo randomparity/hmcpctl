@@ -98,7 +98,12 @@ def test_a_mutation_needing_only_targets_and_ownership_is_mutating():
         _security("destructive", LPAR, SYSTEM),
         _schema(
             "lpar_name_or_uuid",
-            optional=("system_name_or_uuid", "ownership_override", "profile"),
+            optional=(
+                "system_name_or_uuid",
+                "ownership_override",
+                "hold_id",
+                "profile",
+            ),
         ),
     )
 

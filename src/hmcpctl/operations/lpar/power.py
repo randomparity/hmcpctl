@@ -21,7 +21,7 @@ from ...jobs import (
     job_outcome,
     power_on_lpar_job,
 )
-from ...resource_identity import resolve_system_uuid
+from ...resource_identity import guard_partition, resolve_system_uuid
 from ..logical import engine
 from ..logical.engine import (
     BodyResult,
@@ -110,6 +110,7 @@ async def _resolve_and_authorize_power_target(
         )
     entry = matches[0]
     lpar_uuid = str(entry["UUID"]).lower()
+    guard_partition(lpar_uuid)
     if hmc.config.authorize_power_operations:
         try:
             await resolve_and_authorize_lpar_mutation(

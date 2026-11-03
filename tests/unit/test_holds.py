@@ -10,6 +10,7 @@ import pytest
 
 from hmcpctl.call_context import HOLD_EXEMPT_TOOLS, CallContext, calling, current_call
 from hmcpctl.operations.logical import holds, store
+from hmcpctl.operations.logical.holds import HoldRefused
 from hmcpctl.operations.logical.store import OperationRefused
 
 SYS = "0b3f9a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
@@ -255,7 +256,7 @@ def test_enforce_refuses_a_mutation_without_the_matching_id():
         CallContext("hmc_power_lpar", read=False, hold_id="0" * 32),
         CallContext(None, read=False, hold_id="ünicode"),
     ):
-        with pytest.raises(OperationRefused) as info:
+        with pytest.raises(HoldRefused) as info:
             _enforce(context)
         assert info.value.reason == "partition_held"
         assert placed.hold_id not in str(info.value)

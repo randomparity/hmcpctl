@@ -17,13 +17,23 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import MISSING, dataclass, is_dataclass, replace
 from dataclasses import fields as dataclass_fields
 from types import MappingProxyType
-from typing import Any, Literal, TypeVar, get_args, get_origin, get_type_hints
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    TypeVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from fastmcp import FastMCP
 from fastmcp.tools.base import Tool
 from fastmcp.tools.function_tool import FunctionTool
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from .call_context import HOLD_EXEMPT_TOOLS, CallContext, calling
 
 Effect = Literal["read", "mutate", "destructive", "arbitrary-command"]
 
@@ -139,6 +149,23 @@ _ANNOTATIONS: Mapping[str, tuple[bool, bool | None]] = MappingProxyType(
 )
 
 
+# Tools whose partition is derived at run time rather than named by a selector, so the
+# ADR 0193 hold hook can refuse them though no `lpar` selector says so (ADR 0327 Decision 2).
+RUNTIME_PARTITION_TOOLS: frozenset[str] = frozenset({"hmc_detach_storage_mapping"})
+
+HOLD_ID = "hold_id"
+_HOLD_ID_ANNOTATION = Annotated[
+    str | None,
+    Field(
+        description=(
+            "The hold_id of the external-management hold on the partition, when one is "
+            "placed (ADR 0193); omit it otherwise. A held partition refuses this call "
+            "without it."
+        )
+    ),
+]
+
+
 @dataclass(frozen=True)
 class TargetSelector:
     """A public handler argument carrying the identity of one target resource.
@@ -211,6 +238,8 @@ class ToolDefinition:
             def metadata_handler(*args: Any, **kwargs: Any) -> Any:
                 return handler(*args, **kwargs)
 
+        if _injects_hold_id(self.name, self.security, handler):
+            _add_hold_id(metadata_handler)
         return Tool.from_function(
             metadata_handler, annotations=annotations_for(self.security.effect)
         )
@@ -262,6 +291,58 @@ def is_authorized_wrapper(handler: object) -> bool:
     return getattr(handler, _AUTHORIZED_MARKER, False) is True
 
 
+def hold_guarded(name: str, security: ToolSecurity) -> bool:
+    """Whether the ADR 0193 hold hook can refuse *name*, so it must accept ``hold_id``.
+
+    A non-``read``, non-exempt tool that selects a partition, nested selectors included, or
+    that derives one at run time (ADR 0327 Decision 2).
+    """
+    if security.effect == "read" or name in HOLD_EXEMPT_TOOLS:
+        return False
+    return name in RUNTIME_PARTITION_TOOLS or any(
+        target.kind == "lpar" for target in security.targets
+    )
+
+
+def _injects_hold_id(
+    name: str, security: ToolSecurity, handler: Callable[..., Any]
+) -> bool:
+    """True when the registry, not *handler*, supplies a hold-guarded tool's ``hold_id``."""
+    declared = inspect.signature(inspect.unwrap(handler)).parameters
+    return hold_guarded(name, security) and HOLD_ID not in declared
+
+
+def _add_hold_id(fn: Callable[..., Any]) -> None:
+    """Give *fn* a keyword-only ``hold_id`` in the signature FastMCP publishes and validates.
+
+    FastMCP validates a call against the function's own signature, not the published
+    schema, so the argument must be part of that signature to reach the wrapper at all.
+    """
+    signature = inspect.signature(fn)
+    if HOLD_ID in signature.parameters:
+        return
+    parameters = list(signature.parameters.values())
+    at = next(
+        (
+            index
+            for index, parameter in enumerate(parameters)
+            if parameter.kind is inspect.Parameter.VAR_KEYWORD
+        ),
+        len(parameters),
+    )
+    parameters.insert(
+        at,
+        inspect.Parameter(
+            HOLD_ID,
+            inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=_HOLD_ID_ANNOTATION,
+        ),
+    )
+    fn.__signature__ = signature.replace(parameters=parameters)  # ty: ignore[unresolved-attribute]
+    fn.__annotations__ = {**fn.__annotations__, HOLD_ID: _HOLD_ID_ANNOTATION}
+
+
 def _authorize_call(
     signature: inspect.Signature,
     name: str,
@@ -269,10 +350,26 @@ def _authorize_call(
     authorize: Authorize,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-) -> None:
+) -> Mapping[str, Any]:
     bound = signature.bind(*args, **kwargs)
     bound.apply_defaults()
     authorize(name, security, bound.arguments)
+    return bound.arguments
+
+
+def _call_context(
+    name: str,
+    security: ToolSecurity,
+    injected: bool,
+    kwargs: dict[str, Any],
+    arguments: Mapping[str, Any],
+) -> CallContext:
+    hold_id = kwargs.get(HOLD_ID) if injected else arguments.get(HOLD_ID)
+    return CallContext(
+        tool=name,
+        read=security.effect == "read",
+        hold_id=hold_id if isinstance(hold_id, str) else None,
+    )
 
 
 def _mark_authorized(wrapper: Callable[..., Any]) -> Callable[..., Any]:
@@ -305,23 +402,41 @@ def authorized(
     package's one async handler, and connection-less — would be registered as a
     plain function returning an un-awaited coroutine. Both branches name their
     inner function ``guarded`` because that name is a witness the suite reads.
+
+    Every call runs inside a :class:`CallContext` naming the tool, whether it is a read, and
+    any presented ``hold_id``, which the ADR 0193 hold hook reads. A hold-guarded tool whose
+    handler takes no ``hold_id`` gets one from the registry; the wrapper removes it before
+    authorizing and calling the handler, so the handler never sees it (ADR 0327).
     """
     signature = inspect.signature(handler)
+    injected = _injects_hold_id(name, security, handler)
 
     if inspect.iscoroutinefunction(handler):
 
         @functools.wraps(handler)
         async def guarded(*args: Any, **kwargs: Any) -> Any:
-            _authorize_call(signature, name, security, authorize, args, kwargs)
-            return await handler(*args, **kwargs)
+            presented = {HOLD_ID: kwargs.pop(HOLD_ID, None)} if injected else {}
+            arguments = _authorize_call(
+                signature, name, security, authorize, args, kwargs
+            )
+            context = _call_context(name, security, injected, presented, arguments)
+            with calling(context):
+                return await handler(*args, **kwargs)
 
-        return _mark_authorized(guarded)
+    else:
 
-    @functools.wraps(handler)
-    def guarded(*args: Any, **kwargs: Any) -> Any:
-        _authorize_call(signature, name, security, authorize, args, kwargs)
-        return handler(*args, **kwargs)
+        @functools.wraps(handler)
+        def guarded(*args: Any, **kwargs: Any) -> Any:
+            presented = {HOLD_ID: kwargs.pop(HOLD_ID, None)} if injected else {}
+            arguments = _authorize_call(
+                signature, name, security, authorize, args, kwargs
+            )
+            context = _call_context(name, security, injected, presented, arguments)
+            with calling(context):
+                return handler(*args, **kwargs)
 
+    if injected:
+        _add_hold_id(guarded)
     return _mark_authorized(guarded)
 
 

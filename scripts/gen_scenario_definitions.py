@@ -29,10 +29,11 @@ from hmcpctl.tool_registry import ToolSecurity
 _OPERATIONS = (
     Path(__file__).resolve().parent.parent / "docs/capabilities/operations.json"
 )
-# A mutating definition may leave this unset: its default refuses a foreign-owned
-# partition. Every other optional argument of a mutating tool changes what the call
-# does, so a defaulted call may not act (ADR 0249).
-_SAFE_DEFAULT = "ownership_override"
+# A mutating definition may leave these unset: `ownership_override`'s default refuses a
+# foreign-owned partition, and an absent `hold_id` presents no hold, so a held partition
+# refuses (ADR 0193). Every other optional argument of a mutating tool changes what the
+# call does, so a defaulted call may not act (ADR 0249).
+_SAFE_DEFAULTS = frozenset({"ownership_override", "hold_id"})
 
 
 def derive(
@@ -55,7 +56,7 @@ def derive(
             return f"required argument {name} is not a target selector"
     read_only = security.effect == "read"
     if not read_only:
-        allowed = selectors.keys() | {security.connection_argument, _SAFE_DEFAULT}
+        allowed = selectors.keys() | {security.connection_argument, *_SAFE_DEFAULTS}
         others = sorted(set(schema.get("properties") or ()) - allowed)
         if others:
             return (

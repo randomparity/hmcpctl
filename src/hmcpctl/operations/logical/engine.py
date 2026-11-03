@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from . import store
+from .holds import HoldRefused
 from .models import (
     EffectRecord,
     EffectStatus,
@@ -428,7 +429,7 @@ async def _run(
     try:
         result = await body(ctx)
         result_json = _result_json(result)
-    except (OperationFailed, EffectNotApplied) as exc:
+    except (OperationFailed, EffectNotApplied, HoldRefused) as exc:
         definite = not ctx.has_uncertain()
         warnings = [_warning(_failure(exc))]
         carried = getattr(exc, "result", None)
