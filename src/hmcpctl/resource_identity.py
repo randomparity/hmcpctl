@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from hmcpctl.client.client_resolution import summary_for
@@ -18,6 +19,38 @@ if TYPE_CHECKING:
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
+
+
+@dataclass(frozen=True)
+class PartitionGuard:
+    """The ADR 0193 hold hook the MCP server and CLI install; the library installs none.
+
+    *check* refuses a partition UUID's resolution by raising. *names_need_resolution* says
+    whether a partition the caller named only by name must be resolved so *check* can see it.
+    """
+
+    check: Callable[[str], None]
+    names_need_resolution: Callable[[], bool]
+
+
+_PARTITION_GUARD: PartitionGuard | None = None
+
+
+def install_partition_guard(guard: PartitionGuard | None) -> None:
+    """Install *guard* for every later partition resolution in this process, or remove it."""
+    global _PARTITION_GUARD
+    _PARTITION_GUARD = guard
+
+
+def guard_partition(partition_uuid: str) -> None:
+    """Run the installed guard on a resolved partition UUID; nothing when none is installed."""
+    if _PARTITION_GUARD is not None:
+        _PARTITION_GUARD.check(partition_uuid)
+
+
+def partition_names_need_resolution() -> bool:
+    """Whether a name-only partition selector must be resolved for the installed guard."""
+    return _PARTITION_GUARD is not None and _PARTITION_GUARD.names_need_resolution()
 
 
 class ResourceNotFoundError(ValueError):
@@ -162,6 +195,7 @@ async def resolve_lpar_uuid(
     if is_uuid(value):
         if system_uuid is not None:
             await _verify_partition_on_system(hmc, system_uuid, value, "LPAR")
+        guard_partition(value)
         return value
     entry = (
         await hmc.find_partition_by_name(value, system_uuid=system_uuid)
@@ -175,6 +209,7 @@ async def resolve_lpar_uuid(
             f"No LPAR named {value!r} found. "
             "Use hmc_list_lpars to list available partitions.",
         )
+    guard_partition(str(entry["UUID"]))
     return str(entry["UUID"])
 
 

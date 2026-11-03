@@ -14,6 +14,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from ...call_context import HOLD_EXEMPT_TOOLS, current_call
+from ...resource_identity import PartitionGuard
 from . import store
 from .store import OperationRefused
 
@@ -210,15 +211,24 @@ def operator_release(partition_uuid: str) -> tuple[Hold, ...]:
     return tuple(_hold(row) for row in rows)
 
 
+def _exempt_call() -> bool:
+    call = current_call()
+    return call is not None and (call.read or call.tool in HOLD_EXEMPT_TOOLS)
+
+
+def _names_need_resolution() -> bool:
+    return not _exempt_call() and holds_present()
+
+
 def enforce_hold(partition_uuid: str) -> None:
     """Refuse a guarded mutation of a held partition without its ``hold_id`` (ADR 0193).
 
     Reads and the exempt tools pass. A store ADR 0190 Decision 9 refuses raises here too, so
     unknown state refuses (ADR 0193 Decision 5).
     """
-    call = current_call()
-    if call is not None and (call.read or call.tool in HOLD_EXEMPT_TOOLS):
+    if _exempt_call():
         return
+    call = current_call()
     held = find_hold(partition_uuid)
     if held is None or _matches(None if call is None else call.hold_id, held.hold_id):
         return
@@ -227,3 +237,8 @@ def enforce_hold(partition_uuid: str) -> None:
         f"partition {held.partition_uuid} is {describe(held)}; present its hold_id, or ask "
         "the operator to release it with hmcpctl holds release",
     )
+
+
+HOLD_GUARD = PartitionGuard(
+    check=enforce_hold, names_need_resolution=_names_need_resolution
+)
