@@ -45,9 +45,10 @@ Each add used PVID 2 on trunked switch 0. The captured results:
      and CLI paths reach.
    - When the native add raises an `HMCError` with status 500, it re-raises it as a new
      `HMCError` carrying an actionable message, chosen by the code the body names:
-     - `HSCLB021`: the HMC's RMC call to the serving VIOS failed. The HMC makes that call to
-       register a VSI profile. Check the VIOS's RMC state and VSI support, or omit the `vsi_*`
-       fields.
+     - `HSCLB021`: an RMC call the HMC made for the add failed. The HMC's own message names
+       the partition it called; check that partition's RMC state. Only when the request
+       selected a `vsi_*` field does the message add the VSI route: a complete VSI profile
+       makes the HMC call the serving VIOS, so check its VSI support or omit the fields.
      - `REST0269`: the partition has no applied current configuration. Check its
        `resource_config` (`lssyscfg -r lpar -F name,state,resource_config`; `1` means applied),
        then apply its profile once (`chsyscfg -r lpar -o apply`) or activate the partition, and

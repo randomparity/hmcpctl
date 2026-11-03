@@ -314,12 +314,12 @@ def captured_refusal(name):
         (
             "rest-client-network-add-vsi-rmc-refused",
             FIELDS,
-            ("serving VIOS", "RMC", "vsi_manager_id"),
+            ("HSCLB021", "RMC state", "serving VIOS", "vsi_manager_id"),
         ),
         (
             "rest-client-network-add-state-refused",
             {},
-            ("resource_config", "chsyscfg -r lpar -o apply"),
+            ("resource_config", "chsyscfg -r lpar -m <system> -o apply"),
         ),
     ],
 )
@@ -334,9 +334,24 @@ async def test_known_add_refusals_are_classified(hmc, name, values, guidance):
     assert error.value.body == original.body
     message = str(error.value)
     assert message.startswith("Client network adapter add refused:")
-    assert all(text in message for text in (*guidance, "hmc_list_adapters"))
+    assert all(
+        text in message
+        for text in (*guidance, "hmc_list_adapters", "hmcpctl adapters list")
+    )
     hmc.add_network_adapter.assert_awaited_once()
     hmc.delete_adapter.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rmc_refusal_without_vsi_fields_names_no_vsi_cause(hmc):
+    original = captured_refusal("rest-client-network-add-vsi-rmc-refused")
+    hmc.add_network_adapter.side_effect = original
+    with pytest.raises(HMCError) as error:
+        await create(hmc, qos_priority=0)
+    message = str(error.value).split(" (HTTP 500)")[0]
+    assert "HSCLB021" in message and "RMC state" in message
+    assert "VSI" not in message and "vsi_" not in message
+    assert error.value.__cause__ is original
 
 
 @pytest.mark.asyncio
