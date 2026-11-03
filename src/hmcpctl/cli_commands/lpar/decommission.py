@@ -3,33 +3,61 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
 import typer
 
-from ...operations.lpar.decommission import DecommissionResult, decommission_lpar
+from ...operations.logical import engine, store
+from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
+from ...operations.logical.models import OperationRecord
+from ...operations.lpar.decommission import DecommissionResult
+from ...operations.lpar.decommission_operation import (
+    TOOL_NAME,
+    decommission_body,
+    decommission_classifiers,
+    preview,
+    result_from_record,
+)
 from ...resource_identity import is_uuid
+from .. import runtime
 from ..output import (
     InventoryFormat,
     VerbatimTable,
     confirm_on_stderr,
     console,
     err_console,
+    fail,
     print_inventory,
     resolve_inventory_format,
     terminal_field,
+    usage_error,
 )
-from ..runtime import with_client
+from ..runtime import current_options, ssh_config, with_client
+
+CONTINUATIONS = ("none", "resume", "abandon")
 
 
 def lpars_decommission(
-    name_or_uuid: str = typer.Argument(..., help="Partition name or UUID"),
-    system: str = typer.Option(
+    name_or_uuid: str | None = typer.Argument(
+        None, help="Partition name or UUID; required for a new operation"
+    ),
+    request_id: str = typer.Option(
         ...,
+        "--request-id",
+        help="Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ - (ADR 0320)",
+    ),
+    continuation: str = typer.Option(
+        "none",
+        "--continuation",
+        help=("none, resume or abandon; a continuation reuses the recorded request"),
+    ),
+    system: str | None = typer.Option(
+        None,
         "--system",
         "-s",
-        help="Managed system name or UUID; required for scoped ownership and cleanup checks",
+        help="Managed system name or UUID; required for a new operation",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Inventory the blast radius without mutating"
@@ -58,10 +86,59 @@ def lpars_decommission(
 ) -> None:
     """Inventory and optionally decommission one LPAR; retain backing storage.
 
-    Unproven mappings need inspection, not deletion. Use --dry-run first.
+    Unproven mappings need inspection, not deletion. Use --dry-run first; it records
+    nothing. Otherwise the run is recorded under --request-id (ADR 0320): repeating it
+    returns the same operation, and a paused run continues with --continuation resume
+    (or stops with abandon) from this command or hmc_decommission_lpar under the same
+    agent id and connection. The command waits for the run to end and exits 1 unless
+    it completed.
     """
+    try:
+        store.validate_request_id(request_id)
+    except ValueError as exc:
+        usage_error(f"--request-id: {exc}")
+    if continuation not in CONTINUATIONS:
+        usage_error(f"--continuation must be one of {', '.join(CONTINUATIONS)}")
     selected = resolve_inventory_format(as_json, format)
-    if not dry_run and not yes:
+    if continuation != "none":
+        if dry_run:
+            usage_error("--dry-run cannot continue an operation")
+        if name_or_uuid is not None or system is not None:
+            usage_error(
+                "a continuation takes the recorded partition and system; omit the "
+                "partition argument and --system"
+            )
+        if (ownership_override, immediate, timeout_seconds, poll_interval) != (
+            False,
+            False,
+            300,
+            5,
+        ):
+            usage_error(
+                "a continuation reuses the recorded options; omit --ownership-override, "
+                "--immediate, --timeout-seconds and --poll-interval"
+            )
+        try:
+            recorded = engine.recorded_arguments(
+                ssh_config().agent_id or "hmcpctl", request_id, TOOL_NAME
+            )
+        except ValueError as exc:
+            fail(exc)
+        if recorded is None:
+            usage_error(f"no operation has request_id {request_id}")
+        if continuation == "resume" and not yes:
+            confirm_on_stderr(
+                f"Resume decommission request '{terminal_field(request_id, err=True)}' "
+                f"of LPAR '{terminal_field(recorded['lpar_name_or_uuid'], err=True)}' "
+                f"on system '{terminal_field(recorded['system_name_or_uuid'], err=True)}'"
+                "? It continues powering off, detaching and deleting that partition.",
+                abort=True,
+            )
+        _run(request_id, continuation, recorded, selected)
+        return
+    if name_or_uuid is None or system is None:
+        usage_error("a new operation needs the partition argument and --system")
+    if not (dry_run or yes):
         confirm_on_stderr(
             (
                 f"Decommission LPAR '{terminal_field(name_or_uuid, err=True)}' on system '"
@@ -70,24 +147,81 @@ def lpars_decommission(
             ),
             abort=True,
         )
-
-    result = with_client(
-        lambda hmc: decommission_lpar(
-            hmc,
-            name_or_uuid,
-            dry_run=dry_run,
-            ownership_override=ownership_override,
-            immediate=immediate,
-            timeout_seconds=timeout_seconds,
-            poll_interval=poll_interval,
-            system_name_or_uuid=system,
+    arguments = {
+        "system_name_or_uuid": system,
+        "lpar_name_or_uuid": name_or_uuid,
+        "ownership_override": ownership_override,
+        "immediate": immediate,
+        "timeout_seconds": timeout_seconds,
+        "poll_interval": poll_interval,
+    }
+    try:
+        new = dry_run or (
+            engine.recorded_arguments(
+                ssh_config().agent_id or "hmcpctl", request_id, TOOL_NAME
+            )
+            is None
         )
+    except ValueError as exc:
+        fail(exc)
+    if new:
+        # Preconditions refuse a new operation before anything is recorded.
+        result = with_client(lambda hmc: preview(hmc, arguments))
+        if dry_run:
+            _render_decommission_result(result, name_or_uuid, selected, system)
+            return
+    _run(request_id, continuation, arguments, selected)
+
+
+def _run(
+    request_id: str,
+    continuation: str,
+    arguments: Mapping[str, Any],
+    format: InventoryFormat,
+) -> None:
+    """Submit, wait for the worker to end, render, and exit 1 unless it completed."""
+    try:
+        record = _submit(request_id, continuation, arguments)
+    except ValueError as exc:
+        fail(exc)
+    _render_decommission_result(
+        result_from_record(record),
+        arguments["lpar_name_or_uuid"],
+        format,
+        arguments["system_name_or_uuid"],
     )
-
-    _render_decommission_result(result, name_or_uuid, selected, system)
-
-    if not result.dry_run and not result.workflow_completed:
+    ended = record.outcome == "completed" or (
+        continuation == "abandon" and record.outcome == "abandoned"
+    )
+    if not ended:
         raise typer.Exit(1)
+
+
+def _submit(
+    request_id: str, continuation: str, arguments: Mapping[str, Any]
+) -> OperationRecord:
+    """Run the operation in this process and return its record once the worker ends."""
+    config = ssh_config()
+    record = engine.submit(
+        OperationRequest(
+            TOOL_NAME,
+            config.agent_id or "hmcpctl",
+            store.connection_label(current_options().profile, tool=TOOL_NAME),
+            config.host,
+            request_id,
+            arguments if continuation == "none" else {},
+        ),
+        decommission_body(arguments, lambda _connection: runtime.HMCClient(config)),
+        classifiers=decommission_classifiers(
+            lambda _connection: runtime.HMCClient(config)
+        ),
+        continuation=continuation,
+        wait_seconds=MAX_WAIT_SECONDS,
+    )
+    # The worker dies with this process, so wait for it rather than return early.
+    engine.join(record.operation_id, None)
+    with store.session() as conn:
+        return store.read_record(conn, record.operation_id)
 
 
 def _detail_rows(value: Any, path: str = ""):
@@ -130,6 +264,15 @@ def _render_decommission_result(
             )
     else:
         _render_details(result, name_or_uuid, format, system)
+    if result.operation is not None:
+        operation = result.operation
+        status = f"{operation.state}/{operation.outcome or 'running'}"
+        err_console.print(
+            f"Operation {terminal_field(operation.operation_id, err=True)}: "
+            f"{terminal_field(status, err=True)} "
+            f"(phase {terminal_field(operation.phase, err=True)})",
+            markup=False,
+        )
     for warning in result.warnings:
         err_console.print(
             f"Warning: {terminal_field(warning, err=True)}",

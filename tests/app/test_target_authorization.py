@@ -700,6 +700,43 @@ def test_dry_run_changes_no_authorization_decision(dry_run, system):
             _authorize(grants, "hmc_decommission_lpar", arguments)
 
 
+def test_a_decommission_continuation_under_a_table_must_repeat_its_selectors():
+    """ADR 0320 Decision 2: the selectors are optional, the tool stays exhaustive."""
+    security = TOOL_SECURITY["hmc_decommission_lpar"]
+    assert security.exhaustive_targets is True
+    assert [(t.kind, t.required) for t in security.targets] == [
+        ("managed_system", False),
+        ("lpar", False),
+    ]
+    grants = [
+        {
+            "tools": ["hmc_decommission_lpar"],
+            "connections": ["lab"],
+            "targets": {"managed_system": ["sys-1"], "lpar": ["victim"]},
+        }
+    ]
+    repeated = {
+        "system_name_or_uuid": "sys-1",
+        "lpar_name_or_uuid": "victim",
+        "profile": "lab",
+    }
+    assert _authorize(grants, "hmc_decommission_lpar", repeated) is None
+    omitted = {"system_name_or_uuid": None, "lpar_name_or_uuid": None, "profile": "lab"}
+    with pytest.raises(TargetScopeError, match="did not supply"):
+        _authorize(grants, "hmc_decommission_lpar", omitted)
+    _authorize(
+        [
+            {
+                "tools": ["hmc_decommission_lpar"],
+                "connections": ["lab"],
+                "targets": "all-targets",
+            }
+        ],
+        "hmc_decommission_lpar",
+        omitted,
+    )
+
+
 def test_the_decision_modules_never_mention_dry_run():
     """R17 structurally: the three modules that decide contain no such reference.
 
