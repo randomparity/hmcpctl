@@ -1,4 +1,4 @@
-"""The ST70 wrapper parses every argument before entering a live client."""
+"""The ST71 wrapper parses every argument before entering a live client."""
 
 import sys
 from pathlib import Path

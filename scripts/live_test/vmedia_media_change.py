@@ -1,6 +1,6 @@
 """Capture how the HMC and VIOS change the medium in a virtual optical device (#1284).
 
-ST70 runs only in its own arm and answers the four questions #1285 depends on, on one
+ST71 runs only in its own arm and answers the four questions #1285 depends on, on one
 authorized window: whether a ``ViosSCSIMapping`` POST that replaces a mapping's
 ``Storage`` changes the loaded medium (Q1), what ``viosvrcmd`` ``loadopt``/``unloadopt``
 answer (Q2), how they behave after an immediate power-off, without and with ``-release``
@@ -48,13 +48,13 @@ from .vmedia import (
 if TYPE_CHECKING:
     from live_test.runner import RunState
 
-SUBTASK = 70
+SUBTASK = 71
 GROUP = "vmedia-media-change"
 SIZE_MIB = 1024
 #: A VIOS device name. The HMC chooses it at mount, and it enters `viosvrcmd` commands.
 VTD_NAME = re.compile(r"[A-Za-z0-9_]{1,15}")
 _ROW = "vmedia media change"
-#: The row naming each VTD ST70 uses, written before any command touches it; recovery
+#: The row naming each VTD ST71 uses, written before any command touches it; recovery
 #: reports an empty optical device only when one of these names it.
 VTD_ROW = "vtd"
 _POST = "ViosSCSIMapping POST"
@@ -72,7 +72,7 @@ class _Stop(Exception):
 
 
 def capture_path(tag: str) -> Path:
-    """The git-ignored file one ST70 run records its HMC calls to."""
+    """The git-ignored file one ST71 run records its HMC calls to."""
     return _CAPTURES / f"vmedia-media-change-{tag}.capture.jsonl"
 
 
@@ -94,7 +94,7 @@ def _optical_target(entry: object) -> tuple[str, str] | None:
 
 
 def _unready(state: RunState) -> str | None:
-    """Why ST70 cannot start from what ST16 resolved, or None."""
+    """Why ST71 cannot start from what ST16 resolved, or None."""
     artifacts, config = state.artifacts, state.config
     if not artifacts.vios_uuid or not artifacts.vmedia_vg_uuid:
         return _NO_REPOSITORY
@@ -116,7 +116,7 @@ def _tag(name: str) -> str:
 
 
 class _Capture:
-    """One ST70 run against the configured VIOS and test partition."""
+    """One ST71 run against the configured VIOS and test partition."""
 
     def __init__(self, client: Client, state: RunState) -> None:
         artifacts, config = state.artifacts, state.config
@@ -678,7 +678,7 @@ class _Capture:
 
 
 async def vmedia_media_change(client: Client, state: RunState) -> None:
-    print("\n=== ST70: Optical media change capture (#1284) ===")
+    print("\n=== ST71: Optical media change capture (#1284) ===")
     if state.group != GROUP:
         state.skip(SUBTASK, _ROW, f"runs only in the {GROUP} arm")
         return

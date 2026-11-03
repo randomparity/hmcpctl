@@ -1,4 +1,4 @@
-"""The optical media change capture (ST70, #1284) against a scripted HMC and VIOS."""
+"""The optical media change capture (ST71, #1284) against a scripted HMC and VIOS."""
 
 from __future__ import annotations
 
@@ -256,7 +256,7 @@ async def test_the_capture_runs_q1_to_q4_and_leaves_the_vios_as_found(arm):
     state, hmc, captured = arm
     before = hmc.snapshot()
 
-    await _run(state, 16, 70, 22)
+    await _run(state, 16, 71, 22)
 
     assert hmc.posts == ["capture q4 collision", "capture q1 replace storage"]
     assert [c.split(" -")[0] for c in hmc.cli] == [
@@ -304,7 +304,7 @@ async def test_a_refusal_makes_no_mutation(arm, setup):
     state, hmc, _ = arm
     setup(state, hmc)
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     assert not _mutated(hmc)
 
@@ -314,7 +314,7 @@ async def test_an_unusable_vtd_name_stops_before_any_command(arm):
     state, hmc, _ = arm
     hmc.vtd = "vt;rm"
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     assert hmc.cli == [] and hmc.posts == []
     assert any("unusable VTD name" in r["note"] for r in state.results)
@@ -332,7 +332,7 @@ async def test_release_is_retried_only_after_the_plain_command_fails(arm, monkey
 
     monkeypatch.setattr(hmc, "_viosvrcmd", no_reservation)
 
-    await _run(state, 16, 70, 22)
+    await _run(state, 16, 71, 22)
 
     assert not any("-release" in c for c in hmc.cli)
     assert _manual(state) == []
@@ -343,7 +343,7 @@ async def test_an_orphan_adapter_is_reported_and_q1_to_q3_still_run(arm):
     state, hmc, _ = arm
     hmc.collision_orphan = True
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     (answer,) = _rows(state, "q4 orphan adapter")
     assert answer["data"] == {"vios": ["13,sys-A-lp3,4"], "lpar": []}
@@ -356,7 +356,7 @@ async def test_an_orphan_adapter_is_reported_and_q1_to_q3_still_run(arm):
 async def test_the_mounts_own_adapter_is_not_a_q4_orphan(arm):
     state, _hmc, _ = arm
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     (delta,) = _rows(state, "mount adapter delta")
     assert delta["data"] == {"added": ["12,sys-A-lp3,3", "3,vios-A,12"]}
@@ -369,7 +369,7 @@ async def test_an_accepted_collision_stops_and_cleanup_still_runs(arm):
     state, hmc, _ = arm
     hmc.collision_accepted = True
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     assert hmc.posts == ["capture q4 collision"]
     assert any("stopped" in r["note"] for r in state.results)
@@ -384,7 +384,7 @@ async def test_cleanup_reloads_an_empty_drive_before_unmounting(arm):
     state, hmc, _ = arm
     hmc.loads_fail_after_power = 2
 
-    await _run(state, 16, 70, 22)
+    await _run(state, 16, 71, 22)
 
     assert _rows(state, "hmc_run_command (q3 loadopt -release)")
     assert _rows(state, "hmc_run_command (cleanup loadopt)")
@@ -398,7 +398,7 @@ async def test_an_empty_drive_cleanup_cannot_reload_is_a_manual_row(arm):
     state, hmc, _ = arm
     hmc.loads_fail_after_power = 4
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     assert any("rmvdev -vtd vtopt1" in note for note in _manual(state))
 
@@ -415,7 +415,7 @@ async def test_an_unreadable_empty_check_in_cleanup_is_a_manual_row(arm, monkeyp
 
     monkeypatch.setattr(runner.RunState, "call", call)
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     assert any(
         "could not be read" in note and "rmvdev -vtd vtopt1" in note
@@ -429,7 +429,7 @@ async def test_the_vtd_is_rederived_when_q1_renames_it(arm):
     hmc.rest_swaps = True
     hmc.rename_on_swap = "vtopt7"
 
-    await _run(state, 16, 70, 22)
+    await _run(state, 16, 71, 22)
 
     (renamed,) = _rows(state, "q1 target renamed")
     assert renamed["data"] == {"vtd": "vtopt7"}
@@ -441,10 +441,10 @@ async def test_the_vtd_is_rederived_when_q1_renames_it(arm):
 async def test_recovery_reads_the_arms_own_power_on_and_media(arm):
     state, _hmc, _ = arm
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     document = {
-        "run": {"subtasks": [16, 70, 22], "group": vmedia_media_change.GROUP},
+        "run": {"subtasks": [16, 71, 22], "group": vmedia_media_change.GROUP},
         "config": {
             "system_name": SYSTEM,
             "lp3_name": LPAR,
@@ -457,7 +457,7 @@ async def test_recovery_reads_the_arms_own_power_on_and_media(arm):
         },
         "results": state.results,
     }
-    inputs = recovery.lpar_inputs_from_document(document, [16, 70, 22])
+    inputs = recovery.lpar_inputs_from_document(document, [16, 71, 22])
 
     assert inputs is not None
     assert inputs.powered_on and inputs.vmedia_ran
@@ -484,7 +484,7 @@ async def test_a_failed_power_on_leaves_q3_unanswered(arm):
     state, hmc, _ = arm
     hmc.power_on_fails = True
 
-    await _run(state, 16, 70, 22)
+    await _run(state, 16, 71, 22)
 
     assert not _rows(state, "hmc_run_command (q3")
     assert any("q3 unanswered" in r["note"] for r in state.results)
@@ -496,7 +496,7 @@ async def test_cleanup_powers_off_a_partition_q3_left_running(arm):
     state, hmc, _ = arm
     hmc.ignored_power_offs = 1
 
-    await _run(state, 16, 70, 22)
+    await _run(state, 16, 71, 22)
 
     (off,) = _rows(state, "hmc_power_off_lpar (cleanup)")
     assert off["status"] == "PASS"
@@ -509,7 +509,7 @@ async def test_a_cleanup_power_off_that_fails_is_a_manual_row(arm):
     state, hmc, _ = arm
     hmc.ignored_power_offs = 2
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     assert any("chsysstate" in note and "--immed" in note for note in _manual(state))
 
@@ -519,7 +519,7 @@ async def test_a_q1_that_unmaps_the_medium_skips_q2_and_q3(arm):
     state, hmc, _ = arm
     hmc.q1_unmaps = True
 
-    await _run(state, 16, 70, 22)
+    await _run(state, 16, 71, 22)
 
     assert not any(c.startswith(("unloadopt", "loadopt")) for c in hmc.cli)
     assert not _rows(state, "hmc_power_on_lpar")
@@ -533,6 +533,6 @@ async def test_an_unreadable_cleanup_listing_is_a_manual_row(arm):
     state, hmc, _ = arm
     hmc.optical_reads_before_failure = 2
 
-    await _run(state, 16, 70)
+    await _run(state, 16, 71)
 
     assert any("optical mappings could not be read" in n for n in _manual(state))

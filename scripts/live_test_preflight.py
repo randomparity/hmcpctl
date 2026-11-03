@@ -51,6 +51,7 @@ from live_test import (
     dedicated_pcie,
     lpar_config,
     lpar_power,
+    lpar_reconfigure,
     memory_move,
     memory_statistics,
     paging_switchover,
@@ -590,6 +591,26 @@ def _lpar_security_policy_verdict(config: live_config.LiveTestConfig) -> ArmVerd
     )
 
 
+def _lpar_reconfigure_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    return ArmVerdict(
+        lpar_reconfigure.GROUP,
+        True,
+        "configuration validated",
+        (
+            (
+                f"one AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex> (renamed "
+                "<name>-r): hmc_reconfigure_lpar inactive, rename, two profile "
+                "activations to SMS, immediate power off, matching-token deletion"
+            ),
+            (
+                "no live DLPAR, no VIOS change; existing scratch prefix must be absent; "
+                "independent recovery/resource comparison required"
+            ),
+        ),
+        config.system_name,
+    )
+
+
 def _lpar_vtpm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     return ArmVerdict(
         "lpar-vtpm",
@@ -872,6 +893,7 @@ _ARM_VERDICTS = {
     "lpar-processor-move": _processor_move_verdict,
     "lpar-processor-quantities": _processor_quantities_verdict,
     "lpar-vtpm": _lpar_vtpm_verdict,
+    "lpar-reconfigure": _lpar_reconfigure_verdict,
     "lpar-security-policy": _lpar_security_policy_verdict,
     "lpar-hardware-memory": _lpar_hardware_memory_verdict,
     "creation-memory": _creation_memory_verdict,

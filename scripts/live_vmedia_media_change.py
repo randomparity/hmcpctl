@@ -1,7 +1,7 @@
 """Run the optical media change capture (#1284) against a real HMC.
 
-Covers subtask 70 between ST16, which resolves the VIOS, the test partition and the
-media repository, and ST22, which removes any medium ST70 left. ST70 creates two blank
+Covers subtask 71 between ST16, which resolves the VIOS, the test partition and the
+media repository, and ST22, which removes any medium ST71 left. ST71 creates two blank
 media, mounts one to the test partition, sends two raw `ViosSCSIMapping` writes (one
 expected refused), swaps media with `viosvrcmd` `unloadopt`/`loadopt`, and powers the
 test partition on and off once, recording every HMC call to a git-ignored capture file

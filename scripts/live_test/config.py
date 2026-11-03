@@ -456,7 +456,7 @@ class LiveTestArtifacts:
     # and the blank medium the vmedia arm (ST19) creates in it (#1347).
     vmedia_vg_uuid: str | None = None
     vmedia_blank_name: str | None = None
-    # The two blank media the media-change capture (ST70) creates, each recorded before
+    # The two blank media the media-change capture (ST71) creates, each recorded before
     # its create so recovery and ST22 can find one a lost response left (#1284).
     vmedia_change_names: list[str] = field(default_factory=list)
     # The logical volume the storage arm (ST40) is about to create, recorded before

@@ -105,6 +105,8 @@ _PROFILE_OVERRIDES = (
     "HMC_PORT",
     "HMC_VERIFY_SSL",
     "HMC_CERT_FINGERPRINT",
+    "HMC_CA_BUNDLE",
+    "HMC_TRUST_SYSTEM_STORE",
 )
 # Columns holding HMC- or operator-supplied text, which a spreadsheet would evaluate
 # when it starts with a formula character.

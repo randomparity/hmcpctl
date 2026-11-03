@@ -85,6 +85,8 @@ def configured(monkeypatch):
         "HMC_PORT",
         "HMC_VERIFY_SSL",
         "HMC_CERT_FINGERPRINT",
+        "HMC_CA_BUNDLE",
+        "HMC_TRUST_SYSTEM_STORE",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("HMC_PROFILE", raising=False)
@@ -284,6 +286,8 @@ def test_unknown_profile_is_a_usage_error(configured, tmp_path) -> None:
         ("HMC_PORT", "12443"),
         ("HMC_VERIFY_SSL", "false"),
         ("HMC_CERT_FINGERPRINT", ":".join(["AB"] * 32)),
+        ("HMC_CA_BUNDLE", "/etc/hmcpctl/other-ca.pem"),
+        ("HMC_TRUST_SYSTEM_STORE", "true"),
     ],
 )
 def test_exported_connection_override_is_refused(

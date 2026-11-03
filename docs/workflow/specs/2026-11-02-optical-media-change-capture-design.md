@@ -16,17 +16,18 @@ The load/unload operation (#1285) depends on these answers.
 Decision: a committed, opt-in arm, not an uncommitted operator probe. The window's mutations
 then run as reviewed code, preflight and recovery cover them, and the arm can be re-run on the
 V11R2 HMC once that HMC is authorized for mutation. A new runner group `vmedia-media-change`
-dispatches `[16, 70, 22]`: ST16 resolves the VIOS, the test partition and the repository (it
-creates a repository only when the VIOS has none, as the vmedia arm already does), ST70 is the
-new capture, and ST22's existing teardown removes any run medium ST70 left. The group is not in
-`all` or `vmedia`, 70 joins the runner's bare-run exclusion set, and ST70 SKIPs unless
+dispatches `[16, 71, 22]`: ST16 resolves the VIOS, the test partition and the repository (it
+creates a repository only when the VIOS has none, as the vmedia arm already does), ST71 is the
+new capture, and ST22's existing teardown removes any run medium ST71 left. The group is not in
+`all` or `vmedia`, 71 joins the runner's bare-run exclusion set, and ST71 SKIPs unless
 `state.group` is its own group (as `vios_backup.py` does), so no other invocation reaches it.
-Its wrapper is `scripts/live_vmedia_media_change.py`.
+Its wrapper is `scripts/live_vmedia_media_change.py`. The arm was numbered 70 when its 2026-11-02 windows ran; it became 71
+when #1226's `lpar-reconfigure` arm landed on `main` with 70 first.
 
-ST70 (`scripts/live_test/vmedia_media_change.py`) runs only when the test partition is
+ST71 (`scripts/live_test/vmedia_media_change.py`) runs only when the test partition is
 unprotected and `Not Activated`, the repository has 2 GiB free, and ST16 resolved the VIOS
 UUID, its partition id and the partition UUID. Otherwise it records SKIP rows and touches
-nothing. Every HMC call inside ST70 runs under `live_test.capture.capture()` (default, redacting
+nothing. Every HMC call inside ST71 runs under `live_test.capture.capture()` (default, redacting
 mode), writing `hmc-captures/vmedia-media-change-<8 hex>.capture.jsonl`, which is git-ignored.
 Rows use `state.record`/`state.skip`, never `record_verified`: a capture promotes no maturity.
 Every row for a tool call is labelled `<tool name> (<step>)`, because recovery matches a row
@@ -45,7 +46,7 @@ Steps, in order:
    bypassing the #1283 refusal. Record the status and verbatim body; then re-read mappings and
    adapters. Any adapter not in step 1's post-mount set is the orphan answer and a
    `MANUAL RECOVERY REQUIRED` row (the arm never removes an adapter). A mapping count change
-   (the POST was accepted) stops ST70.
+   (the POST was accepted) stops ST71.
 4. Q1: `_rmw_vios_mapping` replacing V's `Storage/VirtualOpticalMedia` with one naming only B.
    Record the response, then the tool's optical mappings and `lsvopt -vtd V`. Re-derive V from
    the lp3 mapping naming A or B (a changed name is part of the Q1 answer and is validated
@@ -55,21 +56,21 @@ Steps, in order:
    `unloadopt -vtd V`; only if that fails, `unloadopt -release -vtd V`; then
    `loadopt -disk B -vtd V`; only if that fails and `help loadopt` listed `-release`,
    `loadopt -release -disk B -vtd V`; then `lsvopt -vtd V`.
-7. Cleanup, in a `finally`: power off if ST70 powered on and the state is not `Not Activated`;
+7. Cleanup, in a `finally`: power off if ST71 powered on and the state is not `Not Activated`;
    when V's drive is empty, `loadopt -disk A -vtd V` (once more with `-release` if that
    fails) so the tool can address the mapping; unmount whichever run medium the mapping names
    (tool); delete A and B (tool); compare mappings and adapters with step 1's baselines. An
    empty drive, a run medium still mapped or
    listed, or any drift is a `MANUAL RECOVERY REQUIRED` row naming the command that clears it.
 
-Recovery: `_VMEDIA_SUBTASKS` gains 70, `iso_names` reads `vmedia_change_names`, and
-`powered_on` reads ST70's power-on rows, so the existing test-partition classes (mapping left,
-unmapped server adapter, run media left, partition running) witness ST70. One new class reads
+Recovery: `_VMEDIA_SUBTASKS` gains 71, `iso_names` reads `vmedia_change_names`, and
+`powered_on` reads ST71's power-on rows, so the existing test-partition classes (mapping left,
+unmapped server adapter, run media left, partition running) witness ST71. One new class reads
 `hmc_list_storage_mappings` and reports a mapping toward the test partition with an identity
 but no backing (an empty VTD, which the optical listing never shows), naming
-`rmvdev -vtd <V>`, only when its device is one ST70 recorded in a `vtd` row before touching
+`rmvdev -vtd <V>`, only when its device is one ST71 recorded in a `vtd` row before touching
 it; an operator's own empty device is never reported. `run_media_names`
-also reads `vmedia_change_names`, so ST22 removes what ST70 left.
+also reads `vmedia_change_names`, so ST22 removes what ST71 left.
 
 The window runs on the lab-reachable host, per docs/live-testing.md: preflight
 `--group vmedia-media-change`, the wrapper, then `scripts/live_test_recovery.py` and
@@ -119,12 +120,12 @@ Exclusions: #1285's operation, physical optical, repository creation and ISO upl
 
 ## Success
 
-1. With a scripted HMC, ST70 issues the step 1–7 calls in order and leaves no run medium,
+1. With a scripted HMC, ST71 issues the step 1–7 calls in order and leaves no run medium,
    mapping or power-on behind; each refusal path (protected, running, no room, bad V) touches
    nothing; a failed `unloadopt` triggers exactly one `-release` retry.
 2. Recovery reports a run medium named in `vmedia_change_names`, and a running partition after
-   the arm's own ST70 power-on row, and an empty VTD toward the test partition; ST22 removes a leftover `vmedia_change_names` medium; a
-   bare runner selection and a bare `70` touch nothing.
+   the arm's own ST71 power-on row, and an empty VTD toward the test partition; ST22 removes a leftover `vmedia_change_names` medium; a
+   bare runner selection and a bare `71` touch nothing.
 3. The wrapper dispatches exactly `--group vmedia-media-change`; preflight names the arm.
 4. The committed fixtures answer Q1–Q4 (or record why one is unanswered), carry no lab
    identifier, and a test pins `_VTD_NAME_IN_USE` against the Q4 fixture.

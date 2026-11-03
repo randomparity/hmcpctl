@@ -158,7 +158,7 @@ below. The table does not grant hardware or VIOS access.
 |---|---|---|
 | round2 | `uv run --no-sync python scripts/live_round2.py` | subtasks 0–15 except 11 |
 | vmedia | `uv run --no-sync python scripts/live_vmedia.py` | subtasks 16–22 |
-| vmedia-media-change | `uv run --no-sync python scripts/live_vmedia_media_change.py` | subtasks 16, 70 and 22; a capture, not a release arm |
+| vmedia-media-change | `uv run --no-sync python scripts/live_vmedia_media_change.py` | subtasks 16, 71 and 22; a capture, not a release arm |
 | sriov | `uv run --no-sync python scripts/live_sriov.py` | subtask 23 |
 | dedicated | `uv run --no-sync python scripts/live_dedicated.py` | subtask 24 |
 | bare-cec | `uv run --no-sync python scripts/live_bare_cec.py` | subtask 25 |
@@ -171,6 +171,7 @@ below. The table does not grant hardware or VIOS access.
 | lpar-config | `uv run --no-sync python scripts/live_lpar_config.py` | subtask 39 |
 | storage | `uv run --no-sync python scripts/live_storage.py` | subtasks 0, 3, 40 and 42 |
 | lpar-power | `uv run --no-sync python scripts/live_lpar_power.py` | subtask 41 |
+| lpar-reconfigure | `uv run --no-sync python scripts/live_lpar_reconfigure.py` | subtask 70 |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
 managed system, and a concurrent run makes the recovery check in step 4
@@ -348,16 +349,20 @@ every change whatever the call returned, and verifies restoration:
   vSCSI server adapter toward the test partition (the serving VIOS); otherwise
   only the VLAN round trip runs.
 - **VLAN.** It creates `hmcpctl-live-vlan<id>-<8 hex>` on the first VLAN in
-  `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, tries a second network
-  on the same VLAN (expected refused; deleted if not), adds a client network
+  `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, on the lowest-numbered
+  virtual switch that carries a VIOS trunk adapter (read through `hmc_list_vios`). When
+  no listed switch has one, or the trunk adapters cannot be read, the VLAN round trip
+  SKIPs with that reason and never falls back to an untrunked switch. It tries a second
+  network on the same VLAN (expected refused; deleted if not), adds a client network
   adapter on that VLAN to the test partition, deletes an unknown adapter UUID
   (expected refused), then removes the adapter and the run's own networks. Any
   other network on that VLAN is reported, never deleted.
-  The same single adapter create selects `addl_vlan_ids=[]`, `allowed_os_mac_addrs="all"`,
-  `qos_priority="none"`, `vsi_manager_id=0`, `vsi_type_id=0` and `vsi_type_version=0`.
-  These are explicit test values, not defaults or a guarantee of HMC acceptance.
-  Credit requires verified creation metadata with all six checked fields and independent
-  contained identity/field readback, including the selected `VirtualSwitchID`. A switch
+  The single adapter create sends only the partition, `port_vlan_id`, `virtual_switch_id`
+  and the system: the request the October 2026 pass sent. The optional creation fields
+  (`addl_vlan_ids`, `allowed_os_mac_addrs`, `qos_priority` and the `vsi_*` fields) are left
+  out while #1861 tests whether they cause HSCLB021 on this boundary.
+  Credit requires an accepted create and independent contained identity readback with
+  the run's `PortVLANID` and the selected `VirtualSwitchID`. A switch
   mismatch or missing switch stops before cleanup. Client-network listings require a
   complete HTTP/Atom envelope: HTTP 204, blank bodies, `Link`/`Content-Range` headers,
   XML `next` links in any case, or ambiguous entries are errors;
@@ -367,15 +372,22 @@ every change whatever the call returned, and verifies restoration:
   selected switch.
   Acknowledged deletion and independent baseline equality must precede later writes.
   Drift or uncertain creation, verification or deletion stops subsequent effects and
-  records manual recovery, retaining residue rather than inferring cleanup. Foreign
-  adapter UUIDs are never additional deletion targets. Use the existing preflight,
+  records manual recovery, retaining residue rather than inferring cleanup. When that
+  stop leaves a fresh read of the test partition's client adapters showing none on the
+  run's VLAN (every `PortVLANID` and `TaggedVLANIDs` parsed), the run still deletes its
+  own networks before stopping; otherwise the networks are retained for manual recovery.
+  Foreign adapter UUIDs are never additional deletion targets. Use the existing preflight,
   `scripts/live_network.py` and mandatory read-only recovery commands above; no new arm,
   activation or second adapter create is added.
 - **vSCSI and vFC clients.** Each first tries an add on the virtual slot the
   test partition's own vSCSI client uses (expected refused), then adds a client
   adapter to the test partition paired to the lowest server slot of the serving
   VIOS assigned to the test partition (a slot open to any partition is never
-  used), checks the pairing, and removes it. The VIOS's
+  used). It proves the create's own UUID, pairing and slot against one fresh listing
+  taken immediately before the delete (exactly the baseline plus that UUID), deletes only
+  that UUID, and confirms the baseline. A collision that is not cleanly refused, an
+  unproven or changed fixture, or an unreadable listing stops ST9 with manual recovery;
+  no other adapter is ever a deletion target. The VIOS's
   server adapters and the test partition's storage mappings must be unchanged
   afterwards. With no such slot, that round trip SKIPs. Each vFC add
   takes a WWPN pair from the system's pool.
@@ -434,9 +446,9 @@ that is left, and nothing else.
 ### The vmedia-media-change arm
 
 This arm captures how the HMC and VIOS change the medium in an existing virtual
-optical device, for #1285 (#1284). It is not in `all` or `vmedia`, and subtask 70
+optical device, for #1285 (#1284). It is not in `all` or `vmedia`, and subtask 71
 SKIPs outside its own group. ST16 resolves the VIOS, the test partition and the
-repository as the vmedia arm does; ST22 removes any medium ST70 left. ST70 needs the
+repository as the vmedia arm does; ST22 removes any medium ST71 left. ST71 needs the
 test partition unprotected and `Not Activated` and 2 GiB free in the repository. The
 partition's profile must have been applied once: on one never applied the mount is refused
 with HTTP 500 REST0269 and leaves a VIOS server adapter behind. The 2026-11-02 answers are
@@ -457,11 +469,11 @@ in `tests/fixtures/live/README.md`. It:
 An adapter the refused create added (Q4), on the VIOS or the test partition or a
 pair of both, is never removed by the arm: each gets a `MANUAL RECOVERY REQUIRED`
 row naming its own `chhwres -r virtualio --rsubtype scsi -o r` and slot, and
-recovery's unmapped-adapter class reports the VIOS side. A device of ST70's the
+recovery's unmapped-adapter class reports the VIOS side. A device of ST71's the
 cleanup cannot reload is a row and a recovery finding naming `rmvdev -vtd <name>`;
-recovery reports only the device names ST70 recorded, never another empty device.
+recovery reports only the device names ST71 recorded, never another empty device.
 
-Every HMC call ST70 makes is recorded to
+Every HMC call ST71 makes is recorded to
 `hmc-captures/vmedia-media-change-<8 hex>.capture.jsonl`, the path its `capture` row
 names. That file and `test-results-vmedia-media-change.json` hold lab names: after
 recovery and `scripts/live_test_evidence.py test-results-vmedia-media-change.json`,
@@ -918,7 +930,7 @@ these sets of them:
 | Subtasks | What it reads |
 |---|---|
 | 16–22 (vmedia) | the test partition left running, its pending boot string changed, a medium of the run's still mounted to it or still in the repository, a VIOS vSCSI server adapter toward it with no mapping, and the media repository the run created |
-| 70 (vmedia-media-change) | everything 16–22 reads, for its own two media and its power-on, and a virtual optical device toward the test partition mapped with no medium |
+| 71 (vmedia-media-change) | everything 16–22 reads, for its own two media and its power-on, and a virtual optical device toward the test partition mapped with no medium |
 | 11 (users) | any HMC user named `hmcpctl-live-*`, whichever run's document you pass |
 | 24–25 (dedicated, bare-cec) | a partition carrying this run's marker, its dedicated slot still owned, its profile's `io_slots` off the baseline |
 | 37 (vios-backup) | the run's backup still in the VIOS catalog, the test partition's disk mapping missing, and a final read the run recorded as off its baseline |
@@ -1734,6 +1746,34 @@ No fabricated numeric EWLM ID is used. Record firmware/state rejections and
 unavailable readback honestly. Generate public evidence using
 `scripts/live_test_evidence.py`; raw result documents remain private. POWER9
 execution does not establish POWER10/POWER11 hardware coverage.
+
+## LPAR reconfigure persistence (arm 70)
+
+The opt-in `lpar-reconfigure` arm proves `hmc_reconfigure_lpar`'s persistence contract (ADR 0314)
+on one owned scratch partition with lpar-config's fixture, prefix and teardown. In order:
+
+1. Inactive, `{memory_mib: 3072, processors: 2}` must read back `profile`.
+2. A rename to `<name>-r` must complete.
+3. A profile activation to SMS must show current memory 3072 MiB and 2 virtual processors.
+4. At SMS (`open firmware`, RMC inactive), `{memory_mib: 2560, processors: 1}` must read back
+   `pending_activation`; the profile must hold it and the running partition must not.
+5. After an immediate power off and a second profile activation, current memory must be
+   2560 MiB, virtual processors 1, and the name still `<name>-r`.
+
+Live DLPAR is recorded as SKIP: it is not authorized on the boundary partition (operator,
+2026-11-02), and a scratch partition never reaches RMC active. A failed step ends the scenario;
+open operations are abandoned, the partition is powered off and the guarded inactive-only
+deletion and independent resource comparison follow even after failure.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-reconfigure
+uv run --no-sync python scripts/live_lpar_reconfigure.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-reconfigure.json
+```
+
+Always run recovery, including after apparent success. Generate public evidence with
+`scripts/live_test_evidence.py`; keep raw results private. Shared processors only; dedicated
+processors, bound widening and `allow_disruption` remain unrun on hardware.
 
 ## Inactive vTPM configuration (arm 51)
 

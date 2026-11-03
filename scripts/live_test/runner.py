@@ -17,9 +17,9 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 70; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66, ST67 and ST70 require named groups and are excluded from default and all selections.
-Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46 and 70 SKIP outside their
+Registered subtasks span 0 through 71; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70 and ST71 require named groups and are excluded from default and all selections.
+Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46 and 71 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract`, `partition-profiles` and
 `vmedia-media-change` groups. A bare
@@ -104,6 +104,7 @@ from live_test.lpar_hardware_memory import exercise_lpar_hardware_memory
 from live_test.lpar_linux_roles import exercise_lpar_linux_roles
 from live_test.lpar_physical_io import exercise_lpar_physical_io
 from live_test.lpar_power import exercise_lpar_power
+from live_test.lpar_reconfigure import exercise_lpar_reconfigure
 from live_test.lpar_security_policy import exercise_lpar_security_policy
 from live_test.lpar_vtpm import exercise_lpar_vtpm
 from live_test.memory_move import exercise_memory_move
@@ -709,6 +710,7 @@ SUBTASKS = {
     49: exercise_lpar_physical_io,
     50: exercise_memory_quantities,
     51: exercise_lpar_vtpm,
+    70: exercise_lpar_reconfigure,
     52: exercise_lpar_security_policy,
     53: exercise_lpar_linux_roles,
     54: exercise_memory_move,
@@ -722,7 +724,7 @@ SUBTASKS = {
     58: exercise_creation_memory_layout,
     59: exercise_processor_sharing_weight,
     64: exercise_accelerator_qos,
-    70: vmedia_media_change,
+    71: vmedia_media_change,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -775,6 +777,9 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-processor-move": [61],
     "lpar-processor-quantities": [56],
     "lpar-vtpm": [51],
+    # Not in "all": the arm creates, reconfigures, activates and deletes its own
+    # partition (#1226).
+    "lpar-reconfigure": [70],
     "lpar-security-policy": [52],
     "lpar-hardware-memory": [55],
     "creation-memory": [65],
@@ -788,7 +793,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-power": [41],
     # Not in "all": powers the test partition on and off and writes raw VIOS
     # mappings to capture how a virtual optical device changes media (#1284).
-    "vmedia-media-change": [16, 70, 22],
+    "vmedia-media-change": [16, 71, 22],
     "all": list(range(26)),
 }
 
@@ -1092,7 +1097,26 @@ async def main(
             n
             for n in SUBTASKS
             if n
-            not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 65, 66, 67, 70}
+            not in {
+                44,
+                45,
+                46,
+                52,
+                53,
+                54,
+                55,
+                56,
+                57,
+                58,
+                59,
+                61,
+                64,
+                65,
+                66,
+                67,
+                70,
+                71,
+            }
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.

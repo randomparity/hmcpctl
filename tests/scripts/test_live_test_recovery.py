@@ -890,7 +890,7 @@ def test_every_mutating_vmedia_call_has_a_trigger():
     # through a helper that takes the name as its first argument.
     named = set(re.findall(r'"(hmc_\w+)"', source)) & set(TOOL_SECURITY)
     # vmedia.py sends only `scsi_adapter_listing`'s lshwres through it, pinned below.
-    # ST70 also sends loadopt/unloadopt, whose residue is a medium or an empty
+    # ST71 also sends loadopt/unloadopt, whose residue is a medium or an empty
     # device on the test partition, read by the mapping-left and empty-target classes.
     named.discard("hmc_run_command")
     mutating = {tool for tool in named if TOOL_SECURITY[tool].effect != "read"}
@@ -1468,13 +1468,13 @@ async def test_more_mapped_adapters_than_listed_ones_is_unreadable():
 
 
 def test_a_media_change_document_reads_its_media_and_power_on():
-    """ST70 (#1284) leaves the same test-partition residue as the vmedia arm."""
+    """ST71 (#1284) leaves the same test-partition residue as the vmedia arm."""
     document = _lpar_document(
-        [16, 70, 22],
+        [16, 71, 22],
         [
-            _row(70, "vtd", data={"vtd": "vtopt1"}),
-            _row(70, "vtd", data={"vtd": "vt;rm"}),
-            _row(70, "hmc_power_on_lpar (q3)"),
+            _row(71, "vtd", data={"vtd": "vtopt1"}),
+            _row(71, "vtd", data={"vtd": "vt;rm"}),
+            _row(71, "hmc_power_on_lpar (q3)"),
         ],
         vmedia_change_names=[_BLANK, "operator.iso"],
     )
@@ -1487,7 +1487,7 @@ def test_a_media_change_document_reads_its_media_and_power_on():
 
 
 _MEDIA_CHANGE = _inputs(
-    _lpar_document([16, 70, 22], [_row(70, "vtd", data={"vtd": "vtopt1"})])
+    _lpar_document([16, 71, 22], [_row(71, "vtd", data={"vtd": "vtopt1"})])
 )
 _EMPTY_TARGET = {
     "id": "vhost1/vtopt1",

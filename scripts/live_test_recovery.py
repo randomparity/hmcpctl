@@ -79,6 +79,7 @@ from live_test import (
     lpar_linux_roles,
     lpar_physical_io,
     lpar_power,
+    lpar_reconfigure,
     lpar_security_policy,
     lpar_vtpm,
     memory_quantities,
@@ -193,6 +194,7 @@ _WITNESSED_SUBTASKS = (
         lpar_config.REPORTING_SUBTASK,
         lpar_physical_io.SUBTASK,
         lpar_vtpm.SUBTASK,
+        lpar_reconfigure.SUBTASK,
         memory_quantities.SUBTASK,
         processor_quantities.SUBTASK,
         processor_sharing_weight.SUBTASK,
@@ -376,6 +378,7 @@ def lpar_config_inputs_from_document(
             lpar_config.REPORTING_SUBTASK,
             lpar_physical_io.SUBTASK,
             lpar_vtpm.SUBTASK,
+            lpar_reconfigure.SUBTASK,
             memory_quantities.SUBTASK,
             processor_quantities.SUBTASK,
             processor_sharing_weight.SUBTASK,
@@ -1549,7 +1552,7 @@ def _boot_baseline(document: dict[str, Any], saved: list[str]) -> str | None:
 
 
 def _media_change_vtds(document: dict[str, Any]) -> frozenset[str]:
-    """The VTD names ST70 recorded before it touched them (#1284)."""
+    """The VTD names ST71 recorded before it touched them (#1284)."""
     rows = document.get("results")
     return frozenset(
         row["data"]["vtd"]
@@ -1748,7 +1751,7 @@ async def _unmapped_server_adapters(call, inputs: LparResidueInputs) -> Finding 
 
 
 async def _empty_optical_target_left(call, inputs: LparResidueInputs) -> Finding | None:
-    """Whether ST70 left a virtual optical device with no medium loaded (#1284).
+    """Whether ST71 left a virtual optical device with no medium loaded (#1284).
 
     The optical listing keeps only media-backed mappings and the adapter count treats
     the device as mapping its adapter, so neither class above sees an empty device.

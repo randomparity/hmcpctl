@@ -6,13 +6,13 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **202** tools are registered.
-- **201** are exposed by a default deployment.
+- **203** tools are registered.
+- **202** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
-| `destructive` | 45 |
+| `destructive` | 46 |
 | `mutate` | 65 |
 | `read` | 91 |
 
@@ -39,7 +39,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `inventory` | 1 | [inventory.md](inventory.md) |
 | `io_slot` | 1 | [io_slot.md](io_slot.md) |
 | `job` | 2 | [job.md](job.md) |
-| `lpar` | 50 | [lpar.md](lpar.md) |
+| `lpar` | 51 | [lpar.md](lpar.md) |
 | `lpar_profile` | 11 | [lpar_profile.md](lpar_profile.md) |
 | `media` | 10 | [media.md](media.md) |
 | `memory_pool` | 2 | [memory_pool.md](memory_pool.md) |
@@ -233,6 +233,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_read_partition_profile` | `read` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_read_vios_boot_order` | `read` | [vios.md](vios.md) |
 | `hmc_read_vios_partition_profile` | `read` | [vios_profile.md](vios_profile.md) |
+| `hmc_reconfigure_lpar` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_remote_restart_lpar` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_remove_memory_pool` | `destructive` | [memory_pool.md](memory_pool.md) |
 | `hmc_remove_vios_fc_port_label` | `destructive` | [vios_label.md](vios_label.md) |
