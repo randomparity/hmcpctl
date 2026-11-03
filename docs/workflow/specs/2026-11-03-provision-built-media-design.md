@@ -66,7 +66,6 @@ path to `ready_to_boot`. Out of scope, with owners:
 - **`server_tools/lpar/provision.py`**: the docstring describes built media.
 - **Docs:**
   - `docs/environment-variables.md` gains two rows;
-  - `AGENTS.md`'s leak probe counts fifteen fields;
   - `tests/conftest.py` unsets both variables;
   - `just tool-docs`;
   - `maturity.json` moves `built-install-media` to implemented;
@@ -142,8 +141,8 @@ partition, remove any ISO it published, then provision again".
     directory. Install fields keep their existing checks (`check_install`), and the name is
     checked against the identifier rule;
   - stdout is bounded at 64 KiB, has an exact key set, refuses duplicate keys, and every field is
-    bound. The URL is allowlisted and at most 2048 characters, which keeps the identity under
-    `store.MAX_IDENTITY_BYTES`. Refusals never echo values;
+    bound. The URL is allowlisted and at most 2048 characters once JSON-escaped, which keeps the
+    identity under `store.MAX_IDENTITY_BYTES`. Refusals never echo values;
   - a timeout kills the process group;
   - an environment with no `HMC_*` names.
 - **Out of scope:**
