@@ -5012,9 +5012,40 @@
                 "constraint": "required true except dry_run or abandon; HMC 10.3.1060 or later; saves, reads back and defaults a new hmcpctl_ profile before configured"
               }
             ]
+          },
+          {
+            "variant": "prepared-install-media",
+            "parameters": [
+              {
+                "name": "adapters.mac",
+                "constraint": "lower-case colon form; required with prepared media and created as given"
+              },
+              {
+                "name": "install",
+                "constraint": "media.mode prepared with an iso-chain-media-v1 producer result bound field by field; digest-checked upload, mount before the profile save, media-first boot order; boot deferred pauses at ready_to_boot (ADR 0319)"
+              }
+            ]
           }
         ],
         "missing_scope": [
+          {
+            "variant": "built-install-media",
+            "parameters": [
+              {
+                "name": "install.media.mode",
+                "constraint": "built refused before provisioning; the operator-configured build entry is owned by issue #1843"
+              }
+            ]
+          },
+          {
+            "variant": "installer-boot",
+            "parameters": [
+              {
+                "name": "boot",
+                "constraint": "immediate with install refused; installer power-on, continuation boot and boot_started are owned by issue #1849"
+              }
+            ]
+          },
           {
             "variant": "dedicated-assignment",
             "parameters": [
