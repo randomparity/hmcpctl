@@ -474,6 +474,7 @@ def test_decommission_lpar_is_public_destructive_and_schema_stable():
 
     properties = tool.parameters["properties"]
     assert set(properties) == {
+        "request_id",
         "system_name_or_uuid",
         "lpar_name_or_uuid",
         "dry_run",
@@ -481,13 +482,15 @@ def test_decommission_lpar_is_public_destructive_and_schema_stable():
         "immediate",
         "timeout_seconds",
         "poll_interval",
+        "continuation",
+        "wait_seconds",
         "profile",
     }
+    assert tool.parameters["required"] == ["request_id"]
     assert properties["dry_run"]["default"] is False
-    assert properties["ownership_override"]["default"] is False
-    assert properties["immediate"]["default"] is False
-    assert properties["timeout_seconds"]["default"] == 300
-    assert properties["poll_interval"]["default"] == 5
+    # A new request fills these (ADR 0320 Decision 1); a continuation omits them.
+    for name in ("ownership_override", "immediate", "timeout_seconds", "poll_interval"):
+        assert properties[name]["default"] is None
 
     schema = tool.output_schema
     assert schema["type"] == "object"
@@ -499,8 +502,9 @@ def test_decommission_lpar_is_public_destructive_and_schema_stable():
         "steps",
         "warnings",
         "blast_radius",
+        "operation",
     }
-    assert set(schema["required"]) == set(schema["properties"])
+    assert set(schema["required"]) == set(schema["properties"]) - {"operation"}
 
 
 def test_partition_creation_tools_share_resource_object_schema():

@@ -303,11 +303,16 @@ def test_hmc_decommission_lpar_delegates_with_one_configured_client() -> None:
     with (
         patch("hmcpctl._app.client_from_env", side_effect=fake_client_from_env),
         patch(
-            "hmcpctl.server_tools.lpar.lifecycle.decommission_lpar",
+            "hmcpctl.server_tools.lpar.lifecycle.build_config",
+            return_value=HMCConfig.from_mapping({"host": "h"}),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.decommission_operation.decommission_lpar",
             new=AsyncMock(return_value=expected),
         ) as decommission_mock,
     ):
         result = hmc_decommission_lpar(
+            request_id="r1",
             system_name_or_uuid="system-a",
             lpar_name_or_uuid="aix-prod",
             dry_run=True,
