@@ -2,7 +2,7 @@
 
 Each HMC write is a journaled effect, so a repeat never writes twice and an
 interrupted write is classified by a live read before anything else is written.
-Messages name UUIDs and exception types, never a caller's arguments (``engine`` note).
+A leg's step error keeps its exception text, bounded to 512 characters.
 """
 
 from __future__ import annotations
@@ -634,15 +634,22 @@ class _Run:
         self, system_uuid: str, lpar_uuid: str, name: str
     ) -> dict[str, Any]:
         # #637's helper can misread a landed save (#1867), so the profile itself decides
-        # (operator decision D1, 2026-11-03).
-        await save_current_partition_profile(
-            self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
-        )
+        # (operator decision D1, 2026-11-03), including after the helper raised.
+        failure: Exception | None = None
+        try:
+            await save_current_partition_profile(
+                self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
+            )
+        except Exception as exc:  # noqa: BLE001 - the by-name read below decides it
+            failure = exc
         profile = await profile_write.profile_by_name(
             self.hmc, lpar_uuid, system_uuid, name
         )
         if profile is None:
-            raise EffectNotApplied(f"no saved profile was created for LPAR {lpar_uuid}")
+            reason = f": {type(failure).__name__}" if failure is not None else ""
+            raise EffectNotApplied(
+                f"no saved profile was created for LPAR {lpar_uuid}{reason}"
+            ) from failure
         return {"profile_uuid": profile.uuid, "profile_name": name}
 
     async def _write_default(self, lpar_uuid: str, name: str) -> dict[str, Any]:
@@ -665,6 +672,7 @@ class _Run:
             lpar_uuid,
             self.request.affinity_assessment,
             partition_profile_uuid=profile_uuid,
+            warnings=self.warnings,
         )
         if isinstance(result, JobOutcome):
             if result.timed_out or result.error is not None:

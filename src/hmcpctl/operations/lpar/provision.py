@@ -312,6 +312,7 @@ async def _power_on(
     lpar_uuid: str,
     assessment: ProvisionAffinityAssessment | None,
     partition_profile_uuid: str | None = None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any] | JobOutcome | None:
     """Activate the partition this workflow just created and stamped.
 
@@ -343,6 +344,9 @@ async def _power_on(
         raise HMCError(
             f"LPAR {lpar_uuid} was already active, so its saved profile was not activated"
         )
+    if warnings is not None:
+        # Adapters in the current configuration that the activated profile lacks.
+        warnings.extend(result.warnings)
     if assessment is None:
         return result.job
     return job_outcome("PowerOn", result.job)

@@ -1768,6 +1768,50 @@ def test_resume_reclassifies_and_continues(monkeypatch, mock_hmc):
     assert create_route.call_count == 1
 
 
+def _withhold_save(name):
+    return name != "hmc_save_current_partition_profile"
+
+
+def _deny_vios(name, _security, arguments):
+    if arguments.get("vios_name_or_uuid") == VIOS_UUID:
+        raise PermissionError(f"{name} denied for the VIOS")
+
+
+@pytest.mark.parametrize("continuation", ["resume", "abandon"])
+@pytest.mark.parametrize(
+    ("permits", "authorize", "match"),
+    [
+        (_withhold_save, lambda *_: None, "hmc_save_current_partition_profile"),
+        (lambda _name: True, _deny_vios, "denied for the VIOS"),
+    ],
+)
+def test_a_continuation_is_reauthorized_against_the_recorded_request(
+    monkeypatch, mock_hmc, persistence, continuation, permits, authorize, match
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    persistence.readback = "the saved profile lacks a requested vNIC"
+    paused = hmc_provision_lpar(**_provision_args(request_id="reauthorized"))
+    assert paused.operation.outcome == "needs_attention"
+    sent = len(mock_hmc.calls)
+
+    handler = provision_handler(TOOL_SECURITY, permits, authorize)
+    with pytest.raises(PermissionError, match=match):
+        handler(
+            request_id="reauthorized",
+            continuation=continuation,
+            exclusive_writer_window=True,
+        )
+
+    assert len(mock_hmc.calls) == sent
+    again = hmc_provision_lpar(**_provision_args(request_id="reauthorized"))
+    assert (again.operation.state, again.operation.outcome) == (
+        paused.operation.state,
+        "needs_attention",
+    )
+
+
 _SRIOV = SriovLogicalPortAssignment("default_profile", "1", "2", "3", Decimal(2))
 
 
@@ -1922,6 +1966,53 @@ def test_a_save_that_left_no_profile_is_not_applied(monkeypatch, mock_hmc, persi
     profile = next(e for e in result.operation.effects if e.key == "profile")
     assert profile.status == "not_applied"
     assert result.operation.outcome == "needs_attention"
+
+
+@pytest.mark.parametrize("landed", [False, True])
+def test_a_raised_save_is_decided_by_the_profile_by_name(
+    monkeypatch, mock_hmc, persistence, landed
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    mock_hmc.put(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn")
+
+    async def refused(_hmc, _system, _lpar, name, **_kwargs):
+        if landed:
+            persistence.saved.append(name)
+        raise ValueError("refused")
+
+    from hmcpctl.operations.lpar import provision_operation
+
+    monkeypatch.setattr(provision_operation, "save_current_partition_profile", refused)
+    result = hmc_provision_lpar(**_provision_args())
+
+    profile = next(e for e in result.operation.effects if e.key == "profile")
+    if landed:
+        assert profile.status == "applied"
+        assert result.operation.outcome == "configured"
+    else:
+        assert profile.status == "not_applied"
+        assert result.operation.outcome == "needs_attention"
+        assert "ValueError" in {s.step: s for s in result.steps}["save_profile"].result
+
+
+def test_power_on_profile_adapter_warnings_reach_the_result(
+    monkeypatch, mock_hmc, persistence
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    mock_hmc.put(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn")
+
+    async def dropped(*_args):
+        return ("the profile drops adapter X",)
+
+    monkeypatch.setattr(activation, "profile_adapter_warnings", dropped)
+    result = hmc_provision_lpar(**_provision_args())
+
+    assert result.operation.outcome == "configured"
+    assert "the profile drops adapter X" in result.warnings
 
 
 def test_an_unconfirmed_default_is_decided_by_the_partition(
