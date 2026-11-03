@@ -302,6 +302,15 @@ def provision_handler(
         issue #1849 adds ``continuation=boot``, a ``ready_to_boot`` operation accepts only
         ``abandon`` here, even though its record lists ``boot``.
 
+        Built media (``media.mode=built``, ADR 0324) instead takes no ``adapters.mac``
+        and needs a partition name of 1-32 characters matching ``[a-z][a-z0-9-]*``,
+        not ending in ``-``. After the disk, the run writes an iso-chain-loader target
+        request with the created adapter's MAC and the operation id, runs the build
+        entry the server's operator configured (``HMC_ISO_BUILD_ENTRY``), and binds the
+        result it prints, including its allowlisted ``url``; the upload then follows
+        as for prepared media. A caller cannot supply a builder. A failed or unbound
+        build ends ``failed``; an interrupted one pauses and is never run twice.
+
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.
             system_name_or_uuid: Target managed-system name or UUID; required for a
@@ -339,11 +348,12 @@ def provision_handler(
                 DRCs and explicit hmc console are supported; unresolved virtual-slot
                 selectors fail before effects (remaining linkage gap #638). C12 profile
                 readback must succeed before application and later workflow steps.
-            install: Optional operating-system installation. Only
-                ``media.mode=prepared`` is accepted: an iso-chain-media-v1 producer
-                result plus an allowlisted URL. Needs ``storage.capacity_mib`` and
-                ``boot=deferred``, and refuses ``power_on``; built media arrives with
-                issue #1843.
+            install: Optional operating-system installation: ``media.mode=prepared``
+                with an iso-chain-media-v1 producer result plus an allowlisted URL, or
+                ``media.mode=built`` with ``ssh_authorized_keys`` and ``login_user``
+                for the server's configured build entry. Needs
+                ``storage.capacity_mib`` and ``boot=deferred``, and refuses
+                ``power_on``.
             boot: ``deferred`` stops at ``ready_to_boot`` with the media mounted and the
                 boot order set; it needs ``install``. ``immediate`` with ``install`` is
                 refused until issue #1849.
