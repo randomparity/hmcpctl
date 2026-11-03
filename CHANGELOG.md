@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- External-management holds (ADR 0193, ADR 0327): while a partition is held, every
+  partition-mutation tool and CLI command that resolves it is refused with `partition_held`
+  unless the call presents the hold's `hold_id` (`--hold-id` on the CLI); reads and console
+  capture are not refused, and an unreadable store refuses. `hmcpctl holds list` and
+  `hmcpctl holds release` manage holds locally. Placing a hold arrives with
+  `hmc_prepare_host_handoff` (#1852). The operation store moves to schema 2 in place on first
+  open; restart every hmcpctl process after upgrading (#1851).
 - `hmc_decommission_lpar` and `hmcpctl lpars decommission` take `storage_cleanup`
   (`--storage-cleanup`): `retain`, the default and the old behaviour, or `delete_owned`. After
   the partition is deleted, `delete_owned` deletes each virtual disk and installer medium the

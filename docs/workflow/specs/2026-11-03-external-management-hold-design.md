@@ -59,8 +59,10 @@ anything kdive-side, and fencing the library, other hosts, the GUI or direct HMC
   1. context present and `read` → pass; tool in `HOLD_EXEMPT_TOOLS` → pass;
   2. `find_hold` (a store failure propagates: Decision 5); no hold → pass;
   3. presented `hold_id` equal by `hmac.compare_digest` on UTF-8 bytes → pass;
-  4. else `OperationRefused("partition_held", ...)` naming partition, label, agent id and creation
-     time and how to proceed (present the `hold_id`; `hmcpctl holds release`).
+  4. else `HoldRefused("partition_held", ...)` naming partition, label, agent id and creation
+     time and how to proceed (present the `hold_id`; `hmcpctl holds release`). `HoldRefused` is
+     not a `ValueError`, so domain code that rewraps a resolver's `ValueError` cannot hide it,
+     and a logical operation body that raises it ends `failed` rather than pausing.
   No context means a mutation with no `hold_id`.
 - **Hook sites.** `resolve_lpar_uuid` calls `guard_partition` on the UUID it returns, which covers
   `resolve_and_authorize_lpar_mutation`, `resolve_and_authorize_lpar_names` and
@@ -73,7 +75,9 @@ anything kdive-side, and fencing the library, other hosts, the GUI or direct HMC
   needed), which runs the guard. A name it cannot resolve — REST unreachable, not found or
   ambiguous — refuses `partition_hold_unverified` (fail closed; Failure model 3). Hosts without
   holds make no extra HMC read. The coverage test below is the closure: any other path it shows
-  is hooked the same way.
+  is hooked the same way. It found, and this change hooks, the partition matchers in
+  `operations/lpar/power.py`, `memory.py` (shared by memory, processor and statistics tools),
+  `accelerator.py`, `paging.py` and `profiles.py`.
 - **Registry (`tool_registry.py`).** `RUNTIME_PARTITION_TOOLS = {"hmc_detach_storage_mapping"}`
   (tools whose partition is derived at run time, not selected) and
   `hold_guarded(name, security) -> bool` (ADR 0327 D2). One helper gives a hold-guarded handler's
@@ -151,8 +155,8 @@ anything kdive-side, and fencing the library, other hosts, the GUI or direct HMC
    refuses.
 3. Every hold-guarded tool in `TOOL_SECURITY` publishes `hold_id`, and, called on a held partition
    through `create_mcp` by UUID (upper- and lower-case) and by name, is refused with
-   `partition_held` before any HMC write; with the matching `hold_id` the call reaches the fake
-   HMC's write sentinel, directly and through `hmc_invoke_tool`. Every non-read tool with a VIOS
+   `partition_held` before any HMC write; with the matching `hold_id` the hook runs and passes,
+   directly and through `hmc_invoke_tool`. Every non-read tool with a VIOS
    selector and no partition selector that reaches the guard is hold-guarded. Reads and the
    exempt tools pass. A logical tool repeated with a different `hold_id` is the same request.
 4. A corrupt store refuses a guarded call; with no hook installed nothing is checked.

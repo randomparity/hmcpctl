@@ -105,6 +105,9 @@ hmcpctl adapters add-vfc mylpar --vios-id 1 --vios-slot 6
 hmcpctl adapters delete mylpar --type ClientNetworkAdapter --uuid <adapter-uuid>
 hmcpctl vios list
 hmcpctl jobs show <job-id>
+hmcpctl holds list                   # external-management holds on this host; no HMC call
+hmcpctl holds release <partition-uuid>   # release one hold; never deletes the partition
+hmcpctl lpars power-on mylpar --hold-id <hold-id>   # act on a partition you were handed
 hmcpctl raw get /rest/api/uom/VirtualSwitch   # escape hatch, prints XML
 ```
 
