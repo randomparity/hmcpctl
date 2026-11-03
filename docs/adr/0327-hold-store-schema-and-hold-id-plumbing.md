@@ -45,6 +45,14 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
    submitting call's context, so a resolution inside the operation body sees the call that
    started or continued it.
 
+5. **Coverage is the partition-resolution path.** ADR 0193 D2 places the check "in every
+   partition-resolution path a mutation uses" and defines its proof as a test over tools that
+   target or select a partition; the H1 spec repeats "checked in every partition-resolution path
+   a mutation uses". Tools that never resolve a partition — system-scoped writes such as
+   `hmc_restore_lpar_profiles`, system power and system profile activation, and the escape
+   hatches `hmc_run_command` and `hmcpctl raw` — are outside the hook, as direct HMC commands are
+   outside it under ADR 0193 D6. A consumer learns this from the handoff document #1852 builds.
+
 ## Consequences
 
 - Upgrading is one-way: rolling hmcpctl back after any schema-2 process opened the store needs
@@ -73,6 +81,10 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
   `__signature__`, run through FastMCP 4.0.10's `Tool.from_function(...).run({..., "hold_id": ...})`,
   raised pydantic `unexpected_keyword_argument` (worktree probe, macOS, Python 3.11); the run-time
   validator reads the function's signature, not the published schema.
+- **Refuse system-scoped tools while any hold exists on their system.** judgment: fit. No
+  `hold_id` can authorize a write to every partition at once, so the holder would be locked out
+  of whole-system operations it owns, and the set of system tools that touch partitions has no
+  registry marker to enumerate it by.
 - **Skip the worker context and re-check holds only at admission.** judgment: fit. A
   continuation's resolutions run in the worker, where a missing context reads as a mutation
   without the caller's `hold_id` and refuses the holder itself.

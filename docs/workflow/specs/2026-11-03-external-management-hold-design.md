@@ -115,7 +115,7 @@ anything kdive-side, and fencing the library, other hosts, the GUI or direct HMC
    - Tools that never resolve a partition are not hold-checked: system-scoped mutations
      (`hmc_restore_lpar_profiles`, system power and system profile activation) and the escape
      hatches (`hmc_run_command`, `hmcpctl raw`). ADR 0193 D2 places the check in partition
-     resolution; these need explicit grants, and #1852's handoff document must name them.
+     resolution (ADR 0327 D5); these need explicit grants.
    - A hold placed while a guarded call is already past its resolution does not stop that call;
      `place_hold` refuses only on an ADR 0190 partition guard, which covers logical operations.
    - Two partitions with the same UUID on different systems: `find_hold` matches by partition UUID
