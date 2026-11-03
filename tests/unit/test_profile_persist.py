@@ -89,6 +89,8 @@ def hmc(monkeypatch):
         recovery_profile=SimpleNamespace(name="hmcprec-00ff"),
         error=None,
     )
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
+    monkeypatch.setattr(profile_persist, "POLL_SECONDS", 0)
     monkeypatch.setattr(profile_persist, "read_partition_profile", read)
     monkeypatch.setattr(profile_persist, "save_current_partition_profile", save)
     return fake
@@ -106,6 +108,7 @@ async def test_a_save_the_readback_shows_is_applied_and_names_recovery_copies(hm
     assert identity == {
         "profile_name": "default",
         "recovery_profiles": ["hmcprec-00ff"],
+        "confirmed_by": "first_read",
     }
     assert hmc.saves == [
         {"overwrite": True, "expected_etag": "E7", "exclusive_writer_window": True}
@@ -184,32 +187,52 @@ async def test_a_helper_refusal_before_any_call_is_named(hmc, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_helper_hmc_error_shows_its_message_and_status_only(hmc, monkeypatch):
-    body = (
-        "<HttpErrorResponse><RequestHeaders>X-API-Session: secret-token"
-        "</RequestHeaders><Message>HSCL1234 the profile is busy</Message>"
-        "</HttpErrorResponse>"
+async def test_a_foreign_error_shows_only_its_status_and_hmc_codes(hmc, monkeypatch):
+    text = (
+        "save failed: Set-Cookie: JSESSIONID=abc123secret; REST0126 [HSCL2957] "
+        "X-API-Session: tok-xyz REST0126"
     )
 
     async def refused(*_args, **_kwargs):
-        raise HMCError("save job failed", 409, body)
+        raise HMCError(text, 409)
 
     monkeypatch.setattr(profile_persist, "save_current_partition_profile", refused)
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
     with pytest.raises(profile_persist.SaveUnconfirmed) as raised:
         await _save(hmc)
-    text = str(raised.value)
-    assert "HMCError, HTTP 409: HSCL1234 the profile is busy" in text
-    assert "secret-token" not in text
+    shown = str(raised.value)
+    assert "HMCError, HTTP 409, codes=REST0126,HSCL2957" in shown
+    for leaked in ("abc123secret", "tok-xyz", "JSESSIONID", "save failed"):
+        assert leaked not in shown
 
 
 @pytest.mark.asyncio
-async def test_a_helper_error_holding_a_raw_body_is_withheld(hmc):
+async def test_a_helper_error_string_shows_only_its_codes(hmc, monkeypatch):
     hmc.save_lands = False
-    hmc.outcome.error = "boom: <RequestHeaders>X-API-Session: secret-token"
+    hmc.outcome.error = "boom: X-API-Session: secret-token HSCL0001"
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
     with pytest.raises(profile_persist.SaveUnconfirmed) as raised:
         await _save(hmc)
-    assert "<body withheld>" in str(raised.value)
+    assert "error_codes=HSCL0001" in str(raised.value)
     assert "secret-token" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_a_save_that_lands_late_is_confirmed_by_a_repoll(hmc, monkeypatch):
+    hmc.save_lands = False
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 60)
+    reads = []
+    real = profile_persist.persisted
+
+    async def late(*args):
+        reads.append(1)
+        if len(reads) == 3:
+            hmc.profiles[0] = _profile("default", *hmc.current)
+        return await real(*args)
+
+    monkeypatch.setattr(profile_persist, "persisted", late)
+    assert (await _save(hmc))["confirmed_by"] == "repoll"
+    assert len(reads) == 3
 
 
 @pytest.mark.asyncio

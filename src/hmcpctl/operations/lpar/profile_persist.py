@@ -14,12 +14,15 @@ first and otherwise a readback does: the profile must lack no current client ada
 
 from __future__ import annotations
 
+import asyncio
+import re
+import time
 from collections.abc import Callable
 from typing import Any
 
 from ...client.core import HMCClient
 from ...errors import HMCError
-from ...xmlutil import find_text, leaf_text
+from ...xmlutil import leaf_text
 from ..logical import engine
 from ..logical.engine import Classification, EffectNotApplied, OperationContext
 from ..logical.models import EffectRecord
@@ -29,6 +32,14 @@ from .profiles import read_partition_profile, save_current_partition_profile
 # Persisted contract (ADR 0195 Consequences).
 KIND = "lpar.profile_save"
 RECOVERY_PREFIX = "hmcprec-"
+# A submitted save whose job status the helper misread (#1867) may land after it
+# returns, so the readback repeats for a bounded time; the identity records which read
+# confirmed it, to tell that cause from an immediate one.
+SETTLE_SECONDS = 120
+POLL_SECONDS = 5
+# Only HMC message codes leave an exception's text: a client path can fall back to a
+# raw body slice, and a body can echo the session cookie.
+_HMC_CODE = re.compile(r"\b(?:REST\d{4}|HSCL[0-9A-F]{4})\b")
 
 
 class SaveUnconfirmed(HMCError):
@@ -126,18 +137,33 @@ async def save_current_over(
         outcome.execution,
         outcome.requested_change,
     ) == ("completed", "verified")
-    try:
-        missing, recovery = await persisted(hmc, lpar_uuid, profile_name)
-    except (HMCError, ValueError, TypeError) as exc:
-        if verified:
-            return {"profile_name": profile_name, "recovery_profiles": []}
-        raise SaveUnconfirmed(
-            f"the force-save of LPAR {lpar_uuid}'s profile is unconfirmed "
-            f"(step=readback, {_said(exc)}; {_diagnosis(outcome, failure)})"
-        ) from exc
-    if verified or not missing:
-        return {"profile_name": profile_name, "recovery_profiles": recovery}
-    detail = f"{_diagnosis(outcome, failure)}; {len(missing)} adapter(s) missing"
+    submitted = outcome is None or outcome.job is not None
+    deadline = time.monotonic() + (SETTLE_SECONDS if submitted else 0)
+    reads = 0
+    while True:
+        reads += 1
+        try:
+            missing, recovery = await persisted(hmc, lpar_uuid, profile_name)
+        except (HMCError, ValueError, TypeError) as exc:
+            if verified:
+                return {"profile_name": profile_name, "recovery_profiles": []}
+            raise SaveUnconfirmed(
+                f"the force-save of LPAR {lpar_uuid}'s profile is unconfirmed "
+                f"(step=readback, {_said(exc)}; {_diagnosis(outcome, failure)})"
+            ) from exc
+        if verified or not missing:
+            return {
+                "profile_name": profile_name,
+                "recovery_profiles": recovery,
+                "confirmed_by": _confirmed_by(verified, reads),
+            }
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(POLL_SECONDS)
+    detail = (
+        f"{_diagnosis(outcome, failure)}; {len(missing)} adapter(s) missing after "
+        f"{reads} read(s)"
+    )
     copies = f"recovery profiles on the partition: {_copies(recovery)}"
     if outcome is not None and outcome.job is None:
         raise EffectNotApplied(
@@ -150,27 +176,30 @@ async def save_current_over(
     ) from failure
 
 
-def _said(exc: BaseException) -> str:
-    """An exception's type, status and message, never a raw HMC body.
+def _confirmed_by(verified: bool, reads: int) -> str:
+    if verified:
+        return "helper"
+    return "first_read" if reads == 1 else "repoll"
 
-    An ``HMCError`` built from a response keeps that body; only its ``<Message>`` is
-    shown (a body can echo request headers). A message hmcpctl wrote itself is shown
-    as it is. Any other exception is named by type only.
+
+def _codes(text: str) -> str:
+    """The HMC message codes in *text*, deduplicated, at most five; no other text."""
+    found = list(dict.fromkeys(_HMC_CODE.findall(text)))[:5]
+    return ",".join(found) if found else "none"
+
+
+def _said(exc: BaseException) -> str:
+    """An exception's type, HTTP status and HMC message codes; never its text.
+
+    The save helper's own pre-call refusals (``ValueError``/``TypeError``) are text
+    hmcpctl writes and are shown; every other exception may hold an HMC body.
     """
     name = type(exc).__name__
-    if isinstance(exc, HMCError):
-        status = f", HTTP {exc.status_code}" if exc.status_code is not None else ""
-        if exc.body:
-            try:
-                message = find_text(exc.body, "Message") or "no <Message>"
-            except Exception:  # noqa: BLE001 - an unparsable body shows no text
-                message = "no <Message>"
-        else:
-            message = str(exc.args[0]) if exc.args else ""
-        return f"{name}{status}: {message[:200]}"
-    if isinstance(exc, (ValueError, TypeError, LookupError)):
+    if isinstance(exc, (ValueError, TypeError)) and not isinstance(exc, HMCError):
         return f"{name}: {str(exc)[:200]}"
-    return name
+    status = getattr(exc, "status_code", None)
+    shown = f", HTTP {status}" if status is not None else ""
+    return f"{name}{shown}, codes={_codes(str(exc))}"
 
 
 def _diagnosis(outcome: Any, failure: Exception | None) -> str:
@@ -179,11 +208,8 @@ def _diagnosis(outcome: Any, failure: Exception | None) -> str:
         return (
             f"step=save, the helper raised {_said(failure) if failure else 'nothing'}"
         )
-    # The helper keeps ``str(HMCError)``, which falls back to a raw body slice when the
-    # response had no <Message>; markup there is withheld, as a body can echo headers.
-    text = outcome.error or ""
-    shown = "<body withheld>" if "<" in text else text[:200]
-    error = f", error={shown}" if text else ""
+    # The helper keeps ``str(HMCError)``, so only the codes in it are shown.
+    error = f", error_codes={_codes(outcome.error)}" if outcome.error else ""
     return (
         f"step=save, execution={outcome.execution}, "
         f"requested_change={outcome.requested_change}, "
