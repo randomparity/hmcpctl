@@ -77,6 +77,13 @@ HMC: `LogicalPartition/quick/All`, `VirtualIOServer/quick/All` and the child for
 `ManagedSystem/{uuid}/LogicalPartition/quick/All`, each trimmed to one or two items. Their token map
 is their own, as for the exports above; never join them to other fixtures by token.
 
+`rest-profile-create-name-too-long` (`capture` prefix `2026-11-03-q1868/`) comes from an
+operator-authorized window for #1868 on the #1161 V10R3 HMC. One owned scratch partition was
+created, never activated, and deleted. The record is the force-save recovery-copy PUT that
+hmcpctl sent and the HMC's 500 answer (REST0142 wrapping HSCL059F, the 31-character name limit).
+It is the one fixture here that also keeps the request it answers, as `request_body`. It was
+tokenized by hand to this page's rules, and its token map is its own.
+
 ## Format
 
 Every file is a JSON object with these keys:
