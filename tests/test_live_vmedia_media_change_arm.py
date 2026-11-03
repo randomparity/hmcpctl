@@ -85,16 +85,21 @@ class MediaHMC(FakeHMC):
         return "PASS", {}
 
     def _viosvrcmd(self, cmd: str) -> tuple[str, Any]:
-        inner = shlex.split(shlex.split(cmd)[-1])
+        return self._vios(shlex.split(shlex.split(cmd)[-1]))
+
+    def _vios(self, inner: list[str]) -> tuple[str, Any]:
         self.cli.append(" ".join(inner))
         verb, release = inner[0], "-release" in inner
         if verb == "help":
             return "PASS", f"Usage: {inner[1]} [-f] [-release] -vtd TargetDevice"
+        row = self._row()
         if verb == "lsvopt":
-            row = self._row()
-            return "PASS", f"VTD Media\n{self.vtd} {row[3] if row else 'none'}"
+            held = row[3] if row and row[3] else "No Media"
+            return "PASS", f"Media                    Size(mb)\n{held}     1024\n"
         if self.reserved and not release:
             return "FAIL", _failure("HMCCLIError: the device is reserved")
+        if verb == "loadopt" and row and row[3]:
+            return "FAIL", _failure("HMCCLIError: the device holds media")
         if verb == "loadopt" and self.failing_loads:
             self.failing_loads -= 1
             return "FAIL", _failure("HMCCLIError: loadopt failed")
@@ -103,6 +108,15 @@ class MediaHMC(FakeHMC):
         return "PASS", ""
 
     async def call(self, _client, tool: str, **kwargs: Any) -> tuple[str, Any]:
+        if tool in ("hmc_load_optical_media", "hmc_unload_optical_media"):
+            self.calls.append((tool, kwargs))
+            assert kwargs["target_device"] == self.vtd
+            verb = "loadopt" if tool == "hmc_load_optical_media" else "unloadopt"
+            inner = [verb, *(["-release"] if kwargs["release"] else [])]
+            if "media_name" in kwargs:
+                inner += ["-disk", kwargs["media_name"]]
+            status, data = self._vios([*inner, "-vtd", kwargs["target_device"]])
+            return status, ({"target_device": self.vtd} if status == "PASS" else data)
         if tool == "hmc_run_command" and kwargs["cmd"].startswith("viosvrcmd"):
             self.calls.append((tool, kwargs))
             return self._viosvrcmd(kwargs["cmd"])
@@ -247,6 +261,8 @@ def _mutated(hmc) -> bool:
         "hmc_create_optical_media",
         "hmc_mount_optical_media",
         "hmc_power_on_lpar",
+        "hmc_load_optical_media",
+        "hmc_unload_optical_media",
     }
     return bool(hmc.posts or hmc.cli or any(t in mutating for t, _ in hmc.calls))
 
@@ -258,22 +274,49 @@ async def test_the_capture_runs_q1_to_q4_and_leaves_the_vios_as_found(arm):
 
     await _run(state, 16, 71, 22)
 
+    media = [
+        kwargs["media_name"]
+        for tool, kwargs in hmc.calls
+        if tool == "hmc_create_optical_media"
+    ]
+
     assert hmc.posts == ["capture q4 collision", "capture q1 replace storage"]
-    assert [c.split(" -")[0] for c in hmc.cli] == [
+    assert hmc.cli == [
         "help loadopt",
         "help unloadopt",
-        "lsvopt",
-        "lsvopt",  # q1
-        "unloadopt",
-        "lsvopt",
-        "loadopt",
-        "lsvopt",
-        "unloadopt",  # q3, refused while reserved
-        "unloadopt",  # then with -release
-        "loadopt",
-        "lsvopt",
+        "lsvopt -vtd vtopt1",
+        "lsvopt -vtd vtopt1",  # q1
+        "unloadopt -vtd vtopt1",  # q2, through the tools
+        "lsvopt -vtd vtopt1",
+        f"loadopt -disk {media[0]} -vtd vtopt1",
+        "lsvopt -vtd vtopt1",
+        f"loadopt -disk {media[1]} -vtd vtopt1",  # occupied, through the tool
+        f"loadopt -disk {media[1]} -vtd vtopt1",  # and raw
+        "lsvopt -vtd vtopt1",
+        "unloadopt -vtd vtopt1",  # q3, refused while reserved
+        "lsvopt -vtd vtopt1",
+        "unloadopt -release -vtd vtopt1",
+        "lsvopt -vtd vtopt1",
+        f"loadopt -release -disk {media[1]} -vtd vtopt1",
+        "lsvopt -vtd vtopt1",
+        "unloadopt -release -vtd vtopt1",
+        "lsvopt -vtd vtopt1",
+        f"loadopt -disk {media[0]} -vtd vtopt1",
+        "lsvopt -vtd vtopt1",
     ]
-    assert "unloadopt -release -vtd vtopt1" in hmc.cli
+    checks = {
+        r["tool"]: r["status"] for r in state.results if r["tool"].endswith(" check")
+    }
+    assert checks == {
+        "q2 unload check": "PASS",
+        "q2 load check": "PASS",
+        "q2 occupied check": "PASS",
+        "q3 unload check": "FAIL",  # the fake reserves the device at power-on
+        "q3 unload release check": "PASS",
+        "q3 load release check": "PASS",
+        "q3 unload release again check": "PASS",
+        "q3 load check": "PASS",
+    }
     (collision,) = _rows(state, "ViosSCSIMapping POST (q4")
     assert str(collision["data"]["status"]) == "500"
     assert "name is already used" in collision["data"]["body"]
@@ -322,19 +365,28 @@ async def test_an_unusable_vtd_name_stops_before_any_command(arm):
 
 
 @pytest.mark.asyncio
-async def test_release_is_retried_only_after_the_plain_command_fails(arm, monkeypatch):
+async def test_the_plain_unload_gets_release_only_after_it_fails(arm, monkeypatch):
     state, hmc, _ = arm
-    original = hmc._viosvrcmd
+    original = hmc._vios
 
-    def no_reservation(cmd: str):
+    def no_reservation(inner: list[str]):
         hmc.reserved = False
-        return original(cmd)
+        return original(inner)
 
-    monkeypatch.setattr(hmc, "_viosvrcmd", no_reservation)
+    monkeypatch.setattr(hmc, "_vios", no_reservation)
 
     await _run(state, 16, 71, 22)
 
-    assert not any("-release" in c for c in hmc.cli)
+    tools = [r["tool"] for r in state.results]
+    assert "hmc_unload_optical_media (q3 unload release)" not in tools
+    # The release forms still run once each, so the tools prove them either way.
+    assert [c.split(" -disk")[0] for c in hmc.cli if "-release" in c] == [
+        "loadopt -release",
+        "unloadopt -release -vtd vtopt1",
+    ]
+    assert all(
+        r["status"] == "PASS" for r in state.results if r["tool"].endswith(" check")
+    )
     assert _manual(state) == []
 
 
@@ -386,8 +438,8 @@ async def test_cleanup_reloads_an_empty_drive_before_unmounting(arm):
 
     await _run(state, 16, 71, 22)
 
-    assert _rows(state, "hmc_run_command (q3 loadopt -release)")
-    assert _rows(state, "hmc_run_command (cleanup loadopt)")
+    assert _rows(state, "hmc_load_optical_media (q3 load release)")
+    assert _rows(state, "hmc_load_optical_media (cleanup load)")
     assert _rows(state, "hmc_unmount_optical_media (cleanup)")
     assert _manual(state) == []
     assert state.artifacts.vmedia_change_names == []
