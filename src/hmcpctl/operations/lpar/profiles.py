@@ -637,7 +637,8 @@ async def _recovery(
         name = recovery.name
         document = None
     else:
-        name = "hmcprec-" + secrets.token_hex(12)
+        # 24 characters: the HMC refuses profile names past 31 (HSCL059F, #1868).
+        name = "hmcprec-" + secrets.token_hex(8)
         if any(r.name == name for r in records):
             raise ValueError("recovery name collided; nothing was written")
         document = clone_profile_document(before.element, name)

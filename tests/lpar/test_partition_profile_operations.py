@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from conftest import live_response
 from lpar.test_partition_profiles import A, field, profile
 
 from hmcpctl.client.core import HMCClient
@@ -147,6 +148,9 @@ class NativeService:
         if method == "PUT":
             key = "55555555-5555-4555-8555-555555555555"
             root = ET.fromstring(kwargs["content"])
+            # The HMC refuses a profile name past 31 characters (HSCL059F, #1868).
+            if len(field(root, "ProfileName").text) > 31:
+                return live_response("rest-profile-create-name-too-long")[1]
 
             # Reconstruct only server-derived readonly fields; honor every submitted writable value.
             def hydrate(payload, template):
@@ -399,6 +403,7 @@ async def test_force_save_has_verified_retained_copy_before_job(service):
     )
     assert result.execution == "completed" and result.requested_change == "verified"
     assert result.recovery_verified and result.recovery_profile
+    assert len(result.recovery_profile.name) <= 31
     copy = service.docs[result.recovery_profile.uuid]
     assert compare_profiles(baseline, copy, recovery=True).equal
     assert field(service.docs[F], "ProfileMemory/DesiredMemory").text == "1024"
