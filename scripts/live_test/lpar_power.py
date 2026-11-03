@@ -298,6 +298,31 @@ async def _volumes(client: Client, state: RunState, run: Run) -> frozenset[str] 
     )
 
 
+async def _shared_storage(
+    client: Client, state: RunState, run: Run
+) -> tuple[str, str] | None:
+    """The VIOS's physical volumes and media repository, as ``lspv`` and ``lsrep`` print
+    them; None when either is unreadable."""
+    assert run.vios is not None
+    prefix = f"viosvrcmd -m {shlex.quote(run.system)} --id {run.vios.partition_id} -c"
+    volumes = await lpar_config._cli(client, state, f"{prefix} 'lspv'")
+    repository = await lpar_config._cli(client, state, f"{prefix} 'lsrep'")
+    if not isinstance(volumes, str) or not isinstance(repository, str):
+        return None
+    return volumes, repository
+
+
+def _deleted_disks(data: Any) -> frozenset[str]:
+    """The disk names a decommission result reports deleted (ADR 0323)."""
+    storage = _plain(result_field(data, "storage"))
+    deleted = storage.get("deleted") if isinstance(storage, Mapping) else None
+    return frozenset(
+        item["disk_name"]
+        for item in deleted or ()
+        if isinstance(item, Mapping) and isinstance(item.get("disk_name"), str)
+    )
+
+
 async def _read_baseline(client: Client, state: RunState, run: Run) -> Baseline | None:
     """Every read of spec step 3; None when any of them failed."""
     quoted = shlex.quote(run.system)
@@ -979,23 +1004,6 @@ async def _eligible_slot(
     return {"profile_name": DEFAULT_PROFILE_NAME, "drc_index": eligible[0]}
 
 
-async def _create_volume(client: Client, state: RunState, run: Run) -> bool:
-    vios = run.vios
-    assert vios is not None
-    run.volume_attempted = True
-    st, data = await state.call(
-        client,
-        "hmc_create_virtual_disk",
-        vios_name_or_uuid=vios.uuid,
-        vg_uuid=vios.group_uuid,
-        disk_name=run.volume,
-        capacity_mib=VOLUME_MIB,
-        system_name_or_uuid=run.system,
-    )
-    state.record(SUBTASK, "hmc_create_virtual_disk (run volume)", st, data)
-    return run.volume in (await _volumes(client, state, run) or ())
-
-
 async def _provision(client: Client, state: RunState, run: Run) -> bool:
     vios = run.vios
     assert vios is not None
@@ -1005,8 +1013,9 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
         state.skip(SUBTASK, "hmc_provision_lpar", PROVISION_WINDOW_SKIP)
         return False
     slot = await _eligible_slot(client, state, run)
-    if not await _create_volume(client, state, run):
-        return False
+    # Provision creates the run volume, so the ledger owns it and decommission's
+    # delete_owned deletes it (ADR 0323); teardown removes it if the run stops first.
+    run.volume_attempted = True
     request_id = f"{run.token}-p"
     st, data = await state.call(
         client,
@@ -1022,6 +1031,7 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
             "storage_name": run.volume,
             "kind": "VirtualDisk",
             "vg_uuid": vios.group_uuid,
+            "capacity_mib": VOLUME_MIB,
         },
         resources=RESOURCES,
         power_on=True,
@@ -1256,6 +1266,8 @@ async def _decommission(
             immediate=True,
             timeout_seconds=_JOB_TIMEOUT_S,
             poll_interval=_JOB_POLL_INTERVAL_S,
+            storage_cleanup="delete_owned",
+            exclusive_writer_window=True,
             wait_seconds=600,
         )
 
@@ -1313,6 +1325,7 @@ async def _decommission_cases(client: Client, state: RunState, run: Run) -> None
     lpar = run.p_uuid or ""
     before_proof = await _complete_mapping_proof(client, state, run)
     before_volumes = await _volumes(client, state, run)
+    before_shared = await _shared_storage(client, state, run)
     before = (
         await _lpar_state(client, state, run, lpar),
         await _client_adapters(client, state, run),
@@ -1367,23 +1380,32 @@ async def _decommission_cases(client: Client, state: RunState, run: Run) -> None
         client_uuid.casefold() == lpar.casefold() or backing == run.volume
         for _, client_uuid, _, backing in left
     )
-    volume_retained = volumes is not None and run.volume in volumes
     foreign_unchanged = (
-        before_proof is not None
-        and proof is not None
-        and before_proof[1] == proof[1]
-        and before_volumes is not None
-        and volumes == before_volumes
+        before_proof is not None and proof is not None and before_proof[1] == proof[1]
+    )
+    owned_deleted = (
+        volumes is not None
+        and run.volume not in volumes
+        and run.volume in _deleted_disks(data)
+    )
+    shared = await _shared_storage(client, state, run)
+    shared_retained = (
+        before_volumes is not None
+        and volumes == before_volumes - {run.volume}
+        and before_shared is not None
+        and shared == before_shared
     )
     run.hold(op, "storage-mapping-absent", mapping_absent and foreign_unchanged)
-    run.hold(op, "backing-volume-retained", volume_retained)
+    run.hold(op, "owned-disk-deleted", owned_deleted)
+    run.hold(op, "shared-storage-retained", shared_retained)
     run.decommission_failed = not (
         deleted
         and completed
         and partition_absent
         and mapping_absent
-        and volume_retained
         and foreign_unchanged
+        and owned_deleted
+        and shared_retained
     )
 
 
@@ -1818,8 +1840,12 @@ def _observe_p(state: RunState, run: Run, cleanup: str) -> None:
                     run.holds("lpar.decommission", "storage-mapping-absent"),
                 ),
                 Assertion(
-                    "backing-volume-retained",
-                    run.holds("lpar.decommission", "backing-volume-retained"),
+                    "owned-disk-deleted",
+                    run.holds("lpar.decommission", "owned-disk-deleted"),
+                ),
+                Assertion(
+                    "shared-storage-retained",
+                    run.holds("lpar.decommission", "shared-storage-retained"),
                 ),
                 Assertion(
                     "dry-run-inventoried",
