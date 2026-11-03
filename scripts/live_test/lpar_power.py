@@ -28,7 +28,7 @@ from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, job_outcome
 from hmcpctl.operations.lpar.decommission import _vscsi_detach_inventory
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 from hmcpctl.operations.storage.resources import storage_mapping
-from hmcpctl.ssh.commands import HMC_NO_RESULTS
+from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter
 from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME
 
 from . import dedicated_pcie, lpar_config, storage_lifecycle
@@ -1080,7 +1080,7 @@ async def _saved_profile_active(
         client,
         state,
         f"lssyscfg -r lpar -m {shlex.quote(run.system)} "
-        f"--filter {shlex.quote(f'lpar_names={run.p_name}')} "
+        f"--filter {shlex.quote(build_filter([('lpar_names', run.p_name)]))} "
         "-F default_profile,curr_profile",
     )
     return row == f"{saved},{saved}"
