@@ -306,6 +306,17 @@ def test_whole_processing_units_read_back_as_the_hmc_renders_them(rendered):
     assert readback_problem(element, request, 0) is None
 
 
+def test_a_profile_whose_range_excludes_the_request_reads_back_as_a_mismatch():
+    request = replace(
+        _request(),
+        resources=LparResources(
+            min_memory=256, desired_memory=512, max_memory=1024, desired_vcpus=8
+        ),
+    )
+
+    assert "processors" in (readback_problem(_profile_element(), request, 0) or "")
+
+
 @pytest.mark.parametrize(
     ("element", "request_", "sriov", "problem"),
     [

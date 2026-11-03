@@ -1994,7 +1994,8 @@ def test_a_raised_save_is_decided_by_the_profile_by_name(
     else:
         assert profile.status == "not_applied"
         assert result.operation.outcome == "needs_attention"
-        assert "ValueError" in {s.step: s for s in result.steps}["save_profile"].result
+        step = {s.step: s for s in result.steps}["save_profile"]
+        assert "ValueError: refused" in step.result
 
 
 def test_power_on_profile_adapter_warnings_reach_the_result(

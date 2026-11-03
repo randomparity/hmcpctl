@@ -646,7 +646,9 @@ class _Run:
             self.hmc, lpar_uuid, system_uuid, name
         )
         if profile is None:
-            reason = f": {type(failure).__name__}" if failure is not None else ""
+            reason = (
+                f": {type(failure).__name__}: {failure}" if failure is not None else ""
+            )
             raise EffectNotApplied(
                 f"no saved profile was created for LPAR {lpar_uuid}{reason}"
             ) from failure

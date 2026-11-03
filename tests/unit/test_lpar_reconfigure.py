@@ -15,7 +15,7 @@ from lpar.test_partition_profiles import U
 from lpar.test_partition_profiles import profile as profile_document
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.documents.partition_profile import apply_profile_patch, one
+from hmcpctl.documents.partition_profile import ProfilePatch, apply_profile_patch, one
 from hmcpctl.errors import HMCError, LparUpdateError
 from hmcpctl.operations.logical import engine, profile_write
 from hmcpctl.operations.logical.engine import OperationFailed, OperationRequest
@@ -791,7 +791,6 @@ def _classify(fake, expected, before):
     [(1024, "applied"), (768, "not_applied"), (900, "needs_attention")],
 )
 def test_profile_write_classifier(hmc, saved, status):
-    from hmcpctl.documents.partition_profile import ProfilePatch
 
     hmc.profile = apply_profile_patch(hmc.profile, ProfilePatch(desired_memory=saved))
     verdict = _classify(
@@ -801,7 +800,6 @@ def test_profile_write_classifier(hmc, saved, status):
 
 
 def test_profile_write_classifier_read_error_raises(hmc, monkeypatch):
-    from hmcpctl.documents.partition_profile import ProfilePatch
 
     async def broken(*_args):
         raise HMCError("GET failed", 503)
@@ -844,7 +842,6 @@ def test_rename_classifier(hmc):
 
 
 def _classify_named(monkeypatch, found):
-    from hmcpctl.documents.partition_profile import ProfilePatch
 
     async def by_name(_hmc, lpar, system, name):
         assert (lpar, system, name) == (LPAR, SYS, "hmcpctl_abc")
@@ -868,7 +865,6 @@ def test_a_named_profile_that_is_absent_was_not_written(monkeypatch):
     ("saved", "status"), [(1024, "applied"), (900, "needs_attention")]
 )
 def test_a_named_profile_classifies_by_its_values(monkeypatch, saved, status):
-    from hmcpctl.documents.partition_profile import ProfilePatch
 
     element = apply_profile_patch(
         profile_document(), ProfilePatch(desired_memory=saved)
@@ -908,3 +904,11 @@ def test_profile_by_name_reads_each_profile_once(monkeypatch):
     found = _await(profile_write.profile_by_name(Feed(), LPAR, SYS, "hmcpctl_abc"))
     assert found.uuid == "u2"
     assert _await(profile_write.profile_by_name(Feed(), LPAR, SYS, "absent")) is None
+
+
+def test_holds_compares_a_profile_name_as_text():
+    element = profile_document()
+    one(element, "ProfileName").text = "07"
+
+    assert not profile_write.holds(element, ProfilePatch(name="7"))
+    assert profile_write.holds(element, ProfilePatch(name="07"))

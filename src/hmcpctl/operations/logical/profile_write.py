@@ -86,21 +86,30 @@ async def profile_by_name(
     return found[0] if found else None
 
 
-def _value(text: str | None) -> Decimal | str | None:
+_NUMERIC_PATHS = ("Memory", "Processors", "ProcessingUnits")
+
+
+def _value(path: str, text: str | None) -> Decimal | str | None:
     # The HMC renders whole processing units as "1" where the patch writes "1.0".
+    if text is None or not path.endswith(_NUMERIC_PATHS):
+        return text
     try:
-        return Decimal(text) if text is not None else None
+        return Decimal(text)
     except InvalidOperation:
         return text
 
 
 def holds(element: ET.Element, patch: ProfilePatch) -> bool:
     """Whether every field *patch* sets already reads its value in *element*."""
-    patched = apply_profile_patch(element, patch)
-    current = requested_profile_values(element, patch)
-    wanted = requested_profile_values(patched, patch)
-    return {k: _value(v) for k, v in current.items()} == {
-        k: _value(v) for k, v in wanted.items()
+    try:
+        patched = apply_profile_patch(element, patch)
+        current = requested_profile_values(element, patch)
+        wanted = requested_profile_values(patched, patch)
+    except ValueError:
+        # A profile that cannot take the requested values does not hold them.
+        return False
+    return {k: _value(k, v) for k, v in current.items()} == {
+        k: _value(k, v) for k, v in wanted.items()
     }
 
 
