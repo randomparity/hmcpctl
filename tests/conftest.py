@@ -100,10 +100,16 @@ def default_power_ownership_guard_off(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-#: `HMC_*` variables the suite depends on being unset. Not all thirteen fields —
-#: only the names a test actually asserts the absence of, each demonstrated to red
-#: the suite when exported.
-_UNSET_FOR_TESTS = ("HMC_AGENT_ID", "HMC_SCHEMA_VERSION", "HMC_ISO_URL_ALLOWLIST")
+#: `HMC_*` variables the suite depends on being unset. Not every field — only the
+#: names a test actually asserts the absence of, each demonstrated to red the suite
+#: when exported. Either build-entry name exported alone fails every config build.
+_UNSET_FOR_TESTS = (
+    "HMC_AGENT_ID",
+    "HMC_SCHEMA_VERSION",
+    "HMC_ISO_URL_ALLOWLIST",
+    "HMC_ISO_BUILD_ENTRY",
+    "HMC_ISO_BUILD_ARGUMENTS",
+)
 
 
 @pytest.fixture(autouse=True)
