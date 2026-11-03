@@ -144,7 +144,12 @@ async def adapters_missing_from_profile(
     slots = _profile_slots(profile)
     missing: list[str] = []
     for adapter_type in PROFILE_CHECKED_ADAPTER_TYPES:
-        for adapter in await hmc.list_adapters(lpar_uuid, adapter_type):
+        # The child feed, not list_adapters: the HMC answers a partition's empty
+        # collection with 204, which the feed reads as no adapter, while the network
+        # creation feed refuses it as missing creation-identity proof (#1846).
+        for adapter in await hmc.list_child(
+            "LogicalPartition", lpar_uuid, adapter_type
+        ):
             slot = _text((adapter.get("Resource") or {}).get("VirtualSlotNumber"))
             if slot is None or slot not in slots:
                 missing.append(
