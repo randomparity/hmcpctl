@@ -823,7 +823,8 @@ dedicated-slot argument failed and stays failed: the slot is written into the ne
 partition's profile, but the provision's PowerOn activates the current configuration,
 so the running partition does not own the slot (#1390). Provision now activates the
 profile it saves (ADR 0313) and writes the slot into that profile first (ADR 0318), and
-the arm asserts `pcie-slot-owned` again.
+the arm asserts `pcie-slot-owned` again. On 2026-11-03 (V10R3, POWER9) all eight observations passed, `provision.lpar`
+including `pcie-slot-owned`, and the post-run compare showed the slot unowned again.
 
 `lpar.power_on` passed on a re-run after #1392. The first run's current-configuration
 activation ended `FAILED_TO_START` with "Parameter 'OperationType' is not allowed for
