@@ -221,6 +221,7 @@ async def _boot(
     client: Client, state: RunState, run: lpar_power.Run, iso: Path
 ) -> None:
     st, data = await _provision(client, state, run, iso)
+    run.data["answered"] = st == "PASS"
     steps = steps_by_name(data)
     operation = lpar_power._plain(result_field(data, "operation"))
     operation = operation if isinstance(operation, Mapping) else {}
@@ -312,7 +313,10 @@ async def _teardown_media(
     if not media or run.vios is None:
         return True, True
     if not isinstance(name, str):
-        return run.p_uuid is None, False
+        # An answered provision that bound no medium created none; a lost answer
+        # leaves the partition for recovery rather than guess.
+        answered = run.data.get("answered") is True
+        return answered or run.p_uuid is None, answered
     unmapped = run.p_uuid is None or await _unmount(client, state, run, name)
     if not unmapped or not isinstance(group, str):
         return unmapped, False
@@ -381,12 +385,14 @@ async def exercise_provision_boot(client: Client, state: RunState) -> None:
         if unmapped:
             await lpar_power._teardown(client, state, run)
         else:
-            lpar_power._manual(
-                state,
+            state.record(
+                SUBTASK,
                 "run medium teardown",
+                "FAIL",
                 f"partition {run.p_name!r}, its volume and medium were kept: the medium "
-                "could not be shown unmapped. Unmount it with hmc_unmount_optical_media, "
-                "then run live_test_recovery.py for the remaining commands.",
+                "could not be shown unmapped. MANUAL RECOVERY REQUIRED: unmount it with "
+                "hmc_unmount_optical_media, then run live_test_recovery.py for the "
+                "remaining commands.",
             )
     same = await lpar_power._compare(client, state, run, ready)
     cleanup = "passed" if run.clean and media_gone and same else "failed"

@@ -67,6 +67,7 @@ class BootWorld(World):
         self.mount_status = "ok"
         self.activated_profile = SAVED
         self.provisions: list[dict[str, Any]] = []
+        self.stop_before_media = False
 
     def _hmc_run_command(self, kwargs: dict[str, Any]) -> Any:
         cmd = kwargs["cmd"]
@@ -93,6 +94,9 @@ class BootWorld(World):
             }
         )
         self.adapters.add("3,run,2")
+        if self.stop_before_media:
+            steps = [{"step": "create", "status": "ok"}]
+            return {**self._answer(uuid, steps), "operation": _record("paused")}
         self.media.add(MEDIA)
         steps = [
             {"step": "create", "status": "ok"},
@@ -128,6 +132,9 @@ class BootWorld(World):
                 },
             ]
             record = _record("paused")
+        return {**self._answer(uuid, steps), "operation": record}
+
+    def _answer(self, uuid: str, steps: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "resource_created": True,
             "workflow_completed": False,
@@ -136,7 +143,6 @@ class BootWorld(World):
             "ownership_stamped": True,
             "steps": steps,
             "warnings": [],
-            "operation": record,
         }
 
     def _hmc_list_optical_mappings(self, kwargs: dict[str, Any]) -> Any:
@@ -288,3 +294,14 @@ def test_a_failed_first_call_with_a_recorded_operation_is_abandoned(schemas, tmp
     ]
     assert len(abandons) == 1
     assert state.artifacts.provision_boot_media["media_name"] is None
+
+
+def test_a_stop_before_any_medium_still_deletes_the_partition(schemas, tmp_path):
+    world = BootWorld()
+    world.stop_before_media = True
+
+    state = _run(schemas, world, tmp_path)
+
+    assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}
+    assert "hmc_unmount_optical_media" not in world.tools()
+    assert _observation(state)["cleanup"] == "passed"
