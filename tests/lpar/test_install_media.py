@@ -229,6 +229,8 @@ def test_a_built_result_binds_the_operation_and_its_url():
         ({"url": "ftp://media.example.test/x.iso"}, "url"),
         ({"url": "https://elsewhere.example.test/x.iso"}, "url"),
         ({"url": "https://media.example.test/" + "x" * 2048}, "url"),
+        ({"url": "https://media.example.test/" + "\u00e9" * 2000}, "url"),
+        ({"url": "https://media.example.test/" + '"' * 2000}, "url"),
         ({"mac": "02:00:00:00:00:09"}, "mac"),
         ({"extra": 1}, "extra"),
         ({"iso_size": True}, "iso_size"),

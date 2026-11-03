@@ -44,7 +44,8 @@ neither the configuration names nor the template syntax.
    as follows:
    - the prepared fields, including the adapter's actual MAC, bind as in ADR 0191 D3;
    - `operation_binding` equals the `operation_id`;
-   - `url` is http(s), at most 2048 characters, and its origin is on `HMC_ISO_URL_ALLOWLIST`.
+   - `url` is http(s), at most 2048 characters once JSON-escaped, and its origin is on
+     `HMC_ISO_URL_ALLOWLIST`.
 5. **Journal.** The build is effect `build`, kind `media.iso_build`, step `build_media`. It runs
    after the network and disk legs and before `bind_media`. Its identity is the bound
    `{url, iso_sha256, iso_size, manifest_sha256, mac}`, which the upload uses. A resume reuses an

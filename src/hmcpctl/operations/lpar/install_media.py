@@ -391,8 +391,11 @@ def parse_result(output: bytes) -> dict[str, Any]:
 
 
 def _check_url(url: object, allowlist: tuple[tuple[str, int | None], ...]) -> str:
-    if not isinstance(url, str) or not 1 <= len(url) <= MAX_MEDIA_URL:
-        raise _mismatch("url", f"must be a string of 1 to {MAX_MEDIA_URL} characters")
+    # Bounded as journaled (JSON-escaped), so the build identity fits its 4 KiB cap.
+    if not isinstance(url, str) or not 1 <= len(json.dumps(url)) - 2 <= MAX_MEDIA_URL:
+        raise _mismatch(
+            "url", f"must be a string of 1 to {MAX_MEDIA_URL} JSON-escaped characters"
+        )
     try:
         scheme = urlparse(url).scheme
     except ValueError:  # its message quotes the URL's host
