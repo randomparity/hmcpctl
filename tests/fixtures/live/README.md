@@ -122,6 +122,27 @@ HMC: `LogicalPartition/quick/All`, `VirtualIOServer/quick/All` and the child for
 `ManagedSystem/{uuid}/LogicalPartition/quick/All`, each trimmed to one or two items. Their token map
 is their own, as for the exports above; never join them to other fixtures by token.
 
+`rest-client-network-add-state-refused`, `rest-client-network-add-vsi-incomplete` and
+`rest-client-network-add-vsi-rmc-refused` (`capture` prefix `2026-11-03-q1864/`) come from an
+operator-authorized window for #1864 on the #1161 V10R3 HMC. Each is one client Ethernet adapter
+add to the Not Activated test partition `sys-R1-lp3`, refused with HTTP 500. The first is the
+minimal request (PVID and switch only), refused with REST0269 before the partition's profile was
+applied. The second sends `vsi_manager_id` alone after the apply, and is refused with REST0126
+naming the missing `vsi_type_id`. The third sends all six creation fields after the apply, and
+is refused with REST0126 wrapping HSCLB021 (RMC return code 83), naming the serving VIOS.
+The capture recorded no response headers, so `content_type` is `null`. The partition name was
+`&lt;REDACTED-PRIVATE&gt;` after export and was renamed to `sys-R1-lp3` by hand. Their token map
+is their own; never join them to other fixtures by token. ADR 0315 records what the window showed.
+
+`rest-profile-create-name-too-long` (`capture` prefix `2026-11-03-q1868/`) comes from an
+operator-authorized window for #1868 on the #1161 V10R3 HMC. One owned scratch partition was
+created, never activated, and deleted. The record is the force-save recovery-copy PUT that
+hmcpctl sent and the HMC's 500 answer (REST0142 wrapping HSCL059F, the 31-character name limit).
+It is the one fixture here that also keeps the request it answers, as `request_body`. It was
+tokenized by hand to this page's rules, and its token map is its own. The HMC echoes the request's
+headers in `<RequestHeaders>`; the cookie and session values there are tokenized, and the
+element is kept so tests can show that no error text carries it.
+
 ## Format
 
 Every file is a JSON object with these keys:

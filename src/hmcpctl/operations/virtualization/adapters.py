@@ -89,6 +89,50 @@ class NetworkUpdateResult:
     errors: tuple[str, ...]
 
 
+# HSCLB021 arrives wrapped in REST0126, so it is matched first (ADR 0315).
+_ADD_REFUSALS = (
+    (
+        "HSCLB021",
+        (
+            "an RMC call the HMC made for this add failed (HSCLB021); its message names "
+            "the partition it called. Check that partition's RMC state"
+        ),
+    ),
+    (
+        "REST0269",
+        (
+            "the partition has no applied current configuration (REST0269). Check its "
+            "resource_config (lssyscfg -r lpar -F name,state,resource_config; 1 means "
+            "applied; curr_profile alone does not prove it), then apply its profile once "
+            "(chsyscfg -r lpar -m <system> -o apply -p <partition> -n <profile>) or "
+            "activate it, and retry"
+        ),
+    ),
+)
+_VSI_ROUTE = (
+    ". A complete VSI profile makes the HMC call the serving VIOS: check its VSI "
+    "support, or omit vsi_manager_id, vsi_type_id and vsi_type_version"
+)
+
+
+def _classified_add_refusal(error: HMCError, vsi_selected: bool) -> HMCError | None:
+    """Return the add's known HMC refusal with its next step (ADR 0315), or None."""
+    if error.status_code != 500:
+        return None
+    for code, guidance in _ADD_REFUSALS:
+        if code in (error.body or ""):
+            if code == "HSCLB021" and vsi_selected:
+                guidance += _VSI_ROUTE
+            return HMCError(
+                f"Client network adapter add refused: {guidance}. List the partition's "
+                "adapters (hmc_list_adapters, or hmcpctl adapters list) to confirm the "
+                "refused add left none",
+                500,
+                error.body,
+            )
+    return None
+
+
 async def list_adapters(
     hmc: HMCClient,
     lpar_name_or_uuid: str,
@@ -163,15 +207,23 @@ async def add_network_adapter(
         if selected
         else set()
     )
-    resource = await hmc.add_network_adapter(
-        lpar_uuid,
-        port_vlan_id,
-        slot_number=slot_number,
-        virtual_switch_id=virtual_switch_id,
-        tagged=tagged,
-        mac_address=mac_address,
-        **selected,
-    )
+    try:
+        resource = await hmc.add_network_adapter(
+            lpar_uuid,
+            port_vlan_id,
+            slot_number=slot_number,
+            virtual_switch_id=virtual_switch_id,
+            tagged=tagged,
+            mac_address=mac_address,
+            **selected,
+        )
+    except HMCError as error:
+        refusal = _classified_add_refusal(
+            error, any(name.startswith("vsi_") for name in selected)
+        )
+        if refusal is None:
+            raise
+        raise refusal from error
     verification = (
         await _verify_network_creation(hmc, lpar_uuid, baseline, resource, selected)
         if selected
