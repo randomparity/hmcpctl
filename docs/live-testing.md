@@ -757,7 +757,7 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   system, it picks the configured slot, or else the first slot no partition owns and no
   profile lists, and sends it as a `default_profile` dedicated assignment; otherwise it
   records a gap SKIP and sends none. It then creates the 1 GiB
-  volume `lppwr<8 hex>` and provisions P on it (virtual Ethernet on the VLAN, vSCSI
+  volume `lppwr<8 hex>` through provision's `storage.capacity_mib` and provisions P on it (virtual Ethernet on the VLAN, vSCSI
   mapping, saved profile, the slot, PowerOn). Once P
   is activated, P's default and current profile must both be the `hmcpctl_…` profile
   the operation saved (`saved-profile-activated`; ADR 0313), and the client adapter is
@@ -765,11 +765,18 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   sent, `lshwres` must show P owning it (`pcie-slot-owned`; ADR 0318). It then proves the
   decommission dry run inventories the exact vSCSI
   mapping and client adapters without changing them. The real decommission runs as the
-  journaled operation `<token>-p-decommission` (ADR 0320); a run still going after its
-  600 s wait is polled to terminal or paused and repeated for its result. It removes
-  its own mapping before deleting P; the arm proves P and its mapping absent, the
-  backing volume retained, and foreign mappings and other volumes unchanged. Only
-  after these complete reads does teardown delete the run volume.
+  journaled operation `<token>-p-decommission` (ADR 0320) with
+  `storage_cleanup=delete_owned` and `exclusive_writer_window=true` (ADR 0323); a run
+  still going after its 600 s wait is polled to terminal or paused and repeated for its
+  result. It removes its own mapping before deleting P, then deletes the run volume,
+  which provision created and the ledger owns; the arm proves P and its mapping absent,
+  the run volume deleted and reported in `storage.deleted` (`owned-disk-deleted`), and
+  foreign mappings, the group's other volumes, `lspv` and `lsrep` unchanged
+  (`shared-storage-retained`). The arm no longer exercises `retain` natively; the
+  2026-10-09 run is its evidence. On 2026-11-03 (V10R3, POWER9) the `delete_owned`
+  decommission held all eight of its assertions and recovery reported clean (#1848).
+  Teardown deletes the run volume only when a run stopped before the decommission
+  removed it.
 - **Not run, recorded as SKIP rows naming what they need:** `hmc_dump_restart_lpar`,
   provision's SR-IOV and vNIC arguments, a graceful `hmc_power_lpar` stop or
   restart, and whole-system power.

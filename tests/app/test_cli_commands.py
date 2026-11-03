@@ -55,7 +55,8 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
 from hmcpctl.operations import jobs as operations_jobs
 from hmcpctl.operations.inventory.composite import _lpar_summary
-from hmcpctl.operations.logical.engine import BodyResult
+from hmcpctl.operations.logical import engine
+from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.lpar import ownership as lpar_ownership
 from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 from hmcpctl.operations.lpar.migration import LpmResult
@@ -506,6 +507,13 @@ class FakeHMC:
     async def list_volume_groups(self, vios_uuid):
         self._record("list_volume_groups", vios_uuid)
         return [self.vg]
+
+    async def get_volume_group(self, vios_uuid, vg_uuid):
+        self._record("get_volume_group", vios_uuid, vg_uuid)
+        return self.vg
+
+    async def delete_virtual_disk(self, vios_uuid, vg_uuid, disk_name):
+        self._record("delete_virtual_disk", vios_uuid, vg_uuid, disk_name)
 
     async def map_storage_to_lpar(self, vios_uuid, kind, disk, lpar_uuid, target):
         self._record("map_storage_to_lpar", vios_uuid, kind, disk, lpar_uuid, target)
@@ -2064,6 +2072,8 @@ def test_lpars_decommission_help_lists_cli_contract(fake_hmc):
         "--yes",
         "--request-id",
         "--continuation",
+        "--storage-cleanup",
+        "--exclusive-writer-window",
     }
 
 
@@ -2137,6 +2147,58 @@ def test_lpars_decommission_confirmed_prompt_names_target_and_executes(fake_hmc)
     names = [name for name, _, _ in fake_hmc.calls]
     assert "delete_logical_partition" in names
     assert "Aborted" not in result.stderr
+
+
+def _owned_disk(fake_hmc) -> None:
+    """Ledger a disk for the partition, as provision does, and list it in its group."""
+
+    async def seed(ctx):
+        identity = {
+            "vios_uuid": VIOS_UUID,
+            "vg_uuid": VG_UUID,
+            "disk_name": "lpar-a-root",
+        }
+        ctx.ledger_add("root_disk", "virtual_disk", SYSTEM_UUID, LPAR_UUID, identity)
+        return BodyResult("completed")
+
+    request = OperationRequest("seed", "hmcpctl", "<default>", "hmc.test", "seed", {})
+    engine.submit(request, seed, wait_seconds=30)
+    fake_hmc.vg["Resource"]["VirtualDisks"] = {
+        "VirtualDisk": [{"DiskName": "lpar-a-root"}]
+    }
+
+
+def test_lpars_decommission_delete_owned_deletes_the_owned_disk(fake_hmc):
+    _owned_disk(fake_hmc)
+    fake_hmc.lpar["Resource"]["PartitionState"] = "not activated"
+
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            LPAR_NAME,
+            "--system",
+            SYSTEM_UUID,
+            "--storage-cleanup",
+            "delete_owned",
+            "--exclusive-writer-window",
+            "--format",
+            "tsv",
+        ],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "deletes its recorded virtual disks" in result.output
+    assert "retains backing storage" not in result.output
+    deletes = [
+        args for name, args, _ in fake_hmc.calls if name == "delete_virtual_disk"
+    ]
+    assert deletes == [(VIOS_UUID, VG_UUID, "lpar-a-root")]
+    assert "storage.deleted\t0\tdisk_name\tlpar-a-root" in result.stdout
 
 
 def test_lpars_decommission_yes_executes_workflow(fake_hmc):
@@ -2266,6 +2328,17 @@ def test_lpars_decommission_resumes_a_paused_operation(fake_hmc):
         (["--request-id", "r1", "--dry-run"], "--system"),
         (["lpar-b", "--request-id", "r1", "--continuation", "resume"], "omit"),
         (["--request-id", "r1", "--continuation", "resume", "--immediate"], "omit"),
+        (
+            ["--request-id", "r1", "--continuation", "resume"]
+            + ["--storage-cleanup", "delete_owned"],
+            "omit",
+        ),
+        (["--request-id", "r1", "--storage-cleanup", "all"], "--storage-cleanup"),
+        (
+            ["lpar-b", "--request-id", "r1", "--system", SYSTEM_UUID]
+            + ["--storage-cleanup", "delete_owned"],
+            "--exclusive-writer-window",
+        ),
     ],
 )
 def test_lpars_decommission_refuses_bad_operation_input(fake_hmc, args, message):
@@ -2370,6 +2443,7 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
         ],
         "warnings": [],
         "operation": None,
+        "storage": None,
         "blast_radius": {
             "lpar_uuid": LPAR_UUID,
             "lpar_name": LPAR_NAME,

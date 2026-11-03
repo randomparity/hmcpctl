@@ -47,7 +47,14 @@ _LOG = logging.getLogger(__name__)
 
 
 class OperationFailed(Exception):
-    """The operation cannot proceed; every effect it recorded is accounted for."""
+    """The operation cannot proceed; every effect it recorded is accounted for.
+
+    *result*, when given, is stored as the operation's result, as a returned body's is.
+    """
+
+    def __init__(self, message: str, *, result: Mapping[str, Any] | None = None):
+        super().__init__(message)
+        self.result = result
 
 
 class EffectNotApplied(Exception):
@@ -122,6 +129,22 @@ def recorded_arguments(
     if row is None or row["tool"] != tool:
         return None
     return json.loads(row["request_json"])["arguments"]
+
+
+def recorded_partition(
+    agent_id: str, request_id: str, tool: str
+) -> tuple[str, str] | None:
+    """Return the (system, partition) UUIDs *tool*'s operation guards, or None.
+
+    Like ``recorded_arguments``, a continuation needs this before ``submit`` to authorize
+    against the recorded targets. Reading never creates the store.
+    """
+    store.validate_request_id(request_id)
+    with store.read_session() as conn:
+        row = None if conn is None else store.find_operation(conn, agent_id, request_id)
+    if row is None or row["tool"] != tool or row["partition_uuid"] is None:
+        return None
+    return row["system_uuid"], row["partition_uuid"]
 
 
 def _check_inputs(
@@ -403,11 +426,23 @@ async def _run(
         result_json = _result_json(result)
     except (OperationFailed, EffectNotApplied) as exc:
         definite = not ctx.has_uncertain()
+        warnings = [_warning(_failure(exc))]
+        carried = getattr(exc, "result", None)
+        try:
+            stored = (
+                None
+                if carried is None
+                else _result_json(BodyResult("completed", carried))
+            )
+        except ValueError as too_large:
+            stored = None
+            warnings.append(_warning(_failure(too_large)))
         _end(
             operation_id,
             "terminal" if definite else "paused",
             "failed" if definite else "needs_attention",
-            (_warning(_failure(exc)),),
+            tuple(warnings),
+            stored,
         )
         return
     except Exception as exc:  # noqa: BLE001 - any body defect pauses for attention
@@ -451,6 +486,8 @@ class OperationContext:
         self.connection: str = row["connection"]
         self.continuation = continuation
         self.arguments: Mapping[str, Any] = json.loads(row["request_json"])["arguments"]
+        # The result an earlier run stored, which a body may extend rather than replace.
+        self.earlier_result: Mapping[str, Any] = json.loads(row["result_json"] or "{}")
         self._phase: str = row["phase"]
         self._partition: tuple[str, str] | None = (
             None
@@ -533,6 +570,17 @@ class OperationContext:
                 partition_uuid=partition_uuid,
                 identity=plain,
             )
+
+    def ledger_remove(
+        self,
+        kind: str,
+        system_uuid: str,
+        partition_uuid: str,
+        match: Mapping[str, Any],
+    ) -> int:
+        """Delete one partition's *kind* entries whose identity holds *match* (ADR 0323)."""
+        with store.session() as conn, store.write_transaction(conn):
+            return store.remove_ledger(conn, kind, system_uuid, partition_uuid, match)
 
     def _settle(
         self, key: str, status: EffectStatus, identity: dict[str, Any] | None
