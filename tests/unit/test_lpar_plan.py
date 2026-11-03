@@ -18,6 +18,12 @@ from hmcpctl.operations.lpar.assignments import (
     LparPcieAssignments,
     SriovLogicalPortAssignment,
 )
+from hmcpctl.operations.lpar.install_media import (
+    InstallMedia,
+    InstallNetwork,
+    InstallRoute,
+    LparInstall,
+)
 from hmcpctl.operations.lpar.plan import (
     CAPACITY_TOOL,
     NETWORKS_TOOL,
@@ -27,10 +33,6 @@ from hmcpctl.operations.lpar.plan import (
     SYSTEMS_TOOL,
     VIOS_TOOL,
     VOLUME_GROUPS_TOOL,
-    InstallMedia,
-    InstallNetwork,
-    InstallRoute,
-    LparInstall,
     LparPlan,
     Placement,
     PlanAdapters,
