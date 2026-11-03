@@ -101,9 +101,9 @@ reads.
 - the rule that a profile with no virtual adapter is unsaved applies only under
   `require_adapter`. Reconfigure passes `True` when the plan has a disk or network add, so a
   removal-only save of the last adapter can confirm;
-- the leg reads the current `ClientNetworkAdapter` slots through the same complete-feed read
-  with `allow_empty=True` (204 → `[]`), not `adapters_missing_from_profile`'s `list_adapters`
-  route;
+- the leg's current-adapter reads are #1846's `adapters_missing_from_profile`, which reads
+  each adapter type's child feed (204 → `[]`), and the same child feeds for the slots current
+  adapters hold;
 - the classifier reads both keywords from the recorded plan through
   `plan.get("networks") or {}`, so a plan recorded before this change classifies as before;
 - the refusal texts of `require_persistable`, `_require_profile_jobs` and `_persist` name "a

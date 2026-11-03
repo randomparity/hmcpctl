@@ -6459,9 +6459,7 @@
                 "constraint": "detach: removes the provision-ledgered installer media mapping; needs exclusive_writer_window and an all-targets hmc_unmount_optical_media grant; refused unless not activated or RMC active"
               }
             ]
-          }
-        ],
-        "missing_scope": [
+          },
           {
             "variant": "added-disks",
             "parameters": [
@@ -6471,11 +6469,26 @@
               },
               {
                 "name": "patch.disks.add",
-                "constraint": "create, map and ledger-own; force-saves the default profile; refused with pending profile values, an activated partition without RMC, or HMC below 10.3.1060; native persistence proof pending (#1846)"
+                "constraint": "not-activated partition: create, map and ledger-own; force-saves the default profile, read back before completed; refused with pending profile values, beside boot or installer_media, or HMC below 10.3.1060"
               },
               {
                 "name": "patch.disks.detach",
-                "constraint": "one mapping to this partition only; the disk and its ledger entry stay; allow_disruption on an activated partition"
+                "constraint": "not-activated partition: one mapping to this partition only; the disk and its ledger entry stay"
+              }
+            ]
+          }
+        ],
+        "missing_scope": [
+          {
+            "variant": "added-disks-activated",
+            "parameters": [
+              {
+                "name": "allow_disruption",
+                "constraint": "required for a detach from an activated partition; no native proof yet"
+              },
+              {
+                "name": "patch.disks.add",
+                "constraint": "running partition with RMC active (DLPAR client adapter); no native proof yet"
               }
             ]
           },

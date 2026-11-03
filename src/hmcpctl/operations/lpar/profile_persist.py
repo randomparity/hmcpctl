@@ -26,7 +26,11 @@ from ...xmlutil import leaf_text
 from ..logical import engine
 from ..logical.engine import Classification, EffectNotApplied, OperationContext
 from ..logical.models import EffectRecord
-from .profile_sync import PROFILE_CHECKED_ADAPTER_TYPES, _profile_slots
+from .profile_sync import (
+    PROFILE_CHECKED_ADAPTER_TYPES,
+    _profile_slots,
+    adapters_missing_from_profile,
+)
 from .profiles import read_partition_profile, save_current_partition_profile
 
 # Persisted contract (ADR 0195 Consequences).
@@ -67,27 +71,17 @@ def _name(entry: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-async def _current_slots(
-    hmc: HMCClient, lpar_uuid: str
-) -> list[tuple[str, str | None]]:
-    """Each current client adapter's (type, virtual slot); the slot is None if unreported.
-
-    Client network adapters come from the complete-feed reader with an empty
-    collection (HTTP 204) read as none; ``list_adapters`` refuses that empty answer
-    (ADR 0325).
-    """
-    slots = []
+async def _held_slots(hmc: HMCClient, lpar_uuid: str) -> set[str]:
+    """The virtual slots the partition's current client adapters hold."""
+    held = set()
     for adapter_type in PROFILE_CHECKED_ADAPTER_TYPES:
-        if adapter_type == "ClientNetworkAdapter":
-            feed = await hmc._network_adapter_creation_feed(lpar_uuid, allow_empty=True)
-        else:
-            feed = await hmc.list_adapters(lpar_uuid, adapter_type)
-        for adapter in feed:
+        for adapter in await hmc.list_child(
+            "LogicalPartition", lpar_uuid, adapter_type
+        ):
             slot = leaf_text((adapter.get("Resource") or {}).get("VirtualSlotNumber"))
-            slots.append(
-                (adapter_type, slot.strip() if isinstance(slot, str) else None)
-            )
-    return slots
+            if isinstance(slot, str):
+                held.add(slot.strip())
+    return held
 
 
 async def persisted(
@@ -120,18 +114,14 @@ async def persisted(
         name for entry in entries if (name := _name(entry)).startswith(RECOVERY_PREFIX)
     )
     saved = _profile_slots(found[0])
-    current = await _current_slots(hmc, lpar_uuid)
-    missing = [
-        f"{adapter_type} in virtual slot {slot or 'not reported'}"
-        for adapter_type, slot in current
-        if slot is None or slot not in saved
-    ]
-    held = {slot for _, slot in current}
-    missing += [
-        f"removed adapter in virtual slot {slot} still in the profile"
-        for slot in removed_slots
-        if slot in saved and slot not in held
-    ]
+    missing = await adapters_missing_from_profile(hmc, lpar_uuid, found[0])
+    if removed_slots:
+        held = await _held_slots(hmc, lpar_uuid)
+        missing += [
+            f"removed adapter in virtual slot {slot} still in the profile"
+            for slot in removed_slots
+            if slot in saved and slot not in held
+        ]
     if require_adapter and not saved:
         missing = missing or ["any virtual adapter"]
     return missing, recovery

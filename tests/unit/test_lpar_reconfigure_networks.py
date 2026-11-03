@@ -510,11 +510,11 @@ class BodyMixin(NetHMC):
         self.level = "1060"
 
     async def list_child(self, parent, uuid, child):
-        assert (parent, uuid, child) == (
-            "LogicalPartition",
-            LPAR,
-            "LogicalPartitionProfile",
-        )
+        assert (parent, uuid) == ("LogicalPartition", LPAR)
+        if child == "ClientNetworkAdapter":
+            return list(self.adapters)
+        if child != "LogicalPartitionProfile":
+            return []
         return [_profile_entry("default", self.saved_slots)] + [
             _profile_entry(name, ()) for name in self.recovery
         ]
@@ -698,7 +698,7 @@ def test_persistence_guards_refuse_before_any_write(body, setup, patch, message)
     record = _submit({**patch, "networks": {"add": [{"port_vlan_id": 30}]}})
     assert (record.outcome, record.effects) == ("failed", ())
     assert message in record.warnings[0]
-    assert "network change" in record.warnings[0]
+    assert "a change that saves" in record.warnings[0]
     assert _writes(body) == []
 
 

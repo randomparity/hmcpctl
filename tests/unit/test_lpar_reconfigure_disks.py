@@ -111,17 +111,12 @@ class StorageMixin:
         return []
 
     async def list_child(self, parent, uuid, child):
-        assert (parent, uuid, child) == (
-            "LogicalPartition",
-            LPAR,
-            "LogicalPartitionProfile",
-        )
-        return [_profile_entry("default", self.saved_slots)] + [
-            _profile_entry(name, ()) for name in self.recovery
-        ]
-
-    async def list_adapters(self, uuid, adapter_type):
-        if adapter_type != "VirtualSCSIClientAdapter":
+        assert (parent, uuid) == ("LogicalPartition", LPAR)
+        if child == "LogicalPartitionProfile":
+            return [_profile_entry("default", self.saved_slots)] + [
+                _profile_entry(name, ()) for name in self.recovery
+            ]
+        if child != "VirtualSCSIClientAdapter":
             return []
         slots = [slot for _, lpar, _, slot in self.maps if lpar == uuid]
         return [{"Resource": {"VirtualSlotNumber": str(slot)}} for slot in slots]
@@ -213,6 +208,15 @@ def _writes(fake):
 def test_the_patch_refuses_malformed_disks(disks, message):
     with pytest.raises(ValueError, match=message):
         ReconfigurePatch(disks=disks)
+
+
+@pytest.mark.parametrize(
+    "other", [{"boot": "root_disk"}, {"installer_media": "detach"}]
+)
+def test_an_add_cannot_share_a_patch_with_the_installer_legs(other):
+    with pytest.raises(ValueError, match="split the patch"):
+        ReconfigurePatch(disks={"add": [ADD]}, **other)
+    ReconfigurePatch(disks={"detach": [{"vios_uuid": VIOS, "name": "x"}]}, **other)
 
 
 def test_disks_need_the_window_and_their_tools():

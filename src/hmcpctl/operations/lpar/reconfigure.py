@@ -178,6 +178,11 @@ class ReconfigurePatch(BaseModel):
     memory_mib: StrictInt | None = Field(
         default=None, gt=0, description="Desired memory in MiB."
     )
+    disks: DiskPatch | None = Field(
+        default=None,
+        description="Virtual disks to add (created, mapped, owned and saved into the "
+        "default profile) and to detach (the mapping only).",
+    )
     boot: Literal["root_disk"] | None = Field(
         default=None,
         description="Set the pending boot order to the root disk provision created; "
@@ -188,11 +193,6 @@ class ReconfigurePatch(BaseModel):
         description="Remove the mapping of the installer media provision mounted; the "
         "medium stays in the repository (ADR 0321).",
     )
-    disks: DiskPatch | None = Field(
-        default=None,
-        description="Virtual disks to add (created, mapped, owned and saved into the "
-        "default profile) and to detach (the mapping only).",
-    )
     networks: network.NetworkPatch | None = Field(
         default=None,
         description="Client network adapters to add by VLAN and to remove by MAC; both "
@@ -201,15 +201,25 @@ class ReconfigurePatch(BaseModel):
 
     @model_validator(mode="after")
     def _not_empty(self) -> ReconfigurePatch:
-        if all(
-            getattr(self, field) is None for field in (*DELEGATED, "disks", "networks")
-        ):
+        fields = [getattr(self, field) for field in DELEGATED]
+        if all(value is None for value in [*fields, self.disks, self.networks]):
             raise ValueError(
                 "patch needs at least one of name, processors, memory_mib, boot, "
                 "installer_media, disks, networks"
             )
         if self.name is not None and not self.name.strip():
             raise ValueError("patch.name must not be blank")
+        if (
+            self.disks is not None
+            and self.disks.add
+            and (self.boot or self.installer_media)
+        ):
+            # The installer legs skip the plan's state basis (ADR 0321 Decision 4), and
+            # the save after them needs it, so the two are separate requests.
+            raise ValueError(
+                "disks.add cannot share a patch with boot or installer_media; "
+                "split the patch"
+            )
         return self
 
     @property
@@ -218,11 +228,7 @@ class ReconfigurePatch(BaseModel):
 
     @property
     def needs_window(self) -> bool:
-        """Whether the caller must assert ``exclusive_writer_window``.
-
-        A profile write, a VIOS mapping write, or a force-save (ADRs 0314, 0321, 0322,
-        0325).
-        """
+        """A profile or VIOS write: the caller must assert the writer window."""
         return (
             self.writes_profile
             or self.installer_media is not None
@@ -602,18 +608,16 @@ def require_persistable(
     """
     if any(change["applied"] == "pending_activation" for change in changes):
         raise OperationFailed(
-            "a disk add or network change saves the current configuration over the "
-            "default profile, which would discard this patch's pending_activation "
-            "change; split the patch"
+            "a change that saves the current configuration over the default profile "
+            "would discard this patch's pending_activation change; split the patch"
         )
     for resource in ("memory", "processors", "units"):
         saved, current = profile[resource], view[resource]
         if saved is not None and current is not None and saved[1] != current[1]:
             raise OperationFailed(
                 f"the default profile's desired {resource} differs from the partition's; "
-                "a disk add or network change saves the current configuration over it "
-                "and would discard the profile's value. Activate the profile first, or "
-                "change the value"
+                "a change that saves the current configuration over it would discard "
+                "the profile's value. Activate the profile first, or change the value"
             )
 
 
@@ -732,8 +736,8 @@ async def _require_profile_jobs(hmc: HMCClient) -> None:
     version = console_version(resource)
     if version is None or version < PROFILE_JOB_MINIMUM:
         raise OperationFailed(
-            "a disk add or network change saves the partition's profile through a "
-            "profile job, which needs HMC 10.3.1060 or later; this console's level is "
+            "a change that saves the partition's profile uses a profile job, which needs "
+            "HMC 10.3.1060 or later; this console's level is "
             f"{'unreadable' if version is None else '.'.join(map(str, version))}"
         )
 
@@ -897,6 +901,7 @@ async def _make_plan(
         require_detachable(view, lpar_uuid)
         media, media_change = await plan_media(hmc, system_uuid, lpar_uuid)
     plan = plan_changes(patch, view, profile, allow_disruption, boot is not None)
+    plan["changes"] += [c for c in (boot_change, media_change) if c is not None]
     disks = None
     if patch.disks is not None:
         assert profile is not None
@@ -924,7 +929,6 @@ async def _make_plan(
             lpar_uuid=lpar_uuid,
             allow_disruption=allow_disruption,
         )
-    plan["changes"] += [c for c in (boot_change, media_change) if c is not None]
     pending = any(c["applied"] == "pending_activation" for c in plan["changes"])
     plan |= {
         "system_uuid": system_uuid,
@@ -1261,7 +1265,7 @@ async def _persist(
     if record.name != name or _stale(ctx, plan, view):
         raise OperationFailed(
             f"LPAR {lpar_uuid}'s default profile or state changed since the plan was "
-            "made; the disk or network changes were not saved into a profile"
+            "made; the current configuration was not saved into a profile"
         )
     require_persistable(view, profile, [])
     await ctx.effect(
@@ -1590,8 +1594,6 @@ RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
         _profile_values, lambda connection: open_client(connection)
     ),
     RENAME_KIND: _classify_rename,
-    BOOT_KIND: boot_classifier(_plan_of, lambda connection: open_client(connection)),
-    MEDIA_KIND: media_classifier(_plan_of, lambda connection: open_client(connection)),
     UNMAP_KIND: _classify_unmap,
     DISK_KIND: _classify_disk,
     MAP_KIND: _classify_map,
@@ -1604,4 +1606,6 @@ RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
     network.REMOVE_KIND: network.remove_classifier(
         _plan_of, lambda connection: open_client(connection)
     ),
+    BOOT_KIND: boot_classifier(_plan_of, lambda connection: open_client(connection)),
+    MEDIA_KIND: media_classifier(_plan_of, lambda connection: open_client(connection)),
 }
