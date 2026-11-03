@@ -16,7 +16,7 @@ command beside mount and unmount:
 
 | Operation | MCP tool (effect) | CLI | VIOS command |
 |---|---|---|---|
-| `load_optical_media` | `hmc_load_optical_media` (`mutate`, `media.load`) | `storage load-optical-media` | `loadopt [-release] -disk M -vtd V` |
+| `load_optical_media` | `hmc_load_optical_media` (`destructive`, `media.load`) | `storage load-optical-media` | `loadopt [-release] -disk M -vtd V` |
 | `unload_optical_media` | `hmc_unload_optical_media` (`destructive`, `media.unload`) | `storage unload-optical-media` | `unloadopt [-release] -vtd V` |
 
 Inputs: `vios_name_or_uuid`, `lpar_name_or_uuid`, `media_name` (load only), optional
@@ -33,14 +33,19 @@ Sequence, each step refusing before any later one runs:
    `TargetName` of each mapping whose `TargetDevice` holds a `VirtualOpticalTargetDevice`, with or
    without `Storage`. A supplied `target_device` must be in that set; an omitted one requires the
    set to hold exactly one name. Otherwise raise `HMCError` naming the candidates (or none).
-   The chosen name must also match the device-name rule.
+   A selected device whose name is outside the device-name rule is refused with a message
+   naming the mapped device (not the caller's argument).
 4. Read the VIOS (`hmc.get_vios`): `PartitionID` must be a positive integer and
    `AssociatedManagedSystem` must link a system UUID, resolved to its `SystemName`. Either missing
    raises `HMCError` before any command.
 5. When `release` is true, emit the `optical-release` audit record.
 6. Submit `viosvrcmd -m <system> --id <id> -c '<inner>'` through `run_hmc_command` with a 64 KiB
-   output bound. A non-zero exit raises `HMCError` naming the action, VTD and VIOS, carrying the
-   HMC's text, and stating that nothing was retried.
+   output bound, and classify the answer (ADR 0317 decision 5):
+   - exit 0 and output `:` after stripping whitespace → success;
+   - `HMCCLIError` with `remote_nonzero_completed` → `HMCError` "refused", carrying the HMC's text;
+   - any other `HMCError`, or exit 0 with any other output → `HMCError` "completion unknown; read
+     the device (`hmc_list_storage_mappings`) before retrying", carrying the text.
+   Each names the action, VTD and VIOS and states that nothing was retried.
 
 Result (`StorageMutationResult.from_raw`): `action`, `vios_uuid`, `lpar_uuid`, `target_device`,
 `media_name` (load) and `release`. No `change_location`: the device's medium is VIOS state, not
@@ -49,15 +54,24 @@ prompt that, when declined, submits nothing.
 
 Audit: `event: "optical-release"` with `action` (`load`/`unload`), `system`, `vios`, `lpar`,
 `target_device`, `media` (null on unload), `host` and `attribution`, emitted at warning level,
-documented in `docs/authorization-audit.md`.
+documented in `docs/authorization-audit.md`. A call refused in steps 1–4 emits none.
 
-Registries updated as their gates require: tool security, capability operations/maturity, ADR
-0092's classification table, `docs/tools/` (regenerated), the vmedia live arm and recovery list.
+Registries and docs: capability `operations.json`/`maturity.json` rows; ADR 0092 §3 rows for both
+operations, with `load_`/`unload_` added to `_MUTATOR_PREFIXES` in
+`tests/unit/test_adr_0092_citations.py` so the guard-reachability check covers them;
+`_VMEDIA_MUTATIONS` in `scripts/live_test_recovery.py`; the storage mutation list in
+`docs/cli.md`; `docs/tools/` (regenerated). The unmount and unload docstrings say an unloaded
+mapping is listed only by `hmc_list_storage_mappings` and must be loaded again before unmount
+can remove it.
 
 Live arm: ST71 (`scripts/live_test/vmedia_media_change.py`) replaces its raw `viosvrcmd`
 `unloadopt`/`loadopt` calls (Q2, Q3 and the cleanup reload) with the two tools. After the immediate
 power-off, Q3 runs unload, load with `release=True`, unload with `release=True`, then load, each
-followed by the existing `lsvopt` read. Q1 and Q4 are unchanged.
+followed by the existing `lsvopt` read. Each tool step is a PASS row only when the tool succeeded
+and the following `lsvopt` reads the expected medium (or `No Media`). One negative step loads
+the second medium into the occupied device through the tool and records the tool's answer; the
+raw `viosvrcmd` refusal is captured once as a fixture for the classification test. Q1 and Q4 are
+unchanged.
 
 Not in scope: `-f`, retrying after a failure, verifying the medium by a readback, and the
 exclusions in the issue's `WORK:SCOPE`.
@@ -69,15 +83,19 @@ exclusions in the issue's `WORK:SCOPE`.
    - the live arm on the operator host.
 2. **Invariants and assets at stake**
    - a client partition's loaded medium (an installer or boot image);
-   - the ownership rule: a foreign LPAR's device is never changed;
-   - the audit trail for every `release` request.
+   - the ownership rule: a device not bound to the authorized LPAR at the binding read is not
+     changed;
+   - an audit record for every `release` request submitted to the VIOS.
 3. **Accepted failure classes**
    - a failed command leaves the device in whatever state the VIOS left it; the error says
      nothing was retried and the operator inspects (`hmc_list_storage_mappings`). Cost bounded to
      one device;
    - a mapping change between step 3 and step 6 is not detected; ADR 0079 puts serializing VIOS
      mapping changes on the caller;
-   - a medium name outside the rule is refused although the VIOS might accept it (ADR 0317).
+   - a medium or device name outside the rules is refused although the VIOS might accept it,
+     including a device pinned at mount (ADR 0317);
+   - an unloaded mapping is invisible to `hmc_list_optical_mappings` and not removable by
+     `hmc_unmount_optical_media` until reloaded; documented in both tools.
 4. **Covered elsewhere**
    - retry after a 5xx: ADR 0169; concurrent VIOS writes: ADR 0079;
    - repository creation and ISO upload: ADR 0031/0049; physical optical devices: out of scope.
@@ -102,15 +120,22 @@ exclusions in the issue's `WORK:SCOPE`.
   `-release` only when requested.
 - Refusals happen before any write for: a bad name, a foreign or unowned LPAR, a device not owned
   by the LPAR's mapping, zero or several candidate devices, and an unusable VIOS identity.
-- A `release=True` call emits exactly one `optical-release` record before the command.
+- A `release=True` call that passes steps 1–4 emits exactly one `optical-release` record before
+  the command; a refused call emits none. (The sink drops a record it cannot render, ADR 0040.)
+- A refusal, an unknown completion, and an unexpected exit-0 answer are each reported as such,
+  never as success.
 - Live: the tools load, unload and run the release form on the test partition (ST71).
 
 ## Validation
 
 - `tests/storage/test_optical_load.py` (focused-test): command text matched against
-  `cli-vios-loadopt`/`cli-vios-unloadopt` (and the `-release` forms from the help fixtures); every
-  refusal above makes no SSH call; binding works for an empty device; error wording on non-zero
-  exit; audit record emitted only with `release`.
+  `cli-vios-loadopt`/`cli-vios-unloadopt` after substituting their redaction tokens (`dev-14`,
+  `media-2`) with rule-conformant names, plus a test that the unsubstituted tokens are refused;
+  `-release` placement from the help fixtures; binding driven through `list_storage_mappings`
+  over `rest-vios-scsi-mapping-unmapped-adapter.json` (empty device) and
+  `rest-vios-scsi-mapping-replace-storage.json` (loaded devices), tokens substituted the same way;
+  every refusal above makes no SSH call; the three outcome classes, the refusal one from the
+  captured refused `loadopt` once the live proof commits it; audit record only with `release`.
 - `tests/unit/test_audit.py`: the `optical-release` record shape.
 - `tests/storage/test_storage_tools.py`, `tests/app/test_cli_commands.py`: wrappers forward
   arguments; a declined CLI prompt does not call the operation.
