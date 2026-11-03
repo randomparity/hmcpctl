@@ -1,0 +1,7 @@
+{
+  "capture": "2026-11-02-q1284/run2/vmedia-media-change-b62996d0.capture.jsonl#78",
+  "command": "viosvrcmd -m sys-R1 --id 100 -c 'lsvopt -vtd dev-14'",
+  "exit_status": 0,
+  "stdout": "Media                                                 Size(mb)\nmedia-3                                     1024\n",
+  "stderr": ""
+}

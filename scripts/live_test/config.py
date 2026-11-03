@@ -456,6 +456,9 @@ class LiveTestArtifacts:
     # and the blank medium the vmedia arm (ST19) creates in it (#1347).
     vmedia_vg_uuid: str | None = None
     vmedia_blank_name: str | None = None
+    # The two blank media the media-change capture (ST71) creates, each recorded before
+    # its create so recovery and ST22 can find one a lost response left (#1284).
+    vmedia_change_names: list[str] = field(default_factory=list)
     # The logical volume the storage arm (ST40) is about to create, recorded before
     # the create so a lost response is still tracked (#1348).
     storage_disk_name: str | None = None
@@ -616,8 +619,13 @@ def decode_artifacts(value: Any) -> LiveTestArtifacts:
         ("system_profile_baseline", {}),
         ("system_profile_phase", None),
         ("system_profile_jobs", []),
+        ("vmedia_change_names", []),
     ):
         parsed.setdefault(name, default)
+    if not isinstance(parsed["vmedia_change_names"], list) or not all(
+        isinstance(n, str) for n in parsed["vmedia_change_names"]
+    ):
+        raise TypeError("vmedia change names must be a string array")
     if not isinstance(parsed["system_profile_names"], list) or not all(
         isinstance(n, str) for n in parsed["system_profile_names"]
     ):

@@ -1,0 +1,7 @@
+{
+  "capture": "2026-11-02-q1284/run2/vmedia-media-change-b62996d0.capture.jsonl#58",
+  "command": "viosvrcmd -m sys-R1 --id 100 -c 'help loadopt'",
+  "exit_status": 0,
+  "stdout": "Usage: loadopt [-f] [-release] -disk FileName -vtd VirtualTargetDevice\n\n        Loads the specified virtual optical media into the given \n        file-backed virtual optical device.\n\n       -disk     Specifies the virtual media to load\n\n       -vtd      Specifies the virtual target device of the file backed\n                 virtual optical device.\n\n       -f        Forces the virtual media to be loaded even if the virtual\n                 optical device has other media loaded.\n\n       -release  Forces the virtual optical device to be released if\n                 client partition has issued a reserve on the device.\n\n",
+  "stderr": ""
+}

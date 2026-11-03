@@ -1,0 +1,7 @@
+{
+  "capture": "2026-11-02-q1284/run2/vmedia-media-change-b62996d0.capture.jsonl#59",
+  "command": "viosvrcmd -m sys-R1 --id 100 -c 'help unloadopt'",
+  "exit_status": 0,
+  "stdout": "Usage: unloadopt [-release] -vtd VirtualTargetDevice\n\n       Unloads the virtual media from the specified file-backed virtual \n       optical device.\n\n       -vtd      Specifies the virtual target device\n\n       -release  Forces the virtual optical device to be released if\n                 client partition has issued a reserve on the device.\n\n",
+  "stderr": ""
+}

@@ -44,6 +44,51 @@ partition with no mapping, read while it existed, and removed. The REST body is 
 `ViosSCSIMapping` group, and the listing is the #1237 `lshwres` command. Its `MACAddressPrefix`
 is zeroed, which the exporter does not do. Their token map is their own, as for the exports above.
 
+The `capture` prefix `2026-11-02-q1284/` marks two runs of the `vmedia-media-change` arm
+(`docs/live-testing.md`) in operator-authorized windows for #1284, on the V10R3 HMC and POWER9
+system above. They answer how media change in an existing virtual optical device:
+
+- **First run** (`vmedia-media-change-e0fd437b.capture.jsonl`). `rest-vios-optical-mapping-create-refused`
+  is the `ViosSCSIMapping` POST that `hmc_mount_optical_media` sent for a blank medium on the Not
+  Activated test partition `sys-R1-lp3`, whose profile had never been applied: HTTP 500 REST0269,
+  "Perform Apply profile or Partition activation". That refused create still left a VIOS server
+  adapter with no mapping (slot 5 toward the partition's slot 4); its `lshwres` listing (record
+  `#91`, not committed) has the same shape as `cli-vios-scsi-unmapped-adapter`: one extra VIOS
+  slot toward the partition, with no client slot. The
+  adapter was removed by hand, and the operator then applied the partition's existing profile,
+  which stays applied.
+- **Second run** (`run2/vmedia-media-change-b62996d0.capture.jsonl`), after that apply. The mount
+  succeeded and the HMC added a server/client adapter pair (VIOS slot 5, partition slot 4).
+  - Q1: `rest-vios-scsi-mapping-replace-storage` is the 200 answer to a read-modify-write POST
+    whose only change replaced the mounted mapping's `Storage` with a `VirtualOpticalMedia`
+    naming the second medium. `cli-vios-lsvopt-after-storage-post` shows the device then held
+    that medium: on V10R3 the REST write changes the loaded medium in place. The mapping and its
+    VTD name were unchanged. Q1 on the V11R2 HMC is unanswered: that HMC is read-only under the
+    current live authority.
+  - Q2: `cli-vios-help-loadopt` and `cli-vios-help-unloadopt` give the flag syntax
+    (`loadopt [-f] [-release] -disk … -vtd …`, `unloadopt [-release] -vtd …`).
+    `cli-vios-unloadopt`, `cli-vios-lsvopt-no-media` and `cli-vios-loadopt` are the `viosvrcmd`
+    swap with the partition off: both exit 0 and print only `:`, and `lsvopt` reads `No Media`
+    in between. So `viosvrcmd` is a working path, but not the only one (Q1). A CLIRunner job is
+    not exercised: it is a REST transport for the same VIOS command, and hmcpctl's CLI transport
+    is SSH.
+  - Q3: the partition was powered on (`rest-job-poweron-completed-q1284`, the PowerOn job
+    `COMPLETED_OK`; the partition then read `running`) and immediately off, then plain
+    `unloadopt` and `loadopt` both exited 0 (`cli-vios-unloadopt-after-power-off`,
+    `cli-vios-loadopt-after-power-off`). `-release` was not needed at this level, so the
+    with-release form is unexercised. The partition has no operating system that opens the
+    device, so the client reservation #1280 hit was not reproduced.
+  - Q4: `rest-vios-optical-mapping-vtd-in-use` is the verbatim HTTP 500 for a second mapping
+    naming the mounted VTD: `VTD <name> name is already used in another mapping`, with a trailing
+    newline inside `Message`. The adapter listings before it (`cli-vios-scsi-adapters-before-collision`,
+    `cli-lpar-scsi-adapters-before-collision`) and after it (`…-after-collision`) are identical, so
+    this refused create left no orphan adapter, unlike the REST0269 refusal above.
+
+The raw captures and results are retained privately on the operator host, not in any repository.
+Their token maps are their own, and each run's tokens are local to its own fixtures (the VTD
+`dev-14` and media `media-2`/`media-3` are second-run tokens). Never join them to other fixtures by
+token.
+
 `rest-user-create-remote-user-id-refused` and `rest-user-profile-kerberos` (`capture` prefix
 `2026-10-13-q1414/`) come from an operator-authorized window for #1414 on the V10R3 HMC, each
 run making at most one disposable Kerberos-type user with a synthetic principal, then deleting
