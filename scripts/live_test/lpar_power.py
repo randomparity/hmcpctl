@@ -70,6 +70,8 @@ _STATE_POLL_ATTEMPTS = 30
 _STATE_POLL_DELAY_S = 10.0
 _OPERATION_POLLS = 10
 _OPERATION_POLL_DELAY_S = 30.0
+# At that delay, 40 polls cover a PowerOff of _JOB_TIMEOUT_S beyond the 600 s wait.
+_DECOMMISSION_POLLS = 40
 _COMPARE_REREAD_DELAY_S = 30.0
 _NOT_ACTIVATED = "not activated"
 _FIRMWARE_STATES = frozenset({"open firmware", "running"})
@@ -1232,7 +1234,7 @@ async def _decommission(
     # Registered only once recorded: a refused decommission has nothing to abandon.
     run.decommissions.add(request_id)
     polled = False
-    for _ in range(_OPERATION_POLLS):
+    for _ in range(_DECOMMISSION_POLLS):
         if operation.get("state") in {"terminal", "paused"}:
             break
         polled = True
