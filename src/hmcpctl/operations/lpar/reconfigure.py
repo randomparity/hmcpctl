@@ -572,6 +572,7 @@ async def _disk_plan(
     view: Mapping[str, Any],
     system_uuid: str,
     lpar_uuid: str,
+    *,
     allow_disruption: bool,
 ) -> dict[str, Any]:
     """The disk writes *disks* needs, checked against live VIOS state (ADR 0322)."""
@@ -829,7 +830,12 @@ async def _make_plan(
     if patch.disks is not None:
         assert profile is not None
         disks = await _disk_plan(
-            hmc, patch.disks, view, system_uuid, lpar_uuid, allow_disruption
+            hmc,
+            patch.disks,
+            view,
+            system_uuid,
+            lpar_uuid,
+            allow_disruption=allow_disruption,
         )
         if disks["add"]:
             require_persistable(view, profile, plan["changes"])
@@ -1055,6 +1061,29 @@ def _stale(
     return observed != expected
 
 
+def _write_for(hmc: HMCClient, plan: Mapping[str, Any], key: str, kind: str) -> Write:
+    """The write the plan's step *key* of *kind* performs."""
+    lpar_uuid = plan["lpar_uuid"]
+    if key == PROFILE_KEY:
+        return _profile_write(hmc, plan)
+    if key == CURRENT_KEY:
+        return _partition_write(
+            hmc,
+            lpar_uuid,
+            "the current configuration",
+            resources=LparResources(**plan["current"]),
+        )
+    if key == RENAME_KEY:
+        return _partition_write(
+            hmc, lpar_uuid, "the partition name", name=plan["rename"]["after"]
+        )
+    if kind == UNMAP_KIND:
+        return _unmap_write(hmc, lpar_uuid, plan["disks"]["detach"][_index(key)])
+    if kind == DISK_KIND:
+        return _disk_write(hmc, plan["disks"]["add"][_index(key)])
+    return _map_write(hmc, lpar_uuid, plan["disks"]["add"][_index(key)])
+
+
 async def _apply(
     ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
 ) -> None:
@@ -1074,25 +1103,7 @@ async def _apply(
                 "sync, name or resources); this run wrote nothing, and the effects list "
                 "shows what earlier runs applied. Start a new request"
             )
-        if key == PROFILE_KEY:
-            write = _profile_write(hmc, plan)
-        elif key == CURRENT_KEY:
-            write = _partition_write(
-                hmc,
-                lpar_uuid,
-                "the current configuration",
-                resources=LparResources(**plan["current"]),
-            )
-        elif key == RENAME_KEY:
-            write = _partition_write(
-                hmc, lpar_uuid, "the partition name", name=plan["rename"]["after"]
-            )
-        elif kind == UNMAP_KIND:
-            write = _unmap_write(hmc, lpar_uuid, plan["disks"]["detach"][_index(key)])
-        elif kind == DISK_KIND:
-            write = _disk_write(hmc, plan["disks"]["add"][_index(key)])
-        else:
-            write = _map_write(hmc, lpar_uuid, plan["disks"]["add"][_index(key)])
+        write = _write_for(hmc, plan, key, kind)
         await ctx.effect(key, kind, target, write)
         if kind == DISK_KIND:
             _ledger(ctx, plan, _index(key))
