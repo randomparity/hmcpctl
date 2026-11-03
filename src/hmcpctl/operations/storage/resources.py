@@ -1270,11 +1270,12 @@ async def unmount_optical_media(
 
     Removing the mapping is the whole unmount as this client implements it:
     mount_optical_media creates a VirtualSCSIMapping with the media referenced
-    inside it, and no unload-without-detach path has been identified on the
-    surveyed firmware, so detaching the mapping and unmounting the image are one
-    operation here.  (#403 and ADR 0079 record only that a detailed
-    VirtualSCSIMapping is not directly addressable; establishing the absence of
-    an unload path would need its own live survey, on the ADR 0069 pattern.)
+    inside it, so detaching the mapping and unmounting the image are one
+    operation here. The #1284 live survey (V10R3) found two paths that change the
+    loaded medium without detaching: a mapping-group POST that replaces the
+    mapping's ``Storage`` (fixture rest-vios-scsi-mapping-replace-storage), and the
+    VIOS ``unloadopt``/``loadopt`` commands (cli-vios-unloadopt, cli-vios-loadopt).
+    This client uses neither yet (#1285).
 
     Empty, missing, ambiguous, or malformed identities fail without a POST, as
     required by ADR 0079.

@@ -7,7 +7,7 @@ a JSON document on exit.
 This mutates a managed system. The procedure is docs/live-testing.md: run
 `scripts/live_test_preflight.py` to see what a selection will touch,
 `scripts/live_{round2,vmedia,sriov,dedicated,bare_cec,profiles,users,vios_backup,pcm,
-lpar_config,lpar_power,storage}.py` to dispatch one arm,
+lpar_config,lpar_power,storage,vmedia_media_change}.py` to dispatch one arm,
 `scripts/live_test_evidence.py` to produce a citable matrix, and
 `scripts/live_test_recovery.py` afterwards to confirm nothing is stranded.
 
@@ -17,11 +17,12 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 70; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66, ST67 and ST70 require named groups and are excluded from default and all selections.
-Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45 and 46 SKIP outside their
+Registered subtasks span 0 through 71; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70 and ST71 require named groups and are excluded from default and all selections.
+Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46 and 71 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
-`lpar-power`, `partition-profile-contract` and `partition-profiles` groups. A bare
+`lpar-power`, `partition-profile-contract`, `partition-profiles` and
+`vmedia-media-change` groups. A bare
 number runs that one subtask; `--group NAME` runs one arm. Results go to `test-results-<group>.json`, or `test-results-round2.json`
 for a bare or whole-suite run, unless
 `--results-file` names another path. That path must be git-ignored.
@@ -152,6 +153,7 @@ from live_test.vmedia import (
     vmedia_teardown,
     vmedia_upload_iso,
 )
+from live_test.vmedia_media_change import vmedia_media_change
 
 # ---------------------------------------------------------------------------
 # Pre-run guard: HMC credentials must resolve before the first dispatch
@@ -722,6 +724,7 @@ SUBTASKS = {
     58: exercise_creation_memory_layout,
     59: exercise_processor_sharing_weight,
     64: exercise_accelerator_qos,
+    71: vmedia_media_change,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -788,6 +791,9 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     # Not in "all": the arm creates, powers, provisions and deletes its own
     # partitions and a VIOS volume (#1346).
     "lpar-power": [41],
+    # Not in "all": powers the test partition on and off and writes raw VIOS
+    # mappings to capture how a virtual optical device changes media (#1284).
+    "vmedia-media-change": [16, 71, 22],
     "all": list(range(26)),
 }
 
@@ -1091,7 +1097,26 @@ async def main(
             n
             for n in SUBTASKS
             if n
-            not in {44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 59, 61, 64, 65, 66, 67, 70}
+            not in {
+                44,
+                45,
+                46,
+                52,
+                53,
+                54,
+                55,
+                56,
+                57,
+                58,
+                59,
+                61,
+                64,
+                65,
+                66,
+                67,
+                70,
+                71,
+            }
         )
 
     # Every invocation preserves its destination; only subsets borrow another arm's context.

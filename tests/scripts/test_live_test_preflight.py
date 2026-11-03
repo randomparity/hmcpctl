@@ -337,6 +337,23 @@ def test_the_vmedia_verdict_names_each_change_it_makes(workspace, monkeypatch, c
     assert "no other medium or mapping is unmounted or deleted" in output
 
 
+def test_the_vmedia_media_change_verdict_names_each_change_it_makes(
+    workspace, monkeypatch, capsys
+):
+    """#1284. The capture's raw writes, power cycle and possible manual residue."""
+    (workspace / ".env").write_text(_env_text(**_DEDICATED), encoding="utf-8")
+    _credentials(monkeypatch)
+
+    assert preflight.main(["--group", "vmedia-media-change", "--skip-hardware"]) == 0
+
+    output = capsys.readouterr().out
+    assert "RUNNABLE" in output
+    assert "two blank 1 GiB media hmcpctl_live_<8 hex>" in output
+    assert "two raw ViosSCSIMapping POSTs" in output
+    assert "chhwres -o r" in output
+    assert "powered on and immediately off once" in output
+
+
 def test_the_storage_verdict_names_each_change_it_makes(workspace, monkeypatch, capsys):
     """#1348. One run-named volume at a time, mapped only while Not Activated."""
     (workspace / ".env").write_text(_env_text(**_DEDICATED), encoding="utf-8")

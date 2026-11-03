@@ -303,7 +303,7 @@ _ADAPTER_SIDE_EFFECT = (
 )
 
 # The HMC's 500 body when a mapping create names a VTD another mapping holds,
-# observed once on V10R3 (#1280); no capture pins the wording yet (#1284).
+# captured on V10R3 (#1284, fixture rest-vios-optical-mapping-vtd-in-use).
 _VTD_NAME_IN_USE = "name is already used in another mapping"
 
 

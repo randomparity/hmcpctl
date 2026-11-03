@@ -158,6 +158,7 @@ below. The table does not grant hardware or VIOS access.
 |---|---|---|
 | round2 | `uv run --no-sync python scripts/live_round2.py` | subtasks 0–15 except 11 |
 | vmedia | `uv run --no-sync python scripts/live_vmedia.py` | subtasks 16–22 |
+| vmedia-media-change | `uv run --no-sync python scripts/live_vmedia_media_change.py` | subtasks 16, 71 and 22; a capture, not a release arm |
 | sriov | `uv run --no-sync python scripts/live_sriov.py` | subtask 23 |
 | dedicated | `uv run --no-sync python scripts/live_dedicated.py` | subtask 24 |
 | bare-cec | `uv run --no-sync python scripts/live_bare_cec.py` | subtask 25 |
@@ -346,7 +347,12 @@ every change whatever the call returned, and verifies restoration:
 - **Preconditions.** The test partition must read `Not Activated`, or nothing is
   changed. The adapter and label round trips also need exactly one VIOS with a
   vSCSI server adapter toward the test partition (the serving VIOS); otherwise
-  only the VLAN round trip runs.
+  only the VLAN round trip runs. The test partition also needs an applied current
+  configuration: `lssyscfg -r lpar -F name,state,curr_profile,resource_config` must read
+  `resource_config` `1`. At `0` every adapter add is refused with REST0269, even while
+  `curr_profile` names a profile; the ST10 profile restore is one known way to reset it.
+  Applying the profile once (`chsyscfg -r lpar -m <system> -o apply -p <partition> -n
+  <profile>`) is the operator's decision for the window; the arm never applies it.
 - **VLAN.** It creates `hmcpctl-live-vlan<id>-<8 hex>` on the first VLAN in
   `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, on the lowest-numbered
   virtual switch that carries a VIOS trunk adapter (read through `hmc_list_vios`). When
@@ -357,9 +363,9 @@ every change whatever the call returned, and verifies restoration:
   (expected refused), then removes the adapter and the run's own networks. Any
   other network on that VLAN is reported, never deleted.
   The single adapter create sends only the partition, `port_vlan_id`, `virtual_switch_id`
-  and the system: the request the October 2026 pass sent. The optional creation fields
-  (`addl_vlan_ids`, `allowed_os_mac_addrs`, `qos_priority` and the `vsi_*` fields) are left
-  out while #1861 tests whether they cause HSCLB021 on this boundary.
+  and the system: the request the October 2026 pass sent. It sends no optional creation
+  field (ADR 0315). #1864's capture showed the policy fields accepted, and a complete VSI
+  profile refused with HSCLB021 from the serving VIOS, which has no VSI manager here.
   Credit requires an accepted create and independent contained identity readback with
   the run's `PortVLANID` and the selected `VirtualSwitchID`. A switch
   mismatch or missing switch stops before cleanup. Client-network listings require a
@@ -441,6 +447,53 @@ unmount, or an unmount the arm cannot confirm, is a FAIL row marked
 `MANUAL RECOVERY REQUIRED` with the command that clears it. The arm never
 removes an adapter. Subtask 22 unmounts and deletes any medium of this run's
 that is left, and nothing else.
+
+### The vmedia-media-change arm
+
+This arm captures how the HMC and VIOS change the medium in an existing virtual
+optical device, for #1285 (#1284). It is not in `all` or `vmedia`, and subtask 71
+SKIPs outside its own group. ST16 resolves the VIOS, the test partition and the
+repository as the vmedia arm does; ST22 removes any medium ST71 left. ST71 needs the
+test partition unprotected and `Not Activated` and 2 GiB free in the repository. The
+partition's profile must have been applied once: on one never applied the mount is refused
+with HTTP 500 REST0269 and leaves a VIOS server adapter behind. The 2026-11-02 answers are
+in `tests/fixtures/live/README.md`. It:
+
+- creates two blank media `hmcpctl_live_<8 hex>` and mounts the first to the test
+  partition, reading the device (VTD) name the HMC chose;
+- runs `help loadopt`, `help unloadopt` and `lsvopt` on the VIOS through `viosvrcmd`;
+- Q4: posts the VIOS `ViosSCSIMapping` group with a second mapping naming that VTD
+  (expected HTTP 500), then compares the adapter listings with the post-mount ones;
+- Q1: posts the group with that mapping's `Storage` naming the second medium;
+- Q2: `unloadopt` and `loadopt` through `viosvrcmd`;
+- Q3: powers the test partition on, then immediately off, and repeats them, retrying
+  each with `-release` only when the plain command fails;
+- unmounts and deletes its media, reloading an empty device first so the unmount
+  can name it, and compares mappings and adapters with its baseline.
+
+An adapter the refused create added (Q4), on the VIOS or the test partition or a
+pair of both, is never removed by the arm: each gets a `MANUAL RECOVERY REQUIRED`
+row naming its own `chhwres -r virtualio --rsubtype scsi -o r` and slot, and
+recovery's unmapped-adapter class reports the VIOS side. A device of ST71's the
+cleanup cannot reload is a row and a recovery finding naming `rmvdev -vtd <name>`;
+recovery reports only the device names ST71 recorded, never another empty device.
+
+Every HMC call ST71 makes is recorded to
+`hmc-captures/vmedia-media-change-<8 hex>.capture.jsonl`, the path its `capture` row
+names. That file and `test-results-vmedia-media-change.json` hold lab names: after
+recovery and `scripts/live_test_evidence.py test-results-vmedia-media-change.json`,
+move both to a private directory outside every repository
+(`~/hmc-live-evidence/<date>-<profile>/`). Tokenize the capture there, passing every
+system, VIOS and partition name and the HMC host prefix as `--private`:
+
+```sh
+uv run --no-sync python scripts/live_capture_export.py tokenize \
+  ~/hmc-live-evidence/<date>-<profile>/vmedia-media-change-*.capture.jsonl \
+  --out ~/hmc-live-evidence/<date>-<profile>/corpus.json --private '<lab-pattern>'
+```
+
+Fixtures taken from that corpus follow `tests/fixtures/live/README.md`, and
+`rg -n -e '<lab-pattern>' tests/fixtures/live/` must print nothing before commit.
 
 ### The storage arm
 
@@ -874,7 +927,7 @@ uv run --no-sync python scripts/live_test_recovery.py --results test-results-ded
 
 After the other arms pass `test-results-<arm>.json` the same way: `vmedia`,
 `bare-cec`, `round2`, `sriov`, `profiles`, `users`, `vios-backup`, `pcm`,
-`network`, `lpar-config`, `storage` or `lpar-power`.
+`network`, `lpar-config`, `storage`, `lpar-power` or `vmedia-media-change`.
 
 The check reads the subtasks the run dispatched from the document, and witnesses
 these sets of them:
@@ -882,6 +935,7 @@ these sets of them:
 | Subtasks | What it reads |
 |---|---|
 | 16–22 (vmedia) | the test partition left running, its pending boot string changed, a medium of the run's still mounted to it or still in the repository, a VIOS vSCSI server adapter toward it with no mapping, and the media repository the run created |
+| 71 (vmedia-media-change) | everything 16–22 reads, for its own two media and its power-on, and a virtual optical device toward the test partition mapped with no medium |
 | 11 (users) | any HMC user named `hmcpctl-live-*`, whichever run's document you pass |
 | 24–25 (dedicated, bare-cec) | a partition carrying this run's marker, its dedicated slot still owned, its profile's `io_slots` off the baseline |
 | 37 (vios-backup) | the run's backup still in the VIOS catalog, the test partition's disk mapping missing, and a final read the run recorded as off its baseline |
