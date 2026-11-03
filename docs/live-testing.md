@@ -1776,21 +1776,35 @@ execution does not establish POWER10/POWER11 hardware coverage.
 
 ## LPAR reconfigure persistence (arm 70)
 
-The opt-in `lpar-reconfigure` arm proves `hmc_reconfigure_lpar`'s persistence contract (ADR 0314)
-on one owned scratch partition with lpar-config's fixture, prefix and teardown. In order:
+The opt-in `lpar-reconfigure` arm proves `hmc_reconfigure_lpar`'s persistence contract (ADRs
+0314 and 0322) on one owned scratch partition, using lpar-config's fixture, prefix and
+teardown. It also uses one `lprcf<8 hex>` 1 GiB disk in the configured
+`LIVE_TEST_VDISK_VOLUME_GROUP_NAME`, which one VIOS must list with at least 1 GiB free. In
+order:
 
-1. Inactive, `{memory_mib: 3072, processors: 2}` must read back `profile`.
-2. A rename to `<name>-r` must complete.
-3. A profile activation to SMS must show current memory 3072 MiB and 2 virtual processors.
-4. At SMS (`open firmware`, RMC inactive), `{memory_mib: 2560, processors: 1}` must read back
+1. Inactive, a `disks.add` of the run disk must read back `profile`, and the partition's
+   profile (other than the `hmcprec-` recovery copy the force-save keeps) must list a vSCSI
+   client adapter.
+2. Inactive, `{memory_mib: 3072, processors: 2}` must read back `profile`.
+3. A rename to `<name>-r` must complete.
+4. A profile activation to SMS must show current memory 3072 MiB and 2 virtual processors.
+   The running partition must hold a vSCSI client adapter, and the run disk's mapping must
+   still be there.
+5. At SMS (`open firmware`, RMC inactive), `{memory_mib: 2560, processors: 1}` must read back
    `pending_activation`; the profile must hold it and the running partition must not.
-5. After an immediate power off and a second profile activation, current memory must be
+6. After an immediate power off and a second profile activation, current memory must be
    2560 MiB, virtual processors 1, and the name still `<name>-r`.
+7. After a further power off, a `disks.detach` must remove the run disk's mapping and leave
+   the disk in its group.
 
 Live DLPAR is recorded as SKIP: it is not authorized on the boundary partition (operator,
 2026-11-02), and a scratch partition never reaches RMC active. A failed step ends the scenario;
 open operations are abandoned, the partition is powered off and the guarded inactive-only
-deletion and independent resource comparison follow even after failure.
+deletion and independent resource comparison follow even after failure. Teardown detaches any
+mapping the run disk still has and deletes the disk. Each VIOS server adapter the mapping
+created and the run left is recorded as a manual step with its `chhwres` command. Recovery
+reports a stranded `lprcf` volume, a mapping it backs, and a server adapter serving a
+`hmcpctl-live-lpar-` partition.
 
 ```sh
 uv run --no-sync python scripts/live_test_preflight.py --group lpar-reconfigure
