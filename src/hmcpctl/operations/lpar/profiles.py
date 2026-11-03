@@ -654,7 +654,7 @@ async def _recovery(
             if status == 202:
                 return replace(
                     outcome,
-                    error="recovery copy accepted asynchronously;retain and reconcile before force-save",
+                    error="recovery copy accepted asynchronously; overwrite not submitted; retain and reconcile before force-save",
                 )
         comparison = compare_profiles(before.element, recovery.element, recovery=True)
         if recovery.name != name or not comparison.equal or not comparison.complete:
@@ -684,7 +684,10 @@ async def _recovery(
     except (HMCError, ValueError, TypeError) as error:
         return replace(
             outcome,
-            error="recovery-copy outcome requires reconciliation: " + str(error)[:1800],
+            error="recovery step failed; overwrite not submitted; reconcile recovery profile "
+            + name
+            + " if present: "
+            + str(error)[:1800],
         )
 
 

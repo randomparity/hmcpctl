@@ -182,6 +182,7 @@ async def write_native_profile(
         raise HMCError(
             "native profile write failed; reconcile before retrying",
             response.status_code,
+            response.text,
         )
 
     return response.status_code

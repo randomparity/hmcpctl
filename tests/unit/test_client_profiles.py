@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from conftest import live_fixture
 
 from hmcpctl.client.client_profiles import (
     profile_path,
@@ -175,6 +176,17 @@ async def test_native_post_carries_opaque_if_match_and_preserves_document():
         await write_native_profile(
             hmc, "LogicalPartition", P, r.element, replace(r, etag=None)
         )
+
+
+@pytest.mark.asyncio
+async def test_native_write_failure_carries_hmc_message():
+    capture = live_fixture("rest-profile-create-name-too-long")
+    hmc = client(response(), httpx.Response(500, text=capture["body"]))
+    r = await read_native_profile(hmc, "LogicalPartition", P, F, S)
+    with pytest.raises(HMCError) as raised:
+        await write_native_profile(hmc, "LogicalPartition", P, r.element)
+    assert "HSCL059F" in str(raised.value) and "31 characters" in str(raised.value)
+    assert "REDACTED-SESSION" not in str(raised.value)
 
 
 @pytest.mark.asyncio

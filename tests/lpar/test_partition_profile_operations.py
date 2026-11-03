@@ -448,6 +448,36 @@ async def test_failed_native_overwrite_retains_verified_recovery_and_uncertain_d
 
 
 @pytest.mark.asyncio
+async def test_refused_recovery_copy_is_classified_and_never_force_saves(
+    service, monkeypatch
+):
+    # The pre-#1868 32-character name, so the HMC answers with the captured refusal.
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.profiles.secrets.token_hex", lambda n: "ab" * 12
+    )
+    result = await save_current_partition_profile(
+        service.hmc,
+        S,
+        P,
+        "source",
+        overwrite=True,
+        expected_etag="e1",
+        exclusive_writer_window=True,
+    )
+    name = "hmcprec-" + "ab" * 12
+    assert result.error.startswith(
+        "recovery step failed; overwrite not submitted; reconcile recovery profile "
+        + name
+        + " if present:"
+    )
+    assert "HSCL059F" in result.error
+    assert "REDACTED-SESSION" not in result.error
+    assert "REDACTED-COOKIE" not in result.error
+    assert result.recovery_profile.name == name and not result.recovery_verified
+    service.hmc.submit_job.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "protected", ["default", "current", "sync", "last", "system-profile"]
 )
@@ -796,6 +826,7 @@ async def test_async_recovery_creation_never_admits_force_save(service):
         exclusive_writer_window=True,
     )
     assert result.recovery_profile is not None and not result.recovery_verified
+    assert "overwrite not submitted" in result.error
     service.hmc.submit_job.assert_not_called()
 
 
