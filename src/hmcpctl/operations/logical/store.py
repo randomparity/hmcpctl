@@ -38,7 +38,7 @@ DEFAULT_CONNECTION = "<default>"
 DB_NAME = "operations.sqlite3"
 SENTINEL_NAME = "store-id"
 LOCK_NAME = "execution.lock"
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 MAX_REQUEST_BYTES = 65_536
 MAX_RESULT_BYTES = 65_536
 MAX_IDENTITY_BYTES = 4_096
@@ -78,6 +78,11 @@ _SCHEMA = (
         system_uuid TEXT NOT NULL, partition_uuid TEXT, identity_json TEXT NOT NULL,
         created_at REAL NOT NULL, PRIMARY KEY (operation_id, key))""",
 )
+# Schema 2 (ADR 0327 Decision 1): schema 1 plus the ADR 0193 holds, keyed by lower-cased UUIDs.
+_HOLDS_TABLE = """CREATE TABLE holds (
+        system_uuid TEXT NOT NULL, partition_uuid TEXT NOT NULL, hold_id TEXT NOT NULL,
+        consumer_label TEXT NOT NULL, agent_id TEXT NOT NULL, connection TEXT NOT NULL,
+        created_at REAL NOT NULL, PRIMARY KEY (system_uuid, partition_uuid))"""
 
 
 class OperationRefused(ValueError):
@@ -155,9 +160,9 @@ def _connect(db: Path) -> sqlite3.Connection:
     return conn
 
 
-def _read_store_id(conn: sqlite3.Connection) -> str:
+def _read_meta(conn: sqlite3.Connection) -> dict[str, str]:
     try:
-        meta = {
+        return {
             row["key"]: row["value"]
             for row in conn.execute("SELECT key, value FROM meta")
         }
@@ -167,6 +172,28 @@ def _read_store_id(conn: sqlite3.Connection) -> str:
         raise _corrupt("no meta table") from exc
     except sqlite3.DatabaseError as exc:
         raise _corrupt(type(exc).__name__) from exc
+
+
+def _upgrade_schema_one(conn: sqlite3.Connection) -> None:
+    """Add the holds table to a schema-1 store (ADR 0327 Decision 1).
+
+    The version is re-read inside the write transaction, so of two processes upgrading at
+    once the second finds schema 2 and changes nothing.
+    """
+    with write_transaction(conn):
+        if _read_meta(conn).get("schema_version") != "1":
+            return
+        conn.execute(_HOLDS_TABLE)
+        conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'", (SCHEMA_VERSION,)
+        )
+
+
+def _read_store_id(conn: sqlite3.Connection) -> str:
+    meta = _read_meta(conn)
+    if meta.get("schema_version") == "1" and meta.get("store_id"):
+        _upgrade_schema_one(conn)
+        meta = _read_meta(conn)
     if meta.get("schema_version") != SCHEMA_VERSION or not meta.get("store_id"):
         raise _corrupt("unknown schema version")
     return meta["store_id"]
@@ -190,7 +217,7 @@ def _create_store(root: Path) -> sqlite3.Connection:
         conn = _connect(staging)
         try:
             with write_transaction(conn):
-                for statement in _SCHEMA:
+                for statement in (*_SCHEMA, _HOLDS_TABLE):
                     conn.execute(statement)
                 conn.executemany(
                     "INSERT INTO meta (key, value) VALUES (?, ?)",
@@ -499,16 +526,7 @@ def insert_operation(
         "DELETE FROM operations WHERE state = 'terminal' AND terminal_at < ?",
         (now - RETENTION_SECONDS,),
     )
-    used = conn.execute(
-        "SELECT (SELECT count(*) FROM operations WHERE state != 'terminal')"
-        " + (SELECT count(*) FROM ledger)"
-    ).fetchone()[0]
-    if used >= STORE_CAPACITY:
-        raise OperationRefused(
-            "store_full",
-            f"{used} live operations and ledger entries reach the {STORE_CAPACITY} limit; "
-            "finish or abandon operations first",
-        )
+    check_capacity(conn)
     conn.execute(
         "INSERT INTO operations (operation_id, agent_id, request_id, tool, connection, host,"
         " digest, request_json, state, phase, warnings_json, created_at, updated_at)"
@@ -526,6 +544,20 @@ def insert_operation(
             now,
         ),
     )
+
+
+def check_capacity(conn: sqlite3.Connection) -> None:
+    """Refuse ``store_full`` once ADR 0190 Decision 8's live records reach the limit."""
+    used = conn.execute(
+        "SELECT (SELECT count(*) FROM operations WHERE state != 'terminal')"
+        " + (SELECT count(*) FROM ledger) + (SELECT count(*) FROM holds)"
+    ).fetchone()[0]
+    if used >= STORE_CAPACITY:
+        raise OperationRefused(
+            "store_full",
+            f"{used} live operations, holds and ledger entries reach the {STORE_CAPACITY} "
+            "limit; finish or abandon operations, or release holds, first",
+        )
 
 
 def set_state(
