@@ -736,6 +736,36 @@ def _vmedia_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _vmedia_media_change_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    """Name what the media change capture (#1284) changes and what may need a hand."""
+    return ArmVerdict(
+        "vmedia-media-change",
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            (
+                "the VIOS's media repository: created, and deleted again, only when "
+                "the VIOS has none (ST16/ST22)"
+            ),
+            (
+                f"two blank 1 GiB media {vmedia.BLANK_PREFIX}<8 hex>; one mounted to "
+                f"{config.lp3_name} while Not Activated (the HMC adds a vSCSI adapter "
+                "pair), unmounted and both deleted at the end"
+            ),
+            (
+                "two raw ViosSCSIMapping POSTs: a create naming the mounted VTD "
+                "(expected refused; it may leave a server adapter that needs a manual "
+                "chhwres -o r) and a Storage replacement on that mapping"
+            ),
+            "viosvrcmd help, lsvopt, unloadopt and loadopt on that VTD, with -release",
+            f"{config.lp3_name} powered on and immediately off once",
+            "every HMC call recorded to a git-ignored hmc-captures/ file",
+        ),
+        config.system_name,
+    )
+
+
 def _storage_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the storage arm (#1348) changes, each removed by the arm itself."""
     volume = f"{storage_lifecycle.DISK_PREFIX}<8 hex>"
@@ -872,6 +902,7 @@ _ARM_VERDICTS = {
     "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "vmedia": _vmedia_verdict,
+    "vmedia-media-change": _vmedia_media_change_verdict,
     "storage": _storage_verdict,
 }
 

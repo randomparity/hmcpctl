@@ -4654,6 +4654,22 @@ def test_decode_artifacts_refuses_a_non_string_vmedia_field():
         live_config.decode_artifacts(artifacts)
 
 
+@pytest.mark.parametrize("value", ["hmcpctl_live_0a1b2c3d", [3]])
+def test_decode_artifacts_refuses_media_change_names_not_a_string_array(value):
+    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts["vmedia_change_names"] = value
+
+    with pytest.raises(TypeError, match="vmedia change names"):
+        live_config.decode_artifacts(artifacts)
+
+
+def test_decode_artifacts_defaults_media_change_names_for_an_older_document():
+    artifacts = asdict(live_config.LiveTestArtifacts())
+    del artifacts["vmedia_change_names"]
+
+    assert live_config.decode_artifacts(artifacts).vmedia_change_names == []
+
+
 def test_decode_artifacts_refuses_a_non_string_vios_backup_field():
     artifacts = asdict(live_config.LiveTestArtifacts())
     artifacts["vios_backup_mapping"] = 3

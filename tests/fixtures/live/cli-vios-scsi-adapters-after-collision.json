@@ -1,0 +1,7 @@
+{
+  "capture": "2026-11-02-q1284/run2/vmedia-media-change-b62996d0.capture.jsonl#72",
+  "command": "lshwres -r virtualio --rsubtype scsi -m sys-R1 --level lpar --filter lpar_ids=100 -F slot_num,remote_lpar_name,remote_slot_num",
+  "exit_status": 0,
+  "stdout": "3,sys-R1-lp3,2\n5,sys-R1-lp3,4\n",
+  "stderr": ""
+}

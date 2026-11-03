@@ -159,7 +159,11 @@ def run_media_names(state: RunState) -> set[str]:
     artifacts = state.artifacts
     return {
         name
-        for name in (artifacts.vmedia_blank_name, artifacts.vmedia_iso_name)
+        for name in (
+            artifacts.vmedia_blank_name,
+            artifacts.vmedia_iso_name,
+            *artifacts.vmedia_change_names,
+        )
         if name is not None and is_run_media_name(name, state.config.iso_media_name)
     }
 
@@ -657,11 +661,7 @@ async def _delete_run_media(
     listed = await _list_media(client, state, subtask, f"after deleting {name}")
     absent = listed is not None and name not in listed
     if absent:
-        artifacts = state.artifacts
-        if artifacts.vmedia_blank_name == name:
-            artifacts.vmedia_blank_name = None
-        if artifacts.vmedia_iso_name == name:
-            artifacts.vmedia_iso_name = None
+        _forget_run_media(state, name)
     return absent
 
 
@@ -1813,6 +1813,8 @@ def _forget_run_media(state: RunState, name: str) -> None:
         artifacts.vmedia_blank_name = None
     if artifacts.vmedia_iso_name == name:
         artifacts.vmedia_iso_name = None
+    if name in artifacts.vmedia_change_names:
+        artifacts.vmedia_change_names.remove(name)
 
 
 async def _remove_repository(
@@ -1861,7 +1863,11 @@ async def vmedia_teardown(client: Client, state: RunState) -> None:
         return
 
     owned = run_media_names(state)
-    for name in (artifacts.vmedia_blank_name, artifacts.vmedia_iso_name):
+    for name in (
+        artifacts.vmedia_blank_name,
+        artifacts.vmedia_iso_name,
+        *artifacts.vmedia_change_names,
+    ):
         if name and name not in owned:
             # Not a name this arm generates (an older arm recorded it): never removed.
             _forget_run_media(state, name)
