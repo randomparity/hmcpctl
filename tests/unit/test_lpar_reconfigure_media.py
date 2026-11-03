@@ -308,6 +308,19 @@ def test_an_unmount_that_errors_but_landed_is_applied(media, monkeypatch):
     monkeypatch.setattr(reconfigure_media, "unmount_optical_media", lost_answer)
     record = _run({"installer_media": "detach"})
     assert record.outcome == "completed"
+    assert any("HTTP 504" in w for w in record.result["warnings"])
+
+
+def test_a_captured_half_done_detach_past_the_guard_warns_of_the_client_adapter(
+    media, monkeypatch
+):
+    _provisioned()
+    _as_captured_on_a_running_client(media)
+    monkeypatch.setattr(reconfigure_media, "unmount_optical_media", media.unmount)
+    record = _run({"installer_media": "detach"})
+    assert record.outcome == "completed"
+    assert media.mounted == []
+    assert any("leftover client vSCSI adapter" in w for w in record.result["warnings"])
 
 
 def test_an_unclassifiable_unmount_is_uncertain_and_resume_classifies_it(media):

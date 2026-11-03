@@ -838,6 +838,13 @@ def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
             "the profile write was applied with preservation drift: fields other than "
             "the requested ones differ from the earlier profile; inspect it"
         )
+    detached = ctx.recorded(MEDIA_KEY)
+    status = ((detached.identity or {}) if detached else {}).get("error_status")
+    if status is not None:
+        warnings.append(
+            f"the HMC answered HTTP {status} to the detach after removing the mapping; "
+            "check the partition for a leftover client vSCSI adapter"
+        )
     if plan.get("media") and plan["basis"]["state"] != _NOT_ACTIVATED:
         warnings.append(
             "the installer media was detached from an activated partition: that "

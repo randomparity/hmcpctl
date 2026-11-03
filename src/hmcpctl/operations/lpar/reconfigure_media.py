@@ -281,6 +281,9 @@ def media_write(hmc: HMCClient, plan: Mapping[str, Any]) -> Write:
                     "Retry, or power the partition off and then resume a paused "
                     "operation or submit a new request"
                 ) from exc
+            # Gone despite the error: the shape the #1844 Q5 capture recorded, where
+            # the HMC removed the VIOS side and kept the client adapter.
+            return {**identity, "error_status": exc.status_code}
         return identity
 
     return write
