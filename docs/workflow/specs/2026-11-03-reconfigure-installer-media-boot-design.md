@@ -31,15 +31,19 @@ entry of the needed kind, more than one entry, or an entry missing its fields.
 
 **Plan** (recorded in the existing `plan` effect, so a replay never re-reads the ledger):
 
-- `media`. First, list the partition's optical mappings on the media's VIOS with #1842's
-  `_media_paths` (reused, not copied). When none holds
+- `media`. First, list the partition's optical mappings on the media's VIOS
+  (`hmc.list_optical_mappings`, matched on `MediaName`). When none holds
   `media_name`, the field is unchanged: no change entry and no write. When exactly one holds it,
   the plan records `{vios_uuid, media_name}` and change `{field: installer_media, before:
   {current: "mounted"}, after: "detached", applied: "live"}`. When more than one holds it, the
   patch is refused.
 - `boot`. The root disk's device path is found by listing the disk's VIOS storage mappings. The
   mapping is the one whose `storage_mapping(e).backing_kind` is `VirtualDisk`, whose `backing_name`
-  is `disk_name` and whose `lpar_uuid` is this partition. There must be exactly one. Its path comes from `device_path` (#1842's `install_media.py`). If none is found
+  is `disk_name` and whose `lpar_uuid` is this partition. There must be
+  exactly one. Its Open Firmware path is built from the mapping's client slot and LUN
+  (`/vdevice/v-scsi@<0x30000000 + slot>/disk@<LUN>`, docs/recipes/lpar-iso-install.md §5). The
+  design depends on #1842's ledger data only, not on its code. When #1842's equivalent helper is
+  on `main` at rebase, the build imports it instead. If none is found
   or the path is unreadable, the patch is refused. The plan then reads the pending boot string.
   When it already equals the path, the field is unchanged. Otherwise the plan records `{before,
   after}` and change `{field: boot, applied: "next_activation"}`.
@@ -70,11 +74,16 @@ needs_attention.
 **Verification.** ADR 0314 Decision 7's poll also waits for the pending boot string to equal
 `after` and for no mapping to hold the media. `observed` gains `boot` and `installer_media`.
 
+**H1 spec.** The reconfigure rows of the H1 spec name the two fields as implemented, citing
+ADR 0321.
+
 **Handler.** `DELEGATED` gains `installer_media → hmc_unmount_optical_media` and `boot →
 hmc_set_lpar_boot_order`. `installer_media` requires `exclusive_writer_window=true`, because the
 VIOS read-modify-write is under the H1 spec's window rule. `boot` does not, as a rename does not.
 The VIOS selector is absent from the delegated authorization, so detach needs an all-targets grant
 of `hmc_unmount_optical_media` (ADR 0321 D6). A grant that limits the tool by target refuses detach.
+The handler re-raises that refusal with its own message, naming ADR 0321 D6. The generic message
+asks for a `vios_name_or_uuid` argument, and this tool takes none.
 
 **Live capture.** The issue asks for live evidence first. The `vmedia-media-change` arm (ST71)
 gains Q5. It powers the test partition on with the medium mapped, unmounts through
