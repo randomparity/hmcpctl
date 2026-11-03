@@ -40,7 +40,13 @@ from ..storage.resources import (
 )
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
-from .install_media import Boot, LparInstall, check_install, check_mac
+from .install_media import (
+    Boot,
+    LparInstall,
+    check_built_name,
+    check_install,
+    check_mac,
+)
 from .provision import check_vlan_exists
 
 MAX_SELECTORS = 16
@@ -220,6 +226,7 @@ def _check_install(request: PlanRequest) -> None:
     if request.power_on:
         raise ValueError("power_on: with install, boot governs power-on; omit power_on")
     check_install(install)
+    check_built_name(request.name, install)
 
 
 def check_request(request: PlanRequest) -> PlanRequest:
@@ -367,6 +374,7 @@ BlockerCode = Literal[
     "storage_mapped",
     "exclusive_writer_window_required",
     "url_not_allowlisted",
+    "build_entry_unconfigured",
     "no_candidate",
 ]
 ChangeKind = Literal[
@@ -996,6 +1004,22 @@ def _request_blockers(hmc: Any, request: PlanRequest) -> list[PlanBlocker]:
                     "the prepared media URL's host is not in HMC_ISO_URL_ALLOWLIST",
                 )
             )
+    if (
+        install is not None
+        and install.media.mode == "built"
+        and (
+            hmc.config.iso_build_command is None
+            or not hmc.config.iso_url_allowlist_entries
+        )
+    ):
+        blockers.append(
+            _blocker(
+                "build_entry_unconfigured",
+                "build_entry",
+                "built media needs HMC_ISO_BUILD_ENTRY, HMC_ISO_BUILD_ARGUMENTS and a "
+                "non-empty HMC_ISO_URL_ALLOWLIST on the server (ADR 0324)",
+            )
+        )
     return blockers
 
 
@@ -1046,7 +1070,7 @@ def _intended_changes(
         # Mounted before the save, so the saved profile keeps the media (ADR 0319).
         steps.extend(
             [
-                ("bind_media", vios, f"bind {request.install.media.mode} media"),
+                ("bind_media", vios, _bind_detail(request.install)),
                 ("upload_media", vios, "upload the installer media"),
                 ("mount_media", vios, "mount the installer media"),
             ]
@@ -1069,6 +1093,12 @@ def _intended_changes(
         IntendedChange(order, kind, target, detail)
         for order, (kind, target, detail) in enumerate(steps, start=1)
     ]
+
+
+def _bind_detail(install: LparInstall) -> str:
+    if install.media.mode == "built":
+        return "run the configured build entry, then bind its result"
+    return "bind prepared media"
 
 
 def _power_detail(boot: Boot) -> str:

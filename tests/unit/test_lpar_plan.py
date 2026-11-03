@@ -290,6 +290,11 @@ _REJECTED: list[tuple[str, Any, str]] = [
         "install.login_user",
     ),
     (
+        "built with a name the producer cannot use",
+        lambda: _install_request(_built(), name="Web_1"),
+        "name",
+    ),
+    (
         "built with URL",
         lambda: _install_request(_built(media=InstallMedia(mode="built", url=_URL))),
         "install.media.url",
@@ -783,11 +788,21 @@ class World:
 class FakeHMC:
     """The read methods planning may call, each logged; nothing else exists."""
 
-    def __init__(self, *worlds: World, allowlist: str = "iso.example.test") -> None:
+    def __init__(
+        self, *worlds: World, allowlist: str = "iso.example.test", build: bool = True
+    ) -> None:
         from hmcpctl.config import HMCConfig
 
         self.worlds = {world.entry["UUID"]: world for world in worlds}
-        self.config = HMCConfig.from_mapping({"iso_url_allowlist": allowlist})
+        entry = (
+            {
+                "iso_build_entry": "/opt/build/iso-chain",
+                "iso_build_arguments": '["{target}"]',
+            }
+            if build
+            else {}
+        )
+        self.config = HMCConfig.from_mapping({"iso_url_allowlist": allowlist, **entry})
         self.calls: list[tuple[str, str | None]] = []
         self.systems_error: Exception | None = None
         self.extra_summaries: list[dict] = []
@@ -1045,6 +1060,14 @@ def _scenario(name: str) -> tuple[FakeHMC, PlanRequest, str]:
             _install_request(_prepared()),
             name,
         )
+    elif name == "build_entry_unconfigured":
+        return FakeHMC(world, build=False), _install_request(_built()), name
+    elif name == "built media without an allowlist":
+        return (
+            FakeHMC(world, allowlist=""),
+            _install_request(_built()),
+            "build_entry_unconfigured",
+        )
     elif name == "url httpx rejects":
         bad = "https://iso.example.test/secret-path/\x00.iso"
         media = InstallMedia(mode="prepared", url=bad, producer_result={"a": 1})
@@ -1059,7 +1082,11 @@ def _scenario(name: str) -> tuple[FakeHMC, PlanRequest, str]:
     return FakeHMC(world), request, name
 
 
-_REQUEST_CODES = {"exclusive_writer_window_required", "url_not_allowlisted"}
+_REQUEST_CODES = {
+    "exclusive_writer_window_required",
+    "url_not_allowlisted",
+    "build_entry_unconfigured",
+}
 
 
 @pytest.mark.parametrize(
@@ -1083,6 +1110,8 @@ _REQUEST_CODES = {"exclusive_writer_window_required", "url_not_allowlisted"}
         "exclusive_writer_window_required",
         "url_not_allowlisted",
         "url httpx rejects",
+        "build_entry_unconfigured",
+        "built media without an allowlist",
         "partitions",
         "vlans",
         "vioses",
