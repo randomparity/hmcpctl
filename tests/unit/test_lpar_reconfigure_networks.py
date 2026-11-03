@@ -8,18 +8,26 @@ system's virtual networks.
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects
+from unit.test_lpar_reconfigure import hmc as base_hmc  # noqa: F401 - a fixture
 
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.logical.engine import EffectNotApplied, OperationFailed
+from hmcpctl.operations.logical import engine, store
+from hmcpctl.operations.logical.engine import (
+    EffectNotApplied,
+    OperationFailed,
+    OperationRequest,
+)
+from hmcpctl.operations.lpar import profile_persist, reconfigure
 from hmcpctl.operations.lpar import reconfigure_network as net
+from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
 from hmcpctl.operations.lpar.reconfigure_network import NetworkPatch
 
-SYS = "0000000a-0000-4000-8000-000000000000"
-LPAR = "0000000b-0000-4000-8000-000000000000"
 MAC_A = "02:00:00:00:00:0a"
 MAC_B = "02:00:00:00:00:0b"
 MAC_NEW = "02:00:00:00:00:0c"
@@ -471,3 +479,288 @@ def test_removal_error_with_unreadable_relist_keeps_the_delete_error():
     fake.list_child = flaky
     with pytest.raises(HMCError, match="refused"):
         _write(fake, plan, "network_remove:0")
+
+
+# --- the operation body (ADR 0325 with ADR 0322's save) ----------------------
+
+
+def _profile_entry(name, slots):
+    adapters = [{"VirtualSlotNumber": str(slot)} for slot in slots]
+    return {
+        "Resource": {
+            "ProfileName": name,
+            "IOConfigurationInstance": {
+                "ProfileVirtualIOAdapters": {
+                    "ProfileVirtualIOAdapterSubclass": {
+                        "ProfileClientNetworkAdapter": adapters
+                    }
+                }
+            },
+        }
+    }
+
+
+class BodyMixin(NetHMC):
+    """Client network adapters, the console level and the profile feed a save reads."""
+
+    def network(self):
+        NetHMC.__init__(self)
+        self.saved_slots = {"2", "3"}
+        self.recovery = []
+        self.level = "1060"
+
+    async def list_child(self, parent, uuid, child):
+        assert (parent, uuid) == ("LogicalPartition", LPAR)
+        if child == "ClientNetworkAdapter":
+            return list(self.adapters)
+        assert child == "LogicalPartitionProfile"
+        return [_profile_entry("default", self.saved_slots)] + [
+            _profile_entry(name, ()) for name in self.recovery
+        ]
+
+    async def list_adapters(self, uuid, adapter_type):
+        assert adapter_type != "ClientNetworkAdapter"
+        return []
+
+    async def get_console_info(self):
+        info = {"Version": "10", "Release": "3", "ServicePackName": self.level}
+        return {"Resource": {"VersionInfo": info}}
+
+    async def add_network_adapter(self, lpar, vlan, *, mac_address=None):
+        entry = await NetHMC.add_network_adapter(
+            self, lpar, vlan, mac_address=mac_address
+        )
+        self.calls[-1] = f"add {vlan}"
+        return entry
+
+    async def delete_adapter(self, lpar, kind, uuid):
+        await NetHMC.delete_adapter(self, lpar, kind, uuid)
+        self.calls[-1] = f"delete {uuid}"
+
+
+@pytest.fixture
+def body(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
+    fake = base_hmc
+    fake.__class__ = type("NetworkHMC", (BodyMixin, FakeHMC), {})
+    fake.network()
+    fake.state = "not activated"
+    fake.saves = []
+    fake.save_lands = True
+
+    async def read(_hmc, system, lpar, name):
+        assert (system, lpar, name) == (SYS, LPAR, "default")
+        return SimpleNamespace(etag="E1")
+
+    async def save(_hmc, system, lpar, name, **kwargs):
+        fake.calls.append("save")
+        fake.saves.append(kwargs)
+        fake.recovery.append(f"hmcprec-{len(fake.recovery):016x}")
+        if fake.save_lands:
+            fake.saved_slots = {
+                str(a["Resource"]["VirtualSlotNumber"]) for a in fake.adapters
+            }
+        return SimpleNamespace(
+            execution="unknown",
+            requested_change="unverified",
+            job=object(),
+            recovery_verified=True,
+            error=None,
+        )
+
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
+    monkeypatch.setattr(profile_persist, "POLL_SECONDS", 0)
+    monkeypatch.setattr(profile_persist, "read_partition_profile", read)
+    monkeypatch.setattr(profile_persist, "save_current_partition_profile", save)
+    return fake
+
+
+def _submit(patch, *, continuation="none", allow_disruption=False):
+    model = ReconfigurePatch(**patch)
+    request = OperationRequest(
+        "hmc_reconfigure_lpar",
+        "agent-a",
+        "<default>",
+        "hmc.test",
+        "n1",
+        {
+            "lpar_name_or_uuid": "web1",
+            "system_name_or_uuid": "sysA",
+            "patch": patch,
+            "allow_disruption": allow_disruption,
+        },
+    )
+    return engine.submit(
+        request,
+        reconfigure.reconfigure_body(model, allow_disruption, "sysA", "web1"),
+        continuation=continuation,
+        wait_seconds=10,
+        classifiers=reconfigure.RECONFIGURE_CLASSIFIERS,
+    )
+
+
+def _writes(fake):
+    return [c for c in fake.calls if c != "authorize"]
+
+
+def test_networks_need_the_window_and_their_tools():
+    patch = ReconfigurePatch(
+        networks={"add": [{"port_vlan_id": 10}], "remove": [{"mac": MAC_A}]}
+    )
+    assert patch.needs_window
+    assert reconfigure.delegated_tools(patch) == (
+        "hmc_add_network_adapter",
+        "hmc_save_current_partition_profile",
+        "hmc_delete_adapter",
+    )
+    with pytest.raises(ValidationError, match="networks"):
+        ReconfigurePatch()
+
+
+def test_an_add_creates_the_adapter_and_saves_the_default_profile(body):
+    record = _submit({"networks": {"add": [{"port_vlan_id": 30}]}})
+    assert (record.state, record.outcome) == ("terminal", "completed"), record.warnings
+    assert _writes(body) == ["add 30", "save"]
+    assert _effects(record)[1:] == [
+        ("network_add:0", "lpar.client_network_adapter", "applied"),
+        ("profile_save", "lpar.profile_save", "applied"),
+    ]
+    assert body.saves == [
+        {"overwrite": True, "expected_etag": "E1", "exclusive_writer_window": True}
+    ]
+    change = record.result["changes"][0]
+    assert (change["field"], change["applied"]) == ("networks.add", "profile")
+    assert record.result["observed"]["networks"][-1] == "02:00:00:00:00:0e"
+
+
+def test_a_removal_deletes_one_adapter_and_its_slot_leaves_the_profile(body):
+    record = _submit({"networks": {"remove": [{"mac": MAC_B}]}})
+    assert record.outcome == "completed", record.warnings
+    assert _writes(body) == ["delete ub", "save"]
+    assert body.saved_slots == {"2"}
+    assert [a["UUID"] for a in body.adapters] == ["UA"]
+
+
+def test_removing_the_last_adapter_confirms_an_empty_profile(body):
+    body.adapters = body.adapters[:1]
+    body.saved_slots = {"2"}
+    record = _submit({"networks": {"remove": [{"mac": MAC_A}]}})
+    assert record.outcome == "completed", record.warnings
+    assert body.saved_slots == set()
+
+
+def test_adds_run_before_removals(body):
+    record = _submit(
+        {"networks": {"add": [{"port_vlan_id": 30}], "remove": [{"mac": MAC_A}]}}
+    )
+    assert record.outcome == "completed", record.warnings
+    assert _writes(body) == ["add 30", "delete ua", "save"]
+
+
+def test_an_unconfirmed_save_pauses_warns_and_resumes_without_adding_again(body):
+    body.save_lands = False
+    record = _submit({"networks": {"add": [{"port_vlan_id": 30}]}})
+    assert record.outcome == "needs_attention"
+    assert any("current configuration only" in w for w in record.result["warnings"])
+    body.save_lands = True
+    resumed = _submit(
+        {"networks": {"add": [{"port_vlan_id": 30}]}}, continuation="resume"
+    )
+    assert resumed.outcome == "completed", resumed.warnings
+    assert _writes(body).count("add 30") == 1
+
+
+def test_a_live_removal_needs_disruption_and_reports_live(body):
+    body.state = "running"
+    refused = _submit({"networks": {"remove": [{"mac": MAC_A}]}})
+    assert (refused.outcome, refused.effects) == ("failed", ())
+    assert "allow_disruption=true" in refused.warnings[0]
+
+
+@pytest.mark.parametrize(
+    ("setup", "patch", "message"),
+    [
+        (lambda f: setattr(f, "level", "1050"), {}, "10.3.1060"),
+        (
+            lambda f: f.profile.find(".//{*}DesiredMemory").__setattr__("text", "1024"),
+            {},
+            "desired memory differs",
+        ),
+        (
+            lambda f: setattr(f, "state", "running"),
+            {"memory_mib": 4096},
+            "pending_activation",
+        ),
+    ],
+)
+def test_persistence_guards_refuse_before_any_write(body, setup, patch, message):
+    setup(body)
+    record = _submit({**patch, "networks": {"add": [{"port_vlan_id": 30}]}})
+    assert (record.outcome, record.effects) == ("failed", ())
+    assert message in record.warnings[0]
+    assert "network change" in record.warnings[0]
+    assert _writes(body) == []
+
+
+def test_a_crash_inside_the_add_is_classified_on_resume(body):
+    calls = {"n": 0}
+    real = body.add_network_adapter
+
+    async def dies(lpar, vlan, *, mac_address=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await real(lpar, vlan, mac_address=mac_address)
+            raise HMCError("connection reset", None, "")
+        return await real(lpar, vlan, mac_address=mac_address)
+
+    body.add_network_adapter = dies
+    record = _submit({"networks": {"add": [{"port_vlan_id": 30}]}})
+    assert record.outcome == "needs_attention"
+    resumed = _submit(
+        {"networks": {"add": [{"port_vlan_id": 30}]}}, continuation="resume"
+    )
+    assert resumed.outcome == "completed", resumed.warnings
+    assert calls["n"] == 1
+
+
+def test_a_plan_on_a_busy_partition_fits_the_store():
+    fake = NetHMC()
+    fake.adapters = [
+        _entry(
+            f"{n:08x}-0000-4000-8000-000000000000",
+            f"02:00:00:00:{n // 256:02x}:{n % 256:02x}",
+            100 + n,
+            n,
+        )
+        for n in range(60)
+    ] + [
+        _entry(
+            f"{n:08x}-0000-4000-9000-000000000000",
+            f"02:00:00:01:00:{n:02x}",
+            10,
+            70 + n,
+        )
+        for n in range(4)
+    ]
+    plan = _plan(
+        fake,
+        {
+            "add": [{"port_vlan_id": 10}, {"port_vlan_id": 20}, {"port_vlan_id": 30}],
+            "remove": [{"mac": f"02:00:00:00:00:{n:02x}"} for n in range(4)],
+        },
+    )
+    assert len(json.dumps(plan, sort_keys=True)) < store.MAX_IDENTITY_BYTES // 2
+
+
+def test_a_removal_save_that_did_not_land_is_not_confirmed(body):
+    body.save_lands = False
+    record = _submit({"networks": {"remove": [{"mac": MAC_B}]}})
+    assert record.outcome == "needs_attention"
+    assert _effects(record)[-1][0] == "profile_save"
+    assert _effects(record)[-1][2] != "applied"
+
+
+def test_verification_waits_for_a_removed_adapter_to_go(body):
+    body.delete_lands = False
+    record = _submit({"networks": {"remove": [{"mac": MAC_B}]}})
+    assert record.outcome == "needs_attention"
+    assert "save" not in _writes(body)
