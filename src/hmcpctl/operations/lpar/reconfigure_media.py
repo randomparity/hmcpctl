@@ -8,7 +8,6 @@ so a replay never re-reads the ledger. Messages name partitions by UUID only.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -25,20 +24,17 @@ from ..logical.engine import (
 from ..logical.models import EffectRecord
 from ..storage.resources import storage_mapping, unmount_optical_media
 from .boot_order import read_lpar_boot_order, set_lpar_boot_order
+from .install_media import device_path
+from .provision_operation import DISK_LEDGER, MEDIA_LEDGER, PARTITION_LEDGER
 
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 BOOT_KEY, BOOT_KIND = "boot", "lpar.boot_order"
 MEDIA_KEY, MEDIA_KIND = "media_detach", "vios.optical_unmount"
-# Ledger kinds and identity fields provision writes (ADR 0313, ADR 0319).
-PARTITION_LEDGER = "partition"
-MEDIA_LEDGER = "installer_media"
-DISK_LEDGER = "virtual_disk"
+# Identity fields of the ledger entries provision writes (ADR 0313, ADR 0319).
 _FIELDS = {
     MEDIA_LEDGER: ("vios_uuid", "media_name"),
     DISK_LEDGER: ("vios_uuid", "disk_name"),
 }
-_LUN = re.compile(r"0x([0-9a-fA-F]{1,16})")
-_SLOT_BASE = 0x30000000
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
 PlanOf = Callable[[OperationContext], Mapping[str, Any]]
 Opener = Callable[[str], Any]
@@ -113,29 +109,6 @@ async def _media_paths(
     ]
 
 
-def _disk_path(mapping: Mapping[str, Any]) -> str | None:
-    """The Open Firmware path of a vSCSI mapping's client device, or None.
-
-    ``/vdevice/v-scsi@<0x30000000 + client slot>/disk@<LUN without 0x>``
-    (docs/recipes/lpar-iso-install.md, section 5).
-    """
-    resource = mapping.get("Resource", mapping)
-    slot = leaf_text(_child(_child(resource, "ClientAdapter"), "VirtualSlotNumber"))
-    target = _child(resource, "TargetDevice")
-    luns = [
-        leaf_text(_child(device, "LogicalUnitAddress"))
-        for device in (target.values() if isinstance(target, Mapping) else ())
-    ]
-    lun = (
-        _LUN.fullmatch(luns[0].strip())
-        if len(luns) == 1 and isinstance(luns[0], str)
-        else None
-    )
-    if not isinstance(slot, str) or not slot.strip().isdigit() or lun is None:
-        return None
-    return f"/vdevice/v-scsi@{_SLOT_BASE + int(slot):x}/disk@{lun.group(1).lower()}"
-
-
 async def root_disk_path(
     hmc: HMCClient, lpar_uuid: str, disk: Mapping[str, Any]
 ) -> str:
@@ -148,7 +121,7 @@ async def root_disk_path(
             and found.backing_name == disk["disk_name"]
             and (found.lpar_uuid or "").lower() == lpar_uuid
         ):
-            paths.append(_disk_path(entry))
+            paths.append(device_path(entry))
     if len(paths) != 1 or paths[0] is None:
         raise OperationFailed(
             f"the root disk of LPAR {lpar_uuid} is mapped {len(paths)} times or its "
