@@ -193,7 +193,7 @@ class World:
             return (
                 "Size(mb) Free(mb) Parent Pool Parent Size Parent Free\n"
                 f"10240 10093 rootvg 571904 {free}\n\nName File Size Optical Access\n"
-                "lp3_28.iso 105 lp3-vopt ro\n"
+                "lpar-a.iso 105 lpar-a-vopt ro\n"
             )
         if cmd.startswith("viosvrcmd") and f"lsvg -lv {GROUP}" in cmd:
             rows = [f"{GROUP}:", "LV NAME TYPE LPs PPs PVs LV STATE MOUNT POINT"]
