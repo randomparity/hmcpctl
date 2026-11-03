@@ -27,6 +27,17 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   (ADR 0189). The configuration is saved into a new partition profile named
   `hmcpctl_<12 hex>`, read back by name, and made the partition's default, and power-on
   activates that profile, so the client adapter survives the next activation (#1839, #1840).
+- `hmc_provision_lpar` accepts `install` with prepared iso-chain-loader media, `adapters.mac`
+  and `boot=deferred` (#1842, ADR 0319). The `iso-chain-media-v1` producer result must match the
+  request and the created adapter's MAC field by field; a mismatch refuses the call or ends the
+  operation `failed`, and nothing is rebuilt or overwritten. The media is uploaded as
+  `hmcpctl_<12 hex>.iso` into the storage VIOS's one media repository only when the download
+  matches the bound SHA-256 and size. It is mounted before the profile save, so the saved
+  profile carries its adapter. After the default profile is set, the boot order puts the media
+  first, and the operation pauses at `ready_to_boot` with the partition powered off. The result's
+  `unverified` lists the VIOS copy and the guest's reach to its installer source. Built media
+  (#1843) and the installer power-on (#1849) are not available yet. `upload_iso` gains
+  `expected_sha256` and `expected_size`.
 
 - `hmc_load_optical_media` and `hmc_unload_optical_media` (`hmcpctl storage
   load-optical-media` and `unload-optical-media`) change the medium in an LPAR's existing

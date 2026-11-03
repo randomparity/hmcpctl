@@ -2225,6 +2225,8 @@ def test_baseline_scope_distinguishes_fixed_serialization_and_carried_assignment
     provision = by_operation["provision.lpar"]["implementation"]
     assert provision["state"] == "partial"
     assert {row["variant"] for row in provision["missing_scope"]} == {
+        "built-install-media",
+        "installer-boot",
         "c12-positive-virtual-slot-linkage",
     }
     assert "dedicated-assignment" in {

@@ -41,7 +41,11 @@ from ..affinity.rest import (
     validate_affinity_request,
 )
 from ..logical.models import OperationRecord
-from ..storage.resources import create_virtual_disk, resolve_volume_group_uuid
+from ..storage.resources import (
+    create_virtual_disk,
+    require_allowlisted_iso_url,
+    resolve_volume_group_uuid,
+)
 from ..virtualization.pcie import list_dedicated_slots
 from .activation import submit_power_on_lpar
 from .assignments import (
@@ -50,6 +54,14 @@ from .assignments import (
     prevalidate_lpar_pcie_assignments,
 )
 from .core import LparCreation
+from .install_media import (
+    Boot,
+    LparInstall,
+    bind_prepared,
+    check_install,
+    check_mac,
+    repository_group,
+)
 from .physical_io import admit_creation_io
 from .workflow_contract import WorkflowStep
 
@@ -62,6 +74,13 @@ class ProvisionAdapters:
         metadata={
             "description": "VLAN identifier for the client virtual Ethernet adapter."
         }
+    )
+    mac: str | None = field(
+        default=None,
+        metadata={
+            "description": "Adapter MAC in lower-case colon form, created as given; "
+            "required with prepared install media and accepted only with it."
+        },
     )
 
 
@@ -109,6 +128,8 @@ class ProvisionRequest:
     minimum_affinity_policy: MinimumAffinityPolicy | None = None
     affinity_assessment: ProvisionAffinityAssessment | None = None
     physical_io: LparPhysicalIO = field(default_factory=LparPhysicalIO)
+    install: LparInstall | None = None
+    boot: Boot = "immediate"
 
 
 @dataclass(frozen=True)
@@ -156,6 +177,13 @@ class ProvisionResult:
         metadata={
             "description": "The logical operation that ran the provision (ADR 0313), "
             "or null for a dry run."
+        },
+    )
+    unverified: tuple[str, ...] = field(
+        default=(),
+        metadata={
+            "description": "What an install run does not check: the VIOS copy of the "
+            "media and the guest's reach to its installer source (ADR 0191)."
         },
     )
 
@@ -263,7 +291,7 @@ async def _read_change_location(
 
 
 async def _add_network(
-    hmc: HMCClient, lpar_uuid: str, port_vlan_id: int
+    hmc: HMCClient, lpar_uuid: str, port_vlan_id: int, mac: str | None = None
 ) -> dict[str, Any] | None:
     return await hmc.add_network_adapter(
         lpar_uuid,
@@ -271,7 +299,7 @@ async def _add_network(
         slot_number=None,
         virtual_switch_id=None,
         tagged=False,
-        mac_address=None,
+        mac_address=mac.replace(":", "") if mac else None,
     )
 
 
@@ -563,6 +591,55 @@ async def _check_profile_jobs(hmc: HMCClient) -> None:
         )
 
 
+def validate_provision_install(request: ProvisionRequest) -> None:
+    """Refuse install inputs this provision cannot run (ADR 0191, ADR 0319)."""
+    install = request.install
+    if install is None:
+        if request.boot != "immediate":
+            raise ValueError("boot: deferred applies only with install")
+        check_mac(request.adapters.mac, None)
+        return
+    if request.storage.capacity_mib is None:
+        raise ValueError(
+            "storage.capacity_mib: install needs a new disk (ADR 0191 Decision 6)"
+        )
+    if request.power_on:
+        raise ValueError("power_on: with install, boot governs power-on; omit power_on")
+    if request.boot != "deferred":
+        raise ValueError(
+            "boot: install currently needs boot=deferred; the installer power-on "
+            "(boot=immediate and continuation=boot) arrives with issue #1849"
+        )
+    check_install(install)
+    if install.media.mode != "prepared":
+        raise ValueError(
+            "install.media.mode: built media is not available yet (issue #1843); "
+            "pass prepared media"
+        )
+    check_mac(request.adapters.mac, install)
+    bind_prepared(install, request.adapters.mac)
+
+
+def require_install_url(hmc: HMCClient, url: str) -> None:
+    """Refuse a media URL off ``HMC_ISO_URL_ALLOWLIST`` without echoing it."""
+    try:
+        require_allowlisted_iso_url(url, hmc.config.iso_url_allowlist_entries)
+    except ValueError:
+        raise ValueError(
+            "install.media.url: its origin (host and port) is not on HMC_ISO_URL_ALLOWLIST (an unset "
+            "allowlist permits nothing); publish the media on a listed origin"
+        ) from None
+
+
+async def preflight_install(hmc: HMCClient, request: ProvisionRequest) -> None:
+    """Refuse install media the HMC side cannot take: an unlisted URL, no repository."""
+    if request.install is None:
+        return
+    validate_provision_install(request)
+    require_install_url(hmc, request.install.media.url or "")
+    await repository_group(hmc, request.storage.vios_uuid)
+
+
 async def _preflight_provision_request(
     hmc: HMCClient,
     system_name_or_uuid: str,
@@ -623,6 +700,7 @@ async def _preflight_provision_request(
         hmc, system_name_or_uuid, request.assignments
     )
     await _check_dedicated_slots_free(hmc, system_name_or_uuid, request.assignments)
+    await preflight_install(hmc, request)
 
 
 def _provision_step_names(
@@ -639,9 +717,13 @@ def _provision_step_names(
     names.extend(
         ["storage", *assignment_step_names(replace(assignments, dedicated=()))]
     )
+    if request.install is not None:
+        names.extend(["bind_media", "upload_media", "mount_media"])
     names.extend(["save_profile", "profile_readback"])
     names.extend(assignment_step_names(LparPcieAssignments(assignments.dedicated)))
     names.append("default_profile")
+    if request.install is not None:
+        names.append("set_boot_order")
     if request.power_on:
         names.append("power_on")
     if request.affinity_assessment is not None:

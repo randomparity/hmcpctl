@@ -1605,3 +1605,49 @@ def scoped_volume_group_inventory(monkeypatch):
     )
     monkeypatch.setattr(HMCClient, "list_volume_groups", lookup)
     return lookup
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "expected",
+    [
+        {"expected_sha256": "0" * 64},
+        {"expected_size": len(TEST_CONTENT) + 1},
+        {"expected_sha256": TEST_SHA256, "expected_size": 1},
+    ],
+)
+async def test_upload_iso_refuses_a_download_that_differs_from_the_bound_digest(
+    stage_download, expected
+):
+    """A bound digest or size that the download misses uploads nothing (ADR 0191 D5)."""
+    download = stage_download()
+    hmc = _web_file_client()
+
+    with pytest.raises(ValueError, match="nothing was uploaded") as caught:
+        await upload_iso(hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, **expected)
+
+    assert TEST_SHA256 not in str(caught.value)
+    hmc._web_file_create.assert_not_awaited()
+    staged, _, _ = download.return_value
+    assert not staged.exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_iso_proceeds_when_the_download_matches_the_bound_digest(
+    stage_download,
+):
+    stage_download()
+    hmc = _web_file_client()
+
+    result = await upload_iso(
+        hmc,
+        VIOS_UUID,
+        VG_UUID,
+        MEDIA_NAME,
+        ISO_URL,
+        expected_sha256=TEST_SHA256,
+        expected_size=len(TEST_CONTENT),
+    )
+
+    assert result.raw["status"] == "uploaded"
+    hmc._web_file_create.assert_awaited_once()
