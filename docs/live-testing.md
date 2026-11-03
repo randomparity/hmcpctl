@@ -756,7 +756,8 @@ partition's profile, but the provision's PowerOn activates the current configura
 so the running partition does not own the slot. Provision now refuses a dedicated
 slot before any HMC call (#1390), and the arm expects that refusal instead of sending
 the slot; a dedicated slot is assigned through the bare-CEC path
-([recipe](recipes/bare-cec-lpar.md)). Profile-first provisioning is #1225.
+([recipe](recipes/bare-cec-lpar.md)). Provision now activates the profile it saves
+(ADR 0313); carrying a dedicated slot into that profile is #1841.
 
 `lpar.power_on` passed on a re-run after #1392. The first run's current-configuration
 activation ended `FAILED_TO_START` with "Parameter 'OperationType' is not allowed for

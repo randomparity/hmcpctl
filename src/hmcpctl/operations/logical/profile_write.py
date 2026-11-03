@@ -85,7 +85,7 @@ async def profile_by_name(
     return found[0] if found else None
 
 
-def _holds(element: ET.Element, patch: ProfilePatch) -> bool:
+def holds(element: ET.Element, patch: ProfilePatch) -> bool:
     """Whether every field *patch* sets already reads its value in *element*."""
     patched = apply_profile_patch(element, patch)
     return requested_profile_values(element, patch) == requested_profile_values(
@@ -113,11 +113,11 @@ def profile_write_classifier(
             profile = await read_native_profile(
                 hmc, "LogicalPartition", lpar_uuid, profile_uuid, ctx.partition[0]
             )
-        if _holds(profile.element, expected):
+        if holds(profile.element, expected):
             return Classification(
                 "applied", {"profile_uuid": profile_uuid, "after_etag": profile.etag}
             )
-        if _holds(profile.element, before):
+        if holds(profile.element, before):
             return Classification("not_applied")
         return Classification(
             "needs_attention",
@@ -139,7 +139,7 @@ def profile_write_classifier(
             profile = await profile_by_name(hmc, lpar_uuid, system_uuid, name)
         if profile is None:
             return Classification("not_applied")
-        if _holds(profile.element, expected):
+        if holds(profile.element, expected):
             return Classification(
                 "applied", {"profile_uuid": profile.uuid, "profile_name": name}
             )

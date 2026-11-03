@@ -16,14 +16,15 @@ from pydantic import TypeAdapter
 
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources, validate_partition_type
+from ...documents.partition_profile import ProfilePatch
 from ...errors import HMCError
 from ...jobs import JobOutcome, job_identifier
 from ...resource_identity import resolve_system_uuid
 from ...ssh.affinity import MinimumAffinityPolicy
 from ...ssh.transport import HMCCLIError
-from ...xmlutil import leaf_text
+from ...xmlutil import leaf_text, localname
 from ..affinity.ssh import set_minimum_affinity_policy
-from ..logical import engine, store
+from ..logical import engine, profile_write, store
 from ..logical.engine import (
     BodyResult,
     Classification,
@@ -46,6 +47,7 @@ from .ownership import (
     stamp_created_lpar_ownership,
 )
 from .power import open_client
+from .profiles import save_current_partition_profile, set_default_partition_profile
 from .provision import (
     ProvisionRequest,
     ProvisionResult,
@@ -73,6 +75,8 @@ EFFECT_KINDS: Mapping[str, str] = {
     "disk": "vios.virtual_disk",
     "storage": "vios.storage_map",
     "assignments": "lpar.pcie_assignments",
+    "profile": profile_write.KIND,
+    "default_profile": "lpar.default_profile",
     "power_on": "lpar.power_on",
 }
 # The step each effect reports under in ProvisionResult.steps.
@@ -84,6 +88,8 @@ STEP_NAMES: Mapping[str, str] = {
     "disk": "create_disk",
     "storage": "storage",
     "assignments": "assignments",
+    "profile": "save_profile",
+    "default_profile": "default_profile",
     "power_on": "power_on",
 }
 # Ledger kinds (ADR 0313 Decision 6); #1842 adds the reserved "installer_media".
@@ -113,6 +119,7 @@ DEFAULT_ARGUMENTS: Mapping[str, Any] = {
     "power_on": True,
 }
 _HEX12 = re.compile(r"[0-9a-f]{12}")
+_PERSIST_STEPS = ("save_profile", "profile_readback", "default_profile")
 _LEG_ERRORS = (HMCError, HMCCLIError, ValueError, LookupError, EffectNotApplied)
 
 
@@ -123,7 +130,12 @@ def request_from_arguments(
     fields = {
         key: value
         for key, value in arguments.items()
-        if key not in ("system_name_or_uuid", "expected_plan_digest")
+        if key
+        not in (
+            "system_name_or_uuid",
+            "expected_plan_digest",
+            "exclusive_writer_window",
+        )
     }
     # Before the schema, so a VIOS type gets its pointer to hmc_create_vios.
     validate_partition_type(fields.get("partition_type", "AIX/Linux"))
@@ -142,6 +154,69 @@ def mac_colon_form(value: object) -> str | None:
     if not _HEX12.fullmatch(digits):
         return None
     return ":".join(digits[i : i + 2] for i in range(0, 12, 2))
+
+
+def profile_name_for(operation_id: str) -> str:
+    """The saved profile an operation's provision creates (ADR 0313 Decision 10)."""
+    return f"hmcpctl_{operation_id[:12]}"
+
+
+def expected_profile(request: ProvisionRequest) -> ProfilePatch:
+    """The requested memory, processors and units the saved profile must hold."""
+    resources = request.resources
+    values: dict[str, Any] = {
+        "min_memory": resources.min_memory,
+        "desired_memory": resources.desired_memory,
+        "max_memory": resources.max_memory,
+    }
+    if resources.dedicated:
+        procs = resources.desired_procs
+        if procs is not None and float(procs).is_integer():
+            values["desired_processors"] = int(procs)
+    else:
+        values["desired_processors"] = resources.desired_vcpus
+        if resources.desired_procs is not None:
+            values["desired_units"] = float(resources.desired_procs)
+    return ProfilePatch(**{k: v for k, v in values.items() if v is not None})
+
+
+def _count(element: Any, *names: str) -> int:
+    return sum(1 for node in element.iter() if localname(node.tag) in names)
+
+
+def _vlan_adapter(element: Any, vlan: int) -> bool:
+    for node in element.iter():
+        if localname(node.tag) == "ProfileClientNetworkAdapter":
+            for child in node:
+                if localname(child.tag) == "PortVLANID" and (
+                    child.text or ""
+                ).strip() == str(vlan):
+                    return True
+    return False
+
+
+def readback_problem(element: Any, request: ProvisionRequest, sriov: int) -> str | None:
+    """Why the saved profile does not hold what provision built, or None when it does."""
+    if not profile_write.holds(element, expected_profile(request)):
+        return "the saved profile's memory, processors or units differ from the request"
+    if not _vlan_adapter(element, request.adapters.port_vlan_id):
+        return "the saved profile has no client network adapter on the requested VLAN"
+    if not _count(element, "ProfileVirtualSCSIClientAdapter"):
+        return "the saved profile has no virtual SCSI client adapter"
+    vnics = len(request.assignments.vnics)
+    if _count(element, "ProfileVirtualNICDedicated", "ProfileVirtualNICShared") < vnics:
+        return "the saved profile lacks a requested vNIC"
+    if _count(element, "ProfileSRIOVEthernetLogicalPort") < sriov:
+        return "the saved profile lacks a requested SR-IOV logical port"
+    return None
+
+
+async def _partition_resource(hmc: HMCClient, lpar_uuid: str) -> Mapping[str, Any]:
+    entry = await hmc.get_logical_partition(lpar_uuid)
+    resource = (entry or {}).get("Resource") if isinstance(entry, dict) else None
+    if not isinstance(resource, dict):
+        raise HMCError(f"LPAR {lpar_uuid} could not be read")
+    return resource
 
 
 def _agent(hmc: HMCClient) -> str:
@@ -270,13 +345,73 @@ class _Run:
         )
         self.steps.append(WorkflowStep("stamp", "ok", dict(identity)))
         completed = await self._legs(system_uuid, lpar_uuid)
+        profile_uuid = (
+            await self._persist(system_uuid, lpar_uuid) if completed else None
+        )
+        completed = profile_uuid is not None
+        if completed and self.request.power_on:
+            completed = (
+                await self._leg(
+                    "power_on",
+                    f"lpar:{lpar_uuid}",
+                    lambda: self._write_power(lpar_uuid, profile_uuid),
+                )
+                is not None
+            )
         if completed:
             completed, warnings = await _run_affinity_stage(
                 self.steps, self.hmc, self.request
             )
             self.warnings.extend(warnings)
-        outcome = "completed" if completed else "needs_attention"
+        elif self.request.affinity_assessment is not None:
+            _skip_steps(self.steps, ["affinity_assessment"])
+        outcome = "configured" if completed else "needs_attention"
         return BodyResult(outcome, self._result(lpar_uuid, completed))
+
+    def _skip_rest(self, *steps: str) -> None:
+        _skip_steps(
+            self.steps, [*steps, *(["power_on"] if self.request.power_on else [])]
+        )
+
+    async def _persist(self, system_uuid: str, lpar_uuid: str) -> str | None:
+        """Save, read back and default the profile; its UUID, or None to pause."""
+        name = profile_name_for(self.ctx.operation_id)
+        identity = await self._leg(
+            "profile",
+            profile_write.target_by_name(lpar_uuid, name),
+            lambda: self._write_profile(system_uuid, lpar_uuid, name),
+        )
+        if identity is None:
+            self._skip_rest("profile_readback", "default_profile")
+            return None
+        profile = await profile_write.profile_by_name(
+            self.hmc, lpar_uuid, system_uuid, name
+        )
+        problem = (
+            "the saved profile is missing"
+            if profile is None
+            else readback_problem(
+                profile.element, self.request, len(self._assignments().sriov)
+            )
+        )
+        if problem is not None:
+            self.steps.append(WorkflowStep("profile_readback", "error", problem))
+            self._skip_rest("default_profile")
+            return None
+        self.steps.append(
+            WorkflowStep("profile_readback", "ok", {"profile_name": name})
+        )
+        if (
+            await self._leg(
+                "default_profile",
+                f"lpar:{lpar_uuid}",
+                lambda: self._write_default(lpar_uuid, name),
+            )
+            is None
+        ):
+            self._skip_rest()
+            return None
+        return str(identity["profile_uuid"])
 
     async def _create(self, system_uuid: str) -> str:
         identity = await self.ctx.effect(
@@ -415,18 +550,14 @@ class _Run:
         legs.append(("storage", lpar, lambda: self._write_storage(lpar_uuid)))
         if assignment_step_names(self._assignments()):
             legs.append(("assignments", lpar, self._write_assignments))
-        if request.power_on:
-            legs.append(("power_on", lpar, lambda: self._write_power(lpar_uuid)))
         for index, (key, target, write) in enumerate(legs):
             identity = await self._leg(key, target, write)
             if key == "assignments":
                 self._replace_assignment_step()
             if identity is None:
-                _skip_steps(
-                    self.steps, [STEP_NAMES[k] for k, _, _ in legs[index + 1 :]]
+                self._skip_rest(
+                    *(STEP_NAMES[k] for k, _, _ in legs[index + 1 :]), *_PERSIST_STEPS
                 )
-                if request.affinity_assessment is not None:
-                    _skip_steps(self.steps, ["affinity_assessment"])
                 return False
             if key == "network":
                 self.change_location, warnings = await _read_change_location(
@@ -499,9 +630,41 @@ class _Run:
             raise HMCError(f"assignment steps reported errors: {', '.join(failed)}")
         return {"steps": [[s.step, s.status] for s in result.steps]}
 
-    async def _write_power(self, lpar_uuid: str) -> dict[str, Any]:
+    async def _write_profile(
+        self, system_uuid: str, lpar_uuid: str, name: str
+    ) -> dict[str, Any]:
+        # #637's helper can misread a landed save (#1867), so the profile itself decides
+        # (operator decision D1, 2026-11-03).
+        await save_current_partition_profile(
+            self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
+        )
+        profile = await profile_write.profile_by_name(
+            self.hmc, lpar_uuid, system_uuid, name
+        )
+        if profile is None:
+            raise EffectNotApplied(f"no saved profile was created for LPAR {lpar_uuid}")
+        return {"profile_uuid": profile.uuid, "profile_name": name}
+
+    async def _write_default(self, lpar_uuid: str, name: str) -> dict[str, Any]:
+        outcome = await set_default_partition_profile(
+            self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
+        )
+        if (outcome.execution, outcome.requested_change) == ("completed", "verified"):
+            return {"profile_name": name}
+        resource = await _partition_resource(self.hmc, lpar_uuid)
+        if leaf_text(resource.get("DefaultProfileName")) == name:
+            return {"profile_name": name}
+        raise HMCError(
+            f"the default profile of LPAR {lpar_uuid} is unconfirmed ({outcome.execution})"
+        )
+
+    async def _write_power(self, lpar_uuid: str, profile_uuid: str) -> dict[str, Any]:
         result = await _power_on(
-            self.hmc, self.system, lpar_uuid, self.request.affinity_assessment
+            self.hmc,
+            self.system,
+            lpar_uuid,
+            self.request.affinity_assessment,
+            partition_profile_uuid=profile_uuid,
         )
         if isinstance(result, JobOutcome):
             if result.timed_out or result.error is not None:
@@ -635,15 +798,33 @@ def provision_classifiers(
 
     async def power_on(ctx: OperationContext, effect: EffectRecord) -> Classification:
         async with client_factory(ctx.connection) as hmc:
-            state = await hmc.get_quick_property(
-                "LogicalPartition", _target_uuid(effect), "PartitionState"
+            resource = await _partition_resource(hmc, _target_uuid(effect))
+        state = str(leaf_text(resource.get("PartitionState")) or "").strip().lower()
+        if state not in ACTIVATED_STATES:
+            return Classification(
+                "needs_attention",
+                reason="a power-on job may still be queued, so it is not resubmitted",
             )
-        if str(state or "").strip().lower() in ACTIVATED_STATES:
-            return Classification("applied", {"job_id": None})
-        return Classification(
-            "needs_attention",
-            reason="a power-on job may still be queued, so it is not resubmitted",
-        )
+        if leaf_text(resource.get("LastActivatedProfile")) != profile_name_for(
+            ctx.operation_id
+        ):
+            return Classification(
+                "needs_attention",
+                reason="the partition is active from another profile; inspect, then abandon",
+            )
+        return Classification("applied", {"job_id": None})
+
+    async def default_profile(
+        ctx: OperationContext, effect: EffectRecord
+    ) -> Classification:
+        name = profile_name_for(ctx.operation_id)
+        async with client_factory(ctx.connection) as hmc:
+            resource = await _partition_resource(hmc, _target_uuid(effect))
+        if leaf_text(resource.get("DefaultProfileName")) == name:
+            return Classification("applied", {"profile_name": name})
+        return Classification("not_applied")
+
+    expected = expected_profile(request)
 
     return {
         EFFECT_KINDS["create"]: create,
@@ -651,6 +832,10 @@ def provision_classifiers(
         EFFECT_KINDS["network"]: network,
         EFFECT_KINDS["disk"]: disk,
         EFFECT_KINDS["storage"]: mapping,
+        EFFECT_KINDS["profile"]: profile_write.profile_write_classifier(
+            lambda _ctx, _effect: (expected, expected), client_factory
+        ),
+        EFFECT_KINDS["default_profile"]: default_profile,
         EFFECT_KINDS["power_on"]: power_on,
     }
 
@@ -671,9 +856,9 @@ def _agrees(result: ProvisionResult, record: OperationRecord) -> bool:
 def result_from_record(record: OperationRecord) -> ProvisionResult:
     """The tool result: the body's own result where it agrees with the journal, else
     one rebuilt from the effects (ADR 0313 Decision 2)."""
-    if record.result and record.outcome in ("completed", "needs_attention"):
+    if record.result and record.outcome in ("configured", "needs_attention"):
         result = _RESULT.validate_python(record.result)
-        if record.outcome == "completed" or _agrees(result, record):
+        if record.outcome == "configured" or _agrees(result, record):
             # A pause the engine added (an open effect, a classifier's reason) is why
             # the operation stopped, so it joins the body's own warnings.
             warnings = tuple(dict.fromkeys((*result.warnings, *record.warnings)))

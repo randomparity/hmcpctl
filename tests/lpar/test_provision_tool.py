@@ -36,6 +36,7 @@ from hmcpctl.operations.affinity.rest import (
 )
 from hmcpctl.operations.logical import store
 from hmcpctl.operations.logical.store import OperationRefused
+from hmcpctl.operations.lpar import activation
 from hmcpctl.operations.lpar.activation import LparPowerResult
 from hmcpctl.operations.lpar.assignments import (
     AssignmentResult,
@@ -93,7 +94,74 @@ def hmc_provision_lpar(**arguments):
     handler = provision_handler(TOOL_SECURITY, lambda _name: True, lambda *_args: None)
     arguments.setdefault("request_id", f"r{next(_REQUEST_IDS)}")
     arguments.setdefault("wait_seconds", 30)
+    arguments.setdefault("exclusive_writer_window", True)
     return handler(**arguments)
+
+
+PROFILE_UUID = "00000000-0000-0000-0000-0000000000c1"
+CONSOLE_FEED = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>urn:uuid:console</id>
+<content type="application/vnd.ibm.powervm.uom+xml">
+<ManagementConsole xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">
+<VersionInfo><Version>10</Version><Release>3</Release>
+<ServicePackName>1060</ServicePackName></VersionInfo>
+</ManagementConsole></content></entry></feed>"""
+
+
+class Persistence:
+    """The #637 profile writes and the readback, answered as a healthy HMC would."""
+
+    def __init__(self):
+        self.saved: list[str] = []
+        self.defaults: list[str] = []
+        self.readback: str | None = None
+        self.profile_present = True
+
+    async def save(self, _hmc, _system, _lpar, name, **kwargs):
+        assert kwargs == {"exclusive_writer_window": True}
+        self.saved.append(name)
+        return SimpleNamespace(execution="unknown", requested_change="unverified")
+
+    async def by_name(self, _hmc, _lpar, _system, name):
+        if not (self.saved and self.profile_present):
+            return None
+        return SimpleNamespace(uuid=PROFILE_UUID, name=name, element=None)
+
+    async def default(self, _hmc, _system, _lpar, name, **kwargs):
+        assert kwargs == {"exclusive_writer_window": True}
+        self.defaults.append(name)
+        return SimpleNamespace(execution="completed", requested_change="verified")
+
+
+@pytest.fixture(autouse=True)
+def persistence(monkeypatch):
+    """Stub the profile primitives: their HMC jobs are #637's and tested there."""
+    from hmcpctl.operations.lpar import provision_operation
+
+    fake = Persistence()
+    monkeypatch.setattr(
+        provision_operation, "save_current_partition_profile", fake.save
+    )
+    monkeypatch.setattr(
+        provision_operation, "set_default_partition_profile", fake.default
+    )
+    monkeypatch.setattr(
+        provision_operation.profile_write, "profile_by_name", fake.by_name
+    )
+    monkeypatch.setattr(
+        provision_operation, "readback_problem", lambda *_args: fake.readback
+    )
+
+    async def contained(_hmc, _lpar, profile_uuid):
+        assert profile_uuid == PROFILE_UUID
+        return {"UUID": profile_uuid}
+
+    async def no_warnings(*_args):
+        return ()
+
+    monkeypatch.setattr(activation, "_require_contained_partition_profile", contained)
+    monkeypatch.setattr(activation, "profile_adapter_warnings", no_warnings)
+    return fake
 
 
 SYSTEM_UUID = "00000000-0000-0000-0000-000000000001"
@@ -274,6 +342,9 @@ def _mock_preconditions(
         f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition",
         name="partitions",
     ).mock(return_value=httpx.Response(200, text=lpar_feed_text))
+    mock_hmc.get("/rest/api/uom/ManagementConsole", name="console").mock(
+        return_value=httpx.Response(200, text=CONSOLE_FEED)
+    )
     mock_hmc.get(f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/VirtualNetwork").mock(
         return_value=httpx.Response(
             200, text=vlan_feed or (VLAN_FEED if has_vlan else EMPTY_FEED)
@@ -345,6 +416,9 @@ def _mock_execution_steps(mock_hmc, *, sync="Disabled"):
     mock_hmc.put(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn").mock(
         return_value=httpx.Response(202, text=JOB_ENTRY)
     )
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/quick/PartitionState"
+    ).mock(return_value=httpx.Response(200, text="not activated"))
     return create_route
 
 
@@ -513,6 +587,7 @@ def test_provision_affinity_power_on_waits_for_terminal_result():
         timeout_seconds=30,
         poll_interval=1,
         ownership_override=True,
+        partition_profile_uuid=None,
     )
 
 
@@ -665,6 +740,9 @@ def test_provision_lpar_full_workflow(monkeypatch, mock_hmc):
         "stamp",
         "network",
         "storage",
+        "save_profile",
+        "profile_readback",
+        "default_profile",
         "power_on",
     ]
     assert all(s.status in ("ok", "skipped") for s in result.steps)
@@ -676,12 +754,14 @@ def test_provision_lpar_full_workflow(monkeypatch, mock_hmc):
     assert steps["power_on"].result == {"job_id": ANY}
     operation = result.operation
     assert operation is not None
-    assert (operation.state, operation.outcome) == ("terminal", "completed")
+    assert (operation.state, operation.outcome) == ("terminal", "configured")
     assert [(e.key, e.kind, e.status) for e in operation.effects] == [
         ("create", "lpar.create", "applied"),
         ("stamp", "lpar.ownership_stamp", "applied"),
         ("network", "lpar.client_network_adapter", "applied"),
         ("storage", "vios.storage_map", "applied"),
+        ("profile", "lpar.profile_write", "applied"),
+        ("default_profile", "lpar.default_profile", "applied"),
         ("power_on", "lpar.power_on", "applied"),
     ]
     assert "vscsi" not in steps
@@ -1104,6 +1184,9 @@ def test_provision_policy_rejects_unsupported_system_before_mutation(
     monkeypatch, mock_hmc
 ):
     _hmc_env(monkeypatch)
+    mock_hmc.get("/rest/api/uom/ManagementConsole").mock(
+        return_value=httpx.Response(200, text=CONSOLE_FEED)
+    )
     with (
         patch(
             "hmcpctl.operations.lpar.provision.resolve_ssh_names",
@@ -1358,8 +1441,9 @@ _DEDICATED = LparPcieAssignments(
 def test_provision_operation_refuses_a_dedicated_slot_before_any_round_trip(
     monkeypatch,
 ):
-    """Provision's PowerOn activates the current configuration, so a slot written to
-    the profile is never owned (#1390); refuse before reading or writing anything."""
+    """Provision activates the profile it saves from the current configuration, so a
+    slot written to the creation profile is never owned (#1390); refuse before
+    reading or writing anything."""
     _hmc_env(monkeypatch)
     args = _provision_args()
 
@@ -1567,7 +1651,9 @@ def test_a_withheld_delegated_tool_refuses_before_anything_is_recorded(
         TOOL_SECURITY, lambda name: name != "hmc_add_network_adapter", lambda *_: None
     )
     with pytest.raises(PermissionError, match="hmc_add_network_adapter"):
-        handler(request_id="r-denied", **_provision_args())
+        handler(
+            request_id="r-denied", exclusive_writer_window=True, **_provision_args()
+        )
     assert not mock_hmc.calls
     assert not _store_root().exists()
 
@@ -1586,6 +1672,8 @@ def test_delegated_tools_follow_the_request():
         "hmc_create_lpar",
         "hmc_add_network_adapter",
         "hmc_map_storage_to_lpar",
+        "hmc_save_current_partition_profile",
+        "hmc_set_default_partition_profile",
         "hmc_create_virtual_disk",
         "hmc_set_minimum_affinity_policy",
         "hmc_assign_sriov_logical_port",
@@ -1671,9 +1759,11 @@ def test_resume_reclassifies_and_continues(monkeypatch, mock_hmc):
     paused = hmc_provision_lpar(**_provision_args(request_id="resumed"))
     assert paused.operation.outcome == "needs_attention"
     network.mock(return_value=httpx.Response(201, text=NETWORK_ADAPTER_FEED))
-    done = hmc_provision_lpar(request_id="resumed", continuation="resume")
+    done = hmc_provision_lpar(
+        request_id="resumed", continuation="resume", exclusive_writer_window=True
+    )
 
-    assert (done.operation.state, done.operation.outcome) == ("terminal", "completed")
+    assert (done.operation.state, done.operation.outcome) == ("terminal", "configured")
     assert done.workflow_completed is True
     assert create_route.call_count == 1
 
@@ -1701,7 +1791,9 @@ def test_an_assignment_error_never_resumes_to_completed(monkeypatch, mock_hmc):
         ),
     ):
         paused = hmc_provision_lpar(**args)
-        resumed = hmc_provision_lpar(request_id="assigned", continuation="resume")
+        resumed = hmc_provision_lpar(
+            request_id="assigned", continuation="resume", exclusive_writer_window=True
+        )
 
     assert paused.operation.outcome == "needs_attention"
     assert ("sriov[0]", "error") in [(s.step, s.status) for s in paused.steps]
@@ -1740,6 +1832,7 @@ def test_each_vnic_is_authorized_against_its_backing_vios(monkeypatch, mock_hmc)
     with pytest.raises(PermissionError, match="vios-b"):
         handler(
             request_id="r-vnic",
+            exclusive_writer_window=True,
             **_provision_args(assignments=LparPcieAssignments(vnics=(vnic,))),
         )
     vnics = [arguments for name, arguments in seen if name == "hmc_add_vnic"]
@@ -1754,4 +1847,114 @@ def test_each_vnic_is_authorized_against_its_backing_vios(monkeypatch, mock_hmc)
     mapping = next(a for name, a in seen if name == "hmc_map_storage_to_lpar")
     assert mapping["vios_name_or_uuid"] == VIOS_UUID
     assert not mock_hmc.calls
+    assert not _store_root().exists()
+
+
+# ---------------------------------------------------------------------- #
+# Persistence through a saved profile (ADR 0313 Decisions 10-12, #1840)
+# ---------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("continuation", ["none", "resume"])
+def test_the_writer_window_is_required(monkeypatch, mock_hmc, continuation):
+    _hmc_env(monkeypatch)
+    arguments = {} if continuation == "resume" else _provision_args()
+    with pytest.raises(ValueError, match="exclusive_writer_window=true is required"):
+        hmc_provision_lpar(
+            request_id="r-window",
+            continuation=continuation,
+            exclusive_writer_window=False,
+            **arguments,
+        )
+    assert not mock_hmc.calls
+    assert not _store_root().exists()
+
+
+def test_a_clean_run_saves_reads_back_defaults_and_activates_the_profile(
+    monkeypatch, mock_hmc, persistence
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    power = mock_hmc.put(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn")
+
+    result = hmc_provision_lpar(**_provision_args())
+
+    operation = result.operation
+    assert (operation.state, operation.outcome) == ("terminal", "configured")
+    name = f"hmcpctl_{operation.operation_id[:12]}"
+    assert persistence.saved == [name] and persistence.defaults == [name]
+    profile = next(e for e in operation.effects if e.key == "profile")
+    assert profile.target == f"lpar:{LPAR_UUID}/profile-name:{name}"
+    assert profile.identity == {"profile_uuid": PROFILE_UUID, "profile_name": name}
+    assert PROFILE_UUID in power.calls.last.request.content.decode()
+
+
+def test_a_readback_mismatch_pauses_before_the_default_and_power_on(
+    monkeypatch, mock_hmc, persistence
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    persistence.readback = "the saved profile lacks a requested vNIC"
+
+    result = hmc_provision_lpar(**_provision_args())
+
+    assert result.operation.outcome == "needs_attention"
+    assert persistence.defaults == []
+    steps = {s.step: s for s in result.steps}
+    assert steps["profile_readback"].status == "error"
+    assert "vNIC" in steps["profile_readback"].result
+    assert (steps["default_profile"].status, steps["power_on"].status) == (
+        "skipped",
+        "skipped",
+    )
+
+
+def test_a_save_that_left_no_profile_is_not_applied(monkeypatch, mock_hmc, persistence):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    persistence.profile_present = False
+
+    result = hmc_provision_lpar(**_provision_args())
+
+    profile = next(e for e in result.operation.effects if e.key == "profile")
+    assert profile.status == "not_applied"
+    assert result.operation.outcome == "needs_attention"
+
+
+def test_an_unconfirmed_default_is_decided_by_the_partition(
+    monkeypatch, mock_hmc, persistence
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+
+    async def unknown(_hmc, _system, _lpar, name, **_kwargs):
+        persistence.defaults.append(name)
+        return SimpleNamespace(execution="unknown", requested_change="unverified")
+
+    async def partition(_hmc, _lpar):
+        return {"DefaultProfileName": "default_profile"}
+
+    from hmcpctl.operations.lpar import provision_operation
+
+    monkeypatch.setattr(provision_operation, "set_default_partition_profile", unknown)
+    monkeypatch.setattr(provision_operation, "_partition_resource", partition)
+    result = hmc_provision_lpar(**_provision_args())
+
+    default = next(e for e in result.operation.effects if e.key == "default_profile")
+    assert default.status == "uncertain"
+    assert result.operation.outcome == "needs_attention"
+
+
+def test_an_old_console_is_refused_before_anything_is_recorded(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    mock_hmc.routes["console"].return_value = httpx.Response(
+        200, text=CONSOLE_FEED.replace("1060", "1050")
+    )
+    with pytest.raises(ValueError, match=r"10\.3\.1060 or later; .* 10\.3\.1050"):
+        hmc_provision_lpar(**_provision_args())
     assert not _store_root().exists()

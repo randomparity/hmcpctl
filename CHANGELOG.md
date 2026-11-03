@@ -24,7 +24,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   continuing. `storage.capacity_mib` creates the root disk and records it as owned. The
   client adapter's MAC is recorded. `expected_plan_digest` refuses a request whose fresh
   `hmc_plan_lpar` digest differs. Each write is authorized as its specialist tool
-  (ADR 0189). No partition profile is written (#1839).
+  (ADR 0189). The configuration is saved into a new partition profile named
+  `hmcpctl_<12 hex>`, read back by name, and made the partition's default, and power-on
+  activates that profile, so the client adapter survives the next activation (#1839, #1840).
 
 - `hmc_reconfigure_lpar` changes an LPAR's processors, memory or partition name as one
   durable logical operation and reports whether each change is `live`, held in the
@@ -252,13 +254,22 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 - **Breaking:** `hmc_provision_lpar` requires `request_id`, and `hmcpctl lpars provision`
   requires `--request-id`, with no compatibility path. The tool's result gains `operation`,
-  a clean run ends `completed`, and a later step's error pauses the operation
+  a clean run ends `configured` only after the saved profile reads back, and a later step's
+  error pauses the operation
   `needs_attention` instead of returning a partial result. The ownership stamp is required:
   a stamp that does not land makes the operation `failed`. Steps gain `stamp`, and the
   `create` step reports only the UUID and name. `affinity_assessment` without `power_on` is
   refused. A policy must now permit the specialist tools whose writes a provision performs.
   `hmcpctl lpars provision` is refused while another process holds the ADR 0190 execution
   lock, such as an MCP server that has started a logical operation (#1839).
+- **Breaking:** `hmc_provision_lpar` requires `exclusive_writer_window=true`, and
+  `hmcpctl lpars provision` requires `--exclusive-writer-window`, except for a dry run or an
+  abandon, because it writes a partition profile. The tool is now `destructive`, so a policy
+  that permits only `mutate` no longer admits it, and a policy must also permit
+  `hmc_save_current_partition_profile` and `hmc_set_default_partition_profile`. Provision
+  refuses an HMC older than 10.3.1060 before recording anything. The new partition's default
+  profile is the saved `hmcpctl_…` profile; the `default_profile` it was created with is kept
+  (#1840).
 
 - Builds derive the package version from Git tags with `hatch-vcs`: a release tag `vX.Y.Z`
   builds `X.Y.Z`, and every other commit builds `X.Y.(Z+1).devN+g<sha>`, so a development
@@ -294,12 +305,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   artifact checks detect candidate closure drift (#1508).
 - `hmc_provision_lpar` and `hmcpctl lpars provision` refuse a dedicated PCIe slot
   (`assignments.dedicated`) before any HMC call, dry runs included. Provision powers on the
-  current configuration, so a slot written into the new profile was never owned by the
+  current configuration then, so a slot written into the new profile was never owned by the
   running partition: the 0.1.0 known issue (#1390). To give a new partition a dedicated slot,
   create it with `hmc_create_lpar` (optionally with `assignments.dedicated`) or assign the slot
   with `hmc_assign_dedicated_pcie_slot`, then power on with the partition profile, as the
-  [bare-CEC LPAR recipe](docs/recipes/bare-cec-lpar.md) does. Profile-first provisioning, which
-  would lift the refusal, is tracked in #1225.
+  [bare-CEC LPAR recipe](docs/recipes/bare-cec-lpar.md) does. Lifting the refusal now that
+  provision activates its saved profile is tracked in #1841.
 - `hmc_remove_memory_pool` and `hmcpctl memory-pools remove` no longer take a pool name. A
   managed system has at most one shared memory pool, so the remove now sends the documented
   `chhwres -r mempool -m <system> -o r`. It refuses when the system has no pool, and when any

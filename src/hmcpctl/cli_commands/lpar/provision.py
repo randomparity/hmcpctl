@@ -91,6 +91,14 @@ def lpars_provision(
     power_on: bool = typer.Option(
         True, "--power-on/--no-power-on", help="Power on after provisioning"
     ),
+    exclusive_writer_window: bool = typer.Option(
+        False,
+        "--exclusive-writer-window",
+        help=(
+            "Attest that no other writer changes this partition's profiles until the "
+            "operation ends; required to provision or resume (ADR 0313)"
+        ),
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate preconditions only; record nothing"
     ),
@@ -110,14 +118,18 @@ def lpars_provision(
     as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
-    """Provision a new LPAR as one journaled operation: create, stamp, network, storage, power on.
+    """Provision a new LPAR as one journaled operation and persist it in a saved profile.
+
+    Creates and stamps the partition, adds its network adapter and storage, saves the
+    current configuration into a new profile that it reads back and makes the default,
+    then optionally powers on from that profile. Needs --exclusive-writer-window.
 
     Always validates preconditions first (name uniqueness, VLAN existence, volume-group
     existence). --dry-run runs only those checks and records nothing. Otherwise the run is
     recorded under --request-id (ADR 0313): repeating it returns the same operation, and a
     paused run continues with --continuation resume (or stops with abandon) from this
     command or hmc_provision_lpar under the same agent id and connection. The command waits
-    for the run to end and exits 1 unless it completed. No automatic rollback is performed.
+    for the run to end and exits 1 unless it is configured. No automatic rollback is performed.
     """
     try:
         store.validate_request_id(request_id)
@@ -125,10 +137,16 @@ def lpars_provision(
         usage_error(f"--request-id: {exc}")
     if continuation not in CONTINUATIONS:
         usage_error(f"--continuation must be one of {', '.join(CONTINUATIONS)}")
+    if not (dry_run or continuation == "abandon" or exclusive_writer_window):
+        usage_error(
+            "--exclusive-writer-window is required: provision writes a partition "
+            "profile and the default-profile setting (ADR 0313)"
+        )
     if continuation != "none":
         if dry_run:
             usage_error("--dry-run cannot continue an operation")
-        _run(request_id, continuation, None, as_json)
+        given = {"exclusive_writer_window": True} if continuation == "resume" else {}
+        _run(request_id, continuation, None, as_json, given)
         return
     missing = [
         flag
@@ -183,6 +201,7 @@ def lpars_provision(
         "power_on": power_on,
         "assignments": json_value(assignments),
         "physical_io": json_value(load_physical_io(physical_io)),
+        "exclusive_writer_window": exclusive_writer_window,
     }
     try:
         system_name, request = request_from_arguments(arguments)
@@ -209,7 +228,7 @@ def lpars_provision(
             f"' (VLAN {terminal_field(port_vlan_id)}, VIOS {terminal_field(vios_uuid)})?",
             abort=True,
         )
-    _run(request_id, continuation, arguments, as_json)
+    _run(request_id, continuation, arguments, as_json, {})
 
 
 def _run(
@@ -217,6 +236,7 @@ def _run(
     continuation: str,
     arguments: Mapping[str, Any] | None,
     as_json: bool,
+    given: Mapping[str, Any],
 ) -> None:
     """Submit, wait for the worker to end, render, and exit 1 unless it completed."""
     config = ssh_config()
@@ -234,7 +254,7 @@ def _run(
                 store.connection_label(current_options().profile, tool=TOOL),
                 config.host,
                 request_id,
-                arguments if continuation == "none" else {},
+                arguments if continuation == "none" else given,
             ),
             provision_body(system, request, lambda _connection: HMCClient(config)),
             classifiers=provision_classifiers(
@@ -251,7 +271,7 @@ def _run(
         fail(exc)
     result = result_from_record(record)
     _render_provision_result(result, request.name, False, as_json)
-    ended = record.outcome == "completed" or (
+    ended = record.outcome == "configured" or (
         continuation == "abandon" and record.outcome == "abandoned"
     )
     if not ended:

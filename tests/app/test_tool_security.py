@@ -464,6 +464,8 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         "hmc_migrate_abort_lpar",
         # ADR 0199: its stop and restart actions power the partition off.
         "hmc_power_lpar",
+        # ADR 0313: it delegates its profile save to a destructive specialist.
+        "hmc_provision_lpar",
         # ADR 0314: allow_disruption=true removes memory or processors live.
         "hmc_reconfigure_lpar",
         "hmc_remote_restart_lpar",

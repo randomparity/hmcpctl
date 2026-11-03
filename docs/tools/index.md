@@ -12,8 +12,8 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
-| `destructive` | 46 |
-| `mutate` | 65 |
+| `destructive` | 47 |
+| `mutate` | 64 |
 | `read` | 91 |
 
 ## Maturity vocabulary
@@ -227,7 +227,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_power_on_vios` | `mutate` | [vios.md](vios.md) |
 | `hmc_processed_metric_links` | `read` | [metrics.md](metrics.md) |
 | `hmc_processed_metrics` | `read` | [metrics.md](metrics.md) |
-| `hmc_provision_lpar` | `mutate` | [provision.md](provision.md) |
+| `hmc_provision_lpar` | `destructive` | [provision.md](provision.md) |
 | `hmc_read_lpar_boot_order` | `read` | [boot_order.md](boot_order.md) |
 | `hmc_read_lpar_refcodes` | `read` | [lpar.md](lpar.md) |
 | `hmc_read_partition_profile` | `read` | [lpar_profile.md](lpar_profile.md) |

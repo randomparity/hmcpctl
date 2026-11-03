@@ -1544,6 +1544,7 @@ def test_lpars_provision_rejects_invalid_vocabulary_before_client_call(
             "provision",
             "--request-id",
             "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -1565,7 +1566,7 @@ def test_lpars_provision_rejects_invalid_vocabulary_before_client_call(
     assert fake_hmc.calls == []
 
 
-def _fake_provision(monkeypatch, returned, outcome="completed"):
+def _fake_provision(monkeypatch, returned, outcome="configured"):
     """Run the CLI's real operation path around a body that returns *returned*."""
 
     async def body(_ctx):
@@ -1581,6 +1582,7 @@ def _fake_provision(monkeypatch, returned, outcome="completed"):
 _PROVISION_ARGS = [
     "lpars",
     "provision",
+    "--exclusive-writer-window",
     "--system",
     SYSTEM_UUID,
     "--name",
@@ -1611,6 +1613,14 @@ def test_lpars_provision_requires_a_request_id(fake_hmc):
     assert fake_hmc.calls == []
 
 
+def test_lpars_provision_requires_the_writer_window(fake_hmc):
+    args = [a for a in _PROVISION_ARGS if a != "--exclusive-writer-window"]
+    result = RUNNER.invoke(cli.app, [*args, "--request-id", "r1"])
+    assert result.exit_code == 2
+    assert "--exclusive-writer-window is required" in unstyle(result.stderr)
+    assert fake_hmc.calls == []
+
+
 def test_lpars_provision_resumes_a_paused_operation(monkeypatch, fake_hmc):
     _fake_provision(monkeypatch, _PROVISIONED, "needs_attention")
     paused = RUNNER.invoke(cli.app, [*_PROVISION_ARGS, "--request-id", "r1"])
@@ -1619,10 +1629,18 @@ def test_lpars_provision_resumes_a_paused_operation(monkeypatch, fake_hmc):
     _fake_provision(monkeypatch, _PROVISIONED)
     resumed = RUNNER.invoke(
         cli.app,
-        ["lpars", "provision", "--request-id", "r1", "--continuation", "resume"],
+        [
+            "lpars",
+            "provision",
+            "--request-id",
+            "r1",
+            "--continuation",
+            "resume",
+            "--exclusive-writer-window",
+        ],
     )
     assert resumed.exit_code == 0, resumed.output
-    assert "terminal/completed" in resumed.stdout
+    assert "terminal/configured" in resumed.stdout
 
 
 def test_lpars_provision_reports_an_unusable_store_without_a_traceback(
@@ -1677,6 +1695,7 @@ def test_lpars_provision_passes_nondefault_request_to_operation(monkeypatch, fak
             "provision",
             "--request-id",
             "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -1765,13 +1784,14 @@ def test_lpars_provision_exit_matches_rendered_outcome(
         warnings=("inspect recorded steps",),
     )
     body, preview = _fake_provision(
-        monkeypatch, returned, "completed" if completed else "needs_attention"
+        monkeypatch, returned, "configured" if completed else "needs_attention"
     )
     arguments = [
         "lpars",
         "provision",
         "--request-id",
         "r1",
+        "--exclusive-writer-window",
         "--system",
         SYSTEM_UUID,
         "--name",
@@ -1837,6 +1857,7 @@ def test_lpars_provision_renders_change_location(monkeypatch, fake_hmc):
             "provision",
             "--request-id",
             "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -5887,6 +5908,7 @@ def test_lpars_create_and_provision_refuse_a_vios_type_before_client_call(
         else [
             "--request-id",
             "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -5925,6 +5947,7 @@ def test_lpars_provision_refuses_a_dedicated_slot_before_client_call(
             "provision",
             "--request-id",
             "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",

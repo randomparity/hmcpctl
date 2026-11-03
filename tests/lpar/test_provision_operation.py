@@ -21,7 +21,9 @@ from hmcpctl.operations.lpar.provision import (
 )
 from hmcpctl.operations.lpar.provision_operation import (
     EFFECT_KINDS,
+    expected_profile,
     provision_classifiers,
+    readback_problem,
 )
 
 SYSTEM = "00000000-0000-0000-0000-0000000000a1"
@@ -29,6 +31,8 @@ LPAR = "00000000-0000-0000-0000-0000000000b2"
 VIOS = "00000000-0000-0000-0000-0000000000c3"
 GROUP = "00000000-0000-0000-0000-0000000000d4"
 STAMP = "[hmcpctl owner:hmcpctl created:2026-11-02]"
+OPERATION = "0123456789ab" + "0" * 20
+SAVED = "hmcpctl_0123456789ab"
 REQUEST = ProvisionRequest(
     name="lpar-a",
     adapters=ProvisionAdapters(100),
@@ -47,6 +51,8 @@ class FakeHMC:
         self.groups: list[dict] = []
         self.mappings: list[dict] = []
         self.state = "not activated"
+        self.last_activated = "default_profile"
+        self.default = "default_profile"
 
     async def __aenter__(self) -> Self:
         return self
@@ -66,8 +72,16 @@ class FakeHMC:
     async def list_storage_mappings(self, _vios: str) -> list[dict]:
         return self.mappings
 
-    async def get_quick_property(self, *_args: str) -> str:
-        return self.state
+    async def get_logical_partition(self, uuid: str) -> dict:
+        assert uuid == LPAR
+        return {
+            "UUID": uuid,
+            "Resource": {
+                "PartitionState": self.state,
+                "LastActivatedProfile": {"text": self.last_activated},
+                "DefaultProfileName": {"text": self.default},
+            },
+        }
 
 
 def _partition(description: str | None = None, uuid: str = LPAR) -> dict:
@@ -81,7 +95,7 @@ def _classify(hmc: FakeHMC, key: str, target: str, *, request=REQUEST, ctx=None)
     effect = EffectRecord(key, EFFECT_KINDS[key], target, "uncertain", None)
     classifier = provision_classifiers(request, lambda _connection: hmc)[effect.kind]
     context = ctx or SimpleNamespace(
-        connection="<default>", operation_id="op-self", partition=(SYSTEM, LPAR)
+        connection="<default>", operation_id=OPERATION, partition=(SYSTEM, LPAR)
     )
     return asyncio.run(classifier(context, effect))
 
@@ -211,12 +225,82 @@ def test_mapping_classifies_by_backing_and_client():
 
 
 @pytest.mark.parametrize(
-    ("state", "status"), [("running", "applied"), ("not activated", "needs_attention")]
+    ("state", "last", "status"),
+    [
+        ("running", SAVED, "applied"),
+        ("open firmware", SAVED, "applied"),
+        ("running", "default_profile", "needs_attention"),
+        ("not activated", SAVED, "needs_attention"),
+    ],
 )
-def test_power_on_classifies_by_partition_state(state, status):
+def test_power_on_needs_the_saved_profile_activated(state, last, status):
     hmc = FakeHMC()
-    hmc.state = state
+    hmc.state, hmc.last_activated = state, last
     assert _classify(hmc, "power_on", f"lpar:{LPAR}").status == status
+
+
+@pytest.mark.parametrize(
+    ("default", "status"), [(SAVED, "applied"), ("default_profile", "not_applied")]
+)
+def test_default_profile_classifies_by_the_partition_setting(default, status):
+    hmc = FakeHMC()
+    hmc.default = default
+    assert _classify(hmc, "default_profile", f"lpar:{LPAR}").status == status
+
+
+def _profile_element(*, vlan="100", vscsi=True, vnics=0, sriov=0, memory=512):
+    from xml.etree import ElementTree as ET
+
+    from unit.test_lpar_reconfigure import profile_document
+
+    from hmcpctl.documents.partition_profile import apply_profile_patch
+
+    element = profile_document()
+    ns = "{http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/}"
+    adapters = ET.SubElement(element, f"{ns}ProfileVirtualIOAdapters")
+    cna = ET.SubElement(adapters, f"{ns}ProfileClientNetworkAdapter")
+    ET.SubElement(cna, f"{ns}PortVLANID").text = vlan
+    if vscsi:
+        ET.SubElement(adapters, f"{ns}ProfileVirtualSCSIClientAdapter")
+    for _ in range(vnics):
+        ET.SubElement(adapters, f"{ns}ProfileVirtualNICDedicated")
+    for _ in range(sriov):
+        ET.SubElement(adapters, f"{ns}ProfileSRIOVEthernetLogicalPort")
+    return apply_profile_patch(element, expected_profile(_request(memory=memory)))
+
+
+def _request(memory=512, vnics=0):
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+
+    assignments = LparPcieAssignments(vnics=(object(),) * vnics)  # type: ignore[arg-type]
+    return replace(
+        REQUEST,
+        resources=LparResources(
+            min_memory=256, desired_memory=memory, max_memory=1024, desired_vcpus=1
+        ),
+        assignments=assignments,
+    )
+
+
+def test_a_matching_profile_reads_back_clean():
+    assert readback_problem(_profile_element(), _request(), 0) is None
+
+
+@pytest.mark.parametrize(
+    ("element", "request_", "sriov", "problem"),
+    [
+        ({"memory": 768}, {}, 0, "memory"),
+        ({"vlan": "200"}, {}, 0, "VLAN"),
+        ({"vscsi": False}, {}, 0, "virtual SCSI"),
+        ({}, {"vnics": 1}, 0, "vNIC"),
+        ({}, {}, 1, "SR-IOV"),
+    ],
+)
+def test_a_profile_missing_what_provision_built_is_named(
+    element, request_, sriov, problem
+):
+    found = readback_problem(_profile_element(**element), _request(**request_), sriov)
+    assert found is not None and problem in found
 
 
 def test_a_running_operation_reports_no_step_for_a_write_in_flight():

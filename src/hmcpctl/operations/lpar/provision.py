@@ -33,7 +33,7 @@ from ...ssh.affinity import (
 from ...ssh.lpar import validate_caller_token
 from ...ssh.selectors import resolve_ssh_names
 from ...ssh.transport import HMCCLIError
-from ...xmlutil import leaf_text
+from ...xmlutil import console_version, leaf_text
 from ..affinity.rest import (
     ProvisionAffinityAssessment,
     assess_post_activation_affinity,
@@ -311,6 +311,7 @@ async def _power_on(
     system_name_or_uuid: str,
     lpar_uuid: str,
     assessment: ProvisionAffinityAssessment | None,
+    partition_profile_uuid: str | None = None,
 ) -> dict[str, Any] | JobOutcome | None:
     """Activate the partition this workflow just created and stamped.
 
@@ -330,12 +331,18 @@ async def _power_on(
         hmc,
         lpar_uuid,
         system_name_or_uuid=system_name_or_uuid,
-        force=True,
+        # Not forced: an already active partition would not activate the saved profile.
+        force=partition_profile_uuid is None,
+        partition_profile_uuid=partition_profile_uuid,
         wait=assessment is not None,
         timeout_seconds=assessment.timeout_seconds if assessment else 300,
         poll_interval=assessment.poll_interval if assessment else 5,
         ownership_override=True,
     )
+    if (result.job or {}).get("already_activated"):
+        raise HMCError(
+            f"LPAR {lpar_uuid} was already active, so its saved profile was not activated"
+        )
     if assessment is None:
         return result.job
     return job_outcome("PowerOn", result.job)
@@ -452,18 +459,18 @@ async def _run_affinity_leg(
 
 
 def validate_provision_assignments(assignments: LparPcieAssignments) -> None:
-    """Refuse a dedicated-slot request, which provision cannot activate (#1390).
+    """Refuse a dedicated-slot request, which provision does not yet carry (#1390).
 
-    Provision's PowerOn activates the current configuration, so a slot written to
-    the new profile is never owned by the running partition. Activating the profile
-    instead would discard the adapters provision adds to the current configuration
-    (#1345). #1225 makes provision profile-first, which removes the conflict.
+    The slot is written to the creation profile, but provision activates the profile
+    it saves from the current configuration (ADR 0313), which the slot never reaches.
+    Carrying the slot into that profile is #1841.
     """
     if assignments.dedicated:
         raise ValueError(
-            "hmc_provision_lpar does not assign dedicated PCIe slots: its power-on "
-            "activates the current configuration, so the partition would not own a "
-            "slot written to its profile (#1390). Create the partition instead "
+            "hmc_provision_lpar does not assign dedicated PCIe slots: it activates the "
+            "profile it saves from the current configuration, so the partition would "
+            "not own a slot written to its creation profile (#1390). Create the "
+            "partition instead "
             "(hmc_create_lpar, optionally with assignments.dedicated), or assign the "
             "slot to its profile with hmc_assign_dedicated_pcie_slot while it is not "
             "activated; then power it on with that profile (hmc_power_on_lpar with "
@@ -501,6 +508,22 @@ async def _check_new_disk_absent(hmc: HMCClient, storage: ProvisionStorage) -> N
             )
 
 
+# #637's profile jobs (save-current, default profile) need this console level (ADR 0313).
+PROFILE_JOB_MINIMUM = (10, 3, 1060)
+
+
+async def _check_profile_jobs(hmc: HMCClient) -> None:
+    console = await hmc.get_console_info()
+    resource = console.get("Resource", {}) if isinstance(console, dict) else {}
+    version = console_version(resource)
+    if version is None or version < PROFILE_JOB_MINIMUM:
+        raise ValueError(
+            "hmc_provision_lpar persists through partition-profile jobs, which need HMC "
+            "10.3.1060 or later; this console's level is "
+            f"{'unreadable' if version is None else '.'.join(map(str, version))}"
+        )
+
+
 async def _preflight_provision_request(
     hmc: HMCClient,
     system_name_or_uuid: str,
@@ -534,6 +557,7 @@ async def _preflight_provision_request(
         validate_caller_token(request.caller_token)
     validate_partition_type(request.partition_type)
 
+    await _check_profile_jobs(hmc)
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     if request.minimum_affinity_policy is not None:
         system_name, _ = await resolve_ssh_names(hmc, system_name_or_uuid, None)
@@ -572,6 +596,7 @@ def _provision_step_names(
     if request.storage.capacity_mib is not None:
         names.append("create_disk")
     names.extend(["storage", *assignment_step_names(request.assignments)])
+    names.extend(["save_profile", "profile_readback", "default_profile"])
     if request.power_on:
         names.append("power_on")
     if request.affinity_assessment is not None:

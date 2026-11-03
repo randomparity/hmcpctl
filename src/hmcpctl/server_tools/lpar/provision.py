@@ -62,7 +62,7 @@ PROVISION_TOOL_NAME = "hmc_provision_lpar"
 # included. No nested storage.vios_uuid selector: a continuation omits storage, and a
 # selector in a None container is unreadable, which denies even under all-targets.
 PROVISION_SECURITY = ToolSecurity(
-    effect="mutate",
+    effect="destructive",
     operation="provision.lpar",
     target_kind="console",
     targets=(TargetSelector("managed_system", "system_name_or_uuid", False),),
@@ -87,6 +87,8 @@ def delegated_tools(request: ProvisionRequest) -> tuple[str, ...]:
         "hmc_create_lpar",
         "hmc_add_network_adapter",
         "hmc_map_storage_to_lpar",
+        "hmc_save_current_partition_profile",
+        "hmc_set_default_partition_profile",
         *(name for name, needed in optional if needed),
     )
 
@@ -118,6 +120,18 @@ def _effective(
     if missing:
         raise ValueError(f"a new operation needs {', '.join(missing)}")
     return {**DEFAULT_ARGUMENTS, **given}, recorded is not None
+
+
+def _require_window(dry_run: bool, continuation: str, window: bool | None) -> None:
+    """Refuse a call that would write without the caller's writer window (ADR 0313)."""
+    if dry_run or continuation == "abandon" or window is True:
+        return
+    raise ValueError(
+        "exclusive_writer_window=true is required: provision writes a partition profile "
+        "and the default-profile setting (ADR 0242, ADR 0313); pass it once no other "
+        "writer changes this partition's profiles until the operation ends"
+        + ("; a resume asserts it again" if continuation == "resume" else "")
+    )
 
 
 def _authorize(
@@ -228,6 +242,7 @@ def provision_handler(
         minimum_affinity_policy: MinimumAffinityPolicy | None = None,
         affinity_assessment: ProvisionAffinityAssessment | None = None,
         physical_io: LparPhysicalIO | None = None,
+        exclusive_writer_window: bool | None = None,
         expected_plan_digest: str | None = None,
         continuation: Continuation = "none",
         wait_seconds: int = 60,
@@ -244,11 +259,16 @@ def provision_handler(
         ``hmc_set_minimum_affinity_policy``, ``hmc_assign_sriov_logical_port`` and
         ``hmc_add_vnic`` for their inputs, and ``hmc_power_on_lpar`` with
         ``power_on``. The policy must permit each and admit its targets, or the call
-        is refused and nothing is recorded. The ownership stamp is required: a stamp
-        that does not land makes the operation ``failed``. A later step's error pauses
+        is refused and nothing is recorded; the profile writes also need
+        ``hmc_save_current_partition_profile`` and ``hmc_set_default_partition_profile``.
+        The ownership stamp is required: a stamp that does not land makes the operation
+        ``failed``. A later step's error pauses
         it as ``needs_attention`` with the steps so far; ``continuation=resume``
-        checks each interrupted write live before continuing. A clean run ends
-        ``completed``; no partition profile is written. ``dry_run`` validates every
+        checks each interrupted write live before continuing. After the adapters and
+        storage, provision saves the current configuration into a new partition profile
+        ``hmcpctl_<12 hex>``, reads it back (memory, processors, adapters), makes it the
+        default, and with ``power_on`` activates from it; only then does the run end
+        ``configured``. It needs HMC 10.3.1060 or later. ``dry_run`` validates every
         precondition and records nothing. No rollback is attempted.
 
         Args:
@@ -268,9 +288,9 @@ def provision_handler(
                 true).
             dry_run: Validate preconditions without recording or changing anything.
             assignments: Declarative direct SR-IOV and vNIC requests. A dedicated-slot
-                request is refused before any HMC call: power-on activates the current
-                configuration, so the partition would not own a slot written to its
-                profile. Create the partition, assign the slot with
+                request is refused before any HMC call: power-on activates the
+                profile saved from the current configuration, so the partition would
+                not own a slot written to its creation profile. Create the partition, assign the slot with
                 hmc_assign_dedicated_pcie_slot (or create-time
                 ``assignments.dedicated``), then power on with that profile.
             caller_token: Optional caller tracking reference embedded in the partition
@@ -286,6 +306,9 @@ def provision_handler(
                 DRCs and explicit hmc console are supported; unresolved virtual-slot
                 selectors fail before effects (remaining linkage gap #638). C12 profile
                 readback must succeed before application and later workflow steps.
+            exclusive_writer_window: Required true for every call that may write (a new
+                operation or ``resume``): the caller asserts no other writer changes this
+                partition's profiles until the operation ends (ADR 0242).
             expected_plan_digest: ``plan_digest`` from hmc_plan_lpar; a new operation
                 is refused unless a fresh plan of this request matches it.
             continuation: none, resume or abandon; a continuation needs only
@@ -314,10 +337,12 @@ def provision_handler(
             minimum_affinity_policy=minimum_affinity_policy,
             affinity_assessment=affinity_assessment,
             physical_io=physical_io,
+            exclusive_writer_window=exclusive_writer_window,
             expected_plan_digest=expected_plan_digest,
         )
         config = build_config(profile=profile)
         agent_id = config.agent_id or "hmcpctl"
+        _require_window(dry_run, continuation, exclusive_writer_window)
         effective, exists = _effective(given, agent_id, request_id, continuation)
         system, request = request_from_arguments(effective)
         _authorize(tool_security, permits, authorize, system, request, profile)

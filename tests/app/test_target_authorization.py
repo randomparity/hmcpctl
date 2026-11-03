@@ -440,7 +440,7 @@ def test_a_table_grant_still_never_reaches_provision_lpar():
     """
     grants = [
         {
-            "effects": ["mutate"],
+            "effects": ["destructive"],
             "connections": ["lab"],
             "targets": {"managed_system": ["sys-1"], "vios": ["vios-uuid-1"]},
         }
@@ -457,7 +457,13 @@ def test_a_table_grant_still_never_reaches_provision_lpar():
 
     continuation = {"system_name_or_uuid": None, "storage": None, "profile": "lab"}
     _authorize(
-        [{"effects": ["mutate"], "connections": ["lab"], "targets": "all-targets"}],
+        [
+            {
+                "effects": ["destructive"],
+                "connections": ["lab"],
+                "targets": "all-targets",
+            }
+        ],
         "hmc_provision_lpar",
         continuation,
     )
