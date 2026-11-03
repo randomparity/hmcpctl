@@ -106,6 +106,8 @@ def hmc_add_network_adapter(
         allowed_os_mac_addrs: all, none, or one to four 12-hex MAC addresses.
         qos_priority: Priority 0–7, or none to disable. Omitted preserves defaults.
         vsi_manager_id: VSI manager signed 32-bit value; HMC validates semantic limits.
+            The HMC requires vsi_manager_id and vsi_type_id together (REST0126), and
+            calls the serving VIOS over RMC for a complete VSI profile.
         vsi_type_id: VSI type signed 32-bit value; HMC validates semantic limits.
         vsi_type_version: VSI version signed 32-bit value; HMC validates semantic limits.
         ownership_override: Bypass LPAR ownership rejection after operator approval.

@@ -86,7 +86,9 @@ def adapters_add_network(
         help="0–7, or none to disable QoS; omitted leaves defaults",
     ),
     vsi_manager_id: int | None = typer.Option(
-        None, "--vsi-manager-id", help="VSI manager ID; HMC validates semantic limits"
+        None,
+        "--vsi-manager-id",
+        help="VSI manager ID; needs --vsi-type-id; the HMC registers it via the VIOS",
     ),
     vsi_type_id: int | None = typer.Option(
         None, "--vsi-type-id", help="VSI type ID; HMC validates semantic limits"
