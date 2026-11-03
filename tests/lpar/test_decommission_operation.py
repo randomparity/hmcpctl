@@ -793,3 +793,18 @@ def test_a_failed_run_still_reports_its_other_retained_items(hmc):
     reasons = {item["disk_name"]: item["reason"] for item in result.storage["retained"]}
     assert reasons == {"disk-a": "absent", "disk-b": "precondition_failed"}
     assert "disk-b" in failed.warnings[0]
+
+
+def test_a_resume_after_the_delete_keeps_the_first_runs_inventory(hmc):
+    _owned_disks(hmc, "lpar-a-root")
+    group = hmc.get_volume_group.return_value
+    hmc.get_volume_group.side_effect = [HMCError("HTTP 500"), group]
+    _submit(hmc, arguments=OWNED)
+
+    resumed = _submit(hmc, "resume", arguments=OWNED)
+
+    result = result_from_record(resumed, delete_owned=True)
+    assert resumed.outcome == "completed"
+    assert result.blast_radius["lpar_name"] == "aix-prod"
+    assert not any("inventory is unavailable" in w for w in result.warnings)
+    assert len(result.storage["deleted"]) == 1

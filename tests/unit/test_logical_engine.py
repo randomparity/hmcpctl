@@ -867,3 +867,15 @@ def test_operation_failed_can_carry_the_result_to_store():
     assert (record.state, record.outcome) == ("terminal", "failed")
     assert record.result == {"kept": ["d1"]}
     assert "refused" in record.warnings[0]
+
+
+def test_an_oversize_carried_result_still_ends_the_operation():
+    async def body(ctx):
+        blob = "x" * (store.MAX_RESULT_BYTES + 1)
+        raise OperationFailed("refused", result={"blob": blob})
+
+    record = _submit(body=body)
+
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert "refused" in record.warnings[0]
+    assert "exceeds" in record.warnings[1]

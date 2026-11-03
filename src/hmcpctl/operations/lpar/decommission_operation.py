@@ -198,7 +198,10 @@ def decommission_body(
             if any(item.get("reason") == INCOMPLETE for item in retained)
             else "completed"
         )
-        # With the partition gone in an earlier run, result_from_record rebuilds the rest.
+        if result is None and "lpar_uuid" in ctx.earlier_result:
+            # The partition went in an earlier run: keep that run's inventory.
+            result = _RESULT.validate_python(ctx.earlier_result)
+        # With no earlier inventory either, result_from_record rebuilds the rest.
         stored = (
             {"storage": storage}
             if result is None

@@ -426,13 +426,23 @@ async def _run(
         result_json = _result_json(result)
     except (OperationFailed, EffectNotApplied) as exc:
         definite = not ctx.has_uncertain()
+        warnings = [_warning(_failure(exc))]
         carried = getattr(exc, "result", None)
+        try:
+            stored = (
+                None
+                if carried is None
+                else _result_json(BodyResult("completed", carried))
+            )
+        except ValueError as too_large:
+            stored = None
+            warnings.append(_warning(_failure(too_large)))
         _end(
             operation_id,
             "terminal" if definite else "paused",
             "failed" if definite else "needs_attention",
-            (_warning(_failure(exc)),),
-            None if carried is None else _result_json(BodyResult("completed", carried)),
+            tuple(warnings),
+            stored,
         )
         return
     except Exception as exc:  # noqa: BLE001 - any body defect pauses for attention
@@ -476,6 +486,8 @@ class OperationContext:
         self.connection: str = row["connection"]
         self.continuation = continuation
         self.arguments: Mapping[str, Any] = json.loads(row["request_json"])["arguments"]
+        # The result an earlier run stored, which a body may extend rather than replace.
+        self.earlier_result: Mapping[str, Any] = json.loads(row["result_json"] or "{}")
         self._phase: str = row["phase"]
         self._partition: tuple[str, str] | None = (
             None
