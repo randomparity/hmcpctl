@@ -6017,15 +6017,37 @@ def test_lpars_create_and_provision_refuse_a_vios_type_before_client_call(
     assert fake_hmc.calls == []
 
 
-def test_lpars_provision_refuses_a_dedicated_slot_before_client_call(
-    fake_hmc, monkeypatch, tmp_path
-):
-    provision, _ = _fake_provision(monkeypatch, None)
+def test_lpars_provision_carries_a_dedicated_slot(monkeypatch, fake_hmc, tmp_path):
+    provision, _ = _fake_provision(monkeypatch, _PROVISIONED)
     assignments = tmp_path / "assignments.json"
     assignments.write_text(
         json.dumps(
             {"dedicated": [{"profile_name": "default_profile", "drc_index": "1"}]}
         ),
+        encoding="utf-8",
+    )
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            *_PROVISION_ARGS,
+            "--request-id",
+            "r1",
+            "--pcie-assignments",
+            str(assignments),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    [request] = [call.args[1] for call in provision.call_args_list]
+    assert request.assignments.dedicated[0].profile_name == "default_profile"
+
+
+def test_lpars_provision_refuses_another_slot_profile_before_client_call(
+    fake_hmc, monkeypatch, tmp_path
+):
+    provision, _ = _fake_provision(monkeypatch, None)
+    assignments = tmp_path / "assignments.json"
+    assignments.write_text(
+        json.dumps({"dedicated": [{"profile_name": "test_profile", "drc_index": "1"}]}),
         encoding="utf-8",
     )
 
@@ -6054,7 +6076,7 @@ def test_lpars_provision_refuses_a_dedicated_slot_before_client_call(
     )
 
     assert result.exit_code == 2
-    assert "hmc_assign_dedicated_pcie_slot" in unstyle(result.stderr)
+    assert "default_profile" in unstyle(result.stderr)
     provision.assert_not_called()
     assert fake_hmc.calls == []
 

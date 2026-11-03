@@ -81,6 +81,7 @@ def delegated_tools(request: ProvisionRequest) -> tuple[str, ...]:
         ),
         ("hmc_assign_sriov_logical_port", bool(request.assignments.sriov)),
         ("hmc_add_vnic", bool(request.assignments.vnics)),
+        ("hmc_assign_dedicated_pcie_slot", bool(request.assignments.dedicated)),
         ("hmc_power_on_lpar", request.power_on),
     )
     return (
@@ -256,8 +257,9 @@ def provision_handler(
         second partition. Each write runs as its specialist: ``hmc_create_lpar``,
         ``hmc_add_network_adapter`` and ``hmc_map_storage_to_lpar`` always, plus
         ``hmc_create_virtual_disk`` with ``storage.capacity_mib``,
-        ``hmc_set_minimum_affinity_policy``, ``hmc_assign_sriov_logical_port`` and
-        ``hmc_add_vnic`` for their inputs, and ``hmc_power_on_lpar`` with
+        ``hmc_set_minimum_affinity_policy``, ``hmc_assign_sriov_logical_port``,
+        ``hmc_add_vnic`` and ``hmc_assign_dedicated_pcie_slot`` for their inputs,
+        and ``hmc_power_on_lpar`` with
         ``power_on``. The policy must permit each and admit its targets, or the call
         is refused and nothing is recorded; the profile writes also need
         ``hmc_save_current_partition_profile`` and ``hmc_set_default_partition_profile``.
@@ -287,12 +289,10 @@ def provision_handler(
             power_on: Power on the partition after configuration succeeds (default
                 true).
             dry_run: Validate preconditions without recording or changing anything.
-            assignments: Declarative direct SR-IOV and vNIC requests. A dedicated-slot
-                request is refused before any HMC call: power-on activates the
-                profile saved from the current configuration, so the partition would
-                not own a slot written to its creation profile. Create the partition, assign the slot with
-                hmc_assign_dedicated_pcie_slot (or create-time
-                ``assignments.dedicated``), then power on with that profile.
+            assignments: Declarative dedicated-slot, direct SR-IOV and vNIC requests.
+                A dedicated slot must name ``default_profile``; provision writes it
+                into the profile it saves, after the readback and before that
+                profile becomes the default, so the activated partition owns it.
             caller_token: Optional caller tracking reference embedded in the partition
                 description as ``[caller <token>]`` after the ownership stamp (ADR 0064);
                 1–64 printable ASCII characters, no whitespace or , = " [ ] \\.

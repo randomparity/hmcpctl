@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
@@ -30,7 +30,7 @@ from ...ssh.affinity import (
     require_minimum_affinity_policy_capability,
     validate_minimum_affinity_policy,
 )
-from ...ssh.lpar import validate_caller_token
+from ...ssh.lpar import DEFAULT_PROFILE_NAME, validate_caller_token
 from ...ssh.selectors import resolve_ssh_names
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import console_version, leaf_text
@@ -463,23 +463,19 @@ async def _run_affinity_leg(
 
 
 def validate_provision_assignments(assignments: LparPcieAssignments) -> None:
-    """Refuse a dedicated-slot request, which provision does not yet carry (#1390).
+    """Refuse a dedicated slot that names a profile other than the create's.
 
-    The slot is written to the creation profile, but provision activates the profile
-    it saves from the current configuration (ADR 0313), which the slot never reaches.
-    Carrying the slot into that profile is #1841.
+    Provision writes each dedicated slot into the profile it saves and activates
+    (ADR 0318), which supersedes the create's ``default_profile``.
     """
-    if assignments.dedicated:
-        raise ValueError(
-            "hmc_provision_lpar does not assign dedicated PCIe slots: it activates the "
-            "profile it saves from the current configuration, so the partition would "
-            "not own a slot written to its creation profile (#1390). Create the "
-            "partition instead "
-            "(hmc_create_lpar, optionally with assignments.dedicated), or assign the "
-            "slot to its profile with hmc_assign_dedicated_pcie_slot while it is not "
-            "activated; then power it on with that profile (hmc_power_on_lpar with "
-            "partition_profile_uuid)."
-        )
+    for item in assignments.dedicated:
+        if item.profile_name != DEFAULT_PROFILE_NAME:
+            raise ValueError(
+                "hmc_provision_lpar writes each dedicated PCIe slot into the profile it "
+                "saves and activates (ADR 0318); pass profile_name "
+                f"{DEFAULT_PROFILE_NAME!r}, the profile the create writes, not "
+                f"{item.profile_name!r}"
+            )
 
 
 def validate_provision_storage(storage: ProvisionStorage) -> None:
@@ -599,8 +595,13 @@ def _provision_step_names(
     names.append("network")
     if request.storage.capacity_mib is not None:
         names.append("create_disk")
-    names.extend(["storage", *assignment_step_names(request.assignments)])
-    names.extend(["save_profile", "profile_readback", "default_profile"])
+    assignments = request.assignments
+    names.extend(
+        ["storage", *assignment_step_names(replace(assignments, dedicated=()))]
+    )
+    names.extend(["save_profile", "profile_readback"])
+    names.extend(assignment_step_names(LparPcieAssignments(assignments.dedicated)))
+    names.append("default_profile")
     if request.power_on:
         names.append("power_on")
     if request.affinity_assessment is not None:
