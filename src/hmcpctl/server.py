@@ -86,6 +86,7 @@ from .server_tools.lpar.inspect import register_inspect_tool
 from .server_tools.lpar.plan import register_plan_tool
 from .server_tools.lpar.power import register_power_tool
 from .server_tools.lpar.provision import register_provision_tool
+from .server_tools.lpar.reconfigure import register_reconfigure_tool
 from .server_tools.permissions import (
     TOOL_NAME as PERMISSIONS_TOOL_NAME,
 )
@@ -157,6 +158,9 @@ def create_mcp(policy: AccessPolicy) -> FastMCP:
         application, TOOL_SECURITY, permits=permits, authorize=authorize
     )
     register_provision_tool(
+        application, TOOL_SECURITY, permits=permits, authorize=authorize
+    )
+    register_reconfigure_tool(
         application, TOOL_SECURITY, permits=permits, authorize=authorize
     )
     register_inspect_tool(

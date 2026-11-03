@@ -330,10 +330,11 @@ def test_uom_user_replacement_reduces_unboundable_tool_count():
     # adding exactly one connection-bearing tool (ADR 0303).
     # #1777 adds one connection-bearing all-targets statistics reset.
     # #1776 adds one connection-bearing all-targets paging switchover.
-    assert len(unboundable) == 40
-    assert len(connection_bearing) == 33
+    # #1226 adds hmc_reconfigure_lpar, one more connection-bearing logical tool.
+    assert len(unboundable) == 41
+    assert len(connection_bearing) == 34
     assert len(connectionless) == 7
-    assert len(all_nonexhaustive) == 41
+    assert len(all_nonexhaustive) == 42
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   `hmc_plan_lpar` digest differs. Each write is authorized as its specialist tool
   (ADR 0189). No partition profile is written (#1839).
 
+- `hmc_reconfigure_lpar` changes an LPAR's processors, memory or partition name as one
+  durable logical operation and reports whether each change is `live`, held in the
+  `profile`, or `pending_activation` until the default profile is next activated. It writes
+  the default profile so a change survives profile activation, never reboots or changes the
+  processor mode, refuses live removals unless `allow_disruption` is true, and needs
+  `exclusive_writer_window=true` for processors or memory (ADR 0314).
+
 - Single-backing vNIC creation accepts priority, VLAN and MAC allowlists, automatic
   priority failover and an explicit MAC address through Python, CLI and MCP. Selected
   policy readback is independent of topology verification, including existing-match

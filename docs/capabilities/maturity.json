@@ -6308,6 +6308,46 @@
         "missing_scope": []
       },
       "evidence": []
+    },
+    {
+      "operation": "lpar.reconfigure",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "processors-memory",
+            "parameters": [
+              {
+                "name": "allow_disruption",
+                "constraint": "false keeps live removals pending_activation"
+              },
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "required true"
+              },
+              {
+                "name": "patch.memory_mib",
+                "constraint": "desired MiB; profile always written; live only when running, RMC active and within current bounds"
+              },
+              {
+                "name": "patch.processors",
+                "constraint": "desired dedicated or virtual processors; processing units and mode unchanged"
+              }
+            ]
+          },
+          {
+            "variant": "rename",
+            "parameters": [
+              {
+                "name": "patch.name",
+                "constraint": "partition name; profile names unchanged"
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
     }
   ]
 }
