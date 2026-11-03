@@ -300,3 +300,14 @@ def test_built_media_accepts_a_producer_identifier_and_prepared_ignores_the_rule
     check_built_name("lpar-a", BUILT)
     check_built_name("LPAR_A", prepared())
     check_built_name("LPAR_A", None)
+
+
+@pytest.mark.parametrize("key", ["\u001b[2Jinjected", "x" * 40])
+def test_a_key_the_builder_chose_is_not_echoed(key):
+    with pytest.raises(MediaMismatch, match="<unnamed>") as caught:
+        bind_built(BUILT, built_result(**{key: 1}), MAC, OPERATION, ALLOWLIST)
+    assert key not in str(caught.value)
+    with pytest.raises(MediaMismatch, match="<unnamed>") as caught:
+        name = json.dumps(key)
+        parse_result(f"{{{name}: 1, {name}: 2}}".encode())
+    assert key not in str(caught.value)

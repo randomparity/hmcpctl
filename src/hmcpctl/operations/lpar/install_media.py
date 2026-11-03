@@ -276,6 +276,7 @@ _PRODUCER_KEYS = frozenset(
 # Present only in a built result (ADR 0191 D3).
 _BUILT_KEYS = frozenset({"operation_binding", "url"})
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_KEY_NAME = re.compile(r"[a-z_]{1,32}")
 _LUN = re.compile(r"0x([0-9a-fA-F]{1,16})")
 # What the VIOS copy and the guest are not checked for (ADR 0191 D5, H1 spec).
 UNVERIFIED: tuple[str, ...] = (
@@ -302,6 +303,11 @@ def _mismatch(name: str, why: str) -> MediaMismatch:
     return MediaMismatch(f"install.media.producer_result.{name}: {why}")
 
 
+def _key_label(key: str) -> str:
+    """A result key as a message may name it: a builder chooses unknown keys."""
+    return key if _KEY_NAME.fullmatch(key) else "<unnamed>"
+
+
 def _check_result(
     result: Mapping[str, Any],
     install: LparInstall,
@@ -311,7 +317,7 @@ def _check_result(
     """Raise ``MediaMismatch`` naming the first field of *result* that does not bind."""
     keys = set(result)
     if unknown := sorted(keys - allowed):
-        raise _mismatch(unknown[0], f"is not a {PRODUCER_FORMAT} field")
+        raise _mismatch(_key_label(unknown[0]), f"is not a {PRODUCER_FORMAT} field")
     if missing := sorted(allowed - keys):
         raise _mismatch(missing[0], "is missing")
     if result["format"] != PRODUCER_FORMAT:
@@ -370,7 +376,7 @@ def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise _mismatch(key, "appears twice")
+            raise _mismatch(_key_label(key), "appears twice")
         result[key] = value
     return result
 
