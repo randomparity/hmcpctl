@@ -42,10 +42,16 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
 - New `server_tools/lpar/decommission.py`: `DECOMMISSION_SECURITY` (equal to today's derived
   security), `decommission_handler(tool_security, permits, authorize)` and
   `register_decommission_tool`. The handler adds `storage_cleanup` and `exclusive_writer_window`,
-  enforces the flag, and authorizes the four specialists per owned VIOS (Decision 5); it is
+  resolves the effective arguments first, then enforces the flag and authorizes the four
+  specialists per owned VIOS against the effective (recorded) mode (Decision 5); every reader
+  defaults a missing `storage_cleanup` to `retain`. Its docstring names the new mode. It is
   removed from `lifecycle.py` and registered in `server.py` and `catalog.py`.
+- `decommission_operation._settled` skips `disk.*` and `media.*` effects: they are reported in
+  `storage` only, so `_agrees` and the rebuilt steps are unchanged for them.
 - CLI `hmcpctl lpars decommission`: `--storage-cleanup retain|delete_owned` and
-  `--exclusive-writer-window`, with the same refusal; the CLI has no access policy, so no
+  `--exclusive-writer-window`, with the same refusal read from the recorded mode on a
+  continuation (which accepts `--exclusive-writer-window`); the confirmation prompts and the
+  text renderer name the deletion and print `storage`. The CLI has no access policy, so no
   delegated check.
 - Live arm `scripts/live_test/lpar_power.py`: partition P is provisioned with an owned disk
   (`storage.capacity_mib` in the arm's volume group) instead of mapping a pre-created volume, and
@@ -72,6 +78,11 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
      Consequences).
    - A resume after a pause rebuilds `storage.retained` as empty; the journal and ledger still hold
      every item.
+   - A ledgered disk deleted out of band whose name is reused in its group is deleted as owned:
+     ADR 0313 D6's identity is the name (ADR 0323 Consequences); follow-up candidate to add a
+     device fingerprint to the ledger identity.
+   - A 412 after the partition is deleted leaves that item for the specialists (ADR 0323
+     Consequences); within an asserted window a 412 means the assertion was broken.
 4. **Covered elsewhere:** store loss (ADR 0190, ADR 0192 D6); teardown order and retain behaviour
    (ADR 0320); the hold interlock (#1231).
 
@@ -91,21 +102,26 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
 ## Success
 
 1. `retain` (the default) is unchanged and returns `storage: null`.
-2. `delete_owned` without `exclusive_writer_window=true`, or with a specialist the policy does not
-   permit or admit for an owned VIOS, is refused and records nothing.
+2. A new request or `resume` whose effective mode is `delete_owned`, without
+   `exclusive_writer_window=true`, or with a specialist the policy does not permit or does not
+   admit for an owned item's VIOS, is refused and records nothing.
 3. A clean `delete_owned` run deletes each ledgered disk and medium of the partition referenced
    only by this partition, after `delete_lpar`, as `applied` effects of the ADR 0323 kinds, removes
    their ledger rows, and ends `completed` with them in `storage.deleted`.
-4. An item referenced by another client, ledgered for another partition, on an unauthorized VIOS,
-   or without one repository group is retained with that reason; its row stays.
+4. An item referenced by another client, ledgered for another partition, on a VIOS outside the
+   authorized set, absent from or duplicated in its group, or without one repository group is
+   retained with that reason; its row stays.
 5. Any unreadable VIOS or unclassifiable mapping retains every owned item, ends `needs_attention`,
    and `resume` deletes them once the read succeeds.
 6. A delete that raises pauses `needs_attention` with the effect `uncertain`; `resume` classifies
-   it by the group read and continues; a 412 ends `failed` with the row kept.
+   it by the group read and continues; a 412 retains that item (`precondition_failed`), the other
+   items are still processed, and the run ends `failed` with the row kept.
+6a. `storage.deleted` after a resume lists the items deleted by every run of the operation.
 7. A resume after `delete_lpar` is applied authorizes and deletes against the recorded system,
    VIOS and group, with no partition lookup.
 8. With no ledger rows (store loss, pre-store partition), `delete_owned` deletes nothing.
-9. A dry run with `delete_owned` reports the plan in `storage` and records nothing.
+9. A dry run with `delete_owned` reports the plan in `storage`, warns when the flag is absent, and
+   records nothing.
 10. The live arm deletes P's owned disk and leaves every other volume in its group and every
     foreign mapping it listed before.
 
@@ -116,7 +132,8 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
 | Store ledger query and removal | focused-test | `tests/unit/test_logical_store.py`, `tests/unit/test_logical_engine.py` |
 | Success 3–8, classifiers, keys | focused-test | `tests/lpar/test_decommission_storage.py`, engine on a temporary state dir with a fake client |
 | Success 1, 2, 9; factory security equals today's | focused-test | `tests/lpar/test_decommission_operation.py`, `tests/app/test_tool_security.py`, `tests/app/test_target_authorization.py` |
-| CLI options and refusal | focused-test | `tests/app/test_cli_commands.py` |
+| Legacy record without `storage_cleanup` resumes as `retain` | focused-test | `tests/lpar/test_decommission_operation.py` |
+| CLI options, refusal, prompt, rendering | focused-test | `tests/app/test_cli_commands.py` |
 | Live arm assertions | focused-test | `tests/test_live_lpar_power_arm.py`, `tests/test_live_runner.py` |
 | Tool schema docs, inventories | focused-test | `just tool-docs-check`, `just doc-freshness`, capability inventory tests |
 | Success 10 on hardware | task-test-not-applicable | needs a granted live window; evidence through `scripts/live_test_evidence.py` |
