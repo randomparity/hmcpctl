@@ -348,16 +348,20 @@ every change whatever the call returned, and verifies restoration:
   vSCSI server adapter toward the test partition (the serving VIOS); otherwise
   only the VLAN round trip runs.
 - **VLAN.** It creates `hmcpctl-live-vlan<id>-<8 hex>` on the first VLAN in
-  `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, tries a second network
-  on the same VLAN (expected refused; deleted if not), adds a client network
+  `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, on the lowest-numbered
+  virtual switch that carries a VIOS trunk adapter (read through `hmc_list_vios`). When
+  no listed switch has one, or the trunk adapters cannot be read, the VLAN round trip
+  SKIPs with that reason and never falls back to an untrunked switch. It tries a second
+  network on the same VLAN (expected refused; deleted if not), adds a client network
   adapter on that VLAN to the test partition, deletes an unknown adapter UUID
   (expected refused), then removes the adapter and the run's own networks. Any
   other network on that VLAN is reported, never deleted.
-  The same single adapter create selects `addl_vlan_ids=[]`, `allowed_os_mac_addrs="all"`,
-  `qos_priority="none"`, `vsi_manager_id=0`, `vsi_type_id=0` and `vsi_type_version=0`.
-  These are explicit test values, not defaults or a guarantee of HMC acceptance.
-  Credit requires verified creation metadata with all six checked fields and independent
-  contained identity/field readback, including the selected `VirtualSwitchID`. A switch
+  The single adapter create sends only the partition, `port_vlan_id`, `virtual_switch_id`
+  and the system: the request the October 2026 pass sent. The optional creation fields
+  (`addl_vlan_ids`, `allowed_os_mac_addrs`, `qos_priority` and the `vsi_*` fields) are left
+  out while #1861 tests whether they cause HSCLB021 on this boundary.
+  Credit requires an accepted create and independent contained identity readback with
+  the run's `PortVLANID` and the selected `VirtualSwitchID`. A switch
   mismatch or missing switch stops before cleanup. Client-network listings require a
   complete HTTP/Atom envelope: HTTP 204, blank bodies, `Link`/`Content-Range` headers,
   XML `next` links in any case, or ambiguous entries are errors;
@@ -367,8 +371,11 @@ every change whatever the call returned, and verifies restoration:
   selected switch.
   Acknowledged deletion and independent baseline equality must precede later writes.
   Drift or uncertain creation, verification or deletion stops subsequent effects and
-  records manual recovery, retaining residue rather than inferring cleanup. Foreign
-  adapter UUIDs are never additional deletion targets. Use the existing preflight,
+  records manual recovery, retaining residue rather than inferring cleanup. When that
+  stop leaves a fresh read of the test partition's client adapters showing none on the
+  run's VLAN (every `PortVLANID` and `TaggedVLANIDs` parsed), the run still deletes its
+  own networks before stopping; otherwise the networks are retained for manual recovery.
+  Foreign adapter UUIDs are never additional deletion targets. Use the existing preflight,
   `scripts/live_network.py` and mandatory read-only recovery commands above; no new arm,
   activation or second adapter create is added.
 - **vSCSI and vFC clients.** Each first tries an add on the virtual slot the

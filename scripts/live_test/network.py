@@ -475,16 +475,6 @@ def _storage_number(value: object) -> str | None:
     return None if number is None else str(number)
 
 
-_NETWORK_CREATION_SETTINGS: dict[str, Any] = {
-    "addl_vlan_ids": [],
-    "allowed_os_mac_addrs": "all",
-    "qos_priority": "none",
-    "vsi_manager_id": 0,
-    "vsi_type_id": 0,
-    "vsi_type_version": 0,
-}
-
-
 def _network_keys(snapshot: Mapping[str, object] | None) -> dict[str, str] | None:
     if snapshot is None:
         return None
@@ -505,36 +495,45 @@ def _network_text(value: object) -> str | None:
     return text.strip() if isinstance(text, str) else None
 
 
-def _network_fields_match(resource: Mapping[str, object]) -> bool:
-    vlans = _network_text(resource.get("TaggedVLANIDs"))
-    return (
-        isinstance(vlans, str)
-        and not vlans.strip()
-        and _network_text(resource.get("AllowedOperatingSystemMACAddresses")) == "ALL"
-        and _network_text(resource.get("QualityOfServicePriorityEnabled"))
-        in ("false", "0")
-        and all(
-            as_int(_network_text(resource.get(name))) == 0
-            for name in (
-                "VirtualStationInterfaceManagerID",
-                "VirtualStationInterfaceTypeID",
-                "VirtualStationInterfaceTypeVersion",
-            )
-        )
-    )
+def _trunked_switches(vioses: Iterable[Mapping[str, object]]) -> frozenset[int] | None:
+    """The SwitchIDs a VIOS trunk adapter is on; None when a trunk adapter is unparsable."""
+    found: set[int] = set()
+    for vios in vioses:
+        group = get_resource(vios).get("TrunkAdapters")
+        if group in (None, ""):
+            continue
+        adapters = group.get("TrunkAdapter", []) if isinstance(group, Mapping) else None
+        # A lone child element parses as a mapping, several as a list.
+        if isinstance(adapters, Mapping):
+            adapters = [adapters]
+        if not isinstance(adapters, list):
+            return None
+        for adapter in adapters:
+            if not isinstance(adapter, Mapping):
+                return None
+            switch = as_int(_network_text(adapter.get("VirtualSwitchID")))
+            if switch is None:
+                return None
+            found.add(switch)
+    return frozenset(found)
 
 
-def _network_metadata_verified(data: Any) -> bool:
-    metadata = data.get("creation_verification") if isinstance(data, Mapping) else None
-    return (
-        isinstance(metadata, dict)
-        and set(metadata)
-        == {"status", "checked_fields", "mismatched_fields", "unavailable_fields"}
-        and metadata["status"] == "verified"
-        and metadata["checked_fields"] == list(_NETWORK_CREATION_SETTINGS)
-        and metadata["mismatched_fields"] == []
-        and metadata["unavailable_fields"] == []
-    )
+def _vlan_free(listed: Listing | None, vlan: int) -> bool:
+    """Whether a client-adapter read proves no adapter is on `vlan`.
+
+    An unparsable PortVLANID or TaggedVLANIDs proves nothing, so it reads as occupied.
+    """
+    if listed is None:
+        return False
+    for resource in listed.values():
+        port = as_int(_network_text(resource.get("PortVLANID")))
+        tagged = _network_text(resource.get("TaggedVLANIDs", ""))
+        if port is None or tagged is None:
+            return False
+        ids = [as_int(token) for token in tagged.replace(",", " ").split()]
+        if port == vlan or vlan in ids or None in ids:
+            return False
+    return True
 
 
 def _network_fixture(
@@ -565,7 +564,6 @@ def _network_fixture(
     if (
         as_int(_network_text(resource.get("PortVLANID"))) != vlan
         or as_int(_network_text(resource.get("VirtualSwitchID"))) != switch
-        or not _network_fields_match(resource)
     ):
         return None
     if expected_placement is not None and placement != expected_placement:
@@ -854,12 +852,16 @@ class _Arm:
     # -- (a) VLAN and client network adapter --------------------------------
 
     async def vlan_baseline(self) -> tuple[Networks, int, int, Adapters] | None:
-        """The network set, the test VLAN and switch, and the partition's CNAs."""
+        """The network set, the test VLAN and trunked switch, and the partition's CNAs."""
         baseline = await self.networks("baseline")
         result = await self.state.call(
             self.client, "hmc_list_virtual_switches", system_name_or_uuid=self.system
         )
         switches = self.data("baseline", "hmc_list_virtual_switches", result)
+        result = await self.state.call(
+            self.client, "hmc_list_vios", system_name_or_uuid=self.system
+        )
+        vioses = self.data("trunk adapters", "hmc_list_vios", result)
         cna = await self.placements("ClientNetworkAdapter", "baseline")
         if baseline is None or switches is None or cna is None:
             self.skip("hmc_create_virtual_network", "the baseline could not be read")
@@ -873,8 +875,20 @@ class _Arm:
         if vlan is None:
             self.skip("hmc_create_virtual_network", "no unused VLAN in the range")
             return None
-        ids = (as_int(get_resource(e).get("SwitchID")) for e in entries(switches))
-        switch = next((sid for sid in ids if sid is not None), 0)
+        trunked = None if vioses is None else _trunked_switches(entries(vioses))
+        if trunked is None:
+            self.skip(
+                "hmc_create_virtual_network", "VIOS trunk adapters could not be read"
+            )
+            return None
+        ids = {as_int(get_resource(e).get("SwitchID")) for e in entries(switches)}
+        switch = min(trunked & ids, default=None)
+        if switch is None:
+            self.skip(
+                "hmc_create_virtual_network",
+                "no virtual switch carries a VIOS trunk adapter",
+            )
+            return None
         self.state.artifacts.test_vlan_id = vlan
         self.state.artifacts.test_vswitch_id = switch
         self.baseline("networks", lambda: self.networks("final"), baseline)
@@ -909,6 +923,7 @@ class _Arm:
         ours = _run_networks(await self.networks("after create"), vlan, name)
         listed = ours is not None and [n for _, n in ours.values()] == [name]
         duplicate_refused = False
+        stopped: _Stop | None = None
         if listed and ours is not None:
             self.state.artifacts.test_network_uuid = next(iter(ours))
             duplicate = await self.create_network(
@@ -918,13 +933,16 @@ class _Arm:
             duplicate_refused = duplicate == "FAIL" and again == ours
             try:
                 await self.client_network_adapter(vlan, switch, cna)
-            except _Stop:
-                self.manual(
-                    f"networks named {name}* were not deleted: the adapter on "
-                    f"VLAN {vlan} was not removed first",
-                    f"remove the adapter, then delete networks {name}* on "
-                    f"{self.system}",
-                )
+            except _Stop as stop:
+                residue = await self.adapters("ClientNetworkAdapter", "after stop")
+                if not _vlan_free(residue, vlan):
+                    self.manual(
+                        f"networks named {name}* were not deleted: the adapter on "
+                        f"VLAN {vlan} was not removed first",
+                        f"remove the adapter, then delete networks {name}* on "
+                        f"{self.system}",
+                    )
+                stopped = stop
         deleted, restored = await self.delete_run_networks(baseline, vlan, name)
         self.state.record_verified(
             SUBTASK,
@@ -961,6 +979,8 @@ class _Arm:
                 f"virtual networks on test VLAN {vlan} remain",
                 f"delete every network named {name}* on {self.system}",
             )
+        if stopped is not None:
+            raise stopped
 
     async def delete_run_networks(
         self, baseline: Networks, vlan: int, name: str
@@ -1004,25 +1024,14 @@ class _Arm:
             port_vlan_id=vlan,
             virtual_switch_id=switch,
             system_name_or_uuid=self.system,
-            addl_vlan_ids=[],
-            allowed_os_mac_addrs="all",
-            qos_priority="none",
-            vsi_manager_id=0,
-            vsi_type_id=0,
-            vsi_type_version=0,
         )
         added = self.note("test VLAN", "hmc_add_network_adapter", result)
         after = await self.adapters(kind, "after add")
         identity = result[1].get("UUID") if isinstance(result[1], Mapping) else None
         fixture = _network_fixture(after, baseline, identity, vlan, switch)
-        qualified = (
-            added == "PASS"
-            and _network_metadata_verified(result[1])
-            and fixture is not None
-        )
-        if not qualified or after is None or fixture is None:
+        if added != "PASS" or after is None or fixture is None:
             self.manual(
-                "N1 creation identity or selected fields are unverified",
+                "N1 creation identity is unverified",
                 "inspect adapter residue; no automatic cleanup or retry",
             )
         placement = _placements(after)[fixture]
@@ -1063,7 +1072,6 @@ class _Arm:
             assertions=[
                 Assertion("adapter-added", added == "PASS"),
                 Assertion("pvid-matches", fixture is not None),
-                Assertion("creation-fields-verified", qualified),
             ],
             cleanup="passed" if restored else "failed",
             data=None,
