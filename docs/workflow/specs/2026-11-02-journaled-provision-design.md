@@ -1,6 +1,6 @@
-# Journaled `hmc_provision_lpar`
+# Journaled, persisted `hmc_provision_lpar`
 
-**Issue:** #1839 (piece 1 of #1225, epic #1215) · **Decision:**
+**Issues:** #1839 and #1840 (pieces 1 and 2 of #1225, epic #1215; one PR) · **Decision:**
 [ADR 0313](../../adr/0313-provision-is-a-journaled-operation.md) · **Contract:**
 [H1 spec](2026-10-01-logical-lpar-workflows-design.md) · **Branch:**
 `feat/journaled-provision-1839` · **Guardrails:** `just verify`;
@@ -9,13 +9,14 @@
 ## Problem
 
 `provision_lpar` writes directly to the HMC. A repeated call duplicates a partition, an
-interrupted call cannot be reconciled, and a failed ownership stamp is a warning.
+interrupted call cannot be reconciled, and a failed ownership stamp is a warning. The adapters
+it adds live only in the current configuration, so a profile activation drops them.
 
 ## Scope
 
-In: the MCP tool and CLI mirror run provision through the logical engine as ADR 0313 decides.
-No profile write, `install`, `boot`, `adapters.mac` or `exclusive_writer_window` (#1840,
-#1842, #1849); the dedicated-slot refusal stays (#1841).
+In: the MCP tool and CLI mirror run provision through the logical engine and persist the
+result through a saved profile, as ADR 0313 decides. No `install`, `boot` or `adapters.mac`
+(#1842, #1849); the dedicated-slot refusal stays (#1841).
 
 **Components.**
 
@@ -26,7 +27,7 @@ No profile write, `install`, `boot`, `adapters.mac` or `exclusive_writer_window`
   `operations/lpar/provision_operation.py`; no caller keeps the old path.
 - `server_tools/lpar/provision.py` becomes a factory handler, as `hmc_power_lpar`'s is:
   `provision_handler(tool_security, permits, authorize)` and `register_provision_tool`, listed
-  in `catalog.py`, `server.py` and `scripts/check_capability_inventory.py`. Security: `mutate`,
+  in `catalog.py`, `server.py` and `scripts/check_capability_inventory.py`. Security: `destructive`,
   target kind `console`, optional selector `system_name_or_uuid`, not exhaustive; the VIOS is
   authorized through the specialists, since a continuation omits `storage`.
 - The handler: validate inputs; on a continuation read the recorded arguments; authorize the
@@ -47,16 +48,41 @@ No profile write, `install`, `boot`, `adapters.mac` or `exclusive_writer_window`
   `--capacity-mib`, submits
   with a client factory built from its own connection options, waits until the worker ends
   (`engine.join` gains `timeout=None`), renders the result plus operation id, state and
-  outcome, and exits 1 unless the outcome is `completed`. A refused submission (such as a held
+  outcome, and exits 1 unless the outcome is `configured`. A refused submission (such as a held
   execution lock) is a CLI error naming the reason.
 - Live scripts pass a run-unique `request_id` and `wait_seconds=600`; their existing judge
   already fails a result whose `workflow_completed` is false, which every outcome but
-  `completed` reports. `lpar_power` adds its provision request to the requests its teardown
+  `configured` reports. `lpar_power` adds its provision request to the requests its teardown
   abandons. `live_test_recovery.py` needs no change: it keys on tool names.
 - Other readers of `provision_lpar` move to the body: `tests/unit/test_adr_0092_citations.py`
   (inventory paths and mutators), `tests/unit/test_unscoped_lookup_fail_closed.py`,
   `tests/lpar/test_sharing_creation_barriers.py`, `tests/lpar/test_physical_io.py`; the
   `_app.py` instructions gain `request_id` and drop the best-effort stamp repair for provision.
+
+**Persistence (ADR 0313 Decisions 10–12).** After `storage` and `assignments`, the
+`profile` effect calls `save_current_partition_profile(…, name, exclusive_writer_window=True)`
+for the new name `hmcpctl_<operation_id[:12]>`. A write that raises, or reports anything
+other than `completed`, is decided by reading the partition's profiles by name: absent means
+`EffectNotApplied`; present goes on to the readback. The readback (`list_partition_profiles`,
+by name) requires `ProfileMemory.DesiredMemory`, the desired processors (virtual processors
+when shared, processors when dedicated), a `ProfileClientNetworkAdapter` whose `PortVLANID` is
+the request's VLAN, and, with storage, a `ProfileVirtualSCSIClientAdapter`. A mismatch stops
+the remaining steps with `needs_attention`. Then the `default_profile` effect
+(`set_default_partition_profile`) runs, and `power_on` passes the profile's UUID as
+`partition_profile_uuid`. `profile_write.py` gains `target_by_name`, and its classifier
+handles the name form; `parse_target` is unchanged for the UUID form. The handler and CLI
+require `exclusive_writer_window`, so the CLI gains `--exclusive-writer-window`.
+
+**Proof arm.** A new opt-in arm `provision-persistence` (subtask 71) on one owned scratch
+partition, with lpar-power's prefix, volume prefix and teardown, runs as follows:
+1. Provision with `capacity_mib` and `power_on=false`; this must end `configured`.
+2. Require the default profile to be the saved name and to hold the adapter and the vSCSI
+   client adapter.
+3. Activate that profile to SMS; the current configuration must show the client adapter on the
+   VLAN, the vSCSI client adapter, and the requested memory and processors.
+4. Power off, then decommission and delete the volume.
+
+It is registered in the runner, preflight, recovery and `docs/live-testing.md`.
 
 **Body.** Phase `validating`: on a continuation whose `create` is not applied, re-run the
 preconditions (which add "no disk of that name on the VIOS" with `capacity_mib`). Once `create` is
@@ -81,8 +107,12 @@ types, never request arguments (engine module note).
    never adopt); the plan check races provisioning (the body re-runs the preconditions); a CLI
    killed mid-run leaves an interrupted operation for the CLI's or MCP's `continuation` under
    the same agent id, connection and host, or for `operations abandon`.
-4. **Covered elsewhere:** profile persistence #1840; VIOS writer window #1840/#1842; owned
-   cleanup #1847/#1848; installer power-on #1849.
+   A save that lands but whose helper reads it as `unknown` is decided by the by-name readback
+   (operator decision D1). The create's original profile is kept, unchanged and no longer
+   default (ADR 0313).
+4. **Covered elsewhere:** #637's job-read and force-save defects (filed by the campaign);
+   media writes under the writer window #1842; owned cleanup #1847/#1848; installer power-on
+   #1849.
 
 ## Threat model
 
@@ -109,13 +139,21 @@ types, never request arguments (engine module note).
 6. `dry_run` records nothing and still rejects a malformed `request_id`.
 7. With `capacity_mib`, the disk is created, mapped and ledgered as `virtual_disk`.
 8. Each withheld Decision 8 tool refuses before anything is recorded.
-9. An assignment or affinity-policy step that reports an error never resumes to `completed`
-   (no classifier); a PowerOn error resumes to `completed` only once the partition reads
+9. An assignment or affinity-policy step that reports an error never resumes to `configured`
+   (no classifier); a PowerOn error resumes to `configured` only once the partition reads
    activated (ADR 0199). A failed run's top-level `steps` carry an `error`.
+10. Without `exclusive_writer_window=true`, a new provision is refused before anything is
+    recorded.
+11. A clean run ends `configured` only after the saved profile reads back with the requested
+    memory, processors and adapters; the profile is the default, and `power_on` activates it.
+12. A save the helper reports as `unknown` is applied when the readback passes; an absent
+    profile is `not_applied` on a resume.
+13. On hardware, the proof arm shows the adapters, memory and processors surviving a profile
+    activation.
 
 ## Validation
 
 Focused tests, rewritten from `tests/lpar/test_provision_tool.py` onto the handler against a
-temporary store, cover Success 1–8 and the classifiers. `tests/app` schema, security, gateway
+temporary store, cover Success 1–12 and the classifiers. Success 13 is the live proof arm. `tests/app` schema, security, gateway
 and CLI tests follow the new signature. `just tool-docs`, `just capability-metadata`, the
 maturity record and `CHANGELOG.md` are regenerated or edited; `just verify` is the gate.

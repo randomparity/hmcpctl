@@ -1,10 +1,11 @@
-# 0313 — LPAR provision is one journaled operation with a required ownership stamp
+# 0313 — LPAR provision is one journaled operation that persists through a saved profile
 
 ## Status
 
-Accepted (2026-11-02), issue #1839 (piece 1 of #1225). Implements the H1 spec's
-`hmc_provision_lpar` row, without `install`, under ADR 0189 Decision 2 and ADRs 0190, 0195 and
-0236, with ADR 0199 as the wiring precedent. ADR 0005's step workflow stands as the order of
+Accepted (2026-11-02), issues #1839 and #1840 (pieces 1 and 2 of #1225, one PR by operator
+decision). Implements the H1 spec's `hmc_provision_lpar` row, without `install`, under ADR 0189
+Decision 2 and ADRs 0190, 0195, 0236 and 0242, with ADR 0199 as the wiring precedent and ADR
+0314's `lpar.profile_write` kind reused. ADR 0005's step workflow stands as the order of
 writes; its best-effort stamp and its partial-failure result no longer describe provision.
 
 ## Context
@@ -19,6 +20,11 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
   was confirmed (`operations/lpar/core.py`).
 - The plan contract already gives provision `storage.capacity_mib` for a new disk and a digest
   that hashes `exclusive_writer_window` as `false` without `install` (ADR 0198, plan spec).
+- A live capture on 2026-11-03 (V10R3 M1060, POWER9, one scratch partition, private evidence):
+  with `CurrentProfileSync` `Disabled`, a REST client-adapter add reaches the current
+  configuration only; a profile activation then starts without it. SaveCurrentConfig into a
+  new profile name holds the adapter, memory and processors, though #637's helper reads its job
+  as unknown. Force-save over the existing profile fails at its recovery copy (HTTP 500).
 
 ## Decision
 
@@ -27,13 +33,12 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
    adds `wait_seconds` and `expected_plan_digest`; `storage` adds `capacity_mib`. A
    continuation needs only `request_id`; any other value it gives must match the record.
 2. **Result.** `ProvisionResult` keeps its fields and adds `operation`, the operation record.
-   The top-level fields are the body's result when the outcome is `completed`, or
+   The top-level fields are the body's result when the outcome is `configured`, or
    `needs_attention` with steps that agree with the journal; otherwise they are rebuilt from
    the effects (applied → `ok` step, any other → `error` step, `workflow_completed` false;
    while the operation is still running, a write in flight is left out), because a failed or
-   reconciled run keeps an older result. A clean run ends `completed`, a departure from the
-   H1 spec's provision outcomes: `configured` needs #1840's profile readback, and #1840 owns
-   switching the outcome and its CHANGELOG entry.
+   reconciled run keeps an older result. A clean run ends `configured`, and only after the
+   profile readback (Decision 10).
 3. **Effects, in order** (keys, kinds, targets and identities are persisted):
 
    | Key | Kind | Target | Identity | Classifier (H1 *Resume*) |
@@ -45,6 +50,8 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
    | `disk` | `vios.virtual_disk` | `vios:<uuid>` | `{vios_uuid, vg_uuid, disk_name, capacity_mib}` | disk in the group, not ledgered by another operation → applied; absent → not applied; else attention |
    | `storage` | `vios.storage_map` | `lpar:<uuid>` | `{vios_uuid, storage_name}` | mapping to this partition → applied, else not applied |
    | `assignments` | `lpar.pcie_assignments` | `lpar:<uuid>` | `{steps}` | none |
+   | `profile` | `lpar.profile_write` | `lpar:<uuid>/profile-name:<name>` | `{profile_uuid, profile_name}` | profile of that name: absent → not applied; memory and processors as requested → applied; else attention (ADR 0314, by name) |
+   | `default_profile` | `lpar.default_profile` | `lpar:<uuid>` | `{profile_name}` | partition's `DefaultProfileName` is the saved name → applied, else not applied |
    | `power_on` | `lpar.power_on` | `lpar:<uuid>` | `{job_id}` | activated → applied, else attention (ADR 0199) |
 
    `follow_ups` lists the create's own profile-apply and physical-I/O steps as
@@ -75,13 +82,36 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
    `hmc_add_network_adapter` and `hmc_map_storage_to_lpar` always; `hmc_create_virtual_disk`
    with `capacity_mib`; `hmc_set_minimum_affinity_policy` with a policy;
    `hmc_assign_sriov_logical_port` with `assignments.sriov`; `hmc_add_vnic` with
-   `assignments.vnics`; `hmc_power_on_lpar` with `power_on`. The `power_on` write keeps
+   `assignments.vnics`; `hmc_save_current_partition_profile` and
+   `hmc_set_default_partition_profile` always; `hmc_power_on_lpar` with `power_on`. Because the
+   save delegates to a `destructive` specialist, provision registers as `destructive`
+   (ADR 0189 Decision 2). The `power_on` write keeps
    `ownership_override=True` against the stamp this operation just confirmed (ADR 0092).
 9. **Preconditions refuse before recording.** For a new request the handler runs the
    preconditions, as `dry_run` does, and raises their error to the caller; the body re-runs
    them only on a continuation whose `create` is not applied, ending `failed` on a refusal.
    `dry_run` validates `request_id` and stops there: no operation, lock or guard.
    `affinity_assessment` without `power_on` is refused, since it waits for activation.
+10. **Persistence (#1840).** After the current-configuration writes, provision saves the
+    current configuration into a NEW profile `hmcpctl_<first 12 hex digits of operation_id>`
+    through #637's `save_current_partition_profile`, never force-saving. It then reads that
+    profile back by name and requires the requested desired memory and processors, a client
+    network adapter on the requested VLAN, and with storage a vSCSI client adapter. Next it
+    makes the profile the default through `set_default_partition_profile`. With `power_on`, it
+    activates from that profile. A save the helper reports as `unknown` counts when the by-name
+    readback passes (operator decision D1, 2026-11-03). A readback that fails ends
+    `needs_attention`.
+11. **The writer window is required.** `exclusive_writer_window=true` is a required caller input
+    for every provision that records an operation (operator decision, 2026-11-02, as #637's
+    writes require it, ADR 0242). Without it the call is refused before anything is recorded.
+12. **Name-addressed profile writes.** ADR 0314's `lpar.profile_write` target gains the form
+    `lpar:<uuid>/profile-name:<name>` for a profile the write creates. Its classifier reads the
+    profile by name, and an absent profile is `not_applied`. The UUID form is unchanged
+    (operator decision D2, 2026-11-03).
+13. **Boundaries kept open.** `install` (#1227, #1842/#1843) adds steps 4–7 and
+    `ready_to_boot` after Decision 10's readback and owns the gate that suppresses early
+    power-on. #1230 (#1849/#1850) owns steps 8–9, `continuation: boot` and `boot_started`.
+    The ledger vocabulary of Decision 6 stands, and #1229 consumes it.
 
 ## Consequences
 
@@ -91,7 +121,12 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
   specialist.
 - The CLI is refused while another process holds the ADR 0190 execution lock, such as a
   server that has run a logical mutation.
-- No `exclusive_writer_window` yet: disk creation keeps the specialist's behavior until #1840.
+- Every provision needs `exclusive_writer_window=true` and a policy permitting the profile
+  specialists, and provision is now `destructive` for client approval prompts.
+- Each provision leaves a second saved profile (`hmcpctl_…`) as the default; the profile the
+  create wrote is kept, unchanged, and is not activated again.
+- A resumed `profile` write classified `applied` from memory and processors alone is still
+  re-checked by the body's full readback, adapters included, before `configured`.
 - Effect keys, kinds and ledger kinds are a persisted contract (ADR 0195).
 
 ## Considered & rejected
@@ -99,7 +134,17 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
 - **Do nothing.** judgment: fit. #1839 and the H1 spec require the journaled tool.
 - **Return the bare operation record, as power does.** judgment: fit. The H1 spec keeps
   `ProvisionResult`'s fields, and the live arms read them; a dry run has no record to return.
-- **Report `configured`.** judgment: fit. The H1 spec ties it to a profile readback (#1840).
+- **Report `completed` until a later piece adds persistence.** judgment: fit. The operator
+  declined an interim outcome (2026-11-02).
+- **Force-save over the create's own profile.** verified: the 2026-11-03 capture's force-save
+  failed at #637's recovery copy with HTTP 500 and left the profile unchanged.
+- **Typed profile updates (`update_partition_profile`).** verified: `ProfilePatch` carries no
+  adapter fields (`documents/partition_profile.py` `ProfilePatch`, main `e117ca52`), so adapters
+  would not persist.
+- **Turn on `CurrentProfileSync`.** judgment: fit. It changes a partition setting the caller did
+  not ask for, and nothing captured shows the HMC syncing a never-activated partition's adapters.
+- **A second effect kind for the save.** judgment: fit. The operator required reusing ADR 0314's
+  kind; a name-addressed target covers a profile that does not exist yet.
 - **Ledger a mapped existing disk as the root disk.** judgment: fit. `delete_owned` (ADR 0192)
   would then delete storage the caller brought.
 - **Split stamping out of `create_and_stamp_lpar`.** verified: physical I/O applies only after
