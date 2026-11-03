@@ -597,7 +597,7 @@ def require_persistable(
     """
     if any(change["applied"] == "pending_activation" for change in changes):
         raise OperationFailed(
-            "a disk add saves the current configuration over the default profile, which "
+            "a change that saves the current configuration over the default profile "
             "would discard this patch's pending_activation change; split the patch"
         )
     for resource in ("memory", "processors", "units"):
@@ -605,7 +605,7 @@ def require_persistable(
         if saved is not None and current is not None and saved[1] != current[1]:
             raise OperationFailed(
                 f"the default profile's desired {resource} differs from the partition's; "
-                "a disk add saves the current configuration over it and would discard "
+                "a change that saves the current configuration over it would discard "
                 "the profile's value. Activate the profile first, or change the value"
             )
 
@@ -725,7 +725,7 @@ async def _require_profile_jobs(hmc: HMCClient) -> None:
     version = console_version(resource)
     if version is None or version < PROFILE_JOB_MINIMUM:
         raise OperationFailed(
-            "a disk add saves the partition's profile through a profile job, which needs "
+            "a change that saves the partition's profile uses a profile job, which needs "
             "HMC 10.3.1060 or later; this console's level is "
             f"{'unreadable' if version is None else '.'.join(map(str, version))}"
         )
@@ -1201,7 +1201,7 @@ async def _persist(
     if record.name != name or _stale(ctx, plan, view):
         raise OperationFailed(
             f"LPAR {lpar_uuid}'s default profile or state changed since the plan was "
-            "made; the added disks were not saved into a profile"
+            "made; the current configuration was not saved into a profile"
         )
     require_persistable(view, profile, [])
     await ctx.effect(
