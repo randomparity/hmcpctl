@@ -10,15 +10,12 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import ipaddress
 import json
-import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 from ...documents.lpar import (
     LparResources,
@@ -43,21 +40,10 @@ from ..storage.resources import (
 )
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
+from .install_media import Boot, LparInstall, check_install, check_mac
 from .provision import check_vlan_exists
 
-InstallProfile = Literal["ubuntu-26.04.1", "rocky-9.8"]
-INSTALL_PROFILES: tuple[str, ...] = ("ubuntu-26.04.1", "rocky-9.8")
-Boot = Literal["immediate", "deferred"]
-
 MAX_SELECTORS = 16
-MAX_ROUTES = 16
-MAX_DNS = 3
-MAX_KEYS = 16
-MAX_KEY_LENGTH = 8192
-MAX_PRODUCER_RESULT_BYTES = 64 * 1024
-_DEFAULT_ROUTE = ipaddress.IPv4Network("0.0.0.0/0")
-_MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
-_LOGIN_USER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 
 
 @dataclass(frozen=True)
@@ -99,70 +85,6 @@ class PlanStorage:
             "description": "Create a new virtual disk of this size; omit to map "
             "existing storage."
         },
-    )
-
-
-@dataclass(frozen=True)
-class InstallRoute:
-    """One IPv4 route the installed guest gets."""
-
-    destination: str = field(
-        metadata={"description": "IPv4 network in CIDR form; 0.0.0.0/0 is default."}
-    )
-    gateway: str = field(
-        metadata={"description": "IPv4 gateway inside the address's network."}
-    )
-
-
-@dataclass(frozen=True)
-class InstallNetwork:
-    """The installed guest's static IPv4 configuration."""
-
-    address: str = field(
-        metadata={"description": "IPv4 interface address in CIDR form."}
-    )
-    routes: tuple[InstallRoute, ...] = field(
-        metadata={"description": "1 to 16 routes, exactly one of them default."}
-    )
-    dns: tuple[str, ...] = field(
-        default=(), metadata={"description": "0 to 3 IPv4 DNS servers."}
-    )
-
-
-@dataclass(frozen=True)
-class InstallMedia:
-    """Where the installer media comes from (ADR 0191)."""
-
-    mode: Literal["built", "prepared"] = field(
-        metadata={"description": "built by hmcpctl, or prepared by a producer."}
-    )
-    url: str | None = field(
-        default=None,
-        metadata={"description": "Prepared media's http(s) URL; prepared only."},
-    )
-    producer_result: dict[str, Any] | None = field(
-        default=None,
-        metadata={
-            "description": "The producer's JSON result, at most 64 KiB; prepared only."
-        },
-    )
-
-
-@dataclass(frozen=True)
-class LparInstall:
-    """The operating-system installation provisioning would start (ADR 0194)."""
-
-    profile: InstallProfile = field(metadata={"description": "Install profile."})
-    network: InstallNetwork = field(
-        metadata={"description": "Static network configuration."}
-    )
-    media: InstallMedia = field(metadata={"description": "Installer media."})
-    ssh_authorized_keys: tuple[str, ...] = field(
-        default=(),
-        metadata={"description": "1 to 16 single-line keys; built media only."},
-    )
-    login_user: str | None = field(
-        default=None, metadata={"description": "Guest login user; built media only."}
     )
 
 
@@ -264,22 +186,6 @@ def _check_new_disk(storage: PlanStorage, capacity_mib: int) -> None:
         raise ValueError(f"storage.capacity_mib: {exc}") from None
 
 
-def _check_mac(request: PlanRequest) -> None:
-    mac = request.adapters.mac
-    prepared = request.install is not None and request.install.media.mode == "prepared"
-    if mac is None:
-        if prepared:
-            raise ValueError("adapters.mac: prepared media requires the adapter MAC")
-        return
-    if not prepared:
-        raise ValueError("adapters.mac: accepted only with prepared install media")
-    if not _MAC.fullmatch(mac) or int(mac[:2], 16) & 1:
-        raise ValueError(
-            "adapters.mac: must be lower-case colon form, such as "
-            "02:00:00:00:00:01, with no group bit"
-        )
-
-
 def _check_affinity(request: PlanRequest) -> None:
     policy = request.minimum_affinity_policy
     if policy is not None:
@@ -301,112 +207,6 @@ def _check_affinity(request: PlanRequest) -> None:
     )
 
 
-def _ipv4_address(text: str, label: str) -> ipaddress.IPv4Address:
-    try:
-        return ipaddress.IPv4Address(text)
-    except ValueError:
-        raise ValueError(f"{label}: must be an IPv4 address") from None
-
-
-def _check_network(network: InstallNetwork) -> None:
-    label = "install.network"
-    try:
-        interface = ipaddress.IPv4Interface(network.address)
-    except ValueError:
-        interface = None
-    if (
-        interface is None
-        or "/" not in network.address
-        or not 1 <= interface.network.prefixlen <= 32
-    ):
-        raise ValueError(
-            f"{label}.address: must be an IPv4 interface in CIDR form, prefix 1 to 32"
-        )
-    _check_routes(network, interface.network)
-    if len(network.dns) > MAX_DNS:
-        raise ValueError(f"{label}.dns: pass at most {MAX_DNS} servers")
-    for index, server in enumerate(network.dns):
-        _ipv4_address(server, f"{label}.dns[{index}]")
-
-
-def _check_routes(network: InstallNetwork, subnet: ipaddress.IPv4Network) -> None:
-    label = "install.network"
-    if not 1 <= len(network.routes) <= MAX_ROUTES:
-        raise ValueError(f"{label}.routes: pass 1 to {MAX_ROUTES} routes")
-    defaults = 0
-    for index, route in enumerate(network.routes):
-        try:
-            destination = ipaddress.IPv4Network(route.destination, strict=True)
-        except ValueError:
-            raise ValueError(
-                f"{label}.routes[{index}].destination: must be an IPv4 network in "
-                "CIDR form"
-            ) from None
-        defaults += destination == _DEFAULT_ROUTE
-        gateway = _ipv4_address(route.gateway, f"{label}.routes[{index}].gateway")
-        if gateway not in subnet:
-            raise ValueError(
-                f"{label}.routes[{index}].gateway: must be inside "
-                f"{network.address}'s network"
-            )
-    if defaults != 1:
-        raise ValueError(f"{label}.routes: exactly one route must be 0.0.0.0/0")
-
-
-def _check_login(install: LparInstall) -> None:
-    keys = install.ssh_authorized_keys
-    if not 1 <= len(keys) <= MAX_KEYS:
-        raise ValueError(
-            f"install.ssh_authorized_keys: built media needs 1 to {MAX_KEYS} keys"
-        )
-    for index, key in enumerate(keys):
-        if (
-            not isinstance(key, str)
-            or not 1 <= len(key) <= MAX_KEY_LENGTH
-            # Rejects every line break (U+2028 and NEL included) and control character.
-            or not key.isprintable()
-        ):
-            raise ValueError(
-                f"install.ssh_authorized_keys[{index}]: must be one line of 1 to "
-                f"{MAX_KEY_LENGTH} characters"
-            )
-    if install.login_user is None or not _LOGIN_USER.fullmatch(install.login_user):
-        raise ValueError(
-            "install.login_user: built media needs 1 to 32 characters matching "
-            "[a-z_][a-z0-9_-]*"
-        )
-
-
-def _check_prepared(install: LparInstall) -> None:
-    if install.ssh_authorized_keys:
-        raise ValueError(
-            "install.ssh_authorized_keys: prepared media carries its own keys; omit it"
-        )
-    if install.login_user is not None:
-        raise ValueError(
-            "install.login_user: prepared media carries its own user; omit it"
-        )
-    media = install.media
-    try:
-        scheme = urlparse(media.url).scheme if media.url is not None else None
-    except ValueError:  # its message quotes the URL's host
-        scheme = None
-    if scheme not in ("http", "https"):
-        raise ValueError("install.media.url: prepared media needs an http or https URL")
-    result = media.producer_result
-    if result is None:
-        raise ValueError(
-            "install.media.producer_result: prepared media needs the producer's "
-            "JSON object"
-        )
-    size = len(json.dumps(result, separators=(",", ":")).encode())
-    if size > MAX_PRODUCER_RESULT_BYTES:
-        raise ValueError(
-            f"install.media.producer_result: {size} bytes exceeds "
-            f"{MAX_PRODUCER_RESULT_BYTES}"
-        )
-
-
 def _check_install(request: PlanRequest) -> None:
     install = request.install
     if install is None:
@@ -419,23 +219,7 @@ def _check_install(request: PlanRequest) -> None:
         )
     if request.power_on:
         raise ValueError("power_on: with install, boot governs power-on; omit power_on")
-    if install.profile not in INSTALL_PROFILES:
-        raise ValueError(f"install.profile: must be one of {list(INSTALL_PROFILES)}")
-    _check_network(install.network)
-    _check_media(install)
-
-
-def _check_media(install: LparInstall) -> None:
-    if install.media.mode == "built":
-        if install.media.url is not None or install.media.producer_result is not None:
-            raise ValueError(
-                "install.media.url: built media takes no url or producer_result"
-            )
-        _check_login(install)
-    elif install.media.mode == "prepared":
-        _check_prepared(install)
-    else:
-        raise ValueError("install.media.mode: must be built or prepared")
+    check_install(install)
 
 
 def check_request(request: PlanRequest) -> PlanRequest:
@@ -462,7 +246,7 @@ def check_request(request: PlanRequest) -> PlanRequest:
     if request.boot not in ("immediate", "deferred"):
         raise ValueError("boot: must be immediate or deferred")
     _check_install(request)
-    _check_mac(request)
+    check_mac(request.adapters.mac, request.install)
     return request
 
 
@@ -1258,15 +1042,21 @@ def _intended_changes(
     if any(counts.values()):
         detail = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
         steps.append(("assign_pcie", system, f"apply {detail}, in order"))
+    if request.install is not None:
+        # Mounted before the save, so the saved profile keeps the media (ADR 0319).
+        steps.extend(
+            [
+                ("bind_media", vios, f"bind {request.install.media.mode} media"),
+                ("upload_media", vios, "upload the installer media"),
+                ("mount_media", vios, "mount the installer media"),
+            ]
+        )
     steps.append(
         ("write_profile", system, "write and read back the partition profile (#637)")
     )
     if request.install is not None:
         steps.extend(
             [
-                ("bind_media", vios, f"bind {request.install.media.mode} media"),
-                ("upload_media", vios, "upload the installer media"),
-                ("mount_media", vios, "mount the installer media"),
                 ("set_boot_order", system, "boot installer media first"),
                 ("power_on", system, _power_detail(request.boot)),
             ]
