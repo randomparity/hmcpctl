@@ -1,8 +1,18 @@
 """Load and unload media in an existing virtual optical device (#1285, ADR 0317)."""
 
-import pytest
-from conftest import live_fixture
+import re
 
+import httpx
+import pytest
+from conftest import live_fixture, make_config
+
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.storage.resources import (
+    load_optical_media,
+    unload_optical_media,
+)
+from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.ssh.vios_optical import optical_command
 
 # The captures tokenize the VTD and media names (`dev-14`, `media-2`), and those tokens
@@ -76,3 +86,288 @@ def test_load_requires_a_medium_and_the_action_is_closed():
         optical_command("sys-R1", 100, "load", "vtopt1", release=False)
     with pytest.raises(ValueError, match="'load' or 'unload'"):
         optical_command("sys-R1", 100, "swap", "vtopt1", release=False)  # type: ignore[arg-type]
+
+
+# -- the operations ---------------------------------------------------------------
+
+EMPTY = "rest-vios-scsi-mapping-unmapped-adapter"  # one empty optical VTD, one disk
+LOADED = "rest-vios-scsi-mapping-replace-storage"  # two loaded optical VTDs, one disk
+_DEVICES = {
+    "dev-11": "vtopt0",
+    "dev-12": "vtscsi2",
+    "dev-13": "vtopt3",
+    "dev-14": "vtopt4",
+}
+_VIOS = {
+    EMPTY: "00000001-ABCD-4EF0-8ABC-000000000001",
+    LOADED: "0000001C-ABCD-4EF0-8ABC-00000000001C",
+}
+_LPAR = {
+    EMPTY: "00000002-ABCD-4EF0-8ABC-000000000002",
+    LOADED: "00000014-ABCD-4EF0-8ABC-000000000014",
+}
+_SYSTEM = {
+    EMPTY: "00000006-abcd-4ef0-8abc-000000000006",
+    LOADED: "00000001-abcd-4ef0-8abc-000000000001",
+}
+
+
+def _vios_body(fixture: str, devices: dict[str, str] | None = None) -> str:
+    body = live_fixture(fixture)["body"]
+    for token, name in (_DEVICES if devices is None else devices).items():
+        body = body.replace(f">{token}<", f">{name}<")
+    return body
+
+
+class _Fake:
+    """The SSH, ownership and system-name boundaries the operations cross."""
+
+    def __init__(self, monkeypatch, fixture: str, answer: object = ":") -> None:
+        self.calls: list[tuple[str, object]] = []
+        self.answer = answer
+        lpar = _LPAR[fixture]
+        system = _SYSTEM[fixture]
+
+        async def authorize(hmc, selector, *, ownership_override, system_name_or_uuid):
+            self.calls.append(("authorize", (selector, ownership_override)))
+            if isinstance(self.answer, PermissionError):
+                raise self.answer
+            return lpar
+
+        async def system_name(hmc, value):
+            assert value == system
+            return "sys-R1"
+
+        async def run(config, command, **kwargs):
+            self.calls.append(("ssh", command))
+            assert kwargs == {"max_output_bytes": 65536}
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+        def released(**fields):
+            self.calls.append(("audit", fields))
+
+        target = "hmcpctl.operations.storage.resources"
+        monkeypatch.setattr(f"{target}.resolve_and_authorize_lpar_mutation", authorize)
+        monkeypatch.setattr(f"{target}.resolve_system_name", system_name)
+        monkeypatch.setattr(f"{target}.run_hmc_command", run)
+        monkeypatch.setattr(f"{target}.audit.record_optical_release", released)
+
+    def kinds(self) -> list[str]:
+        return [kind for kind, _ in self.calls]
+
+    def ssh(self) -> list[object]:
+        return [value for kind, value in self.calls if kind == "ssh"]
+
+
+def _serve(mock_hmc, fixture: str, body: str | None = None) -> None:
+    mock_hmc.get(f"/rest/api/uom/VirtualIOServer/{_VIOS[fixture]}").mock(
+        return_value=httpx.Response(
+            200,
+            text=_vios_body(fixture) if body is None else body,
+            headers={"Content-Type": "application/atom+xml"},
+        )
+    )
+
+
+async def _call(operation, fixture: str, **kwargs):
+    async with HMCClient(make_config()) as hmc:
+        return await operation(hmc, _VIOS[fixture], "lpar-a", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_load_finds_the_lpars_empty_device_and_submits_the_captured_shape(
+    mock_hmc, monkeypatch
+):
+    fake = _Fake(monkeypatch, EMPTY)
+    _serve(mock_hmc, EMPTY)
+
+    result = await _call(load_optical_media, EMPTY, media_name="media_2")
+
+    assert fake.ssh() == [
+        _captured_command("cli-vios-loadopt").replace("vtopt1", "vtopt0")
+    ]
+    assert result.raw == {
+        "action": "load",
+        "vios_uuid": _VIOS[EMPTY],
+        "lpar_uuid": _LPAR[EMPTY],
+        "target_device": "vtopt0",
+        "media_name": "media_2",
+        "release": False,
+    }
+    assert result.lpar_uuid == _LPAR[EMPTY]
+    assert result.change_location is None
+    assert "audit" not in fake.kinds()
+
+
+@pytest.mark.asyncio
+async def test_unload_names_one_of_several_devices_explicitly(mock_hmc, monkeypatch):
+    fake = _Fake(monkeypatch, LOADED)
+    _serve(mock_hmc, LOADED)
+
+    result = await _call(unload_optical_media, LOADED, target_device="vtopt4")
+
+    assert fake.ssh() == [
+        _captured_command("cli-vios-unloadopt").replace("vtopt1", "vtopt4")
+    ]
+    assert result.raw["media_name"] is None
+    assert result.raw["action"] == "unload"
+
+
+@pytest.mark.asyncio
+async def test_several_devices_and_no_target_is_refused_without_a_command(
+    mock_hmc, monkeypatch
+):
+    fake = _Fake(monkeypatch, LOADED)
+    _serve(mock_hmc, LOADED)
+
+    with pytest.raises(HMCError, match=r"has 2 virtual optical devices.*target_device"):
+        await _call(unload_optical_media, LOADED)
+    assert fake.ssh() == []
+
+
+@pytest.mark.asyncio
+async def test_a_device_the_lpar_does_not_own_is_refused(mock_hmc, monkeypatch):
+    fake = _Fake(monkeypatch, LOADED)
+    _serve(mock_hmc, LOADED)
+
+    # vtscsi2 is the partition's disk VTD, not an optical one.
+    for device in ("vtopt9", "vtscsi2"):
+        with pytest.raises(HMCError, match="is not mapped to LPAR"):
+            await _call(unload_optical_media, LOADED, target_device=device)
+    assert fake.ssh() == []
+
+
+@pytest.mark.asyncio
+async def test_an_lpar_with_no_optical_device_is_refused(mock_hmc, monkeypatch):
+    fake = _Fake(monkeypatch, EMPTY)
+    body = _vios_body(EMPTY).replace(
+        _LPAR[EMPTY], "00000009-ABCD-4EF0-8ABC-000000000009"
+    )
+    _serve(mock_hmc, EMPTY, body)
+
+    with pytest.raises(HMCError, match=r"has 0 virtual optical devices.*none"):
+        await _call(load_optical_media, EMPTY, media_name="media_2")
+    assert fake.ssh() == []
+
+
+@pytest.mark.asyncio
+async def test_a_mapped_device_outside_the_name_rule_is_refused_by_its_name(
+    mock_hmc, monkeypatch
+):
+    fake = _Fake(monkeypatch, EMPTY)
+    _serve(mock_hmc, EMPTY, _vios_body(EMPTY, {}))  # the raw token dev-11
+
+    with pytest.raises(HMCError, match="Mapped virtual optical device 'dev-11'"):
+        await _call(unload_optical_media, EMPTY)
+    assert fake.ssh() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pattern", "replacement"),
+    [
+        (r"(<PartitionID[^>]*>)[^<]*<", r"\g<1>0<"),
+        (r"\bPartitionID\b", "NoPartitionID"),
+        (r"\bAssociatedManagedSystem\b", "OtherLink"),
+    ],
+)
+async def test_an_unusable_vios_identity_is_refused(
+    mock_hmc, monkeypatch, pattern, replacement
+):
+    fake = _Fake(monkeypatch, EMPTY)
+    body = re.sub(pattern, replacement, _vios_body(EMPTY))
+    _serve(mock_hmc, EMPTY, body)
+
+    with pytest.raises(HMCError, match="no usable PartitionID"):
+        await _call(unload_optical_media, EMPTY)
+    assert fake.ssh() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "kwargs"),
+    [
+        (load_optical_media, {"media_name": "bad name"}),
+        (load_optical_media, {"media_name": "media_2", "target_device": "vt-1"}),
+        (unload_optical_media, {"target_device": "a;b"}),
+    ],
+)
+async def test_a_bad_name_is_refused_before_any_request(
+    mock_hmc, monkeypatch, operation, kwargs
+):
+    fake = _Fake(monkeypatch, EMPTY)
+    with pytest.raises(ValueError):
+        await _call(operation, EMPTY, **kwargs)
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_ownership_refusal_submits_nothing(mock_hmc, monkeypatch):
+    fake = _Fake(monkeypatch, EMPTY, answer=PermissionError("foreign owner"))
+    _serve(mock_hmc, EMPTY)
+
+    with pytest.raises(PermissionError):
+        await _call(unload_optical_media, EMPTY, ownership_override=False)
+    assert fake.ssh() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["load", "unload"])
+async def test_release_is_audited_before_the_command(mock_hmc, monkeypatch, action):
+    fake = _Fake(monkeypatch, EMPTY)
+    _serve(mock_hmc, EMPTY)
+    operation = load_optical_media if action == "load" else unload_optical_media
+    media = {"media_name": "media_2"} if action == "load" else {}
+
+    result = await _call(operation, EMPTY, release=True, **media)
+
+    assert fake.kinds()[-2:] == ["audit", "ssh"]
+    assert fake.calls[-2][1] == {
+        "action": action,
+        "system": "sys-R1",
+        "vios": _VIOS[EMPTY],
+        "lpar": _LPAR[EMPTY],
+        "target_device": "vtopt0",
+        "media": media.get("media_name"),
+        "host": "hmc.test",
+        "agent_id": "hmcpctl",
+    }
+    assert " -release " in str(fake.ssh()[0])
+    assert result.raw["release"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("answer", "message"),
+    [
+        (HMCCLIError("rc 1: refused", remote_nonzero_completed=True), "was refused"),
+        (HMCCLIError("timed out"), "completion unknown"),
+        ("Some VIOS text\n", "completion unknown, unexpected answer"),
+        ("", "completion unknown, unexpected answer"),
+    ],
+)
+async def test_every_answer_but_the_captured_one_is_not_success(
+    mock_hmc, monkeypatch, answer, message
+):
+    fake = _Fake(monkeypatch, EMPTY, answer=answer)
+    _serve(mock_hmc, EMPTY)
+
+    with pytest.raises(HMCError, match=message) as caught:
+        await _call(load_optical_media, EMPTY, media_name="media_2")
+    text = str(caught.value)
+    assert "Optical load of vtopt0 on VIOS" in text
+    assert "Nothing was retried" in text
+    assert len(fake.ssh()) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_captured_answer_with_surrounding_whitespace_is_success(
+    mock_hmc, monkeypatch
+):
+    _Fake(monkeypatch, EMPTY, answer=" :\n")
+    _serve(mock_hmc, EMPTY)
+
+    result = await _call(unload_optical_media, EMPTY)
+    assert result.raw["target_device"] == "vtopt0"
