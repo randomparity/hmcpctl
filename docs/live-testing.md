@@ -170,6 +170,7 @@ below. The table does not grant hardware or VIOS access.
 | lpar-config | `uv run --no-sync python scripts/live_lpar_config.py` | subtask 39 |
 | storage | `uv run --no-sync python scripts/live_storage.py` | subtasks 0, 3, 40 and 42 |
 | lpar-power | `uv run --no-sync python scripts/live_lpar_power.py` | subtask 41 |
+| lpar-reconfigure | `uv run --no-sync python scripts/live_lpar_reconfigure.py` | subtask 70 |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
 managed system, and a concurrent run makes the recovery check in step 4
@@ -1701,6 +1702,34 @@ No fabricated numeric EWLM ID is used. Record firmware/state rejections and
 unavailable readback honestly. Generate public evidence using
 `scripts/live_test_evidence.py`; raw result documents remain private. POWER9
 execution does not establish POWER10/POWER11 hardware coverage.
+
+## LPAR reconfigure persistence (arm 70)
+
+The opt-in `lpar-reconfigure` arm proves `hmc_reconfigure_lpar`'s persistence contract (ADR 0314)
+on one owned scratch partition with lpar-config's fixture, prefix and teardown. In order:
+
+1. Inactive, `{memory_mib: 3072, processors: 2}` must read back `profile`.
+2. A rename to `<name>-r` must complete.
+3. A profile activation to SMS must show current memory 3072 MiB and 2 virtual processors.
+4. At SMS (`open firmware`, RMC inactive), `{memory_mib: 2560, processors: 1}` must read back
+   `pending_activation`; the profile must hold it and the running partition must not.
+5. After an immediate power off and a second profile activation, current memory must be
+   2560 MiB, virtual processors 1, and the name still `<name>-r`.
+
+Live DLPAR is recorded as SKIP: it is not authorized on the boundary partition (operator,
+2026-11-02), and a scratch partition never reaches RMC active. A failed step ends the scenario;
+open operations are abandoned, the partition is powered off and the guarded inactive-only
+deletion and independent resource comparison follow even after failure.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-reconfigure
+uv run --no-sync python scripts/live_lpar_reconfigure.py
+uv run --no-sync python scripts/live_test_recovery.py --results test-results-lpar-reconfigure.json
+```
+
+Always run recovery, including after apparent success. Generate public evidence with
+`scripts/live_test_evidence.py`; keep raw results private. Shared processors only; dedicated
+processors, bound widening and `allow_disruption` remain unrun on hardware.
 
 ## Inactive vTPM configuration (arm 51)
 
