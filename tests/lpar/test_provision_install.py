@@ -592,7 +592,6 @@ def test_the_readback_requires_the_optical_adapter_slot():
         ({"install": None}, "boot: deferred applies only with install"),
         ({"install": None, "boot": "immediate"}, "adapters.mac: accepted only"),
         ({"power_on": True}, "power_on: with install"),
-        ({"boot": "immediate"}, "#1849"),
         ({"storage": ProvisionStorage(VIOS, "lv-a", vg_uuid=GROUP)}, "capacity_mib"),
         (
             {"install": replace(INSTALL, media=InstallMedia(mode="built"))},
@@ -640,13 +639,18 @@ def test_preflight_refuses_an_unlisted_url_and_a_vios_without_one_repository():
 
 
 def test_install_delegates_the_media_specialists_only_with_install():
-    media = {"hmc_upload_iso", "hmc_mount_optical_media", "hmc_set_lpar_boot_order"}
+    media = {
+        "hmc_upload_iso",
+        "hmc_mount_optical_media",
+        "hmc_set_lpar_boot_order",
+        "hmc_power_on_lpar",
+        "hmc_read_lpar_refcodes",
+    }
     assert media <= set(delegated_tools(REQUEST))
     plain = replace(
         REQUEST, install=None, boot="immediate", adapters=ProvisionAdapters(100)
     )
     assert not media & set(delegated_tools(plain))
-    assert "hmc_power_on_lpar" not in delegated_tools(REQUEST)
 
 
 def _arguments() -> dict[str, Any]:

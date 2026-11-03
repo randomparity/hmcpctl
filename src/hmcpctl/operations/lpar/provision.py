@@ -607,11 +607,6 @@ def validate_provision_install(request: ProvisionRequest) -> None:
         )
     if request.power_on:
         raise ValueError("power_on: with install, boot governs power-on; omit power_on")
-    if request.boot != "deferred":
-        raise ValueError(
-            "boot: install currently needs boot=deferred; the installer power-on "
-            "(boot=immediate and continuation=boot) arrives with issue #1849"
-        )
     check_install(install)
     check_built_name(request.name, install)
     check_mac(request.adapters.mac, install)

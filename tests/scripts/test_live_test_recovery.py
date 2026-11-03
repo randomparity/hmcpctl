@@ -1976,6 +1976,97 @@ def test_lpar_reconfigure_inputs_need_its_subtask_and_system():
 
 
 # ---------------------------------------------------------------------------
+# The provision-boot arm (ST72, #1849)
+# ---------------------------------------------------------------------------
+
+_MEDIUM = "hmcpctl_0a1b2c3d4e5f.iso"
+_BOOT_MEDIA = recovery.ProvisionBootMediaInputs(_SYSTEM, "vios-uuid", "repo", _MEDIUM)
+
+
+def _media_caller(names: list[str] | None):
+    async def call(tool: str, **arguments):
+        recovery.guard_read_only(tool, arguments)
+        assert tool == "hmc_list_optical_media" and arguments["vg_uuid"] == "repo"
+        if names is None:
+            return "FAIL", None
+        return "PASS", [{"name": name} for name in names]
+
+    return call
+
+
+@pytest.mark.asyncio
+async def test_a_provision_boot_medium_left_is_reported_with_its_command():
+    findings = await recovery.check_run(
+        _media_caller(["other.iso", _MEDIUM]),
+        ((recovery.check_provision_boot_media, _BOOT_MEDIA),),
+    )
+
+    assert [f.what for f in findings] == [f"medium {_MEDIUM}"]
+    assert "delete-media vios-uuid --vg repo --name" in findings[0].remedy
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_provision_boot_medium_is_clean():
+    checks = ((recovery.check_provision_boot_media, _BOOT_MEDIA),)
+
+    assert await recovery.check_run(_media_caller(["other.iso"]), checks) == []
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [_BOOT_MEDIA, recovery.ProvisionBootMediaInputs(_SYSTEM, "vios-uuid", None, None)],
+)
+@pytest.mark.asyncio
+async def test_an_unread_or_unreported_medium_is_not_clean(inputs):
+    with pytest.raises(recovery.StateUnreadable):
+        await recovery.check_run(
+            _media_caller(None), ((recovery.check_provision_boot_media, inputs),)
+        )
+
+
+def test_a_provision_boot_run_is_witnessed_by_both_checks(
+    tmp_path, monkeypatch, capsys
+):
+    document = {
+        "run": {"subtasks": [72], "group": "provision-boot"},
+        "config": {"system_name": _SYSTEM},
+        "artifacts": {
+            "provision_boot_media": {
+                "vios_uuid": "vios-uuid",
+                "vg_uuid": "repo",
+                "media_name": _MEDIUM,
+            }
+        },
+        "results": [],
+    }
+    seen = []
+
+    async def run_checks(checks, *, users=False):
+        seen.append(dict(checks))
+        return []
+
+    monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
+    monkeypatch.setattr(recovery, "_run_checks", run_checks)
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    assert recovery.main(["--results", str(path)]) == 0
+    assert seen == [
+        {
+            recovery.check_lpar_power: recovery.LparPowerInputs(_SYSTEM),
+            recovery.check_provision_boot_media: _BOOT_MEDIA,
+        }
+    ]
+    assert "CLEAN" in capsys.readouterr().out
+
+
+def test_a_provision_boot_run_refused_before_its_call_reads_no_medium():
+    document = {"config": {"system_name": _SYSTEM}, "artifacts": {}}
+
+    assert recovery.provision_boot_media_inputs_from_document(document, [72]) is None
+
+
+# ---------------------------------------------------------------------------
 # The vios-backup arm (ST37, #1349)
 # ---------------------------------------------------------------------------
 

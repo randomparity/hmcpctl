@@ -17,12 +17,12 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 71; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70 and ST71 require named groups and are excluded from default and all selections.
-Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46 and 71 SKIP outside their
+Registered subtasks span 0 through 72; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71 and ST72 require named groups and are excluded from default and all selections.
+Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71 and 72 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
-`lpar-power`, `partition-profile-contract`, `partition-profiles` and
-`vmedia-media-change` groups. A bare
+`lpar-power`, `partition-profile-contract`, `partition-profiles`,
+`vmedia-media-change` and `provision-boot` groups. A bare
 number runs that one subtask; `--group NAME` runs one arm. Results go to `test-results-<group>.json`, or `test-results-round2.json`
 for a bare or whole-suite run, unless
 `--results-file` names another path. That path must be git-ignored.
@@ -132,6 +132,7 @@ from live_test.processor_move import exercise_processor_move
 from live_test.processor_quantities import exercise_processor_quantities
 from live_test.processor_sharing_weight import exercise_processor_sharing_weight
 from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
+from live_test.provision_boot import exercise_provision_boot
 from live_test.provisioning import (
     exercise_storage_provisioning,
     validate_provisioning_dry_run,
@@ -725,6 +726,7 @@ SUBTASKS = {
     59: exercise_processor_sharing_weight,
     64: exercise_accelerator_qos,
     71: vmedia_media_change,
+    72: exercise_provision_boot,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -794,6 +796,8 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     # Not in "all": powers the test partition on and off and writes raw VIOS
     # mappings to capture how a virtual optical device changes media (#1284).
     "vmedia-media-change": [16, 71, 22],
+    # Not in "all": activates a partition with installer media (#1849, ADR 0326).
+    "provision-boot": [72],
     "all": list(range(26)),
 }
 

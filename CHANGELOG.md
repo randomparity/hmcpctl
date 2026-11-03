@@ -46,9 +46,18 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   matches the bound SHA-256 and size. It is mounted before the profile save, so the saved
   profile carries its adapter. After the default profile is set, the boot order puts the media
   first, and the operation pauses at `ready_to_boot` with the partition powered off. The result's
-  `unverified` lists the VIOS copy and the guest's reach to its installer source. The installer
-  power-on (#1849) is not available yet. `upload_iso` gains
-  `expected_sha256` and `expected_size`.
+  `unverified` lists the VIOS copy and the guest's reach to its installer source. `upload_iso`
+  gains `expected_sha256` and `expected_size`.
+- `hmc_provision_lpar` boots the installer (#1849, ADR 0326): `boot=immediate` with `install` boots
+  in the same call, and `continuation=boot` boots a `ready_to_boot` operation. Before power-on the
+  run re-checks that the partition is powered off, the media still listed and mapped, the boot
+  order and adapter MAC unchanged, and the owned disk its only disk; otherwise it pauses
+  `needs_attention` without powering on. It records the newest reference code, activates the saved
+  profile once, and reads reference codes every 15 seconds until the call's `wait_seconds` ends. The
+  boot-started code set stays empty until native evidence fills it (#1850), so the wait ends
+  `needs_attention` with the newer codes it saw, and `resume` polls again without a second
+  power-on. `install` now also needs `hmc_power_on_lpar` and `hmc_read_lpar_refcodes`, and
+  `continuation=boot` needs `exclusive_writer_window=true`.
 - `hmc_provision_lpar` accepts `install` with built media (#1843, ADR 0324). The operator
   names a build entry and its argument template with `HMC_ISO_BUILD_ENTRY` and
   `HMC_ISO_BUILD_ARGUMENTS`; provision runs it without a shell once the client adapter's MAC

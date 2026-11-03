@@ -477,6 +477,9 @@ class LiveTestArtifacts:
     vios_backup_name: str | None = None
     vios_backup_mapping: str | None = None
     vios_backup_backing: str | None = None
+    # The installer medium the provision-boot arm (ST72) may leave: the VIOS before
+    # the provision call, then the repository group and medium name it reports.
+    provision_boot_media: dict = field(default_factory=dict)
 
 
 _VIOS_BACKUP_ARTIFACTS = (
