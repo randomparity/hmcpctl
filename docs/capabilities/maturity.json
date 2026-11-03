@@ -6398,6 +6398,19 @@
                 "constraint": "partition name; profile names unchanged"
               }
             ]
+          },
+          {
+            "variant": "installer-media-boot",
+            "parameters": [
+              {
+                "name": "patch.boot",
+                "constraint": "root_disk: the provision-ledgered root disk's device path only; applies at the next activation"
+              },
+              {
+                "name": "patch.installer_media",
+                "constraint": "detach: removes the provision-ledgered installer media mapping; needs exclusive_writer_window and an all-targets hmc_unmount_optical_media grant"
+              }
+            ]
           }
         ],
         "missing_scope": []
