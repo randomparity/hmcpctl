@@ -131,12 +131,6 @@ class DiskPatch(BaseModel):
             raise ValueError("disks names the same VIOS and disk name twice")
         return self
 
-    @property
-    def vios_uuids(self) -> tuple[str, ...]:
-        return tuple(
-            dict.fromkeys(d.vios_uuid.lower() for d in (*self.add, *self.detach))
-        )
-
 
 class ReconfigurePatch(BaseModel):
     """What to change; an omitted field is never read into a write (ADR 0314 Decision 1)."""
@@ -194,9 +188,18 @@ def delegated_tools(patch: ReconfigurePatch) -> tuple[str, ...]:
     return tuple(dict.fromkeys(tools))
 
 
-def disk_tool(name: str) -> bool:
-    """Whether specialist *name* acts on a VIOS, so it is authorized per VIOS."""
-    return name in DISK_ADD_TOOLS or name in DISK_DETACH_TOOLS
+def disk_vios_uuids(patch: ReconfigurePatch, tool: str) -> tuple[str, ...]:
+    """The VIOSes disk specialist *tool* writes for *patch*; empty for any other tool."""
+    if patch.disks is None:
+        return ()
+    items = (
+        patch.disks.add
+        if tool in DISK_ADD_TOOLS
+        else patch.disks.detach
+        if tool in DISK_DETACH_TOOLS
+        else []
+    )
+    return tuple(dict.fromkeys(item.vios_uuid.lower() for item in items))
 
 
 def open_client(connection: str) -> HMCClient:
@@ -1012,14 +1015,18 @@ def _stale(
     """Whether the partition differs from the plan's basis in what no applied write moved.
 
     Once the plan's own ``current`` write is applied, the resources it changed are its
-    result rather than the basis, and a DLPAR may still be settling, so they are left out.
+    result rather than the basis, and a DLPAR may still be settling, so they are left out;
+    once its ``rename`` is applied, the name is likewise its result (the disk writes and
+    the save follow it).
     """
     observed, expected = basis(view), dict(plan["basis"])
-    applied = ctx.recorded(CURRENT_KEY)
-    if applied is not None and applied.status == "applied":
-        for resource in _RESOURCES:
-            observed.pop(resource)
-            expected.pop(resource)
+    moved = {CURRENT_KEY: _RESOURCES, RENAME_KEY: ("name",)}
+    for key, fields in moved.items():
+        applied = ctx.recorded(key)
+        if applied is not None and applied.status == "applied":
+            for field in fields:
+                observed.pop(field)
+                expected.pop(field)
     return observed != expected
 
 

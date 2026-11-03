@@ -22,7 +22,7 @@ from ...operations.lpar.reconfigure import (
     RECONFIGURE_CLASSIFIERS,
     ReconfigurePatch,
     delegated_tools,
-    disk_tool,
+    disk_vios_uuids,
     reconfigure_body,
 )
 from ...tool_registry import (
@@ -127,10 +127,11 @@ def reconfigure_handler(
         ``hmc_dlpar_proc`` and ``hmc_update_partition_profile``; ``disks.add`` needs
         ``hmc_create_virtual_disk``, ``hmc_map_storage_to_lpar`` and
         ``hmc_save_current_partition_profile``, and ``disks.detach`` needs
-        ``hmc_detach_storage_mapping``, each for every named VIOS: the policy must permit
-        each and admit this partition, or nothing is recorded. An interrupted DLPAR
-        write always needs attention: inspect the partition, then ``abandon``. The
-        rename is written last; when unsure the HMC accepts a name, rename separately.
+        ``hmc_detach_storage_mapping``, each for the VIOS it writes: the policy must
+        permit each and admit this partition, or nothing is recorded. An interrupted
+        DLPAR write always needs attention: inspect the partition, then ``abandon``. The
+        rename is written after the resource changes and before disk changes; when
+        unsure the HMC accepts a name, rename separately.
 
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.
@@ -170,14 +171,13 @@ def reconfigure_handler(
             "lpar": effective["lpar_name_or_uuid"],
             "managed_system": effective["system_name_or_uuid"],
         }
-        vioses = model.disks.vios_uuids if model.disks is not None else ()
         for delegated in delegated_tools(model):
             if not permits(delegated):
                 raise PermissionError(
                     f"{delegated} is not permitted by this server's access policy; "
                     f"{RECONFIGURE_TOOL_NAME} needs it for this patch (ADR 0189)"
                 )
-            for vios in vioses if disk_tool(delegated) else (None,):
+            for vios in disk_vios_uuids(model, delegated) or (None,):
                 authorize_as(
                     tool_security,
                     authorize,

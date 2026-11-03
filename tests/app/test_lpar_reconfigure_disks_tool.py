@@ -69,3 +69,23 @@ def test_a_detach_runs_with_its_delegated_authority(hmc):
     record = _call(_app(_grant(TOOL, DETACH)), DETACHES)
     assert record["outcome"] == "completed"
     assert [m[0] for m in hmc.maps] == ["shared"]
+
+
+def test_each_disk_tool_is_authorized_only_for_the_vios_it_writes(hmc):
+    other = "0000000d-0000-4000-8000-000000000000"
+    arguments = {
+        **ADDS,
+        "allow_disruption": True,
+        "patch": {
+            "disks": {"add": [ADD], "detach": [{"vios_uuid": other, "name": "x"}]}
+        },
+    }
+    app = _app(
+        _grant(TOOL, MAP, SAVE),
+        _grant(CREATE, targets={"vios": [VIOS], "managed_system": ["sysA"]}),
+        _grant(DETACH, targets={"vios": [other], "managed_system": ["sysA"]}),
+    )
+    # Admitted past authorization, so an operation is recorded; its plan then fails on
+    # the fake's single VIOS, which is beside the point here.
+    record = _call(app, arguments)
+    assert record["operation_id"]

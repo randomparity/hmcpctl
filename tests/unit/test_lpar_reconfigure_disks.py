@@ -204,7 +204,8 @@ def test_disks_need_the_window_and_their_tools():
         "hmc_save_current_partition_profile",
         "hmc_detach_storage_mapping",
     )
-    assert patch.disks.vios_uuids == (VIOS,)
+    assert reconfigure.disk_vios_uuids(patch, "hmc_create_virtual_disk") == (VIOS,)
+    assert reconfigure.disk_vios_uuids(patch, "hmc_modify_lpar") == ()
     assert reconfigure.delegated_tools(ReconfigurePatch(name="x")) == (
         "hmc_modify_lpar",
         "hmc_rename_lpar",
@@ -424,6 +425,29 @@ async def test_a_disk_another_operation_owns_needs_attention(hmc):
         )
     verdict = await _classify("vios.virtual_disk", "disk:0", _disk_plan())
     assert verdict.status == "needs_attention"
+
+
+@pytest.mark.parametrize(
+    "disks",
+    [{"add": [ADD]}, {"detach": [{"vios_uuid": VIOS, "name": "root1"}]}],
+)
+def test_a_rename_with_disks_completes_and_resumes_past_the_rename(hmc, disks):
+    hmc.state = "not activated"
+    record = _run({"name": "web2", "disks": disks})
+    assert (record.state, record.outcome) == ("terminal", "completed"), record.warnings
+    assert hmc.name == "web2"
+    assert _writes(hmc)[0] == "the partition name" and len(_writes(hmc)) > 1
+
+
+def test_a_resume_after_the_rename_continues_to_the_disk(hmc, monkeypatch):
+    hmc.state = "not activated"
+    hmc.disk_error = HMCError("lost reply")
+    record = _run({"name": "web2", "disks": {"add": [ADD]}})
+    assert record.outcome == "needs_attention"
+    hmc.disk_error = None
+    record = _run({"name": "web2", "disks": {"add": [ADD]}}, continuation="resume")
+    assert (record.state, record.outcome) == ("terminal", "completed"), record.warnings
+    assert "data1" in hmc.disks
 
 
 # ---------------------------------------------------------------------------
