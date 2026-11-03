@@ -246,9 +246,12 @@ async def _cleanup_fixture(
                 "MANUAL RECOVERY REQUIRED: fixture ownership not confirmed",
             )
             return
+        # The default 300 s PowerOff timeout fits inside wait_seconds (ADR 0320).
         status, data = await state.call(
             client,
             "hmc_decommission_lpar",
+            request_id=f"st14-{fixture['token']}-decommission",
+            wait_seconds=600,
             system_name_or_uuid=state.config.system_name,
             lpar_name_or_uuid=name,
             dry_run=False,

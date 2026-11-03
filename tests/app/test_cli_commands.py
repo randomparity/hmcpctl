@@ -2062,6 +2062,8 @@ def test_lpars_decommission_help_lists_cli_contract(fake_hmc):
         "--json",
         "--format",
         "--yes",
+        "--request-id",
+        "--continuation",
     }
 
 
@@ -2071,6 +2073,8 @@ def test_lpars_decommission_dry_run_skips_confirmation(fake_hmc):
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2089,7 +2093,15 @@ def test_lpars_decommission_dry_run_skips_confirmation(fake_hmc):
 def test_lpars_decommission_declined_confirmation_aborts(fake_hmc):
     result = RUNNER.invoke(
         cli.app,
-        ["lpars", "decommission", LPAR_NAME, "--system", SYSTEM_UUID],
+        [
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            LPAR_NAME,
+            "--system",
+            SYSTEM_UUID,
+        ],
         input="n\n",
     )
 
@@ -2103,7 +2115,15 @@ def test_lpars_decommission_confirmed_prompt_names_target_and_executes(fake_hmc)
 
     result = RUNNER.invoke(
         cli.app,
-        ["lpars", "decommission", LPAR_NAME, "--system", SYSTEM_UUID],
+        [
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            LPAR_NAME,
+            "--system",
+            SYSTEM_UUID,
+        ],
         input="y\n",
     )
 
@@ -2127,6 +2147,8 @@ def test_lpars_decommission_yes_executes_workflow(fake_hmc):
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2150,6 +2172,8 @@ def test_lpars_decommission_incomplete_human_result_exits_1_after_rendering(fake
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2176,6 +2200,8 @@ def test_lpars_decommission_incomplete_json_result_exits_1_after_rendering(fake_
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2207,6 +2233,8 @@ def test_lpars_decommission_denies_foreign_owned_partition(fake_hmc, monkeypatch
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_UUID,
             "--system",
             SYSTEM_UUID,
@@ -2225,6 +2253,8 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2286,6 +2316,7 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
             },
         ],
         "warnings": [],
+        "operation": None,
         "blast_radius": {
             "lpar_uuid": LPAR_UUID,
             "lpar_name": LPAR_NAME,
@@ -6139,7 +6170,8 @@ def test_required_lpar_scope_rejects_before_hmc_calls(fake_hmc, command, monkeyp
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "xterm")
     monkeypatch.setattr("typer.rich_utils.FORCE_TERMINAL", True)
-    result = RUNNER.invoke(cli.app, ["lpars", command, LPAR_UUID])
+    extra = ["--request-id", "r1"] if command == "decommission" else []
+    result = RUNNER.invoke(cli.app, ["lpars", command, LPAR_UUID, *extra])
     assert result.exit_code == 2, result.output
     assert "--system" in unstyle(result.output)
     assert fake_hmc.calls == []

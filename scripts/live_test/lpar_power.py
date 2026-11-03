@@ -142,6 +142,7 @@ class Run:
     decommission_failed: bool = False
     requests: dict[str, bool] = field(default_factory=dict)
     provisions: set[str] = field(default_factory=set)
+    decommissions: set[str] = field(default_factory=set)
     ran: set[str] = field(default_factory=set)
     held: dict[str, bool] = field(default_factory=dict)
     data: dict[str, Any] = field(default_factory=dict)
@@ -1203,16 +1204,51 @@ def _dry_run_inventoried(data: object, run: Run, expected_adapters: object) -> b
 async def _decommission(
     client: Client, state: RunState, run: Run, *, dry_run: bool
 ) -> tuple[str, Any]:
-    st, data = await state.call(
-        client,
-        "hmc_decommission_lpar",
-        system_name_or_uuid=run.system,
-        lpar_name_or_uuid=run.p_uuid,
-        dry_run=dry_run,
-        immediate=True,
-        timeout_seconds=_JOB_TIMEOUT_S,
-        poll_interval=_JOB_POLL_INTERVAL_S,
-    )
+    """Run the journaled decommission (ADR 0320) and return its final result.
+
+    The PowerOff job may outlast ``wait_seconds``, so a running operation is polled to
+    terminal or paused, then repeated: a repeat returns the same operation's result.
+    """
+    request_id = f"{run.token}-p-decommission"
+
+    async def call() -> tuple[str, Any]:
+        return await state.call(
+            client,
+            "hmc_decommission_lpar",
+            request_id=request_id,
+            system_name_or_uuid=run.system,
+            lpar_name_or_uuid=run.p_uuid,
+            dry_run=dry_run,
+            immediate=True,
+            timeout_seconds=_JOB_TIMEOUT_S,
+            poll_interval=_JOB_POLL_INTERVAL_S,
+            wait_seconds=600,
+        )
+
+    st, data = await call()
+    operation = _plain(result_field(data, "operation")) if st == "PASS" else None
+    if not isinstance(operation, Mapping):
+        return st, data
+    # Registered only once recorded: a refused decommission has nothing to abandon.
+    run.decommissions.add(request_id)
+    polled = False
+    for _ in range(_OPERATION_POLLS):
+        if operation.get("state") in {"terminal", "paused"}:
+            break
+        polled = True
+        await asyncio.sleep(_OPERATION_POLL_DELAY_S)
+        status, page = await state.call(
+            client, "hmc_operation_status", request_id=request_id
+        )
+        found = [
+            item
+            for item in _items(page, "operations")
+            if item.get("request_id") == request_id
+        ]
+        operation = found[0] if status == "PASS" and found else operation
+    run.requests[request_id] = operation.get("state") == "terminal"
+    if polled:
+        st, data = await call()
     return st, data
 
 
@@ -1343,6 +1379,14 @@ async def _abandon(client: Client, state: RunState, run: Run) -> None:
             st, data = await state.call(
                 client,
                 "hmc_provision_lpar",
+                request_id=request_id,
+                continuation="abandon",
+            )
+        elif request_id in run.decommissions:
+            tool = "hmc_decommission_lpar"
+            st, data = await state.call(
+                client,
+                "hmc_decommission_lpar",
                 request_id=request_id,
                 continuation="abandon",
             )

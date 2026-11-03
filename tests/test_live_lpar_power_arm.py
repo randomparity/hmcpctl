@@ -118,6 +118,7 @@ class World:
         self.composite_pauses = False
         self.detach_keeps_adapter = False
         self.provision_fails_after_storage = False
+        self.decommission_pauses = False
         self.provision_without_uuid = False
         self.refusals_create = False
         self.saved_profile = "hmcpctl_" + "0" * 12
@@ -430,6 +431,8 @@ class World:
         return []
 
     def _hmc_decommission_lpar(self, kwargs: dict[str, Any]) -> Any:
+        if kwargs.get("continuation") == "abandon":
+            return {**_decommissioned(False), "operation": _record("terminal")}
         entry = self.by_selector(kwargs["lpar_name_or_uuid"])
         assert entry is not None
         radius = {
@@ -481,6 +484,13 @@ class World:
                 "steps": steps,
                 "blast_radius": radius,
             }
+        if self.decommission_pauses:
+            return {
+                **_decommissioned(False),
+                "lpar_uuid": entry["uuid"],
+                "blast_radius": radius,
+                "operation": _record("paused"),
+            }
         for mapping in list(self.mappings):
             if mapping["lpar_uuid"] == entry["uuid"]:
                 self._hmc_detach_storage_mapping({"mapping_id": mapping["id"]})
@@ -493,6 +503,7 @@ class World:
             "warnings": [],
             "steps": [{"step": "delete_lpar", "status": "ok"}],
             "blast_radius": radius,
+            "operation": _record("terminal"),
         }
 
 
@@ -520,6 +531,28 @@ def _record(state: str) -> dict[str, Any]:
             "t",
         )
     )
+
+
+def _decommissioned(deleted: bool) -> dict[str, Any]:
+    return {
+        "resource_deleted": deleted,
+        "workflow_completed": deleted,
+        "dry_run": False,
+        "lpar_uuid": "",
+        "warnings": [],
+        "steps": [],
+        "blast_radius": {
+            "lpar_uuid": "",
+            "lpar_name": "",
+            "partition_id": None,
+            "state": None,
+            "owner": None,
+            "adapters": [],
+            "storage_mappings": [],
+            "unresolved_storage_mapping_count": 0,
+            "unavailable_storage_source_count": 0,
+        },
+    }
 
 
 def _provisioned(completed: bool, state: str) -> dict[str, Any]:
@@ -802,6 +835,25 @@ def test_a_paused_composite_fails_and_is_abandoned_in_teardown(schemas):
     assert _results(state)["lpar.power"] == "failed"
     abandoned = [k for k in world.calls_to("hmc_power_lpar") if "continuation" in k]
     assert {k["request_id"] for k in abandoned} == set(world.operations)
+
+
+def test_a_paused_decommission_is_abandoned_with_its_own_tool(schemas):
+    world = World()
+    world.decommission_pauses = True
+    state = _run(schemas, world)
+
+    assert _results(state)["lpar.decommission"] == "failed"
+    abandoned = [
+        k for k in world.calls_to("hmc_decommission_lpar") if "continuation" in k
+    ]
+    assert len(abandoned) == 1 and abandoned[0]["request_id"].endswith(
+        "-p-decommission"
+    )
+    assert not [
+        k
+        for k in world.calls_to("hmc_power_lpar")
+        if k.get("request_id") == abandoned[0]["request_id"]
+    ]
 
 
 def test_a_repeat_stop_that_submits_fails_its_assertion(schemas):
