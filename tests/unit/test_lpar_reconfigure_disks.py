@@ -140,7 +140,11 @@ def hmc(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
         fake.recovery.append(f"hmcprec-{len(fake.recovery):016x}")
         fake.saved_slots = {slot for _, lpar, _, slot in fake.maps if lpar == LPAR}
         return SimpleNamespace(
-            execution="unknown", requested_change="unverified", job=object()
+            execution="unknown",
+            requested_change="unverified",
+            job=object(),
+            recovery_verified=True,
+            error=None,
         )
 
     async def vios_on(_hmc, vios, *, system_name_or_uuid):
@@ -149,6 +153,8 @@ def hmc(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
         return vios
 
     monkeypatch.setattr(reconfigure, "resolve_vios_uuid", vios_on)
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
+    monkeypatch.setattr(profile_persist, "POLL_SECONDS", 0)
     monkeypatch.setattr(profile_persist, "read_partition_profile", read)
     monkeypatch.setattr(profile_persist, "save_current_partition_profile", save)
     return fake
@@ -340,7 +346,11 @@ def test_a_failed_save_pauses_with_the_disk_owned_and_warns(hmc, monkeypatch):
 
     async def refused(*_args, **_kwargs):
         return SimpleNamespace(
-            execution="rejected", requested_change="unverified", job=None
+            execution="rejected",
+            requested_change="unverified",
+            job=None,
+            recovery_verified=False,
+            error="refused",
         )
 
     monkeypatch.setattr(profile_persist, "save_current_partition_profile", refused)

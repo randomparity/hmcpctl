@@ -14,6 +14,8 @@ first and otherwise a readback does: the profile must lack no current client ada
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -29,6 +31,14 @@ from .profiles import read_partition_profile, save_current_partition_profile
 # Persisted contract (ADR 0195 Consequences).
 KIND = "lpar.profile_save"
 RECOVERY_PREFIX = "hmcprec-"
+# A submitted save whose job status the helper misread (#1867) may land after it
+# returns, so the readback is repeated for a bounded time before it decides.
+SETTLE_SECONDS = 120
+POLL_SECONDS = 5
+
+
+class SaveUnconfirmed(HMCError):
+    """A submitted save the readback could not confirm; its text is hmcpctl's own."""
 
 
 def target(lpar_uuid: str, profile_name: str) -> str:
@@ -111,24 +121,44 @@ async def save_current_over(
         )
     except Exception as exc:  # noqa: BLE001 - the readback below decides the outcome
         failure = exc
-    missing, recovery = await persisted(hmc, lpar_uuid, profile_name)
     verified = outcome is not None and (
         outcome.execution,
         outcome.requested_change,
     ) == ("completed", "verified")
-    if verified or not missing:
-        return {"profile_name": profile_name, "recovery_profiles": recovery}
-    reason = str(outcome.execution) if outcome is not None else type(failure).__name__
+    submitted = outcome is not None and outcome.job is not None
+    deadline = time.monotonic() + (SETTLE_SECONDS if submitted or failure else 0)
+    while True:
+        missing, recovery = await persisted(hmc, lpar_uuid, profile_name)
+        if verified or not missing:
+            return {"profile_name": profile_name, "recovery_profiles": recovery}
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(POLL_SECONDS)
+    detail = _diagnosis(outcome, failure, len(missing))
     copies = f"recovery profiles on the partition: {_copies(recovery)}"
     if outcome is not None and outcome.job is None:
         raise EffectNotApplied(
             f"the force-save of LPAR {lpar_uuid}'s profile was not submitted "
-            f"({reason}); {copies}"
+            f"({detail}); {copies}"
         ) from failure
-    raise HMCError(
-        f"the force-save of LPAR {lpar_uuid}'s profile is unconfirmed ({reason}) and "
-        f"the profile lacks {len(missing)} current client adapter(s); {copies}"
+    raise SaveUnconfirmed(
+        f"the force-save of LPAR {lpar_uuid}'s profile is unconfirmed ({detail}); "
+        f"{copies}"
     ) from failure
+
+
+def _diagnosis(outcome: Any, failure: Exception | None, missing: int) -> str:
+    """What the helper reported, without HMC response text (``engine`` module note)."""
+    if outcome is None:
+        return (
+            f"the helper raised {type(failure).__name__}; {missing} adapter(s) missing"
+        )
+    return (
+        f"execution={outcome.execution}, requested_change={outcome.requested_change}, "
+        f"job={'submitted' if outcome.job is not None else 'none'}, "
+        f"recovery_verified={outcome.recovery_verified}, "
+        f"error={'yes' if outcome.error else 'no'}; {missing} adapter(s) missing"
+    )
 
 
 def profile_save_classifier(

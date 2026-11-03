@@ -1311,7 +1311,9 @@ async def _classify_plan(
 
 def _failure_note(exc: Exception, lpar_uuid: str) -> str:
     """A warning naming the failure's type, never its text (``engine`` module note)."""
-    if isinstance(exc, (OperationFailed, EffectNotApplied)):
+    if isinstance(
+        exc, (OperationFailed, EffectNotApplied, profile_persist.SaveUnconfirmed)
+    ):
         return f"{type(exc).__name__}: {exc}"[:512]
     return (
         f"{type(exc).__name__} while reconfiguring LPAR {lpar_uuid}; resume or abandon"

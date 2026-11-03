@@ -85,9 +85,12 @@ def hmc(monkeypatch):
         execution="unknown",
         requested_change="unverified",
         job=object(),
+        recovery_verified=True,
         recovery_profile=SimpleNamespace(name="hmcprec-00ff"),
         error=None,
     )
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
+    monkeypatch.setattr(profile_persist, "POLL_SECONDS", 0)
     monkeypatch.setattr(profile_persist, "read_partition_profile", read)
     monkeypatch.setattr(profile_persist, "save_current_partition_profile", save)
     return fake
@@ -160,6 +163,34 @@ async def test_an_empty_adapter_feed_does_not_vouch_for_an_empty_profile(hmc):
     hmc.profiles[0] = _profile("default")
     missing, _ = await profile_persist.persisted(hmc, LPAR, "default")
     assert missing == ["any virtual adapter"]
+
+
+@pytest.mark.asyncio
+async def test_a_submitted_save_that_lands_late_is_applied(hmc, monkeypatch):
+    hmc.save_lands = False
+    monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 60)
+    reads = []
+    real = profile_persist.persisted
+
+    async def late(*args):
+        reads.append(1)
+        if len(reads) == 3:
+            hmc.profiles[0] = _profile("default", *hmc.current)
+        return await real(*args)
+
+    monkeypatch.setattr(profile_persist, "persisted", late)
+    assert (await _save(hmc))["profile_name"] == "default"
+    assert len(reads) == 3
+
+
+@pytest.mark.asyncio
+async def test_an_unconfirmed_save_names_what_the_helper_reported(hmc):
+    hmc.save_lands = False
+    with pytest.raises(profile_persist.SaveUnconfirmed) as raised:
+        await _save(hmc)
+    assert "execution=unknown" in str(raised.value)
+    assert "job=submitted" in str(raised.value)
+    assert "1 adapter(s) missing" in str(raised.value)
 
 
 @pytest.mark.asyncio
