@@ -124,6 +124,22 @@ def recorded_arguments(
     return json.loads(row["request_json"])["arguments"]
 
 
+def recorded_partition(
+    agent_id: str, request_id: str, tool: str
+) -> tuple[str, str] | None:
+    """Return the (system, partition) UUIDs *tool*'s operation guards, or None.
+
+    Like ``recorded_arguments``, a continuation needs this before ``submit`` to authorize
+    against the recorded targets. Reading never creates the store.
+    """
+    store.validate_request_id(request_id)
+    with store.read_session() as conn:
+        row = None if conn is None else store.find_operation(conn, agent_id, request_id)
+    if row is None or row["tool"] != tool or row["partition_uuid"] is None:
+        return None
+    return row["system_uuid"], row["partition_uuid"]
+
+
 def _check_inputs(
     request: OperationRequest, continuation: str, wait_seconds: int
 ) -> None:
@@ -533,6 +549,17 @@ class OperationContext:
                 partition_uuid=partition_uuid,
                 identity=plain,
             )
+
+    def ledger_remove(
+        self,
+        kind: str,
+        system_uuid: str,
+        partition_uuid: str,
+        match: Mapping[str, Any],
+    ) -> int:
+        """Delete one partition's *kind* entries whose identity holds *match* (ADR 0323)."""
+        with store.session() as conn, store.write_transaction(conn):
+            return store.remove_ledger(conn, kind, system_uuid, partition_uuid, match)
 
     def _settle(
         self, key: str, status: EffectStatus, identity: dict[str, Any] | None

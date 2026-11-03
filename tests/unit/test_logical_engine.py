@@ -809,3 +809,50 @@ def test_ledger_entries_lists_one_kind_on_one_system():
     with store.session() as conn:
         entries = store.ledger_entries(conn, "virtual_disk", "sys")
     assert entries == [(record.operation_id, "lpar", {"disk_name": "d1"})]
+
+
+def test_ledger_remove_deletes_matching_rows_of_one_partition_across_operations():
+    async def first(ctx):
+        ctx.ledger_add("root_disk", "virtual_disk", "sys", "lpar", {"disk_name": "d1"})
+        ctx.ledger_add("partition", "partition", "sys", "lpar", {"lpar_uuid": "lpar"})
+        return BodyResult("completed")
+
+    async def second(ctx):
+        extra = {"disk_name": "d1", "capacity_mib": 10}
+        ctx.ledger_add("added_disk:0", "virtual_disk", "sys", "lpar", extra)
+        ctx.ledger_add(
+            "other_lpar", "virtual_disk", "sys", "lpar-b", {"disk_name": "d1"}
+        )
+        ctx.ledger_add("other_disk", "virtual_disk", "sys", "lpar", {"disk_name": "d2"})
+        removed = ctx.ledger_remove("virtual_disk", "sys", "lpar", {"disk_name": "d1"})
+        return BodyResult("completed", {"removed": removed})
+
+    _submit(body=first)
+    record = _submit(_request("r2"), body=second)
+    assert record.result == {"removed": 2}
+    with store.session() as conn:
+        left = store.ledger_entries(conn, "virtual_disk", "sys")
+        partitions = store.ledger_entries(conn, "partition", "sys")
+    assert [(lpar, identity) for _, lpar, identity in left] == [
+        ("lpar-b", {"disk_name": "d1"}),
+        ("lpar", {"disk_name": "d2"}),
+    ]
+    assert len(partitions) == 1
+
+
+def test_recorded_partition_reads_the_guard_without_creating_a_store():
+    assert engine.recorded_partition("agent-a", "r1", "hmc_test_tool") is None
+    assert not (store.state_dir() / store.DB_NAME).exists()
+
+    async def body(ctx):
+        ctx.guard("sys", "lpar")
+        return BodyResult("completed")
+
+    _submit(body=body)
+    assert engine.recorded_partition("agent-a", "r1", "hmc_test_tool") == (
+        "sys",
+        "lpar",
+    )
+    assert engine.recorded_partition("agent-a", "r1", "other_tool") is None
+    _submit(_request("r2"))
+    assert engine.recorded_partition("agent-a", "r2", "hmc_test_tool") is None

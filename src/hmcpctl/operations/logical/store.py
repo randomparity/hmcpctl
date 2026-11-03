@@ -721,6 +721,34 @@ def ledger_entries(
     ]
 
 
+def remove_ledger(
+    conn: sqlite3.Connection,
+    kind: str,
+    system_uuid: str,
+    partition_uuid: str,
+    match: Mapping[str, Any],
+) -> int:
+    """Delete the *kind* entries of one partition whose identity holds every *match* field.
+
+    Returns how many entries were deleted, whichever operation wrote them (ADR 0323).
+    """
+    rows = conn.execute(
+        "SELECT operation_id, key, identity_json FROM ledger"
+        " WHERE kind = ? AND system_uuid = ? AND partition_uuid = ?",
+        (kind, system_uuid, partition_uuid),
+    ).fetchall()
+    doomed = [
+        (row["operation_id"], row["key"])
+        for row in rows
+        if all(
+            json.loads(row["identity_json"]).get(field) == value
+            for field, value in match.items()
+        )
+    ]
+    conn.executemany("DELETE FROM ledger WHERE operation_id = ? AND key = ?", doomed)
+    return len(doomed)
+
+
 def _iso(timestamp: float) -> str:
     moment = datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="milliseconds")
     return moment.replace("+00:00", "Z")
