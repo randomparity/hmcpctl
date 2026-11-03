@@ -347,7 +347,12 @@ every change whatever the call returned, and verifies restoration:
 - **Preconditions.** The test partition must read `Not Activated`, or nothing is
   changed. The adapter and label round trips also need exactly one VIOS with a
   vSCSI server adapter toward the test partition (the serving VIOS); otherwise
-  only the VLAN round trip runs.
+  only the VLAN round trip runs. The test partition also needs an applied current
+  configuration: `lssyscfg -r lpar -F name,state,curr_profile,resource_config` must read
+  `resource_config` `1`. At `0` every adapter add is refused with REST0269, even while
+  `curr_profile` names a profile; the ST10 profile restore is one known way to reset it.
+  Applying the profile once (`chsyscfg -r lpar -m <system> -o apply -p <partition> -n
+  <profile>`) is the operator's decision for the window; the arm never applies it.
 - **VLAN.** It creates `hmcpctl-live-vlan<id>-<8 hex>` on the first VLAN in
   `LIVE_TEST_VLAN_RANGE_START`–`END` that no network uses, on the lowest-numbered
   virtual switch that carries a VIOS trunk adapter (read through `hmc_list_vios`). When
@@ -358,9 +363,9 @@ every change whatever the call returned, and verifies restoration:
   (expected refused), then removes the adapter and the run's own networks. Any
   other network on that VLAN is reported, never deleted.
   The single adapter create sends only the partition, `port_vlan_id`, `virtual_switch_id`
-  and the system: the request the October 2026 pass sent. The optional creation fields
-  (`addl_vlan_ids`, `allowed_os_mac_addrs`, `qos_priority` and the `vsi_*` fields) are left
-  out while #1861 tests whether they cause HSCLB021 on this boundary.
+  and the system: the request the October 2026 pass sent. It sends no optional creation
+  field (ADR 0315). #1864's capture showed the policy fields accepted, and a complete VSI
+  profile refused with HSCLB021 from the serving VIOS, which has no VSI manager here.
   Credit requires an accepted create and independent contained identity readback with
   the run's `PortVLANID` and the selected `VirtualSwitchID`. A switch
   mismatch or missing switch stops before cleanup. Client-network listings require a
