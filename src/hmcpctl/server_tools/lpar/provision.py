@@ -292,9 +292,11 @@ def provision_handler(
             assignments: Declarative dedicated-slot, direct SR-IOV and vNIC requests.
                 A dedicated slot must name ``default_profile``; provision writes it
                 into the profile it saves, after the readback and before that
-                profile becomes the default, so the activated partition owns it. A slot
-                missing from the inventory, owned, or listed by a profile is refused
-                before anything is recorded.
+                profile becomes the default. A slot missing from the inventory, owned,
+                or listed by a profile is refused before anything is recorded. The slot
+                is written not required and ownership is not re-read after activation,
+                so a slot another partition takes meanwhile is left out; confirm with
+                hmc_list_dedicated_pcie_slots.
             caller_token: Optional caller tracking reference embedded in the partition
                 description as ``[caller <token>]`` after the ownership stamp (ADR 0064);
                 1–64 printable ASCII characters, no whitespace or , = " [ ] \\.

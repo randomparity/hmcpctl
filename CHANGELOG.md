@@ -311,8 +311,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   artifact checks detect candidate closure drift (#1508).
 - `hmc_provision_lpar` and `hmcpctl lpars provision` write each dedicated PCIe slot
   (`assignments.dedicated`) into the `hmcpctl_…` profile they save, after its readback and
-  before it becomes the default, so the partition activated from it owns the slot; this
-  addresses the 0.1.0 known issue (#1390). A dedicated item must name `default_profile`, the
+  before it becomes the default, so the partition activated from it owns the slot unless
+  another partition takes it first; this addresses the 0.1.0 known issue (#1390). A slot
+  missing from the inventory, owned, or listed by a profile is refused before any write. A dedicated item must name `default_profile`, the
   profile the create writes; any other name is refused before any HMC call. The write runs as
   `hmc_assign_dedicated_pcie_slot`, which the policy must permit, and its steps report after
   `profile_readback` (ADR 0318, #1841).
