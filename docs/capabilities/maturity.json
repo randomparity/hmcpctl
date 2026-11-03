@@ -1312,7 +1312,7 @@
               },
               {
                 "name": "creation_memory.mem_expansion",
-                "constraint": "optional finite exact JSON number zero or inclusive 1\u201310 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
+                "constraint": "optional finite exact JSON number zero or inclusive 1–10 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
               },
               {
                 "name": "creation_memory.mem_mode",
@@ -1320,7 +1320,7 @@
               },
               {
                 "name": "creation_memory.mem_weight",
-                "constraint": "optional strict integer 0\u2013255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
+                "constraint": "optional strict integer 0–255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
               },
               {
                 "name": "creation_memory.primary_paging_vios_id",
@@ -4859,7 +4859,7 @@
     {
       "operation": "lpar.decommission",
       "implementation": {
-        "state": "implemented",
+        "state": "partial",
         "implemented_scope": [
           {
             "variant": "dry-run-inventory",
@@ -4913,7 +4913,21 @@
             ]
           }
         ],
-        "missing_scope": []
+        "missing_scope": [
+          {
+            "variant": "delete-owned-storage",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "required true with delete_owned on a new operation or resume"
+              },
+              {
+                "name": "storage_cleanup",
+                "constraint": "delete_owned: after the partition, deletes ledger-owned virtual disks and installer media no other partition maps, as journaled effects, and removes their ledger entries; incomplete inventory retains every owned item (ADR 0323); native proof pending (#1848)"
+              }
+            ]
+          }
+        ]
       },
       "evidence": [
         {
@@ -5281,7 +5295,7 @@
               },
               {
                 "name": "creation_memory.mem_expansion",
-                "constraint": "optional finite exact JSON number zero or inclusive 1\u201310 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
+                "constraint": "optional finite exact JSON number zero or inclusive 1–10 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
               },
               {
                 "name": "creation_memory.mem_mode",
@@ -5289,7 +5303,7 @@
               },
               {
                 "name": "creation_memory.mem_weight",
-                "constraint": "optional strict integer 0\u2013255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
+                "constraint": "optional strict integer 0–255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
               },
               {
                 "name": "creation_memory.primary_paging_vios_id",

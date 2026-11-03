@@ -517,8 +517,9 @@ status keeps showing `running` until a process that can take the lock recovers i
 on its own: a logical tool continues an operation only on a call with `continuation: resume`.
 
 Terminal operations are pruned 30 days after they end, and each operation keeps its newest 1,024
-events. The resource ledger is never pruned; decommission will remove its entries (#1229), and
-until then nothing does. A new operation is refused with `store_full` once non-terminal
+events. Pruning never touches the resource ledger. `hmc_decommission_lpar` with
+`storage_cleanup=delete_owned` removes the entry of each disk or medium it deletes (ADR 0323);
+nothing removes the entries of retained storage or of the partition itself. A new operation is refused with `store_full` once non-terminal
 operations plus ledger entries reach 10,000. To back up or delete the store, stop every hmcpctl
 process first and handle the whole directory; deleting `operations.sqlite3` alone is refused as
 a lost store. A restored backup lacks everything recorded after it was taken: HMC writes made

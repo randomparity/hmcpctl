@@ -14,7 +14,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_configure_lpar_security_policy` | `destructive` | `lpar.configure_security_policy` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure security policy once; verify pending policy separately from current boot. |
 | `hmc_configure_lpar_vtpm` | `destructive` | `lpar.configure_vtpm` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure an inactive AIX/Linux partition's advertised vTPM settings. |
 | `hmc_create_lpar` | `mutate` | `lpar.create` | `managed_system` | `partial` | `current` | `existing-runtime-guards` | Create a new LPAR on a managed system. |
-| `hmc_decommission_lpar` | `destructive` | `lpar.decommission` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Inventory, authorize, and optionally decommission one LPAR. |
+| `hmc_decommission_lpar` | `destructive` | `lpar.decommission` | `lpar` | `partial` | `stale (closure-changed)` | `existing-runtime-guards` | Inventory, authorize, and optionally decommission one LPAR. |
 | `hmc_delete_lpar` | `destructive` | `lpar.delete` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Delete (destroy) an LPAR by name or UUID. |
 | `hmc_dlpar_mem` | `mutate` | `lpar.dlpar_mem` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Change absolute memory resources or typed native current-memory quantities. |
 | `hmc_dlpar_proc` | `mutate` | `lpar.dlpar_proc` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Change absolute processor resources or native current-processor quantities. |
