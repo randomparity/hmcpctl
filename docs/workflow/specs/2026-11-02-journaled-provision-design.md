@@ -120,7 +120,7 @@ types, never request arguments (engine module note).
    A save that lands but whose helper reads it as `unknown` is decided by the by-name readback
    (operator decision D1). The create's original profile is kept, unchanged and no longer
    default (ADR 0313).
-4. **Covered elsewhere:** #637's job-read and force-save defects (filed by the campaign);
+4. **Covered elsewhere:** #637's job-read and force-save defects (#1867, #1868);
    media writes under the writer window #1842; owned cleanup #1847/#1848; installer power-on
    #1849.
 

@@ -109,7 +109,9 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
     reports `completed` and `verified`, so an uncertain write is decided by its classifier.
     The power-on write raises when the partition was already active, so its classifier
     decides. Both #637 writes need HMC 10.3.1060 or later, which the preconditions check
-    before anything is recorded.
+    before anything is recorded. `lpar.default_profile` records the partition's
+    `DefaultProfileName`, not a profile's content, so it is not a second profile-write kind.
+    #637's job-read and force-save defects are #1867 and #1868.
 11. **The writer window is required.** `exclusive_writer_window=true` is a required caller input
     for every provision that records an operation (operator decision, 2026-11-02, as #637's
     writes require it, ADR 0242). Without it the call is refused before anything is recorded.
@@ -120,8 +122,8 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
     profile by name, and an absent profile is `not_applied`. The UUID form is unchanged
     (operator decision D2, 2026-11-03).
 13. **Boundaries kept open.** `install` (#1227, #1842/#1843) adds steps 4–7 and
-    `ready_to_boot` after Decision 10's readback and owns the gate that suppresses early
-    power-on. #1230 (#1849/#1850) owns steps 8–9, `continuation: boot` and `boot_started`.
+    `ready_to_boot` after Decision 10's readback. Its gate that suppresses early power-on
+    lives in the body after the readback, where it skips the `power_on` effect. #1230 (#1849/#1850) owns steps 8–9, `continuation: boot` and `boot_started`.
     The ledger vocabulary of Decision 6 stands, and #1229 consumes it.
 
 ## Consequences
@@ -150,7 +152,7 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
 - **Report `completed` until a later piece adds persistence.** judgment: fit. The operator
   declined an interim outcome (2026-11-02).
 - **Force-save over the create's own profile.** verified: the 2026-11-03 capture's force-save
-  failed at #637's recovery copy with HTTP 500 and left the profile unchanged.
+  failed at #637's recovery copy with HTTP 500 and left the profile unchanged (#1868).
 - **Typed profile updates (`update_partition_profile`).** verified: `ProfilePatch` carries no
   adapter fields (`documents/partition_profile.py` `ProfilePatch`, main `e117ca52`), so adapters
   would not persist.
