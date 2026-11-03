@@ -5,7 +5,9 @@ authorized window: whether a ``ViosSCSIMapping`` POST that replaces a mapping's
 ``Storage`` changes the loaded medium (Q1), how ``loadopt``/``unloadopt`` answer (Q2),
 how they behave after an immediate power-off, without and with ``-release`` (Q3), and
 what a create naming a VTD another mapping holds answers, and whether it leaves an
-orphan server adapter (Q4). Since #1285, Q2 and Q3 go through ``hmc_load_optical_media``
+orphan server adapter (Q4). Q5 (#1844) unmounts the medium through
+``hmc_unmount_optical_media`` while the client runs, and again after an immediate power-off
+when that is refused. Since #1285, Q2 and Q3 go through ``hmc_load_optical_media``
 and ``hmc_unload_optical_media`` (ADR 0317): each tool step is followed by an ``lsvopt``
 read and a ``check`` row, and Q2 also records one load into the occupied device, through
 the tool and as the raw command, to capture how a refusal is answered.
@@ -383,6 +385,7 @@ class _Capture:
         if await self.replace_storage():
             await self.cli_swap()
             await self.release_cycle()
+            await self.running_unmount()
 
     async def create_media(self) -> None:
         for name in self.media:
@@ -612,6 +615,63 @@ class _Capture:
         await self.checked("q3 load release", "load", self.media[1], release=True)
         await self.checked("q3 unload release again", "unload", release=True)
         await self.checked("q3 load", "load", self.media[0])
+
+    async def unmount_first(self, step: str) -> str:
+        status, _ = self.note(
+            "hmc_unmount_optical_media",
+            step,
+            await self.state.call(
+                self.client,
+                "hmc_unmount_optical_media",
+                vios_name_or_uuid=self.vios,
+                lpar_name_or_uuid=self.lpar,
+                media_name=self.media[0],
+                system_name_or_uuid=self.system,
+            ),
+        )
+        return status
+
+    async def running_unmount(self) -> None:
+        """Q5: the mapping removal on a running client, then after a power-off (#1844).
+
+        The client has no operating system, so this shows firmware alone holding the
+        device, never a guest's reservation.
+        """
+        targets = await self.optical("q5 precondition")
+        if not targets or self.media[0] not in {media for media, _ in targets}:
+            self.state.skip(SUBTASK, _ROW, "q5 unanswered: medium A is not mapped")
+            return
+        self.powered_on = True
+        powered, _ = self.note(
+            "hmc_power_on_lpar",
+            "q5",
+            await self.state.call(
+                self.client,
+                "hmc_power_on_lpar",
+                lpar_name_or_uuid=self.lpar,
+                system_name_or_uuid=self.system,
+                wait=True,
+                timeout_seconds=120,
+            ),
+        )
+        if powered != "PASS":
+            self.state.skip(SUBTASK, _ROW, f"q5 unanswered: power-on {powered}")
+            return
+        status = await self.unmount_first("q5 running unmount")
+        if status != "PASS":
+            self.note(
+                "hmc_power_off_lpar",
+                "q5 immediate",
+                await self.state.call(
+                    self.client,
+                    "hmc_power_off_lpar",
+                    lpar_name_or_uuid=self.lpar,
+                    system_name_or_uuid=self.system,
+                    immediate=True,
+                    wait=True,
+                ),
+            )
+            await self.unmount_first("q5 off unmount")
 
     # -- cleanup ------------------------------------------------------------
 

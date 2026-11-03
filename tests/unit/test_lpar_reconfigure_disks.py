@@ -211,6 +211,15 @@ def test_the_patch_refuses_malformed_disks(disks, message):
         ReconfigurePatch(disks=disks)
 
 
+@pytest.mark.parametrize(
+    "other", [{"boot": "root_disk"}, {"installer_media": "detach"}]
+)
+def test_an_add_cannot_share_a_patch_with_the_installer_legs(other):
+    with pytest.raises(ValueError, match="split the patch"):
+        ReconfigurePatch(disks={"add": [ADD]}, **other)
+    ReconfigurePatch(disks={"detach": [{"vios_uuid": VIOS, "name": "x"}]}, **other)
+
+
 def test_disks_need_the_window_and_their_tools():
     patch = ReconfigurePatch(
         disks={"add": [ADD], "detach": [{"vios_uuid": VIOS, "name": "root1"}]}

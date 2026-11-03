@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from fastmcp import FastMCP
 
+from ...authorization.target_scope import TargetScopeError
 from ...config import build_config
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
@@ -36,6 +37,7 @@ from ...tool_registry import (
 from ..delegation import authorize_as
 
 RECONFIGURE_TOOL_NAME = "hmc_reconfigure_lpar"
+UNMOUNT_TOOL_NAME = "hmc_unmount_optical_media"
 # "console" and not exhaustive, as hmc_power_lpar: a continuation names no target, so the
 # delegated specialists carry the target bound (ADR 0189 Decision 2).
 RECONFIGURE_SECURITY = ToolSecurity(
@@ -96,8 +98,8 @@ def reconfigure_handler(
         wait_seconds: int = 60,
         profile: str | None = None,
     ) -> OperationRecord:
-        """Change an LPAR's processors, memory, name or virtual disks, and say where each
-        change lives.
+        """Change an LPAR's processors, memory, name, boot or virtual disks, or detach
+        its installer media.
 
         Durable (ADR 0190): the call returns within ``wait_seconds`` and the work
         continues; poll ``hmc_operation_status`` with ``request_id``. Every change is
@@ -133,18 +135,28 @@ def reconfigure_handler(
         rename is written after the resource changes and before disk changes; when
         unsure the HMC accepts a name, rename separately.
 
+        For a partition ``hmc_provision_lpar`` created, ``boot: root_disk`` sets the
+        pending boot order to its root disk only (``next_activation``: the next
+        activation uses it) and needs ``hmc_set_lpar_boot_order``.
+        ``installer_media: detach`` removes the mapping of the installer media provision
+        mounted, keeping the medium, and needs ``hmc_unmount_optical_media`` granted for
+        all targets and ``exclusive_writer_window=true``. Detach is refused unless the
+        partition is not activated or RMC is active: power it off, then detach. Media
+        already detached or a boot order already set plans no change.
+
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.
             lpar_name_or_uuid: PartitionName or UUID; required for a new operation.
             system_name_or_uuid: The managed system holding it; required for a new
                 operation.
-            patch: name, processors, memory_mib and/or disks; omitted fields are
-                unchanged. Required for a new operation.
+            patch: name, processors, memory_mib, boot (root_disk), installer_media
+                (detach) and/or disks; omitted fields are unchanged. Required for a
+                new operation.
             allow_disruption: Permit live removal of memory or processors (default
                 false: a removal on a running partition is pending_activation), and a
                 disk detach from an activated partition.
             exclusive_writer_window: Required true when the patch has processors,
-                memory_mib or disks.
+                memory_mib, installer_media or disks.
             continuation: none, resume or abandon; a continuation needs only
                 request_id, and any other value given must match the operation's.
             wait_seconds: Seconds to wait before returning, 0-600.
@@ -163,9 +175,10 @@ def reconfigure_handler(
         model = ReconfigurePatch.model_validate(effective["patch"])
         if model.needs_window and effective["exclusive_writer_window"] is not True:
             raise PermissionError(
-                "processors, memory_mib and disks write the partition's profile or VIOS "
-                "storage: assert exclusive_writer_window=true after coordinating other "
-                "writers of this partition, its profiles and that storage (ADR 0242)"
+                "processors and memory_mib write the partition's profile, and "
+                "installer_media and disks write VIOS storage: assert "
+                "exclusive_writer_window=true after coordinating other writers of this "
+                "partition, its profiles and its VIOS (ADR 0242, ADR 0321, ADR 0322)"
             )
         by_kind = {
             "lpar": effective["lpar_name_or_uuid"],
@@ -178,13 +191,23 @@ def reconfigure_handler(
                     f"{RECONFIGURE_TOOL_NAME} needs it for this patch (ADR 0189)"
                 )
             for vios in disk_vios_uuids(model, delegated) or (None,):
-                authorize_as(
-                    tool_security,
-                    authorize,
-                    delegated,
-                    by_kind if vios is None else {**by_kind, "vios": vios},
-                    profile,
-                )
+                try:
+                    authorize_as(
+                        tool_security,
+                        authorize,
+                        delegated,
+                        by_kind if vios is None else {**by_kind, "vios": vios},
+                        profile,
+                    )
+                except TargetScopeError as exc:
+                    if delegated != UNMOUNT_TOOL_NAME:
+                        raise
+                    # The generic denial asks for a vios argument this tool does not take.
+                    raise TargetScopeError(
+                        f"installer_media needs {UNMOUNT_TOOL_NAME} granted for all "
+                        "targets: the VIOS is known only from the operation ledger, after "
+                        "this check (ADR 0321 Decision 6)"
+                    ) from exc
         request = OperationRequest(
             RECONFIGURE_TOOL_NAME,
             agent_id,

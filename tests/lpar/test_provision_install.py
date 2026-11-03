@@ -17,7 +17,7 @@ from hmcpctl.errors import HMCError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar import provision_operation
+from hmcpctl.operations.lpar import provision_operation, reconfigure_media
 from hmcpctl.operations.lpar.install_media import (
     UNVERIFIED,
     InstallMedia,
@@ -45,6 +45,7 @@ from hmcpctl.operations.lpar.provision import (
     validate_provision_install,
 )
 from hmcpctl.operations.lpar.provision_operation import (
+    DISK_LEDGER,
     EFFECT_KINDS,
     MEDIA_LEDGER,
     provision_body,
@@ -337,6 +338,22 @@ def test_a_clean_install_run_pauses_ready_to_boot_with_the_media_first(writes):
     ]
     assert result.steps[-1].step == "set_boot_order"
     assert record.next_actions == ("boot", "abandon")
+
+
+def test_reconfigure_finds_the_media_and_root_disk_this_provision_recorded(writes):
+    """#1844 reads exactly the ledger entries an install run writes (ADR 0321 D1)."""
+    record = _submit(writes)
+
+    media = reconfigure_media.provision_owned(SYSTEM, LPAR, MEDIA_LEDGER)
+    disk = reconfigure_media.provision_owned(SYSTEM, LPAR, DISK_LEDGER)
+
+    assert media == {
+        "vios_uuid": VIOS,
+        "media_name": media_name_for(record.operation_id),
+    }
+    assert (
+        disk["vios_uuid"] == VIOS and disk["disk_name"] == REQUEST.storage.storage_name
+    )
 
 
 def test_an_adapter_whose_mac_differs_from_the_pin_fails_before_any_upload(writes):

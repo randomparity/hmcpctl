@@ -763,7 +763,10 @@ def _vmedia_media_change_verdict(config: live_config.LiveTestConfig) -> ArmVerdi
                 "chhwres -o r) and a Storage replacement on that mapping"
             ),
             "viosvrcmd help, lsvopt, unloadopt and loadopt on that VTD, with -release",
-            f"{config.lp3_name} powered on and immediately off once",
+            (
+                f"{config.lp3_name} powered on and immediately off once, then on "
+                "again for an unmount while it runs (Q5) and off"
+            ),
             "every HMC call recorded to a git-ignored hmc-captures/ file",
         ),
         config.system_name,
