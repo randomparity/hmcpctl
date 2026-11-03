@@ -23,22 +23,25 @@ say that no overwrite was submitted.
 1. Generate the recovery name as `"hmcprec-" + secrets.token_hex(8)`: 24 characters, 64
    random bits. The `hmcprec-` prefix is unchanged, so the live arm's namespace check
    (`scripts/live_test/partition_profiles.py`) still matches it.
-2. `clone_profile_document` refuses a name longer than 31 characters with `ValueError` before
-   anything is written. This guards the one HMC-created name hmcprec controls. It cites
-   HSCL059F.
-3. `write_native_profile` passes `response.text` to `HMCError`, as `client/core.py` does. The
+2. `write_native_profile` passes `response.text` to `HMCError`, as `client/core.py` does. The
    shared `HMCError` renders only the `<Message>` element (bounded to 500 characters). Its
    raw-body fallback applies only when no `Message` is present.
-4. When the recovery copy cannot be created or verified, the outcome's `error` begins
-   `recovery copy failed; overwrite not submitted; reconcile retained recovery profile <name>
-   if present:`, followed by the underlying error. `recovery_profile` keeps reporting the
-   generated name, as it does today.
-5. ADR 0242 gains an appended, dated section recording the observed limit and the captured
+3. `_recovery`'s `except (HMCError, ValueError, TypeError)` — which covers the clone write,
+   its readback and comparison, the post-copy freshness checks, and a selected existing
+   recovery profile — makes the outcome's `error` begin `recovery step failed; overwrite not
+   submitted; reconcile recovery profile <name> if present:` followed by the underlying error.
+   The wording stays true on each of those paths. The asynchronous-copy (202) message gains
+   `overwrite not submitted`. `recovery_profile` keeps reporting the name. Exits before that
+   `try` (the name-collision refusal and the pre-copy freshness check) write nothing and keep
+   their text.
+4. ADR 0242 gains an appended, dated section recording the observed limit and the captured
    refusal. Its recovery-copy requirement is unchanged, so ADR 0316 is not used.
 
 Not changed:
 
 - `profile_name()`. It also validates partition names, which the HMC allows to be longer.
+  No separate 31-character guard is added: the generator emits a constant 24 characters and
+  the stateful test transport pins the limit.
 - The `ProfileName` passed to `SaveCurrentConfig`. No capture shows that job's limit.
 - The root `Metadata` the projection retains. ADR 0242 forbids omitting it. The live proof
   below shows whether the HMC accepts it.
@@ -80,10 +83,8 @@ Not changed:
   force-save completes against a stateful transport that refuses longer names with the
   captured 500 (`tests/lpar/test_partition_profile_operations.py`). Red on main: HTTP 500,
   no job.
-- `focused-test`: `clone_profile_document` refuses a 32-character name and accepts a
-  31-character one (`tests/lpar/test_partition_profiles.py`). Red on main: no refusal.
-- `focused-test`: a clone PUT answered with the captured 500 yields an outcome whose `error`
-  names the recovery-copy step, says no overwrite was submitted, carries `HSCL059F`, and
+- `focused-test`: a clone PUT answered with the captured 500 (a test forces the pre-fix
+  32-character name) yields an outcome whose `error` names the recovery step, says no overwrite was submitted, carries `HSCL059F`, and
   includes neither the captured session nor the cookie tokens. No job is submitted, and
   `recovery_profile.name` is set (`tests/lpar/test_partition_profile_operations.py`). Red on
   main: the message lacks both texts.
@@ -93,8 +94,11 @@ Not changed:
   private capture and cited in its README.
 - `task-test-not-applicable`: the ADR 0242 amendment. It is prose; `just adr-numbering` checks
   only its name and H1.
-- Live proof (operator lease, `docs/live-testing.md`): on one owned scratch partition, run
-  create, save-current into a new profile, then force-save over the scratch `default_profile`.
+- Live proof (operator lease; preflight and recovery per `docs/live-testing.md`, through an
+  untracked private script as the operator granted for the capture, because the named
+  `partition-profiles` arm needs a prepared target and generates 38-character scratch names):
+  on one owned scratch partition, run create, save-current into a new profile named
+  `hmcpctl_cap` (11 characters), then force-save over the scratch `default_profile`.
   `recovery_verified` must be true and the force-save job must be submitted. Its reported
   execution may be `unknown` (#1867), so the profile readback decides the result. Then
-  teardown and a `CLEAN` recovery.
+  teardown, a `CLEAN` recovery, and a public matrix from `scripts/live_test_evidence.py`.
