@@ -258,6 +258,16 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Changed
 
+- **Breaking:** `hmc_decommission_lpar` requires `request_id`, and `hmcpctl lpars
+  decommission` requires `--request-id`, with no compatibility path (ADR 0320). The decommission
+  runs as one journaled logical operation: a repeat returns the same operation and never powers
+  off, detaches or deletes twice, and a failed step pauses the operation `needs_attention` for
+  `continuation=resume` or `abandon` instead of returning a partial result. The tool's result
+  gains `operation` (null for a dry run, which records nothing). `ownership_override`,
+  `immediate`, `timeout_seconds` and `poll_interval` default to null in the tool schema so a
+  continuation can omit them; a new request still uses false, false, 300 and 5. A table grant
+  still bounds the tool, but a continuation under one must repeat both selectors. `hmcpctl lpars
+  decommission` is refused while another process holds the ADR 0190 execution lock (#1847).
 - **Breaking:** `hmc_provision_lpar` requires `request_id`, and `hmcpctl lpars provision`
   requires `--request-id`, with no compatibility path. The tool's result gains `operation`,
   a clean run ends `configured` only after the saved profile reads back, and a later step's

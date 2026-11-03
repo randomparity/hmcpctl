@@ -756,14 +756,17 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   is activated, P's default and current profile must both be the `hmcpctl_…` profile
   the operation saved (`saved-profile-activated`; ADR 0313), and the client adapter is
   listed only after that activation, so it proves the adapter survived it. It then proves the decommission dry run inventories the exact vSCSI
-  mapping and client adapters without changing them. The real decommission removes
+  mapping and client adapters without changing them. The real decommission runs as the
+  journaled operation `<token>-p-decommission` (ADR 0320); a run still going after its
+  600 s wait is polled to terminal or paused and repeated for its result. It removes
   its own mapping before deleting P; the arm proves P and its mapping absent, the
   backing volume retained, and foreign mappings and other volumes unchanged. Only
   after these complete reads does teardown delete the run volume.
 - **Not run, recorded as SKIP rows naming what they need:** `hmc_dump_restart_lpar`,
   provision's SR-IOV and vNIC arguments, a graceful `hmc_power_lpar` stop or
   restart, and whole-system power.
-- **After.** Teardown abandons any `hmc_power_lpar` operation left open. Any failed,
+- **After.** Teardown abandons any `hmc_power_lpar`, provision or decommission operation
+  left open, each with its own tool. Any failed,
   cancelled, or unproven decommission attempt retains its remaining resources for
   manual recovery; teardown does not retry mapping or partition deletion. When no
   decommission attempt started, teardown detaches a
