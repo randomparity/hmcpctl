@@ -1072,6 +1072,8 @@ async def upload_iso(
     iso_source: str,
     *,
     system_name_or_uuid: str | None = None,
+    expected_sha256: str | None = None,
+    expected_size: int | None = None,
 ) -> StorageMutationResult:
     """Upload an ISO to a VIOS media repository via the HMC web File API (ADR 0177).
 
@@ -1097,6 +1099,9 @@ async def upload_iso(
         iso_source: HTTP(S) URL to download the ISO from.
         system_name_or_uuid: Optional managed-system name or UUID used to scope
             a VIOS name.
+        expected_sha256: The SHA-256 the download must have, or None. A download
+            that differs is refused before any web File exists (ADR 0191 D5).
+        expected_size: The byte size the download must have, or None.
 
     Returns:
         Mutation result whose raw dictionary contains:
@@ -1120,7 +1125,8 @@ async def upload_iso(
         ValueError: If ``iso_source`` is not an http(s) URL, if its host is not
                    on the operator's allowlist (including the unset allowlist,
                    which permits nothing), if the server answers with a
-                   redirect, if the download exceeds the size bound, or if the
+                   redirect, if the download exceeds the size bound or differs
+                   from ``expected_sha256``/``expected_size``, or if the
                    volume group holds no media repository, its selector is missing
                    or ambiguous, or its inventory contains incomplete identities.
         FileExistsError: If media_name already exists in the repository.
@@ -1166,6 +1172,13 @@ async def upload_iso(
         raise HMCError("ISO download failed: HTTP request could not complete.") from exc
 
     try:
+        if (expected_sha256 is not None and iso_sha256 != expected_sha256) or (
+            expected_size is not None and file_size != expected_size
+        ):
+            raise ValueError(
+                "the downloaded ISO's SHA-256 or size differs from the bound value; "
+                "nothing was uploaded"
+            )
         uploaded_media_entry = await _upload_iso_via_web_file(
             hmc, vios_uuid, vg_uuid, media_name, iso_path, file_size
         )
