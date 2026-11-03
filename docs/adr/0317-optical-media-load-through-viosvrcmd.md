@@ -59,8 +59,10 @@ fixtures and answers are in `tests/fixtures/live/README.md` (capture prefix `202
 - The binding is checked at one read; a mapping change between that read and the command,
   including a re-created device of the same name for another partition, is the caller's to
   serialize (ADR 0079).
-- How `viosvrcmd` reports a refused `loadopt` is captured by the #1285 live proof; until then a
-  refusal answered with exit 0 surfaces as completion unknown, not as success.
+- The #1285 live proof (2026-11-03, V10R3) captured one refusal: a `loadopt` into a loaded
+  device exits 1 with `HSCL2970` (`cli-vios-loadopt-occupied`), which decision 5 reports as
+  refused. A refusal some other level answers with exit 0 would surface as completion unknown,
+  not as success.
 - The REST `Storage`-replace path stays uncaptured on V11R2 and unused; nothing here depends on it.
 - The `-release` form is unexercised against a real stale reservation: the capture's partition
   had no operating system to issue one (README Q3).
