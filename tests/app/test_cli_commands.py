@@ -2062,6 +2062,8 @@ def test_lpars_decommission_help_lists_cli_contract(fake_hmc):
         "--json",
         "--format",
         "--yes",
+        "--request-id",
+        "--continuation",
     }
 
 
@@ -2071,6 +2073,8 @@ def test_lpars_decommission_dry_run_skips_confirmation(fake_hmc):
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2089,7 +2093,15 @@ def test_lpars_decommission_dry_run_skips_confirmation(fake_hmc):
 def test_lpars_decommission_declined_confirmation_aborts(fake_hmc):
     result = RUNNER.invoke(
         cli.app,
-        ["lpars", "decommission", LPAR_NAME, "--system", SYSTEM_UUID],
+        [
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            LPAR_NAME,
+            "--system",
+            SYSTEM_UUID,
+        ],
         input="n\n",
     )
 
@@ -2103,7 +2115,15 @@ def test_lpars_decommission_confirmed_prompt_names_target_and_executes(fake_hmc)
 
     result = RUNNER.invoke(
         cli.app,
-        ["lpars", "decommission", LPAR_NAME, "--system", SYSTEM_UUID],
+        [
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            LPAR_NAME,
+            "--system",
+            SYSTEM_UUID,
+        ],
         input="y\n",
     )
 
@@ -2127,6 +2147,8 @@ def test_lpars_decommission_yes_executes_workflow(fake_hmc):
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2150,6 +2172,8 @@ def test_lpars_decommission_incomplete_human_result_exits_1_after_rendering(fake
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2176,6 +2200,8 @@ def test_lpars_decommission_incomplete_json_result_exits_1_after_rendering(fake_
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2196,6 +2222,59 @@ def test_lpars_decommission_incomplete_json_result_exits_1_after_rendering(fake_
     )
 
 
+def test_lpars_decommission_resumes_a_paused_operation(fake_hmc):
+    fake_hmc.lpar["Resource"]["PartitionState"] = "not activated"
+    fake_hmc.fail_on = "delete_logical_partition"
+    start = ["lpars", "decommission", LPAR_NAME, "--request-id", "r1"]
+    paused = RUNNER.invoke(cli.app, [*start, "--system", SYSTEM_UUID, "--yes"])
+    assert paused.exit_code == 1
+    assert "paused/needs_attention" in paused.stderr
+
+    fake_hmc.fail_on = None
+    declined = RUNNER.invoke(
+        cli.app,
+        ["lpars", "decommission", "--request-id", "r1", "--continuation", "resume"],
+        input="n\n",
+    )
+    assert declined.exit_code == 1 and "Aborted" in declined.stderr
+    assert f"of LPAR '{LPAR_NAME}' on system '{SYSTEM_UUID}'" in declined.stderr
+    resumed = RUNNER.invoke(
+        cli.app,
+        [
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            "--continuation",
+            "resume",
+            "--yes",
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    assert "terminal/completed" in resumed.stderr
+    deletes = [n for n, _, _ in fake_hmc.calls if n == "delete_logical_partition"]
+    assert len(deletes) == 2
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--request-id", "bad id", "--system", SYSTEM_UUID], "--request-id"),
+        (["--request-id", "r1", "--continuation", "later"], "--continuation"),
+        (["--request-id", "r1", "--continuation", "abandon"], "no operation"),
+        (["--request-id", "r1", "--continuation", "resume", "--dry-run"], "--dry-run"),
+        (["--request-id", "r1", "--dry-run"], "--system"),
+        (["lpar-b", "--request-id", "r1", "--continuation", "resume"], "omit"),
+        (["--request-id", "r1", "--continuation", "resume", "--immediate"], "omit"),
+    ],
+)
+def test_lpars_decommission_refuses_bad_operation_input(fake_hmc, args, message):
+    result = RUNNER.invoke(cli.app, ["lpars", "decommission", *args])
+    assert result.exit_code == 2, result.output
+    assert message in unstyle(result.output)
+    assert fake_hmc.calls == []
+
+
 def test_lpars_decommission_denies_foreign_owned_partition(fake_hmc, monkeypatch):
     async def foreign_description(*_args):
         return "[hmcpctl owner:other-agent created:2026-08-14]"
@@ -2207,6 +2286,8 @@ def test_lpars_decommission_denies_foreign_owned_partition(fake_hmc, monkeypatch
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_UUID,
             "--system",
             SYSTEM_UUID,
@@ -2225,6 +2306,8 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
         [
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             LPAR_NAME,
             "--system",
             SYSTEM_UUID,
@@ -2286,6 +2369,7 @@ def test_lpars_decommission_json_renders_dataclass_shape(fake_hmc):
             },
         ],
         "warnings": [],
+        "operation": None,
         "blast_radius": {
             "lpar_uuid": LPAR_UUID,
             "lpar_name": LPAR_NAME,
@@ -6161,7 +6245,8 @@ def test_required_lpar_scope_rejects_before_hmc_calls(fake_hmc, command, monkeyp
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "xterm")
     monkeypatch.setattr("typer.rich_utils.FORCE_TERMINAL", True)
-    result = RUNNER.invoke(cli.app, ["lpars", command, LPAR_UUID])
+    extra = ["--request-id", "r1"] if command == "decommission" else []
+    result = RUNNER.invoke(cli.app, ["lpars", command, LPAR_UUID, *extra])
     assert result.exit_code == 2, result.output
     assert "--system" in unstyle(result.output)
     assert fake_hmc.calls == []

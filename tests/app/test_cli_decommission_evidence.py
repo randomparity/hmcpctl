@@ -3,6 +3,7 @@
 import json
 import shlex
 from dataclasses import asdict
+from types import SimpleNamespace
 
 import click
 import pytest
@@ -12,6 +13,8 @@ from hmcpctl import cli
 from hmcpctl.cli_commands.lpar import decommission as command
 from hmcpctl.operations.lpar.decommission import DecommissionResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+_PAUSED = SimpleNamespace(outcome="needs_attention")
 
 
 @pytest.fixture
@@ -49,6 +52,8 @@ def evidence_result(monkeypatch):
         },
     )
     monkeypatch.setattr(command, "with_client", lambda callback: result)
+    monkeypatch.setattr(command, "_submit", lambda *_args: _PAUSED)
+    monkeypatch.setattr(command, "result_from_record", lambda _record: result)
     return result
 
 
@@ -56,7 +61,17 @@ def evidence_result(monkeypatch):
 def test_decommission_formats_and_confirmation(evidence_result, format):
     run = CliRunner().invoke(
         cli.app,
-        ["lpars", "decommission", "target", "--system", "system-a", "--format", format],
+        [
+            "lpars",
+            "decommission",
+            "target",
+            "--request-id",
+            "r1",
+            "--system",
+            "system-a",
+            "--format",
+            format,
+        ],
         input="y\n",
         env={"COLUMNS": "40", "FORCE_COLOR": "1"},
     )
@@ -94,7 +109,16 @@ def test_format_conflict_and_decline_precede_io(monkeypatch):
     ]:
         run = CliRunner().invoke(
             cli.app,
-            ["lpars", "decommission", "target", "--system", "system-a", *args],
+            [
+                "lpars",
+                "decommission",
+                "target",
+                "--request-id",
+                "r1",
+                "--system",
+                "system-a",
+                *args,
+            ],
             input=input_text,
         )
         assert run.exit_code == code
@@ -137,8 +161,11 @@ from hmcpctl.cli_commands.lpar import decommission as command
 from hmcpctl.operations.lpar.decommission import DecommissionResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 result = {evidence_result!r}
+from types import SimpleNamespace
 command.with_client = lambda callback: result
-cli.app(args=['lpars', 'decommission', 'target', '--system', 'system-a', '--yes'])
+command._submit = lambda *_args: SimpleNamespace(outcome="needs_attention")
+command.result_from_record = lambda _record: result
+cli.app(args=['lpars', 'decommission', 'target', '--request-id', 'r1', '--system', 'system-a', '--yes'])
 """
     run = subprocess.run(
         [sys.executable, "-c", source],

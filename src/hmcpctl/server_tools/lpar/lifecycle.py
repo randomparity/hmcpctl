@@ -10,6 +10,7 @@ from ..._app import (
     with_client,
 )
 from ...client.core import HMCClient
+from ...config import build_config
 from ...documents.lpar import LparResources
 from ...documents.lpar_memory import (
     LparMemoryChange,
@@ -19,6 +20,8 @@ from ...documents.lpar_memory import (
 from ...documents.lpar_processors import LparProcessorChange, LparProcessorMove
 from ...jobs import BootMode, PowerOnKeylock, PowerOnOperationType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
+from ...operations.logical import engine, store
+from ...operations.logical.engine import OperationRequest
 from ...operations.lpar.activation import (
     LparPowerOnOutcome,
     power_off_lpar,
@@ -29,7 +32,19 @@ from ...operations.lpar.assignments import (
     LparPcieWorkflowResult,
 )
 from ...operations.lpar.core import delete_lpar, rename_lpar
-from ...operations.lpar.decommission import DecommissionResult, decommission_lpar
+from ...operations.lpar.decommission import DecommissionResult
+from ...operations.lpar.decommission_operation import (
+    TOOL_NAME as DECOMMISSION_TOOL_NAME,
+)
+from ...operations.lpar.decommission_operation import (
+    decommission_body,
+    decommission_classifiers,
+    effective_arguments,
+    given_arguments,
+    new_arguments,
+    preview,
+    result_from_record,
+)
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
 from ...operations.lpar.memory import change_lpar_memory
 from ...operations.lpar.memory_move import move_lpar_memory
@@ -445,13 +460,16 @@ def hmc_delete_lpar(
 
 @tool(effect="destructive", operation="lpar.decommission", target_kind="lpar")
 def hmc_decommission_lpar(
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
+    request_id: str,
+    system_name_or_uuid: str | None = None,
+    lpar_name_or_uuid: str | None = None,
     dry_run: bool = False,
-    ownership_override: bool = False,
-    immediate: bool = False,
-    timeout_seconds: int = 300,
-    poll_interval: int = 5,
+    ownership_override: bool | None = None,
+    immediate: bool | None = None,
+    timeout_seconds: int | None = None,
+    poll_interval: int | None = None,
+    continuation: Literal["none", "resume", "abandon"] = "none",
+    wait_seconds: int = 60,
     profile: str | None = None,
 ) -> DecommissionResult:
     """Inventory, authorize, and optionally decommission one LPAR.
@@ -463,8 +481,18 @@ def hmc_decommission_lpar(
     detach its exact vSCSI mappings before client adapters, and finally delete
     the partition while retaining backing storage and foreign mappings.
     Set dry_run=True to render the blast radius, warnings and step plan
-    without mutating anything. With dry_run=False, the final delete is
-    irreversible once reached.
+    without mutating anything or recording an operation. With dry_run=False,
+    the final delete is irreversible once reached.
+
+    Durable (ADR 0190, ADR 0320): the call returns within ``wait_seconds`` and the
+    work continues; poll ``hmc_operation_status`` with ``request_id``. A repeat with
+    the same arguments returns the same operation and never powers off, detaches or
+    deletes twice. A step that fails pauses the operation as ``needs_attention``;
+    ``continuation=resume`` checks each interrupted write live and continues from a
+    fresh inventory, and ``abandon`` stops it without writing. A power-off that
+    failed with the partition still active pauses on every resume: abandon it and
+    start a new request_id. A new request whose inventory or ownership check fails
+    is refused and nothing is recorded.
 
     Ownership enforcement runs even for dry runs. If the LPAR description
     names a different owner, stop and ask the operator before proceeding. Set
@@ -480,33 +508,65 @@ def hmc_decommission_lpar(
     - ``warnings`` — non-fatal warnings discovered during inventory.
     - ``blast_radius`` — curated inventory of the LPAR, adapters, and observed
       storage mappings.
+    - ``operation`` — the operation record (null for a dry run).
 
     Args:
-        system_name_or_uuid: SystemName or UUID of the managed system containing the target LPAR.
-        lpar_name_or_uuid: PartitionName or UUID of the logical partition to inventory or delete.
-        dry_run: When True, inventory the blast radius and planned steps without mutating resources.
-        ownership_override: Bypass ownership rejection only after explicit operator approval.
+        request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.
+        system_name_or_uuid: SystemName or UUID of the managed system containing the
+            target LPAR; required for a new operation.
+        lpar_name_or_uuid: PartitionName or UUID of the logical partition to inventory
+            or delete; required for a new operation.
+        dry_run: When True, inventory the blast radius and planned steps without
+            mutating resources or recording an operation.
+        ownership_override: Default false; bypass ownership rejection only after
+            explicit operator approval.
         immediate: Whether to request immediate shutdown instead of a delayed one
-            before deletion.
+            before deletion (default false).
         timeout_seconds: Maximum polling duration in seconds for the power-off job;
-            must be positive.
-        poll_interval: Seconds between power-off job polls; must be positive.
+            must be positive (default 300).
+        poll_interval: Seconds between power-off job polls; must be positive
+            (default 5).
+        continuation: none, resume or abandon; a continuation needs only request_id,
+            and any other value given must match the operation's.
+        wait_seconds: Seconds to wait before returning, 0-600.
         profile: Optional configured HMC profile name; uses the default when omitted.
     """
-
-    return with_client(
-        lambda hmc: decommission_lpar(
-            hmc,
-            lpar_name_or_uuid,
-            dry_run=dry_run,
-            ownership_override=ownership_override,
-            immediate=immediate,
-            timeout_seconds=timeout_seconds,
-            poll_interval=poll_interval,
-            system_name_or_uuid=system_name_or_uuid,
-        ),
-        profile=profile,
+    store.validate_request_id(request_id)
+    if dry_run and continuation != "none":
+        raise ValueError("dry_run cannot continue an operation")
+    given = given_arguments(
+        system_name_or_uuid=system_name_or_uuid,
+        lpar_name_or_uuid=lpar_name_or_uuid,
+        ownership_override=ownership_override,
+        immediate=immediate,
+        timeout_seconds=timeout_seconds,
+        poll_interval=poll_interval,
     )
+    if dry_run:
+        # Reads no operation store, so a store needing recovery still previews.
+        arguments = new_arguments(given)
+        return with_client(lambda hmc: preview(hmc, arguments), profile=profile)
+    config = build_config(profile=profile)
+    agent_id = config.agent_id or "hmcpctl"
+    effective, exists = effective_arguments(given, agent_id, request_id, continuation)
+    if not exists:
+        # Preconditions refuse a new operation before anything is recorded.
+        with_client(lambda hmc: preview(hmc, effective), profile=profile)
+    record = engine.submit(
+        OperationRequest(
+            DECOMMISSION_TOOL_NAME,
+            agent_id,
+            store.connection_label(profile, tool=DECOMMISSION_TOOL_NAME),
+            config.host,
+            request_id,
+            effective if continuation == "none" else given,
+        ),
+        decommission_body(effective),
+        classifiers=decommission_classifiers(),
+        continuation=continuation,
+        wait_seconds=wait_seconds,
+    )
+    return result_from_record(record)
 
 
 @tool(effect="mutate", operation="lpar.power_on", target_kind="lpar")

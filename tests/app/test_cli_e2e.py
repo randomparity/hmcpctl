@@ -833,7 +833,15 @@ def test_cleanup_journey(cleanup_cli):
     assert shown["UUID"] == lpar
     preview = json.loads(
         run(
-            "lpars", "decommission", lpar, "--system", system, "--dry-run", "--json"
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            lpar,
+            "--system",
+            system,
+            "--dry-run",
+            "--json",
         ).stdout
     )
     assert preview["dry_run"] and not preview["resource_deleted"]
@@ -856,7 +864,17 @@ def test_cleanup_journey(cleanup_cli):
         assert message in guarded.stderr
         assert not _mutations(server)
     completed = json.loads(
-        run("lpars", "decommission", lpar, "--system", system, "--yes", "--json").stdout
+        run(
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            lpar,
+            "--system",
+            system,
+            "--yes",
+            "--json",
+        ).stdout
     )
     assert completed["workflow_completed"] and completed["resource_deleted"]
     assert (
@@ -890,7 +908,10 @@ def test_cleanup_refuses_wrong_system_and_duplicate_name(cleanup_cli):
     target = next(
         row for row in lpars["entries"] if row["Resource"]["PartitionName"] == "cleanup"
     )
-    for command, flags in (("show", ()), ("decommission", ("--yes",))):
+    for command, flags in (
+        ("show", ()),
+        ("decommission", ("--yes", "--request-id", "r1")),
+    ):
         refused = run(
             "lpars", command, target["UUID"], "--system", wrong_system, *flags, code=1
         )
@@ -902,6 +923,8 @@ def test_cleanup_refuses_wrong_system_and_duplicate_name(cleanup_cli):
     duplicate = run(
         "lpars",
         "decommission",
+        "--request-id",
+        "r1",
         target["Resource"]["PartitionName"],
         "--system",
         "frame-a",
@@ -921,7 +944,15 @@ def test_cleanup_unresolved_mapping_inspection_and_refusal(cleanup_cli):
         b"</VirtualSCSIMappings>", unknown.encode() + b"</VirtualSCSIMappings>"
     )
     preview = run(
-        "lpars", "decommission", "cleanup", "--system", "frame-a", "--dry-run", "--json"
+        "lpars",
+        "decommission",
+        "--request-id",
+        "r1",
+        "cleanup",
+        "--system",
+        "frame-a",
+        "--dry-run",
+        "--json",
     )
     data = json.loads(preview.stdout)
     row = next(
@@ -948,6 +979,8 @@ def test_cleanup_unresolved_mapping_inspection_and_refusal(cleanup_cli):
         run(
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             data["lpar_uuid"],
             "--system",
             "frame-a",
@@ -980,6 +1013,8 @@ def test_cleanup_partial_failure_preserves_backing_and_prior_effects(
         run(
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             "cleanup",
             "--system",
             "frame-a",
@@ -991,6 +1026,8 @@ def test_cleanup_partial_failure_preserves_backing_and_prior_effects(
         run(
             "lpars",
             "decommission",
+            "--request-id",
+            "r1",
             preview["lpar_uuid"],
             "--system",
             "frame-a",

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
@@ -32,6 +34,7 @@ from ...jobs import (
 )
 from ...resource_identity import is_uuid, resolve_system_uuid
 from ...xmlutil import leaf_text
+from ..logical.models import EffectRecord, OperationRecord
 from .workflow_contract import WorkflowStep
 
 _ADAPTER_ORDER: tuple[AdapterType, ...] = (
@@ -44,6 +47,67 @@ _STORAGE_MAPPING_TYPES: tuple[tuple[str, str], ...] = (
     ("VirtualSCSIMappings", "VirtualSCSIMapping"),
     ("VirtualFibreChannelMappings", "VirtualFibreChannelMapping"),
 )
+# Persisted contract (ADR 0320 Decision 4): never change while an operation can be open.
+POWER_OFF_KEY = "power_off"
+DELETE_LPAR_KEY = "delete_lpar"
+EFFECT_KINDS: Mapping[str, str] = {
+    "power_off": "lpar.power_off",
+    "unmap": "vios.storage_unmap",
+    "adapter": "lpar.client_adapter_delete",
+    "delete_lpar": "lpar.delete",
+}
+Write = Callable[[], Awaitable[Mapping[str, Any]]]
+
+
+class DecommissionJournal(Protocol):
+    """Where a decommission's writes are recorded; ``OperationContext`` is one (ADR 0320)."""
+
+    def set_phase(self, name: str) -> None: ...
+
+    def guard(self, system_uuid: str, partition_uuid: str) -> None: ...
+
+    def recorded(self, key: str) -> EffectRecord | None: ...
+
+    async def effect(
+        self, key: str, kind: str, target: str, write: Write
+    ) -> Mapping[str, Any]: ...
+
+
+class _Direct:
+    """No journal: each write runs once, as a direct Python call (ADR 0029)."""
+
+    def set_phase(self, name: str) -> None:
+        return None
+
+    def guard(self, system_uuid: str, partition_uuid: str) -> None:
+        return None
+
+    def recorded(self, key: str) -> EffectRecord | None:
+        return None
+
+    async def effect(
+        self, key: str, kind: str, target: str, write: Write
+    ) -> Mapping[str, Any]:
+        return await write()
+
+
+def unmap_key(vios_uuid: str, mapping_id: str) -> str:
+    """The effect key of one mapping detach; a mapping id is not a valid key itself."""
+    digest = hashlib.sha256(f"{vios_uuid.lower()}|{mapping_id}".encode()).hexdigest()
+    return f"unmap.{digest[:16]}"
+
+
+def adapter_key(adapter_uuid: str) -> str:
+    """The effect key of one client-adapter delete."""
+    return f"adapter.{adapter_uuid.lower()}"
+
+
+class _StepFailed(Exception):
+    """A write whose step reported an error: raised so its effect settles uncertain."""
+
+    def __init__(self, step: WorkflowStep) -> None:
+        super().__init__(f"{step.step} reported an error")
+        self.step = step
 
 
 class _VScsiDetach(TypedDict):
@@ -152,10 +216,18 @@ class DecommissionResult:
             "description": "Curated inventory of the LPAR, adapters, and observed storage mappings."
         }
     )
+    operation: OperationRecord | None = field(
+        default=None,
+        metadata={
+            "description": "The logical operation that ran the decommission (ADR 0320), "
+            "or null for a dry run."
+        },
+    )
 
 
 @dataclass(frozen=True)
 class _Inventory:
+    system_uuid: str
     system_name: str
     ownership_lpar_name: str
     lpar_uuid: str
@@ -795,6 +867,7 @@ async def _inventory(
     ) = await _inventory_storage_mappings(hmc, system_uuid, lpar_uuid, partition_id)
 
     return _Inventory(
+        system_uuid=system_uuid,
         system_name=system_name,
         ownership_lpar_name=lpar_name,
         lpar_uuid=lpar_uuid,
@@ -877,13 +950,27 @@ async def _power_off(
 
 
 async def _detach_storage_mappings(
-    hmc: HMCClient, inventory: _Inventory
+    hmc: HMCClient, inventory: _Inventory, journal: DecommissionJournal
 ) -> WorkflowStep:
     detached: list[_VScsiDetach] = []
     for mapping in inventory.vscsi_detaches:
-        try:
+
+        async def unmap(mapping: _VScsiDetach = mapping) -> Mapping[str, Any]:
             await hmc.delete_storage_mapping(
                 mapping["vios_uuid"], mapping["mapping_id"], inventory.lpar_uuid
+            )
+            return {
+                "vios_uuid": mapping["vios_uuid"].lower(),
+                "mapping_id": mapping["mapping_id"],
+            }
+
+        vios_uuid = mapping["vios_uuid"].lower()
+        try:
+            await journal.effect(
+                unmap_key(vios_uuid, mapping["mapping_id"]),
+                EFFECT_KINDS["unmap"],
+                f"vios:{vios_uuid}/mapping:{mapping['mapping_id']}",
+                unmap,
             )
         except HMCError as exc:
             return WorkflowStep(
@@ -903,14 +990,28 @@ async def _detach_adapters(
     hmc: HMCClient,
     inventory: _Inventory,
     adapters: tuple[DecommissionAdapterRecord, ...],
+    journal: DecommissionJournal,
 ) -> WorkflowStep:
     deleted: list[DecommissionAdapterRecord] = []
+    lpar_uuid = inventory.lpar_uuid.lower()
     for adapter in adapters:
-        try:
+
+        async def delete(
+            adapter: DecommissionAdapterRecord = adapter,
+        ) -> Mapping[str, Any]:
             await hmc.delete_adapter(
                 inventory.lpar_uuid,
                 adapter["type"],
                 adapter["uuid"],
+            )
+            return {"type": adapter["type"], "uuid": adapter["uuid"].lower()}
+
+        try:
+            await journal.effect(
+                adapter_key(adapter["uuid"]),
+                EFFECT_KINDS["adapter"],
+                f"lpar:{lpar_uuid}/{adapter['type']}:{adapter['uuid'].lower()}",
+                delete,
             )
         except HMCError as exc:
             return WorkflowStep(
@@ -1037,12 +1138,13 @@ def _incomplete_result(
 async def _power_step_with_errors(
     hmc: HMCClient,
     inventory: _Inventory,
+    journal: DecommissionJournal,
     *,
     immediate: bool,
     timeout_seconds: int,
     poll_interval: int,
 ) -> WorkflowStep:
-    try:
+    async def power_off() -> WorkflowStep:
         return await _power_off(
             hmc,
             inventory,
@@ -1050,13 +1152,54 @@ async def _power_step_with_errors(
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
         )
+
+    ran: list[WorkflowStep] = []
+
+    async def write() -> Mapping[str, Any]:
+        step = await power_off()
+        ran.append(step)
+        if step.status != "ok":
+            raise _StepFailed(step)
+        return {"job_id": step.result.get("job_id")}
+
+    try:
+        if (
+            inventory.state == "not activated"
+            and journal.recorded(POWER_OFF_KEY) is None
+        ):
+            return await power_off()
+        identity = await journal.effect(
+            POWER_OFF_KEY,
+            EFFECT_KINDS["power_off"],
+            f"lpar:{inventory.lpar_uuid.lower()}",
+            write,
+        )
+    except _StepFailed as exc:
+        return exc.step
     except HMCError as exc:
         return WorkflowStep("power_off", "error", str(exc))
+    if ran:
+        return ran[0]
+    # Replayed: an earlier run of this operation powered the partition off.
+    return WorkflowStep(
+        "power_off", "ok", {"already_off": False, "job_id": identity.get("job_id")}
+    )
 
 
-async def _delete_lpar_step(hmc: HMCClient, lpar_uuid: str) -> WorkflowStep:
-    try:
+async def _delete_lpar_step(
+    hmc: HMCClient, lpar_uuid: str, journal: DecommissionJournal
+) -> WorkflowStep:
+    async def delete() -> Mapping[str, Any]:
         await hmc.delete_logical_partition(lpar_uuid)
+        return {"lpar_uuid": lpar_uuid.lower()}
+
+    try:
+        await journal.effect(
+            DELETE_LPAR_KEY,
+            EFFECT_KINDS["delete_lpar"],
+            f"lpar:{lpar_uuid.lower()}",
+            delete,
+        )
     except HMCError as exc:
         return WorkflowStep("delete_lpar", "error", str(exc))
     return WorkflowStep("delete_lpar", "ok", {"lpar_uuid": lpar_uuid})
@@ -1072,15 +1215,23 @@ async def decommission_lpar(
     immediate: bool = False,
     timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS,
     poll_interval: int = DEFAULT_JOB_POLL_INTERVAL,
+    journal: DecommissionJournal | None = None,
 ) -> DecommissionResult:
-    """Inventory, authorize, and optionally decommission one LPAR."""
+    """Inventory, authorize, and optionally decommission one LPAR.
+
+    With *journal*, every write is recorded through it (ADR 0320): a repeat skips an
+    applied write, and a write that ends in error is left for the journal to classify.
+    """
     validate_wait_timing(True, timeout_seconds, poll_interval)
+    journal = journal or _Direct()
+    journal.set_phase("validating")
     inventory = await _inventory(
         hmc,
         system_name_or_uuid,
         lpar_name_or_uuid,
         ownership_override=ownership_override,
     )
+    journal.guard(inventory.system_uuid.lower(), inventory.lpar_uuid.lower())
 
     if dry_run:
         return _build_decommission_result(
@@ -1110,6 +1261,7 @@ async def decommission_lpar(
         )
 
     steps: list[WorkflowStep] = []
+    journal.set_phase("tearing_down")
     if inventory.state != "not activated":
         await authorize_decommission_lpar_ownership_snapshot(
             hmc,
@@ -1120,6 +1272,7 @@ async def decommission_lpar(
     power_step = await _power_step_with_errors(
         hmc,
         inventory,
+        journal,
         immediate=immediate,
         timeout_seconds=timeout_seconds,
         poll_interval=poll_interval,
@@ -1142,7 +1295,7 @@ async def decommission_lpar(
         )
         _skip_steps(steps, "detach_adapters", "delete_lpar")
         return _incomplete_result(inventory, steps)
-    mapping_step = await _detach_storage_mappings(hmc, inventory)
+    mapping_step = await _detach_storage_mappings(hmc, inventory, journal)
     steps.append(mapping_step)
     if mapping_step.status != "ok":
         _skip_steps(steps, "detach_adapters", "delete_lpar")
@@ -1178,13 +1331,13 @@ async def decommission_lpar(
         )
         _skip_steps(steps, "delete_lpar")
         return _incomplete_result(inventory, steps)
-    detach_step = await _detach_adapters(hmc, inventory, adapters)
+    detach_step = await _detach_adapters(hmc, inventory, adapters, journal)
     steps.append(detach_step)
     if detach_step.status != "ok":
         steps.append(WorkflowStep("delete_lpar", "skipped"))
         return _incomplete_result(inventory, steps)
 
-    delete_step = await _delete_lpar_step(hmc, inventory.lpar_uuid)
+    delete_step = await _delete_lpar_step(hmc, inventory.lpar_uuid, journal)
     steps.append(delete_step)
     if delete_step.status != "ok":
         return _incomplete_result(inventory, steps)

@@ -4894,6 +4894,23 @@
                 "constraint": "SystemName or UUID"
               }
             ]
+          },
+          {
+            "variant": "journaled-operation",
+            "parameters": [
+              {
+                "name": "continuation",
+                "constraint": "none, resume or abandon"
+              },
+              {
+                "name": "request_id",
+                "constraint": "required; 1-64 of A-Z a-z 0-9 . _ -"
+              },
+              {
+                "name": "wait_seconds",
+                "constraint": "0-600; the operation continues after the call returns"
+              }
+            ]
           }
         ],
         "missing_scope": []
