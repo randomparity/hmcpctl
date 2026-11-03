@@ -64,6 +64,7 @@ from hmcpctl.operations.lpar.provision import (
     _check_vg_exists,
     _power_on,
     preview_provision,
+    validate_provision_assignments,
 )
 from hmcpctl.operations.lpar.provision_operation import mac_colon_form
 from hmcpctl.server_tools.catalog import TOOL_SECURITY
@@ -1433,41 +1434,232 @@ def test_provision_tool_refuses_a_vios_type_before_logon(monkeypatch, mock_hmc):
     assert not mock_hmc.calls
 
 
+_SLOT = "21010020"
 _DEDICATED = LparPcieAssignments(
-    dedicated=(DedicatedPcieAssignment(profile_name="default_profile", drc_index="1"),)
+    dedicated=(
+        DedicatedPcieAssignment(profile_name="default_profile", drc_index=_SLOT),
+    )
+)
+_OTHER_PROFILE = LparPcieAssignments(
+    dedicated=(DedicatedPcieAssignment(profile_name="test_profile", drc_index=_SLOT),)
 )
 
 
-def test_provision_operation_refuses_a_dedicated_slot_before_any_round_trip(
-    monkeypatch,
-):
-    """Provision activates the profile it saves from the current configuration, so a
-    slot written to the creation profile is never owned (#1390); refuse before
-    reading or writing anything."""
-    _hmc_env(monkeypatch)
-    args = _provision_args()
+def test_a_dedicated_slot_must_name_the_created_profile():
+    """Provision carries the slot into the profile it saves (ADR 0318), so the only
+    profile a caller can name is the one the create writes."""
+    validate_provision_assignments(_DEDICATED)
+    with pytest.raises(ValueError, match="default_profile"):
+        validate_provision_assignments(_OTHER_PROFILE)
 
-    with pytest.raises(ValueError, match="hmc_assign_dedicated_pcie_slot"):
-        asyncio.run(
-            preview_provision(
-                None,  # type: ignore[arg-type]
-                args["system_name_or_uuid"],
-                ProvisionRequest(
-                    name=args["name"],
-                    adapters=args["adapters"],
-                    storage=args["storage"],
-                    resources=args["resources"],
-                    assignments=_DEDICATED,
-                ),
-            )
+
+def test_provision_tool_refuses_another_profile_before_logon(monkeypatch, mock_hmc):
+    _hmc_env(monkeypatch)
+    with pytest.raises(ValueError, match="ADR 0318"):
+        hmc_provision_lpar(**_provision_args(assignments=_OTHER_PROFILE))
+    assert not mock_hmc.calls
+
+
+def _slot_writes(persistence, results):
+    """An apply_validated_lpar_pcie_assignments stand-in recording what it was asked."""
+    calls: list = []
+    answers = iter(results)
+
+    async def apply(_hmc, _system, _lpar, assignments, **_kwargs):
+        calls.append((assignments, list(persistence.saved), list(persistence.defaults)))
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return calls, apply
+
+
+def _provision_with(apply, **overrides):
+    with (
+        patch(
+            "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
+            new=AsyncMock(),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.provision._check_dedicated_slots_free",
+            new=AsyncMock(),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.provision_operation"
+            ".apply_validated_lpar_pcie_assignments",
+            new=apply,
+        ),
+    ):
+        return hmc_provision_lpar(**_provision_args(**overrides))
+
+
+def _ok(*names):
+    return AssignmentResult(True, False, tuple(WorkflowStep(n, "ok") for n in names))
+
+
+def test_a_dedicated_slot_is_written_to_the_saved_profile(
+    monkeypatch, mock_hmc, persistence
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    calls, apply = _slot_writes(persistence, [_ok("dedicated[0]")])
+
+    result = _provision_with(apply, assignments=_DEDICATED)
+
+    assert result.operation.outcome == "configured"
+    [(written, saved, defaults)] = calls
+    assert saved[0].startswith("hmcpctl_")
+    assert written == LparPcieAssignments(
+        dedicated=(DedicatedPcieAssignment(saved[0], _SLOT),)
+    )
+    assert defaults == []
+    assert persistence.defaults == saved
+    steps = [step.step for step in result.steps]
+    assert (
+        steps.index("profile_readback")
+        < steps.index("dedicated[0]")
+        < steps.index("default_profile")
+    )
+
+
+def test_a_failed_slot_write_pauses_before_the_default_profile(
+    monkeypatch, mock_hmc, persistence
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    failed = AssignmentResult(
+        False, False, (WorkflowStep("dedicated[0]", "error", "x"),)
+    )
+    _calls, apply = _slot_writes(persistence, [failed])
+
+    result = _provision_with(apply, assignments=_DEDICATED)
+
+    assert result.operation.outcome == "needs_attention"
+    assert persistence.defaults == []
+    statuses = {(step.step, step.status) for step in result.steps}
+    assert ("dedicated[0]", "error") in statuses
+    assert ("default_profile", "skipped") in statuses
+
+
+def test_a_failed_slot_write_leaves_a_stamped_ledgered_partition_to_abandon(
+    monkeypatch, mock_hmc, persistence
+):
+    """The recovery path (ADR 0318): abandon writes nothing, and the partition stays
+    stamped and ledgered for decommission, which removes it with its profiles."""
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    failed = AssignmentResult(
+        False, False, (WorkflowStep("dedicated[0]", "error", "x"),)
+    )
+    _calls, apply = _slot_writes(persistence, [failed])
+    paused = _provision_with(apply, request_id="slot-abandon", assignments=_DEDICATED)
+    sent = len(mock_hmc.calls)
+
+    abandoned = hmc_provision_lpar(request_id="slot-abandon", continuation="abandon")
+
+    assert paused.operation.outcome == "needs_attention"
+    assert paused.ownership_stamped is True
+    assert persistence.saved and persistence.defaults == []
+    assert (abandoned.operation.state, abandoned.operation.outcome) == (
+        "terminal",
+        "abandoned",
+    )
+    assert len(mock_hmc.calls) == sent
+    with store.session() as conn:
+        rows = conn.execute("SELECT kind, partition_uuid FROM ledger").fetchall()
+    assert [tuple(row) for row in rows] == [("partition", LPAR_UUID)]
+
+
+def test_a_raising_slot_write_reports_its_own_step(monkeypatch, mock_hmc, persistence):
+    """The SR-IOV leg's steps never stand in for the slot leg's error."""
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    calls, apply = _slot_writes(
+        persistence, [_ok("sriov[0]"), LookupError("slot inventory changed")]
+    )
+    both = LparPcieAssignments(dedicated=_DEDICATED.dedicated, sriov=(_SRIOV,))
+
+    result = _provision_with(apply, assignments=both)
+
+    assert calls[0][0].dedicated == ()
+    steps = [(step.step, step.status) for step in result.steps]
+    assert steps.count(("sriov[0]", "ok")) == 1
+    assert ("dedicated", "error") in steps
+    assert result.operation.outcome == "needs_attention"
+
+
+def _slot_reads(monkeypatch, owner, io_slots):
+    from hmcpctl.operations.lpar import provision as provision_module
+
+    async def inventory(_hmc, _system):
+        return SimpleNamespace(
+            system="sys1",
+            items=[SimpleNamespace(drc_index=_SLOT, owner_lpar=owner)],
         )
 
+    async def rows(_config, system):
+        assert system == "sys1"
+        return [
+            {"lpar_name": "lpar-b", "name": "default_profile", "io_slots": io_slots}
+        ]
 
-def test_provision_tool_refuses_a_dedicated_slot_before_logon(monkeypatch, mock_hmc):
+    monkeypatch.setattr(provision_module, "list_dedicated_slots", inventory)
+    monkeypatch.setattr(provision_module, "read_profile_io_slot_rows", rows)
+    return provision_module._check_dedicated_slots_free
+
+
+@pytest.mark.parametrize(
+    ("owner", "io_slots", "assignments", "match"),
+    [
+        ("lpar-b", "none", _DEDICATED, "owned by LPAR 'lpar-b'"),
+        (None, f"{_SLOT}/none/0", _DEDICATED, "listed by a profile of LPAR lpar-b"),
+        (
+            None,
+            "none",
+            LparPcieAssignments(
+                dedicated=(DedicatedPcieAssignment("default_profile", "2101FFFF"),)
+            ),
+            "not in the system's inventory",
+        ),
+    ],
+    ids=["owned", "listed", "unknown"],
+)
+def test_an_unavailable_slot_is_refused_before_any_write(
+    monkeypatch, owner, io_slots, assignments, match
+):
+    check = _slot_reads(monkeypatch, owner, io_slots)
+    with pytest.raises(ValueError, match=match):
+        asyncio.run(check(SimpleNamespace(config=None), "sys1", assignments))
+
+
+def test_a_free_slot_passes_the_preflight(monkeypatch):
+    check = _slot_reads(monkeypatch, None, "21010021/none/0")
+    asyncio.run(check(SimpleNamespace(config=None), "sys1", _DEDICATED))
+
+
+def test_a_dry_run_lists_the_slot_after_the_readback(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
-    with pytest.raises(ValueError, match="partition_profile_uuid"):
-        hmc_provision_lpar(**_provision_args(assignments=_DEDICATED))
-    assert not mock_hmc.calls
+    _mock_preconditions(mock_hmc)
+    with (
+        patch(
+            "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
+            new=AsyncMock(),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.provision._check_dedicated_slots_free",
+            new=AsyncMock(),
+        ),
+    ):
+        result = hmc_provision_lpar(
+            **_provision_args(dry_run=True, assignments=_DEDICATED)
+        )
+    steps = [step.step for step in result.steps]
+    assert steps[steps.index("profile_readback") + 1] == "dedicated[0]"
 
 
 # ---------------------------------------------------------------------- #
@@ -1658,6 +1850,38 @@ def test_a_withheld_delegated_tool_refuses_before_anything_is_recorded(
     assert not _store_root().exists()
 
 
+def _deny_slot_target(name, _security, arguments):
+    if name == "hmc_assign_dedicated_pcie_slot" and arguments.get("lpar_name_or_uuid"):
+        raise PermissionError(f"{name} denied for the partition")
+
+
+@pytest.mark.parametrize(
+    ("permits", "authorize", "match"),
+    [
+        (
+            lambda name: name != "hmc_assign_dedicated_pcie_slot",
+            lambda *_: None,
+            "hmc_assign_dedicated_pcie_slot is not permitted",
+        ),
+        (lambda _name: True, _deny_slot_target, "denied for the partition"),
+    ],
+    ids=["withheld", "target-denied"],
+)
+def test_a_dedicated_slot_needs_its_specialist_before_anything_is_recorded(
+    monkeypatch, mock_hmc, permits, authorize, match
+):
+    _hmc_env(monkeypatch)
+    handler = provision_handler(TOOL_SECURITY, permits, authorize)
+    with pytest.raises(PermissionError, match=match):
+        handler(
+            request_id="r-slot-denied",
+            exclusive_writer_window=True,
+            **_provision_args(assignments=_DEDICATED),
+        )
+    assert not mock_hmc.calls
+    assert not _store_root().exists()
+
+
 def test_delegated_tools_follow_the_request():
     request = ProvisionRequest(
         name="web01",
@@ -1665,7 +1889,9 @@ def test_delegated_tools_follow_the_request():
         storage=ProvisionStorage(VIOS_UUID, "lv", vg_uuid=VG_UUID, capacity_mib=1024),
         resources=LparResources(min_memory=256, desired_memory=512, max_memory=1024),
         power_on=False,
-        assignments=LparPcieAssignments(sriov=(_SRIOV,)),
+        assignments=LparPcieAssignments(
+            dedicated=_DEDICATED.dedicated, sriov=(_SRIOV,)
+        ),
         minimum_affinity_policy=MinimumAffinityPolicy(80, "warn"),
     )
     assert delegated_tools(request) == (
@@ -1677,6 +1903,7 @@ def test_delegated_tools_follow_the_request():
         "hmc_create_virtual_disk",
         "hmc_set_minimum_affinity_policy",
         "hmc_assign_sriov_logical_port",
+        "hmc_assign_dedicated_pcie_slot",
     )
 
 

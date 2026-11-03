@@ -747,15 +747,19 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   immediate power-off, `hmc_power_lpar` start, immediate restart, immediate stop,
   a repeated stop (already in state) and a replayed request id, and the delete.
 - **Partition P** (`…-p`). Only when exactly one VIOS lists the configured group
-  with 1 GiB free and `LIVE_TEST_PROVISION_VLAN_ID` has a virtual network. It
-  first sends a dry-run provision carrying a dedicated slot, which must be refused
-  before any HMC read (`dedicated-slot-refused`; #1390). It then creates the 1 GiB
+  with 1 GiB free and `LIVE_TEST_PROVISION_VLAN_ID` has a virtual network. The
+  provision needs `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` and is skipped
+  without it. With the dedicated arm's `LIVE_TEST_DEDICATED_PCIE_*` keys naming the run's
+  system, it picks the configured slot, or else the first slot no partition owns and no
+  profile lists, and sends it as a `default_profile` dedicated assignment; otherwise it
+  records a gap SKIP and sends none. It then creates the 1 GiB
   volume `lppwr<8 hex>` and provisions P on it (virtual Ethernet on the VLAN, vSCSI
-  mapping, saved profile, PowerOn) with no PCIe argument; the real provision needs
-  `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` and is skipped without it. Once P
+  mapping, saved profile, the slot, PowerOn). Once P
   is activated, P's default and current profile must both be the `hmcpctl_…` profile
   the operation saved (`saved-profile-activated`; ADR 0313), and the client adapter is
-  listed only after that activation, so it proves the adapter survived it. It then proves the decommission dry run inventories the exact vSCSI
+  listed only after that activation, so it proves the adapter survived it. With a slot
+  sent, `lshwres` must show P owning it (`pcie-slot-owned`; ADR 0318). It then proves the
+  decommission dry run inventories the exact vSCSI
   mapping and client adapters without changing them. The real decommission removes
   its own mapping before deleting P; the arm proves P and its mapping absent, the
   backing volume retained, and foreign mappings and other volumes unchanged. Only
@@ -817,11 +821,10 @@ Live on V10R3 (2026-10-07, POWER9) seven of its eight observations passed:
 `lpar.power`, `lpar.delete` and `lpar.decommission`. `provision.lpar` with the
 dedicated-slot argument failed and stays failed: the slot is written into the new
 partition's profile, but the provision's PowerOn activates the current configuration,
-so the running partition does not own the slot. Provision now refuses a dedicated
-slot before any HMC call (#1390), and the arm expects that refusal instead of sending
-the slot; a dedicated slot is assigned through the bare-CEC path
-([recipe](recipes/bare-cec-lpar.md)). Provision now activates the profile it saves
-(ADR 0313); carrying a dedicated slot into that profile is #1841.
+so the running partition does not own the slot (#1390). Provision now activates the
+profile it saves (ADR 0313) and writes the slot into that profile first (ADR 0318), and
+the arm asserts `pcie-slot-owned` again. On 2026-11-03 (V10R3, POWER9) all eight observations passed, `provision.lpar`
+including `pcie-slot-owned`, and the post-run compare showed the slot unowned again.
 
 `lpar.power_on` passed on a re-run after #1392. The first run's current-configuration
 activation ended `FAILED_TO_START` with "Parameter 'OperationType' is not allowed for
