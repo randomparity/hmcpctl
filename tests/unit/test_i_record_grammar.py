@@ -954,6 +954,8 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "verify_fixture",
         "_profile_lists_vscsi",
         "_running_vscsi",
+        "_profile_eth_slots",
+        "_running_eth_slots",
     }
 
 
