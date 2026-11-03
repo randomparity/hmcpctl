@@ -3710,6 +3710,52 @@
       ]
     },
     {
+      "operation": "media.load",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "by-lpar-device-and-media-name",
+            "parameters": [
+              {
+                "name": "release",
+                "constraint": "false by default; true adds -release and is audited (optical-release)"
+              },
+              {
+                "name": "target_device",
+                "constraint": "optional when the LPAR has exactly one optical device on that VIOS"
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "media.unload",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "by-lpar-device",
+            "parameters": [
+              {
+                "name": "release",
+                "constraint": "false by default; true adds -release and is audited (optical-release)"
+              },
+              {
+                "name": "target_device",
+                "constraint": "optional when the LPAR has exactly one optical device on that VIOS"
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
       "operation": "media.unmount",
       "implementation": {
         "state": "implemented",

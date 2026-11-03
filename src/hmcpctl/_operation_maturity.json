@@ -654,11 +654,25 @@
       "observed_at": "2026-10-07T16:37:00Z"
     },
     {
+      "operation": "media.load",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "media.mount",
       "implementation": "implemented",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-07T22:09:08Z"
+    },
+    {
+      "operation": "media.unload",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "media.unmount",

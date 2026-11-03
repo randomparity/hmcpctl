@@ -3027,6 +3027,95 @@ def test_storage_unmount_optical_media_forwards_selectors(fake_hmc, monkeypatch)
     assert "CurrentProfileSync is Disabled" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("command", "operation", "extra", "kwargs"),
+    [
+        (
+            "load-optical-media",
+            "load_optical_media",
+            ["--name", "install.iso"],
+            {"media_name": "install.iso"},
+        ),
+        ("unload-optical-media", "unload_optical_media", [], {}),
+    ],
+)
+def test_storage_optical_load_commands_forward_selectors(
+    fake_hmc, monkeypatch, command, operation, extra, kwargs
+):
+    raw = {
+        "action": operation.split("_", 1)[0],
+        "vios_uuid": VIOS_UUID,
+        "lpar_uuid": LPAR_UUID,
+        "target_device": "vtopt1",
+        "media_name": kwargs.get("media_name"),
+        "release": True,
+    }
+    call = AsyncMock(
+        return_value=StorageMutationResult.from_raw(raw, lpar_uuid=LPAR_UUID)
+    )
+    monkeypatch.setattr(f"hmcpctl.cli_commands.storage.resources.{operation}", call)
+
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "storage",
+            command,
+            VIOS_UUID,
+            "--lpar",
+            LPAR_UUID,
+            *extra,
+            "--target-device",
+            "vtopt1",
+            "--release",
+            "--system",
+            SYSTEM_UUID,
+            "--ownership-override",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    call.assert_awaited_once_with(
+        fake_hmc,
+        VIOS_UUID,
+        LPAR_UUID,
+        target_device="vtopt1",
+        release=True,
+        ownership_override=True,
+        system_name_or_uuid=SYSTEM_UUID,
+        **kwargs,
+    )
+    assert f"operation\t{command}" in result.stdout
+    assert "target_device\tvtopt1" in result.stdout
+    assert "release\ttrue" in result.stdout
+
+
+@pytest.mark.usefixtures("storage_terminal_input")
+@pytest.mark.parametrize(
+    ("command", "operation", "extra"),
+    [
+        ("load-optical-media", "load_optical_media", ["--name", "install.iso"]),
+        ("unload-optical-media", "unload_optical_media", []),
+    ],
+)
+def test_storage_optical_load_decline_does_not_mutate(
+    fake_hmc, monkeypatch, command, operation, extra
+):
+    call = AsyncMock()
+    monkeypatch.setattr(f"hmcpctl.cli_commands.storage.resources.{operation}", call)
+
+    result = RUNNER.invoke(
+        cli.app,
+        ["storage", command, VIOS_UUID, "--lpar", LPAR_UUID, *extra, "--release"],
+        input="n\n",
+    )
+
+    assert result.exit_code == 1
+    assert "Aborted" in result.stderr
+    assert "forcibly releasing" in result.stderr
+    call.assert_not_awaited()
+
+
 @pytest.mark.usefixtures("storage_terminal_input")
 def test_storage_mount_optical_media_decline_does_not_mutate(fake_hmc, monkeypatch):
     mount = AsyncMock()

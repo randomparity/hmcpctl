@@ -34,8 +34,10 @@ from hmcpctl.server_tools.storage.resources import (
     hmc_list_clusters,
     hmc_list_shared_storage_pools,
     hmc_list_volume_groups,
+    hmc_load_optical_media,
     hmc_map_storage_to_lpar,
     hmc_mount_optical_media,
+    hmc_unload_optical_media,
 )
 from hmcpctl.server_tools.virtualization.adapters import (
     hmc_add_network_adapter,
@@ -859,3 +861,42 @@ def test_mount_optical_media_without_a_resource_still_reports_its_location(
             "profile_name": None,
         }
     }
+
+
+@pytest.mark.parametrize(
+    ("tool", "operation", "kwargs"),
+    [
+        (hmc_load_optical_media, "load_optical_media", {"media_name": "install.iso"}),
+        (hmc_unload_optical_media, "unload_optical_media", {}),
+    ],
+)
+def test_optical_load_tools_forward_every_argument_and_return_the_result(
+    monkeypatch, mock_hmc, tool, operation, kwargs
+):
+    """#1285: the tools pass their selectors and flags through unchanged."""
+    _hmc_env(monkeypatch)
+    raw = {"action": operation.split("_", 1)[0], "target_device": "vtopt1"}
+    call = AsyncMock(return_value=StorageMutationResult.from_raw(raw))
+    monkeypatch.setattr(f"hmcpctl.server_tools.storage.resources.{operation}", call)
+
+    result = tool(
+        VIOS_UUID,
+        LPAR_UUID,
+        target_device="vtopt1",
+        release=True,
+        system_name_or_uuid="sys-R1",
+        ownership_override=True,
+        **kwargs,
+    )
+
+    assert result == raw
+    call.assert_awaited_once_with(
+        ANY,
+        VIOS_UUID,
+        LPAR_UUID,
+        target_device="vtopt1",
+        release=True,
+        system_name_or_uuid="sys-R1",
+        ownership_override=True,
+        **kwargs,
+    )
