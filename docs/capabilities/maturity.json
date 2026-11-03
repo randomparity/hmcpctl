@@ -5052,9 +5052,40 @@
                 "constraint": "profile_name default_profile; an unowned slot no profile lists, written into the saved hmcpctl_ profile before activation (ADR 0318)"
               }
             ]
+          },
+          {
+            "variant": "prepared-install-media",
+            "parameters": [
+              {
+                "name": "adapters.mac",
+                "constraint": "lower-case colon form; required with prepared media and created as given"
+              },
+              {
+                "name": "install",
+                "constraint": "media.mode prepared with an iso-chain-media-v1 producer result bound field by field; digest-checked upload, mount before the profile save, media-first boot order; boot deferred pauses at ready_to_boot (ADR 0319)"
+              }
+            ]
           }
         ],
         "missing_scope": [
+          {
+            "variant": "built-install-media",
+            "parameters": [
+              {
+                "name": "install.media.mode",
+                "constraint": "built refused before provisioning; the operator-configured build entry is owned by issue #1843"
+              }
+            ]
+          },
+          {
+            "variant": "installer-boot",
+            "parameters": [
+              {
+                "name": "boot",
+                "constraint": "immediate with install refused; installer power-on, continuation boot and boot_started are owned by issue #1849"
+              }
+            ]
+          },
           {
             "variant": "c12-positive-virtual-slot-linkage",
             "parameters": [
@@ -6427,6 +6458,19 @@
               {
                 "name": "patch.name",
                 "constraint": "partition name; profile names unchanged"
+              }
+            ]
+          },
+          {
+            "variant": "installer-media-boot",
+            "parameters": [
+              {
+                "name": "patch.boot",
+                "constraint": "root_disk: the provision-ledgered root disk's device path only; applies at the next activation"
+              },
+              {
+                "name": "patch.installer_media",
+                "constraint": "detach: removes the provision-ledgered installer media mapping; needs exclusive_writer_window and an all-targets hmc_unmount_optical_media grant; refused unless not activated or RMC active"
               }
             ]
           }

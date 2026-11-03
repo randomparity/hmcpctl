@@ -96,6 +96,15 @@ POWER9 system: a raw `loadopt` naming a second medium for a device that already 
 stdout, stderr empty, so the tools report a refusal rather than an unknown completion
 (ADR 0317). Its tokens (`dev-14`, `media-3`) are local to that run's corpus.
 
+`rest-vios-optical-unmount-running-no-rmc` (`capture` prefix `2026-11-03-q1844/`) comes from ST71's
+Q5 step for #1844 on the same V10R3 HMC and POWER9 system. `hmc_unmount_optical_media` ran while
+the test partition was Running with no operating system, so RMC was inactive. The VIOS mapping and
+its server adapter were removed, and the `ViosSCSIMapping` POST then answered HTTP 500 `REST0126`
+`HSCL2957` (no RMC connection or no dynamic partitioning). The partition kept its client vSCSI
+adapter. That adapter is the residue the arm's baseline comparison reported, and the operator
+removed it by hand. After an immediate power-off, a second unmount found no mapping. ADR 0321
+Decision 7 refuses detach in that state.
+
 `rest-user-create-remote-user-id-refused` and `rest-user-profile-kerberos` (`capture` prefix
 `2026-10-13-q1414/`) come from an operator-authorized window for #1414 on the V10R3 HMC, each
 run making at most one disposable Kerberos-type user with a synthetic principal, then deleting

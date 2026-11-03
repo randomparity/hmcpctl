@@ -21,6 +21,7 @@ from ...operations.logical import engine, store
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.store import OperationRefused, connection_label
 from ...operations.lpar.assignments import LparPcieAssignments
+from ...operations.lpar.install_media import Boot, LparInstall
 from ...operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,
@@ -83,6 +84,9 @@ def delegated_tools(request: ProvisionRequest) -> tuple[str, ...]:
         ("hmc_add_vnic", bool(request.assignments.vnics)),
         ("hmc_assign_dedicated_pcie_slot", bool(request.assignments.dedicated)),
         ("hmc_power_on_lpar", request.power_on),
+        ("hmc_upload_iso", request.install is not None),
+        ("hmc_mount_optical_media", request.install is not None),
+        ("hmc_set_lpar_boot_order", request.install is not None),
     )
     return (
         "hmc_create_lpar",
@@ -120,7 +124,12 @@ def _effective(
     missing = [name for name in _REQUIRED if name not in given]
     if missing:
         raise ValueError(f"a new operation needs {', '.join(missing)}")
-    return {**DEFAULT_ARGUMENTS, **given}, recorded is not None
+    # With install, boot governs power-on (H1 spec), so the default is off.
+    defaults = {
+        **DEFAULT_ARGUMENTS,
+        **({"power_on": False} if "install" in given else {}),
+    }
+    return {**defaults, **given}, recorded is not None
 
 
 def _require_window(dry_run: bool, continuation: str, window: bool | None) -> None:
@@ -171,6 +180,7 @@ def _check_plan(
     request: ProvisionRequest,
     expected: str,
     profile: str | None,
+    window: bool,
 ) -> None:
     """Refuse unless a fresh plan of this request has digest *expected* (ADR 0313)."""
     if request.physical_io.requested:
@@ -181,7 +191,7 @@ def _check_plan(
     plan_request = check_request(
         PlanRequest(
             name=request.name,
-            adapters=PlanAdapters(request.adapters.port_vlan_id),
+            adapters=PlanAdapters(request.adapters.port_vlan_id, request.adapters.mac),
             storage=PlanStorage(
                 storage.storage_name,
                 storage.kind,
@@ -196,7 +206,10 @@ def _check_plan(
             caller_token=request.caller_token,
             minimum_affinity_policy=request.minimum_affinity_policy,
             affinity_assessment=request.affinity_assessment,
-            power_on=request.power_on,
+            power_on=None if request.install is not None else request.power_on,
+            boot=request.boot,
+            install=request.install,
+            exclusive_writer_window=window,
         )
     )
     for tool in required_tools(plan_request):
@@ -243,6 +256,8 @@ def provision_handler(
         minimum_affinity_policy: MinimumAffinityPolicy | None = None,
         affinity_assessment: ProvisionAffinityAssessment | None = None,
         physical_io: LparPhysicalIO | None = None,
+        install: LparInstall | None = None,
+        boot: Boot | None = None,
         exclusive_writer_window: bool | None = None,
         expected_plan_digest: str | None = None,
         continuation: Continuation = "none",
@@ -273,13 +288,27 @@ def provision_handler(
         ``configured``. It needs HMC 10.3.1060 or later. ``dry_run`` validates every
         precondition and records nothing. No rollback is attempted.
 
+        With ``install`` (prepared media, ``boot=deferred``; ADR 0191, ADR 0319) the
+        producer result must bind the request and the pinned ``adapters.mac``, field by
+        field, or the call is refused. After the adapters and the new disk, the run binds
+        the result again against the created adapter's MAC, uploads the media as
+        ``hmcpctl_<12 hex>.iso`` into the storage VIOS's one media repository only if the
+        download matches the bound SHA-256 and size, and mounts it. Only then does it save,
+        read back (including the media's vSCSI adapter) and default the profile. It then
+        writes the boot order, media first, and pauses ``ready_to_boot`` with the partition
+        powered off. A mismatch ends ``failed``; nothing is rebuilt or overwritten. These
+        writes also need ``hmc_upload_iso``, ``hmc_mount_optical_media`` and
+        ``hmc_set_lpar_boot_order``. ``unverified`` lists what is not checked. Until
+        issue #1849 adds ``continuation=boot``, a ``ready_to_boot`` operation accepts only
+        ``abandon`` here, even though its record lists ``boot``.
+
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.
             system_name_or_uuid: Target managed-system name or UUID; required for a
                 new operation.
             name: Name for the new logical partition; required for a new operation.
             adapters: Virtual Ethernet attachment settings; required for a new
-                operation.
+                operation. ``mac`` pins the adapter MAC for prepared install media.
             storage: VIOS-backed storage; required for a new operation. With
                 ``capacity_mib`` (and ``vg_uuid``) the disk is created and owned by
                 the operation; without it existing storage is mapped.
@@ -310,6 +339,14 @@ def provision_handler(
                 DRCs and explicit hmc console are supported; unresolved virtual-slot
                 selectors fail before effects (remaining linkage gap #638). C12 profile
                 readback must succeed before application and later workflow steps.
+            install: Optional operating-system installation. Only
+                ``media.mode=prepared`` is accepted: an iso-chain-media-v1 producer
+                result plus an allowlisted URL. Needs ``storage.capacity_mib`` and
+                ``boot=deferred``, and refuses ``power_on``; built media arrives with
+                issue #1843.
+            boot: ``deferred`` stops at ``ready_to_boot`` with the media mounted and the
+                boot order set; it needs ``install``. ``immediate`` with ``install`` is
+                refused until issue #1849.
             exclusive_writer_window: Required true for every call that may write (a new
                 operation or ``resume``): the caller asserts no other writer changes this
                 partition's profiles until the operation ends (ADR 0242).
@@ -341,6 +378,8 @@ def provision_handler(
             minimum_affinity_policy=minimum_affinity_policy,
             affinity_assessment=affinity_assessment,
             physical_io=physical_io,
+            install=install,
+            boot=boot,
             exclusive_writer_window=exclusive_writer_window,
             expected_plan_digest=expected_plan_digest,
         )
@@ -353,7 +392,14 @@ def provision_handler(
         digest = effective.get("expected_plan_digest")
         if digest is not None and not exists:
             _check_plan(
-                tool_security, permits, authorize, system, request, digest, profile
+                tool_security,
+                permits,
+                authorize,
+                system,
+                request,
+                digest,
+                profile,
+                effective.get("exclusive_writer_window") is True,
             )
         if dry_run or not exists:
             # Preconditions refuse a new operation before anything is recorded.

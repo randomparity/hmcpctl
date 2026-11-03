@@ -20,9 +20,8 @@ from ...documents.lpar import LparResources, PartitionType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
 from ...operations.logical.store import connection_label
 from ...operations.lpar.assignments import LparPcieAssignments
+from ...operations.lpar.install_media import Boot, LparInstall
 from ...operations.lpar.plan import (
-    Boot,
-    LparInstall,
     LparPlan,
     Placement,
     PlanAdapters,
