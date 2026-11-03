@@ -119,8 +119,17 @@ class DiskPatch(BaseModel):
     """Disks to add and to detach (ADR 0322 Decision 1)."""
 
     model_config = ConfigDict(extra="forbid")
-    add: list[DiskAdd] = Field(default_factory=list, max_length=MAX_DISKS)
-    detach: list[DiskDetach] = Field(default_factory=list, max_length=MAX_DISKS)
+    add: list[DiskAdd] = Field(
+        default_factory=list,
+        max_length=MAX_DISKS,
+        description="Up to 4 disks to create, map, own and save into the default profile.",
+    )
+    detach: list[DiskDetach] = Field(
+        default_factory=list,
+        max_length=MAX_DISKS,
+        description="Up to 4 disks whose one mapping to this partition is removed; "
+        "the disks stay.",
+    )
 
     @model_validator(mode="after")
     def _distinct(self) -> DiskPatch:
