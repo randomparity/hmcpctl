@@ -202,7 +202,9 @@ dry-run return. No field distinguishes either case; this is the same caveat the
 override record above carries for its own two sources. A journaled decommission (ADR 0320) reads
 ownership in the inventory that precedes recording its operation and again in each run of
 that operation, a `resume` included, so one decommission can emit several records of either
-kind for the same partition.
+kind for the same partition. A continuation names only its `request_id`, so its authorization
+record carries absent targets under an `all-targets` grant; the partition it acts on is the one
+`hmc_operation_status` reports for that request.
 
 **Silence here is not proof of no refusal**, for one specific reason worth writing
 down: with `HMC_AUTHORIZE_POWER_OPERATIONS` off — the default — the power path never
