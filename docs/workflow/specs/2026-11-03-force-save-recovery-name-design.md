@@ -9,7 +9,10 @@ destination profile (ADR 0242). The copy's name is `"hmcprec-" + secrets.token_h
 answered with HTTP 500. The answer was `REST0142` wrapping `HSCL059F The user-defined name
 "hmcprec-…" is too long. The user-defined name cannot be longer than 31 characters.` In the
 same session, a PUT of the same projected document with a 21-character name returned 200. The
-cause is the generated name's length, not the projection in `clone_profile_document`.
+refused and accepted documents were both projections of the profile the HMC served in that
+session, and differed only in `ProfileName` and the emptied root `Metadata`. The HMC's message
+names the name. The cause is the generated name's length, not the projection in
+`clone_profile_document`.
 Because overwrite always clones first, force-save is unreachable on that HMC.
 
 Two secondary defects hid the cause. `write_native_profile`
@@ -43,8 +46,9 @@ Not changed:
   No separate 31-character guard is added: the generator emits a constant 24 characters and
   the stateful test transport pins the limit.
 - The `ProfileName` passed to `SaveCurrentConfig`. No capture shows that job's limit.
-- The root `Metadata` the projection retains. ADR 0242 forbids omitting it. The live proof
-  below shows whether the HMC accepts it.
+- The root `Metadata` the projection retains. ADR 0242 forbids omitting it. The accepted
+  diagnostic PUT omitted it, so the live proof below is the first evidence that the HMC
+  accepts it.
 
 ## Failure model
 
@@ -94,9 +98,10 @@ Not changed:
   private capture and cited in its README.
 - `task-test-not-applicable`: the ADR 0242 amendment. It is prose; `just adr-numbering` checks
   only its name and H1.
-- Live proof (operator lease; preflight and recovery per `docs/live-testing.md`, through an
-  untracked private script as the operator granted for the capture, because the named
-  `partition-profiles` arm needs a prepared target and generates 38-character scratch names):
+- Live proof (its own operator grant, requested through the campaign lease; preflight and
+  recovery per `docs/live-testing.md`; an untracked private script only if that grant admits
+  one, because the named `partition-profiles` arm needs a prepared target and generates
+  38-character scratch names):
   on one owned scratch partition, run create, save-current into a new profile named
   `hmcpctl_cap` (11 characters), then force-save over the scratch `default_profile`.
   `recovery_verified` must be true and the force-save job must be submitted. Its reported
