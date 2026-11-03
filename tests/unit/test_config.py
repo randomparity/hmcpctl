@@ -1341,6 +1341,10 @@ def _non_default_env_value(field_name: str, field_info) -> str:
     """
     if field_name == "cert_fingerprint":
         return _ENV_FINGERPRINT
+    if field_name == "iso_build_entry":
+        return "/leak/iso-build-entry"
+    if field_name == "iso_build_arguments":
+        return '["leak", "{target}"]'
     annotation = field_info.annotation
     if annotation is bool:
         return "true"
@@ -1445,6 +1449,8 @@ def test_from_mapping_applies_every_supplied_key():
         "agent_id": "row-agent",
         "authorize_power_operations": True,
         "iso_url_allowlist": "iso.example.internal",
+        "iso_build_entry": "/opt/build/iso-chain",
+        "iso_build_arguments": ("--target", "{target}"),
     }
     assert set(values) == set(HMCConfig.model_fields)
 
@@ -1735,6 +1741,10 @@ def _toml_literal(field_name: str, field_info) -> str:
     """A TOML literal for *field_name* that differs from its env-side value."""
     if field_name == "cert_fingerprint":
         return '"' + ":".join(["CD"] * 32) + '"'
+    if field_name == "iso_build_entry":
+        return '"/toml/iso-build-entry"'
+    if field_name == "iso_build_arguments":
+        return '["toml", "{target}"]'
     annotation = field_info.annotation
     if annotation is bool:
         return "false"  # _non_default_env_value yields "true"
@@ -1749,6 +1759,10 @@ def _expected_env_value(field_name: str, field_info):
     """``_non_default_env_value`` as the model parses it."""
     if field_name == "cert_fingerprint":
         return _ENV_FINGERPRINT
+    if field_name == "iso_build_entry":
+        return "/leak/iso-build-entry"
+    if field_name == "iso_build_arguments":
+        return ("leak", "{target}")
     annotation = field_info.annotation
     if annotation is bool:
         return True
@@ -1977,3 +1991,64 @@ def test_cert_fingerprint_rejects_malformed_without_echo(value):
 def test_cert_fingerprint_is_validated_when_verify_ssl_is_false():
     with pytest.raises(ValidationError):
         HMCConfig.from_mapping({"verify_ssl": False, "cert_fingerprint": "nope"})
+
+
+# ── Built-media build entry (ADR 0324) ──────────────────────────────────────
+
+
+def test_iso_build_command_is_none_when_unset():
+    assert HMCConfig.from_mapping({}).iso_build_command is None
+
+
+def test_iso_build_command_is_the_entry_then_the_template():
+    config = HMCConfig.from_mapping(
+        {
+            "iso_build_entry": "/opt/build/iso-chain",
+            "iso_build_arguments": ["build", "--target", "{target}"],
+        }
+    )
+    assert config.iso_build_command == (
+        "/opt/build/iso-chain",
+        "build",
+        "--target",
+        "{target}",
+    )
+
+
+def test_iso_build_arguments_read_a_json_array_from_the_environment(monkeypatch):
+    monkeypatch.setenv("HMC_ISO_BUILD_ENTRY", "/opt/build/iso-chain")
+    monkeypatch.setenv("HMC_ISO_BUILD_ARGUMENTS", '["--target", "{target}"]')
+    config = HMCConfig(host="h", user="u", password="p")
+    assert config.iso_build_command == ("/opt/build/iso-chain", "--target", "{target}")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"iso_build_entry": "relative/build", "iso_build_arguments": ["{target}"]},
+        {"iso_build_entry": "/opt/b\nx", "iso_build_arguments": ["{target}"]},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": [1]},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["x"] * 64 + ["{target}"]},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["--target"]},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["{target}", "{target}"]},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["{target}", "a\x00b"]},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["{target}", "a" * 4097]},
+        {"iso_build_entry": "/opt/b"},
+        {"iso_build_arguments": ["{target}"]},
+    ],
+    ids=[
+        "relative-entry",
+        "unprintable-entry",
+        "non-string",
+        "too-many",
+        "no-target",
+        "two-targets",
+        "nul",
+        "too-long",
+        "entry-alone",
+        "arguments-alone",
+    ],
+)
+def test_iso_build_configuration_is_refused_at_construction(values):
+    with pytest.raises(ValidationError):
+        HMCConfig.from_mapping(values)

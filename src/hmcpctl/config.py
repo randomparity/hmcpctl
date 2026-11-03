@@ -112,6 +112,12 @@ ISO_URL_ALLOWLIST_HELP = (
 )
 
 
+#: The one argument-template element replaced by the target request's path (ADR 0324).
+BUILD_TARGET = "{target}"
+MAX_BUILD_ARGUMENTS = 64
+MAX_BUILD_ARGUMENT_LENGTH = 4096
+
+
 def parse_iso_url_allowlist(value: str) -> tuple[tuple[str, int | None], ...]:
     """Parse the ISO download allowlist into ``(host, port_or_None)`` pairs.
 
@@ -286,6 +292,28 @@ class HMCConfig(BaseSettings):
         ),
     )
 
+    iso_build_entry: str = Field(
+        default="",
+        description=(
+            "Absolute path of the executable hmc_provision_lpar runs to build installer "
+            "media for install.media.mode=built (ADR 0324). It runs without a shell, "
+            "with no HMC_* variable in its environment. Empty (the default) refuses "
+            "built media. Set together with iso_build_arguments. (HMC_ISO_BUILD_ENTRY)"
+        ),
+    )
+
+    iso_build_arguments: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "The build entry's fixed arguments: a JSON array of strings in the "
+            "environment, an array in a TOML profile. At most "
+            f"{MAX_BUILD_ARGUMENTS} printable elements of at most "
+            f"{MAX_BUILD_ARGUMENT_LENGTH} characters each; exactly one is the literal "
+            f"{BUILD_TARGET}, which becomes the path of the per-call target request "
+            "file. Set together with iso_build_entry. (HMC_ISO_BUILD_ARGUMENTS)"
+        ),
+    )
+
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> Self:
         """Build a config from *values* alone, reading no environment and no dotenv.
@@ -366,6 +394,54 @@ class HMCConfig(BaseSettings):
     def _validate_iso_url_allowlist(cls, v: str) -> str:
         parse_iso_url_allowlist(v)
         return v
+
+    @field_validator("iso_build_entry")
+    @classmethod
+    def _validate_iso_build_entry(cls, v: str) -> str:
+        if v and not (os.path.isabs(v) and v.isprintable()):
+            raise ValueError(
+                "iso_build_entry must be an absolute path of printable characters"
+            )
+        return v
+
+    @field_validator("iso_build_arguments")
+    @classmethod
+    def _validate_iso_build_arguments(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        if not v:
+            return v
+        if len(v) > MAX_BUILD_ARGUMENTS:
+            raise ValueError(
+                f"iso_build_arguments holds {len(v)} elements; at most "
+                f"{MAX_BUILD_ARGUMENTS} are allowed"
+            )
+        for index, argument in enumerate(v):
+            if not argument.isprintable() or len(argument) > MAX_BUILD_ARGUMENT_LENGTH:
+                raise ValueError(
+                    f"iso_build_arguments[{index}] must be printable and at most "
+                    f"{MAX_BUILD_ARGUMENT_LENGTH} characters"
+                )
+        if v.count(BUILD_TARGET) != 1:
+            raise ValueError(
+                f"iso_build_arguments must hold exactly one {BUILD_TARGET} element, "
+                "which becomes the target request file's path"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _require_build_pair(self) -> HMCConfig:
+        if bool(self.iso_build_entry) != bool(self.iso_build_arguments):
+            raise ValueError(
+                "iso_build_entry and iso_build_arguments are set together or not at "
+                "all (HMC_ISO_BUILD_ENTRY, HMC_ISO_BUILD_ARGUMENTS)"
+            )
+        return self
+
+    @property
+    def iso_build_command(self) -> tuple[str, ...] | None:
+        """The build entry followed by its argument template, or None when unset."""
+        if not self.iso_build_entry:
+            return None
+        return (self.iso_build_entry, *self.iso_build_arguments)
 
     @property
     def iso_url_allowlist_entries(self) -> tuple[tuple[str, int | None], ...]:
