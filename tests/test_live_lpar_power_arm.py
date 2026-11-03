@@ -914,6 +914,21 @@ def test_a_slot_the_partition_does_not_own_fails_the_observation(schemas):
     assert _results(state)["provision.lpar"] == "failed"
 
 
+def test_a_paused_slot_provision_is_recovered_by_the_teardown(schemas):
+    """A provision that pauses after its writes leaves P for the teardown, which
+    deletes it with its profiles; no slot stays owned and the baseline holds."""
+    world = World()
+    world.provision_fails_after_storage = True
+    state = _run(schemas, world, **_PCIE)
+
+    (call, *_abandon) = world.calls_to("hmc_provision_lpar")
+    assert call["assignments"]["dedicated"]
+    assert not world.partitions
+    assert world.slot_owner == "null"
+    assert _results(state)["provision.lpar"] == "failed"
+    assert {e["observation"]["cleanup"] for e in state.observations} == {"passed"}
+
+
 def _listed_by_a_profile(world: World) -> None:
     def answer(kwargs: dict[str, Any]) -> Any:
         if kwargs["cmd"] == profile_io_slot_rows_command(SYSTEM):

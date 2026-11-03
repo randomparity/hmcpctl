@@ -1544,6 +1544,36 @@ def test_a_failed_slot_write_pauses_before_the_default_profile(
     assert ("default_profile", "skipped") in statuses
 
 
+def test_a_failed_slot_write_leaves_a_stamped_ledgered_partition_to_abandon(
+    monkeypatch, mock_hmc, persistence
+):
+    """The recovery path (ADR 0318): abandon writes nothing, and the partition stays
+    stamped and ledgered for decommission, which removes it with its profiles."""
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    failed = AssignmentResult(
+        False, False, (WorkflowStep("dedicated[0]", "error", "x"),)
+    )
+    _calls, apply = _slot_writes(persistence, [failed])
+    paused = _provision_with(apply, request_id="slot-abandon", assignments=_DEDICATED)
+    sent = len(mock_hmc.calls)
+
+    abandoned = hmc_provision_lpar(request_id="slot-abandon", continuation="abandon")
+
+    assert paused.operation.outcome == "needs_attention"
+    assert paused.ownership_stamped is True
+    assert persistence.saved and persistence.defaults == []
+    assert (abandoned.operation.state, abandoned.operation.outcome) == (
+        "terminal",
+        "abandoned",
+    )
+    assert len(mock_hmc.calls) == sent
+    with store.session() as conn:
+        rows = conn.execute("SELECT kind, partition_uuid FROM ledger").fetchall()
+    assert [tuple(row) for row in rows] == [("partition", LPAR_UUID)]
+
+
 def test_a_raising_slot_write_reports_its_own_step(monkeypatch, mock_hmc, persistence):
     """The SR-IOV leg's steps never stand in for the slot leg's error."""
     _hmc_env(monkeypatch)
