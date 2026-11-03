@@ -890,6 +890,16 @@ the media and the run length: it powers a partition on.
 
 It does not record the boot-started code set or the other #1850 facts.
 
+Live on V10R3 (2026-11-03, POWER9, commit `02389897`), all eight assertions passed and
+recovery reported CLEAN:
+- The mount on the provision-created partition was accepted the first time, with no REST0269.
+- The partition ran from the saved `hmcpctl_…` profile with the optical client slot in its
+  current configuration and the mapping still listed.
+
+In the boot wait, the twenty newest reference codes all carried one HMC timestamp, so only
+the HMC's row order separated them. The run's repository, volume-group and boundary-partition
+reads before and after were identical.
+
 ### The bare-cec arm
 
 The bare-cec arm is the release path end to end. It creates a partition, assigns
