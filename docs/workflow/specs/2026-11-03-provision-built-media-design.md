@@ -165,7 +165,7 @@ partition, remove any ISO it published, then provision again".
    file that cannot be written, a result nested past the recursion limit, a non-string `url`, and
    a command unset by the time the build leg runs each end `failed`.
 5. Config: a relative entry, an argument value that is not an array of strings, more than 64
-   elements, zero or two `{target}` elements, or a field without its pair raises at construction.
+   elements, an element that is not printable or is over 4096 characters, zero or two `{target}` elements, or a field without its pair raises at construction.
 6. The `media.iso_build` classifier returns `needs_attention`. A resume after an applied `build`
    does not run the entry again.
 7. `hmc_plan_lpar` reports `build_entry_unconfigured` for an unset command or an empty allowlist.

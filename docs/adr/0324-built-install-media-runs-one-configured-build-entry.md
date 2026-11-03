@@ -23,7 +23,8 @@ neither the configuration names nor the template syntax.
 
 1. **Configuration.** `iso_build_entry` (`HMC_ISO_BUILD_ENTRY`) is an absolute executable path.
    `iso_build_arguments` (`HMC_ISO_BUILD_ARGUMENTS`) is a tuple of at most 64 strings: a JSON array
-   in the environment, an array in a TOML profile. Exactly one element is the literal `{target}`.
+   in the environment, an array in a TOML profile. Each element is printable, with no NUL, and at
+   most 4096 characters. Exactly one element is the literal `{target}`.
    Nothing is substituted inside an element. Both fields are empty by default, which refuses built
    mode. A field set without the other is a configuration error. The build uses the configuration
    in force when its leg runs; an unset command then ends the run `failed`.
