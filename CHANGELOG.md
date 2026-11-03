@@ -41,6 +41,15 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   processor mode, refuses live removals unless `allow_disruption` is true, and needs
   `exclusive_writer_window=true` for processors or memory (ADR 0314).
 
+- `hmc_reconfigure_lpar` takes `patch.disks`. `add` creates each virtual disk in a named
+  volume group, maps it, records it as owned for decommission, and overwrites the default
+  profile with the current configuration so the disk survives a profile activation. The
+  profile's earlier content is kept in an `hmcprec-` recovery profile, which the result
+  names. An existing disk name is refused, so a disk is never resized. An add is also
+  refused while the profile holds pending values, on an activated partition without RMC,
+  and on an HMC older than 10.3.1060. `detach` removes one mapping and keeps the disk
+  (ADR 0322, #1846).
+
 - Single-backing vNIC creation accepts priority, VLAN and MAC allowlists, automatic
   priority failover and an explicit MAC address through Python, CLI and MCP. Selected
   policy readback is independent of topology verification, including existing-match
