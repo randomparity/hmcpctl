@@ -178,8 +178,11 @@ def _upgrade_schema_one(conn: sqlite3.Connection) -> None:
     """Add the holds table to a schema-1 store (ADR 0327 Decision 1).
 
     The version is re-read inside the write transaction, so of two processes upgrading at
-    once the second finds schema 2 and changes nothing.
+    once the second finds schema 2 and changes nothing. A schema-2 store is read without a
+    write lock, so hold checks never queue behind writers.
     """
+    if _read_meta(conn).get("schema_version") != "1":
+        return
     with write_transaction(conn):
         if _read_meta(conn).get("schema_version") != "1":
             return

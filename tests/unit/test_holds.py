@@ -298,3 +298,15 @@ def test_a_schema_one_store_naming_another_sentinel_is_refused_unchanged():
     (store.state_dir() / store.SENTINEL_NAME).write_text("b" * 32)
     assert _reason(holds.find_hold, LPAR) == "store_corrupt"
     assert _schema_version() == "1"
+
+
+def test_opening_a_schema_two_store_takes_no_write_lock():
+    with store.session():
+        pass
+    blocker = sqlite3.connect(store.state_dir() / store.DB_NAME, isolation_level=None)
+    try:
+        blocker.execute("BEGIN IMMEDIATE")
+        assert holds.find_hold(LPAR) is None
+    finally:
+        blocker.execute("ROLLBACK")
+        blocker.close()
