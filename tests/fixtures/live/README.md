@@ -82,7 +82,9 @@ operator-authorized window for #1868 on the #1161 V10R3 HMC. One owned scratch p
 created, never activated, and deleted. The record is the force-save recovery-copy PUT that
 hmcpctl sent and the HMC's 500 answer (REST0142 wrapping HSCL059F, the 31-character name limit).
 It is the one fixture here that also keeps the request it answers, as `request_body`. It was
-tokenized by hand to this page's rules, and its token map is its own.
+tokenized by hand to this page's rules, and its token map is its own. The HMC echoes the request's
+headers in `<RequestHeaders>`; the cookie and session values there are tokenized, and the
+element is kept so tests can show that no error text carries it.
 
 ## Format
 
