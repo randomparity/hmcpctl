@@ -27,6 +27,7 @@ from ...documents.storage import StorageKind
 from ...errors import HMCError
 from ...jobs import JobOutcome, job_identifier, job_outcome
 from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
+from ...ssh.vios_optical import MEDIA_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -1119,8 +1120,8 @@ async def upload_iso(
     # An uncaptured assumption (ADR 0177): no capture or reference states the HMC's
     # Filename grammar. The pattern is a conservative client-side allowlist, and no
     # name outside it is known to have been sent to an HMC, so the HMC may accept more.
-    _MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9_.]{1,79}$")
-    if not _MEDIA_NAME_RE.match(media_name):
+    # Loading a medium applies the same rule (ADR 0317).
+    if not MEDIA_NAME.fullmatch(media_name):
         raise ValueError(
             f"media_name {media_name!r} is refused by hmcpctl before any request. "
             "It must match [A-Za-z0-9_.]{1,79} (no hyphens, spaces, or other special "
