@@ -121,5 +121,5 @@ def test_matching_hold_id_lets_the_cli_mutation_past_the_hold(hmc):
 
 def test_cli_reads_of_a_held_partition_pass(hmc):
     _place()
-    result = RUNNER.invoke(app, ["lpars", "get-description", LPAR, "--system", SYS])
+    result = RUNNER.invoke(app, ["lpars", "show", LPAR, "--system", SYS])
     assert "partition_held" not in result.output
