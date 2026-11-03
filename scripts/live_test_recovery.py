@@ -22,7 +22,9 @@ there is nothing for it to leave. It witnesses the lpar-config arm (subtask 39) 
 any partition still carrying its reserved `hmcpctl-live-lpar-` prefix, and the
 lpar-power arm (subtask 41) by a `hmcpctl-live-pwr-` partition, a VIOS mapping backed
 by an `lppwr` volume, an `lppwr` volume left in the configured volume group, or a VIOS
-vSCSI adapter serving a `hmcpctl-live-pwr-` partition. Complete round2 runs carry
+vSCSI adapter serving a `hmcpctl-live-pwr-` partition. The lpar-reconfigure arm
+(subtask 70) is witnessed the same way for its `lprcf` volume and the
+`hmcpctl-live-lpar-` partition it served, beside lpar-config's prefix check. Complete round2 runs carry
 an ST0 snapshot: recovery independently recaptures system and VIOS tables and
 reads the original partition's description/profile compatibility. Missing witness
 data or scope mismatches fail closed. Every other
@@ -825,10 +827,16 @@ async def check_creation_memory_layout(
 
 @dataclass(frozen=True)
 class LparPowerInputs:
-    """The system the lpar-power arm (ST41) created its partitions and volume on."""
+    """The system an arm with VIOS storage residue created its partitions and volume on.
+
+    ``arm`` supplies the arm's ``scratch_partitions`` and ``scratch_volumes`` prefix
+    checks: lpar-power (ST41) by default, or lpar-reconfigure (ST70).
+    """
 
     system_name: str
     volume_group: str = ""
+    arm: Any = lpar_power
+    label: str = "lpar-power"
 
 
 def lpar_power_inputs_from_document(
@@ -841,6 +849,20 @@ def lpar_power_inputs_from_document(
         return None
     group = config.get("vdisk_volume_group_name") if isinstance(config, dict) else ""
     return LparPowerInputs(str(system), str(group or ""))
+
+
+def lpar_reconfigure_inputs_from_document(
+    document: dict[str, Any], subtasks: list[int]
+) -> LparPowerInputs | None:
+    """The run's system and group when it dispatched ST70, else `None`."""
+    config = document.get("config")
+    system = config.get("system_name") if isinstance(config, dict) else None
+    if lpar_reconfigure.SUBTASK not in subtasks or not system:
+        return None
+    group = config.get("vdisk_volume_group_name") if isinstance(config, dict) else ""
+    return LparPowerInputs(
+        str(system), str(group or ""), lpar_reconfigure, "lpar-reconfigure"
+    )
 
 
 async def _cli_rows(call, command: str, what: str) -> list[list[str]]:
@@ -878,6 +900,27 @@ async def check_lpar_power(call, inputs: LparPowerInputs) -> list[Finding]:
                 remedy=f"{shutdown}rmsyscfg -r lpar -m {system} -n {quoted}",
             )
         )
+    return findings + await _vios_storage_residue(call, inputs, rows)
+
+
+async def check_lpar_reconfigure_storage(
+    call, inputs: LparPowerInputs
+) -> list[Finding]:
+    """ST70's run disk, its mappings and server adapters; lpar-config checks the
+    partitions themselves."""
+    rows = await _cli_rows(
+        call,
+        f"lssyscfg -r lpar -m {shlex.quote(inputs.system_name)} "
+        "-F name,state,lpar_env,lpar_id",
+        f"the partitions of {inputs.system_name}",
+    )
+    return await _vios_storage_residue(call, inputs, rows)
+
+
+async def _vios_storage_residue(
+    call, inputs: LparPowerInputs, rows: list[list[str]]
+) -> list[Finding]:
+    findings = []
     for vios, _, env, vios_id in (row for row in rows if len(row) == 4):
         if env == "vioserver":
             findings += await _lpar_power_vios_residue(call, inputs, vios)
@@ -912,10 +955,10 @@ async def _lpar_power_volumes_left(
     return [
         Finding(
             what=f"volume {name} on VIOS {vios}",
-            detail=f"an lpar-power volume is still in volume group {group}",
+            detail=f"an {inputs.label} volume is still in volume group {group}",
             remedy=f'viosvrcmd -m {system} --id {vios_id} -c "rmlv -f {name}"',
         )
-        for name in lpar_power.scratch_volumes(names)
+        for name in inputs.arm.scratch_volumes(names)
     ]
 
 
@@ -933,7 +976,7 @@ async def _lpar_power_vios_residue(
     findings = [
         Finding(
             what=f"mapping {entry.get('id')} on VIOS {vios}",
-            detail=f"maps lpar-power volume {entry.get('backing_name')}",
+            detail=f"maps {inputs.label} volume {entry.get('backing_name')}",
             remedy=(
                 f"viosvrcmd -m {system} -p {shlex.quote(vios)} -c "
                 f'"rmvdev -vtd {str(entry.get("id")).rpartition("/")[2]}"'
@@ -944,7 +987,7 @@ async def _lpar_power_vios_residue(
         )
         for entry in mappings
         if isinstance(entry, dict)
-        and lpar_power.scratch_volumes([str(entry.get("backing_name") or "")])
+        and inputs.arm.scratch_volumes([str(entry.get("backing_name") or "")])
     ]
     adapters = await _cli_rows(
         call,
@@ -954,14 +997,14 @@ async def _lpar_power_vios_residue(
     findings += [
         Finding(
             what=f"vSCSI server adapter {slot} on VIOS {vios}",
-            detail=f"serves lpar-power partition {remote}",
+            detail=f"serves {inputs.label} partition {remote}",
             remedy=(
                 f"chhwres -r virtualio --rsubtype scsi -m {system} -o r "
                 f"-p {shlex.quote(vios)} -s {slot}"
             ),
         )
         for slot, remote, _ in (row for row in adapters if len(row) == 3)
-        if lpar_power.scratch_partitions([remote])
+        if inputs.arm.scratch_partitions([remote])
     ]
     return findings
 
@@ -2732,6 +2775,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
     lpar_power_inputs = lpar_power_inputs_from_document(document, subtasks)
+    reconfigure_inputs = lpar_reconfigure_inputs_from_document(document, subtasks)
 
     artifact_system = None
     if 43 in subtasks:
@@ -2748,6 +2792,7 @@ def main(argv: list[str] | None = None) -> int:
             (check_network, network_inputs),
             (check_lpar_config, lpar_config_inputs),
             (check_lpar_power, lpar_power_inputs),
+            (check_lpar_reconfigure_storage, reconfigure_inputs),
             (check_creation_memory, memory_inputs),
             (check_creation_memory_layout, creation_inputs),
             (check_round2, round2_inputs),
