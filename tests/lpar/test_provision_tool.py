@@ -1820,6 +1820,38 @@ def test_a_withheld_delegated_tool_refuses_before_anything_is_recorded(
     assert not _store_root().exists()
 
 
+def _deny_slot_target(name, _security, arguments):
+    if name == "hmc_assign_dedicated_pcie_slot" and arguments.get("lpar_name_or_uuid"):
+        raise PermissionError(f"{name} denied for the partition")
+
+
+@pytest.mark.parametrize(
+    ("permits", "authorize", "match"),
+    [
+        (
+            lambda name: name != "hmc_assign_dedicated_pcie_slot",
+            lambda *_: None,
+            "hmc_assign_dedicated_pcie_slot is not permitted",
+        ),
+        (lambda _name: True, _deny_slot_target, "denied for the partition"),
+    ],
+    ids=["withheld", "target-denied"],
+)
+def test_a_dedicated_slot_needs_its_specialist_before_anything_is_recorded(
+    monkeypatch, mock_hmc, permits, authorize, match
+):
+    _hmc_env(monkeypatch)
+    handler = provision_handler(TOOL_SECURITY, permits, authorize)
+    with pytest.raises(PermissionError, match=match):
+        handler(
+            request_id="r-slot-denied",
+            exclusive_writer_window=True,
+            **_provision_args(assignments=_DEDICATED),
+        )
+    assert not mock_hmc.calls
+    assert not _store_root().exists()
+
+
 def test_delegated_tools_follow_the_request():
     request = ProvisionRequest(
         name="web01",
