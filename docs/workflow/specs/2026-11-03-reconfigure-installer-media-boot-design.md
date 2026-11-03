@@ -8,8 +8,9 @@ entry). Piece 1 of #1228's split.
 
 ## Problem
 
-After `boot_started` the installer media stays mounted, and the pending boot order still names it
-first (ADR 0191 D6–D7). Detaching the media and booting from the root disk are reconfigure actions.
+After `boot_started` the installer media stays mounted (ADR 0191 D7). The activation consumed the
+pending boot string (ADR 0319 D3), so the next activation boots from whatever the string holds
+when it starts. Detaching the media and booting from the root disk are reconfigure actions.
 Nothing implements them, so an agent must use two specialists and work out which mapping and disk
 hmcpctl owns.
 
@@ -30,14 +31,15 @@ entry of the needed kind, more than one entry, or an entry missing its fields.
 
 **Plan** (recorded in the existing `plan` effect, so a replay never re-reads the ledger):
 
-- `media`. First, list the partition's optical mappings on the media's VIOS. When none holds
+- `media`. First, list the partition's optical mappings on the media's VIOS with #1842's
+  `_media_paths` (reused, not copied). When none holds
   `media_name`, the field is unchanged: no change entry and no write. When exactly one holds it,
   the plan records `{vios_uuid, media_name}` and change `{field: installer_media, before:
   {current: "mounted"}, after: "detached", applied: "live"}`. When more than one holds it, the
   patch is refused.
 - `boot`. The root disk's device path is found by listing the disk's VIOS storage mappings. The
-  mapping must be a `VirtualDisk` named `disk_name` whose client is this partition, and there must
-  be exactly one. Its path comes from `device_path` (#1842's `install_media.py`). If none is found
+  mapping is the one whose `storage_mapping(e).backing_kind` is `VirtualDisk`, whose `backing_name`
+  is `disk_name` and whose `lpar_uuid` is this partition. There must be exactly one. Its path comes from `device_path` (#1842's `install_media.py`). If none is found
   or the path is unreadable, the patch is refused. The plan then reads the pending boot string.
   When it already equals the path, the field is unchanged. Otherwise the plan records `{before,
   after}` and change `{field: boot, applied: "next_activation"}`.
@@ -50,15 +52,15 @@ entry of the needed kind, more than one entry, or an entry missing its fields.
 
 Before each write, the body re-resolves the partition and runs the ADR 0011 check, as for every
 write. It does not compare the partition-view basis, because an installer changes state and RMC on
-its own. `boot` instead re-derives the root-disk path and fails stale if it differs from the plan's.
-Refusal mapping:
+its own. `set_lpar_boot_order` verifies its own write. When the planned state is not `not
+activated`, the result warns that a detach assumes the install has finished. Refusal mapping:
 
 - `ValueError`, `LookupError` or `PermissionError` before the POST → `EffectNotApplied`. So is
   `LparUpdateError(submission="rejected")`.
 - An `HMCError` from the unmount is followed by one mapping listing. Media still mapped →
-  `EffectNotApplied`, with a message that names a possible client reservation and says to power
-  the partition off and retry. Media gone → applied. Listing unreadable → the original error
-  propagates (uncertain).
+  `EffectNotApplied`. The message names the HTTP status and says to retry, or to power the
+  partition off and then resume a paused operation or submit a new one. Media gone → applied.
+  Listing unreadable → the original error propagates (uncertain).
 
 **Classifiers.** `lpar.boot_order` reads the pending boot string: the planned `after` → applied,
 the planned `before` → not_applied, anything else → needs_attention. `vios.optical_unmount` lists
@@ -71,11 +73,16 @@ needs_attention.
 **Handler.** `DELEGATED` gains `installer_media → hmc_unmount_optical_media` and `boot →
 hmc_set_lpar_boot_order`. `installer_media` requires `exclusive_writer_window=true`, because the
 VIOS read-modify-write is under the H1 spec's window rule. `boot` does not, as a rename does not.
+The VIOS selector is absent from the delegated authorization, so detach needs an all-targets grant
+of `hmc_unmount_optical_media` (ADR 0321 D6). A grant that limits the tool by target refuses detach.
 
 **Live capture.** The issue asks for live evidence first. The `vmedia-media-change` arm (ST71)
 gains Q5. It powers the test partition on with the medium mapped, unmounts through
 `hmc_unmount_optical_media` while it runs, and records the answer. If that unmount is refused, Q5
-powers the partition off immediately and unmounts again. Q5 runs under a LIVE-GRANT only.
+powers the partition off immediately and unmounts again. Q5 first checks that the medium is still
+mapped by name, and it skips when the medium is not. Q5 runs under a LIVE-GRANT only. The client
+has no operating system, so Q5 cannot show a guest holding the device. That case stays unevidenced.
+Before maturity is recorded, the Q5 answer is read back into the refusal message.
 
 ## Failure model
 
@@ -90,8 +97,15 @@ powers the partition off immediately and unmounts again. Q5 runs under a LIVE-GR
    - no write happens before the plan is recorded;
    - effect keys and kinds are a persisted contract (ADR 0195).
 3. **Accepted failure classes**
-   - a guest's reservation refuses the unmount. The effect is `not_applied` and the message names
-     the recovery. hmcpctl never forces `-release` (ADR 0317 D3 keeps that a separate audited tool);
+   - the HMC refuses the unmount, for example because a guest holds the device, which is
+     unevidenced. The effect is `not_applied` and the message names the status and the recovery;
+   - a degraded VIOS read that returns no mappings reads as "detached". The result is a false
+     `unchanged`, with the mapping left intact and visible to `hmc_inspect_lpar`. The specialist's
+     own lookup has the same blind spot;
+   - an installer mapping emptied by `hmc_unload_optical_media` has no medium name, so it reads as
+     `unchanged`. The specialists remove it;
+   - a detach while the installer still reads the device succeeds. The caller asserts that the
+     install finished, and the result warns about it;
    - the saved profile keeps the optical client vSCSI adapter (ADR 0319 D2). Adapters stay as the
      HMC leaves them after the unmount. Removing them is not a detach;
    - a partition that no provision recorded cannot use either field. It has no ledger owner.
@@ -117,12 +131,11 @@ powers the partition off immediately and unmounts again. Q5 runs under a LIVE-GR
    plans no write. A missing ledger entry, a duplicate ledger entry or a duplicate mapping is
    refused before any intent. (criterion 1)
 2. `boot: root_disk` writes exactly the root-disk path. A boot string that already holds it plans
-   no write. A missing entry or mapping is refused. A path that changes after planning fails stale.
-   (criterion 2)
+   no write. A missing entry or mapping is refused. (criterion 2)
 3. Each classifier gives its three answers. An uncertain write resumes by classification. A
    refused unmount with the media still mapped is `not_applied`. (criterion 3)
-4. A patch with detach and no window, or with a denied delegated tool, is refused before
-   recording. (criterion 4)
+4. A patch with detach and no window, a denied delegated tool, or a target-limited grant of
+   `hmc_unmount_optical_media` is refused before recording. (criterion 4)
 5. Docs regenerate, and `maturity.json` records the variant with no native evidence.
    (criterion 5)
 6. ST71 Q5 is tested without hardware and runs once under a grant: preflight → arm → recovery →
