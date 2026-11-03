@@ -68,7 +68,7 @@ PROVISION_SECURITY = ToolSecurity(
     target_kind="console",
     targets=(TargetSelector("managed_system", "system_name_or_uuid", False),),
 )
-Continuation = Literal["none", "resume", "abandon"]
+Continuation = Literal["none", "resume", "abandon", "boot"]
 _REQUIRED = ("system_name_or_uuid", "name", "adapters", "storage")
 
 
@@ -83,10 +83,12 @@ def delegated_tools(request: ProvisionRequest) -> tuple[str, ...]:
         ("hmc_assign_sriov_logical_port", bool(request.assignments.sriov)),
         ("hmc_add_vnic", bool(request.assignments.vnics)),
         ("hmc_assign_dedicated_pcie_slot", bool(request.assignments.dedicated)),
-        ("hmc_power_on_lpar", request.power_on),
+        # With install, the installer boot powers on (ADR 0326 Decision 7).
+        ("hmc_power_on_lpar", request.power_on or request.install is not None),
         ("hmc_upload_iso", request.install is not None),
         ("hmc_mount_optical_media", request.install is not None),
         ("hmc_set_lpar_boot_order", request.install is not None),
+        ("hmc_read_lpar_refcodes", request.install is not None),
     )
     return (
         "hmc_create_lpar",
@@ -140,7 +142,11 @@ def _require_window(dry_run: bool, continuation: str, window: bool | None) -> No
         "exclusive_writer_window=true is required: provision writes a partition profile "
         "and the default-profile setting (ADR 0242, ADR 0313); pass it once no other "
         "writer changes this partition's profiles until the operation ends"
-        + ("; a resume asserts it again" if continuation == "resume" else "")
+        + (
+            f"; a {continuation} asserts it again"
+            if continuation in ("resume", "boot")
+            else ""
+        )
     )
 
 
@@ -288,19 +294,27 @@ def provision_handler(
         ``configured``. It needs HMC 10.3.1060 or later. ``dry_run`` validates every
         precondition and records nothing. No rollback is attempted.
 
-        With ``install`` (prepared media, ``boot=deferred``; ADR 0191, ADR 0319) the
+        With ``install`` (prepared media; ADR 0191, ADR 0319) the
         producer result must bind the request and the pinned ``adapters.mac``, field by
         field, or the call is refused. After the adapters and the new disk, the run binds
         the result again against the created adapter's MAC, uploads the media as
         ``hmcpctl_<12 hex>.iso`` into the storage VIOS's one media repository only if the
         download matches the bound SHA-256 and size, and mounts it. Only then does it save,
         read back (including the media's vSCSI adapter) and default the profile. It then
-        writes the boot order, media first, and pauses ``ready_to_boot`` with the partition
-        powered off. A mismatch ends ``failed``; nothing is rebuilt or overwritten. These
-        writes also need ``hmc_upload_iso``, ``hmc_mount_optical_media`` and
-        ``hmc_set_lpar_boot_order``. ``unverified`` lists what is not checked. Until
-        issue #1849 adds ``continuation=boot``, a ``ready_to_boot`` operation accepts only
-        ``abandon`` here, even though its record lists ``boot``.
+        writes the boot order, media first. With ``boot=deferred`` it pauses
+        ``ready_to_boot`` with the partition powered off, and ``continuation=boot`` later
+        boots it; ``boot=immediate`` boots in the same call (ADR 0326). The boot re-checks
+        that the partition is powered off, the media mapped and listed, the boot order and
+        the adapter MAC unchanged, and the owned disk its only disk, or pauses
+        ``needs_attention`` without powering on. It records the newest reference code,
+        activates the saved profile once, and reads reference codes every 15 seconds
+        until ``wait_seconds`` passes. ``boot_started`` needs a newer code in the
+        boot-started set, which stays empty until native evidence fills it, so the wait
+        ends ``needs_attention`` with the newer codes it saw; ``resume`` polls again and
+        never powers on twice. A mismatch ends ``failed``; nothing is rebuilt or
+        overwritten. These writes also need ``hmc_upload_iso``,
+        ``hmc_mount_optical_media``, ``hmc_set_lpar_boot_order``, ``hmc_power_on_lpar``
+        and ``hmc_read_lpar_refcodes``. ``unverified`` lists what is not checked.
 
         Built media (``media.mode=built``, ADR 0324) instead takes no ``adapters.mac``
         and needs a partition name of 1-32 characters matching ``[a-z][a-z0-9-]*``,
@@ -352,19 +366,21 @@ def provision_handler(
                 with an iso-chain-media-v1 producer result plus an allowlisted URL, or
                 ``media.mode=built`` with ``ssh_authorized_keys`` and ``login_user``
                 for the server's configured build entry. Needs
-                ``storage.capacity_mib`` and ``boot=deferred``, and refuses
-                ``power_on``.
-            boot: ``deferred`` stops at ``ready_to_boot`` with the media mounted and the
-                boot order set; it needs ``install``. ``immediate`` with ``install`` is
-                refused until issue #1849.
+                ``storage.capacity_mib``, and refuses ``power_on``: ``boot`` governs it.
+            boot: ``immediate`` (default) boots the installer in the same call;
+                ``deferred`` stops at ``ready_to_boot`` with the media mounted and the
+                boot order set, for ``continuation=boot``. ``deferred`` needs ``install``.
             exclusive_writer_window: Required true for every call that may write (a new
-                operation or ``resume``): the caller asserts no other writer changes this
-                partition's profiles until the operation ends (ADR 0242).
+                operation, ``resume`` or ``boot``): the caller asserts no other writer
+                changes this partition's profiles until the operation ends (ADR 0242).
             expected_plan_digest: ``plan_digest`` from hmc_plan_lpar; a new operation
                 is refused unless a fresh plan of this request matches it.
-            continuation: none, resume or abandon; a continuation needs only
-                request_id, and any other value given must match the operation's.
-            wait_seconds: Seconds to wait before returning, 0-600.
+            continuation: none, resume or abandon, or boot for a ``ready_to_boot``
+                operation; a continuation needs only request_id, and any other value
+                given must match the operation's.
+            wait_seconds: Seconds to wait before returning, 0-600; an installer boot
+                reads reference codes for this long, so the call may return while the
+                operation is still running.
             profile: Optional TOML profile name; uses environment defaults when omitted.
 
         Returns:
@@ -427,7 +443,7 @@ def provision_handler(
                 request_id,
                 effective if continuation == "none" else given,
             ),
-            provision_body(system, request),
+            provision_body(system, request, wait_seconds=wait_seconds),
             classifiers=provision_classifiers(request),
             continuation=continuation,
             wait_seconds=wait_seconds,

@@ -21,6 +21,8 @@ from ...errors import HMCError
 from ...jobs import JobOutcome, job_identifier
 from ...resource_identity import resolve_system_uuid
 from ...ssh.affinity import MinimumAffinityPolicy
+from ...ssh.refcodes import list_lpar_refcodes
+from ...ssh.selectors import resolve_ssh_names
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import leaf_text, localname
 from ..affinity.ssh import set_minimum_affinity_policy
@@ -80,6 +82,7 @@ from .provision import (
     validate_provision_storage,
     virtual_disk_names,
 )
+from .provision_boot import REFCODE_ROWS, row_identity, wait_for_boot
 from .workflow_contract import WorkflowStep
 
 ClientFactory = Callable[[str], HMCClient]
@@ -102,6 +105,8 @@ EFFECT_KINDS: Mapping[str, str] = {
     "upload": "vios.optical_media_upload",
     "mount": "vios.optical_mapping",
     "boot_order": "lpar.boot_order",
+    # The installer boot (ADR 0326); its power-on is the `power_on` effect above.
+    "refcode_baseline": "lpar.refcode_baseline",
 }
 # The step each effect reports under in ProvisionResult.steps.
 STEP_NAMES: Mapping[str, str] = {
@@ -120,6 +125,7 @@ STEP_NAMES: Mapping[str, str] = {
     "upload": "upload_media",
     "mount": "mount_media",
     "boot_order": "set_boot_order",
+    "refcode_baseline": "refcode_baseline",
 }
 # Ledger kinds (ADR 0313 Decision 6).
 PARTITION_LEDGER = "partition"
@@ -152,6 +158,7 @@ _HEX12 = re.compile(r"[0-9a-f]{12}")
 # Legs whose result is reported as their per-assignment steps.
 _ASSIGNMENT_KEYS = ("assignments", "dedicated")
 _MEDIA_STEPS = ("bind_media", "upload_media", "mount_media")
+_BOOT_STEPS = ("revalidate_boot", "refcode_baseline", "power_on", "wait_boot_started")
 _REST0269_MOUNT = (
     "the HMC refused the installer media mapping because the partition has no applied "
     "current configuration (REST0269). A refused mapping create can leave a VIOS virtual "
@@ -403,6 +410,76 @@ async def _adapters_on_vlan(
     ]
 
 
+async def _partition_disks(
+    hmc: HMCClient, system_uuid: str, lpar_uuid: str
+) -> list[tuple[str, str | None]]:
+    """``(vios_uuid, backing)`` of every non-optical mapping to *lpar_uuid* on the system."""
+    disks = []
+    for vios in await hmc.list_vios(system_uuid):
+        vios_uuid = str(vios.get("UUID") or "").lower()
+        for entry in await hmc.list_storage_mappings(vios_uuid):
+            found = storage_mapping(entry)
+            backing = (entry.get("Resource") or entry).get("Storage")
+            if (found.lpar_uuid or "").lower() != lpar_uuid or not backing:
+                continue
+            if found.backing_kind != "VirtualOpticalMedia":
+                disks.append((vios_uuid, found.backing_name))
+    return disks
+
+
+def _recorded_field(ctx: OperationContext, key: str, field: str) -> Any:
+    effect = ctx.recorded(key)
+    return ((effect.identity if effect else None) or {}).get(field)
+
+
+async def boot_problem(
+    hmc: HMCClient,
+    ctx: OperationContext,
+    request: ProvisionRequest,
+    system_uuid: str,
+    lpar_uuid: str,
+) -> str | None:
+    """Why the partition is no longer as the run left it before power-on, or None
+    (ADR 0191 Decision 1, ADR 0326 Decision 2)."""
+    resource = await _partition_resource(hmc, lpar_uuid)
+    state = str(leaf_text(resource.get("PartitionState")) or "").strip().lower()
+    if state != "not activated":
+        return f"the partition is {state or 'in an unread state'}, not powered off"
+    vios = request.storage.vios_uuid.lower()
+    name = media_name_for(ctx.operation_id)
+    try:
+        group = await repository_group(hmc, vios)
+    except ValueError:
+        return "the media repository is no longer one volume group"
+    if not any(
+        leaf_text(m.get("MediaName")) == name
+        for m in await hmc.list_optical_media(vios, group)
+    ):
+        return "the installer media is no longer in the media repository"
+    if await _media_paths(hmc, vios, lpar_uuid, name) != [
+        _recorded_field(ctx, "mount", "device_path")
+    ]:
+        return "the installer media is not mapped once at its recorded device path"
+    observed = await read_lpar_boot_order(
+        hmc, lpar_uuid, system_name_or_uuid=system_uuid
+    )
+    if observed["pending_boot_string"] != _recorded_field(
+        ctx, "boot_order", "pending_boot_string"
+    ):
+        return "the pending boot order differs from the one this operation wrote"
+    adapters = await _adapters_on_vlan(hmc, lpar_uuid, request.adapters.port_vlan_id)
+    identity = _adapter_identity(adapters[0]) if len(adapters) == 1 else None
+    if identity is None or identity["mac"] != _recorded_field(ctx, "network", "mac"):
+        return (
+            "the client adapter on the VLAN no longer carries the MAC the media binds"
+        )
+    if await _partition_disks(hmc, system_uuid, lpar_uuid) != [
+        (vios, request.storage.storage_name)
+    ]:
+        return "the owned root disk is no longer the partition's only disk"
+    return None
+
+
 class _Run:
     """One execution of the body: the steps so far and the writes still to make."""
 
@@ -412,8 +489,10 @@ class _Run:
         hmc: HMCClient,
         system: str,
         request: ProvisionRequest,
+        wait_seconds: int = 0,
     ) -> None:
         self.ctx, self.hmc, self.system, self.request = ctx, hmc, system, request
+        self.wait_seconds = wait_seconds
         self.steps: list[WorkflowStep] = []
         self.warnings: list[str] = []
         self.change_location = None
@@ -470,7 +549,7 @@ class _Run:
         )
         completed = profile_uuid is not None
         if self.request.install is not None:
-            return await self._ready(lpar_uuid, completed)
+            return await self._ready(system_uuid, lpar_uuid, profile_uuid)
         if completed and self.request.power_on:
             completed = (
                 await self._leg(
@@ -492,7 +571,7 @@ class _Run:
 
     def _skip_rest(self, *steps: str) -> None:
         if self.request.install is not None:
-            tail = ["set_boot_order"]
+            tail = ["set_boot_order", *(_BOOT_STEPS if self._booting() else ())]
         else:
             tail = ["power_on"] if self.request.power_on else []
         _skip_steps(self.steps, [*steps, *tail])
@@ -573,21 +652,85 @@ class _Run:
         self.optical_path = str(mounted["device_path"])
         return True
 
-    async def _ready(self, lpar_uuid: str, completed: bool) -> BodyResult:
-        """Write the boot order after the default profile, then pause (ADR 0319)."""
-        if completed:
-            completed = (
-                await self._leg(
-                    "boot_order",
-                    f"lpar:{lpar_uuid}",
-                    lambda: self._write_boot(lpar_uuid, self.optical_path),
-                )
-                is not None
+    def _booting(self) -> bool:
+        """Whether this run boots: immediate, `continuation: boot`, or a resume of a
+        boot already begun (ADR 0326 Decision 1)."""
+        return (
+            self.request.boot == "immediate"
+            or self.ctx.continuation == "boot"
+            or self.ctx.recorded("refcode_baseline") is not None
+        )
+
+    async def _ready(
+        self, system_uuid: str, lpar_uuid: str, profile_uuid: str | None
+    ) -> BodyResult:
+        """Write the boot order after the default profile (ADR 0319), then pause or boot."""
+        completed = profile_uuid is not None and (
+            await self._leg(
+                "boot_order",
+                f"lpar:{lpar_uuid}",
+                lambda: self._write_boot(lpar_uuid, self.optical_path),
             )
+            is not None
+        )
         if not completed:
             return BodyResult("needs_attention", self._result(lpar_uuid, False))
-        self.ctx.set_phase("ready_to_boot")
-        return BodyResult("ready_to_boot", self._result(lpar_uuid, True, UNVERIFIED))
+        if not self._booting():
+            self.ctx.set_phase("ready_to_boot")
+            return BodyResult(
+                "ready_to_boot", self._result(lpar_uuid, True, UNVERIFIED)
+            )
+        assert profile_uuid is not None
+        return await self._boot(system_uuid, lpar_uuid, profile_uuid)
+
+    def _attention(self, lpar_uuid: str, *skipped: str) -> BodyResult:
+        _skip_steps(self.steps, list(skipped))
+        return BodyResult("needs_attention", self._result(lpar_uuid, False, UNVERIFIED))
+
+    async def _boot(
+        self, system_uuid: str, lpar_uuid: str, profile_uuid: str
+    ) -> BodyResult:
+        """Revalidate, journal the baseline, power on once, then wait (ADR 0326)."""
+        self.ctx.set_phase("booting")
+        lpar = f"lpar:{lpar_uuid}"
+        if self.ctx.recorded("power_on") is None:
+            problem = await boot_problem(
+                self.hmc, self.ctx, self.request, system_uuid, lpar_uuid
+            )
+            self.steps.append(
+                WorkflowStep("revalidate_boot", "error" if problem else "ok", problem)
+            )
+            if problem is not None:
+                return self._attention(lpar_uuid, *_BOOT_STEPS[1:])
+        names = await resolve_ssh_names(self.hmc, system_uuid, lpar_uuid)
+        baseline = await self._leg(
+            "refcode_baseline", lpar, lambda: self._write_baseline(*names)
+        )
+        if baseline is None:
+            return self._attention(lpar_uuid, *_BOOT_STEPS[2:])
+        if (
+            await self._leg(
+                "power_on", lpar, lambda: self._write_power(lpar_uuid, profile_uuid)
+            )
+            is None
+        ):
+            return self._attention(lpar_uuid, _BOOT_STEPS[3])
+        wait = await wait_for_boot(
+            lambda: list_lpar_refcodes(self.hmc.config, *names, REFCODE_ROWS),
+            baseline,
+            self.wait_seconds,
+        )
+        if wait.started is not None:
+            self.steps.append(WorkflowStep("wait_boot_started", "ok", wait.started))
+            self.ctx.set_phase("boot_started")
+            return BodyResult("boot_started", self._result(lpar_uuid, True, UNVERIFIED))
+        detail = {
+            "reason": wait.reason,
+            "baseline": dict(baseline),
+            "observed": wait.observed,
+        }
+        self.steps.append(WorkflowStep("wait_boot_started", "error", detail))
+        return BodyResult("needs_attention", self._result(lpar_uuid, False, UNVERIFIED))
 
     async def _persist(self, system_uuid: str, lpar_uuid: str) -> str | None:
         """Save, read back and default the profile; its UUID, or None to pause."""
@@ -972,6 +1115,16 @@ class _Run:
             )
         return _mount_identity(vios, name, paths[0])
 
+    async def _write_baseline(self, system_name: str, lpar_name: str) -> dict[str, Any]:
+        """The newest reference code before power-on; a failed read changed nothing."""
+        try:
+            rows = await list_lpar_refcodes(self.hmc.config, system_name, lpar_name, 1)
+        except (HMCCLIError, ValueError, TypeError) as exc:
+            raise EffectNotApplied(
+                f"the refcode baseline was not read: {type(exc).__name__}: {exc}"
+            ) from exc
+        return row_identity(rows[0] if rows else None)
+
     async def _write_boot(self, lpar_uuid: str, optical: str) -> dict[str, Any]:
         devices = await boot_devices(self.hmc, self.request, lpar_uuid, optical)
         await set_lpar_boot_order(
@@ -1061,13 +1214,18 @@ class _Run:
 
 
 def provision_body(
-    system: str, request: ProvisionRequest, client_factory: ClientFactory = open_client
+    system: str,
+    request: ProvisionRequest,
+    client_factory: ClientFactory = open_client,
+    *,
+    wait_seconds: int = 0,
 ) -> engine.Body:
-    """The operation body for one ``hmc_provision_lpar`` request."""
+    """The operation body for one ``hmc_provision_lpar`` call; a boot waits for
+    refcodes up to *wait_seconds*, the call's own (ADR 0326 Decision 5)."""
 
     async def body(ctx: OperationContext) -> BodyResult:
         async with client_factory(ctx.connection) as hmc:
-            return await _Run(ctx, hmc, system, request).execute()
+            return await _Run(ctx, hmc, system, request, wait_seconds).execute()
 
     return body
 
@@ -1244,6 +1402,10 @@ def provision_classifiers(
             )
         return Classification("applied", _mount_identity(vios, name, paths[0]))
 
+    async def baseline(_ctx: OperationContext, _effect: EffectRecord) -> Classification:
+        # A read: the power-on is recorded only after it settles (ADR 0326 Decision 3).
+        return Classification("not_applied")
+
     async def boot_order(ctx: OperationContext, effect: EffectRecord) -> Classification:
         mount = ctx.recorded("mount")
         optical = (mount.identity or {}).get("device_path") if mount else None
@@ -1279,6 +1441,7 @@ def provision_classifiers(
         EFFECT_KINDS["upload"]: upload,
         EFFECT_KINDS["mount"]: mount,
         EFFECT_KINDS["boot_order"]: boot_order,
+        EFFECT_KINDS["refcode_baseline"]: baseline,
     }
 
 
@@ -1298,7 +1461,7 @@ def _agrees(result: ProvisionResult, record: OperationRecord) -> bool:
 def result_from_record(record: OperationRecord) -> ProvisionResult:
     """The tool result: the body's own result where it agrees with the journal, else
     one rebuilt from the effects (ADR 0313 Decision 2)."""
-    finished = ("configured", "ready_to_boot")
+    finished = ("configured", "ready_to_boot", "boot_started")
     if record.result and record.outcome in (*finished, "needs_attention"):
         result = _RESULT.validate_python(record.result)
         if record.outcome in finished or _agrees(result, record):
