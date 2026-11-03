@@ -82,6 +82,7 @@ from .server_tools.command import (
 )
 from .server_tools.gateway import register_gateway_tools
 from .server_tools.inventory.logical import register_inventory_tool
+from .server_tools.lpar.decommission import register_decommission_tool
 from .server_tools.lpar.inspect import register_inspect_tool
 from .server_tools.lpar.plan import register_plan_tool
 from .server_tools.lpar.power import register_power_tool
@@ -155,6 +156,9 @@ def create_mcp(policy: AccessPolicy) -> FastMCP:
     )
     register_plan_tool(application, TOOL_SECURITY, permits=permits, authorize=authorize)
     register_power_tool(
+        application, TOOL_SECURITY, permits=permits, authorize=authorize
+    )
+    register_decommission_tool(
         application, TOOL_SECURITY, permits=permits, authorize=authorize
     )
     register_provision_tool(

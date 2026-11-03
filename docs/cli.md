@@ -284,8 +284,13 @@ operation, and after inspecting, `hmcpctl lpars decommission --request-id cleanu
 --continuation resume` checks each interrupted write live and continues, while
 `--continuation abandon` stops it without writing. Do not
 continue to backing-file deletion merely because some steps succeeded.
-Decommission retains backing storage. Once the LPAR cleanup is complete, make
-separate explicit decisions about the exact unused disk and ISO:
+Decommission retains backing storage by default. For a partition hmcpctl provisioned,
+`--storage-cleanup delete_owned --exclusive-writer-window` also deletes, after the
+partition, each disk and installer medium the operation store records as created for it
+and no other partition maps; the rows under `storage.deleted`, `storage.retained` (with a
+reason) and `storage.pending` say what happened (ADR 0323). Anything else, and every
+disk of a partition hmcpctl did not create, stays. Once the LPAR cleanup is complete,
+make separate explicit decisions about the exact unused disk and ISO:
 
 ```sh
 DISK='<verified intended disk name>'

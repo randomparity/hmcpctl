@@ -492,6 +492,7 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
 # Handlers defined inside a factory, which the module-level AST passes cannot reach.
 _FACTORY_TOOLS = frozenset(
     {
+        "hmc_decommission_lpar",
         "hmc_effective_permissions",
         "hmc_search_tools",
         "hmc_invoke_tool",
@@ -912,7 +913,8 @@ def test_every_handler_routes_the_connection_argument_it_declares():
             checked.add(name)
 
     # `hmc_effective_permissions`, the two gateway tools, `hmc_inventory`,
-    # `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_provision_lpar` and `hmc_inspect_lpar`
+    # `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_provision_lpar`, `hmc_decommission_lpar` and
+    # `hmc_inspect_lpar`
     # are defined inside a factory rather than at module level, so they are the names
     # this pass cannot reach; every other tool, including the ones that declare no connection argument,
     # is checked.
