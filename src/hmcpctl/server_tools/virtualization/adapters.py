@@ -109,6 +109,7 @@ def hmc_add_network_adapter(
             The HMC requires vsi_manager_id and vsi_type_id together (REST0126), and
             calls the serving VIOS over RMC for a complete VSI profile.
         vsi_type_id: VSI type signed 32-bit value; HMC validates semantic limits.
+            Requires vsi_manager_id.
         vsi_type_version: VSI version signed 32-bit value; HMC validates semantic limits.
         ownership_override: Bypass LPAR ownership rejection after operator approval.
         profile: TOML profile name, or the environment-default HMC when omitted.
