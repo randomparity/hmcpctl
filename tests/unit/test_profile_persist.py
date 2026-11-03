@@ -42,6 +42,7 @@ class FakeHMC:
 
     def __init__(self, current=("2", "3"), saved=("2",)):
         self.current = list(current)
+        self.network: list[str] = []
         self.profiles = [_profile("default", *saved), _profile("hmcprec-00ff")]
         self.save_lands = True
 
@@ -52,11 +53,10 @@ class FakeHMC:
         return None
 
     async def list_child(self, parent, uuid, child):
-        assert (parent, uuid, child) == (
-            "LogicalPartition",
-            LPAR,
-            "LogicalPartitionProfile",
-        )
+        assert (parent, uuid) == ("LogicalPartition", LPAR)
+        if child == "ClientNetworkAdapter":
+            return [{"Resource": {"VirtualSlotNumber": slot}} for slot in self.network]
+        assert child == "LogicalPartitionProfile"
         return self.profiles
 
     async def list_adapters(self, uuid, adapter_type):
@@ -224,11 +224,11 @@ async def test_a_save_that_lands_late_is_confirmed_by_a_repoll(hmc, monkeypatch)
     reads = []
     real = profile_persist.persisted
 
-    async def late(*args):
+    async def late(*args, **kwargs):
         reads.append(1)
         if len(reads) == 3:
             hmc.profiles[0] = _profile("default", *hmc.current)
-        return await real(*args)
+        return await real(*args, **kwargs)
 
     monkeypatch.setattr(profile_persist, "persisted", late)
     assert (await _save(hmc))["confirmed_by"] == "repoll"
@@ -248,7 +248,7 @@ async def test_an_unreadable_profile_before_the_save_is_not_applied(hmc, monkeyp
 
 @pytest.mark.asyncio
 async def test_a_failed_readback_is_unconfirmed_and_named(hmc, monkeypatch):
-    async def unreadable(*_args):
+    async def unreadable(*_args, **_kwargs):
         raise HMCError("feed read failed", 503)
 
     monkeypatch.setattr(profile_persist, "persisted", unreadable)
@@ -294,3 +294,80 @@ def test_target_round_trips():
     )
     with pytest.raises(ValueError, match="malformed"):
         profile_persist.parse_target(f"lpar:{LPAR}/profile:x")
+
+
+# ADR 0325: the removed-slot readback, an empty profile, and client network adapters.
+
+
+@pytest.mark.asyncio
+async def test_a_removed_slot_still_in_the_profile_is_unsaved():
+    fake = FakeHMC(current=("2",), saved=("2", "5"))
+    missing, _ = await profile_persist.persisted(
+        fake, LPAR, "default", removed_slots=("5",)
+    )
+    assert missing == ["removed adapter in virtual slot 5 still in the profile"]
+    assert (await profile_persist.persisted(fake, LPAR, "default"))[0] == []
+
+
+@pytest.mark.asyncio
+async def test_a_removed_slot_a_current_adapter_holds_is_saved():
+    fake = FakeHMC(current=("2", "5"), saved=("2", "5"))
+    missing, _ = await profile_persist.persisted(
+        fake, LPAR, "default", removed_slots=("5",)
+    )
+    assert missing == []
+
+
+@pytest.mark.asyncio
+async def test_a_removal_only_save_may_leave_an_empty_profile():
+    fake = FakeHMC(current=(), saved=())
+    assert (await profile_persist.persisted(fake, LPAR, "default"))[0] == [
+        "any virtual adapter"
+    ]
+    missing, _ = await profile_persist.persisted(
+        fake, LPAR, "default", removed_slots=("5",), require_adapter=False
+    )
+    assert missing == []
+
+
+@pytest.mark.asyncio
+async def test_client_network_adapters_are_read_as_a_child_collection():
+    fake = FakeHMC(current=(), saved=("4",))
+    fake.network = ["4", "6"]
+    missing, _ = await profile_persist.persisted(fake, LPAR, "default")
+    assert missing == ["ClientNetworkAdapter in virtual slot 6"]
+
+
+@pytest.mark.asyncio
+async def test_the_save_passes_its_readback_options(hmc):
+    hmc.current, hmc.save_lands = [], False
+    hmc.profiles[0] = _profile("default", "5")
+    with pytest.raises(profile_persist.SaveUnconfirmed, match="1 adapter"):
+        await profile_persist.save_current_over(
+            hmc,
+            SYS,
+            LPAR,
+            "default",
+            exclusive_writer_window=True,
+            removed_slots=("5",),
+            require_adapter=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_classifier_applies_the_operations_readback_options():
+    fake = FakeHMC(current=("2",), saved=("2", "5"))
+    effect = EffectRecord(
+        "profile_save",
+        profile_persist.KIND,
+        profile_persist.target(LPAR, "default"),
+        "uncertain",
+        None,
+    )
+    ctx = SimpleNamespace(connection="<default>")
+    plain = profile_persist.profile_save_classifier(lambda _connection: fake)
+    removal = profile_persist.profile_save_classifier(
+        lambda _connection: fake, lambda _ctx: (("5",), False)
+    )
+    assert (await plain(ctx, effect)).status == "applied"
+    assert (await removal(ctx, effect)).status == "not_applied"

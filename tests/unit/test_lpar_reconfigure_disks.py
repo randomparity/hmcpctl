@@ -107,11 +107,10 @@ class StorageMixin:
         return {"Resource": {"VersionInfo": info}}
 
     async def list_child(self, parent, uuid, child):
-        assert (parent, uuid, child) == (
-            "LogicalPartition",
-            LPAR,
-            "LogicalPartitionProfile",
-        )
+        assert (parent, uuid) == ("LogicalPartition", LPAR)
+        if child == "ClientNetworkAdapter":
+            return []
+        assert child == "LogicalPartitionProfile"
         return [_profile_entry("default", self.saved_slots)] + [
             _profile_entry(name, ()) for name in self.recovery
         ]
