@@ -117,7 +117,7 @@ In scope: the MCP tool `hmc_provision_lpar` accepts `install` with `media.mode: 
    - identity `{pending_boot_string}`.
 6. Phase `ready_to_boot`. `BodyResult("ready_to_boot", ...)` carries `workflow_completed=true` and
    `unverified=UNVERIFIED`. The engine records `paused`/`ready_to_boot`, which accepts `boot` and `abandon`.
-   The handler still offers only `resume` and `abandon`; `boot` is #1849's.
+   Until #1849 adds `boot` to the handler, a `ready_to_boot` operation accepts only `abandon` there.
 7. `result_from_record` treats `ready_to_boot` as it treats `configured`.
 
 **Device paths.** `device_path` reads a mapping's `ClientAdapter/VirtualSlotNumber` and

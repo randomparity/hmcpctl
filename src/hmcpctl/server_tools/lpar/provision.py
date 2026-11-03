@@ -298,7 +298,9 @@ def provision_handler(
         writes the boot order, media first, and pauses ``ready_to_boot`` with the partition
         powered off. A mismatch ends ``failed``; nothing is rebuilt or overwritten. These
         writes also need ``hmc_upload_iso``, ``hmc_mount_optical_media`` and
-        ``hmc_set_lpar_boot_order``. ``unverified`` lists what is not checked.
+        ``hmc_set_lpar_boot_order``. ``unverified`` lists what is not checked. Until
+        issue #1849 adds ``continuation=boot``, a ``ready_to_boot`` operation accepts only
+        ``abandon`` here, even though its record lists ``boot``.
 
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.
