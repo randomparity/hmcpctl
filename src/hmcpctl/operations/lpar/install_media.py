@@ -1,9 +1,9 @@
 """Installer media for ``hmc_provision_lpar``: inputs, checks and producer binding.
 
 The install input types and their field checks are shared with ``hmc_plan_lpar``.
-``bind_prepared`` checks an iso-chain-loader ``iso-chain-media-v1`` producer result
-against the request (ADR 0191 Decision 3); the media steps that use it run in
-``provision_operation`` (ADR 0319). Nothing here writes to the HMC, and no message
+``bind_prepared`` and ``bind_built`` check an iso-chain-loader ``iso-chain-media-v1``
+producer result against the request (ADR 0191 Decision 3, ADR 0324); the media steps
+that use it run in ``provision_operation`` (ADR 0319). Nothing here writes to the HMC, and no message
 echoes a key, URL or producer-result value.
 """
 
@@ -18,7 +18,9 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from ...client.core import HMCClient
+from ...errors import HMCError
 from ...xmlutil import leaf_text
+from ..storage.resources import require_allowlisted_iso_url
 
 InstallProfile = Literal["ubuntu-26.04.1", "rocky-9.8"]
 INSTALL_PROFILES: tuple[str, ...] = ("ubuntu-26.04.1", "rocky-9.8")
@@ -32,6 +34,8 @@ MAX_PRODUCER_RESULT_BYTES = 64 * 1024
 _DEFAULT_ROUTE = ipaddress.IPv4Network("0.0.0.0/0")
 _MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
 _LOGIN_USER = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+# The producer's ``lpar`` identifier, which becomes the installer hostname (ADR 0324 D6).
+_PRODUCER_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 
 
 @dataclass(frozen=True)
@@ -241,7 +245,21 @@ def check_mac(mac: str | None, install: LparInstall | None) -> None:
         )
 
 
+def check_built_name(name: str, install: LparInstall | None) -> None:
+    """Refuse built media for a partition name the producer cannot use as ``lpar``."""
+    if install is None or install.media.mode != "built":
+        return
+    if not _PRODUCER_NAME.fullmatch(name) or name.endswith("-"):
+        raise ValueError(
+            "name: built media needs a partition name of 1 to 32 characters matching "
+            "[a-z][a-z0-9-]*, not ending in -, because it becomes the installer "
+            "hostname; rename the partition or pass prepared media"
+        )
+
+
 PRODUCER_FORMAT = "iso-chain-media-v1"
+TARGET_FORMAT = "iso-chain-target-v1"
+MAX_MEDIA_URL = 2048
 _PRODUCER_KEYS = frozenset(
     {
         "format",
@@ -255,6 +273,8 @@ _PRODUCER_KEYS = frozenset(
         "network",
     }
 )
+# Present only in a built result (ADR 0191 D3).
+_BUILT_KEYS = frozenset({"operation_binding", "url"})
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _LUN = re.compile(r"0x([0-9a-fA-F]{1,16})")
 # What the VIOS copy and the guest are not checked for (ADR 0191 D5, H1 spec).
@@ -282,19 +302,17 @@ def _mismatch(name: str, why: str) -> MediaMismatch:
     return MediaMismatch(f"install.media.producer_result.{name}: {why}")
 
 
-def bind_prepared(install: LparInstall, mac: str | None) -> MediaBinding:
-    """Check a prepared producer result field by field against the request.
-
-    Raises ``MediaMismatch`` naming the first field that does not bind.
-    """
-    media = install.media
-    result = media.producer_result
-    if media.mode != "prepared" or media.url is None or not isinstance(result, dict):
-        raise _mismatch("format", f"prepared media needs a {PRODUCER_FORMAT} object")
+def _check_result(
+    result: Mapping[str, Any],
+    install: LparInstall,
+    mac: str | None,
+    allowed: frozenset[str],
+) -> None:
+    """Raise ``MediaMismatch`` naming the first field of *result* that does not bind."""
     keys = set(result)
-    if unknown := sorted(keys - _PRODUCER_KEYS):
+    if unknown := sorted(keys - allowed):
         raise _mismatch(unknown[0], f"is not a {PRODUCER_FORMAT} field")
-    if missing := sorted(_PRODUCER_KEYS - keys):
+    if missing := sorted(allowed - keys):
         raise _mismatch(missing[0], "is missing")
     if result["format"] != PRODUCER_FORMAT:
         raise _mismatch("format", f"must be {PRODUCER_FORMAT}")
@@ -315,7 +333,100 @@ def bind_prepared(install: LparInstall, mac: str | None) -> MediaBinding:
         raise _mismatch("mac", "differs from adapters.mac")
     if result["network"] != json.loads(json.dumps(asdict(install.network))):
         raise _mismatch("network", "differs from install.network")
-    return MediaBinding(media.url, result["iso_sha256"], size, mac)
+
+
+def bind_prepared(install: LparInstall, mac: str | None) -> MediaBinding:
+    """Check a prepared producer result field by field against the request.
+
+    Raises ``MediaMismatch`` naming the first field that does not bind.
+    """
+    media = install.media
+    result = media.producer_result
+    if media.mode != "prepared" or media.url is None or not isinstance(result, dict):
+        raise _mismatch("format", f"prepared media needs a {PRODUCER_FORMAT} object")
+    _check_result(result, install, mac, _PRODUCER_KEYS)
+    assert mac is not None  # _check_result refuses a None mac
+    return MediaBinding(media.url, result["iso_sha256"], result["iso_size"], mac)
+
+
+def target_request(
+    install: LparInstall, name: str, mac: str, operation_id: str
+) -> bytes:
+    """The ``iso-chain-target-v1`` request the build entry reads (ADR 0324 D2)."""
+    request = {
+        "format": TARGET_FORMAT,
+        "profile": install.profile,
+        "lpar": name,
+        "mac": mac,
+        "network": asdict(install.network),
+        "operation_binding": operation_id,
+        "ssh_authorized_keys": list(install.ssh_authorized_keys),
+        "login_user": install.login_user,
+    }
+    return json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _mismatch(key, "appears twice")
+        result[key] = value
+    return result
+
+
+def parse_result(output: bytes) -> dict[str, Any]:
+    """The one JSON object a build entry printed, duplicate keys refused (ADR 0324 D4)."""
+    if len(output) > MAX_PRODUCER_RESULT_BYTES:
+        raise _mismatch("format", f"exceeds {MAX_PRODUCER_RESULT_BYTES} bytes")
+    try:
+        result = json.loads(output.decode("utf-8"), object_pairs_hook=_unique)
+    except MediaMismatch:
+        raise
+    except (ValueError, RecursionError):
+        raise _mismatch("format", "is not one UTF-8 JSON object") from None
+    if not isinstance(result, dict):
+        raise _mismatch("format", f"must be one {PRODUCER_FORMAT} object")
+    return result
+
+
+def _check_url(url: object, allowlist: tuple[tuple[str, int | None], ...]) -> str:
+    if not isinstance(url, str) or not 1 <= len(url) <= MAX_MEDIA_URL:
+        raise _mismatch("url", f"must be a string of 1 to {MAX_MEDIA_URL} characters")
+    try:
+        scheme = urlparse(url).scheme
+    except ValueError:  # its message quotes the URL's host
+        scheme = None
+    if scheme not in ("http", "https"):
+        raise _mismatch("url", "must be an http or https URL")
+    try:
+        require_allowlisted_iso_url(url, allowlist)
+    except (ValueError, HMCError):
+        raise _mismatch(
+            "url", "its origin (host and port) is not on HMC_ISO_URL_ALLOWLIST"
+        ) from None
+    return url
+
+
+def bind_built(
+    install: LparInstall,
+    result: Mapping[str, Any],
+    mac: str,
+    operation_id: str,
+    allowlist: tuple[tuple[str, int | None], ...],
+) -> MediaBinding:
+    """Check a build entry's result against the request, the adapter's actual MAC
+    and the operation (ADR 0191 D3, ADR 0324 D4).
+
+    Its URL is checked here as well as before the upload, so the build effect never
+    records an unlisted URL. Raises ``MediaMismatch`` naming the first field that
+    does not bind.
+    """
+    _check_result(result, install, mac, _PRODUCER_KEYS | _BUILT_KEYS)
+    if result["operation_binding"] != operation_id:
+        raise _mismatch("operation_binding", "differs from this operation")
+    url = _check_url(result["url"], allowlist)
+    return MediaBinding(url, result["iso_sha256"], result["iso_size"], mac)
 
 
 def media_name_for(operation_id: str) -> str:
