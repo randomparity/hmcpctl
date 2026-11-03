@@ -139,8 +139,11 @@ def _adapter(entry: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def current_adapters(hmc: HMCClient, lpar_uuid: str) -> list[dict[str, Any]]:
-    """The partition's client network adapters; an empty collection (HTTP 204) is []."""
-    feed = await hmc.list_child("LogicalPartition", lpar_uuid, "ClientNetworkAdapter")
+    """The partition's client network adapters, from a complete feed (absence is proof).
+
+    An empty collection (HTTP 204) is no adapters; a paged feed is refused.
+    """
+    feed = await hmc._network_adapter_creation_feed(lpar_uuid, allow_empty=True)
     return [_adapter(entry) for entry in feed if isinstance(entry, dict)]
 
 
@@ -210,6 +213,11 @@ async def plan_networks(
             raise OperationFailed(
                 f"networks.remove[{index}]: LPAR {lpar_uuid} has {len(hits)} client "
                 "network adapters with that MAC; exactly one is needed"
+            )
+        if hits[0]["slot"] is None:
+            raise OperationFailed(
+                f"networks.remove[{index}]: adapter {hits[0]['adapter_uuid']} reports no "
+                "virtual slot, so its removal from the profile could not be confirmed"
             )
         removes.append({"mac": item.mac, **_without_mac(hits[0])})
     return {"add": adds, "remove": removes}

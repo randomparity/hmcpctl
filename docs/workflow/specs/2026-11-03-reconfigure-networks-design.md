@@ -32,11 +32,13 @@ until #1846 is on `main`.
 **Plan** (phase `validating`, before any write). A patch with `networks` reads the default
 profile under ADR 0314 Decision 2, then:
 
-- reads the partition's client network adapters once, through
-  `hmc.list_child("LogicalPartition", lpar, "ClientNetworkAdapter")`. That read maps an empty
-  (HTTP 204) collection to `[]`; `list_adapters` would route to the creation-proof feed, which
-  treats 204 as unavailable. Every network reader below uses the same `list_child` read. MACs
-  compare through `mac_colon_form`;
+- reads the partition's client network adapters once, through the complete-feed reader
+  `list_adapters` uses (a paged feed is refused, because absence is proof here) with
+  `allow_empty=True`, which reads an empty (HTTP 204) collection as `[]` where `list_adapters`
+  treats it as unavailable. Every network reader below uses the same read. MACs compare
+  through `mac_colon_form`;
+- a removal whose adapter reports no virtual slot is refused, because its removal from the
+  profile could not be confirmed;
 - a removal needs exactly one current adapter with its MAC. The plan records `{mac,
   adapter_uuid, port_vlan_id, slot}`; zero or several matches are refused;
 - an unpinned add records, as its own `baseline`, the UUIDs of the adapters already on its
@@ -99,8 +101,9 @@ reads.
 - the rule that a profile with no virtual adapter is unsaved applies only under
   `require_adapter`. Reconfigure passes `True` when the plan has a disk or network add, so a
   removal-only save of the last adapter can confirm;
-- the leg reads the current `ClientNetworkAdapter` slots through `list_child` (204 → `[]`). It
-  does not use `adapters_missing_from_profile`'s `list_adapters` route;
+- the leg reads the current `ClientNetworkAdapter` slots through the same complete-feed read
+  with `allow_empty=True` (204 → `[]`), not `adapters_missing_from_profile`'s `list_adapters`
+  route;
 - the classifier reads both keywords from the recorded plan through
   `plan.get("networks") or {}`, so a plan recorded before this change classifies as before;
 - the refusal texts of `require_persistable`, `_require_profile_jobs` and `_persist` name "a

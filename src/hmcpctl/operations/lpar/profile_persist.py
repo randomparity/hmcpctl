@@ -72,14 +72,14 @@ async def _current_slots(
 ) -> list[tuple[str, str | None]]:
     """Each current client adapter's (type, virtual slot); the slot is None if unreported.
 
-    Client network adapters are read as a plain child collection, whose empty answer
-    (HTTP 204) is no adapters; ``list_adapters`` routes them to a creation-proof feed
-    that refuses an empty collection (ADR 0325).
+    Client network adapters come from the complete-feed reader with an empty
+    collection (HTTP 204) read as none; ``list_adapters`` refuses that empty answer
+    (ADR 0325).
     """
     slots = []
     for adapter_type in PROFILE_CHECKED_ADAPTER_TYPES:
         if adapter_type == "ClientNetworkAdapter":
-            feed = await hmc.list_child("LogicalPartition", lpar_uuid, adapter_type)
+            feed = await hmc._network_adapter_creation_feed(lpar_uuid, allow_empty=True)
         else:
             feed = await hmc.list_adapters(lpar_uuid, adapter_type)
         for adapter in feed:

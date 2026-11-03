@@ -53,11 +53,16 @@ class FakeHMC:
         return None
 
     async def list_child(self, parent, uuid, child):
-        assert (parent, uuid) == ("LogicalPartition", LPAR)
-        if child == "ClientNetworkAdapter":
-            return [{"Resource": {"VirtualSlotNumber": slot}} for slot in self.network]
-        assert child == "LogicalPartitionProfile"
+        assert (parent, uuid, child) == (
+            "LogicalPartition",
+            LPAR,
+            "LogicalPartitionProfile",
+        )
         return self.profiles
+
+    async def _network_adapter_creation_feed(self, uuid, *, allow_empty=False):
+        assert uuid == LPAR and allow_empty is True
+        return [{"Resource": {"VirtualSlotNumber": slot}} for slot in self.network]
 
     async def list_adapters(self, uuid, adapter_type):
         assert uuid == LPAR

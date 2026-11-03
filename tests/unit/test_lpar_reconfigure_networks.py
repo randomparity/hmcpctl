@@ -58,12 +58,8 @@ class NetHMC:
         self.delete_lands = True
         self.response = True
 
-    async def list_child(self, parent, uuid, child):
-        assert (parent, uuid, child) == (
-            "LogicalPartition",
-            LPAR,
-            "ClientNetworkAdapter",
-        )
+    async def _network_adapter_creation_feed(self, uuid, *, allow_empty=False):
+        assert uuid == LPAR and allow_empty is True
         return list(self.adapters)
 
     async def list_virtual_networks(self, system):
@@ -250,10 +246,10 @@ def test_plan_allows_live_changes_on_running_partition_with_disruption():
 def test_plan_names_an_unreadable_inventory():
     fake = NetHMC()
 
-    async def broken(*_):
+    async def broken(*_, **__):
         raise HMCError("boom", 500, "secret body")
 
-    fake.list_child = broken
+    fake._network_adapter_creation_feed = broken
     with pytest.raises(OperationFailed, match="could not be read \\(HMCError\\)"):
         _plan(fake, {"remove": [{"mac": MAC_A}]})
 
@@ -468,15 +464,15 @@ def test_removal_error_with_unreadable_relist_keeps_the_delete_error():
     fake.delete_error = HMCError("refused", 500, "")
     plan = _plan(fake, {"remove": [{"mac": MAC_B}]})
     reads = []
-    listing = fake.list_child
+    listing = fake._network_adapter_creation_feed
 
-    async def flaky(*args):
+    async def flaky(*args, **kwargs):
         reads.append(args)
         if len(reads) > 1:
             raise HMCError("relist", 503, "")
-        return await listing(*args)
+        return await listing(*args, **kwargs)
 
-    fake.list_child = flaky
+    fake._network_adapter_creation_feed = flaky
     with pytest.raises(HMCError, match="refused"):
         _write(fake, plan, "network_remove:0")
 
@@ -510,10 +506,11 @@ class BodyMixin(NetHMC):
         self.level = "1060"
 
     async def list_child(self, parent, uuid, child):
-        assert (parent, uuid) == ("LogicalPartition", LPAR)
-        if child == "ClientNetworkAdapter":
-            return list(self.adapters)
-        assert child == "LogicalPartitionProfile"
+        assert (parent, uuid, child) == (
+            "LogicalPartition",
+            LPAR,
+            "LogicalPartitionProfile",
+        )
         return [_profile_entry("default", self.saved_slots)] + [
             _profile_entry(name, ()) for name in self.recovery
         ]
@@ -764,3 +761,10 @@ def test_verification_waits_for_a_removed_adapter_to_go(body):
     record = _submit({"networks": {"remove": [{"mac": MAC_B}]}})
     assert record.outcome == "needs_attention"
     assert "save" not in _writes(body)
+
+
+def test_plan_refuses_a_removal_whose_adapter_reports_no_slot():
+    fake = NetHMC()
+    del fake.adapters[1]["Resource"]["VirtualSlotNumber"]
+    with pytest.raises(OperationFailed, match="reports no virtual slot"):
+        _plan(fake, {"remove": [{"mac": MAC_B}]})

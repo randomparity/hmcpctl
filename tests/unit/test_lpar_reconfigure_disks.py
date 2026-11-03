@@ -106,11 +106,16 @@ class StorageMixin:
         info = {"Version": "10", "Release": "3", "ServicePackName": self.level}
         return {"Resource": {"VersionInfo": info}}
 
+    async def _network_adapter_creation_feed(self, uuid, *, allow_empty=False):
+        assert uuid == LPAR and allow_empty is True
+        return []
+
     async def list_child(self, parent, uuid, child):
-        assert (parent, uuid) == ("LogicalPartition", LPAR)
-        if child == "ClientNetworkAdapter":
-            return []
-        assert child == "LogicalPartitionProfile"
+        assert (parent, uuid, child) == (
+            "LogicalPartition",
+            LPAR,
+            "LogicalPartitionProfile",
+        )
         return [_profile_entry("default", self.saved_slots)] + [
             _profile_entry(name, ()) for name in self.recovery
         ]
