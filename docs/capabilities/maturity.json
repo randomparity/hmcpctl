@@ -5067,18 +5067,18 @@
                 "constraint": "media.mode prepared with an iso-chain-media-v1 producer result bound field by field; digest-checked upload, mount before the profile save, media-first boot order; boot deferred pauses at ready_to_boot (ADR 0319)"
               }
             ]
-          }
-        ],
-        "missing_scope": [
+          },
           {
             "variant": "built-install-media",
             "parameters": [
               {
-                "name": "install.media.mode",
-                "constraint": "built refused before provisioning; the operator-configured build entry is owned by issue #1843"
+                "name": "install",
+                "constraint": "media.mode built runs the operator-configured build entry (HMC_ISO_BUILD_ENTRY) without a shell after the adapter MAC is recorded, binds its iso-chain-media-v1 result to that MAC and the operation, then follows the prepared-media path to ready_to_boot (ADR 0324)"
               }
             ]
-          },
+          }
+        ],
+        "missing_scope": [
           {
             "variant": "installer-boot",
             "parameters": [

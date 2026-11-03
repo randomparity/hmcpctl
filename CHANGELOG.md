@@ -46,9 +46,15 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   matches the bound SHA-256 and size. It is mounted before the profile save, so the saved
   profile carries its adapter. After the default profile is set, the boot order puts the media
   first, and the operation pauses at `ready_to_boot` with the partition powered off. The result's
-  `unverified` lists the VIOS copy and the guest's reach to its installer source. Built media
-  (#1843) and the installer power-on (#1849) are not available yet. `upload_iso` gains
+  `unverified` lists the VIOS copy and the guest's reach to its installer source. The installer
+  power-on (#1849) is not available yet. `upload_iso` gains
   `expected_sha256` and `expected_size`.
+- `hmc_provision_lpar` accepts `install` with built media (#1843, ADR 0324). The operator
+  names a build entry and its argument template with `HMC_ISO_BUILD_ENTRY` and
+  `HMC_ISO_BUILD_ARGUMENTS`; provision runs it without a shell once the client adapter's MAC
+  is known, binds its `iso-chain-media-v1` result to that MAC, the request and the operation,
+  and then uploads, mounts and pauses at `ready_to_boot` as for prepared media.
+  `hmc_plan_lpar` reports `build_entry_unconfigured` when the server cannot build.
 
 - `hmc_load_optical_media` and `hmc_unload_optical_media` (`hmcpctl storage
   load-optical-media` and `unload-optical-media`) change the medium in an LPAR's existing
