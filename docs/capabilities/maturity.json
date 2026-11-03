@@ -5012,18 +5012,18 @@
                 "constraint": "required true except dry_run or abandon; HMC 10.3.1060 or later; saves, reads back and defaults a new hmcpctl_ profile before configured"
               }
             ]
-          },
+          }
+        ],
+        "missing_scope": [
           {
             "variant": "dedicated-assignment",
             "parameters": [
               {
                 "name": "assignments.dedicated",
-                "constraint": "profile_name default_profile; written into the saved hmcpctl_ profile after its readback and before it becomes the default (ADR 0318)"
+                "constraint": "written into the saved hmcpctl_ profile before activation (ADR 0318); native ownership-after-activation proof pending (#1841)"
               }
             ]
-          }
-        ],
-        "missing_scope": [
+          },
           {
             "variant": "c12-positive-virtual-slot-linkage",
             "parameters": [
