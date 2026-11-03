@@ -2222,6 +2222,56 @@ def test_lpars_decommission_incomplete_json_result_exits_1_after_rendering(fake_
     )
 
 
+def test_lpars_decommission_resumes_a_paused_operation(fake_hmc):
+    fake_hmc.lpar["Resource"]["PartitionState"] = "not activated"
+    fake_hmc.fail_on = "delete_logical_partition"
+    start = ["lpars", "decommission", LPAR_NAME, "--request-id", "r1"]
+    paused = RUNNER.invoke(cli.app, [*start, "--system", SYSTEM_UUID, "--yes"])
+    assert paused.exit_code == 1
+    assert "paused/needs_attention" in paused.stderr
+
+    fake_hmc.fail_on = None
+    declined = RUNNER.invoke(
+        cli.app,
+        ["lpars", "decommission", "--request-id", "r1", "--continuation", "resume"],
+        input="n\n",
+    )
+    assert declined.exit_code == 1 and "Aborted" in declined.stderr
+    resumed = RUNNER.invoke(
+        cli.app,
+        [
+            "lpars",
+            "decommission",
+            "--request-id",
+            "r1",
+            "--continuation",
+            "resume",
+            "--yes",
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    assert "terminal/completed" in resumed.stderr
+    deletes = [n for n, _, _ in fake_hmc.calls if n == "delete_logical_partition"]
+    assert len(deletes) == 2
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--request-id", "bad id", "--system", SYSTEM_UUID], "--request-id"),
+        (["--request-id", "r1", "--continuation", "later"], "--continuation"),
+        (["--request-id", "r1", "--continuation", "abandon"], "no operation"),
+        (["--request-id", "r1", "--continuation", "resume", "--dry-run"], "--dry-run"),
+        (["--request-id", "r1", "--dry-run"], "--system"),
+    ],
+)
+def test_lpars_decommission_refuses_bad_operation_input(fake_hmc, args, message):
+    result = RUNNER.invoke(cli.app, ["lpars", "decommission", *args])
+    assert result.exit_code == 2, result.output
+    assert message in unstyle(result.output)
+    assert fake_hmc.calls == []
+
+
 def test_lpars_decommission_denies_foreign_owned_partition(fake_hmc, monkeypatch):
     async def foreign_description(*_args):
         return "[hmcpctl owner:other-agent created:2026-08-14]"
