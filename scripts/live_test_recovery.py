@@ -86,6 +86,7 @@ from live_test import (
     network,
     processor_quantities,
     processor_sharing_weight,
+    provision_boot,
     runner,
     storage_lifecycle,
     storage_volume_group,
@@ -205,6 +206,7 @@ _WITNESSED_SUBTASKS = (
         lpar_affinity_group.SUBTASK,
         lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
+        provision_boot.SUBTASK,
     }
 )
 
@@ -834,10 +836,13 @@ class LparPowerInputs:
 def lpar_power_inputs_from_document(
     document: dict[str, Any], subtasks: list[int]
 ) -> LparPowerInputs | None:
-    """The run's system when it dispatched ST41, else `None`; found by prefix."""
+    """The run's system when it dispatched ST41 or ST72, else `None`; found by prefix.
+
+    ST72 (provision-boot) reuses lpar-power's partition and volume names.
+    """
     config = document.get("config")
     system = config.get("system_name") if isinstance(config, dict) else None
-    if lpar_power.SUBTASK not in subtasks or not system:
+    if not {lpar_power.SUBTASK, provision_boot.SUBTASK} & set(subtasks) or not system:
         return None
     group = config.get("vdisk_volume_group_name") if isinstance(config, dict) else ""
     return LparPowerInputs(str(system), str(group or ""))
@@ -964,6 +969,71 @@ async def _lpar_power_vios_residue(
         if lpar_power.scratch_partitions([remote])
     ]
     return findings
+
+
+@dataclass(frozen=True)
+class ProvisionBootMediaInputs:
+    """The installer medium the provision-boot arm (ST72) recorded."""
+
+    system_name: str
+    vios_uuid: str
+    vg_uuid: str | None
+    media_name: str | None
+
+
+def provision_boot_media_inputs_from_document(
+    document: dict[str, Any], subtasks: list[int]
+) -> ProvisionBootMediaInputs | None:
+    """ST72's medium, or `None` when the arm never reached its provision call."""
+    config, artifacts = document.get("config"), document.get("artifacts")
+    if provision_boot.SUBTASK not in subtasks or not isinstance(artifacts, dict):
+        return None
+    media = artifacts.get("provision_boot_media")
+    system = config.get("system_name") if isinstance(config, dict) else None
+    if not isinstance(media, dict) or not media or not system:
+        return None
+    return ProvisionBootMediaInputs(
+        str(system),
+        str(media.get("vios_uuid") or ""),
+        media.get("vg_uuid"),
+        media.get("media_name"),
+    )
+
+
+async def check_provision_boot_media(
+    call, inputs: ProvisionBootMediaInputs
+) -> list[Finding]:
+    """The run's medium still in the repository; unreadable when it was unreported."""
+    if not inputs.media_name or not inputs.vg_uuid:
+        raise StateUnreadable(
+            "the provision-boot medium's name or repository group (the provision call "
+            f"reported none); list VIOS {inputs.vios_uuid}'s media repository for "
+            "hmcpctl_<12 hex>.iso"
+        )
+    status, data = await call(
+        "hmc_list_optical_media",
+        vios_name_or_uuid=inputs.vios_uuid,
+        vg_uuid=inputs.vg_uuid,
+        system_name_or_uuid=inputs.system_name,
+    )
+    names = (
+        {entry.get("name") for entry in data if isinstance(entry, dict)}
+        if status == "PASS" and isinstance(data, list)
+        else None
+    )
+    if names is None:
+        raise StateUnreadable(f"the media in {inputs.vg_uuid} ({status})")
+    if inputs.media_name not in names:
+        return []
+    where = f"{_q(inputs.vios_uuid)} --vg {_q(inputs.vg_uuid)}"
+    return [
+        Finding(
+            f"medium {inputs.media_name}",
+            f"the provision-boot medium is still in volume group {inputs.vg_uuid}",
+            f"hmcpctl storage delete-media {where} --name {_q(inputs.media_name)} "
+            f"--system {_q(inputs.system_name)}",
+        )
+    ]
 
 
 @dataclass(frozen=True)
@@ -2732,6 +2802,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
     lpar_power_inputs = lpar_power_inputs_from_document(document, subtasks)
+    boot_media = provision_boot_media_inputs_from_document(document, subtasks)
 
     artifact_system = None
     if 43 in subtasks:
@@ -2748,6 +2819,7 @@ def main(argv: list[str] | None = None) -> int:
             (check_network, network_inputs),
             (check_lpar_config, lpar_config_inputs),
             (check_lpar_power, lpar_power_inputs),
+            (check_provision_boot_media, boot_media),
             (check_creation_memory, memory_inputs),
             (check_creation_memory_layout, creation_inputs),
             (check_round2, round2_inputs),

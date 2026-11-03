@@ -657,6 +657,35 @@ def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _provision_boot_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    """Name the partition, volume and media the provision-boot arm (#1849) creates."""
+    return ArmVerdict(
+        "provision-boot",
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            (
+                f"one partition {lpar_power.NAME_PREFIX}<8 hex>-p, provisioned with "
+                f"prepared media made from {config.iso_path} (served at "
+                f"{config.iso_url}) and boot immediate: activated once from its saved "
+                "profile with the installer media first, then powered off and deleted"
+            ),
+            (
+                f"one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}"
+                f"<8 hex> in volume group {config.vdisk_volume_group_name}, and one "
+                "medium hmcpctl_<12 hex>.iso in the VIOS's media repository, both "
+                "deleted"
+            ),
+            (
+                "no other partition, volume or mapping: the lpar-power arm's pre-run "
+                "read is compared after teardown"
+            ),
+        ),
+        config.system_name,
+    )
+
+
 def _network_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the network arm (#629) changes, each reversed by the arm itself."""
     return ArmVerdict(
@@ -904,6 +933,7 @@ _ARM_VERDICTS = {
     "creation-memory-layout": _creation_memory_layout_verdict,
     "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
+    "provision-boot": _provision_boot_verdict,
     "vmedia": _vmedia_verdict,
     "vmedia-media-change": _vmedia_media_change_verdict,
     "storage": _storage_verdict,

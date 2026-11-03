@@ -172,6 +172,7 @@ below. The table does not grant hardware or VIOS access.
 | storage | `uv run --no-sync python scripts/live_storage.py` | subtasks 0, 3, 40 and 42 |
 | lpar-power | `uv run --no-sync python scripts/live_lpar_power.py` | subtask 41 |
 | lpar-reconfigure | `uv run --no-sync python scripts/live_lpar_reconfigure.py` | subtask 70 |
+| provision-boot | `uv run --no-sync python scripts/live_provision_boot.py` | subtask 72; powers on a partition with installer media |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
 managed system, and a concurrent run makes the recovery check in step 4
@@ -853,6 +854,35 @@ and `rmsyscfg`; for a mapping, `rmvdev -vtd <device>` on the VIOS before the vol
 `rmlv`. The arm never removes a VIOS adapter: a server adapter left after the detach
 fails the compare.
 
+### The provision-boot arm
+
+The provision-boot arm (subtask 72, #1849, ADR 0326) is the native proof of provision's
+installer boot. Each run needs its own operator authorization naming the partition,
+the media and the run length: it powers a partition on.
+
+- **Inputs.** The lpar-power arm's: one VIOS listing `LIVE_TEST_VDISK_VOLUME_GROUP_NAME`
+  with 1 GiB free, a virtual network on `LIVE_TEST_PROVISION_VLAN_ID`,
+  `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` and
+  `HMC_AUTHORIZE_POWER_OPERATIONS`. The VIOS needs one media repository with room for
+  the ISO at `LIVE_TEST_ISO_PATH`, which the runner serves as the vmedia arm does and
+  adds to `HMC_ISO_URL_ALLOWLIST`.
+- **Run.** It provisions one partition `hmcpctl-live-pwr-<8 hex>-p` on a new 1 GiB
+  volume `lppwr<8 hex>`, with prepared media described from the ISO's own SHA-256 and
+  size, a locally administered MAC and documentation addresses, and `boot: immediate`
+  with `wait_seconds` 120. A run still going is repeated until it pauses or ends.
+- **Assertions.** `mount-accepted` (no REST0269 on the provision-created partition),
+  `saved-profile-optical-slot`, `revalidated-before-power-on`, `installer-powered-on`,
+  `activated-from-saved-profile` (`curr_profile` is the saved `hmcpctl_…` profile),
+  `optical-adapter-after-activation` (the mount's client slot is in the running
+  partition's vSCSI adapters), `optical-mapping-after-activation`, and
+  `refcodes-observed-without-boot-started-claim` (the run pauses `needs_attention`
+  with the codes it saw). The observed reference codes stay in the private results.
+- **After.** It abandons the operation, powers the partition off, unmounts and deletes
+  the medium, then runs the lpar-power arm's teardown (detach, delete the partition and
+  the volume) and compares the lpar-power baseline.
+
+It does not record the boot-started code set or the other #1850 facts.
+
 ### The bare-cec arm
 
 The bare-cec arm is the release path end to end. It creates a partition, assigns
@@ -949,7 +979,8 @@ uv run --no-sync python scripts/live_test_recovery.py --results test-results-ded
 
 After the other arms pass `test-results-<arm>.json` the same way: `vmedia`,
 `bare-cec`, `round2`, `sriov`, `profiles`, `users`, `vios-backup`, `pcm`,
-`network`, `lpar-config`, `storage`, `lpar-power` or `vmedia-media-change`.
+`network`, `lpar-config`, `storage`, `lpar-power`, `provision-boot` or
+`vmedia-media-change`.
 
 The check reads the subtasks the run dispatched from the document, and witnesses
 these sets of them:
@@ -964,6 +995,7 @@ these sets of them:
 | 39 (lpar-config) | any partition named `hmcpctl-live-lpar-*` on the run's system, whichever run left it |
 | 0, 3, 40, 42 (storage) | a mapping (its virtual target device) backed by an `hpctl<8 hex>` volume, such a volume still in `LIVE_TEST_VDISK_VOLUME_GROUP_NAME`, and a VIOS vSCSI server adapter toward the test partition with no mapping; 0 and 3 only read; ST42 also reports `hpvg<8 hex>` groups or unresolved pending restoration |
 | 41 (lpar-power) | any partition named `hmcpctl-live-pwr-*`, running or not; on each VIOS, any mapping backed by an `lppwr*` volume, any vSCSI adapter serving a `hmcpctl-live-pwr-*` partition, and any `lppwr*` volume left in the configured volume group (read with the one admitted `viosvrcmd … -c 'lsvg -lv <group>'` command) |
+| 72 (provision-boot) | everything 41 reads, plus the run's installer medium (`hmcpctl_<12 hex>.iso`) still in the media repository; a run that recorded the provision call but no medium name reads as unreadable, not clean |
 | 2, 9 (network) | a network on the run's test VLAN, the test partition's client adapters off the run's baseline, the serving VIOS's FC-port labels off their originals, and a vFC group label named `hmcl-*` |
 
 A complete current round2 run carries a fresh producer baseline. Recovery validates

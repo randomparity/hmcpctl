@@ -1,0 +1,235 @@
+"""The provision-boot live arm (ST72, #1849) against a scripted HMC.
+
+It reuses the lpar-power arm's scripted system and adds what an install run
+touches: the media repository, the optical mapping and the boot's steps.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+import test_live_lpar_power_arm as arm
+from live_test import config as live_config
+from live_test import provision_boot, runner
+from test_live_lpar_power_arm import (
+    GROUP,
+    SYSTEM,
+    VLAN,
+    FakeClient,
+    World,
+    _record,
+)
+
+from hmcpctl.ssh.commands import HMC_NO_RESULTS
+
+REPO_UUID = "0A1B2C3D-0000-4000-8000-0000000000D1"
+MEDIA = "hmcpctl_000000000000.iso"
+SAVED = "hmcpctl_000000000000"
+
+
+@pytest.fixture(scope="module")
+def schemas():
+    return arm.schemas.__wrapped__()
+
+
+@pytest.fixture(scope="module")
+def output_schemas():
+    return arm.output_schemas.__wrapped__()
+
+
+@pytest.fixture(autouse=True)
+def _no_iso_server(monkeypatch):
+    monkeypatch.setattr(provision_boot, "_start_iso_server", lambda *_a: None)
+    monkeypatch.setattr(provision_boot, "_power_operations_authorized", lambda: True)
+    monkeypatch.setattr(provision_boot, "_POLL_DELAY_S", 0)
+
+
+class BootWorld(World):
+    """Answers an install provision as a healthy HMC would, then its teardown."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.media: set[str] = set()
+        self.optical: list[str] = []
+        self.mount_status = "ok"
+        self.activated_profile = SAVED
+        self.provisions: list[dict[str, Any]] = []
+
+    def _hmc_run_command(self, kwargs: dict[str, Any]) -> Any:
+        cmd = kwargs["cmd"]
+        if cmd.endswith("-F curr_profile,state"):
+            (entry,) = self.partitions.values()
+            return f"{self.activated_profile},{entry['state']}"
+        if cmd.endswith("-F slot_num") and "lpar_names=hmcpctl-live-pwr-" in cmd:
+            return "2\n4\n" if self.optical else HMC_NO_RESULTS
+        return super()._hmc_run_command(kwargs)
+
+    def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
+        if kwargs.get("continuation") == "abandon":
+            return {**arm._provisioned(False, "terminal"), "steps": []}
+        self.provisions.append(kwargs)
+        uuid = self._new(kwargs["name"], kwargs["caller_token"], kwargs["resources"])
+        name = kwargs["storage"]["storage_name"]
+        self.volumes.add(name)
+        self.mappings.append(
+            {
+                "id": "vhost1/vtscsi1",
+                "lpar_uuid": uuid,
+                "backing_kind": "VirtualDisk",
+                "backing_name": name,
+            }
+        )
+        self.adapters.add("3,run,2")
+        self.media.add(MEDIA)
+        steps = [
+            {"step": "create", "status": "ok"},
+            {"step": "bind_media", "status": "ok", "result": {"media_name": MEDIA}},
+            {
+                "step": "upload_media",
+                "status": "ok",
+                "result": {"vg_uuid": REPO_UUID, "media_name": MEDIA},
+            },
+        ]
+        if self.mount_status != "ok":
+            steps.append(
+                {"step": "mount_media", "status": "error", "result": "REST0269"}
+            )
+            record = _record("terminal")
+            record["outcome"] = "failed"
+        else:
+            self.optical.append(MEDIA)
+            self.partitions[kwargs["name"]]["state"] = "Running"
+            steps += [
+                {
+                    "step": "mount_media",
+                    "status": "ok",
+                    "result": {"client_slot": 4, "media_name": MEDIA},
+                },
+                {"step": "profile_readback", "status": "ok"},
+                {"step": "revalidate_boot", "status": "ok"},
+                {"step": "power_on", "status": "ok"},
+                {
+                    "step": "wait_boot_started",
+                    "status": "error",
+                    "result": {"reason": "set empty", "observed": []},
+                },
+            ]
+            record = _record("paused")
+        return {
+            "resource_created": True,
+            "workflow_completed": False,
+            "lpar_uuid": uuid,
+            "dry_run": False,
+            "ownership_stamped": True,
+            "steps": steps,
+            "warnings": [],
+            "operation": record,
+        }
+
+    def _hmc_list_optical_mappings(self, kwargs: dict[str, Any]) -> Any:
+        return [{"media_name": name} for name in self.optical]
+
+    def _hmc_unmount_optical_media(self, kwargs: dict[str, Any]) -> Any:
+        self.optical.remove(kwargs["media_name"])
+        return {"unmounted": True}
+
+    def _hmc_delete_optical_media(self, kwargs: dict[str, Any]) -> Any:
+        if kwargs["media_name"] in self.optical:
+            return ValueError("the medium is mapped")
+        self.media.discard(kwargs["media_name"])
+        return {"deleted": True}
+
+    def _hmc_list_optical_media(self, kwargs: dict[str, Any]) -> Any:
+        return [{"name": name} for name in sorted(self.media)]
+
+
+def _run(schemas, world: World, tmp_path: Path, group: str = provision_boot.GROUP):
+    iso = tmp_path / "installer.iso"
+    iso.write_bytes(b"iso")
+    state = runner.RunState(
+        config=live_config.LiveTestConfig(
+            system_name=SYSTEM,
+            vdisk_volume_group_name=GROUP,
+            provision_vlan_id=VLAN,
+            partition_profile_writer_window=True,
+            iso_path=str(iso),
+        ),
+        group=group,
+    )
+    state.schemas = schemas
+    asyncio.run(
+        provision_boot.exercise_provision_boot(FakeClient(world, arm._OUTPUTS), state)
+    )
+    return state
+
+
+def _observation(state) -> dict[str, Any]:
+    (entry,) = state.observations
+    return entry["observation"]
+
+
+def test_a_clean_boot_holds_every_assertion_and_leaves_nothing(schemas, tmp_path):
+    world = BootWorld()
+
+    state = _run(schemas, world, tmp_path)
+
+    observation = _observation(state)
+    assert observation["result"] == "passed"
+    assert observation["cleanup"] == "passed"
+    assert len(observation["assertions"]) == 8
+    assert world.partitions == {} and world.media == set() and world.optical == []
+    assert world.volumes == {"hd5", "lv_op"}
+    (sent,) = world.provisions
+    assert sent["boot"] == "immediate" and sent["exclusive_writer_window"] is True
+    result = sent["install"]["media"]["producer_result"]
+    assert result["iso_size"] == 3 and result["mac"] == sent["adapters"]["mac"]
+    assert sent["name"].startswith(provision_boot.lpar_power.NAME_PREFIX)
+    assert state.artifacts.provision_boot_media == {
+        "vios_uuid": arm.VIOS_UUID,
+        "vg_uuid": REPO_UUID,
+        "media_name": MEDIA,
+    }
+    tools = world.tools()
+    assert tools.index("hmc_unmount_optical_media") < tools.index(
+        "hmc_delete_optical_media"
+    )
+    assert tools.index("hmc_power_off_lpar") < tools.index("hmc_unmount_optical_media")
+
+
+def test_a_refused_mount_fails_its_assertion_and_still_cleans_up(schemas, tmp_path):
+    world = BootWorld()
+    world.mount_status = "error"
+
+    state = _run(schemas, world, tmp_path)
+
+    observation = _observation(state)
+    assert observation["result"] == "failed"
+    assert "mount-accepted" not in observation["assertions"]
+    assert world.partitions == {} and world.media == set()
+
+
+def test_activation_from_another_profile_fails_that_assertion(schemas, tmp_path):
+    world = BootWorld()
+    world.activated_profile = "default_profile"
+
+    state = _run(schemas, world, tmp_path)
+
+    assert "activated-from-saved-profile" not in _observation(state)["assertions"]
+
+
+def test_outside_its_group_it_calls_nothing(schemas, tmp_path):
+    world = BootWorld()
+
+    _run(schemas, world, tmp_path, group="lpar-power")
+
+    assert world.calls == []
+
+
+def test_the_run_mac_is_locally_administered_unicast():
+    assert provision_boot.run_mac("0a1b2c3d") == "02:00:0a:1b:2c:3d"
