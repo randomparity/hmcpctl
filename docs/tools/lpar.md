@@ -2,7 +2,7 @@
 
 # `lpar` tools
 
-50 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+51 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -49,6 +49,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_power_off_lpar` | `destructive` | `lpar.power_off` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Submit a PowerOff job for a logical partition, optionally restarting it or selecting the shutdown operation. |
 | `hmc_power_on_lpar` | `mutate` | `lpar.power_on` | `lpar` | `partial` | `current` | `existing-runtime-guards` | Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection. |
 | `hmc_read_lpar_refcodes` | `read` | `lpar.list_refcodes` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Read recent partition reference codes with offline POWER9 definitions. |
+| `hmc_reconfigure_lpar` | `destructive` | `lpar.reconfigure` | `console` | `implemented` | `unevidenced` | `existing-runtime-guards` | Change an LPAR's processors, memory or name, and say where each change lives. |
 | `hmc_remote_restart_lpar` | `destructive` | `lpar.remote_restart` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Remote-restart a failed LPAR on another managed system. |
 | `hmc_rename_lpar` | `mutate` | `lpar.rename` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Rename one LPAR after enforcing its ownership token. |
 | `hmc_reset_lpar_memory_statistics` | `destructive` | `lpar.reset_memory_statistics` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Reset memory statistics history once on a contained Running shared partition. |
