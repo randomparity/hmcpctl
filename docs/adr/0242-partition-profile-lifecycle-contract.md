@@ -148,3 +148,11 @@ refusal is `tests/fixtures/live/rest-profile-create-name-too-long.json`. The rec
 `hmcprec-` plus 16 hex characters. A refused or unverified copy reports `recovery step failed;
 overwrite not submitted` with the HMC's message and the recovery name. The recovery-copy
 requirement and the four-scalar comparison above are unchanged.
+
+A second authorized run on the same HMC and system exercised the fixed code. The partition was a
+fresh owned scratch partition, never activated, with one client network adapter added to its
+current configuration. A force-save over its `default_profile` wrote the 24-character recovery copy
+with the root `Metadata` retained (HTTP 200), verified it, and submitted the native force-save job.
+The profile then held the adapter, and the copy held the prior content. The tool reported execution
+`unknown` because of the job-status misread #1867 owns. That run is the first hardware evidence
+for the force-save path this record describes.
