@@ -27,12 +27,16 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
    schema-2 store therefore refuses it, and with it every logical mutation and ADR 0193 guarded
    operation, rather than ignoring holds it cannot see.
 2. **The registry injects `hold_id`.** A tool is *hold-guarded* when its effect is not `read`,
-   it is not exempt (`hmc_capture_lpar_console`, `hmc_prepare_host_handoff`), and one of its
-   target selectors, nested ones included, is of kind `lpar`. `ToolDefinition` publishes a
-   hold-guarded tool with one more optional argument, `hold_id`, unless the handler declares
-   `hold_id` itself. The `authorized()` wrapper removes the injected argument before calling the
-   handler and, for every tool, records the tool name, whether it is a read, and any `hold_id`
-   in a call context the hook reads. Handlers do not change.
+   it is not exempt (`hmc_capture_lpar_console`, `hmc_prepare_host_handoff`), and either one of
+   its target selectors, nested ones included, is of kind `lpar`, or it is listed as deriving its
+   partition at run time (`hmc_detach_storage_mapping`, which resolves the mapping's client
+   partition). One helper gives a hold-guarded tool's wrapper a `__signature__` with one more
+   keyword-only optional argument, `hold_id`, unless the handler declares `hold_id` itself; the
+   published schema and FastMCP's run-time argument validation both read that signature. The
+   `authorized()` wrapper removes the injected argument before binding the handler's arguments
+   and, for every tool, records the tool name, whether it is a read, and any `hold_id` in a call
+   context the hook reads. Handlers do not change, so an injected `hold_id` never reaches a
+   logical tool's request arguments or its ADR 0190 digest.
 3. **The CLI names its mirrored tool in one table.** A table maps every CLI command path to the
    registry tool it mirrors, or to none. `CLICommand` sets the same call context from that
    table and adds `--hold-id` to every command whose mirrored tool is hold-guarded. A command
@@ -44,7 +48,11 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
 ## Consequences
 
 - Upgrading is one-way: rolling hmcpctl back after any schema-2 process opened the store needs
-  the store deleted or restored from a schema-1 backup. `docs/mcp-server.md` says so.
+  the store deleted or restored from a schema-1 backup, either of which drops every hold.
+- During an upgrade, an hmcpctl process still running the old version reports the upgraded store
+  as `store_corrupt` with ADR 0190's delete-or-restore advice. Nothing is corrupt: restart or
+  upgrade that process. `docs/mcp-server.md` says to restart every hmcpctl process after
+  upgrading, and to list holds before any restore or deletion so they can be re-placed.
 - Every hold-guarded tool's schema gains `hold_id`, so `docs/tools/` regenerates and a tool
   added later gains it with no handler edit. A new tool with a partition selector and a
   hand-written `hold_id` keeps its own.
@@ -61,6 +69,10 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
   edits whose omission is invisible until the coverage test, and every future tool repeats it.
 - **One root `hmcpctl --hold-id` option.** judgment: fit. ADR 0193 names `--hold-id` on the
   partition commands, and a root option would also appear on commands that cannot use it.
+- **Wrap only the published schema.** verified: a `functools.wraps` wrapper given no
+  `__signature__`, run through FastMCP 4.0.10's `Tool.from_function(...).run({..., "hold_id": ...})`,
+  raised pydantic `unexpected_keyword_argument` (worktree probe, macOS, Python 3.11); the run-time
+  validator reads the function's signature, not the published schema.
 - **Skip the worker context and re-check holds only at admission.** judgment: fit. A
   continuation's resolutions run in the worker, where a missing context reads as a mutation
   without the caller's `hold_id` and refuses the holder itself.
