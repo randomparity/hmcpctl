@@ -38,7 +38,7 @@ Each add used PVID 2 on trunked switch 0. The captured results:
 1. **VSI documentation, no new validation.**
    - The tool docstring and the CLI help for the three `vsi_*` fields will state the following:
      - the HMC requires `vsi_manager_id` and `vsi_type_id` together, and refuses a lone field with REST0126;
-     - the HMC registers a complete profile through the serving VIOS over RMC.
+     - the HMC was observed to call the serving VIOS over RMC for a complete VSI profile.
    - Validation stays with the HMC (ADR 0307). Its REST0126 already names the missing field.
 2. **Classified add refusals.**
    - `operations.virtualization.adapters.add_network_adapter` is the one owner that both the MCP
@@ -48,10 +48,11 @@ Each add used PVID 2 on trunked switch 0. The captured results:
      - `HSCLB021`: the HMC's RMC call to the serving VIOS failed. The HMC makes that call to
        register a VSI profile. Check the VIOS's RMC state and VSI support, or omit the `vsi_*`
        fields.
-     - `REST0269`: the partition has no applied current configuration (`lssyscfg -r lpar -F
-       name,state,resource_config` reads `0`). Apply its profile once (`chsyscfg -r lpar -o
-       apply`) or activate the partition, then retry. A `curr_profile` that names a profile does
-       not prove the profile is applied.
+     - `REST0269`: the partition has no applied current configuration. Check its
+       `resource_config` (`lssyscfg -r lpar -F name,state,resource_config`; `1` means applied),
+       then apply its profile once (`chsyscfg -r lpar -o apply`) or activate the partition, and
+       retry. A `curr_profile` that names a profile does not prove the profile is applied. The
+       `resource_config` link rests on #939's prior evidence; this capture proved the remedy.
    - Both messages say the HMC refused the add, and tell the caller to list the partition's
      adapters to confirm none was left. HSCLB021 is checked first, because the HMC wraps it in
      REST0126.
