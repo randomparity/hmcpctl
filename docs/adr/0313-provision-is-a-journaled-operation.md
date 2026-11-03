@@ -2,6 +2,8 @@
 
 ## Status
 
+> **Partially superseded by [0319](0319-provision-mounts-installer-media-before-the-profile-save.md)** (2026-11-03)
+
 Accepted (2026-11-02), issues #1839 and #1840 (pieces 1 and 2 of #1225, one PR by operator
 decision). Implements the H1 spec's `hmc_provision_lpar` row, without `install`, under ADR 0189
 Decision 2 and ADRs 0190, 0195, 0236 and 0242, with ADR 0199 as the wiring precedent and ADR
