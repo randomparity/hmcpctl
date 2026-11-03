@@ -155,6 +155,14 @@ async def test_a_helper_failure_the_readback_shows_landed_is_applied(hmc, monkey
 
 
 @pytest.mark.asyncio
+async def test_an_empty_adapter_feed_does_not_vouch_for_an_empty_profile(hmc):
+    hmc.current, hmc.save_lands = [], False
+    hmc.profiles[0] = _profile("default")
+    missing, _ = await profile_persist.persisted(hmc, LPAR, "default")
+    assert missing == ["any virtual adapter"]
+
+
+@pytest.mark.asyncio
 async def test_a_missing_profile_is_an_error(hmc):
     hmc.profiles = []
     with pytest.raises(HMCError, match="no profile"):

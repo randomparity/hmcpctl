@@ -65,11 +65,17 @@ class StorageMixin:
         self.recovery = []
         self.level = "1060"
         self.disk_error = None
+        self.free_gib = 100
 
     async def list_volume_groups(self, vios):
         assert vios == VIOS
         disks = [{"DiskName": name} for name in sorted(self.disks)]
-        return [{"UUID": VG, "Resource": {"VirtualDisks": {"VirtualDisk": disks}}}]
+        resource = {
+            "GroupName": "datavg",
+            "FreeSpace": str(self.free_gib),
+            "VirtualDisks": {"VirtualDisk": disks},
+        }
+        return [{"UUID": VG, "Resource": resource}]
 
     async def create_virtual_disk(self, vios, vg, name, capacity):
         assert (vios, vg, capacity) == (VIOS, VG, 2048)
@@ -137,6 +143,12 @@ def hmc(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
             execution="unknown", requested_change="unverified", job=object()
         )
 
+    async def vios_on(_hmc, vios, *, system_name_or_uuid):
+        if (vios, system_name_or_uuid) != (VIOS, SYS):
+            raise LookupError("VIOS is not on the system")
+        return vios
+
+    monkeypatch.setattr(reconfigure, "resolve_vios_uuid", vios_on)
     monkeypatch.setattr(profile_persist, "read_partition_profile", read)
     monkeypatch.setattr(profile_persist, "save_current_partition_profile", save)
     return fake
@@ -289,6 +301,7 @@ def test_an_add_to_an_activated_partition_needs_rmc(hmc, state, rmc):
     [
         (lambda f: f.disks.add("data1"), "already has a virtual disk"),
         (lambda f: setattr(f, "level", "1050"), "10.3.1060"),
+        (lambda f: setattr(f, "free_gib", 1), "GiB free"),
         (
             lambda f: f.profile.find(".//{*}DesiredMemory").__setattr__("text", "1024"),
             "desired memory differs",
@@ -301,6 +314,13 @@ def test_add_refusals_write_nothing(hmc, setup, message):
     assert (record.outcome, record.effects) == ("failed", ())
     assert message in record.warnings[0]
     assert _writes(hmc) == []
+
+
+def test_a_vios_on_another_managed_system_is_refused(hmc):
+    other = {**ADD, "vios_uuid": "0000000d-0000-4000-8000-000000000000"}
+    record = _run({"disks": {"add": [other]}})
+    assert (record.outcome, record.effects) == ("failed", ())
+    assert "is not on managed system" in record.warnings[0]
 
 
 def test_a_volume_group_missing_from_the_vios_is_refused(hmc):

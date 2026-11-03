@@ -25,7 +25,7 @@ from ...documents.lpar import LparResources, partition_updates
 from ...documents.partition_profile import ProfilePatch
 from ...documents.storage import validate_virtual_disk
 from ...errors import HMCError, LparUpdateError
-from ...resource_identity import resolve_system_uuid
+from ...resource_identity import resolve_system_uuid, resolve_vios_uuid
 from ...xmlutil import console_version, escape_xml, leaf_text
 from ..logical import engine, profile_write, store
 from ..logical.engine import (
@@ -36,7 +36,7 @@ from ..logical.engine import (
     OperationFailed,
 )
 from ..logical.models import EffectRecord
-from ..storage.resources import storage_mapping
+from ..storage.resources import storage_mapping, volume_group
 from ..systems.fleet import read_system_entry
 from . import profile_persist
 from .memory_bound import require_memory_within_selected_system
@@ -570,6 +570,7 @@ async def _disk_plan(
     hmc: HMCClient,
     disks: DiskPatch,
     view: Mapping[str, Any],
+    system_uuid: str,
     lpar_uuid: str,
     allow_disruption: bool,
 ) -> dict[str, Any]:
@@ -585,9 +586,20 @@ async def _disk_plan(
             f"a disk detach from activated LPAR {lpar_uuid} removes a disk the guest may "
             "be using; pass allow_disruption=true"
         )
+    vioses = dict.fromkeys(d.vios_uuid.lower() for d in (*disks.add, *disks.detach))
+    for vios_uuid in vioses:
+        try:
+            await resolve_vios_uuid(hmc, vios_uuid, system_name_or_uuid=system_uuid)
+        except (HMCError, ValueError, LookupError) as exc:
+            raise OperationFailed(
+                f"VIOS {vios_uuid} is not on managed system {system_uuid}, or could not "
+                f"be read ({type(exc).__name__})"
+            ) from exc
+    claimed: dict[str, int] = {}
     try:
         adds = [
-            await _planned_add(hmc, item, index) for index, item in enumerate(disks.add)
+            await _planned_add(hmc, item, index, claimed)
+            for index, item in enumerate(disks.add)
         ]
         detaches = [
             await _planned_detach(hmc, item, index, lpar_uuid)
@@ -603,12 +615,23 @@ async def _disk_plan(
     return {"add": adds, "detach": detaches}
 
 
-async def _planned_add(hmc: HMCClient, item: DiskAdd, index: int) -> dict[str, Any]:
+async def _planned_add(
+    hmc: HMCClient, item: DiskAdd, index: int, claimed: dict[str, int]
+) -> dict[str, Any]:
+    """One add, checked; *claimed* sums the MiB earlier adds take from each group."""
     vios_uuid, vg_uuid = item.vios_uuid.lower(), item.vg_uuid.lower()
     groups = await hmc.list_volume_groups(vios_uuid)
-    if not any(str(g.get("UUID") or "").lower() == vg_uuid for g in groups):
+    group = [g for g in groups if str(g.get("UUID") or "").lower() == vg_uuid]
+    if not group:
         raise OperationFailed(
             f"disks.add[{index}]: volume group {vg_uuid} is not on VIOS {vios_uuid}"
+        )
+    claimed[vg_uuid] = claimed.get(vg_uuid, 0) + item.capacity_mib
+    free = volume_group(group[0]).free_space_gib
+    if free is not None and free * 1024 < claimed[vg_uuid]:
+        raise OperationFailed(
+            f"disks.add[{index}]: volume group {vg_uuid} has {free} GiB free, less than "
+            "the patch's adds to it need"
         )
     if any(item.name in virtual_disk_names(group) for group in groups):
         raise OperationFailed(
@@ -805,7 +828,9 @@ async def _make_plan(
     disks = None
     if patch.disks is not None:
         assert profile is not None
-        disks = await _disk_plan(hmc, patch.disks, view, lpar_uuid, allow_disruption)
+        disks = await _disk_plan(
+            hmc, patch.disks, view, system_uuid, lpar_uuid, allow_disruption
+        )
         if disks["add"]:
             require_persistable(view, profile, plan["changes"])
         plan["changes"] += _disk_changes(disks, view["state"] != _NOT_ACTIVATED)

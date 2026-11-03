@@ -23,7 +23,7 @@ from ...xmlutil import leaf_text
 from ..logical import engine
 from ..logical.engine import Classification, EffectNotApplied, OperationContext
 from ..logical.models import EffectRecord
-from .profile_sync import adapters_missing_from_profile
+from .profile_sync import _profile_slots, adapters_missing_from_profile
 from .profiles import read_partition_profile, save_current_partition_profile
 
 # Persisted contract (ADR 0195 Consequences).
@@ -55,7 +55,12 @@ def _name(entry: dict[str, Any]) -> str:
 async def persisted(
     hmc: HMCClient, lpar_uuid: str, profile_name: str
 ) -> tuple[list[str], list[str]]:
-    """The current client adapters *profile_name* lacks, and the recovery copies kept."""
+    """The current client adapters *profile_name* lacks, and the recovery copies kept.
+
+    A profile listing no virtual adapter at all counts as lacking one: every caller
+    persists at least one added adapter, so an empty current-adapter read must not make
+    an unsaved profile look complete.
+    """
     feed = await hmc.list_child(
         "LogicalPartition", lpar_uuid, "LogicalPartitionProfile"
     )
@@ -68,7 +73,10 @@ async def persisted(
     recovery = sorted(
         name for entry in entries if (name := _name(entry)).startswith(RECOVERY_PREFIX)
     )
-    return await adapters_missing_from_profile(hmc, lpar_uuid, found[0]), recovery
+    missing = await adapters_missing_from_profile(hmc, lpar_uuid, found[0])
+    if not _profile_slots(found[0]):
+        missing = missing or ["any virtual adapter"]
+    return missing, recovery
 
 
 def _copies(recovery: list[str]) -> str:
