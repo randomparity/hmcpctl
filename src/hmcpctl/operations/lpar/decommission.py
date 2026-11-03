@@ -189,6 +189,14 @@ class DecommissionBlastRadius(_MappingEvidence):
     unavailable_storage_source_count: int
 
 
+class DecommissionStorage(TypedDict):
+    """What ``delete_owned`` deleted, retained (with a reason) and has yet to delete."""
+
+    deleted: tuple[dict[str, str], ...]
+    retained: tuple[dict[str, str], ...]
+    pending: tuple[dict[str, str], ...]
+
+
 @dataclass(frozen=True)
 class DecommissionResult:
     """Truthful outcome of an LPAR decommission request."""
@@ -221,6 +229,14 @@ class DecommissionResult:
         metadata={
             "description": "The logical operation that ran the decommission (ADR 0320), "
             "or null for a dry run."
+        },
+    )
+    storage: DecommissionStorage | None = field(
+        default=None,
+        metadata={
+            "description": "Owned-storage cleanup under storage_cleanup=delete_owned "
+            "(ADR 0323): deleted items, retained items with a reason, and items still "
+            "pending; null under retain."
         },
     )
 

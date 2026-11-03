@@ -334,6 +334,7 @@ def test_hmc_decommission_lpar_delegates_with_one_configured_client() -> None:
         timeout_seconds=123,
         poll_interval=7,
         system_name_or_uuid="system-a",
+        journal=None,
     )
 
 

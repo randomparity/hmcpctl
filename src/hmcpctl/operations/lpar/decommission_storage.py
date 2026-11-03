@@ -13,8 +13,6 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from typing_extensions import TypedDict
-
 from ...client.client_storage import mapping_lpar_uuid, storage_mapping_id
 from ...client.core import HMCClient
 from ...errors import HMCError
@@ -25,6 +23,7 @@ from ..logical.engine import Classification, EffectNotApplied, OperationContext
 from ..logical.models import EffectRecord
 from .decommission import (
     EFFECT_KINDS,
+    DecommissionStorage,
     Write,
     _records,
     _text,
@@ -40,7 +39,6 @@ DELETE_KINDS: Mapping[str, str] = {
     DISK_LEDGER: "vios.virtual_disk_delete",
     MEDIA_LEDGER: "vios.optical_media_delete",
 }
-_KEY_PREFIX = {DISK_LEDGER: "disk", MEDIA_LEDGER: "media"}
 _STORAGE_SECTIONS = (
     ("VirtualDisk", "DiskName", DISK_LEDGER),
     ("VirtualOpticalMedia", "MediaName", MEDIA_LEDGER),
@@ -48,14 +46,6 @@ _STORAGE_SECTIONS = (
     ("LogicalUnit", "UnitName", None),
 )
 INCOMPLETE = "inventory_incomplete"
-
-
-class DecommissionStorage(TypedDict):
-    """What ``delete_owned`` deleted, retained (with a reason) and has yet to delete."""
-
-    deleted: tuple[dict[str, str], ...]
-    retained: tuple[dict[str, str], ...]
-    pending: tuple[dict[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -123,11 +113,6 @@ def delete_key(item: OwnedItem) -> str:
     if item.kind == DISK_LEDGER:
         return f"disk.{_digest(item.vios_uuid, item.vg_uuid or '', item.name)}"
     return f"media.{_digest(item.vios_uuid, item.name)}"
-
-
-def is_cleanup_key(key: str) -> bool:
-    """Whether *key* is a cleanup delete, which only ``storage`` reports."""
-    return key.startswith(tuple(f"{prefix}." for prefix in _KEY_PREFIX.values()))
 
 
 def _target(item: OwnedItem, vg_uuid: str) -> str:

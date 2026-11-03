@@ -25,9 +25,19 @@ from .decommission import (
     EFFECT_KINDS,
     DecommissionBlastRadius,
     DecommissionResult,
+    DecommissionStorage,
+    _Direct,
     _inventory_adapters,
     _vscsi_detach_inventory,
     decommission_lpar,
+)
+from .decommission_storage import (
+    INCOMPLETE,
+    clean_storage,
+    deleted_from_effects,
+    plan_storage,
+    storage_classifiers,
+    storage_from_effects,
 )
 from .power import open_client
 from .workflow_contract import WorkflowStep
@@ -40,7 +50,9 @@ DEFAULT_ARGUMENTS: Mapping[str, Any] = {
     "immediate": False,
     "timeout_seconds": 300,
     "poll_interval": 5,
+    "storage_cleanup": "retain",
 }
+STORAGE_CLEANUP = ("retain", "delete_owned")
 _REQUIRED = ("system_name_or_uuid", "lpar_name_or_uuid")
 # The four ADR 0027 steps, in order, and the effects each one reports (ADR 0320 D7).
 _STEPS = ("power_off", "detach_storage_mappings", "detach_adapters", "delete_lpar")
@@ -84,9 +96,31 @@ def effective_arguments(
     return new_arguments(given), recorded is not None
 
 
-async def preview(hmc: HMCClient, arguments: Mapping[str, Any]) -> DecommissionResult:
-    """The dry-run inventory of *arguments*; it raises what a new request must refuse."""
-    return await decommission_lpar(
+def deletes_owned(arguments: Mapping[str, Any]) -> bool:
+    """Whether *arguments* ask for ADR 0323's cleanup; a record predating the field
+    retains."""
+    return arguments.get("storage_cleanup", "retain") == "delete_owned"
+
+
+class _Target(_Direct):
+    """The direct journal, keeping the system and partition the inventory resolved."""
+
+    target: tuple[str, str] | None = None
+
+    def guard(self, system_uuid: str, partition_uuid: str) -> None:
+        self.target = (system_uuid, partition_uuid)
+
+
+async def preview_target(
+    hmc: HMCClient, arguments: Mapping[str, Any]
+) -> tuple[DecommissionResult, tuple[str, str] | None]:
+    """The dry-run inventory of *arguments*; it raises what a new request must refuse.
+
+    With ``delete_owned`` the result carries the storage plan (ADR 0323 Decision 6) and
+    the (system, partition) UUIDs the inventory resolved come back too; else None.
+    """
+    journal = _Target() if deletes_owned(arguments) else None
+    result = await decommission_lpar(
         hmc,
         arguments["lpar_name_or_uuid"],
         system_name_or_uuid=arguments["system_name_or_uuid"],
@@ -95,39 +129,86 @@ async def preview(hmc: HMCClient, arguments: Mapping[str, Any]) -> DecommissionR
         immediate=arguments["immediate"],
         timeout_seconds=arguments["timeout_seconds"],
         poll_interval=arguments["poll_interval"],
+        journal=journal,
     )
+    if journal is None or journal.target is None:
+        return result, None
+    storage = await plan_storage(hmc, *journal.target)
+    return dataclasses.replace(result, storage=storage), journal.target
+
+
+async def preview(hmc: HMCClient, arguments: Mapping[str, Any]) -> DecommissionResult:
+    """The dry-run inventory of *arguments*; it raises what a new request must refuse."""
+    return (await preview_target(hmc, arguments))[0]
 
 
 def decommission_body(
-    arguments: Mapping[str, Any], client_factory: ClientFactory = open_client
+    arguments: Mapping[str, Any],
+    client_factory: ClientFactory = open_client,
+    *,
+    authorized_vios: frozenset[str] | None = None,
 ) -> engine.Body:
-    """The operation body for one ``hmc_decommission_lpar`` request."""
+    """The operation body for one ``hmc_decommission_lpar`` request.
+
+    With ``delete_owned`` it cleans owned storage once the partition is deleted, on
+    VIOSes in *authorized_vios* only (ADR 0323 Decision 5).
+    """
+    cleanup = deletes_owned(arguments)
+
+    async def run(ctx: OperationContext, hmc: HMCClient, gone: bool) -> BodyResult:
+        result = None
+        if not gone:
+            result = await decommission_lpar(
+                hmc,
+                arguments["lpar_name_or_uuid"],
+                system_name_or_uuid=arguments["system_name_or_uuid"],
+                ownership_override=arguments["ownership_override"],
+                immediate=arguments["immediate"],
+                timeout_seconds=arguments["timeout_seconds"],
+                poll_interval=arguments["poll_interval"],
+                journal=ctx,
+            )
+            if not (cleanup and result.resource_deleted):
+                outcome = (
+                    "completed" if result.workflow_completed else "needs_attention"
+                )
+                return BodyResult(outcome, _RESULT.dump_python(result, mode="json"))
+        assert ctx.partition is not None
+        ctx.set_phase("cleaning_storage")
+        retained = await clean_storage(
+            hmc, ctx, *ctx.partition, authorized_vios=authorized_vios
+        )
+        storage: DecommissionStorage = {
+            "deleted": (),
+            "retained": retained,
+            "pending": (),
+        }
+        outcome = (
+            "needs_attention"
+            if any(item.get("reason") == INCOMPLETE for item in retained)
+            else "completed"
+        )
+        if result is None:
+            # The partition went in an earlier run; result_from_record rebuilds the rest.
+            return BodyResult(outcome, {"storage": storage})
+        result = dataclasses.replace(result, storage=storage)
+        return BodyResult(outcome, _RESULT.dump_python(result, mode="json"))
 
     async def body(ctx: OperationContext) -> BodyResult:
         deleted = ctx.recorded(DELETE_LPAR_KEY)
-        if deleted is not None and deleted.status == "applied":
+        gone = deleted is not None and deleted.status == "applied"
+        if gone and not cleanup:
             # The partition is gone; result_from_record rebuilds from the journal.
             return BodyResult("completed")
         async with client_factory(ctx.connection) as hmc:
             try:
-                result = await decommission_lpar(
-                    hmc,
-                    arguments["lpar_name_or_uuid"],
-                    system_name_or_uuid=arguments["system_name_or_uuid"],
-                    ownership_override=arguments["ownership_override"],
-                    immediate=arguments["immediate"],
-                    timeout_seconds=arguments["timeout_seconds"],
-                    poll_interval=arguments["poll_interval"],
-                    journal=ctx,
-                )
+                return await run(ctx, hmc, gone)
             except _BODY_ERRORS as exc:
                 lpar = ctx.partition[1] if ctx.partition else "unresolved"
                 raise RuntimeError(
                     f"decommission of LPAR {lpar} stopped ({type(exc).__name__}); "
                     "inspect it, then resume or abandon"
                 ) from exc
-        outcome = "completed" if result.workflow_completed else "needs_attention"
-        return BodyResult(outcome, _RESULT.dump_python(result, mode="json"))
 
     return body
 
@@ -206,6 +287,7 @@ def decommission_classifiers(
         EFFECT_KINDS["unmap"]: unmap,
         EFFECT_KINDS["adapter"]: adapter,
         EFFECT_KINDS["delete_lpar"]: delete,
+        **storage_classifiers(client_factory),
     }
 
 
@@ -261,17 +343,39 @@ def _minimal_blast_radius(lpar_uuid: str) -> DecommissionBlastRadius:
     }
 
 
-def result_from_record(record: OperationRecord) -> DecommissionResult:
+def _storage(
+    record: OperationRecord, stored: DecommissionResult | None
+) -> DecommissionStorage:
+    """``deleted`` and ``pending`` from the journal, so they span every run; ``retained``
+    from the latest pass the record holds (ADR 0323 Decision 6)."""
+    latest = (
+        stored.storage if stored is not None else (record.result or {}).get("storage")
+    )
+    journal = storage_from_effects(record.effects)
+    return {
+        "deleted": deleted_from_effects(record.effects),
+        "retained": tuple(latest["retained"]) if latest else (),
+        "pending": journal["pending"],
+    }
+
+
+def result_from_record(
+    record: OperationRecord, *, delete_owned: bool = False
+) -> DecommissionResult:
     """The tool result: the body's own result where it agrees with the journal, else
-    one rebuilt from the effects (ADR 0320 Decision 7)."""
+    one rebuilt from the effects (ADR 0320 Decision 7). *delete_owned* is the recorded
+    mode, which the record does not carry."""
     stored = _stored(record)
+    storage = _storage(record, stored) if delete_owned else None
     warnings = record.warnings
     if stored is not None and (
         record.outcome == "completed"
         or (record.outcome == "needs_attention" and _agrees(stored, record))
     ):
         merged = tuple(dict.fromkeys((*stored.warnings, *warnings)))
-        return dataclasses.replace(stored, warnings=merged, operation=record)
+        return dataclasses.replace(
+            stored, warnings=merged, operation=record, storage=storage
+        )
     lpar_uuid = record.partition_uuid or ""
     if stored is not None:
         blast_radius = stored.blast_radius
@@ -297,4 +401,5 @@ def result_from_record(record: OperationRecord) -> DecommissionResult:
         warnings=tuple(warnings),
         blast_radius=blast_radius,
         operation=record,
+        storage=storage,
     )
