@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from enum import Enum
 from typing import Any
@@ -35,9 +36,11 @@ from ...operations.storage.resources import (
     list_optical_media,
     list_storage_mappings,
     list_volume_groups,
+    load_optical_media,
     map_storage,
     mount_optical_media,
     resolve_volume_group_uuid,
+    unload_optical_media,
     unmount_optical_media,
     upload_iso,
 )
@@ -946,6 +949,172 @@ def storage_unmount_optical_media(
     )
 
 
+_TARGET_DEVICE_HELP = "Virtual optical device; omit when the LPAR has exactly one"
+_RELEASE_HELP = (
+    "Force the device free of a stale client reservation (-release); audited"
+)
+
+
+def _change_optical(
+    command: str,
+    question: str,
+    operation: Callable[[HMCClient], Awaitable[StorageMutationResult]],
+    *,
+    yes: bool,
+    release: bool,
+    summary: dict[str, Any],
+    selected: InventoryFormat,
+    details: bool,
+) -> None:
+    """Confirm, run and print one optical load or unload (ADR 0317)."""
+    forced = ", forcibly releasing a client reservation" if release else ""
+    _confirm_storage(yes, f"{question}{forced}?")
+    result = with_client(operation)
+    _print_mutation(
+        {
+            "operation": command,
+            **summary,
+            "lpar_uuid": result.lpar_uuid,
+            "target_device": result.raw["target_device"],
+            "release": release,
+        },
+        result,
+        selected,
+        details,
+    )
+
+
+def storage_load_optical_media(
+    vios: str = typer.Argument(..., help="VIOS name or UUID"),
+    lpar: str = typer.Option(..., "--lpar", help="Target LPAR name or UUID"),
+    media_name: str = typer.Option(
+        ..., "--name", "-n", help="Repository medium name to load"
+    ),
+    system: str | None = typer.Option(
+        None, "--system", "-s", help="Managed system name or UUID"
+    ),
+    target_device: str | None = typer.Option(
+        None, "--target-device", help=_TARGET_DEVICE_HELP
+    ),
+    release: bool = typer.Option(False, "--release", help=_RELEASE_HELP),
+    ownership_override: bool = typer.Option(
+        False,
+        "--ownership-override",
+        help="Bypass LPAR ownership protection after operator approval",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Confirm this mutation; required without terminal stdin",
+    ),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format (default: table on TTY, tsv when redirected)",
+    ),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        help="Original result as JSON; may contain hardware identifiers",
+    ),
+) -> None:
+    """Load a repository medium into an LPAR's existing virtual optical device.
+
+    Runs the VIOS loadopt command; the mapping stays. The VIOS does not replace a
+    loaded medium: run unload-optical-media first.
+    """
+    selected = resolve_inventory_format(as_json or details, format)
+    device = (
+        f" device {terminal_field(target_device, err=True)}" if target_device else ""
+    )
+    _change_optical(
+        "load-optical-media",
+        f"Load optical media '{terminal_field(media_name, err=True)}' into LPAR "
+        f"{terminal_field(lpar, err=True)}'s optical{device} on VIOS "
+        f"{terminal_field(vios, err=True)}",
+        lambda hmc: load_optical_media(
+            hmc,
+            vios,
+            lpar,
+            media_name=media_name,
+            target_device=target_device,
+            release=release,
+            ownership_override=ownership_override,
+            system_name_or_uuid=system,
+        ),
+        yes=yes,
+        release=release,
+        summary={"target": media_name, "vios": vios, "system": system, "lpar": lpar},
+        selected=selected,
+        details=details,
+    )
+
+
+def storage_unload_optical_media(
+    vios: str = typer.Argument(..., help="VIOS name or UUID"),
+    lpar: str = typer.Option(..., "--lpar", help="Target LPAR name or UUID"),
+    system: str | None = typer.Option(
+        None, "--system", "-s", help="Managed system name or UUID"
+    ),
+    target_device: str | None = typer.Option(
+        None, "--target-device", help=_TARGET_DEVICE_HELP
+    ),
+    release: bool = typer.Option(False, "--release", help=_RELEASE_HELP),
+    ownership_override: bool = typer.Option(
+        False,
+        "--ownership-override",
+        help="Bypass LPAR ownership protection after operator approval",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Confirm this mutation; required without terminal stdin",
+    ),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format (default: table on TTY, tsv when redirected)",
+    ),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        help="Original result as JSON; may contain hardware identifiers",
+    ),
+) -> None:
+    """Unload the medium from an LPAR's virtual optical device, keeping the mapping.
+
+    The emptied mapping shows only in list-mappings; unmount-optical-media cannot
+    remove it until a medium is loaded again.
+    """
+    selected = resolve_inventory_format(as_json or details, format)
+    device = (
+        f" device {terminal_field(target_device, err=True)}" if target_device else ""
+    )
+    _change_optical(
+        "unload-optical-media",
+        f"Unload LPAR {terminal_field(lpar, err=True)}'s optical{device} on VIOS "
+        f"{terminal_field(vios, err=True)}",
+        lambda hmc: unload_optical_media(
+            hmc,
+            vios,
+            lpar,
+            target_device=target_device,
+            release=release,
+            ownership_override=ownership_override,
+            system_name_or_uuid=system,
+        ),
+        yes=yes,
+        release=release,
+        summary={"vios": vios, "system": system, "lpar": lpar},
+        selected=selected,
+        details=details,
+    )
+
+
 def storage_list_mappings(
     vios: str = typer.Argument(..., help="VIOS name or UUID"),
     lpar: str | None = typer.Option(
@@ -1130,6 +1299,8 @@ def register_commands(group: typer.Typer) -> None:
     group.command("list-optical-media")(storage_list_optical_media)
     group.command("mount-optical-media")(storage_mount_optical_media)
     group.command("unmount-optical-media")(storage_unmount_optical_media)
+    group.command("load-optical-media")(storage_load_optical_media)
+    group.command("unload-optical-media")(storage_unload_optical_media)
     group.command("list-mappings")(storage_list_mappings)
     group.command("detach-mapping")(storage_detach_mapping)
     group.command("upload-iso")(storage_upload_iso)

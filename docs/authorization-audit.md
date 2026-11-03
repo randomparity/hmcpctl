@@ -375,6 +375,33 @@ PowerOff and writes no record, and neither does a dry run.
 
 It carries no `policy`, `decision`, `reason`, `targets`, or `connection`, and not as nulls.
 
+### `event: "optical-release"`
+
+Emitted immediately **before** a VIOS `loadopt` or `unloadopt` is submitted with `-release`, one
+record per request, from `hmc_load_optical_media`, `hmc_unload_optical_media`,
+`hmcpctl storage load-optical-media`, `hmcpctl storage unload-optical-media`, or the Python
+`load_optical_media` and `unload_optical_media` with `release=True`. Always `WARNING`. No access
+policy gates it. The decision is [ADR 0317](adr/0317-optical-media-load-through-viosvrcmd.md).
+
+```json
+{"time":"2026-11-03T18:00:00+00:00","event":"optical-release","action":"unload","system":"sys-a","vios":"22222222-2222-2222-2222-222222222222","lpar":"11111111-1111-1111-1111-111111111111","target_device":"vtopt1","media":null,"host":"hmc-a.example","attribution":{"claim":"agent-7","source":"config:agent_id","verified":false}}
+```
+
+`action` is `load` or `unload`. `-release` forces the virtual optical device free when a client
+partition holds a reservation on it, so this is the record to filter on for a forced release.
+`system` is the managed system's name and `vios` and `lpar` are the resolved VIOS and client
+partition UUIDs, whatever selectors the caller passed. `target_device` is the virtual target
+device the command names, and `media` the medium a load names (`null` for an unload).
+`host` and `attribution` are as for `lpar-power-off`.
+
+The record is written after name validation, the
+[ADR 0011](adr/0011-multi-agent-lpar-ownership.md) ownership guard and the check that the
+device belongs to that partition's mapping, so a refused call writes no record. It is written
+before the command, so a command that then fails is still recorded: the record proves an
+attempt, not that the device was released. A load or unload without `release` writes none.
+
+It carries no `policy`, `decision`, `reason`, `targets`, or `connection`, and not as nulls.
+
 ### `event: "power-ownership-guard"`
 
 Emitted once at `serve` startup for every connection the selected access policy can route.

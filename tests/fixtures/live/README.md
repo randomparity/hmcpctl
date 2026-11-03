@@ -89,6 +89,13 @@ Their token maps are their own, and each run's tokens are local to its own fixtu
 `dev-14` and media `media-2`/`media-3` are second-run tokens). Never join them to other fixtures by
 token.
 
+`cli-vios-loadopt-occupied` (`capture` prefix `2026-11-03-q1285/`) comes from the ST71 run that
+proved #1285's `hmc_load_optical_media` and `hmc_unload_optical_media` on the same V10R3 HMC and
+POWER9 system: a raw `loadopt` naming a second medium for a device that already held one. It exits
+1 with `HSCL2970` and the VIOS reason `This device already contains a loaded virtual disk` on
+stdout, stderr empty, so the tools report a refusal rather than an unknown completion
+(ADR 0317). Its tokens (`dev-14`, `media-3`) are local to that run's corpus.
+
 `rest-user-create-remote-user-id-refused` and `rest-user-profile-kerberos` (`capture` prefix
 `2026-10-13-q1414/`) come from an operator-authorized window for #1414 on the V10R3 HMC, each
 run making at most one disposable Kerberos-type user with a synthetic principal, then deleting

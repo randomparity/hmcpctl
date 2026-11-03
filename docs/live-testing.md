@@ -451,7 +451,7 @@ that is left, and nothing else.
 ### The vmedia-media-change arm
 
 This arm captures how the HMC and VIOS change the medium in an existing virtual
-optical device, for #1285 (#1284). It is not in `all` or `vmedia`, and subtask 71
+optical device (#1284), and proves the #1285 load and unload tools. It is not in `all` or `vmedia`, and subtask 71
 SKIPs outside its own group. ST16 resolves the VIOS, the test partition and the
 repository as the vmedia arm does; ST22 removes any medium ST71 left. ST71 needs the
 test partition unprotected and `Not Activated` and 2 GiB free in the repository. The
@@ -465,9 +465,16 @@ in `tests/fixtures/live/README.md`. It:
 - Q4: posts the VIOS `ViosSCSIMapping` group with a second mapping naming that VTD
   (expected HTTP 500), then compares the adapter listings with the post-mount ones;
 - Q1: posts the group with that mapping's `Storage` naming the second medium;
-- Q2: `unloadopt` and `loadopt` through `viosvrcmd`;
-- Q3: powers the test partition on, then immediately off, and repeats them, retrying
-  each with `-release` only when the plain command fails;
+- Q2: unloads and loads the device through `hmc_unload_optical_media` and
+  `hmc_load_optical_media` (#1285), then loads the second medium into the occupied
+  device through the tool and as a raw `loadopt`, to capture how a refusal is answered;
+- Q3: powers the test partition on, then immediately off, and unloads (with `release`
+  only when the plain unload fails), loads with `release`, unloads with `release` and
+  loads again, all through the tools;
+- after each tool step reads `lsvopt` and records a `<step> check` row, PASS only when the
+  tool succeeded and the device holds the expected medium or `No Media`. These rows are
+  evidence for the reviewer of the run; like every ST71 row they promote no maturity, so
+  `media.load` and `media.unload` stay unevidenced in the capability ledger;
 - unmounts and deletes its media, reloading an empty device first so the unmount
   can name it, and compares mappings and adapters with its baseline.
 

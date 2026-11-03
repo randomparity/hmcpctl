@@ -2,7 +2,7 @@
 
 # `media` tools
 
-10 tools in the `media` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+12 tools in the `media` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -15,6 +15,8 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_get_media_repository` | `read` | `media.get_repository` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Get the VolumeGroup Atom entry containing a Virtual Media Repository. |
 | `hmc_list_optical_mappings` | `read` | `media.list_mappings` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List VirtualSCSIMappings for optical media on a VIOS, optionally filtered by LPAR. |
 | `hmc_list_optical_media` | `read` | `media.list` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List Virtual Optical Media in the Virtual Media Repository. |
+| `hmc_load_optical_media` | `destructive` | `media.load` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Load a repository medium into an LPAR's existing virtual optical device. |
 | `hmc_mount_optical_media` | `mutate` | `media.mount` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create a VirtualSCSIMapping for optical media (mount ISO to LPAR). |
+| `hmc_unload_optical_media` | `destructive` | `media.unload` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Unload the medium from an LPAR's virtual optical device, keeping the mapping. |
 | `hmc_unmount_optical_media` | `destructive` | `media.unmount` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Remove a VirtualSCSIMapping for optical media (unmount). |
 | `hmc_upload_iso` | `mutate` | `media.upload_iso` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Upload an ISO to a VIOS media repository via the HMC web File API. |

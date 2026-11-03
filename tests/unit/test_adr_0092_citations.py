@@ -44,6 +44,7 @@ _MUTATOR_PREFIXES = (
     "deploy_",
     "detach_",
     "install_",
+    "load_",
     "map_",
     "migrate_",
     "modify_",
@@ -59,6 +60,7 @@ _MUTATOR_PREFIXES = (
     "synchronize_",
     "submit_power_on_lpar",
     "unassign_",
+    "unload_",
     "unmount_",
     "update_",
 )
@@ -129,6 +131,8 @@ _CLASSIFIED_MUTATORS = frozenset(
         "detach_storage_mapping",
         "mount_optical_media",
         "unmount_optical_media",
+        "load_optical_media",
+        "unload_optical_media",
         "set_minimum_affinity_policy",
         "set_lpar_ownership_description",
     }
@@ -156,6 +160,8 @@ _GUARDED_DELEGATES = {
     "assign_sriov_logical_port": "_preflight_sriov_assignment",
     "apply_lpar_pcie_assignments": "apply_validated_lpar_pcie_assignments",
     "migrate_lpar_with_affinity_preflight": "migrate_lpar",
+    "load_optical_media": "_change_optical_media",
+    "unload_optical_media": "_change_optical_media",
 }
 _UNCHECKED_ROWS = frozenset({"`hmc lpar modify` (CLI)"})
 

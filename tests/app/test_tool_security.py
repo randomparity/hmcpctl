@@ -450,6 +450,8 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         "hmc_dump_restart_lpar",
         # ADR 0189: classed by the most severe tool it can reach.
         "hmc_invoke_tool",
+        # ADR 0317: either can force-release a client reservation on the device.
+        "hmc_load_optical_media",
         "hmc_migrate_abort_lpar",
         # ADR 0199: its stop and restart actions power the partition off.
         "hmc_power_lpar",
@@ -461,6 +463,7 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         # Saving current configuration can overwrite an existing saved profile.
         "hmc_save_current_partition_profile",
         "hmc_save_current_vios_partition_profile",
+        "hmc_unload_optical_media",
         # #247: the firmware/software update tools overwrite existing software
         # they did not create (ADR 0035 amendment). No prefix is newly reliable:
         # "update" sits mid-name on hmc_vios_update and would over-match future
