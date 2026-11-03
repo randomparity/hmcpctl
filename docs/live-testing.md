@@ -773,8 +773,10 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   the run volume deleted and reported in `storage.deleted` (`owned-disk-deleted`), and
   foreign mappings, the group's other volumes, `lspv` and `lsrep` unchanged
   (`shared-storage-retained`). The arm no longer exercises `retain` natively; the
-  2026-10-09 run is its evidence. Teardown deletes the run volume only when a run
-  stopped before the decommission removed it.
+  2026-10-09 run is its evidence. On 2026-11-03 (V10R3, POWER9) the `delete_owned`
+  decommission held all eight of its assertions and recovery reported clean (#1848).
+  Teardown deletes the run volume only when a run stopped before the decommission
+  removed it.
 - **Not run, recorded as SKIP rows naming what they need:** `hmc_dump_restart_lpar`,
   provision's SR-IOV and vNIC arguments, a graceful `hmc_power_lpar` stop or
   restart, and whole-system power.
