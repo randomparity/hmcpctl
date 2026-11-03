@@ -41,6 +41,7 @@ from ...operations.lpar.decommission_operation import (
     decommission_classifiers,
     effective_arguments,
     given_arguments,
+    new_arguments,
     preview,
     result_from_record,
 )
@@ -541,14 +542,16 @@ def hmc_decommission_lpar(
         timeout_seconds=timeout_seconds,
         poll_interval=poll_interval,
     )
+    if dry_run:
+        # Reads no operation store, so a store needing recovery still previews.
+        arguments = new_arguments(given)
+        return with_client(lambda hmc: preview(hmc, arguments), profile=profile)
     config = build_config(profile=profile)
     agent_id = config.agent_id or "hmcpctl"
     effective, exists = effective_arguments(given, agent_id, request_id, continuation)
-    if dry_run or not exists:
+    if not exists:
         # Preconditions refuse a new operation before anything is recorded.
-        inventory = with_client(lambda hmc: preview(hmc, effective), profile=profile)
-        if dry_run:
-            return inventory
+        with_client(lambda hmc: preview(hmc, effective), profile=profile)
     record = engine.submit(
         OperationRequest(
             DECOMMISSION_TOOL_NAME,

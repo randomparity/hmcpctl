@@ -61,6 +61,14 @@ def given_arguments(**values: Any) -> dict[str, Any]:
     }
 
 
+def new_arguments(given: Mapping[str, Any]) -> dict[str, Any]:
+    """A new request's arguments: the caller's, over the tool's defaults."""
+    missing = [name for name in _REQUIRED if name not in given]
+    if missing:
+        raise ValueError(f"a new operation needs {', '.join(missing)}")
+    return {**DEFAULT_ARGUMENTS, **given}
+
+
 def effective_arguments(
     given: Mapping[str, Any], agent_id: str, request_id: str, continuation: str
 ) -> tuple[dict[str, Any], bool]:
@@ -73,10 +81,7 @@ def effective_arguments(
                 f"no operation has request_id {request_id}; omit continuation to start one",
             )
         return {**recorded, **given}, True
-    missing = [name for name in _REQUIRED if name not in given]
-    if missing:
-        raise ValueError(f"a new operation needs {', '.join(missing)}")
-    return {**DEFAULT_ARGUMENTS, **given}, recorded is not None
+    return new_arguments(given), recorded is not None
 
 
 async def preview(hmc: HMCClient, arguments: Mapping[str, Any]) -> DecommissionResult:

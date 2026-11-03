@@ -395,6 +395,23 @@ def test_a_dry_run_records_nothing(served):
     served.submit_job.assert_not_awaited()
 
 
+def test_a_dry_run_reads_no_operation_store(served, monkeypatch, tmp_path):
+    # A store-id sentinel without its store is a lost store (ADR 0190 Decision 1).
+    (tmp_path / "store-id").write_text("x")
+    monkeypatch.setenv(store.STATE_DIR_ENV, str(tmp_path))
+    result = hmc_decommission_lpar(
+        request_id="d2",
+        system_name_or_uuid="system-a",
+        lpar_name_or_uuid="aix-prod",
+        dry_run=True,
+    )
+    assert result.dry_run is True
+    with pytest.raises(store.OperationRefused):
+        hmc_decommission_lpar(
+            request_id="d2", system_name_or_uuid="system-a", lpar_name_or_uuid="x"
+        )
+
+
 def test_a_refused_inventory_records_nothing(served):
     served.list_logical_partitions.return_value = []
     with pytest.raises(ValueError):
