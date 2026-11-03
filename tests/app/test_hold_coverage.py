@@ -361,3 +361,12 @@ def test_hold_id_stays_outside_a_logical_request_digest(app):
 
     first, *repeats = asyncio.run(go())
     assert repeats == [first, first]
+
+
+@pytest.mark.parametrize("tool", ["hmc_get_lpar", "hmc_capture_lpar_console"])
+def test_reads_and_exempt_tools_pass_a_held_partition(app, tool):
+    application, spy, _ = app
+    holds.place_hold(SYS, LPAR, consumer_label="kdive", agent_id="a", connection="c")
+    outcome = _call(application, tool, LPAR)
+    assert "partition_held" not in outcome, outcome
+    assert spy.refused == [] and spy.passed == [LPAR], (spy.passed, outcome)
