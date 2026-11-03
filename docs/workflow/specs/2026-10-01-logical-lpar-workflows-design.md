@@ -260,6 +260,12 @@ off with the owned root disk as its only disk):
 9. poll refcodes until a newer row (HMC time and row order) carries a code in the boot-started
    set, or `wait_seconds` runs out, then report `needs_attention` with the observed codes.
 
+[ADR 0326](../../adr/0326-provision-boots-the-installer-once-and-polls-refcodes.md) fixes steps
+8–9: the revalidation runs before any power-on in both timings, the baseline is effect
+`refcode_baseline` (`lpar.refcode_baseline`), the power-on is ADR 0313's `power_on` effect, and
+the poll reads the newest 20 rows every 15 seconds for the call's `wait_seconds`, at least once.
+The hold check before power-on joins with #1851.
+
 hmcpctl never acquires the console during boot. A caller who wants the console from its first
 byte uses `boot: deferred`, attaches their own console (HMC `mkvterm`/`vtmenu` or the `hmcpctl`
 console CLI), then sends `continuation: boot`. Firmware that stops at SMS, Open Firmware or a menu
@@ -291,7 +297,7 @@ what keeps the media-first boot order from reinstalling on the guest's reboot. C
 the login user pass through to the producer untouched.
 
 **Undecided:** the boot-started reference-code set and the refcode timestamp's zone handling.
-#1230 fills both from native evidence. Until then `boot_started` is never reported.
+#1850 fills both from native evidence. Until then `boot_started` is never reported.
 
 **Not verified by hmcpctl:**
 

@@ -5005,7 +5005,7 @@
             "parameters": [
               {
                 "name": "continuation",
-                "constraint": "none, resume or abandon"
+                "constraint": "none, resume or abandon; boot with install"
               },
               {
                 "name": "expected_plan_digest",
@@ -5060,15 +5060,28 @@
                 "constraint": "media.mode built runs the operator-configured build entry (HMC_ISO_BUILD_ENTRY) without a shell after the adapter MAC is recorded, binds its iso-chain-media-v1 result to that MAC and the operation, then follows the prepared-media path to ready_to_boot (ADR 0324)"
               }
             ]
-          }
-        ],
-        "missing_scope": [
+          },
           {
             "variant": "installer-boot",
             "parameters": [
               {
                 "name": "boot",
-                "constraint": "immediate with install refused; installer power-on, continuation boot and boot_started are owned by issue #1849"
+                "constraint": "immediate boots in the same call; deferred pauses at ready_to_boot for continuation boot; revalidates before power-on, journals a refcode baseline, activates the saved profile once and polls refcodes until wait_seconds (ADR 0326)"
+              },
+              {
+                "name": "continuation",
+                "constraint": "boot accepted on a ready_to_boot operation; needs exclusive_writer_window"
+              }
+            ]
+          }
+        ],
+        "missing_scope": [
+          {
+            "variant": "boot-started-codes",
+            "parameters": [
+              {
+                "name": "boot",
+                "constraint": "the boot-started reference-code set is empty until native evidence fills it, so no operation reports boot_started; owned by issue #1850"
               }
             ]
           },
