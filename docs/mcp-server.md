@@ -545,7 +545,9 @@ keeps at most one hold per partition. While a partition is held, this host's MCP
 refuse every partition-mutation tool and command that resolves it, with `partition_held`, unless
 the call presents the hold's `hold_id`. Every such tool takes an optional `hold_id` argument and
 every such CLI command takes `--hold-id`; `hold_id` is not part of a logical operation's
-request, so a continuation may add it. Reads, `hmc_capture_lpar_console` and the handoff tool
+request, so a continuation of a paused operation may add it. A logical operation refused for a
+hold ends `failed`, and a repeat of its `request_id` returns that record, so retry with a new
+`request_id`. Reads, `hmc_capture_lpar_console` and the handoff tool
 are not refused. A store that cannot be read refuses these calls too.
 
 A hold binds only this host's front ends. The library API, other hosts, the HMC GUI and direct

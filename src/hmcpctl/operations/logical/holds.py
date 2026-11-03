@@ -248,7 +248,8 @@ def enforce_hold(partition_uuid: str) -> None:
     raise HoldRefused(
         "partition_held",
         f"partition {held.partition_uuid} is {describe(held)}; present its hold_id, or ask "
-        "the operator to release it with hmcpctl holds release",
+        "the operator to release it with hmcpctl holds release. A logical operation refused "
+        "here has ended failed, so retry it with a new request_id",
     )
 
 
