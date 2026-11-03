@@ -42,7 +42,7 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   run re-checks that the partition is powered off, the media still listed and mapped, the boot
   order and adapter MAC unchanged, and the owned disk its only disk; otherwise it pauses
   `needs_attention` without powering on. It records the newest reference code, activates the saved
-  profile once, and reads reference codes every 15 seconds for the call's `wait_seconds`. The
+  profile once, and reads reference codes every 15 seconds until the call's `wait_seconds` ends. The
   boot-started code set stays empty until native evidence fills it (#1850), so the wait ends
   `needs_attention` with the newer codes it saw, and `resume` polls again without a second
   power-on. `install` now also needs `hmc_power_on_lpar` and `hmc_read_lpar_refcodes`, and

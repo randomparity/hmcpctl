@@ -143,8 +143,11 @@ async def _provision(
         await asyncio.sleep(_POLL_DELAY_S)
         st, data = await call()
     state.record(SUBTASK, "hmc_provision_lpar (install, boot immediate)", st, data)
-    if not run.provisions:
+    if not run.provisions and not await _recorded(client, state, request_id):
         state.artifacts.provision_boot_media = {}  # refused before anything was recorded
+    elif not run.provisions:
+        run.provisions.add(request_id)  # a lost response: teardown abandons it
+        run.requests[request_id] = False
     steps = steps_by_name(data)
     for step, key in (("bind_media", "media_name"), ("upload_media", "vg_uuid")):
         result = (steps.get(step) or {}).get("result")
@@ -155,6 +158,17 @@ async def _provision(
     if run.p_uuid is None:
         run.p_uuid = await lpar_power._adopt(client, state, run, run.p_name)
     return st, data
+
+
+async def _recorded(client: Client, state: RunState, request_id: str) -> bool:
+    """Whether an operation exists for *request_id*; True when that cannot be read."""
+    st, page = await state.call(client, "hmc_operation_status", request_id=request_id)
+    if st != "PASS":
+        return True
+    return any(
+        item.get("request_id") == request_id
+        for item in lpar_power._items(page, "operations")
+    )
 
 
 async def _activated_from_saved(
@@ -190,7 +204,8 @@ async def _optical_slot_current(
 
 async def _media_mapped(
     client: Client, state: RunState, run: lpar_power.Run, media: str
-) -> bool:
+) -> bool | None:
+    """Whether *media* is mapped to the run partition; None when unreadable."""
     assert run.vios is not None
     st, data = await state.call(
         client,
@@ -199,7 +214,7 @@ async def _media_mapped(
         lpar_name_or_uuid=run.p_uuid,
         system_name_or_uuid=run.system,
     )
-    return st == "PASS" and media in repr(data)
+    return media in repr(data) if st == "PASS" else None
 
 
 async def _boot(
@@ -254,20 +269,15 @@ async def _boot(
     run.hold(
         "provision.lpar",
         "optical-mapping-after-activation",
-        isinstance(name, str) and await _media_mapped(client, state, run, name),
+        isinstance(name, str) and await _media_mapped(client, state, run, name) is True,
     )
 
 
-async def _teardown_media(client: Client, state: RunState, run: lpar_power.Run) -> bool:
-    """Power off, unmount and delete the run's media; whether none is left."""
-    await lpar_power._abandon(client, state, run)
-    run.requests = dict.fromkeys(run.requests, True)
-    name = run.data.get("media_name")
-    upload = run.data.get("upload") or {}
-    identity = upload.get("result") if isinstance(upload, Mapping) else None
-    group = identity.get("vg_uuid") if isinstance(identity, Mapping) else None
-    if not isinstance(name, str) or run.vios is None or run.p_uuid is None:
-        return not (upload and upload.get("status") == "ok")
+async def _unmount(
+    client: Client, state: RunState, run: lpar_power.Run, name: str
+) -> bool:
+    """Power the partition off and unmount *name*; whether it is no longer mapped."""
+    assert run.vios is not None and run.p_uuid is not None
     off = frozenset({lpar_power._NOT_ACTIVATED})
     if await lpar_power._lpar_state(client, state, run, run.p_uuid) not in off:
         st, data = await lpar_power._power_off(
@@ -284,8 +294,28 @@ async def _teardown_media(client: Client, state: RunState, run: lpar_power.Run) 
         system_name_or_uuid=run.system,
     )
     state.record(SUBTASK, "hmc_unmount_optical_media (teardown)", st, data)
-    if not isinstance(group, str):
-        return False
+    return await _media_mapped(client, state, run, name) is False
+
+
+async def _teardown_media(
+    client: Client, state: RunState, run: lpar_power.Run
+) -> tuple[bool, bool]:
+    """Abandon, power off, unmount and delete the run's medium.
+
+    Returns whether the medium is unmapped, and whether it is gone. A partition is
+    never deleted while the medium is mapped: its server adapter would be stranded.
+    """
+    await lpar_power._abandon(client, state, run)
+    run.requests = dict.fromkeys(run.requests, True)
+    media = state.artifacts.provision_boot_media
+    name, group = media.get("media_name"), media.get("vg_uuid")
+    if not media or run.vios is None:
+        return True, True
+    if not isinstance(name, str):
+        return run.p_uuid is None, False
+    unmapped = run.p_uuid is None or await _unmount(client, state, run, name)
+    if not unmapped or not isinstance(group, str):
+        return unmapped, False
     st, data = await state.call(
         client,
         "hmc_delete_optical_media",
@@ -302,7 +332,7 @@ async def _teardown_media(client: Client, state: RunState, run: lpar_power.Run) 
         vg_uuid=group,
         system_name_or_uuid=run.system,
     )
-    return st == "PASS" and name not in repr(data)
+    return True, st == "PASS" and name not in repr(data)
 
 
 async def _preconditions(
@@ -347,8 +377,17 @@ async def exercise_provision_boot(client: Client, state: RunState) -> None:
     try:
         await _boot(client, state, run, Path(state.config.iso_path))
     finally:
-        media_gone = await _teardown_media(client, state, run)
-        await lpar_power._teardown(client, state, run)
+        unmapped, media_gone = await _teardown_media(client, state, run)
+        if unmapped:
+            await lpar_power._teardown(client, state, run)
+        else:
+            lpar_power._manual(
+                state,
+                "run medium teardown",
+                f"partition {run.p_name!r}, its volume and medium were kept: the medium "
+                "could not be shown unmapped. Unmount it with hmc_unmount_optical_media, "
+                "then run live_test_recovery.py for the remaining commands.",
+            )
     same = await lpar_power._compare(client, state, run, ready)
     cleanup = "passed" if run.clean and media_gone and same else "failed"
     state.record_verified(

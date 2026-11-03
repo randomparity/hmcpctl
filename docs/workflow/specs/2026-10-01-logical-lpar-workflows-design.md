@@ -263,7 +263,8 @@ off with the owned root disk as its only disk):
 [ADR 0326](../../adr/0326-provision-boots-the-installer-once-and-polls-refcodes.md) fixes steps
 8–9: the revalidation runs before any power-on in both timings, the baseline is effect
 `refcode_baseline` (`lpar.refcode_baseline`), the power-on is ADR 0313's `power_on` effect, and
-the poll reads the newest 20 rows every 15 seconds for the call's `wait_seconds`, at least once.
+the poll reads the newest 20 rows every 15 seconds until the call's `wait_seconds` ends, at
+least once.
 The hold check before power-on joins with #1851.
 
 hmcpctl never acquires the console during boot. A caller who wants the console from its first

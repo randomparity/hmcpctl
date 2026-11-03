@@ -35,8 +35,8 @@ steps 8–9 for `install`. ADRs 0313 and 0319 stand: this record adds effects af
      path;
    - `PendingBootString` equal to the recorded boot order;
    - exactly one client network adapter on the VLAN, carrying the recorded MAC that the media binds;
-   - across every VIOS of the system, exactly one non-optical mapping to the partition, and it is
-     the operation's own root disk.
+   - across every VIOS of the system, exactly one mapping to the partition other than optical
+     media, and it is the operation's own root disk; a virtual Fibre Channel mapping counts.
 
    Any difference ends the run `needs_attention` with step `revalidate_boot` naming it, and nothing
    is powered on. The hold check joins with #1851.
@@ -49,7 +49,8 @@ steps 8–9 for `install`. ADRs 0313 and 0319 stand: this record adds effects af
    the saved profile. It is never resubmitted: a recorded `power_on` is replayed or classified, so the
    installer power-on happens at most once per operation.
 5. **Polling.** Step `wait_boot_started` reads the newest 20 rows, then again every 15 seconds
-   until the call's `wait_seconds` has passed, at least once. A row is newer than the baseline when it
+   until the call's `wait_seconds`, counted from when the body started, has passed; it reads at
+   least once. A row is newer than the baseline when it
    precedes the baseline's row in the HMC's own order (or the baseline is absent from the read) and,
    where both timestamps parse as the HMC's `MM/DD/YYYY HH:MM:SS`, its timestamp is not earlier than
    the baseline's. hmcpctl's clock is never compared with an HMC timestamp.
@@ -71,8 +72,8 @@ steps 8–9 for `install`. ADRs 0313 and 0319 stand: this record adds effects af
 
 - No operation reports `boot_started` until #1850 fills the set. A `boot: immediate` install always
   ends `needs_attention` today, with the partition running the installer media.
-- A boot wait spends the call's `wait_seconds` inside the body. The call may return `running` just
-  before the body ends; `hmc_operation_status` then reports the outcome.
+- A boot wait spends what is left of the call's `wait_seconds` inside the body, so the call usually
+  returns the outcome. A slow read can still outlast it; `hmc_operation_status` then reports it.
 - A long wait costs one SSH login per read (at most 41 at the 600-second maximum).
 - An interrupted power-on stays paused until a human abandons it, as ADR 0313 already accepts.
 - `lpar.refcode_baseline` is a persisted effect kind (ADR 0195).

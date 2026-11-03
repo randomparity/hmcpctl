@@ -48,6 +48,13 @@ def _no_iso_server(monkeypatch):
     monkeypatch.setattr(provision_boot, "_start_iso_server", lambda *_a: None)
     monkeypatch.setattr(provision_boot, "_power_operations_authorized", lambda: True)
     monkeypatch.setattr(provision_boot, "_POLL_DELAY_S", 0)
+    for name in (
+        "_STATE_POLL_DELAY_S",
+        "_OPERATION_POLL_DELAY_S",
+        "_COMPARE_REREAD_DELAY_S",
+    ):
+        monkeypatch.setattr(provision_boot.lpar_power, name, 0)
+    monkeypatch.setattr(provision_boot.lpar_power, "_STATE_POLL_ATTEMPTS", 2)
 
 
 class BootWorld(World):
@@ -233,3 +240,51 @@ def test_outside_its_group_it_calls_nothing(schemas, tmp_path):
 
 def test_the_run_mac_is_locally_administered_unicast():
     assert provision_boot.run_mac("0a1b2c3d") == "02:00:0a:1b:2c:3d"
+
+
+def test_a_medium_left_mapped_keeps_the_partition_for_manual_recovery(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    world.overrides["hmc_unmount_optical_media"] = lambda _kw: ValueError("busy")
+
+    state = _run(schemas, world, tmp_path)
+
+    assert len(world.partitions) == 1 and world.optical == [MEDIA]
+    assert "hmc_delete_lpar" not in world.tools()
+    assert "hmc_delete_optical_media" not in world.tools()
+    assert _observation(state)["cleanup"] == "failed"
+    assert any("MANUAL RECOVERY" in str(row) for row in state.results)
+
+
+def test_an_unreadable_mapping_listing_is_not_taken_as_unmapped(schemas, tmp_path):
+    world = BootWorld()
+    world.overrides["hmc_list_optical_mappings"] = lambda _kw: ValueError("down")
+
+    _run(schemas, world, tmp_path)
+
+    assert len(world.partitions) == 1
+    assert "hmc_delete_lpar" not in world.tools()
+
+
+def test_a_failed_first_call_with_a_recorded_operation_is_abandoned(schemas, tmp_path):
+    world = BootWorld()
+    world.overrides["hmc_provision_lpar"] = lambda kw: (
+        {**arm._provisioned(False, "terminal"), "steps": []}
+        if kw.get("continuation") == "abandon"
+        else ValueError("connection reset")
+    )
+    world.overrides["hmc_operation_status"] = lambda kw: {
+        "operations": [{"request_id": kw["request_id"]}],
+        "limit": 50,
+        "truncated": False,
+        "next_cursor": None,
+    }
+
+    state = _run(schemas, world, tmp_path)
+
+    abandons = [
+        kw for kw in world.calls_to("hmc_provision_lpar") if kw.get("continuation")
+    ]
+    assert len(abandons) == 1
+    assert state.artifacts.provision_boot_media["media_name"] is None

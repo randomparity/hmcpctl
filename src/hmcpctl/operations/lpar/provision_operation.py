@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from pydantic import TypeAdapter
 
+from ...client.client_storage import mapping_lpar_uuid
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources, validate_partition_type
 from ...documents.partition_profile import ProfilePatch
@@ -410,20 +412,33 @@ async def _adapters_on_vlan(
     ]
 
 
+def _vios_mappings(resource: Mapping[str, Any], block: str, item: str) -> list[Any]:
+    found = (resource.get(block) or {}) if isinstance(resource, Mapping) else {}
+    items = found.get(item) if isinstance(found, Mapping) else None
+    return [m for m in (items if isinstance(items, list) else [items]) if m]
+
+
 async def _partition_disks(
     hmc: HMCClient, system_uuid: str, lpar_uuid: str
 ) -> list[tuple[str, str | None]]:
-    """``(vios_uuid, backing)`` of every non-optical mapping to *lpar_uuid* on the system."""
-    disks = []
+    """``(vios_uuid, backing)`` of every mapping to *lpar_uuid* on the system that is
+    not optical media; a virtual Fibre Channel mapping has no backing name."""
+    disks: list[tuple[str, str | None]] = []
     for vios in await hmc.list_vios(system_uuid):
         vios_uuid = str(vios.get("UUID") or "").lower()
-        for entry in await hmc.list_storage_mappings(vios_uuid):
-            found = storage_mapping(entry)
-            backing = (entry.get("Resource") or entry).get("Storage")
-            if (found.lpar_uuid or "").lower() != lpar_uuid or not backing:
-                continue
-            if found.backing_kind != "VirtualOpticalMedia":
-                disks.append((vios_uuid, found.backing_name))
+        resource = vios.get("Resource") or {}
+        for kind in ("VirtualSCSIMapping", "VirtualFibreChannelMapping"):
+            for mapping in _vios_mappings(resource, f"{kind}s", kind):
+                if (mapping_lpar_uuid(mapping) or "").lower() != lpar_uuid:
+                    continue
+                if kind == "VirtualFibreChannelMapping":
+                    disks.append((vios_uuid, None))
+                    continue
+                found = storage_mapping(mapping)
+                if mapping.get("Storage") and (
+                    found.backing_kind != "VirtualOpticalMedia"
+                ):
+                    disks.append((vios_uuid, found.backing_name))
     return disks
 
 
@@ -492,7 +507,8 @@ class _Run:
         wait_seconds: int = 0,
     ) -> None:
         self.ctx, self.hmc, self.system, self.request = ctx, hmc, system, request
-        self.wait_seconds = wait_seconds
+        # The boot wait ends when the call's own wait does (ADR 0326 Decision 5).
+        self.wait_deadline = time.monotonic() + wait_seconds
         self.steps: list[WorkflowStep] = []
         self.warnings: list[str] = []
         self.change_location = None
@@ -718,7 +734,7 @@ class _Run:
         wait = await wait_for_boot(
             lambda: list_lpar_refcodes(self.hmc.config, *names, REFCODE_ROWS),
             baseline,
-            self.wait_seconds,
+            max(0.0, self.wait_deadline - time.monotonic()),
         )
         if wait.started is not None:
             self.steps.append(WorkflowStep("wait_boot_started", "ok", wait.started))

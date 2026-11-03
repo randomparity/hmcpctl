@@ -1030,6 +1030,8 @@ async def check_provision_boot_media(
         Finding(
             f"medium {inputs.media_name}",
             f"the provision-boot medium is still in volume group {inputs.vg_uuid}",
+            "if a partition still maps it, unmount it there first "
+            "(hmc_unmount_optical_media); then "
             f"hmcpctl storage delete-media {where} --name {_q(inputs.media_name)} "
             f"--system {_q(inputs.system_name)}",
         )

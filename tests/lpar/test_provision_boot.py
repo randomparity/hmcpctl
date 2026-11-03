@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -59,12 +60,24 @@ class BootHMC(FakeHMC):
         return {"Resource": {"PartitionState": self.state}}
 
     async def list_vios(self, _system: str) -> list[dict[str, Any]]:
-        return [{"UUID": VIOS.upper()}, {"UUID": OTHER_VIOS}]
-
-    async def list_storage_mappings(self, vios: str) -> list[dict]:
-        if vios == OTHER_VIOS:
-            return self.extra_mappings.get(vios, [])
-        return await super().list_storage_mappings(vios)
+        own = [*await self.list_storage_mappings(VIOS), *self.optical]
+        other = self.extra_mappings.get(OTHER_VIOS, [])
+        fibre = self.extra_mappings.get("fibre", [])
+        return [
+            {
+                "UUID": VIOS.upper(),
+                "Resource": {"VirtualSCSIMappings": {"VirtualSCSIMapping": own}},
+            },
+            {
+                "UUID": OTHER_VIOS,
+                "Resource": {
+                    "VirtualSCSIMappings": {"VirtualSCSIMapping": other},
+                    "VirtualFibreChannelMappings": {
+                        "VirtualFibreChannelMapping": fibre
+                    },
+                },
+            },
+        ]
 
     async def list_adapters(self, _lpar: str, _kind: str) -> list[dict[str, Any]]:
         resource = {"PortVLANID": "100", "MACAddress": self.mac_hex}
@@ -234,6 +247,16 @@ def test_deferred_pauses_ready_to_boot_and_continuation_boot_powers_on(boot):
         (
             lambda b: b.hmc.extra_mappings.setdefault(OTHER_VIOS, []).append(
                 _scsi_mapping(6, {"VirtualDisk": {"DiskName": "lv-b"}})
+            ),
+            "only disk",
+        ),
+        (
+            lambda b: b.hmc.extra_mappings.setdefault("fibre", []).append(
+                {
+                    "AssociatedLogicalPartition": {
+                        "href": f"https://hmc.test/rest/api/uom/LogicalPartition/{LPAR}"
+                    }
+                }
             ),
             "only disk",
         ),
@@ -411,3 +434,29 @@ def test_continuation_boot_of_an_unknown_request_is_not_found(handler):
         handler(
             request_id="boot-unknown", continuation="boot", exclusive_writer_window=True
         )
+
+
+def test_the_wait_ends_when_the_calls_own_wait_does(boot, monkeypatch):
+    windows: list[float] = []
+    ticks = iter([100.0, 120.0])
+
+    async def wait(_read, _baseline, window, **_kw):
+        windows.append(window)
+        return provision_boot.BootWait(None, [], "no code")
+
+    monkeypatch.setattr(provision_operation, "wait_for_boot", wait)
+    monkeypatch.setattr(
+        provision_operation, "time", SimpleNamespace(monotonic=lambda: next(ticks))
+    )
+    hmc = boot.hmc
+    operation = OperationRequest(
+        "hmc_provision_lpar", "agent", "<default>", "hmc.test", "boot-window", {}
+    )
+    engine.submit(
+        operation,
+        provision_body(SYSTEM, IMMEDIATE, lambda _c: hmc, wait_seconds=30),
+        classifiers=provision_classifiers(IMMEDIATE, lambda _c: hmc),
+        wait_seconds=30,
+    )
+
+    assert windows == [10.0]
