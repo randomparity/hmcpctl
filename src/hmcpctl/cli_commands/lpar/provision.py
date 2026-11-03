@@ -111,8 +111,9 @@ def lpars_provision(
         None,
         "--pcie-assignments",
         help=(
-            "JSON file using the declarative LparPcieAssignments schema; "
-            "dedicated slots are refused"
+            "JSON file using the declarative LparPcieAssignments schema; a "
+            "dedicated slot names profile default_profile and is written into the "
+            "saved profile provision activates"
         ),
     ),
     as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
