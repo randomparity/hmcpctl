@@ -105,7 +105,7 @@ In scope: the MCP tool `hmc_provision_lpar` accepts `install` with `media.mode: 
    - `mount_optical_media`, then one listing read;
    - the write raises `HMCError`, settling `uncertain`, unless exactly one listed optical mapping of
      this partition has the media name and a device path;
-   - identity `{vios_uuid, media_name, client_slot, lun}`;
+   - identity `{vios_uuid, media_name, client_slot, device_path}`;
    - a refusal whose HMC error names `REST0269` (no applied current configuration) raises
      `EffectNotApplied`, and the run ends `failed`. Its text says a refused mapping create can leave a
      VIOS server adapter with no target device, using the `client_storage` wording and its `lshwres`
