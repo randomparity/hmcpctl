@@ -111,13 +111,23 @@ def lpars_decommission(
                 "a continuation takes the recorded partition and system; omit the "
                 "partition argument and --system"
             )
+        try:
+            recorded = engine.recorded_arguments(
+                ssh_config().agent_id or "hmcpctl", request_id, TOOL_NAME
+            )
+        except ValueError as exc:
+            fail(exc)
+        if recorded is None:
+            usage_error(f"no operation has request_id {request_id}")
         if continuation == "resume" and not yes:
             confirm_on_stderr(
-                f"Resume decommission request '{terminal_field(request_id, err=True)}'? "
-                "It continues powering off, detaching and deleting the recorded partition.",
+                f"Resume decommission request '{terminal_field(request_id, err=True)}' "
+                f"of LPAR '{terminal_field(recorded['lpar_name_or_uuid'], err=True)}' "
+                f"on system '{terminal_field(recorded['system_name_or_uuid'], err=True)}'"
+                "? It continues powering off, detaching and deleting that partition.",
                 abort=True,
             )
-        _run(request_id, continuation, None, selected)
+        _run(request_id, continuation, recorded, selected)
         return
     if name_or_uuid is None or system is None:
         usage_error("a new operation needs the partition argument and --system")
@@ -159,17 +169,11 @@ def lpars_decommission(
 def _run(
     request_id: str,
     continuation: str,
-    arguments: Mapping[str, Any] | None,
+    arguments: Mapping[str, Any],
     format: InventoryFormat,
 ) -> None:
     """Submit, wait for the worker to end, render, and exit 1 unless it completed."""
     try:
-        if arguments is None:
-            arguments = engine.recorded_arguments(
-                ssh_config().agent_id or "hmcpctl", request_id, TOOL_NAME
-            )
-            if arguments is None:
-                usage_error(f"no operation has request_id {request_id}")
         record = _submit(request_id, continuation, arguments)
     except ValueError as exc:
         fail(exc)

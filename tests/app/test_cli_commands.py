@@ -2237,6 +2237,7 @@ def test_lpars_decommission_resumes_a_paused_operation(fake_hmc):
         input="n\n",
     )
     assert declined.exit_code == 1 and "Aborted" in declined.stderr
+    assert f"of LPAR '{LPAR_NAME}' on system '{SYSTEM_UUID}'" in declined.stderr
     resumed = RUNNER.invoke(
         cli.app,
         [
