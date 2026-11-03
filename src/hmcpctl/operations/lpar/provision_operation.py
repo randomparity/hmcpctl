@@ -46,12 +46,16 @@ from .install_media import (
     UNVERIFIED,
     MediaBinding,
     MediaMismatch,
+    bind_built,
     bind_prepared,
     client_slot,
     device_path,
     media_name_for,
+    parse_result,
     repository_group,
+    target_request,
 )
+from .media_build import run_build_entry
 from .ownership import (
     lpar_ownership_entry,
     parse_lpar_ownership_caller_token,
@@ -93,7 +97,8 @@ EFFECT_KINDS: Mapping[str, str] = {
     "dedicated": "lpar.pcie_assignments",
     "default_profile": "lpar.default_profile",
     "power_on": "lpar.power_on",
-    # Installer media (ADR 0319).
+    # Installer media (ADR 0319); the build is built media's (ADR 0324).
+    "build": "media.iso_build",
     "upload": "vios.optical_media_upload",
     "mount": "vios.optical_mapping",
     "boot_order": "lpar.boot_order",
@@ -111,6 +116,7 @@ STEP_NAMES: Mapping[str, str] = {
     "dedicated": "dedicated",
     "default_profile": "default_profile",
     "power_on": "power_on",
+    "build": "build_media",
     "upload": "upload_media",
     "mount": "mount_media",
     "boot_order": "set_boot_order",
@@ -154,6 +160,11 @@ _REST0269_MOUNT = (
     "slot_num,remote_lpar_name,remote_slot_num` with the VIOS mappings, then decommission"
 )
 _LEG_ERRORS = (HMCError, HMCCLIError, ValueError, LookupError, EffectNotApplied)
+_BUILD_INTERRUPTED = (
+    "the build entry's run was interrupted and its result is unrecorded; hmcpctl "
+    "does not run it twice: abandon, decommission the partition, remove any ISO it "
+    "published, then provision again"
+)
 
 
 def request_from_arguments(
@@ -492,22 +503,36 @@ class _Run:
         install = request.install
         assert install is not None
         self.ctx.set_phase("media_bound")
-        try:
-            binding = bind_prepared(install, request.adapters.mac)
-        except MediaMismatch as exc:
-            raise OperationFailed(str(exc)) from exc
-        network = self.ctx.recorded("network")
-        if network is None or (network.identity or {}).get("mac") != binding.mac:
-            raise OperationFailed(
-                f"the adapter on LPAR {lpar_uuid} does not carry adapters.mac, which the "
-                "media binds; nothing was uploaded"
-            )
         disk = self.ctx.recorded("disk")
         if disk is None or (disk.identity or {}).get("disk_name") != (
             request.storage.storage_name
         ):
             raise OperationFailed(
                 "the media's root disk is not one this operation created"
+            )
+        if install.media.mode == "built":
+            built = await self._leg(
+                "build",
+                f"lpar:{lpar_uuid}",
+                lambda: self._write_build(lpar_uuid),
+                definite=True,
+            )
+            if built is None:
+                self._skip_rest(*_MEDIA_STEPS, *self._persist_steps())
+                return False
+            binding = MediaBinding(
+                built["url"], built["iso_sha256"], built["iso_size"], built["mac"]
+            )
+        else:
+            try:
+                binding = bind_prepared(install, request.adapters.mac)
+            except MediaMismatch as exc:
+                raise OperationFailed(str(exc)) from exc
+        network = self.ctx.recorded("network")
+        if network is None or (network.identity or {}).get("mac") != binding.mac:
+            raise OperationFailed(
+                f"the adapter on LPAR {lpar_uuid} does not carry the MAC the media "
+                "binds; nothing was uploaded"
             )
         name = media_name_for(self.ctx.operation_id)
         self.steps.append(
@@ -767,10 +792,9 @@ class _Run:
             if key == "assignments":
                 self._replace_assignment_step()
             if identity is None:
-                media = _MEDIA_STEPS if self.request.install is not None else ()
                 self._skip_rest(
                     *(STEP_NAMES[k] for k, _, _ in legs[index + 1 :]),
-                    *media,
+                    *self._media_steps(),
                     *self._persist_steps(),
                 )
                 return False
@@ -797,6 +821,13 @@ class _Run:
             # The create applied these with its physical I/O.
             return dataclasses.replace(assignments, sriov=())
         return assignments
+
+    def _media_steps(self) -> tuple[str, ...]:
+        install = self.request.install
+        if install is None:
+            return ()
+        built = ("build_media",) if install.media.mode == "built" else ()
+        return (*built, *_MEDIA_STEPS)
 
     def _persist_steps(self) -> list[str]:
         return [
@@ -850,6 +881,47 @@ class _Run:
         return {
             "vios_uuid": storage.vios_uuid.lower(),
             "storage_name": storage.storage_name,
+        }
+
+    async def _write_build(self, lpar_uuid: str) -> dict[str, Any]:
+        """Run the configured build entry once and bind its result (ADR 0324).
+
+        The runner returns or raises only once its child has been reaped, so every
+        error here is a build known not to have produced bound media.
+        """
+        install = self.request.install
+        assert install is not None
+        try:
+            command = self.hmc.config.iso_build_command
+            if command is None:
+                raise ValueError(
+                    "HMC_ISO_BUILD_ENTRY is no longer configured on the server"
+                )
+            network = self.ctx.recorded("network")
+            mac = (network.identity or {}).get("mac") if network else None
+            if not isinstance(mac, str):
+                raise TypeError(f"no adapter MAC is recorded for LPAR {lpar_uuid}")
+            request = target_request(
+                install, self.request.name, mac, self.ctx.operation_id
+            )
+            result = parse_result(await run_build_entry(command, request))
+            binding = bind_built(
+                install,
+                result,
+                mac,
+                self.ctx.operation_id,
+                self.hmc.config.iso_url_allowlist_entries,
+            )
+        except Exception as exc:  # every outcome here is definite (ADR 0324 D3)
+            raise EffectNotApplied(
+                f"the installer media was not built: {type(exc).__name__}: {exc}"
+            ) from exc
+        return {
+            "url": binding.url,
+            "iso_sha256": binding.iso_sha256,
+            "iso_size": binding.iso_size,
+            "manifest_sha256": result["manifest_sha256"],
+            "mac": binding.mac,
         }
 
     async def _write_upload(self, binding: MediaBinding, name: str) -> dict[str, Any]:
@@ -1141,6 +1213,9 @@ def provision_classifiers(
             return Classification("applied", {"profile_name": name})
         return Classification("not_applied")
 
+    async def build(_ctx: OperationContext, _effect: EffectRecord) -> Classification:
+        return Classification("needs_attention", reason=_BUILD_INTERRUPTED)
+
     async def upload(ctx: OperationContext, effect: EffectRecord) -> Classification:
         vios, name = request.storage.vios_uuid.lower(), media_name_for(ctx.operation_id)
         async with client_factory(ctx.connection) as hmc:
@@ -1200,6 +1275,7 @@ def provision_classifiers(
         ),
         EFFECT_KINDS["default_profile"]: default_profile,
         EFFECT_KINDS["power_on"]: power_on,
+        EFFECT_KINDS["build"]: build,
         EFFECT_KINDS["upload"]: upload,
         EFFECT_KINDS["mount"]: mount,
         EFFECT_KINDS["boot_order"]: boot_order,

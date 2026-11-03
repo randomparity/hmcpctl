@@ -1,9 +1,10 @@
-"""Prepared installer media in hmc_provision_lpar (ADR 0191, ADR 0319)."""
+"""Installer media in hmc_provision_lpar (ADR 0191, ADR 0319, ADR 0324)."""
 
 from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, Self
@@ -27,6 +28,7 @@ from hmcpctl.operations.lpar.install_media import (
     MediaMismatch,
     media_name_for,
 )
+from hmcpctl.operations.lpar.media_build import BuildFailed
 from hmcpctl.operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,
@@ -69,6 +71,10 @@ NETWORK = InstallNetwork(
 )
 
 
+BUILD_COMMAND = ("/opt/build/iso-chain", "container-build", "--target", "{target}")
+BUILT_URL = f"https://media.example.test/iso/{'c' * 64}.iso"
+
+
 def producer_result(**changes: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "format": "iso-chain-media-v1",
@@ -93,6 +99,13 @@ INSTALL = LparInstall(
     profile="ubuntu-26.04.1",
     network=NETWORK,
     media=InstallMedia(mode="prepared", url=URL, producer_result=producer_result()),
+)
+BUILT_INSTALL = LparInstall(
+    profile="ubuntu-26.04.1",
+    network=NETWORK,
+    media=InstallMedia(mode="built"),
+    ssh_authorized_keys=("ssh-ed25519 AAAAC3Nza lpar-a",),
+    login_user="admin",
 )
 REQUEST = ProvisionRequest(
     name="lpar-a",
@@ -124,6 +137,7 @@ class FakeHMC:
         self.config = SimpleNamespace(
             agent_id=None,
             iso_url_allowlist_entries=parse_iso_url_allowlist("media.example.test"),
+            iso_build_command=BUILD_COMMAND,
         )
         self.media_name = media_name_for(operation_id)
         self.optical: list[dict[str, Any]] = []
@@ -190,6 +204,11 @@ class Writes:
         patch(po, "set_default_partition_profile", self.default)
         patch(po.profile_write, "profile_by_name", self.profile)
         patch(po, "readback_problem", self.problem)
+        patch(po, "run_build_entry", self.build)
+        self.build_requests: list[dict[str, Any]] = []
+        self.build_result: dict[str, Any] = {}
+        self.build_output: bytes | None = None
+        self.build_error: Exception | None = None
 
     def record(self, name: str):
         async def write(*_args: Any, **_kwargs: Any) -> None:
@@ -208,6 +227,24 @@ class Writes:
         self.network_mac.append(mac)
         hex_mac = (self.adapter_mac or "").replace(":", "").upper()
         return {"UUID": "adapter-1", "Resource": {"MACAddress": hex_mac}}
+
+    async def build(self, command: tuple[str, ...], request: bytes) -> bytes:
+        self.calls.append("build")
+        assert command == BUILD_COMMAND
+        sent = json.loads(request)
+        self.build_requests.append(sent)
+        if self.build_error is not None:
+            raise self.build_error
+        if self.build_output is not None:
+            return self.build_output
+        result = producer_result(
+            iso_sha256="c" * 64,
+            iso_size=8192,
+            mac=sent["mac"],
+            operation_binding=sent["operation_binding"],
+            url=BUILT_URL,
+        )
+        return json.dumps({**result, **self.build_result}).encode() + b"\n"
 
     async def upload(self, _hmc: Any, vios: str, group: str, name: str, url: str, **kw):
         self.calls.append("upload")
@@ -346,7 +383,7 @@ def test_an_adapter_whose_mac_differs_from_the_pin_fails_before_any_upload(write
 
     assert (record.state, record.outcome) == ("terminal", "failed")
     assert "upload" not in writes.calls
-    assert "does not carry adapters.mac" in record.warnings[0]
+    assert "does not carry the MAC the media binds" in record.warnings[0]
 
 
 def test_a_digest_mismatch_uploads_nothing_and_fails(writes):
@@ -541,16 +578,17 @@ def test_the_readback_requires_the_optical_adapter_slot():
         ({"boot": "immediate"}, "#1849"),
         ({"storage": ProvisionStorage(VIOS, "lv-a", vg_uuid=GROUP)}, "capacity_mib"),
         (
+            {"install": replace(INSTALL, media=InstallMedia(mode="built"))},
+            "install.ssh_authorized_keys: built media needs",
+        ),
+        ({"install": BUILT_INSTALL}, "adapters.mac: accepted only"),
+        (
             {
-                "install": replace(
-                    INSTALL,
-                    media=InstallMedia(mode="built"),
-                    login_user="ubuntu",
-                    ssh_authorized_keys=("ssh-ed25519 AAAA key",),
-                ),
+                "install": BUILT_INSTALL,
                 "adapters": ProvisionAdapters(100),
+                "name": "LPAR_A",
             },
-            "#1843",
+            "name: built media",
         ),
         ({"adapters": ProvisionAdapters(100)}, "adapters.mac: prepared media requires"),
     ],
@@ -684,3 +722,177 @@ def test_the_dry_run_order_matches_the_plan_order():
         if names.get(n, n) in plan_kinds
     ]
     assert plan_kinds == provision_steps
+
+
+# ── Built media (ADR 0324) ──────────────────────────────────────────────────
+
+BUILT_REQUEST = replace(REQUEST, install=BUILT_INSTALL, adapters=ProvisionAdapters(100))
+
+
+def test_a_built_install_runs_the_entry_once_and_uploads_its_result(writes):
+    writes.adapter_mac = "02:00:00:00:00:07"
+
+    record = _submit(writes, BUILT_REQUEST)
+
+    assert (record.state, record.outcome) == ("paused", "ready_to_boot")
+    assert writes.calls == [
+        "create",
+        "network",
+        "disk",
+        "storage",
+        "build",
+        "upload",
+        "mount",
+        "save",
+        "default_profile",
+        "boot_order",
+    ]
+    assert writes.network_mac == [None]
+    (sent,) = writes.build_requests
+    assert sent["mac"] == "02:00:00:00:00:07"
+    assert sent["operation_binding"] == record.operation_id
+    assert (sent["format"], sent["lpar"], sent["login_user"]) == (
+        "iso-chain-target-v1",
+        "lpar-a",
+        "admin",
+    )
+    assert (writes.upload_kwargs["url"], writes.upload_kwargs["expected_sha256"]) == (
+        BUILT_URL,
+        "c" * 64,
+    )
+    assert writes.upload_kwargs["expected_size"] == 8192
+    build = next(e for e in record.effects if e.key == "build")
+    assert (build.kind, build.status) == ("media.iso_build", "applied")
+    assert build.identity == {
+        "url": BUILT_URL,
+        "iso_sha256": "c" * 64,
+        "iso_size": 8192,
+        "manifest_sha256": "b" * 64,
+        "mac": "02:00:00:00:00:07",
+    }
+    steps = [step.step for step in result_from_record(record).steps]
+    assert steps[steps.index("storage") + 1 : steps.index("upload_media")] == [
+        "build_media",
+        "bind_media",
+    ]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        {"build_error": BuildFailed("the build entry exited with status 3")},
+        {"build_error": OSError("disk full")},
+        {"build_result": {"operation_binding": "f" * 32}},
+        {"build_result": {"mac": "02:00:00:00:00:09"}},
+        {"build_result": {"url": "https://elsewhere.example.test/x.iso"}},
+        {"build_result": {"url": 7}},
+        {"build_output": b"[" * 30000 + b"]" * 30000},
+        {"build_output": b'{"format": 1, "format": 2}'},
+    ],
+    ids=[
+        "exit",
+        "os-error",
+        "operation",
+        "mac",
+        "unlisted-url",
+        "url-type",
+        "nested",
+        "duplicate",
+    ],
+)
+def test_a_failed_or_unbound_build_fails_without_an_upload(writes, fault):
+    for name, value in fault.items():
+        setattr(writes, name, value)
+
+    record = _submit(writes, BUILT_REQUEST)
+
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert "upload" not in writes.calls
+    build = next(e for e in record.effects if e.key == "build")
+    assert build.status == "not_applied"
+    assert "elsewhere" not in record.warnings[0]
+
+
+def test_a_build_entry_unset_by_the_time_the_leg_runs_fails(writes):
+    writes.hmc.config.iso_build_command = None
+
+    record = _submit(writes, BUILT_REQUEST)
+
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert "build" not in writes.calls
+    assert "HMC_ISO_BUILD_ENTRY" in record.warnings[0]
+
+
+def test_a_resume_after_an_applied_build_never_runs_the_entry_again(writes):
+    writes.upload_error = HMCError("socket closed", 502, "")
+    rid = f"install-{next(_IDS)}"
+    first = _submit(writes, BUILT_REQUEST, rid=rid)
+    assert first.outcome == "needs_attention"
+
+    writes.upload_error = None
+    resumed = _submit(writes, BUILT_REQUEST, continuation="resume", rid=rid)
+
+    assert resumed.outcome == "ready_to_boot"
+    assert writes.calls.count("build") == 1
+
+
+def test_an_interrupted_build_classifies_needs_attention():
+    verdict = _classify(FakeHMC(), "build", f"lpar:{LPAR}", request=BUILT_REQUEST)
+    assert verdict.status == "needs_attention"
+    assert "decommission" in (verdict.reason or "")
+
+
+def test_a_prepared_run_that_stops_early_lists_no_build_step(writes, monkeypatch):
+    async def broken(*_args: Any, **_kwargs: Any) -> Any:
+        writes.calls.append("network")
+        raise HMCError("refused", 500, "")
+
+    monkeypatch.setattr(provision_operation, "_add_network", broken)
+
+    record = _submit(writes)
+
+    steps = [step.step for step in result_from_record(record).steps]
+    assert "bind_media" in steps and "build_media" not in steps
+
+
+def test_built_install_is_accepted_and_needs_a_usable_entry(tmp_path):
+    validate_provision_install(BUILT_REQUEST)
+    entry = tmp_path / "iso-chain"
+    entry.write_text("#!/bin/sh\n")
+    entry.chmod(0o700)
+    hmc = FakeHMC()
+    hmc.config.iso_build_command = (str(entry), "{target}")
+    asyncio.run(preflight_install(hmc, BUILT_REQUEST))  # type: ignore[arg-type]
+    for command, allowlist, message in [
+        (None, "media.example.test", "none is configured"),
+        ((str(tmp_path / "absent"), "{target}"), "media.example.test", "executable"),
+        ((str(entry), "{target}"), "", "HMC_ISO_URL_ALLOWLIST"),
+    ]:
+        hmc.config.iso_build_command = command
+        hmc.config.iso_url_allowlist_entries = parse_iso_url_allowlist(allowlist)
+        with pytest.raises(ValueError, match=message):
+            asyncio.run(preflight_install(hmc, BUILT_REQUEST))  # type: ignore[arg-type]
+    entry.chmod(0o600)
+    hmc.config.iso_build_command = (str(entry), "{target}")
+    hmc.config.iso_url_allowlist_entries = parse_iso_url_allowlist("media.example.test")
+    with pytest.raises(ValueError, match="executable"):
+        asyncio.run(preflight_install(hmc, BUILT_REQUEST))  # type: ignore[arg-type]
+
+
+def test_the_built_dry_run_lists_the_build_before_the_binding():
+    names = _provision_step_names(BUILT_REQUEST)
+    assert names[names.index("build_media") + 1] == "bind_media"
+    assert "build_media" not in _provision_step_names(REQUEST)
+
+
+def test_a_built_run_that_stops_early_lists_its_build_step(writes, monkeypatch):
+    async def broken(*_args: Any, **_kwargs: Any) -> Any:
+        raise HMCError("refused", 500, "")
+
+    monkeypatch.setattr(provision_operation, "_add_network", broken)
+
+    record = _submit(writes, BUILT_REQUEST)
+
+    steps = [step.step for step in result_from_record(record).steps]
+    assert steps[steps.index("build_media") + 1] == "bind_media"
+    assert "build" not in writes.calls

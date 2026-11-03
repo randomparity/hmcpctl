@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
@@ -58,6 +59,7 @@ from .install_media import (
     Boot,
     LparInstall,
     bind_prepared,
+    check_built_name,
     check_install,
     check_mac,
     repository_group,
@@ -611,13 +613,10 @@ def validate_provision_install(request: ProvisionRequest) -> None:
             "(boot=immediate and continuation=boot) arrives with issue #1849"
         )
     check_install(install)
-    if install.media.mode != "prepared":
-        raise ValueError(
-            "install.media.mode: built media is not available yet (issue #1843); "
-            "pass prepared media"
-        )
+    check_built_name(request.name, install)
     check_mac(request.adapters.mac, install)
-    bind_prepared(install, request.adapters.mac)
+    if install.media.mode == "prepared":
+        bind_prepared(install, request.adapters.mac)
 
 
 def require_install_url(hmc: HMCClient, url: str) -> None:
@@ -631,12 +630,36 @@ def require_install_url(hmc: HMCClient, url: str) -> None:
         ) from None
 
 
+def require_build_entry(hmc: HMCClient) -> tuple[str, ...]:
+    """The configured build command, refusing one that cannot run (ADR 0324)."""
+    command = hmc.config.iso_build_command
+    if command is None:
+        raise ValueError(
+            "install.media.mode: built media needs HMC_ISO_BUILD_ENTRY and "
+            "HMC_ISO_BUILD_ARGUMENTS on the server; none is configured"
+        )
+    if not (os.path.isfile(command[0]) and os.access(command[0], os.X_OK)):
+        raise ValueError(
+            "HMC_ISO_BUILD_ENTRY does not name an executable regular file on the server"
+        )
+    if not hmc.config.iso_url_allowlist_entries:
+        raise ValueError(
+            "install.media.mode: built media publishes to an origin on "
+            "HMC_ISO_URL_ALLOWLIST, which is empty"
+        )
+    return command
+
+
 async def preflight_install(hmc: HMCClient, request: ProvisionRequest) -> None:
-    """Refuse install media the HMC side cannot take: an unlisted URL, no repository."""
+    """Refuse install media the HMC side cannot take: an unlisted URL, an unusable
+    build entry, no repository."""
     if request.install is None:
         return
     validate_provision_install(request)
-    require_install_url(hmc, request.install.media.url or "")
+    if request.install.media.mode == "built":
+        require_build_entry(hmc)
+    else:
+        require_install_url(hmc, request.install.media.url or "")
     await repository_group(hmc, request.storage.vios_uuid)
 
 
@@ -718,6 +741,8 @@ def _provision_step_names(
         ["storage", *assignment_step_names(replace(assignments, dedicated=()))]
     )
     if request.install is not None:
+        if request.install.media.mode == "built":
+            names.append("build_media")
         names.extend(["bind_media", "upload_media", "mount_media"])
     names.extend(["save_profile", "profile_readback"])
     names.extend(assignment_step_names(LparPcieAssignments(assignments.dedicated)))
