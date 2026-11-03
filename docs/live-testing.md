@@ -375,7 +375,11 @@ every change whatever the call returned, and verifies restoration:
   test partition's own vSCSI client uses (expected refused), then adds a client
   adapter to the test partition paired to the lowest server slot of the serving
   VIOS assigned to the test partition (a slot open to any partition is never
-  used), checks the pairing, and removes it. The VIOS's
+  used). It proves the create's own UUID, pairing and slot against one fresh listing
+  taken immediately before the delete (exactly the baseline plus that UUID), deletes only
+  that UUID, and confirms the baseline. A collision that is not cleanly refused, an
+  unproven or changed fixture, or an unreadable listing stops ST9 with manual recovery;
+  no other adapter is ever a deletion target. The VIOS's
   server adapters and the test partition's storage mappings must be unchanged
   afterwards. With no such slot, that round trip SKIPs. Each vFC add
   takes a WWPN pair from the system's pool.
