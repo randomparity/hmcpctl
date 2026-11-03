@@ -104,7 +104,7 @@ def _seed(*rows: tuple[str, str, str, dict[str, Any]], request_id: str = "seed")
 def _run(
     hmc: AsyncMock,
     *,
-    authorized: frozenset[str] | None = None,
+    authorized: frozenset[str] = frozenset({VIOS, VIOS_B}),
     continuation: str = "none",
 ) -> OperationRecord:
     async def body(ctx):

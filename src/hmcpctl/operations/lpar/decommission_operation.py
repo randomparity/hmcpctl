@@ -35,6 +35,7 @@ from .decommission_storage import (
     INCOMPLETE,
     clean_storage,
     deleted_from_effects,
+    owned_items,
     plan_storage,
     storage_classifiers,
     storage_from_effects,
@@ -137,6 +138,14 @@ async def preview_target(
     return dataclasses.replace(result, storage=storage), journal.target
 
 
+def owned_vios(target: tuple[str, str] | None) -> frozenset[str]:
+    """The VIOSes holding the partition's ledger-owned storage (ADR 0323 Decision 5)."""
+    if target is None:
+        return frozenset()
+    items, _ = owned_items(*target)
+    return frozenset(item.vios_uuid for item in items)
+
+
 async def preview(hmc: HMCClient, arguments: Mapping[str, Any]) -> DecommissionResult:
     """The dry-run inventory of *arguments*; it raises what a new request must refuse."""
     return (await preview_target(hmc, arguments))[0]
@@ -146,7 +155,7 @@ def decommission_body(
     arguments: Mapping[str, Any],
     client_factory: ClientFactory = open_client,
     *,
-    authorized_vios: frozenset[str] | None = None,
+    authorized_vios: frozenset[str] = frozenset(),
 ) -> engine.Body:
     """The operation body for one ``hmc_decommission_lpar`` request.
 

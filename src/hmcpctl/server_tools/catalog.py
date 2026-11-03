@@ -31,6 +31,10 @@ from hmcpctl.server_tools.lpar import (
     migration,
     profiles,
 )
+from hmcpctl.server_tools.lpar.decommission import (
+    DECOMMISSION_SECURITY,
+    DECOMMISSION_TOOL_NAME,
+)
 from hmcpctl.server_tools.lpar.inspect import INSPECT_SECURITY, INSPECT_TOOL_NAME
 from hmcpctl.server_tools.lpar.plan import PLAN_SECURITY, PLAN_TOOL_NAME
 from hmcpctl.server_tools.lpar.power import POWER_SECURITY, POWER_TOOL_NAME
@@ -96,6 +100,7 @@ TOOL_SECURITY: Mapping[str, ToolSecurity] = build_tool_security(
         INVENTORY_TOOL_NAME: INVENTORY_SECURITY,
         PLAN_TOOL_NAME: PLAN_SECURITY,
         POWER_TOOL_NAME: POWER_SECURITY,
+        DECOMMISSION_TOOL_NAME: DECOMMISSION_SECURITY,
         PROVISION_TOOL_NAME: PROVISION_SECURITY,
         RECONFIGURE_TOOL_NAME: RECONFIGURE_SECURITY,
         INSPECT_TOOL_NAME: INSPECT_SECURITY,
@@ -111,7 +116,7 @@ PRIMARY_TOOLS: frozenset[str] = frozenset(
         PLAN_TOOL_NAME,
         PROVISION_TOOL_NAME,
         RECONFIGURE_TOOL_NAME,
-        "hmc_decommission_lpar",
+        DECOMMISSION_TOOL_NAME,
         POWER_TOOL_NAME,
         INSPECT_TOOL_NAME,
         "hmc_prepare_host_handoff",

@@ -28,11 +28,14 @@ from hmcpctl.operations.lpar.decommission import (
     _vscsi_detach_inventory,
     decommission_lpar,
 )
-from hmcpctl.server_tools.lpar.lifecycle import (
-    hmc_decommission_lpar,
-)
+from hmcpctl.server_tools.catalog import TOOL_SECURITY
+from hmcpctl.server_tools.lpar.decommission import decommission_handler
 from hmcpctl.xmlutil import element_to_dict
 
+# The served handler under a policy that permits and admits everything.
+hmc_decommission_lpar = decommission_handler(
+    TOOL_SECURITY, lambda _name: True, lambda *_args: None
+)
 SYSTEM_UUID = "11111111-1111-1111-1111-111111111111"
 LPAR_UUID = "22222222-2222-2222-2222-222222222222"
 VIOS_UUID = "33333333-3333-3333-3333-333333333333"
@@ -303,7 +306,7 @@ def test_hmc_decommission_lpar_delegates_with_one_configured_client() -> None:
     with (
         patch("hmcpctl._app.client_from_env", side_effect=fake_client_from_env),
         patch(
-            "hmcpctl.server_tools.lpar.lifecycle.build_config",
+            "hmcpctl.server_tools.lpar.decommission.build_config",
             return_value=HMCConfig.from_mapping({"host": "h"}),
         ),
         patch(

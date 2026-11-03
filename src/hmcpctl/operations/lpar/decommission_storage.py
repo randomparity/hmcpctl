@@ -383,7 +383,7 @@ async def clean_storage(
     system_uuid: str,
     partition_uuid: str,
     *,
-    authorized_vios: frozenset[str] | None,
+    authorized_vios: frozenset[str],
 ) -> tuple[dict[str, str], ...]:
     """Delete the partition's deletable owned items; return the retained ones.
 
@@ -396,9 +396,7 @@ async def clean_storage(
         # A run that stopped between the delete and the ledger write: finish the write.
         journal.ledger_remove(item.kind, system_uuid, partition_uuid, item.identity())
     items = tuple(i for i in items if i not in done)
-    allowed = tuple(
-        i for i in items if authorized_vios is None or i.vios_uuid in authorized_vios
-    )
+    allowed = tuple(i for i in items if i.vios_uuid in authorized_vios)
     kept = [*retained]
     kept.extend(i.entry(reason="not_authorized") for i in items if i not in allowed)
     assessment = await assess(hmc, system_uuid, partition_uuid, allowed)

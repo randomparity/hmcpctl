@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -40,8 +41,12 @@ from hmcpctl.operations.lpar.decommission_operation import (
     preview,
     result_from_record,
 )
-from hmcpctl.server_tools.lpar.lifecycle import hmc_decommission_lpar
+from hmcpctl.server_tools.catalog import TOOL_SECURITY
+from hmcpctl.server_tools.lpar.decommission import decommission_handler
 
+hmc_decommission_lpar = decommission_handler(
+    TOOL_SECURITY, lambda _name: True, lambda *_args: None
+)
 ARGUMENTS = {
     **DEFAULT_ARGUMENTS,
     "system_name_or_uuid": "system-a",
@@ -86,7 +91,9 @@ def _submit(
     )
     return engine.submit(
         request,
-        decommission_body(arguments, _factory(hmc)),
+        decommission_body(
+            arguments, _factory(hmc), authorized_vios=frozenset({VIOS_UUID})
+        ),
         classifiers=decommission_classifiers(_factory(hmc)),
         continuation=continuation,
         wait_seconds=30,
@@ -592,3 +599,154 @@ def test_the_dry_run_plans_owned_storage(hmc):
         },
     )
     hmc.delete_virtual_disk.assert_not_awaited()
+
+
+def _gated(permitted=lambda _name: True, denied: str | None = None):
+    """The handler under gates that record each delegated check."""
+    checks: list[tuple[str, dict[str, Any]]] = []
+
+    def authorize(name, _security, arguments):
+        checks.append((name, dict(arguments)))
+        if name == denied:
+            raise PermissionError(f"{name} denied")
+
+    return decommission_handler(TOOL_SECURITY, permitted, authorize), checks
+
+
+def _owned_call(handler, **extra):
+    return handler(
+        request_id="o1",
+        system_name_or_uuid="system-a",
+        lpar_name_or_uuid="aix-prod",
+        storage_cleanup="delete_owned",
+        poll_interval=1,
+        wait_seconds=30,
+        **extra,
+    )
+
+
+def test_delete_owned_without_the_window_is_refused_and_records_nothing(served):
+    with pytest.raises(ValueError, match="exclusive_writer_window"):
+        _owned_call(hmc_decommission_lpar)
+    assert _recorded("o1") is None
+
+
+def test_an_unpermitted_specialist_refuses_delete_owned(served):
+    _owned_disks(served, "lpar-a-root")
+    handler, _ = _gated(permitted=lambda name: name != "hmc_delete_virtual_disk")
+
+    with pytest.raises(PermissionError, match="hmc_delete_virtual_disk"):
+        _owned_call(handler, exclusive_writer_window=True)
+    assert _recorded("o1") is None
+    served.submit_job.assert_not_awaited()
+
+
+def test_a_denied_vios_refuses_delete_owned(served):
+    _owned_disks(served, "lpar-a-root")
+    handler, _ = _gated(denied="hmc_detach_storage_mapping")
+
+    with pytest.raises(PermissionError):
+        _owned_call(handler, exclusive_writer_window=True)
+    assert _recorded("o1") is None
+
+
+def test_delete_owned_authorizes_each_specialist_on_the_owning_vios(served):
+    _owned_disks(served, "lpar-a-root")
+    handler, checks = _gated()
+
+    result = _owned_call(handler, exclusive_writer_window=True)
+
+    assert result.operation.outcome == "completed"
+    delegated = [(name, args) for name, args in checks if name != TOOL_NAME]
+    assert [name for name, _ in delegated] == [
+        "hmc_detach_storage_mapping",
+        "hmc_unmount_optical_media",
+        "hmc_delete_optical_media",
+        "hmc_delete_virtual_disk",
+    ]
+    assert {args["vios_name_or_uuid"] for _, args in delegated} == {VIOS_UUID}
+    assert {args["system_name_or_uuid"] for _, args in delegated} == {"system-a"}
+    assert len(result.storage["deleted"]) == 1
+
+
+def test_a_bare_resume_of_delete_owned_needs_the_window(served):
+    _owned_disks(served, "lpar-a-root")
+    served.delete_storage_mapping.side_effect = HMCError("HTTP 500")
+    paused = _owned_call(hmc_decommission_lpar, exclusive_writer_window=True)
+    assert paused.operation.outcome == "needs_attention"
+
+    with pytest.raises(ValueError, match="exclusive_writer_window"):
+        hmc_decommission_lpar(request_id="o1", continuation="resume")
+
+
+def test_a_resume_after_the_delete_authorizes_against_the_recorded_targets(served):
+    _owned_disks(served, "lpar-a-root")
+    group = served.get_volume_group.return_value
+    # The first read is the new request's preview; the run's own read fails.
+    served.get_volume_group.side_effect = [group, HMCError("HTTP 500"), group]
+    paused = _owned_call(hmc_decommission_lpar, exclusive_writer_window=True)
+    assert paused.resource_deleted is True
+    assert paused.operation.outcome == "needs_attention"
+    served.list_logical_partitions.return_value = []
+    handler, checks = _gated()
+
+    resumed = handler(
+        request_id="o1",
+        continuation="resume",
+        exclusive_writer_window=True,
+        wait_seconds=30,
+    )
+
+    assert resumed.operation.outcome == "completed"
+    assert len(resumed.storage["deleted"]) == 1
+    vioses = {
+        args.get("vios_name_or_uuid") for name, args in checks if name != TOOL_NAME
+    }
+    assert vioses == {VIOS_UUID}
+
+
+def test_a_legacy_record_without_storage_cleanup_resumes_as_retain(served):
+    _owned_disks(served, "lpar-a-root")
+    served.delete_storage_mapping.side_effect = [HMCError("HTTP 500"), None]
+    hmc_decommission_lpar(
+        request_id="L1",
+        system_name_or_uuid="system-a",
+        lpar_name_or_uuid="aix-prod",
+        poll_interval=1,
+        wait_seconds=30,
+    )
+    with store.session() as conn, store.write_transaction(conn):
+        row = conn.execute(
+            "SELECT request_json FROM operations WHERE request_id = 'L1'"
+        ).fetchone()
+        request = json.loads(row["request_json"])
+        del request["arguments"]["storage_cleanup"]
+        conn.execute(
+            "UPDATE operations SET request_json = ? WHERE request_id = 'L1'",
+            (json.dumps(request),),
+        )
+
+    resumed = hmc_decommission_lpar(
+        request_id="L1", continuation="resume", wait_seconds=30
+    )
+
+    assert resumed.operation.outcome == "completed"
+    assert resumed.storage is None
+    served.delete_virtual_disk.assert_not_awaited()
+
+
+def test_a_delete_owned_dry_run_warns_without_the_window(served):
+    _owned_disks(served, "lpar-a-root")
+
+    result = hmc_decommission_lpar(
+        request_id="d1",
+        system_name_or_uuid="system-a",
+        lpar_name_or_uuid="aix-prod",
+        storage_cleanup="delete_owned",
+        dry_run=True,
+    )
+
+    assert result.operation is None
+    assert len(result.storage["pending"]) == 1
+    assert any("exclusive_writer_window" in w for w in result.warnings)
+    assert _recorded("d1") is None
