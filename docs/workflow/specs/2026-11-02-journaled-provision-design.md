@@ -50,7 +50,10 @@ result through a saved profile, as ADR 0313 decides. No `install`, `boot` or `ad
   (`engine.join` gains `timeout=None`), renders the result plus operation id, state and
   outcome, and exits 1 unless the outcome is `configured`. A refused submission (such as a held
   execution lock) is a CLI error naming the reason.
-- Live scripts pass a run-unique `request_id` and `wait_seconds=600`; their existing judge
+- Live scripts pass a run-unique `request_id`, `wait_seconds=600`, and
+  `exclusive_writer_window` from the operator's existing `partition_profile_writer_window`
+  attestation. Without that attestation they record the provision as a SKIP with the reason.
+  Their existing judge
   already fails a result whose `workflow_completed` is false, which every outcome but
   `configured` reports. `lpar_power` adds its provision request to the requests its teardown
   abandons. `live_test_recovery.py` needs no change: it keys on tool names.
@@ -66,8 +69,15 @@ other than `completed`, is decided by reading the partition's profiles by name: 
 `EffectNotApplied`; present goes on to the readback. The readback (`list_partition_profiles`,
 by name) requires `ProfileMemory.DesiredMemory`, the desired processors (virtual processors
 when shared, processors when dedicated), a `ProfileClientNetworkAdapter` whose `PortVLANID` is
-the request's VLAN, and, with storage, a `ProfileVirtualSCSIClientAdapter`. A mismatch stops
-the remaining steps with `needs_attention`. Then the `default_profile` effect
+the request's VLAN, and, with storage, a `ProfileVirtualSCSIClientAdapter`. It also requires the desired
+processing units when shared, a `ProfileVirtualNICDedicated` or `ProfileVirtualNICShared` per
+requested vNIC, and a `ProfileSRIOVEthernetLogicalPort` per requested direct SR-IOV port. Each
+is counted by element name in the profile read by `profile_write.profile_by_name`. A mismatch
+stops the remaining steps with `needs_attention`. The default-profile write raises unless its
+outcome is `completed` and `verified`. `power_on` raises on an `already_activated` result, and
+its classifier requires `LastActivatedProfile` to be the saved name. The preconditions refuse
+an HMC console below 10.3.1060, and the handler refuses a `resume` that does not re-assert
+`exclusive_writer_window`. Then the `default_profile` effect
 (`set_default_partition_profile`) runs, and `power_on` passes the profile's UUID as
 `partition_profile_uuid`. `profile_write.py` gains `target_by_name`, and its classifier
 handles the name form; `parse_target` is unchanged for the UUID form. The handler and CLI

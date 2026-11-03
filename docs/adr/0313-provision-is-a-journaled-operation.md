@@ -50,9 +50,9 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
    | `disk` | `vios.virtual_disk` | `vios:<uuid>` | `{vios_uuid, vg_uuid, disk_name, capacity_mib}` | disk in the group, not ledgered by another operation → applied; absent → not applied; else attention |
    | `storage` | `vios.storage_map` | `lpar:<uuid>` | `{vios_uuid, storage_name}` | mapping to this partition → applied, else not applied |
    | `assignments` | `lpar.pcie_assignments` | `lpar:<uuid>` | `{steps}` | none |
-   | `profile` | `lpar.profile_write` | `lpar:<uuid>/profile-name:<name>` | `{profile_uuid, profile_name}` | profile of that name: absent → not applied; memory and processors as requested → applied; else attention (ADR 0314, by name) |
+   | `profile` | `lpar.profile_write` | `lpar:<uuid>/profile-name:<name>` | `{profile_uuid, profile_name}` | profile of that name: absent → not applied; memory, processors and units as requested → applied; else attention (ADR 0314, by name) |
    | `default_profile` | `lpar.default_profile` | `lpar:<uuid>` | `{profile_name}` | partition's `DefaultProfileName` is the saved name → applied, else not applied |
-   | `power_on` | `lpar.power_on` | `lpar:<uuid>` | `{job_id}` | activated → applied, else attention (ADR 0199) |
+   | `power_on` | `lpar.power_on` | `lpar:<uuid>` | `{job_id}` | activated with `LastActivatedProfile` the saved name → applied; anything else → attention (ADR 0199) |
 
    `follow_ups` lists the create's own profile-apply and physical-I/O steps as
    `[step, status, text]`; `steps` lists each assignment step as `[step, status]`. The MAC is
@@ -95,15 +95,26 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
 10. **Persistence (#1840).** After the current-configuration writes, provision saves the
     current configuration into a NEW profile `hmcpctl_<first 12 hex digits of operation_id>`
     through #637's `save_current_partition_profile`, never force-saving. It then reads that
-    profile back by name and requires the requested desired memory and processors, a client
-    network adapter on the requested VLAN, and with storage a vSCSI client adapter. Next it
-    makes the profile the default through `set_default_partition_profile`. With `power_on`, it
-    activates from that profile. A save the helper reports as `unknown` counts when the by-name
-    readback passes (operator decision D1, 2026-11-03). A readback that fails ends
-    `needs_attention`.
+    profile back by name and requires:
+    - the requested desired memory, processors and, for a shared partition, processing units;
+    - a client network adapter on the requested VLAN, and with storage a vSCSI client adapter;
+    - at least one profile vNIC per requested vNIC, and one SR-IOV logical port per requested
+      direct port.
+
+    Physical I/O is verified by the create's own profile comparison and is not re-checked.
+    Next the profile becomes the default through `set_default_partition_profile`; with
+    `power_on`, provision then activates from it. A save the helper reports as `unknown`
+    counts when the by-name readback passes (operator decision D1, 2026-11-03). A readback
+    that fails ends `needs_attention`. The default-profile write raises unless the helper
+    reports `completed` and `verified`, so an uncertain write is decided by its classifier.
+    The power-on write raises when the partition was already active, so its classifier
+    decides. Both #637 writes need HMC 10.3.1060 or later, which the preconditions check
+    before anything is recorded.
 11. **The writer window is required.** `exclusive_writer_window=true` is a required caller input
     for every provision that records an operation (operator decision, 2026-11-02, as #637's
     writes require it, ADR 0242). Without it the call is refused before anything is recorded.
+    A `resume` re-asserts it, because its writes may run long after the first call. `abandon`
+    writes nothing and does not need it.
 12. **Name-addressed profile writes.** ADR 0314's `lpar.profile_write` target gains the form
     `lpar:<uuid>/profile-name:<name>` for a profile the write creates. Its classifier reads the
     profile by name, and an absent profile is `not_applied`. The UUID form is unchanged
@@ -122,11 +133,13 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
 - The CLI is refused while another process holds the ADR 0190 execution lock, such as a
   server that has run a logical mutation.
 - Every provision needs `exclusive_writer_window=true` and a policy permitting the profile
-  specialists, and provision is now `destructive` for client approval prompts.
+  specialists. Provision is now `destructive`, so an effect grant must list `destructive`, or
+  name the tool, to admit it; a `mutate`-only grant no longer does.
 - Each provision leaves a second saved profile (`hmcpctl_…`) as the default; the profile the
   create wrote is kept, unchanged, and is not activated again.
-- A resumed `profile` write classified `applied` from memory and processors alone is still
-  re-checked by the body's full readback, adapters included, before `configured`.
+- A resumed `profile` write classified `applied` from memory, processors and units alone is
+  still re-checked by the body's full readback, adapters included, before `configured`.
+- An HMC older than 10.3.1060 cannot provision, since #637's profile jobs need that level.
 - Effect keys, kinds and ledger kinds are a persisted contract (ADR 0195).
 
 ## Considered & rejected
@@ -153,7 +166,5 @@ writes; its best-effort stamp and its partial-failure result no longer describe 
 - **Use `stamp_policy="required"`.** verified: it raises after the partition exists
   (`core.py` `create_and_stamp_lpar` docstring, main `ddf3429a`), so the create effect would
   settle `uncertain` and pause instead of ending `failed`.
-- **Require `exclusive_writer_window` for disk creation now.** judgment: fit. The plan digest
-  hashes it `false` without `install`, so the flag would make plans unmatchable before #1840.
 - **Delegate `hmc_add_vscsi_adapter`.** verified: provision adds no vSCSI adapter; the mapping
   creates the pair (ADR 0169, #1030).
