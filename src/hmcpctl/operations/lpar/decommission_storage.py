@@ -30,10 +30,10 @@ from .decommission import (
     _vscsi_detach_inventory,
     unmap_key,
 )
+from .install_media import repository_group
+from .provision_operation import DISK_LEDGER, MEDIA_LEDGER
 
 ClientFactory = Callable[[str], Any]
-DISK_LEDGER = "virtual_disk"
-MEDIA_LEDGER = "installer_media"
 # Persisted contract (ADR 0323 Decision 3): never change while an operation can be open.
 DELETE_KINDS: Mapping[str, str] = {
     DISK_LEDGER: "vios.virtual_disk_delete",
@@ -249,24 +249,6 @@ def _disk_count(group: Mapping[str, Any] | None, name: str) -> int:
     )
 
 
-def _holds_repository(group: Mapping[str, Any]) -> bool:
-    resource = group.get("Resource")
-    repositories = (
-        resource.get("MediaRepositories") if isinstance(resource, dict) else None
-    )
-    return isinstance(repositories, dict) and "VirtualMediaRepository" in repositories
-
-
-async def repository_group(hmc: HMCClient, vios_uuid: str) -> str | None:
-    """The VIOS's one repository-bearing volume group, or None for none or several."""
-    groups = [
-        str(group.get("UUID") or "").lower()
-        for group in await hmc.list_volume_groups(vios_uuid)
-        if _holds_repository(group)
-    ]
-    return groups[0] if len(groups) == 1 and groups[0] else None
-
-
 async def _media_count(hmc: HMCClient, vios_uuid: str, vg_uuid: str, name: str) -> int:
     media = await hmc.list_optical_media(vios_uuid, vg_uuid)
     return sum(leaf_text(item.get("MediaName")) == name for item in media)
@@ -281,8 +263,9 @@ async def _locate(hmc: HMCClient, item: OwnedItem) -> tuple[str | None, int]:
         if group is None:
             raise HMCError(f"volume group {item.vg_uuid} returned nothing")
         return item.vg_uuid, _disk_count(group, item.name)
-    repository = await repository_group(hmc, item.vios_uuid)
-    if repository is None:
+    try:
+        repository = await repository_group(hmc, item.vios_uuid)
+    except ValueError:
         return None, 0
     return repository, await _media_count(hmc, item.vios_uuid, repository, item.name)
 
