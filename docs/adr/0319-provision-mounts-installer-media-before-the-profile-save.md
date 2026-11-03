@@ -15,6 +15,10 @@ of the save. The rest of ADR 0313 stands. The decision was taken by the operator
 - A mount creates a new vSCSI adapter pair for the optical mapping. `docs/recipes/lpar-iso-install.md`
   §4 records this on V10R3 M1060. The #1284 capture `rest-vios-scsi-mapping-replace-storage.json` shows the
   disk on client slot 2 and the optical medium on client slot 4.
+- A mapping create on a partition with no applied current configuration is refused with REST0269. The
+  refused create can leave a VIOS server adapter behind (recipe §4; `client/client_storage.py`). A REST
+  create sets the current configuration (#1164), and the `mksyscfg` path applies the profile, so the
+  mount runs before any profile write touches the partition.
 - The installer power-on (#1849) activates the saved profile. If the optical adapter is added after the
   save, that profile does not carry it, and the firmware never sees the installer.
 
@@ -49,5 +53,9 @@ of the save. The rest of ADR 0313 stands. The decision was taken by the operator
   extra #637 job on a path whose job read is already defective (#1867).
 - **Force-save over the saved profile after the mount.** verified: ADR 0313 records that force-save fails
   at #637's recovery copy with HTTP 500 (#1868).
+- **Apply the profile again before the mount.** judgment: cost. Both create paths already leave an
+  applied current configuration (`operations/lpar/core.py` `_REST_CREATE_CONFIGURED`, main
+  `35174c09`). A refusal ends the run `failed` with the server-adapter note, not a retry loop.
+- **Do nothing (no install path).** judgment: fit. Issue #1842 and the H1 spec require it.
 - **Turn on `CurrentProfileSync`.** judgment: fit. ADR 0313 already rejected changing a partition setting
   the caller did not ask for.

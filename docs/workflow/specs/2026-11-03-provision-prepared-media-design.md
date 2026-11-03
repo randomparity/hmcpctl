@@ -51,6 +51,9 @@ In scope: the MCP tool `hmc_provision_lpar` accepts `install` with `media.mode: 
   - The preconditions add, for `install`, an allowlisted `media.url` (`require_allowlisted_iso_url`) and
     `repository_group` on `storage.vios_uuid`. The dry-run step list adds `bind_media`, `upload_media`
     and `mount_media` before `save_profile`, and `set_boot_order` after `default_profile`.
+  - `_add_network` takes the pinned MAC: with `adapters.mac` the network leg creates the adapter with
+    `mac_address` set to it, as 12 hex digits. The network classifier then also requires the found
+    adapter's MAC to equal the pin; a different MAC is `needs_attention`.
 - **`operations/storage/resources.py`**: `upload_iso` gains keyword-only `expected_sha256` and
   `expected_size`. After the download, and before any web File is created, a difference raises
   `ValueError`, so nothing is uploaded. Callers that omit both see no change.
@@ -62,6 +65,9 @@ In scope: the MCP tool `hmc_provision_lpar` accepts `install` with `media.mode: 
     with `install`;
   - `_check_plan` passes `install`, `boot`, `adapters.mac` and the caller's `exclusive_writer_window`;
   - the docstring states the install path.
+- **`operations/lpar/plan.py`** `_intended_changes` follows ADR 0319: `bind_media`, `upload_media`
+  and `mount_media` come before `write_profile`, and `set_boot_order` after it. The plan digest is
+  unchanged, because it hashes the request.
 - **Docs:** `just tool-docs`; `docs/capabilities/maturity.json` gains a `prepared-install-media`
   implemented variant and a `built-install-media` missing variant owned by #1843; `CHANGELOG.md`.
 
@@ -86,16 +92,24 @@ In scope: the MCP tool `hmc_provision_lpar` accepts `install` with `media.mode: 
 1. After the ADR 0313 legs succeed, `_media` sets phase `media_bound` and re-runs `bind_prepared`. It
    requires the `network` effect's MAC to equal the binding's MAC and the `disk` effect's `disk_name` to
    equal `storage.storage_name`. Otherwise it raises `OperationFailed`. It records step `bind_media`.
-2. Effect `upload`, kind `vios.optical_media_upload`, target `vios:<uuid>/media:<name>`, step
-   `upload_media`:
+2. Effect `upload`, kind `vios.optical_media_upload`, target `vios:<uuid>`, step `upload_media`:
    - `repository_group`, then `upload_iso(..., expected_sha256, expected_size)`;
    - a `ValueError` becomes `EffectNotApplied`;
+   - this effect and `mount` are called through `ctx.effect` directly, not `_leg`, so an
+     `EffectNotApplied` propagates and the engine ends the run `failed`;
+   - every other error settles the effect `uncertain` and pauses the run;
    - identity `{vios_uuid, vg_uuid, media_name}`;
    - once applied, a ledger entry `installer_media` (key `installer_media`) with
      `{vios_uuid, media_name}`.
 3. Effect `mount`, kind `vios.optical_mapping`, target `lpar:<uuid>`, step `mount_media`:
    - `mount_optical_media`, then one listing read;
-   - identity `{vios_uuid, media_name, client_slot, lun}`.
+   - the write raises `HMCError`, settling `uncertain`, unless exactly one listed optical mapping of
+     this partition has the media name and a device path;
+   - identity `{vios_uuid, media_name, client_slot, lun}`;
+   - a refusal whose HMC error names `REST0269` (no applied current configuration) raises
+     `EffectNotApplied`, and the run ends `failed`. Its text says a refused mapping create can leave a
+     VIOS server adapter with no target device, using the `client_storage` wording and its `lshwres`
+     check. A resume therefore never re-runs a mount the HMC refused for that reason.
 4. `_persist`, as ADR 0313 runs it. With `install`, `readback_problem` also requires a
    `ProfileVirtualSCSIClientAdapter` whose `VirtualSlotNumber` is the mount's `client_slot`.
 5. Effect `boot_order`, kind `lpar.boot_order`, target `lpar:<uuid>`, step `set_boot_order`:
@@ -113,7 +127,8 @@ comes from the storage mapping with backing `storage.storage_name` on this parti
 
 **Classifiers (H1 *Resume*):**
 
-- `upload`: the media name is listed in the repository group → `applied`; otherwise `not_applied`; an
+- `upload`: the VIOS comes from `request.storage.vios_uuid` and the name from
+  `media_name_for(ctx.operation_id)`; the target is not parsed. The media name is listed in the repository group → `applied`; otherwise `not_applied`; an
   unreadable or ambiguous group → `needs_attention`.
 - `mount`: the optical mappings of this partition with that `MediaName`:
   - one with a device path → `applied`;
@@ -149,8 +164,14 @@ comes from the storage mapping with backing `storage.storage_name` on this parti
      request is refused as `request_too_large`.
    - A stored operation recorded before `adapters.mac` existed conflicts if a continuation re-sends
      `adapters` (pre-release; ADR 0313 precedent).
-   - A mount on a partition the HMC still reports as needing a profile apply (REST0269, recipe §4)
-     settles `uncertain`, then `not_applied` on resume, and pauses.
+   - A mount refused with REST0269 ends `failed`, possibly leaving a VIOS server adapter
+     (`client_storage.py` note). Provision's REST create sets the current configuration
+     (`core.py` `_REST_CREATE_CONFIGURED`, #1164) and its `mksyscfg` path applies it, so the mount
+     runs on an applied configuration. The recipe's §4 refusal followed a CLI create. Native proof is
+     #1849's.
+   - Any other mount error pauses. A resume that finds no mapping re-runs the mount once per resume.
+     A refused create may leave a server adapter that the listing cannot show (ADR 0315
+     Consequences).
 4. **Covered elsewhere:**
    - the power-on, and whether the optical device survives activation natively → #1849/#1850;
    - built mode → #1843;
@@ -185,11 +206,14 @@ comes from the storage mapping with backing `storage.storage_name` on this parti
    `installer_media`, and its result lists `unverified`.
 2. Each refusal named in `validate_provision_install`, and each `bind_prepared` field mismatch, refuses
    before anything is recorded.
-3. A created adapter whose MAC differs from `adapters.mac` ends `failed`, and no upload is attempted.
-4. A digest or size mismatch uploads nothing, and the run ends `failed`.
-5. The `upload`, `mount` and `boot_order` classifiers return the verdicts listed above.
+3. The network leg requests `adapters.mac`. A created adapter whose MAC differs from `adapters.mac` ends `failed`, and no upload is attempted.
+4. A digest or size mismatch uploads nothing, and the run ends `failed`. A mount refused with
+   REST0269 ends `failed`. A mount write that lists no device path settles `uncertain`.
+5. The `upload`, `mount` and `boot_order` classifiers, and the pinned-MAC `network` check, return
+   the verdicts listed above.
 6. A readback that lacks the optical slot pauses `needs_attention` without writing the boot order.
-7. Without `install`, the delegated tools, the step order and the readback are unchanged, and the
+7. `hmc_plan_lpar`'s `intended_changes` order for `install` matches provision's dry-run order.
+   Without `install`, the delegated tools, the step order and the readback are unchanged, and the
    existing provision tests pass.
 8. `just tool-docs-check`, `just capability-inventory` and `just verify` are green.
 
