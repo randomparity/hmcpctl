@@ -309,7 +309,17 @@ async def _shared_storage(
     repository = await lpar_config._cli(client, state, f"{prefix} 'lsrep'")
     if not isinstance(volumes, str) or not isinstance(repository, str):
         return None
-    return volumes, repository
+    return volumes, _repository_without_parent_free(repository)
+
+
+def _repository_without_parent_free(listing: str) -> str:
+    """``lsrep`` with its first data row's last column, the parent volume group's free
+    space, dropped: deleting the run volume in that group changes it, the repository
+    and its media do not."""
+    lines = listing.splitlines()
+    if len(lines) > 1:
+        lines[1] = " ".join(lines[1].split()[:-1])
+    return "\n".join(lines)
 
 
 def _deleted_disks(data: Any) -> frozenset[str]:

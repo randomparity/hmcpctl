@@ -188,7 +188,13 @@ class World:
         if cmd.startswith("viosvrcmd") and cmd.endswith("'lspv'"):
             return "NAME PVID VG STATUS\nhdisk0 00f1 rootvg active\n"
         if cmd.startswith("viosvrcmd") and cmd.endswith("'lsrep'"):
-            return "Size(mb) Free(mb) Parent Pool Parent Size Parent Free\n2048 1024 rootvg\n"
+            # Parent Free follows the group's volumes, as live V10R3 VIOS prints it.
+            free = 459264 - 1024 * len(self.volumes)
+            return (
+                "Size(mb) Free(mb) Parent Pool Parent Size Parent Free\n"
+                f"10240 10093 rootvg 571904 {free}\n\nName File Size Optical Access\n"
+                "lp3_28.iso 105 lp3-vopt ro\n"
+            )
         if cmd.startswith("viosvrcmd") and f"lsvg -lv {GROUP}" in cmd:
             rows = [f"{GROUP}:", "LV NAME TYPE LPs PPs PVs LV STATE MOUNT POINT"]
             rows += [f"{v} jfs2 1 1 1 open/syncd N/A" for v in sorted(self.volumes)]
@@ -1464,7 +1470,7 @@ def _repository_changes(w: World) -> None:
             not c["dry_run"] for c in w.calls_to("hmc_decommission_lpar")
         )
         if decommissioned and k["cmd"].endswith("'lsrep'"):
-            return "Size(mb) Free(mb)\n2048 2048\n"
+            return "Size(mb) Free(mb)\n2048 2048 rootvg 571904 1\n"
         return real(k)
 
     _wrap(w, "hmc_run_command", change)
