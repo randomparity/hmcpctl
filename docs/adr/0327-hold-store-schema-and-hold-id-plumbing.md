@@ -12,7 +12,7 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
   partition guards and the resource ledger. ADR 0190 says nothing about changing the schema.
 - ADR 0193 Decision 2 needs `hold_id` on every partition-mutation tool and `--hold-id` on every
   partition-mutation CLI command. On `main` at `41744bd2`, 55 registered non-`read` tools take a
-  partition selector, and about 70 CLI commands mirror them.
+  partition selector, and 49 CLI commands mirror them.
 - The `authorized()` wrapper and `ToolDefinition` already see every registered tool's
   `ToolSecurity`, and every CLI command passes through one `CLICommand` class in
   `cli.py`'s `_register_commands`.
@@ -73,7 +73,7 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
   not read — ADR 0193 Decision 5 turned into a silent bypass.
 - **Refuse a schema-1 store and require the operator to delete it.** judgment: cost. It discards
   live operations, guards and ledger entries to add an empty table.
-- **Add `hold_id` to each handler and CLI command by hand.** judgment: complexity. About 120
+- **Add `hold_id` to each handler and CLI command by hand.** judgment: complexity. About 105
   edits whose omission is invisible until the coverage test, and every future tool repeats it.
 - **One root `hmcpctl --hold-id` option.** judgment: fit. ADR 0193 names `--hold-id` on the
   partition commands, and a root option would also appear on commands that cannot use it.
