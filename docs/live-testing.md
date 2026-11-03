@@ -471,6 +471,10 @@ in `tests/fixtures/live/README.md`. It:
 - Q3: powers the test partition on, then immediately off, and unloads (with `release`
   only when the plain unload fails), loads with `release`, unloads with `release` and
   loads again, all through the tools;
+- Q5 (#1844): with the first medium still mapped, powers the test partition on and unmounts
+  it through `hmc_unmount_optical_media` while it runs; when that is refused, powers it off
+  immediately and unmounts again. The partition has no operating system, so Q5 shows how the
+  HMC answers a running client whose firmware holds the device, never a guest's reservation;
 - after each tool step reads `lsvopt` and records a `<step> check` row, PASS only when the
   tool succeeded and the device holds the expected medium or `No Media`. These rows are
   evidence for the reviewer of the run; like every ST71 row they promote no maturity, so
