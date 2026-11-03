@@ -2265,6 +2265,7 @@ def test_lpars_decommission_resumes_a_paused_operation(fake_hmc):
         (["--request-id", "r1", "--continuation", "resume", "--dry-run"], "--dry-run"),
         (["--request-id", "r1", "--dry-run"], "--system"),
         (["lpar-b", "--request-id", "r1", "--continuation", "resume"], "omit"),
+        (["--request-id", "r1", "--continuation", "resume", "--immediate"], "omit"),
     ],
 )
 def test_lpars_decommission_refuses_bad_operation_input(fake_hmc, args, message):

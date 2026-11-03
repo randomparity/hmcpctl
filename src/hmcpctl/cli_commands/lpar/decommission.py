@@ -51,10 +51,7 @@ def lpars_decommission(
     continuation: str = typer.Option(
         "none",
         "--continuation",
-        help=(
-            "none, resume or abandon; a continuation reuses the recorded request and "
-            "ignores the option flags"
-        ),
+        help=("none, resume or abandon; a continuation reuses the recorded request"),
     ),
     system: str | None = typer.Option(
         None,
@@ -110,6 +107,16 @@ def lpars_decommission(
             usage_error(
                 "a continuation takes the recorded partition and system; omit the "
                 "partition argument and --system"
+            )
+        if (ownership_override, immediate, timeout_seconds, poll_interval) != (
+            False,
+            False,
+            300,
+            5,
+        ):
+            usage_error(
+                "a continuation reuses the recorded options; omit --ownership-override, "
+                "--immediate, --timeout-seconds and --poll-interval"
             )
         try:
             recorded = engine.recorded_arguments(
