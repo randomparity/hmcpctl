@@ -751,7 +751,11 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   first sends a dry-run provision carrying a dedicated slot, which must be refused
   before any HMC read (`dedicated-slot-refused`; #1390). It then creates the 1 GiB
   volume `lppwr<8 hex>` and provisions P on it (virtual Ethernet on the VLAN, vSCSI
-  mapping, PowerOn) with no PCIe argument. It then proves the decommission dry run inventories the exact vSCSI
+  mapping, saved profile, PowerOn) with no PCIe argument; the real provision needs
+  `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` and is skipped without it. Once P
+  is activated, P's default and current profile must both be the `hmcpctl_…` profile
+  the operation saved (`saved-profile-activated`; ADR 0313), and the client adapter is
+  listed only after that activation, so it proves the adapter survived it. It then proves the decommission dry run inventories the exact vSCSI
   mapping and client adapters without changing them. The real decommission removes
   its own mapping before deleting P; the arm proves P and its mapping absent, the
   backing volume retained, and foreign mappings and other volumes unchanged. Only
@@ -816,7 +820,8 @@ partition's profile, but the provision's PowerOn activates the current configura
 so the running partition does not own the slot. Provision now refuses a dedicated
 slot before any HMC call (#1390), and the arm expects that refusal instead of sending
 the slot; a dedicated slot is assigned through the bare-CEC path
-([recipe](recipes/bare-cec-lpar.md)). Profile-first provisioning is #1225.
+([recipe](recipes/bare-cec-lpar.md)). Provision now activates the profile it saves
+(ADR 0313); carrying a dedicated slot into that profile is #1841.
 
 `lpar.power_on` passed on a re-run after #1392. The first run's current-configuration
 activation ended `FAILED_TO_START` with "Parameter 'OperationType' is not allowed for

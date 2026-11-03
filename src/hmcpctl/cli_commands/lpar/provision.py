@@ -2,48 +2,72 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import typer
 from rich.text import Text
 
+from ...client.core import HMCClient
 from ...documents.lpar import PARTITION_TYPES, LparResources, validate_partition_type
 from ...documents.storage import STORAGE_KINDS, StorageKind
+from ...operations.logical import engine, store
+from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
 from ...operations.lpar.provision import (
     ProvisionAdapters,
-    ProvisionRequest,
     ProvisionResult,
     ProvisionStorage,
-    provision_lpar,
+    preview_provision,
     validate_provision_assignments,
+)
+from ...operations.lpar.provision_operation import (
+    json_value,
+    provision_body,
+    provision_classifiers,
+    request_from_arguments,
+    result_from_record,
 )
 from ..output import (
     VerbatimTable,
     console,
     escape_controls,
+    fail,
     print_json,
     terminal_field,
     usage_error,
 )
-from ..runtime import with_client
+from ..runtime import current_options, ssh_config, with_client
 from .assignment_input import load_pcie_assignments, load_physical_io
+
+TOOL = "hmc_provision_lpar"
+CONTINUATIONS = ("none", "resume", "abandon")
 
 
 def lpars_provision(
-    system: str = typer.Option(
-        ..., "--system", "-s", help="Target managed system name or UUID"
+    request_id: str = typer.Option(
+        ...,
+        "--request-id",
+        help="Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ - (ADR 0313)",
     ),
-    name: str = typer.Option(..., "--name", "-n", help="Name for the new LPAR"),
-    port_vlan_id: int = typer.Option(
-        ..., "--vlan", help="Port VLAN ID for the network adapter"
+    continuation: str = typer.Option(
+        "none",
+        "--continuation",
+        help="none, resume or abandon; a continuation reuses the recorded request",
     ),
-    vios_uuid: str = typer.Option(
-        ..., "--vios-uuid", help="UUID of the VIOS for vSCSI / storage"
+    system: str | None = typer.Option(
+        None, "--system", "-s", help="Target managed system name or UUID"
     ),
-    storage_name: str = typer.Option(
-        ..., "--storage-name", help="VirtualDisk or PhysicalVolume name to map"
+    name: str | None = typer.Option(None, "--name", "-n", help="Name for the new LPAR"),
+    port_vlan_id: int | None = typer.Option(
+        None, "--vlan", help="Port VLAN ID for the network adapter"
+    ),
+    vios_uuid: str | None = typer.Option(
+        None, "--vios-uuid", help="UUID of the VIOS for vSCSI / storage"
+    ),
+    storage_name: str | None = typer.Option(
+        None, "--storage-name", help="VirtualDisk or PhysicalVolume name to map"
     ),
     partition_type: str = typer.Option(
         "AIX/Linux", "--type", help=f"Partition type: {', '.join(PARTITION_TYPES)}"
@@ -57,13 +81,26 @@ def lpars_provision(
         "VirtualDisk", "--storage-kind", help='"VirtualDisk" or "PhysicalVolume"'
     ),
     vg_uuid: str | None = typer.Option(
-        None, "--vg-uuid", help="Volume group UUID to validate (optional)"
+        None, "--vg-uuid", help="Volume group UUID (required with --capacity-mib)"
+    ),
+    capacity_mib: int | None = typer.Option(
+        None,
+        "--capacity-mib",
+        help="Create --storage-name as a new owned virtual disk of this size",
     ),
     power_on: bool = typer.Option(
         True, "--power-on/--no-power-on", help="Power on after provisioning"
     ),
+    exclusive_writer_window: bool = typer.Option(
+        False,
+        "--exclusive-writer-window",
+        help=(
+            "Attest that no other writer changes this partition's profiles until the "
+            "operation ends; required to provision or resume (ADR 0313)"
+        ),
+    ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="Validate preconditions only; do not create"
+        False, "--dry-run", help="Validate preconditions only; record nothing"
     ),
     physical_io: Path | None = typer.Option(
         None,
@@ -81,68 +118,163 @@ def lpars_provision(
     as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
-    """Provision a new LPAR end-to-end: create, add network adapter, map storage, power on.
+    """Provision a new LPAR as one journaled operation and persist it in a saved profile.
 
-    Always validates preconditions first (name uniqueness, VLAN existence, volume-group existence).
-    Pass --dry-run to run precondition checks only without creating anything.
-    On partial failure the completed steps are reported as "ok", the failed step as "error",
-    and remaining steps as "skipped". Incomplete workflows exit with status 1;
-    successful dry runs exit with status 0. No automatic rollback is performed.
+    Creates and stamps the partition, adds its network adapter and storage, saves the
+    current configuration into a new profile that it reads back and makes the default,
+    then optionally powers on from that profile. Needs --exclusive-writer-window.
+
+    Always validates preconditions first (name uniqueness, VLAN existence, volume-group
+    existence). --dry-run runs only those checks and records nothing. Otherwise the run is
+    recorded under --request-id (ADR 0313): repeating it returns the same operation, and a
+    paused run continues with --continuation resume (or stops with abandon) from this
+    command or hmc_provision_lpar under the same agent id and connection. The command waits
+    for the run to end and exits 1 unless it is configured. No automatic rollback is performed.
     """
+    try:
+        store.validate_request_id(request_id)
+    except ValueError as exc:
+        usage_error(f"--request-id: {exc}")
+    if continuation not in CONTINUATIONS:
+        usage_error(f"--continuation must be one of {', '.join(CONTINUATIONS)}")
+    if not (dry_run or continuation == "abandon" or exclusive_writer_window):
+        usage_error(
+            "--exclusive-writer-window is required: provision writes a partition "
+            "profile and the default-profile setting (ADR 0313)"
+        )
+    if continuation != "none":
+        if dry_run:
+            usage_error("--dry-run cannot continue an operation")
+        given = {"exclusive_writer_window": True} if continuation == "resume" else {}
+        _run(request_id, continuation, None, as_json, given)
+        return
+    missing = [
+        flag
+        for flag, value in (
+            ("--system", system),
+            ("--name", name),
+            ("--vlan", port_vlan_id),
+            ("--vios-uuid", vios_uuid),
+            ("--storage-name", storage_name),
+        )
+        if value is None
+    ]
+    if missing:
+        usage_error(f"a new operation needs {', '.join(missing)}")
+    try:
+        validate_partition_type(partition_type)
+    except ValueError as exc:
+        usage_error(f"--type: {exc}")
     assignments = load_pcie_assignments(pcie_assignments)
     try:
         validate_provision_assignments(assignments)
     except ValueError as exc:
         usage_error(f"--pcie-assignments: {exc}")
-
-    try:
-        lpar_type = validate_partition_type(partition_type)
-    except ValueError as exc:
-        usage_error(f"--type: {exc}")
     if storage_kind not in STORAGE_KINDS:
         usage_error(
             "--storage-kind must be one of "
             f"{', '.join(sorted(STORAGE_KINDS))}, got {storage_kind!r}"
         )
-    if not dry_run and not yes:
-        typer.confirm(
-            (
-                f"Provision LPAR '{terminal_field(name)}' on system '{terminal_field(system)}"
-                f"' (VLAN {terminal_field(port_vlan_id)}, VIOS {terminal_field(vios_uuid)})?"
+    arguments = {
+        "system_name_or_uuid": system,
+        "name": name,
+        "adapters": json_value(ProvisionAdapters(port_vlan_id or 0)),
+        "storage": json_value(
+            ProvisionStorage(
+                vios_uuid or "",
+                storage_name or "",
+                cast(StorageKind, storage_kind),
+                vg_uuid,
+                capacity_mib,
             )
-            + (" [DRY RUN]" if dry_run else ""),
+        ),
+        "resources": json_value(
+            LparResources(
+                min_memory=min_memory,
+                desired_memory=memory,
+                max_memory=max_memory,
+                desired_vcpus=vcpus,
+                max_vcpus=max_vcpus,
+            )
+        ),
+        "partition_type": partition_type,
+        "power_on": power_on,
+        "assignments": json_value(assignments),
+        "physical_io": json_value(load_physical_io(physical_io)),
+        "exclusive_writer_window": exclusive_writer_window,
+    }
+    try:
+        system_name, request = request_from_arguments(arguments)
+    except ValueError as exc:
+        usage_error(str(exc))
+    try:
+        new = dry_run or (
+            engine.recorded_arguments(
+                ssh_config().agent_id or "hmcpctl", request_id, TOOL
+            )
+            is None
+        )
+    except ValueError as exc:
+        fail(exc)
+    if new:
+        # Preconditions refuse a new operation before anything is recorded.
+        result = with_client(lambda hmc: preview_provision(hmc, system_name, request))
+        if dry_run:
+            _render_provision_result(result, request.name, True, as_json)
+            return
+    if not yes:
+        typer.confirm(
+            f"Provision LPAR '{terminal_field(name)}' on system '{terminal_field(system)}"
+            f"' (VLAN {terminal_field(port_vlan_id)}, VIOS {terminal_field(vios_uuid)})?",
             abort=True,
         )
+    _run(request_id, continuation, arguments, as_json, {})
 
-    request = ProvisionRequest(
-        name=name,
-        adapters=ProvisionAdapters(port_vlan_id),
-        storage=ProvisionStorage(
-            vios_uuid, storage_name, cast(StorageKind, storage_kind), vg_uuid
-        ),
-        resources=LparResources(
-            min_memory=min_memory,
-            desired_memory=memory,
-            max_memory=max_memory,
-            desired_vcpus=vcpus,
-            max_vcpus=max_vcpus,
-        ),
-        partition_type=lpar_type,
-        power_on=power_on,
-        dry_run=dry_run,
-        assignments=assignments,
-        physical_io=load_physical_io(physical_io),
-    )
-    result = with_client(
-        lambda hmc: provision_lpar(
-            hmc,
-            system_name_or_uuid=system,
-            request=request,
+
+def _run(
+    request_id: str,
+    continuation: str,
+    arguments: Mapping[str, Any] | None,
+    as_json: bool,
+    given: Mapping[str, Any],
+) -> None:
+    """Submit, wait for the worker to end, render, and exit 1 unless it completed."""
+    config = ssh_config()
+    agent_id = config.agent_id or "hmcpctl"
+    try:
+        if arguments is None:
+            arguments = engine.recorded_arguments(agent_id, request_id, TOOL)
+            if arguments is None:
+                usage_error(f"no operation has request_id {request_id}")
+        system, request = request_from_arguments(arguments)
+        record = engine.submit(
+            OperationRequest(
+                TOOL,
+                agent_id,
+                store.connection_label(current_options().profile, tool=TOOL),
+                config.host,
+                request_id,
+                arguments if continuation == "none" else given,
+            ),
+            provision_body(system, request, lambda _connection: HMCClient(config)),
+            classifiers=provision_classifiers(
+                request, lambda _connection: HMCClient(config)
+            ),
+            continuation=continuation,
+            wait_seconds=MAX_WAIT_SECONDS,
         )
+        # The worker dies with this process, so wait for it rather than return early.
+        engine.join(record.operation_id, None)
+        with store.session() as conn:
+            record = store.read_record(conn, record.operation_id)
+    except ValueError as exc:
+        fail(exc)
+    result = result_from_record(record)
+    _render_provision_result(result, request.name, False, as_json)
+    ended = record.outcome == "configured" or (
+        continuation == "abandon" and record.outcome == "abandoned"
     )
-
-    _render_provision_result(result, name, dry_run, as_json)
-    if not dry_run and not result.workflow_completed:
+    if not ended:
         raise typer.Exit(code=1)
 
 
@@ -198,6 +330,14 @@ def _render_provision_result(
         )
         table.add_row(step.step, Text(escape_controls(step.status), style=style))
     console.print(table)
+    if result.operation is not None:
+        operation = result.operation
+        status = f"{operation.state}/{operation.outcome or 'running'}"
+        console.print(
+            f"Operation {terminal_field(operation.operation_id)}: "
+            f"{terminal_field(status)} (phase {terminal_field(operation.phase)})",
+            markup=False,
+        )
     for warning in result.warnings:
         console.print(
             f"Warning: {terminal_field(warning)}", style="yellow", markup=False

@@ -910,6 +910,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
     }
     assert by_label["--filter"] == {
         "_native",
+        "_saved_profile_active",
         "_ssh",
         "_profile",
         "get_lpar_memory_layout",

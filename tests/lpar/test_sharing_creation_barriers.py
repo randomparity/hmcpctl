@@ -19,7 +19,7 @@ from hmcpctl.operations.lpar.provision import (
     ProvisionRequest,
     ProvisionStorage,
     _preflight_provision_request,
-    provision_lpar,
+    preview_provision,
 )
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.lpar import _lpar_resource_pairs, complete_create_resources
@@ -69,7 +69,6 @@ class _NoCreationReads:
         "vios",
         "vios-native",
         "preflight",
-        "provision",
         "dry-run",
     ],
 )
@@ -93,18 +92,17 @@ async def test_sharing_create_barrier(weight, route):
                 if route == "vios-layout"
                 else None,
             )
-        elif route in {"preflight", "provision", "dry-run"}:
+        elif route in {"preflight", "dry-run"}:
             request = ProvisionRequest(
                 "new",
                 ProvisionAdapters(100),
                 ProvisionStorage("vios", "disk"),
                 resources,
-                dry_run=route == "dry-run",
             )
             if route == "preflight":
                 await _preflight_provision_request(hmc, "system", request)
             else:
-                await provision_lpar(hmc, "system", request)
+                await preview_provision(hmc, "system", request)
         else:
             creation = LparCreation(
                 "new",

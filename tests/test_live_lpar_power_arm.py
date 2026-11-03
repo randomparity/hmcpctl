@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +28,7 @@ from live_test import (  # noqa: E402
 from pydantic import TypeAdapter  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402
+from hmcpctl.operations.logical.models import OperationRecord  # noqa: E402
 from hmcpctl.operations.lpar.assignments import LparPcieAssignments  # noqa: E402
 from hmcpctl.operations.lpar.provision import (  # noqa: E402
     validate_provision_assignments,
@@ -118,6 +120,7 @@ class World:
         self.provision_fails_after_storage = False
         self.provision_without_uuid = False
         self.refusals_create = False
+        self.saved_profile = "hmcpctl_" + "0" * 12
 
     # -- views ---------------------------------------------------------------
 
@@ -159,6 +162,8 @@ class World:
 
     def _hmc_run_command(self, kwargs: dict[str, Any]) -> Any:
         cmd = kwargs["cmd"]
+        if cmd.endswith("-F default_profile,curr_profile"):
+            return f"{self.saved_profile},{self.saved_profile}\n"
         if cmd.startswith("lssyscfg -r lpar") and cmd.endswith("name,state"):
             rows = [f"{OTHER},Running"]
             rows += [f"{n},{e['state']}" for n, e in self.partitions.items()]
@@ -370,6 +375,8 @@ class World:
         return {"mapping_id": kwargs["mapping_id"]}
 
     def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
+        if kwargs.get("continuation") == "abandon":
+            return {**_provisioned(False, "terminal"), "steps": []}
         assignments = kwargs.get("assignments", {})
         try:
             validate_provision_assignments(
@@ -406,6 +413,9 @@ class World:
             "ownership_stamped": True,
             "steps": steps,
             "warnings": [],
+            "operation": _record(
+                "paused" if self.provision_fails_after_storage else "terminal"
+            ),
         }
 
     def _hmc_list_adapters(self, kwargs: dict[str, Any]) -> Any:
@@ -486,6 +496,44 @@ class World:
         }
 
 
+def _record(state: str) -> dict[str, Any]:
+    """An ADR 0313 operation record in *state*, as the served result carries it."""
+    outcome = "configured" if state == "terminal" else "needs_attention"
+    return asdict(
+        OperationRecord(
+            "0" * 32,
+            "r",
+            "hmc_provision_lpar",
+            "<default>",
+            None,
+            None,
+            state,
+            "creating",
+            outcome,
+            (),
+            (),
+            False,
+            (),
+            (),
+            None,
+            "t",
+            "t",
+        )
+    )
+
+
+def _provisioned(completed: bool, state: str) -> dict[str, Any]:
+    return {
+        "resource_created": True,
+        "workflow_completed": completed,
+        "lpar_uuid": None,
+        "dry_run": False,
+        "ownership_stamped": True,
+        "warnings": [],
+        "operation": _record(state),
+    }
+
+
 class FakeClient:
     """Answers from the World, typed the way FastMCP types a served result.
 
@@ -558,7 +606,7 @@ def _run(schemas, world: World, group: str = "lpar-power", **config: Any):
             system_name=SYSTEM,
             vdisk_volume_group_name=GROUP,
             provision_vlan_id=VLAN,
-            **config,
+            **{"partition_profile_writer_window": True, **config},
         ),
         group=group,
     )
@@ -793,6 +841,26 @@ def test_without_the_vlan_provision_is_skipped(schemas):
         "no virtual network"
         in _rows(state, "hmc_provision_lpar / hmc_decommission_lpar")[0]["note"]
     )
+
+
+def test_without_the_writer_window_provision_is_skipped_before_any_write(schemas):
+    world = World()
+    state = _run(schemas, world, partition_profile_writer_window=False)
+
+    (probe,) = world.calls_to("hmc_provision_lpar")
+    assert probe["dry_run"] is True
+    assert "hmc_create_virtual_disk" not in world.tools()
+    (row,) = _rows(state, "hmc_provision_lpar")
+    assert row["status"] == "SKIP"
+    assert row["note"] == lpar_power.PROVISION_WINDOW_SKIP
+
+
+def test_provision_attests_the_writer_window(schemas):
+    world = World()
+    _run(schemas, world)
+
+    _probe, real = world.calls_to("hmc_provision_lpar")
+    assert real["exclusive_writer_window"] is True
 
 
 def test_a_dry_run_dedicated_slot_is_refused_and_never_sent_for_real(schemas):
@@ -1165,6 +1233,10 @@ def _p_not_activated(w: World) -> None:
     _wrap(w, "hmc_provision_lpar", change)
 
 
+def _p_activated_from_another_profile(w: World) -> None:
+    w.saved_profile = "default_profile"
+
+
 def _dedicated_dry_run_accepted(w: World) -> None:
     _wrap(
         w,
@@ -1250,6 +1322,7 @@ _DEVIATIONS = [
     ("provision.lpar", "network-adapter-on-vlan", _other_vlan),
     ("provision.lpar", "storage-mapping-listed", _mapping_elsewhere),
     ("provision.lpar", "partition-activated", _p_not_activated),
+    ("provision.lpar", "saved-profile-activated", _p_activated_from_another_profile),
     ("provision.lpar", "dedicated-slot-refused", _dedicated_dry_run_accepted),
     (
         "lpar.decommission",

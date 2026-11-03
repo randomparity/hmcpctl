@@ -42,6 +42,7 @@ async def validate_provisioning_dry_run(client: Client, state: RunState) -> None
     st, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id="st13-dry-run",
         dry_run=True,
         system_name_or_uuid=config.system_name,
         name=config.dry_run_lpar_name,
@@ -298,9 +299,19 @@ async def _provision_from_baseline(
 ) -> None:
     config = state.config
     vios_uuid, vg_uuid = fixture["vios_uuid"], fixture["vg_uuid"]
+    if not config.partition_profile_writer_window:
+        state.skip(
+            14,
+            "hmc_provision_lpar (live)",
+            "provision writes a partition profile and needs "
+            "LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true (ADR 0313)",
+        )
+        return
     status, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id=f"st14-{fixture['token']}",
+        wait_seconds=600,
         system_name_or_uuid=config.system_name,
         name=fixture["name"],
         caller_token=fixture["token"],
@@ -315,6 +326,7 @@ async def _provision_from_baseline(
         partition_type="AIX/Linux",
         power_on=True,
         dry_run=False,
+        exclusive_writer_window=True,
     )
     result, reason = judge_create_result(status, data)
     state.record(14, "hmc_provision_lpar (live)", result, data, reason)
@@ -322,6 +334,16 @@ async def _provision_from_baseline(
     if isinstance(data, dict):
         for step in data.get("steps") or []:
             print(f"provision step [{step.get('step')}]: {step.get('status')}")
+        operation = data.get("operation")
+        if isinstance(operation, dict) and operation.get("state") != "terminal":
+            # A paused operation holds the partition guard past the fixture teardown.
+            st, abandoned = await state.call(
+                client,
+                "hmc_provision_lpar",
+                request_id=f"st14-{fixture['token']}",
+                continuation="abandon",
+            )
+            state.record(14, "hmc_provision_lpar (abandon)", st, abandoned)
 
 
 async def exercise_storage_provisioning(client: Client, state: RunState) -> None:

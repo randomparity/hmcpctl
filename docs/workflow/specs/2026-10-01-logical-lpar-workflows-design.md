@@ -53,7 +53,7 @@ logical partition mutations take an optional `hold_id` (ADR 0193).
 | --- | --- | --- | --- |
 | `hmc_inventory` | read | `systems?` (≤ 16 selectors), `lpar_state?`, `owner?`, `limit` 1–200 (default 50), `cursor?` | systems and partitions with scoped ids, state, capacity and owner; `sources` with per-source `ok` / `unavailable` / `denied` |
 | `hmc_plan_lpar` | read | provision's inputs, with `system_name_or_uuid` optional and a `placement` constraint as the alternative | `plan_digest` (SHA-256 of the canonical inputs and resolved targets), resolved targets, `blockers[]`, `intended_changes[]`, `unverified[]` |
-| `hmc_provision_lpar` | mutate | today's inputs plus `adapters.mac?`, `expected_plan_digest?`, `install?`, `exclusive_writer_window?` and `boot` (`immediate` default / `deferred`) | `ProvisionResult` (today's fields) plus the operation fields |
+| `hmc_provision_lpar` | destructive | today's inputs plus `adapters.mac?`, `expected_plan_digest?`, `install?`, `exclusive_writer_window` (required true except `dry_run` or `abandon`; ADR 0313) and `boot` (`immediate` default / `deferred`) | `ProvisionResult` (today's fields) plus the operation fields |
 | `hmc_reconfigure_lpar` | destructive | `lpar`, `system_name_or_uuid` (required, as ADR 0199), `patch`, `allow_disruption` (default false), `exclusive_writer_window` (required true for `processors` or `memory_mib`; ADR 0314) | operation fields plus `changes[]`, each `live` / `profile` / `pending_activation` |
 | `hmc_decommission_lpar` | destructive | ADR 0027 inputs plus `storage_cleanup` (`retain` default / `delete_owned`) | `DecommissionResult` plus `storage` (`deleted[]`, `retained[]` with reasons, `pending[]`) and the operation fields |
 | `hmc_power_lpar` | destructive | `lpar`, `system_name_or_uuid` (required, ADR 0199), `action` (`start` / `stop` / `restart`), `mode` (`graceful` default / `immediate`) | operation fields plus `already_in_state` and `observed_state` |
@@ -144,7 +144,7 @@ the dispatch authorizer admits the call, as that tool, for each resolved target.
 | --- | --- |
 | plan | `hmc_list_systems` (enumerating placement only), `hmc_list_lpars`, `hmc_capacity_report`, `hmc_list_virtual_networks`, `hmc_list_vios`, `hmc_list_volume_groups`, `hmc_get_vios_storage_detail` (ADR 0198) |
 | inventory | `hmc_list_systems`, `hmc_list_lpars`, `hmc_capacity_report`, `hmc_list_lpar_ownership`, each authorized per source (ADR 0196) |
-| provision (no install) | `hmc_create_lpar`, `hmc_add_network_adapter`, `hmc_add_vscsi_adapter`, `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar`, #637's profile write |
+| provision (no install) | `hmc_create_lpar`, `hmc_add_network_adapter`, `hmc_add_vscsi_adapter`, `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar`, `hmc_save_current_partition_profile`, `hmc_set_default_partition_profile` (ADR 0313) |
 | provision `install` | the row above, plus `hmc_upload_iso`, `hmc_mount_optical_media`, `hmc_set_lpar_boot_order`, `hmc_power_on_lpar`, `hmc_read_lpar_refcodes` |
 | `power_on=true` (no `install`) | adds `hmc_power_on_lpar` |
 | reconfigure | `hmc_modify_lpar` and `hmc_rename_lpar` for `name`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, `hmc_update_partition_profile` (ADR 0314 Decision 6); #1228 adds `hmc_unmount_optical_media`, `hmc_set_lpar_boot_order` and its attach tools |
@@ -232,8 +232,9 @@ under any agent id, and list and release holds (ADR 0190, ADR 0193).
   upload, mount), decommission with `delete_owned`, and #1228's attach actions. That flag is the
   caller's assertion that an operator has paused other writers on those VIOS. Without it, planning
   reports a blocker, and the mutating tool refuses before recording any intent, naming the flag;
-  `delete_owned` never degrades to `retain`. Provision without `install` and the specialist tools
-  keep today's behavior and do not take the flag. A 412 response is `failed` and is not retried.
+  `delete_owned` never degrades to `retain`. Provision requires the flag with or without
+  `install`, because it writes a partition profile (ADR 0313); the specialist tools keep today's
+  behavior and do not take the flag. A 412 response is `failed` and is not retried.
 - Reconfigure's profile write requires `exclusive_writer_window=true` whenever the patch has
   `processors` or `memory_mib` (operator decision 2026-11-02; ADR 0242 unchanged, ADR 0314). The
   tool refuses before recording any intent, naming the flag; a rename alone does not take it.

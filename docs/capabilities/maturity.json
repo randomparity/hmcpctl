@@ -4982,6 +4982,36 @@
                 "constraint": "eight typed creation fields; physical/HMC and declared direct SR-IOV selectors; native profile comparison before apply/dependent writes"
               }
             ]
+          },
+          {
+            "variant": "journaled-operation",
+            "parameters": [
+              {
+                "name": "continuation",
+                "constraint": "none, resume or abandon"
+              },
+              {
+                "name": "expected_plan_digest",
+                "constraint": "hmc_plan_lpar plan_digest, checked for a new request"
+              },
+              {
+                "name": "request_id",
+                "constraint": "required; 1-64 of A-Z a-z 0-9 . _ -"
+              },
+              {
+                "name": "storage.capacity_mib",
+                "constraint": "new operation-owned virtual disk in storage.vg_uuid"
+              }
+            ]
+          },
+          {
+            "variant": "saved-profile-persistence",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "required true except dry_run or abandon; HMC 10.3.1060 or later; saves, reads back and defaults a new hmcpctl_ profile before configured"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -4990,7 +5020,7 @@
             "parameters": [
               {
                 "name": "assignments.dedicated",
-                "constraint": "refused before provisioning; profile-first activation is owned by issue #1225"
+                "constraint": "refused before provisioning; lifting it on saved-profile activation is owned by issue #1841"
               }
             ]
           },

@@ -212,6 +212,14 @@ def test_available_hmc_ptfs_is_mutating_job_submission():
     assert tool.annotations.read_only_hint is False
 
 
+def _object_schema(schema: dict) -> dict:
+    """*schema*'s object form: an optional container is ``anyOf`` the object and null."""
+    for variant in schema.get("anyOf", ()):
+        if "properties" in variant:
+            return variant
+    return schema
+
+
 def test_selectors_and_connection_arguments_are_public_parameters():
     """G3: every declared selector is really an argument a caller supplies."""
     for name, tool in _tools_by_name(True).items():
@@ -221,9 +229,9 @@ def test_selectors_and_connection_arguments_are_public_parameters():
             if target.container is not None:
                 # A nested selector (#260) is a field of a structured parameter,
                 # so it must be public one level down in that object's schema.
-                nested = tool.parameters["properties"][target.container].get(
-                    "properties", {}
-                )
+                nested = _object_schema(
+                    tool.parameters["properties"][target.container]
+                ).get("properties", {})
                 assert target.argument in nested, (name, target.path)
                 continue
             assert target.argument in properties, (name, target.argument)
@@ -317,9 +325,12 @@ def test_provision_lpar_declares_its_nested_selectors():
     """
     security = TOOL_SECURITY["hmc_provision_lpar"]
     assert security.exhaustive_targets is False
+    # Optional since ADR 0313: a continuation names no target, so the delegated
+    # specialists carry the target bound, as hmc_power_lpar's do (ADR 0199). The
+    # VIOS selector is gone: a continuation's storage is None, which a nested
+    # selector would read as unreadable and deny under every grant.
     assert [(t.kind, t.path, t.required) for t in security.targets] == [
-        ("managed_system", "system_name_or_uuid", True),
-        ("vios", "storage.vios_uuid", True),
+        ("managed_system", "system_name_or_uuid", False),
     ]
 
 
@@ -455,6 +466,8 @@ DESTRUCTIVE_WITHOUT_PREFIX = frozenset(
         "hmc_migrate_abort_lpar",
         # ADR 0199: its stop and restart actions power the partition off.
         "hmc_power_lpar",
+        # ADR 0313: it delegates its profile save to a destructive specialist.
+        "hmc_provision_lpar",
         # ADR 0314: allow_disruption=true removes memory or processors live.
         "hmc_reconfigure_lpar",
         "hmc_remote_restart_lpar",
@@ -486,6 +499,7 @@ _FACTORY_TOOLS = frozenset(
         "hmc_inventory",
         "hmc_plan_lpar",
         "hmc_power_lpar",
+        "hmc_provision_lpar",
         "hmc_reconfigure_lpar",
     }
 )
@@ -898,9 +912,9 @@ def test_every_handler_routes_the_connection_argument_it_declares():
             checked.add(name)
 
     # `hmc_effective_permissions`, the two gateway tools, `hmc_inventory`,
-    # `hmc_plan_lpar`, `hmc_power_lpar` and `hmc_inspect_lpar` are defined inside a
-    # factory rather than at module level, so they are the names this pass cannot
-    # reach; every other tool, including the ones that declare no connection argument,
+    # `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_provision_lpar` and `hmc_inspect_lpar`
+    # are defined inside a factory rather than at module level, so they are the names
+    # this pass cannot reach; every other tool, including the ones that declare no connection argument,
     # is checked.
     assert set(TOOL_SECURITY) - checked == _FACTORY_TOOLS
 

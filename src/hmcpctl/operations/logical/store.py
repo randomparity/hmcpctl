@@ -706,6 +706,21 @@ def add_ledger(
     )
 
 
+def ledger_entries(
+    conn: sqlite3.Connection, kind: str, system_uuid: str
+) -> list[tuple[str, str | None, dict[str, Any]]]:
+    """Every ledger entry of *kind* on *system_uuid*: (operation id, partition, identity)."""
+    rows = conn.execute(
+        "SELECT operation_id, partition_uuid, identity_json FROM ledger"
+        " WHERE kind = ? AND system_uuid = ? ORDER BY created_at, operation_id, key",
+        (kind, system_uuid),
+    ).fetchall()
+    return [
+        (row["operation_id"], row["partition_uuid"], json.loads(row["identity_json"]))
+        for row in rows
+    ]
+
+
 def _iso(timestamp: float) -> str:
     moment = datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="milliseconds")
     return moment.replace("+00:00", "Z")

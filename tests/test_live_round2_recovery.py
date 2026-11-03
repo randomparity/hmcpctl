@@ -14,6 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_recovery as recovery
 from live_test import baseline, inventory, provisioning, runner
+from live_test import config as live_config
 
 from hmcpctl.config import HMCConfig
 
@@ -58,7 +59,10 @@ def snapshot(state):
 
 @pytest.fixture
 def state():
-    value = runner.RunState(group="round2")
+    value = runner.RunState(
+        config=live_config.LiveTestConfig(partition_profile_writer_window=True),
+        group="round2",
+    )
     value.artifacts.vios_uuid = VIOS_UUID
     value.artifacts.vios_partition_id = 7
     value.artifacts.vg_uuid = "volume-group"
@@ -118,6 +122,8 @@ class Hardware:
         if tool == "hmc_create_virtual_disk":
             self.disks.add(kw["disk_name"])
             return "PASS", {}
+        if tool == "hmc_provision_lpar" and "continuation" in kw:
+            return "PASS", {"operation": {"state": "terminal"}}
         if tool == "hmc_provision_lpar":
             name = kw["name"]
             token = "foreign" if self.foreign else kw.get("caller_token", "")
@@ -137,11 +143,13 @@ class Hardware:
                 raise KeyboardInterrupt
             if self.fail == "lost-response":
                 return "FAIL", "transport lost after mutation"
+            paused = self.fail == "paused"
             return "PASS", {
                 "resource_created": True,
-                "workflow_completed": True,
+                "workflow_completed": not paused,
                 "lpar_uuid": "new-uuid",
                 "steps": [],
+                "operation": {"state": "paused" if paused else "terminal"},
             }
         if tool in {"hmc_decommission_lpar", "hmc_delete_lpar"}:
             name = kw["lpar_name_or_uuid"]
@@ -189,6 +197,27 @@ async def test_st14_preserves_originals_and_cleans_owned_resources(
     assert provisions[0]["storage"]["storage_name"] != state.config.vdisk_name
     assert provisions[0]["caller_token"]
     assert not any(kw.get("ownership_override") for _, kw in hardware.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paused", [False, True])
+async def test_st14_abandons_a_provision_it_left_open(state, monkeypatch, paused):
+    """A paused operation would hold its partition guard past teardown (ADR 0313)."""
+    hardware = Hardware(state)
+    hardware.fail = "paused" if paused else None
+    monkeypatch.setattr(runner.RunState, "call", hardware.call)
+    await provisioning.exercise_storage_provisioning(None, state)
+    abandons = [
+        kw
+        for tool, kw in hardware.calls
+        if tool == "hmc_provision_lpar" and kw.get("continuation") == "abandon"
+    ]
+    request = next(
+        kw["request_id"] for tool, kw in hardware.calls if tool == "hmc_provision_lpar"
+    )
+    assert abandons == (
+        [{"request_id": request, "continuation": "abandon"}] if paused else []
+    )
 
 
 @pytest.mark.asyncio

@@ -157,11 +157,15 @@ def test_committed_registry_is_fresh(generated):
 def test_nested_container_operations_are_hand_written(generated):
     _, hand_written = generated
 
-    for operation in ("lpar.plan", "provision.lpar"):
-        assert (
-            f"hand-written: {operation}: required argument storage is a nested "
-            "selector's container"
-        ) in hand_written
+    assert (
+        "hand-written: lpar.plan: required argument storage is a nested "
+        "selector's container"
+    ) in hand_written
+    # A continuation omits provision's storage (ADR 0313); its request_id is required.
+    assert (
+        "hand-written: provision.lpar: required argument request_id is not a "
+        "target selector"
+    ) in hand_written
 
 
 def test_main_writes_output(tmp_path, capsys):

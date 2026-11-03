@@ -466,7 +466,7 @@ def test_a_composite_a_table_cannot_bound_is_refused_at_load(tool) -> None:
 def test_a_mixed_effect_grant_loads_and_warns_at_startup() -> None:
     """#279: a mixed effect-resolved set loads; its dead subset is diagnosed later.
 
-    `mutate` resolves `hmc_provision_lpar` and siblings that are
+    `mutate` resolves `hmc_create_lpar` and siblings that are
     `exhaustive_targets=False`, alongside the tools this table binds correctly.
     Before the fix, the exhaustiveness check ignored effect-resolved tools
     entirely, so this grant loaded with no diagnostic at all -- every
@@ -483,8 +483,10 @@ def test_a_mixed_effect_grant_loads_and_warns_at_startup() -> None:
             targets={"managed_system": ["S1"]},
         )
     )
-    assert policy.permits_tool("hmc_provision_lpar") is True
+    assert policy.permits_tool("hmc_create_lpar") is True
     assert policy.permits_tool("hmc_add_vfc_adapter") is True
+    # Destructive since ADR 0313: a mutate-only grant no longer reaches provision.
+    assert policy.permits_tool("hmc_provision_lpar") is False
 
     warnings = unboundable_effect_tools(policy, TOOL_SECURITY)
     assert len(warnings) == 1
@@ -492,7 +494,7 @@ def test_a_mixed_effect_grant_loads_and_warns_at_startup() -> None:
     for offender in (
         "hmc_add_vfc_adapter",
         "hmc_add_vscsi_adapter",
-        "hmc_provision_lpar",
+        "hmc_create_lpar",
     ):
         assert repr(offender) in message
     # #1086: its selectors bound it, so a table reaches it and it is not dead.

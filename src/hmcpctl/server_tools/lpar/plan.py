@@ -119,8 +119,8 @@ def plan_handler(
         call can write a few hundred. A denied target becomes a ``denied`` blocker and
         is not read; ``hmc_capacity_report`` needs an ``all-targets`` grant. Placement
         evaluates at most 16 systems and selects the tightest fit with no blocker.
-        ``plan_digest`` binds the request and the selected targets; provisioning does
-        not consume it until #1225.
+        ``plan_digest`` binds the request and the selected targets; pass it to
+        hmc_provision_lpar as ``expected_plan_digest`` to refuse a stale plan.
 
         Args:
             name: Name for the new logical partition.

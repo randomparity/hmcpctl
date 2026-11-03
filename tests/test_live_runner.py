@@ -1331,6 +1331,7 @@ async def test_provision_dry_run_requires_vios_and_uses_configured_vlan() -> Non
         (
             "hmc_provision_lpar",
             {
+                "request_id": "st13-dry-run",
                 "dry_run": True,
                 "system_name_or_uuid": state.config.system_name,
                 "name": state.config.dry_run_lpar_name,
@@ -1488,6 +1489,9 @@ async def test_live_provision_is_judged_by_the_steps_of_a_served_result(
     )
     assert dataclasses.is_dataclass(provisioned)
     state = _ScriptedSriovState([("hmc_provision_lpar", "PASS", provisioned)])
+    state.config = dataclasses.replace(
+        state.config, partition_profile_writer_window=True
+    )
 
     await provisioning._provision_from_baseline(
         object(),
@@ -6520,8 +6524,33 @@ async def test_mutating_workflows_stop_when_inventory_context_is_missing(
 
 
 @pytest.mark.asyncio
+async def test_live_provision_without_the_writer_window_is_skipped_unsent():
+    state = _ScriptedSriovState([])
+
+    await provisioning._provision_from_baseline(
+        object(),
+        state,
+        {
+            "name": "fixture",
+            "disk": "d",
+            "token": "t",
+            "vios_uuid": "v",
+            "vg_uuid": "g",
+        },
+    )
+
+    assert state.calls == []
+    (row,) = state.results
+    assert row["status"] == "SKIP"
+    assert "PARTITION_PROFILE_WRITER_WINDOW" in row["note"]
+
+
+@pytest.mark.asyncio
 async def test_storage_provisioning_preserves_baseline_resource_sizes():
     state = _ScriptedSriovState([("hmc_provision_lpar", "PASS", {"steps": []})])
+    state.config = dataclasses.replace(
+        state.config, partition_profile_writer_window=True
+    )
     state.artifacts.lp3_baseline = {
         "lpars": {
             "Resource": {
@@ -7678,6 +7707,7 @@ def test_scenarios_declare_their_expected_assertion_ids():
             "network-adapter-on-vlan",
             "storage-mapping-listed",
             "partition-activated",
+            "saved-profile-activated",
             "dedicated-slot-refused",
             "dry-run-inventoried",
             "dry-run-changed-nothing",

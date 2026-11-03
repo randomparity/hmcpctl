@@ -20,7 +20,7 @@ import textwrap
 import xml.etree.ElementTree as ET  # nosec B405 - parses a literal test partition
 from dataclasses import asdict
 from typing import Self
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import click
 import httpx
@@ -28,6 +28,7 @@ import pytest
 import typer
 from click import unstyle
 from conftest import live_fixture
+from pydantic import TypeAdapter
 from rendered_output import collapse_whitespace
 from typer.main import get_command
 from typer.testing import CliRunner
@@ -54,6 +55,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
 from hmcpctl.operations import jobs as operations_jobs
 from hmcpctl.operations.inventory.composite import _lpar_summary
+from hmcpctl.operations.logical.engine import BodyResult
 from hmcpctl.operations.lpar import ownership as lpar_ownership
 from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 from hmcpctl.operations.lpar.migration import LpmResult
@@ -1540,6 +1542,9 @@ def test_lpars_provision_rejects_invalid_vocabulary_before_client_call(
         [
             "lpars",
             "provision",
+            "--request-id",
+            "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -1561,9 +1566,118 @@ def test_lpars_provision_rejects_invalid_vocabulary_before_client_call(
     assert fake_hmc.calls == []
 
 
+def _fake_provision(monkeypatch, returned, outcome="configured"):
+    """Run the CLI's real operation path around a body that returns *returned*."""
+
+    async def body(_ctx):
+        return BodyResult(outcome, TypeAdapter(ProvisionResult).dump_python(returned))
+
+    factory = Mock(return_value=body)
+    monkeypatch.setattr(cli_lpar_provision, "provision_body", factory)
+    preview = AsyncMock(return_value=returned)
+    monkeypatch.setattr(cli_lpar_provision, "preview_provision", preview)
+    return factory, preview
+
+
+_PROVISION_ARGS = [
+    "lpars",
+    "provision",
+    "--exclusive-writer-window",
+    "--system",
+    SYSTEM_UUID,
+    "--name",
+    "newlpar",
+    "--vlan",
+    "100",
+    "--vios-uuid",
+    VIOS_UUID,
+    "--storage-name",
+    "rootvg",
+    "--yes",
+]
+_PROVISIONED = ProvisionResult(
+    resource_created=True,
+    workflow_completed=True,
+    lpar_uuid=LPAR_UUID,
+    dry_run=False,
+    ownership_stamped=True,
+    steps=(),
+    warnings=(),
+)
+
+
+def test_lpars_provision_requires_a_request_id(fake_hmc):
+    result = RUNNER.invoke(cli.app, _PROVISION_ARGS)
+    assert result.exit_code == 2
+    assert "--request-id" in unstyle(result.stderr)
+    assert fake_hmc.calls == []
+
+
+def test_lpars_provision_requires_the_writer_window(fake_hmc):
+    args = [a for a in _PROVISION_ARGS if a != "--exclusive-writer-window"]
+    result = RUNNER.invoke(cli.app, [*args, "--request-id", "r1"])
+    assert result.exit_code == 2
+    assert "--exclusive-writer-window is required" in unstyle(result.stderr)
+    assert fake_hmc.calls == []
+
+
+def test_lpars_provision_resumes_a_paused_operation(monkeypatch, fake_hmc):
+    _fake_provision(monkeypatch, _PROVISIONED, "needs_attention")
+    paused = RUNNER.invoke(cli.app, [*_PROVISION_ARGS, "--request-id", "r1"])
+    assert paused.exit_code == 1
+    assert "needs_attention" in paused.stdout
+    _fake_provision(monkeypatch, _PROVISIONED)
+    resumed = RUNNER.invoke(
+        cli.app,
+        [
+            "lpars",
+            "provision",
+            "--request-id",
+            "r1",
+            "--continuation",
+            "resume",
+            "--exclusive-writer-window",
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    assert "terminal/configured" in resumed.stdout
+
+
+def test_lpars_provision_reports_an_unusable_store_without_a_traceback(
+    monkeypatch, fake_hmc, tmp_path
+):
+    from hmcpctl.operations.logical import store
+
+    root = tmp_path / "state"
+    root.mkdir(mode=0o755)
+    root.chmod(0o755)
+    (root / "store-id").write_text("x", encoding="utf-8")
+    monkeypatch.setenv(store.STATE_DIR_ENV, str(root))
+    _fake_provision(monkeypatch, _PROVISIONED)
+    result = RUNNER.invoke(cli.app, [*_PROVISION_ARGS, "--request-id", "r1"])
+    assert result.exit_code == 1
+    assert "store_not_private" in result.stderr
+    assert "Traceback" not in result.output + result.stderr
+
+
+def test_lpars_provision_reports_a_held_execution_lock(monkeypatch, fake_hmc):
+    from hmcpctl.operations.logical import store
+
+    _fake_provision(monkeypatch, _PROVISIONED)
+    monkeypatch.setattr(
+        store,
+        "acquire_execution_lock",
+        Mock(side_effect=store.OperationRefused("execution_lock_held", "pid 4242")),
+    )
+    result = RUNNER.invoke(cli.app, [*_PROVISION_ARGS, "--request-id", "r1"])
+    assert result.exit_code == 1
+    assert "execution_lock_held" in result.stderr
+
+
 def test_lpars_provision_passes_nondefault_request_to_operation(monkeypatch, fake_hmc):
-    provision = AsyncMock(
-        return_value=ProvisionResult(
+    provision, _ = _fake_provision(
+        monkeypatch,
+        ProvisionResult(
             resource_created=True,
             workflow_completed=True,
             lpar_uuid=LPAR_UUID,
@@ -1571,15 +1685,17 @@ def test_lpars_provision_passes_nondefault_request_to_operation(monkeypatch, fak
             ownership_stamped=True,
             steps=(),
             warnings=(),
-        )
+        ),
     )
-    monkeypatch.setattr(cli_lpar_provision, "provision_lpar", provision)
 
     result = RUNNER.invoke(
         cli.app,
         [
             "lpars",
             "provision",
+            "--request-id",
+            "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -1612,11 +1728,11 @@ def test_lpars_provision_passes_nondefault_request_to_operation(monkeypatch, fak
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     assert '"workflow_completed": true' in result.output
-    provision.assert_awaited_once()
-    request = provision.await_args.kwargs["request"]
-    assert provision.await_args.args == (fake_hmc,)
+    provision.assert_called_once()
+    system, request = provision.call_args.args[:2]
+    assert system == SYSTEM_UUID
     assert request.name == "newlpar"
     assert request.partition_type == "OS400"
     assert request.adapters.port_vlan_id == 200
@@ -1667,11 +1783,15 @@ def test_lpars_provision_exit_matches_rendered_outcome(
         steps=steps,
         warnings=("inspect recorded steps",),
     )
-    operation = AsyncMock(return_value=returned)
-    monkeypatch.setattr(cli_lpar_provision, "provision_lpar", operation)
+    body, preview = _fake_provision(
+        monkeypatch, returned, "configured" if completed else "needs_attention"
+    )
     arguments = [
         "lpars",
         "provision",
+        "--request-id",
+        "r1",
+        "--exclusive-writer-window",
         "--system",
         SYSTEM_UUID,
         "--name",
@@ -1690,7 +1810,8 @@ def test_lpars_provision_exit_matches_rendered_outcome(
         arguments.append("--dry-run")
     result = RUNNER.invoke(cli.app, arguments)
     assert result.exit_code == expected_exit, result.output
-    operation.assert_awaited_once()
+    preview.assert_awaited_once()
+    assert body.called is not dry_run
     assert result.stderr == ""
     if as_json:
         payload = json.loads(result.stdout)
@@ -1715,8 +1836,9 @@ def test_lpars_provision_exit_matches_rendered_outcome(
 
 def test_lpars_provision_renders_change_location(monkeypatch, fake_hmc):
     """#1056: provision prints the same CurrentProfileSync line add-network does."""
-    provision = AsyncMock(
-        return_value=ProvisionResult(
+    _fake_provision(
+        monkeypatch,
+        ProvisionResult(
             resource_created=True,
             workflow_completed=True,
             lpar_uuid=LPAR_UUID,
@@ -1725,15 +1847,17 @@ def test_lpars_provision_renders_change_location(monkeypatch, fake_hmc):
             steps=(),
             warnings=(),
             change_location=UNSYNCED,
-        )
+        ),
     )
-    monkeypatch.setattr(cli_lpar_provision, "provision_lpar", provision)
 
     result = RUNNER.invoke(
         cli.app,
         [
             "lpars",
             "provision",
+            "--request-id",
+            "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -5871,6 +5995,9 @@ def test_lpars_create_and_provision_refuse_a_vios_type_before_client_call(
         ["acmesys9-lp3", "--system", SYSTEM_UUID]
         if command == "create"
         else [
+            "--request-id",
+            "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -5893,8 +6020,7 @@ def test_lpars_create_and_provision_refuse_a_vios_type_before_client_call(
 def test_lpars_provision_refuses_a_dedicated_slot_before_client_call(
     fake_hmc, monkeypatch, tmp_path
 ):
-    provision = AsyncMock()
-    monkeypatch.setattr(cli_lpar_provision, "provision_lpar", provision)
+    provision, _ = _fake_provision(monkeypatch, None)
     assignments = tmp_path / "assignments.json"
     assignments.write_text(
         json.dumps(
@@ -5908,6 +6034,9 @@ def test_lpars_provision_refuses_a_dedicated_slot_before_client_call(
         [
             "lpars",
             "provision",
+            "--request-id",
+            "r1",
+            "--exclusive-writer-window",
             "--system",
             SYSTEM_UUID,
             "--name",
@@ -5926,7 +6055,7 @@ def test_lpars_provision_refuses_a_dedicated_slot_before_client_call(
 
     assert result.exit_code == 2
     assert "hmc_assign_dedicated_pcie_slot" in unstyle(result.stderr)
-    provision.assert_not_awaited()
+    provision.assert_not_called()
     assert fake_hmc.calls == []
 
 

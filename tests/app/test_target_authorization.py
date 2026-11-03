@@ -433,15 +433,14 @@ def test_attach_disk_denies_an_omitted_system_under_a_table():
 def test_a_table_grant_still_never_reaches_provision_lpar():
     """The tool stays non-exhaustive, so no table grant reaches it.
 
-    A well-formed call extracts both identities and still denies under
-    target-unboundable: `assignments` names vNIC backing VIOSes, DRC indexes and
-    SR-IOV ports that no selector declares (#1086). A call whose structured arguments
-    are None is malformed rather than narrow: the second extraction rule reads
-    it UNREADABLE, which denies under `all-targets` too.
+    A well-formed call still denies under target-unboundable: `assignments` names
+    vNIC backing VIOSes, DRC indexes and SR-IOV ports that no selector declares
+    (#1086). A continuation, which omits storage, is admitted under `all-targets`;
+    each write is then authorized as its specialist (ADR 0313).
     """
     grants = [
         {
-            "effects": ["mutate"],
+            "effects": ["destructive"],
             "connections": ["lab"],
             "targets": {"managed_system": ["sys-1"], "vios": ["vios-uuid-1"]},
         }
@@ -456,8 +455,18 @@ def test_a_table_grant_still_never_reaches_provision_lpar():
     with pytest.raises(TargetScopeError, match="all-targets"):
         _authorize(grants, "hmc_provision_lpar", well_formed)
 
-    with pytest.raises(TargetScopeError, match="readable"):
-        _authorize(grants, "hmc_provision_lpar", {**well_formed, "storage": None})
+    continuation = {"system_name_or_uuid": None, "storage": None, "profile": "lab"}
+    _authorize(
+        [
+            {
+                "effects": ["destructive"],
+                "connections": ["lab"],
+                "targets": "all-targets",
+            }
+        ],
+        "hmc_provision_lpar",
+        continuation,
+    )
 
 
 def test_all_targets_reaches_everything_the_table_could_not():

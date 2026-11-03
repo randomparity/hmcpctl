@@ -28,7 +28,7 @@ from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, job_outcome
 from hmcpctl.operations.lpar.decommission import _vscsi_detach_inventory
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 from hmcpctl.operations.storage.resources import storage_mapping
-from hmcpctl.ssh.commands import HMC_NO_RESULTS
+from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter
 from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME
 
 from . import dedicated_pcie, lpar_config, storage_lifecycle
@@ -49,6 +49,10 @@ NAME_PREFIX = "hmcpctl-live-pwr-"
 TOKEN_PREFIX = "lparpwr-"
 VOLUME_PREFIX = "lppwr"
 SCENARIO = "st41-lpar-power"
+PROVISION_WINDOW_SKIP = (
+    "provision writes a partition profile and needs "
+    "LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true (ADR 0313)"
+)
 
 RESOURCES = lpar_config.RESOURCES
 VOLUME_MIB = 1024
@@ -137,6 +141,7 @@ class Run:
     volume_attempted: bool = False
     decommission_failed: bool = False
     requests: dict[str, bool] = field(default_factory=dict)
+    provisions: set[str] = field(default_factory=set)
     ran: set[str] = field(default_factory=set)
     held: dict[str, bool] = field(default_factory=dict)
     data: dict[str, Any] = field(default_factory=dict)
@@ -934,6 +939,7 @@ async def _dedicated_slot_refused(client: Client, state: RunState, run: Run) -> 
     st, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id=f"{run.token}-p-dry",
         system_name_or_uuid=run.system,
         name=run.p_name,
         adapters={"port_vlan_id": run.vlan},
@@ -976,11 +982,19 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
     vios = run.vios
     assert vios is not None
     refused = await _dedicated_slot_refused(client, state, run)
+    if not state.config.partition_profile_writer_window:
+        # Provision writes a partition profile (ADR 0313), which needs the operator's
+        # writer-window attestation; without it nothing is created.
+        state.skip(SUBTASK, "hmc_provision_lpar", PROVISION_WINDOW_SKIP)
+        return False
     if not await _create_volume(client, state, run):
         return False
+    request_id = f"{run.token}-p"
     st, data = await state.call(
         client,
         "hmc_provision_lpar",
+        request_id=request_id,
+        wait_seconds=600,
         system_name_or_uuid=run.system,
         name=run.p_name,
         caller_token=run.token,
@@ -993,10 +1007,16 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
         },
         resources=RESOURCES,
         power_on=True,
+        exclusive_writer_window=True,
     )
     record_status, note = judge_create_result(st, data)
     state.record(SUBTASK, "hmc_provision_lpar", record_status, data, note)
     run.data["provision.lpar"] = data
+    operation = _plain(result_field(data, "operation")) if st == "PASS" else None
+    if isinstance(operation, Mapping):
+        # Registered only once recorded: a refused provision has nothing to abandon.
+        run.provisions.add(request_id)
+        run.requests[request_id] = operation.get("state") == "terminal"
     found = result_field(data, "lpar_uuid") if st == "PASS" else None
     run.p_uuid = found if isinstance(found, str) else None
     if run.p_uuid is None:
@@ -1023,6 +1043,16 @@ async def _provision_checks(
     )
     token = await _token_of(client, state, run, run.p_uuid or "")
     run.hold(op, "ownership-stamped", token == run.token)
+    reached = await _wait_for_state(
+        client, state, run, run.p_uuid or "", _FIRMWARE_STATES
+    )
+    run.hold(op, "partition-activated", reached in _FIRMWARE_STATES)
+    run.hold(
+        op,
+        "saved-profile-activated",
+        await _saved_profile_active(client, state, run, data),
+    )
+    # Listed after activation: activating a profile without the adapter drops it (#1840).
     st_adapters, adapters = await state.call(
         client,
         "hmc_list_adapters",
@@ -1036,10 +1066,24 @@ async def _provision_checks(
     run.hold(
         op, "storage-mapping-listed", _mapped(await _mappings(client, state, run), run)
     )
-    reached = await _wait_for_state(
-        client, state, run, run.p_uuid or "", _FIRMWARE_STATES
+
+
+async def _saved_profile_active(
+    client: Client, state: RunState, run: Run, data: Any
+) -> bool:
+    """P's default and last-activated profile are the one provision saved (ADR 0313)."""
+    operation = _plain(result_field(data, "operation"))
+    if not isinstance(operation, Mapping) or operation.get("outcome") != "configured":
+        return False
+    saved = f"hmcpctl_{str(operation.get('operation_id', ''))[:12]}"
+    row = await lpar_config._cli(
+        client,
+        state,
+        f"lssyscfg -r lpar -m {shlex.quote(run.system)} "
+        f"--filter {shlex.quote(build_filter([('lpar_names', run.p_name)]))} "
+        "-F default_profile,curr_profile",
     )
-    run.hold(op, "partition-activated", reached in _FIRMWARE_STATES)
+    return row == f"{saved},{saved}"
 
 
 def _mapped(mappings: frozenset[tuple[str, ...]] | None, run: Run) -> bool:
@@ -1294,10 +1338,20 @@ async def _abandon(client: Client, state: RunState, run: Run) -> None:
     for request_id, terminal in run.requests.items():
         if terminal:
             continue
-        st, data = await state.call(
-            client, "hmc_power_lpar", request_id=request_id, continuation="abandon"
-        )
-        state.record(SUBTASK, f"hmc_power_lpar ({request_id} abandon)", st, data)
+        if request_id in run.provisions:
+            tool = "hmc_provision_lpar"
+            st, data = await state.call(
+                client,
+                "hmc_provision_lpar",
+                request_id=request_id,
+                continuation="abandon",
+            )
+        else:
+            tool = "hmc_power_lpar"
+            st, data = await state.call(
+                client, "hmc_power_lpar", request_id=request_id, continuation="abandon"
+            )
+        state.record(SUBTASK, f"{tool} ({request_id} abandon)", st, data)
 
 
 async def _remove(client: Client, state: RunState, run: Run, name: str) -> str | None:
@@ -1494,6 +1548,10 @@ def _provision_assertions(run: Run) -> list[Assertion]:
         Assertion(
             "partition-activated",
             run.holds("provision.lpar", "partition-activated"),
+        ),
+        Assertion(
+            "saved-profile-activated",
+            run.holds("provision.lpar", "saved-profile-activated"),
         ),
         Assertion(
             "dedicated-slot-refused",

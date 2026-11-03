@@ -80,6 +80,7 @@ _INVENTORY_PATHS = tuple(
         "operations/lpar/migration.py",
         "operations/lpar/ownership.py",
         "operations/lpar/provision.py",
+        "operations/lpar/provision_operation.py",
         "operations/affinity/ssh.py",
         "operations/virtualization/adapters.py",
         "operations/virtualization/pcie.py",
@@ -138,9 +139,7 @@ _CLASSIFIED_MUTATORS = frozenset(
     }
 )
 _OPERATIONAL_MUTATORS = frozenset({"submit_power_on_lpar", "power_off_lpar"})
-_CREATION_MUTATORS = frozenset(
-    {"create_and_stamp_lpar", "provision_lpar", "deploy_partition_template"}
-)
+_CREATION_MUTATORS = frozenset({"create_and_stamp_lpar", "deploy_partition_template"})
 _NON_LPAR_MUTATORS = frozenset(
     {
         "create_volume_group",

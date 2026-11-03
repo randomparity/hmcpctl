@@ -343,7 +343,7 @@ def test_a_mixed_effect_grant_warns_at_startup():
     """#279: an effects-only grant reaching a table-unboundable tool is diagnosed.
 
     Before the fix, `effects = ["mutate"]` beside a `managed_system` table loaded
-    with no diagnostic at all, even though it resolves `hmc_provision_lpar` (and
+    with no diagnostic at all, even though it resolves `hmc_create_lpar` (and
     four siblings) whose declaration is `exhaustive_targets=False` -- every call
     to any of the five is denied under `target-unboundable`
     (`target_scope.py`) regardless of argument. `_startup_warnings` is where an
@@ -373,7 +373,7 @@ def test_a_mixed_effect_grant_warns_at_startup():
 
     lines = server_module._startup_warnings(129, policy, False)
 
-    matches = [line for line in lines if "'hmc_provision_lpar'" in line]
+    matches = [line for line in lines if "'hmc_create_lpar'" in line]
     assert len(matches) == 1
     assert matches[0].startswith("warning: ")
     assert "all-targets" in matches[0]

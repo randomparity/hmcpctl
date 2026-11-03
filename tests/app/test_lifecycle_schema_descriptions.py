@@ -82,10 +82,13 @@ def test_core_lifecycle_parameters_have_rendered_descriptions():
 
 def test_nested_lifecycle_parameters_have_rendered_descriptions():
     tools = _tools_by_name()
+    # Provision's containers are optional (a continuation omits them, ADR 0313), so
+    # each schema is the object beside null.
+    provision = tools["hmc_provision_lpar"].parameters["properties"]
     nested = {
         "resources": tools["hmc_create_lpar"].parameters["properties"]["resources"],
-        "adapters": tools["hmc_provision_lpar"].parameters["properties"]["adapters"],
-        "storage": tools["hmc_provision_lpar"].parameters["properties"]["storage"],
+        "adapters": provision["adapters"]["anyOf"][0],
+        "storage": provision["storage"]["anyOf"][0],
     }
     missing = {
         (group, field)
@@ -203,7 +206,13 @@ def test_lpar_create_tools_do_not_offer_a_vios_or_an_os_type():
         properties = tools[name].parameters["properties"]
         assert "os_type" not in properties, name
         partition_type = properties["partition_type"]
-        assert partition_type["enum"] == ["AIX/Linux", "OS400"], name
+        # Optional on provision since ADR 0313: the enum sits beside null.
+        enums = [
+            v["enum"]
+            for v in partition_type.get("anyOf", [partition_type])
+            if "enum" in v
+        ]
+        assert enums == [["AIX/Linux", "OS400"]], name
         assert "hmc_create_vios" in partition_type["description"], name
 
 

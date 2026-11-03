@@ -367,6 +367,8 @@ def test_provision_cli_delegates_to_neutral_operation():
     args = [
         "lpars",
         "provision",
+        "--request-id",
+        "r1",
         "--system",
         "system1",
         "--name",
@@ -381,7 +383,7 @@ def test_provision_cli_delegates_to_neutral_operation():
         "--json",
     ]
     with (
-        patch("hmcpctl.cli_commands.lpar.provision.provision_lpar", provision),
+        patch("hmcpctl.cli_commands.lpar.provision.preview_provision", provision),
         patch(
             "hmcpctl.cli_commands.runtime.client",
             return_value=_ClientContext(client),
@@ -390,4 +392,4 @@ def test_provision_cli_delegates_to_neutral_operation():
         result = CliRunner().invoke(app, args)
     assert result.exit_code == 0
     provision.assert_awaited_once()
-    assert provision.await_args.args == (client,)
+    assert provision.await_args.args[:2] == (client, "system1")
