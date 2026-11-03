@@ -836,3 +836,75 @@ def test_rename_classifier(hmc):
     assert _await(reconfigure._classify_rename(ctx, effect)).status == "not_applied"
     hmc.name = "other"
     assert _await(reconfigure._classify_rename(ctx, effect)).status == "needs_attention"
+
+
+# ---------------------------------------------------------------------------
+# The name-addressed profile-write target (ADR 0313 Decision 12)
+# ---------------------------------------------------------------------------
+
+
+def _classify_named(monkeypatch, found):
+    from hmcpctl.documents.partition_profile import ProfilePatch
+
+    async def by_name(_hmc, lpar, system, name):
+        assert (lpar, system, name) == (LPAR, SYS, "hmcpctl_abc")
+        return found
+
+    monkeypatch.setattr(profile_write, "profile_by_name", by_name)
+    ctx = SimpleNamespace(partition=(SYS, LPAR), connection="<default>")
+    effect = SimpleNamespace(target=profile_write.target_by_name(LPAR, "hmcpctl_abc"))
+    classify = profile_write.profile_write_classifier(
+        lambda _ctx, _effect: (ProfilePatch(desired_memory=1024),) * 2,
+        lambda _connection: FakeHMC(),
+    )
+    return _await(classify(ctx, effect))
+
+
+def test_a_named_profile_that_is_absent_was_not_written(monkeypatch):
+    assert _classify_named(monkeypatch, None).status == "not_applied"
+
+
+@pytest.mark.parametrize(
+    ("saved", "status"), [(1024, "applied"), (900, "needs_attention")]
+)
+def test_a_named_profile_classifies_by_its_values(monkeypatch, saved, status):
+    from hmcpctl.documents.partition_profile import ProfilePatch
+
+    element = apply_profile_patch(
+        profile_document(), ProfilePatch(desired_memory=saved)
+    )
+    found = SimpleNamespace(uuid=PROFILE, element=element)
+    verdict = _classify_named(monkeypatch, found)
+    assert verdict.status == status
+    if status == "applied":
+        assert verdict.identity == {
+            "profile_uuid": PROFILE,
+            "profile_name": "hmcpctl_abc",
+        }
+
+
+def test_the_uuid_parser_refuses_a_named_target():
+    with pytest.raises(ValueError, match="malformed"):
+        profile_write.parse_target(profile_write.target_by_name(LPAR, "p"))
+
+
+def test_profile_by_name_reads_each_profile_once(monkeypatch):
+    names = {"u1": "default_profile", "u2": "hmcpctl_abc"}
+
+    class Feed:
+        async def list_child(self, kind, parent, child):
+            assert (kind, parent, child) == (
+                "LogicalPartition",
+                LPAR,
+                "LogicalPartitionProfile",
+            )
+            return [{"UUID": uuid} for uuid in names]
+
+    async def read(_hmc, kind, parent, uuid, system):
+        assert (kind, parent, system) == ("LogicalPartition", LPAR, SYS)
+        return SimpleNamespace(uuid=uuid, name=names[uuid])
+
+    monkeypatch.setattr(profile_write, "read_native_profile", read)
+    found = _await(profile_write.profile_by_name(Feed(), LPAR, SYS, "hmcpctl_abc"))
+    assert found.uuid == "u2"
+    assert _await(profile_write.profile_by_name(Feed(), LPAR, SYS, "absent")) is None
