@@ -459,6 +459,32 @@ def deleted_from_effects(effects: Iterable[EffectRecord]) -> tuple[dict[str, str
     )
 
 
+def same_item(entry: Mapping[str, Any]) -> tuple[Any, ...]:
+    """What identifies one item across report entries, whatever else they carry."""
+    name = entry.get("disk_name", entry.get("media_name"))
+    return entry.get("kind"), entry.get("vios_uuid"), name
+
+
+def refused_from_effects(effects: Iterable[EffectRecord]) -> tuple[dict[str, str], ...]:
+    """The deletes a failed run settled ``not_applied``: the HMC refused them (412)."""
+    kinds = {kind: ledger for ledger, kind in DELETE_KINDS.items()}
+    refused = []
+    for effect in effects:
+        if effect.kind in kinds and effect.status == "not_applied":
+            vios, group, name = _parse_target(effect)
+            field = "disk_name" if kinds[effect.kind] == DISK_LEDGER else "media_name"
+            refused.append(
+                {
+                    "kind": kinds[effect.kind],
+                    "vios_uuid": vios,
+                    "vg_uuid": group,
+                    field: name,
+                    "reason": "precondition_failed",
+                }
+            )
+    return tuple(refused)
+
+
 def storage_from_effects(effects: Iterable[EffectRecord]) -> DecommissionStorage:
     """The storage block rebuilt from the journal alone: open deletes are pending."""
     effects = tuple(effects)

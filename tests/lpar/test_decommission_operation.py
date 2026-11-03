@@ -750,3 +750,28 @@ def test_a_delete_owned_dry_run_warns_without_the_window(served):
     assert len(result.storage["pending"]) == 1
     assert any("exclusive_writer_window" in w for w in result.warnings)
     assert _recorded("d1") is None
+
+
+def test_a_failed_resume_reports_earlier_retentions_it_deleted_only_as_deleted(hmc):
+    _owned_disks(hmc, "disk-a", "disk-b")
+    group = hmc.get_volume_group.return_value
+    hmc.get_volume_group.side_effect = [HMCError("HTTP 500"), group, group]
+    paused = _submit(hmc, arguments=OWNED)
+    retained = result_from_record(paused, delete_owned=True).storage["retained"]
+    assert [item["reason"] for item in retained] == ["inventory_incomplete"] * 2
+    hmc.delete_virtual_disk.side_effect = [None, HMCError("changed", 412)]
+
+    failed = _submit(hmc, "resume", arguments=OWNED)
+
+    assert (failed.state, failed.outcome) == ("terminal", "failed")
+    storage = result_from_record(failed, delete_owned=True).storage
+    assert [item["disk_name"] for item in storage["deleted"]] == ["disk-a"]
+    assert storage["retained"] == (
+        {
+            "kind": "virtual_disk",
+            "vios_uuid": VIOS_UUID,
+            "vg_uuid": VG_UUID,
+            "disk_name": "disk-b",
+            "reason": "precondition_failed",
+        },
+    )

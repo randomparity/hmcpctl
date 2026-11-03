@@ -83,8 +83,9 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
      caller asserts the window; the delete client re-reads the group under `If-Match`.
    - A retained item whose partition is gone keeps an unclaimable ledger row (ADR 0323
      Consequences).
-   - A resume after a pause rebuilds `storage.retained` as empty; the journal and ledger still hold
-     every item.
+   - A result rebuilt after a pause takes `storage.retained` from the latest stored pass, less
+     what the journal shows deleted, so it can be stale; the journal and ledger still hold every
+     item.
    - A ledgered disk deleted out of band whose name is reused in its group is deleted as owned:
      ADR 0313 D6's identity is the name (ADR 0323 Consequences); follow-up candidate to add a
      device fingerprint to the ledger identity.

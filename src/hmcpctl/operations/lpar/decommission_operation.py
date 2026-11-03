@@ -37,6 +37,8 @@ from .decommission_storage import (
     deleted_from_effects,
     owned_items,
     plan_storage,
+    refused_from_effects,
+    same_item,
     storage_classifiers,
     storage_from_effects,
 )
@@ -356,14 +358,20 @@ def _storage(
     record: OperationRecord, stored: DecommissionResult | None
 ) -> DecommissionStorage:
     """``deleted`` and ``pending`` from the journal, so they span every run; ``retained``
-    from the latest pass the record holds (ADR 0323 Decision 6)."""
+    from the latest pass the record holds, less what a later run deleted, plus a failed
+    run's refused deletes, which no stored result holds (ADR 0323 Decision 6)."""
     latest = (
         stored.storage if stored is not None else (record.result or {}).get("storage")
     )
     journal = storage_from_effects(record.effects)
+    deleted = deleted_from_effects(record.effects)
+    refused = refused_from_effects(record.effects) if record.outcome == "failed" else ()
+    settled = {same_item(item) for item in (*deleted, *refused)}
+    earlier = (latest or {}).get("retained", ())
+    retained = [*(i for i in earlier if same_item(i) not in settled), *refused]
     return {
-        "deleted": deleted_from_effects(record.effects),
-        "retained": tuple(latest["retained"]) if latest else (),
+        "deleted": deleted,
+        "retained": tuple(retained),
         "pending": journal["pending"],
     }
 
