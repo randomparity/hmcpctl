@@ -292,10 +292,14 @@ def test_add_without_response_identity_finds_the_new_adapter():
 
 def test_add_refusal_is_not_applied_with_its_guidance():
     fake = NetHMC()
-    fake.add_error = HMCError("refused", 500, "<Message>REST0269 ...</Message>")
+    fake.add_error = HMCError(
+        "refused", 500, "<Message>REST0269 cookie=secret</Message>"
+    )
     plan = _plan(fake, {"add": [{"port_vlan_id": 10}]})
-    with pytest.raises(EffectNotApplied, match="REST0269"):
+    with pytest.raises(EffectNotApplied, match="REST0269") as refused:
         _write(fake, plan, "network_add:0")
+    assert "secret" not in str(refused.value)
+    assert "chsyscfg" in str(refused.value)
 
 
 def test_other_add_error_stays_open():
@@ -768,3 +772,11 @@ def test_plan_refuses_a_removal_whose_adapter_reports_no_slot():
     del fake.adapters[1]["Resource"]["VirtualSlotNumber"]
     with pytest.raises(OperationFailed, match="reports no virtual slot"):
         _plan(fake, {"remove": [{"mac": MAC_B}]})
+
+
+def test_an_unclassified_add_error_warns_without_the_hmc_body(body):
+    body.add_error = HMCError("bad gateway", 502, "<Message>cookie=secret</Message>")
+    record = _submit({"networks": {"add": [{"port_vlan_id": 30}]}})
+    assert record.outcome == "needs_attention"
+    text = " ".join([*record.warnings, *record.result["warnings"]])
+    assert "HMCError" in text and "secret" not in text
