@@ -1,4 +1,4 @@
-"""ST70: hmc_reconfigure_lpar's persistence across profile activation (ADRs 0314, 0322).
+"""ST70: hmc_reconfigure_lpar's persistence across profile activation (ADRs 0314, 0322, 0325).
 
 One owned scratch partition, lpar-config's fixture and teardown. Inactive, a processor
 and memory change must read back `profile` and survive a profile activation; a rename
@@ -13,6 +13,13 @@ volume group. It must read back `profile`, its client adapter must be in the def
 profile, and after the first activation in the running partition. After the final power
 off a detach must remove only its mapping. Teardown detaches what is left, deletes the
 disk, and reports a VIOS server adapter the run left as a manual step.
+
+Network attachments (#1845): after that power off the partition has an applied
+configuration and its profile matches it, so a client network adapter is added on the
+configured provision VLAN. It must read back `profile`, its slot must be in the default
+profile, and after a third activation in the running partition. After a power off its
+removal by MAC must read back `profile` and drop its slot from the profile. Deleting the
+scratch partition removes any adapter left behind.
 """
 
 from __future__ import annotations
@@ -75,6 +82,12 @@ DISK_ASSERTIONS = (
     "added-disk-in-default-profile",
     "added-disk-survives-profile-activation",
     "detach-removes-only-the-mapping",
+)
+NETWORK_ASSERTIONS = (
+    "added-network-classified-profile",
+    "added-network-in-default-profile",
+    "added-network-survives-profile-activation",
+    "removed-network-leaves-the-profile",
 )
 LIVE_DLPAR_SKIP = (
     "live DLPAR on the boundary test LPAR is not authorized (operator 2026-11-02); "
@@ -255,6 +268,120 @@ async def _detach_disk(
         and volumes is not None
         and disk.name in volumes
     )
+
+
+def _eth_slots(items: Iterable[str]) -> frozenset[str]:
+    """The slot numbers of ``virtual_eth_adapters`` entries, each ``<slot>/...``.
+
+    An entry holding additional VLAN ids contains commas, so the CLI quotes it inside the
+    already quoted list; the list is therefore parsed as CSV a second time.
+    """
+    found = set()
+    for item in items:
+        for entry in next(csv.reader([item]), []):
+            head = entry.strip().split("/", 1)[0]
+            if head.isdigit():
+                found.add(head)
+    return frozenset(found)
+
+
+async def _profile_eth_slots(
+    client: Client, state: RunState, run: _Run
+) -> frozenset[str] | None:
+    """The client network adapter slots of the one non-recovery profile."""
+    listing = await _cli(
+        client,
+        state,
+        f"lssyscfg -r prof -m {shlex.quote(run.system)} --filter "
+        f"{shlex.quote(build_filter([('lpar_names', run.name)]))} "
+        "-F name,virtual_eth_adapters",
+    )
+    rows = [
+        row
+        for row in csv.reader((listing or "").splitlines())
+        if row and not row[0].startswith(_RECOVERY_PREFIX)
+    ]
+    return _eth_slots(rows[0][1:]) if len(rows) == 1 else None
+
+
+async def _running_eth_slots(
+    client: Client, state: RunState, run: _Run
+) -> frozenset[str] | None:
+    """The activated partition's client network adapter slots."""
+    return _lines(
+        await _cli(
+            client,
+            state,
+            f"lshwres -r virtualio --rsubtype eth -m {shlex.quote(run.system)} "
+            f"--level lpar --filter "
+            f"{shlex.quote(build_filter([('lpar_names', run.name)]))} -F slot_num",
+        )
+    )
+
+
+def _added_adapter(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The ``network_add:0`` effect identity: the adapter's UUID, MAC and slot."""
+    for effect in record.get("effects") or []:
+        if effect.get("key") == "network_add:0" and effect.get("status") == "applied":
+            return effect.get("identity") or {}
+    return {}
+
+
+async def _add_network(
+    client: Client, state: RunState, run: _Run, held: dict[str, bool]
+) -> Mapping[str, Any]:
+    """Add one adapter on the provision VLAN; its identity when the add completed."""
+    patch = {"networks": {"add": [{"port_vlan_id": state.config.provision_vlan_id}]}}
+    record = await _reconfigure(client, state, run, "network-add", patch)
+    if record.get("outcome") != "completed":
+        await _abandon_open(client, state, run)
+        return {}
+    added = _added_adapter(record)
+    held["added-network-classified-profile"] = _applied(record) == {"profile"}
+    slots = await _profile_eth_slots(client, state, run)
+    held["added-network-in-default-profile"] = (
+        slots is not None and str(added.get("slot")) in slots
+    )
+    return added
+
+
+async def _remove_network(
+    client: Client,
+    state: RunState,
+    run: _Run,
+    added: Mapping[str, Any],
+    held: dict[str, bool],
+) -> None:
+    patch = {"networks": {"remove": [{"mac": added.get("mac")}]}}
+    record = await _reconfigure(client, state, run, "network-remove", patch)
+    if record.get("outcome") != "completed":
+        await _abandon_open(client, state, run)
+        return
+    slots = await _profile_eth_slots(client, state, run)
+    held["removed-network-leaves-the-profile"] = (
+        _applied(record) == {"profile"}
+        and slots is not None
+        and str(added.get("slot")) not in slots
+    )
+
+
+async def _network_leg(
+    client: Client, state: RunState, run: _Run, held: dict[str, bool]
+) -> None:
+    """Add, activate, power off, remove: the network persistence proof (ADR 0325)."""
+    added = await _add_network(client, state, run, held)
+    if not added or not held.get("added-network-in-default-profile"):
+        return
+    if not await _activate(client, state, run, "profile, after the network add"):
+        return
+    running = await _running_eth_slots(client, state, run)
+    held["added-network-survives-profile-activation"] = (
+        running is not None and str(added.get("slot")) in running
+    )
+    if not await _power_off(client, state, run):
+        return
+    run.data["activated"] = False
+    await _remove_network(client, state, run, added, held)
 
 
 def _manual(state: RunState, label: str, text: str) -> None:
@@ -516,9 +643,12 @@ async def _scenarios(
     current = await _current(client, state, run)
     held["pending-change-survives-profile-activation"] = _holds(current, FIRMWARE_PATCH)
     held["rename-persists-across-activations"] = current.get("name") == renamed
-    if disk is not None and disk.attempted and await _power_off(client, state, run):
-        run.data["activated"] = False
+    if not await _power_off(client, state, run):
+        return
+    run.data["activated"] = False
+    if disk is not None and disk.attempted:
         await _detach_disk(client, state, run, disk, held)
+    await _network_leg(client, state, run, held)
 
 
 async def _abandon_open(client: Client, state: RunState, run: _Run) -> None:
@@ -588,6 +718,7 @@ async def exercise_lpar_reconfigure(client: Client, state: RunState) -> None:
         "pending-change-survives-profile-activation",
         "rename-persists-across-activations",
         *DISK_ASSERTIONS,
+        *NETWORK_ASSERTIONS,
     )
     state.record_verified(
         SUBTASK,
@@ -600,6 +731,7 @@ async def exercise_lpar_reconfigure(client: Client, state: RunState) -> None:
             "inactive": INACTIVE_PATCH,
             "firmware": FIRMWARE_PATCH,
             "disk_mib": DISK_MIB,
+            "network_vlan": state.config.provision_vlan_id,
             "live": "skipped",
         },
     )

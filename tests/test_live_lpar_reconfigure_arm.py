@@ -1,4 +1,4 @@
-"""ST70 arm sequencing and cleanup without hardware (#1226, #1846, ADRs 0314, 0322)."""
+"""ST70 arm sequencing and cleanup without hardware (#1226, #1846, #1845; ADRs 0314, 0322, 0325)."""
 
 import sys
 from pathlib import Path
@@ -28,6 +28,10 @@ class Surface:
         self.saved_vscsi = self.running_vscsi = False
         self.server_slots = {"5,vios-peer,2"}
         self.detach_leaves_mapping = False
+        # Network side: client network adapter slots in the profile and running.
+        self.saved_eth: set[str] = set()
+        self.running_eth: set[str] = set()
+        self.remove_keeps_slot = False
 
     def __call__(self, _client, tool, **kwargs):
         self.calls.append(tool)
@@ -50,6 +54,8 @@ class Surface:
             field = "disks.add" if "add" in patch["disks"] else "disks.detach"
             changes = [{"field": field, "applied": "profile"}]
             return "PASS", {"outcome": "completed", "result": {"changes": changes}}
+        if "networks" in patch:
+            return self._networks(patch["networks"])
         if "name" in patch:
             self.name = patch["name"]
             return "PASS", {"outcome": "completed", "result": {"changes": []}}
@@ -59,6 +65,28 @@ class Surface:
             self.current |= patch
         changes = [{"field": key, "applied": applied} for key in patch]
         return "PASS", {"outcome": "completed", "result": {"changes": changes}}
+
+    def _networks(self, networks):
+        effects = []
+        if networks.get("add"):
+            self.saved_eth.add("7")
+            identity = {
+                "adapter_uuid": "eth-uuid",
+                "mac": "02:00:00:00:00:07",
+                "slot": "7",
+            }
+            effects = [
+                {"key": "network_add:0", "status": "applied", "identity": identity}
+            ]
+            field = "networks.add"
+        else:
+            assert networks["remove"] == [{"mac": "02:00:00:00:00:07"}]
+            if not self.remove_keeps_slot:
+                self.saved_eth.discard("7")
+            field = "networks.remove"
+        changes = [{"field": field, "applied": "profile"}]
+        result = {"changes": changes}
+        return "PASS", {"outcome": "completed", "result": result, "effects": effects}
 
     def hmc_get_lpar(self, **_kwargs):
         return "PASS", {
@@ -93,6 +121,7 @@ class Surface:
         if self.persists:
             self.current = dict(self.saved)
             self.running_vscsi = self.saved_vscsi
+            self.running_eth = set(self.saved_eth)
         return "PASS", {"job": {"status": "COMPLETED_OK"}}
 
     def hmc_power_off_lpar(self, **_kwargs):
@@ -128,6 +157,16 @@ class Surface:
         return "PASS", {}
 
     def hmc_run_command(self, cmd, **_kwargs):
+        if "virtual_eth_adapters" in cmd:
+            entries = ",".join(
+                f'""{slot}/0/1//0/0/ETHERNET0//all/none""'
+                for slot in sorted(self.saved_eth)
+            )
+            listing = f'"{entries}"' if entries else "none"
+            return "PASS", f"default_profile,{listing}\nhmcprec-00ff,none"
+        if "--rsubtype eth" in cmd:
+            slots = "\n".join(sorted(self.running_eth))
+            return "PASS", slots or "No results were found."
         if cmd.startswith("lssyscfg -r prof"):
             listing = '"2/client/1/vios/6/1"' if self.saved_vscsi else "none"
             return "PASS", f"default_profile,{listing}\nhmcprec-00ff,none"
@@ -145,7 +184,9 @@ def _state(surface):
     return SimpleNamespace(
         group=arm.GROUP,
         config=SimpleNamespace(
-            system_name="system", vdisk_volume_group_name="clientvg"
+            system_name="system",
+            vdisk_volume_group_name="clientvg",
+            provision_vlan_id=1,
         ),
         call=AsyncMock(side_effect=surface),
         skip=Mock(),
@@ -182,7 +223,7 @@ async def test_every_assertion_holds_and_the_partition_is_cleaned(cleanup):
     state = _state(surface)
     await arm.exercise_lpar_reconfigure(object(), state)
     held, cleaned = _held(state)
-    assert all(held.values()) and len(held) == 9
+    assert all(held.values()) and len(held) == 13
     assert cleaned == "passed"
     assert surface.volumes == {"keep1"} and surface.mapped is None
     manual = [c.args[1] for c in state.record.call_args_list if c.args[2] == "FAIL"]
@@ -301,3 +342,42 @@ async def test_a_paused_disk_add_is_abandoned_so_the_other_scenarios_run(cleanup
     assert held["added-disk-in-default-profile"] is False
     assert held["rename-persists-across-activations"] is True
     assert surface.volumes == {"keep1"} and surface.mapped is None
+
+
+@pytest.mark.asyncio
+async def test_a_network_adapter_lost_at_activation_fails(cleanup):
+    surface = Surface()
+    real = surface.hmc_power_on_lpar
+
+    def drops(**kwargs):
+        outcome = real(**kwargs)
+        surface.running_eth = set()
+        return outcome
+
+    surface.hmc_power_on_lpar = drops
+    state = _state(surface)
+    await arm.exercise_lpar_reconfigure(object(), state)
+    held, _ = _held(state)
+    assert held["added-network-in-default-profile"] is True
+    assert held["added-network-survives-profile-activation"] is False
+    assert surface.state == "not activated"
+
+
+@pytest.mark.asyncio
+async def test_a_removal_that_keeps_the_profile_slot_fails(cleanup):
+    surface = Surface()
+    surface.remove_keeps_slot = True
+    state = _state(surface)
+    await arm.exercise_lpar_reconfigure(object(), state)
+    held, _ = _held(state)
+    assert held["added-network-survives-profile-activation"] is True
+    assert held["removed-network-leaves-the-profile"] is False
+    assert surface.state == "not activated"
+
+
+def test_eth_slots_read_quoted_profile_entries():
+    entries = [
+        '"2/0/1//0/0/ETHERNET0//all/none","5/1/20/30,40/1/0/ETHERNET0//all/none"'
+    ]
+    assert arm._eth_slots(entries) == {"2", "5"}
+    assert arm._eth_slots(["none"]) == frozenset()
