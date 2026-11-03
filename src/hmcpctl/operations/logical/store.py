@@ -190,11 +190,11 @@ def _upgrade_schema_one(conn: sqlite3.Connection) -> None:
 
 
 def _read_store_id(conn: sqlite3.Connection) -> str:
+    """Return the store id of a schema-1 or schema-2 store; upgrade only after the sentinel."""
     meta = _read_meta(conn)
-    if meta.get("schema_version") == "1" and meta.get("store_id"):
-        _upgrade_schema_one(conn)
-        meta = _read_meta(conn)
-    if meta.get("schema_version") != SCHEMA_VERSION or not meta.get("store_id"):
+    if meta.get("schema_version") not in ("1", SCHEMA_VERSION) or not meta.get(
+        "store_id"
+    ):
         raise _corrupt("unknown schema version")
     return meta["store_id"]
 
@@ -254,6 +254,7 @@ def _open_existing(root: Path, *, create: bool) -> sqlite3.Connection:
                 raise _corrupt(f"{SENTINEL_NAME} names another store")
         elif create:
             _write_private_file(sentinel, store_id)
+        _upgrade_schema_one(conn)
     except BaseException:
         conn.close()
         raise

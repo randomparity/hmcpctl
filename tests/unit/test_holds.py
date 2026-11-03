@@ -291,3 +291,10 @@ def test_calling_restores_the_outer_context():
             assert current_call() == inner
         assert current_call() == outer
     assert current_call() is None
+
+
+def test_a_schema_one_store_naming_another_sentinel_is_refused_unchanged():
+    _schema_one_store()
+    (store.state_dir() / store.SENTINEL_NAME).write_text("b" * 32)
+    assert _reason(holds.find_hold, LPAR) == "store_corrupt"
+    assert _schema_version() == "1"
