@@ -129,8 +129,9 @@ then moves to `implemented_scope`. `networks-live` (the running-partition DLPAR 
    - a removal deletes only the one planned adapter UUID, and only while it carries the MAC;
    - no VIOS object, virtual network or other partition is written;
    - the force-save never runs over pending profile values (persistence guard);
-   - `completed` with a network change means the default profile lists every current client
-     adapter and no removed slot (as bounded in entry 3);
+   - `completed` with a network change means the save helper reported `completed`/`verified`,
+     or the readback found every current client adapter's slot and no removed slot in the
+     default profile (as bounded in entry 3);
    - effect keys and kinds are a persisted contract.
 3. **Accepted failure classes**
    - the force-save copies the whole current configuration (ADR 0322 Failure model; the
@@ -183,9 +184,10 @@ then moves to `implemented_scope`. `networks-live` (the running-partition DLPAR 
    partition's last adapter can confirm. (criteria 5, 7)
 5. Tool docs regenerate. `maturity.json`, the CHANGELOG and the H1 spec rows name the change.
    (criterion 10)
-6. Live (arm 70, extended, under a LIVE-GRANT). On the not-activated scratch partition, an add
-   on `LIVE_TEST_PROVISION_VLAN_ID` reads back `profile`, and the default profile lists the
-   adapter. A profile activation shows it in the running configuration. After power-off, a
+6. Live (arm 70, extended, under a LIVE-GRANT). After the arm's first profile activation and
+   power-off, the scratch partition has an applied configuration (no REST0269) and still no
+   client network adapter. There, an add on `LIVE_TEST_PROVISION_VLAN_ID` reads back `profile`,
+   and the default profile lists the adapter. A profile activation shows it in the running configuration. After power-off, a
    removal by its MAC reads back `profile`, and the profile no longer lists its slot. Teardown
    deletes the partition. Recovery reports a leftover scratch partition as today. (criteria 9,
    10)
