@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from conftest import live_fixture
 from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects, _run
 from unit.test_lpar_reconfigure import hmc as hmc  # noqa: PLC0414 - fixture import
 
@@ -344,6 +345,59 @@ def test_detach_skips_the_partition_basis(media, monkeypatch):
     record = _run({"installer_media": "detach"})
     assert record.outcome == "completed"
     assert media.mounted == []
+
+
+def _as_captured_on_a_running_client(media: MediaHMC) -> None:
+    """The #1844 Q5 answer: the VIOS side goes, the client adapter stays, then a 500."""
+    captured = live_fixture("rest-vios-optical-unmount-running-no-rmc")
+
+    async def unmount(_hmc, vios, lpar, *, system_name_or_uuid, media_name):
+        media.fake.calls.append("unmount")
+        media.mounted.remove(media_name)
+        raise HMCError("possible side effect", captured["status"], captured["body"])
+
+    media.unmount = unmount
+
+
+def test_the_captured_running_unmount_is_the_half_done_detach_the_guard_refuses():
+    body = live_fixture("rest-vios-optical-unmount-running-no-rmc")["body"]
+    assert "REST0126" in body and "HSCL2957" in body
+
+
+@pytest.mark.parametrize(
+    ("state", "rmc"), [("running", "inactive"), ("open firmware", "")]
+)
+def test_detach_refuses_an_activated_partition_without_rmc(
+    media, monkeypatch, state, rmc
+):
+    _provisioned()
+    _as_captured_on_a_running_client(media)
+    monkeypatch.setattr(reconfigure_media, "unmount_optical_media", media.unmount)
+    media.fake.state, media.fake.rmc = state, rmc
+    record = _run({"installer_media": "detach"})
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert "Power the partition off, then detach" in str(record)
+    assert _effects(record) == []
+    assert (_writes(media), media.mounted) == ([], [MEDIA])
+
+
+def test_detach_rechecks_rmc_before_its_write(media, monkeypatch):
+    _provisioned()
+    _as_captured_on_a_running_client(media)
+    monkeypatch.setattr(reconfigure_media, "unmount_optical_media", media.unmount)
+    plan_media = reconfigure.plan_media
+
+    async def plan_then_lose_rmc(hmc, system_uuid, lpar_uuid):
+        planned = await plan_media(hmc, system_uuid, lpar_uuid)
+        media.fake.rmc = "inactive"
+        return planned
+
+    monkeypatch.setattr(reconfigure, "plan_media", plan_then_lose_rmc)
+    record = _run(BOTH)
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert ("boot", "lpar.boot_order", "applied") in _effects(record)
+    assert "media_detach" not in [key for key, _, _ in _effects(record)]
+    assert media.mounted == [MEDIA]
 
 
 def test_sync_on_refuses_pending_profile_values_with_a_boot_write(media):

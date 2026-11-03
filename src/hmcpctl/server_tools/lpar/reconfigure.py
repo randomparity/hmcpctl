@@ -124,8 +124,9 @@ def reconfigure_handler(
         activation uses it) and needs ``hmc_set_lpar_boot_order``.
         ``installer_media: detach`` removes the mapping of the installer media provision
         mounted, keeping the medium, and needs ``hmc_unmount_optical_media`` granted for
-        all targets and ``exclusive_writer_window=true``. Detach only after the install
-        has finished. Media already detached or a boot order already set plans no change.
+        all targets and ``exclusive_writer_window=true``. Detach is refused unless the
+        partition is not activated or RMC is active: power it off, then detach. Media
+        already detached or a boot order already set plans no change.
 
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.

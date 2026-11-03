@@ -37,7 +37,8 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 - `hmc_reconfigure_lpar` accepts `patch.installer_media: detach` and `patch.boot: root_disk`
   for a partition `hmc_provision_lpar` created (ADR 0321). Detach removes the mapping of the
   installer media that provision recorded, keeping the medium; it needs
-  `exclusive_writer_window=true` and `hmc_unmount_optical_media` granted for all targets. Boot
+  `exclusive_writer_window=true` and `hmc_unmount_optical_media` granted for all targets, and it
+  is refused unless the partition is not activated or RMC is active. Boot
   sets the pending boot order to the provision-recorded root disk only. Both are journaled
   effects that resume by a live read (#1844).
 - `hmc_reconfigure_lpar` changes an LPAR's processors, memory or partition name as one

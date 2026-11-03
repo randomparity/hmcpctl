@@ -56,8 +56,10 @@ entry of the needed kind, more than one entry, or an entry missing its fields.
 
 Before each write, the body re-resolves the partition and runs the ADR 0011 check, as for every
 write. It does not compare the partition-view basis, because an installer changes state and RMC on
-its own. `set_lpar_boot_order` verifies its own write. When the planned state is not `not
-activated`, the result warns that a detach assumes the install has finished. Refusal mapping:
+its own. `set_lpar_boot_order` verifies its own write. Detach is refused, at planning and again
+before its write, unless the partition is `not activated` or RMC is `active` (ADR 0321 D7, from the
+Q5 capture). When the planned state is not `not activated`, the result warns that a detach assumes
+the install has finished. Refusal mapping:
 
 - `ValueError`, `LookupError` or `PermissionError` before the POST → `EffectNotApplied`. So is
   `LparUpdateError(submission="rejected")`.
@@ -106,8 +108,9 @@ Before maturity is recorded, the Q5 answer is read back into the refusal message
    - no write happens before the plan is recorded;
    - effect keys and kinds are a persisted contract (ADR 0195).
 3. **Accepted failure classes**
-   - the HMC refuses the unmount, for example because a guest holds the device, which is
-     unevidenced. The effect is `not_applied` and the message names the status and the recovery;
+   - the HMC refuses the unmount on a partition that passed the RMC guard, for example because a
+     guest holds the device, which is unevidenced. The effect is `not_applied` and the message
+     names the status and the recovery;
    - a degraded VIOS read that returns no mappings reads as "detached". The result is a false
      `unchanged`, with the mapping left intact and visible to `hmc_inspect_lpar`. The specialist's
      own lookup has the same blind spot;

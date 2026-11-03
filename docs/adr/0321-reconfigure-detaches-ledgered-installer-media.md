@@ -17,8 +17,12 @@ It consumes the `installer_media` ledger entry that ADR 0319 (#1842) has provisi
 - `unmount_optical_media` removes the whole optical mapping by `MediaName`, through the VIOS
   read-modify-write (ADR 0079). `unloadopt` empties the device but leaves the mapping (ADR 0317). A
   mapping left with no medium can no longer be unmounted by name.
-- Whether a running client can make a mapping removal fail is unknown. #1280 concerns `unloadopt`,
-  and the #1284 capture's partition had no operating system (`tests/fixtures/live/README.md`, Q3).
+- The #1844 Q5 capture (`tests/fixtures/live/rest-vios-optical-unmount-running-no-rmc.json`) ran a
+  mapping removal on a running partition without RMC, on V10R3. The VIOS mapping and its server
+  adapter were removed. The POST then answered HTTP 500 `REST0126` `[HSCL2957 Either there is
+  currently no RMC connection between the management console and the partition 1 or the partition
+  does not support dynamic partitioning operations. …]`. The partition's client vSCSI adapter
+  stayed in its current configuration, so a second unmount after power-off found no mapping.
 
 ## Decision
 
@@ -48,14 +52,19 @@ It consumes the `installer_media` ledger entry that ADR 0319 (#1842) has provisi
    read, and that read needs the UUIDs that planning resolves. The `vios` selector of
    `hmc_unmount_optical_media` is therefore absent. A grant that limits that tool by target refuses
    detach, which fails closed. Only a grant of the tool for all targets admits it.
+7. **Detach only when the HMC can finish it.** Detach is refused unless the partition is
+   `not activated` or its RMC is `active`, because otherwise the HMC does the half-done removal
+   captured above. The check runs at planning and again before the write. The refusal names the
+   state and the fix: power the partition off, then detach (operator decision, 2026-11-03).
 
 ## Consequences
 
 - A partition that hmcpctl did not provision cannot use either field. The specialists remain
   available for it.
-- If the HMC refuses the detach, the caller retries or powers the partition off. Q5 of the
-  `vmedia-media-change` arm records a firmware-only running client. It does not record a guest
-  that holds the device.
+- Right after `boot_started`, an installer runs without RMC, so detach requires a power-off
+  first. A partition whose installed OS has RMC up can detach while running. No guest holding the
+  device has been captured.
+- If the HMC refuses the detach anyway, the caller retries or powers the partition off.
 - Detach requires an all-targets grant of `hmc_unmount_optical_media`.
 - The saved profile keeps the optical client adapter (ADR 0319 D2). Adapters stay as the HMC
   leaves them after the unmount.
@@ -82,6 +91,9 @@ It consumes the `installer_media` ledger entry that ADR 0319 (#1842) has provisi
   resolve the selectors through the HMC before submit, which duplicates the body's resolution.
 - **Keep the installer second in the boot string.** judgment: fit. ADR 0191 D6 relies on the
   producer to refuse reinstalls, and the issue asks for a partition that boots from its root disk.
+- **Detach on a running partition and warn about the client adapter.** verified: the Q5 capture
+  above. That detach removes the VIOS side and leaves a client adapter, which the
+  `vmedia-media-change` arm reported for manual removal; the operator chose to refuse instead.
 - **Compare the partition-view basis before these writes too.** judgment: fit. An installer that
   halts or reboots changes state and RMC, and that would fail every detach as stale.
 - **Require the window for boot as well.** judgment: fit. The boot write touches no VIOS and no

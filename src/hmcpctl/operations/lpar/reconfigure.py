@@ -51,6 +51,7 @@ from .reconfigure_media import (
     observed,
     plan_boot,
     plan_media,
+    require_detachable,
 )
 
 # ADR 0314 Decision 6: the specialists whose authority each patch field uses.
@@ -595,6 +596,7 @@ async def _make_plan(
     if patch.boot is not None:
         boot, boot_change = await plan_boot(hmc, system_uuid, lpar_uuid)
     if patch.installer_media is not None:
+        require_detachable(view, lpar_uuid)
         media, media_change = await plan_media(hmc, system_uuid, lpar_uuid)
     plan = plan_changes(patch, view, profile, allow_disruption, boot is not None)
     plan["changes"] += [c for c in (boot_change, media_change) if c is not None]
@@ -739,6 +741,8 @@ async def _apply(
         # write not yet applied. An installer changes state and RMC by itself, so the
         # boot and media writes skip the basis (ADR 0321 Decision 4).
         await _resolve(hmc, system_uuid, lpar_uuid)
+        if key == MEDIA_KEY:
+            require_detachable(await _read_view(hmc, lpar_uuid), lpar_uuid)
         if key in (BOOT_KEY, MEDIA_KEY):
             write = (boot_write if key == BOOT_KEY else media_write)(hmc, plan)
             await ctx.effect(key, kind, target, write)

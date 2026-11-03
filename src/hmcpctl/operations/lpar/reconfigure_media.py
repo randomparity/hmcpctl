@@ -44,6 +44,20 @@ PlanOf = Callable[[OperationContext], Mapping[str, Any]]
 Opener = Callable[[str], Any]
 
 
+def require_detachable(view: Mapping[str, Any], lpar_uuid: str) -> None:
+    """Refuse a detach the HMC would leave half done (ADR 0321 Decision 7).
+
+    On a running partition without RMC the mapping removal returns REST0126/HSCL2957
+    after the VIOS side is gone and leaves the client adapter (#1844 Q5 capture).
+    """
+    if view["state"] != "not activated" and view["rmc"] != "active":
+        raise OperationFailed(
+            f"LPAR {lpar_uuid} is {view['state']!r} with RMC "
+            f"{view['rmc'] or 'unknown'!r}: the HMC would remove the VIOS mapping and "
+            "leave the client adapter. Power the partition off, then detach"
+        )
+
+
 def provision_owned(system_uuid: str, lpar_uuid: str, kind: str) -> dict[str, Any]:
     """The *kind* identity this partition's provision recorded (ADR 0321 Decision 1)."""
     with store.read_session() as conn:
