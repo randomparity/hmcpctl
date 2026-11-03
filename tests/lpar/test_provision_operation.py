@@ -11,6 +11,7 @@ import pytest
 
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_io import LparPhysicalIO
+from hmcpctl.documents.partition_profile import apply_profile_patch
 from hmcpctl.operations.logical import engine
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
@@ -284,6 +285,25 @@ def _request(memory=512, vnics=0):
 
 def test_a_matching_profile_reads_back_clean():
     assert readback_problem(_profile_element(), _request(), 0) is None
+
+
+@pytest.mark.parametrize("rendered", ["1", "1.0", "1.00"])
+def test_whole_processing_units_read_back_as_the_hmc_renders_them(rendered):
+    request = replace(
+        _request(),
+        resources=LparResources(
+            min_memory=256,
+            desired_memory=512,
+            max_memory=1024,
+            desired_vcpus=1,
+            desired_procs=1.0,
+        ),
+    )
+    element = apply_profile_patch(_profile_element(), expected_profile(request))
+    units = next(e for e in element.iter() if e.tag.endswith("DesiredProcessingUnits"))
+    units.text = rendered
+
+    assert readback_problem(element, request, 0) is None
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,7 @@ reads the profile by name, and an absent profile means the write did not land.
 from __future__ import annotations
 
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 from ...client.client_profiles import NativeProfile, read_native_profile
@@ -85,12 +86,22 @@ async def profile_by_name(
     return found[0] if found else None
 
 
+def _value(text: str | None) -> Decimal | str | None:
+    # The HMC renders whole processing units as "1" where the patch writes "1.0".
+    try:
+        return Decimal(text) if text is not None else None
+    except InvalidOperation:
+        return text
+
+
 def holds(element: ET.Element, patch: ProfilePatch) -> bool:
     """Whether every field *patch* sets already reads its value in *element*."""
     patched = apply_profile_patch(element, patch)
-    return requested_profile_values(element, patch) == requested_profile_values(
-        patched, patch
-    )
+    current = requested_profile_values(element, patch)
+    wanted = requested_profile_values(patched, patch)
+    return {k: _value(v) for k, v in current.items()} == {
+        k: _value(v) for k, v in wanted.items()
+    }
 
 
 def profile_write_classifier(
