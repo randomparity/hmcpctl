@@ -47,9 +47,11 @@ and removal, and `exclusive_writer_window` (#1848).
   (`engine.join(..., None)`), renders as today plus the operation id/state/outcome, and exits 1
   unless `completed` (or `abandoned` after `abandon`).
 - Live scripts (`scripts/live_test/lpar_power.py`, `scripts/live_test/provisioning.py`) pass a
-  run-unique `request_id` and `wait_seconds=600`, and when the returned operation is not terminal
-  poll `hmc_operation_status` until it is (the arm's PowerOff timeout is 900 s). `lpar_power`
-  registers its decommission request and its teardown abandons it with `hmc_decommission_lpar`.
+  run-unique `request_id` and `wait_seconds=600`. `lpar_power`, whose PowerOff timeout is 900 s,
+  polls `hmc_operation_status` until the operation is terminal or paused and repeats the call for
+  its result; it registers its decommission request and its teardown abandons it with
+  `hmc_decommission_lpar`. The provisioning fixture's default 300 s PowerOff fits the wait, so it
+  makes one call and reports manual recovery on any result that leaves the partition.
 - Docs: `CHANGELOG.md` (breaking entry), `docs/tools/` (regenerated), `docs/mcp-server.md`,
   `docs/capabilities/maturity.json` (a `journaled-operation` variant),
   `docs/capabilities/operations.json` (the tool's signature), `docs/cli.md`'s decommission examples
@@ -125,7 +127,7 @@ and removal, and `exclusive_writer_window` (#1848).
 | Schema defaults and option set | focused-test | `tests/app/test_capabilities.py`, `tests/app/test_cli_commands.py` help test |
 | operations.json signature | focused-test | `just capability-inventory` |
 | CLI | focused-test | `tests/app/test_cli_commands.py` decommission cases |
-| Live arm request ids | focused-test | `tests/test_live_lpar_power_arm.py`, `tests/test_live_round2_recovery.py` |
+| Live arm request ids | focused-test | `tests/test_live_lpar_power_arm.py`; `just scenario-gap`'s dispatch check for the provisioning call |
 | Tool schema docs | focused-test | `just tool-docs-check` after `just tool-docs` |
 | maturity variant | focused-test | `just test` capability inventory tests |
 | ADR/spec prose | task-test-not-applicable | prose; `just adr-numbering` checks only the number |
