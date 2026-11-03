@@ -248,6 +248,10 @@ def arm(monkeypatch, tmp_path):
     return state, hmc, captured
 
 
+async def _skip_q5(_capture) -> None:
+    return None
+
+
 def _rows(state, prefix: str) -> list[dict[str, Any]]:
     return [r for r in state.results if r["tool"].startswith(prefix)]
 
@@ -466,6 +470,8 @@ async def test_an_unreadable_empty_check_in_cleanup_is_a_manual_row(arm, monkeyp
         return await base_call(client, tool, **kwargs)
 
     monkeypatch.setattr(runner.RunState, "call", call)
+    # Q5 would unmap the device; this case needs it still mapped at cleanup.
+    monkeypatch.setattr(vmedia_media_change._Capture, "running_unmount", _skip_q5)
 
     await _run(state, 16, 71)
 
@@ -588,3 +594,52 @@ async def test_an_unreadable_cleanup_listing_is_a_manual_row(arm):
     await _run(state, 16, 71)
 
     assert any("optical mappings could not be read" in n for n in _manual(state))
+
+
+@pytest.mark.asyncio
+async def test_q5_unmounts_on_the_running_client(arm):
+    state, _hmc, _ = arm
+
+    await _run(state, 16, 71, 22)
+
+    (running,) = _rows(state, "hmc_unmount_optical_media (q5 running unmount)")
+    assert running["status"] == "PASS"
+    assert not _rows(state, "hmc_power_off_lpar (q5 immediate)")
+    assert not _rows(state, "hmc_load_optical_media (cleanup load)")
+    assert _manual(state) == []
+    assert state.artifacts.vmedia_change_names == []
+
+
+@pytest.mark.asyncio
+async def test_a_refused_running_unmount_is_retried_after_a_power_off(arm):
+    state, hmc, _ = arm
+    unmount = hmc._unmount
+
+    def refused_while_running(name):
+        if hmc.lpar_state == "Running":
+            return "FAIL", _failure("HMCError: HTTP 500")
+        return unmount(name)
+
+    hmc._unmount = refused_while_running
+
+    await _run(state, 16, 71, 22)
+
+    statuses = [
+        r["status"]
+        for r in state.results
+        if r["tool"].startswith("hmc_unmount_optical_media (q5")
+    ]
+    assert statuses == ["FAIL", "PASS"]
+    assert _rows(state, "hmc_power_off_lpar (q5 immediate)")
+    assert _manual(state) == []
+
+
+@pytest.mark.asyncio
+async def test_q5_is_unanswered_when_medium_a_is_not_mapped(arm):
+    state, hmc, _ = arm
+    hmc.loads_fail_after_power = 2  # q3 leaves the device empty
+
+    await _run(state, 16, 71, 22)
+
+    assert any("q5 unanswered" in str(r["note"]) for r in state.results)
+    assert not _rows(state, "hmc_power_on_lpar (q5)")

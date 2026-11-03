@@ -103,8 +103,8 @@ through DLPAR. #1228 extends `patch` under the same rules with:
 
 - networks;
 - added disks;
-- `installer_media: detach`;
-- `boot: root_disk`.
+- `installer_media: detach` (implemented, #1844, ADR 0321);
+- `boot: root_disk` (implemented, #1844, ADR 0321).
 
 `install` contains:
 
@@ -147,7 +147,7 @@ the dispatch authorizer admits the call, as that tool, for each resolved target.
 | provision (no install) | `hmc_create_lpar`, `hmc_add_network_adapter`, `hmc_add_vscsi_adapter`, `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar`, `hmc_save_current_partition_profile`, `hmc_set_default_partition_profile` (ADR 0313) |
 | provision `install` | the row above, plus `hmc_upload_iso`, `hmc_mount_optical_media`, `hmc_set_lpar_boot_order`, `hmc_power_on_lpar`, `hmc_read_lpar_refcodes` |
 | `power_on=true` (no `install`) | adds `hmc_power_on_lpar` |
-| reconfigure | `hmc_modify_lpar` and `hmc_rename_lpar` for `name`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, `hmc_update_partition_profile` (ADR 0314 Decision 6); #1228 adds `hmc_unmount_optical_media`, `hmc_set_lpar_boot_order` and its attach tools |
+| reconfigure | `hmc_modify_lpar` and `hmc_rename_lpar` for `name`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, `hmc_update_partition_profile` (ADR 0314 Decision 6); `hmc_unmount_optical_media` for `installer_media` and `hmc_set_lpar_boot_order` for `boot` (ADR 0321 Decision 6); #1228 adds its attach tools |
 | power `start` | `hmc_power_on_lpar` |
 | power `stop` / `restart` | `hmc_power_off_lpar` |
 | decommission `retain` | `hmc_decommission_lpar`'s existing set |
