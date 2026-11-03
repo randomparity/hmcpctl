@@ -637,7 +637,8 @@ async def _recovery(
         name = recovery.name
         document = None
     else:
-        name = "hmcprec-" + secrets.token_hex(12)
+        # 24 characters: the HMC refuses profile names past 31 (HSCL059F, #1868).
+        name = "hmcprec-" + secrets.token_hex(8)
         if any(r.name == name for r in records):
             raise ValueError("recovery name collided; nothing was written")
         document = clone_profile_document(before.element, name)
@@ -653,7 +654,7 @@ async def _recovery(
             if status == 202:
                 return replace(
                     outcome,
-                    error="recovery copy accepted asynchronously;retain and reconcile before force-save",
+                    error="recovery copy accepted asynchronously; overwrite not submitted; retain and reconcile before force-save",
                 )
         comparison = compare_profiles(before.element, recovery.element, recovery=True)
         if recovery.name != name or not comparison.equal or not comparison.complete:
@@ -683,7 +684,10 @@ async def _recovery(
     except (HMCError, ValueError, TypeError) as error:
         return replace(
             outcome,
-            error="recovery-copy outcome requires reconciliation: " + str(error)[:1800],
+            error="recovery step failed; overwrite not submitted; reconcile recovery profile "
+            + name
+            + " if present: "
+            + str(error)[:1800],
         )
 
 

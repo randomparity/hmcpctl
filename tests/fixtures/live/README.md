@@ -134,6 +134,15 @@ The capture recorded no response headers, so `content_type` is `null`. The parti
 `&lt;REDACTED-PRIVATE&gt;` after export and was renamed to `sys-R1-lp3` by hand. Their token map
 is their own; never join them to other fixtures by token. ADR 0315 records what the window showed.
 
+`rest-profile-create-name-too-long` (`capture` prefix `2026-11-03-q1868/`) comes from an
+operator-authorized window for #1868 on the #1161 V10R3 HMC. One owned scratch partition was
+created, never activated, and deleted. The record is the force-save recovery-copy PUT that
+hmcpctl sent and the HMC's 500 answer (REST0142 wrapping HSCL059F, the 31-character name limit).
+It is the one fixture here that also keeps the request it answers, as `request_body`. It was
+tokenized by hand to this page's rules, and its token map is its own. The HMC echoes the request's
+headers in `<RequestHeaders>`; the cookie and session values there are tokenized, and the
+element is kept so tests can show that no error text carries it.
+
 ## Format
 
 Every file is a JSON object with these keys:

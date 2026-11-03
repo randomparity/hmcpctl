@@ -136,3 +136,23 @@ separate hardware authorization and existing maturity rules remain in force. No 
 The later operator “approve” accepted the complete reconciled design for implementation,
 without additional review or scope-audit passes (scope6344262032). Tests and shipping checks
 remain required; hardware effects,merge and maturity promotion remain separately held.
+
+## Observed recovery-copy name limit — 2026-11-03
+
+An operator-authorized capture for #1868 (V10R3 SP1060, POWER9, one owned scratch partition,
+never activated) showed every force-save stopping at the recovery copy. The copy PUT got HTTP 500,
+REST0142 wrapping HSCL059F: the HMC refuses a user-defined profile name longer than 31
+characters, and the generated `hmcprec-` name was 32. In the same session, a PUT of the same
+projected document with a 21-character name and no root `Metadata` was accepted. The tokenized
+refusal is `tests/fixtures/live/rest-profile-create-name-too-long.json`. The recovery name is now
+`hmcprec-` plus 16 hex characters. A refused or unverified copy reports `recovery step failed;
+overwrite not submitted` with the HMC's message and the recovery name. The recovery-copy
+requirement and the four-scalar comparison above are unchanged.
+
+A second authorized run on the same HMC and system exercised the fixed code. The partition was a
+fresh owned scratch partition, never activated, with one client network adapter added to its
+current configuration. A force-save over its `default_profile` wrote the 24-character recovery copy
+with the root `Metadata` retained (HTTP 200), verified it, and submitted the native force-save job.
+The profile then held the adapter, and the copy held the prior content. The tool reported execution
+`unknown` because of the job-status misread #1867 owns. That run is the first hardware evidence
+for the force-save path this record describes.
