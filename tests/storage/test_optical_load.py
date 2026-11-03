@@ -1,7 +1,11 @@
 """Load and unload media in an existing virtual optical device (#1285, ADR 0317)."""
 
+import asyncio
 import re
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
+import asyncssh
 import httpx
 import pytest
 from conftest import live_fixture, make_config
@@ -122,7 +126,14 @@ def _vios_body(fixture: str, devices: dict[str, str] | None = None) -> str:
 class _Fake:
     """The SSH, ownership and system-name boundaries the operations cross."""
 
-    def __init__(self, monkeypatch, fixture: str, answer: object = ":") -> None:
+    def __init__(
+        self,
+        monkeypatch,
+        fixture: str,
+        answer: object = ":",
+        *,
+        transport: bool = False,
+    ) -> None:
         self.calls: list[tuple[str, object]] = []
         self.answer = answer
         lpar = _LPAR[fixture]
@@ -151,7 +162,8 @@ class _Fake:
         target = "hmcpctl.operations.storage.resources"
         monkeypatch.setattr(f"{target}.resolve_and_authorize_lpar_mutation", authorize)
         monkeypatch.setattr(f"{target}.resolve_system_name", system_name)
-        monkeypatch.setattr(f"{target}.run_hmc_command", run)
+        if not transport:
+            monkeypatch.setattr(f"{target}.run_hmc_command", run)
         monkeypatch.setattr(f"{target}.audit.record_optical_release", released)
 
     def kinds(self) -> list[str]:
@@ -371,3 +383,66 @@ async def test_the_captured_answer_with_surrounding_whitespace_is_success(
 
     result = await _call(unload_optical_media, EMPTY)
     assert result.raw["target_device"] == "vtopt0"
+
+
+def _captured_ssh(monkeypatch, fixture: str) -> list[str]:
+    """Answer the real SSH transport with one captured ``viosvrcmd`` result."""
+    capture = live_fixture(fixture)
+    commands: list[str] = []
+
+    def reader(data: str) -> asyncio.StreamReader:
+        stream = asyncio.StreamReader()
+        stream.feed_data(data.encode())
+        stream.feed_eof()
+        return stream
+
+    async def create_process(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(
+            stdout=reader(capture["stdout"]),
+            stderr=reader(capture["stderr"]),
+            env={},
+            command=command,
+            subsystem=None,
+            exit_status=capture["exit_status"],
+            exit_signal=None,
+            returncode=capture["exit_status"],
+            close=MagicMock(),
+            wait_closed=AsyncMock(),
+        )
+
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    connection.create_process.side_effect = create_process
+    connection.abort = MagicMock()
+    monkeypatch.setattr(asyncssh, "connect", MagicMock(return_value=connection))
+    return commands
+
+
+@pytest.mark.asyncio
+async def test_the_captured_success_is_success_through_the_transport(
+    mock_hmc, monkeypatch
+):
+    _Fake(monkeypatch, EMPTY, transport=True)
+    _serve(mock_hmc, EMPTY)
+    commands = _captured_ssh(monkeypatch, "cli-vios-loadopt")
+
+    result = await _call(load_optical_media, EMPTY, media_name="media_2")
+
+    assert result.raw["target_device"] == "vtopt0"
+    assert len(commands) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_captured_occupied_device_refusal_is_reported_as_refused(
+    mock_hmc, monkeypatch
+):
+    """#1285 live: a load into a loaded device exits 1 with HSCL2970."""
+    _Fake(monkeypatch, EMPTY, transport=True)
+    _serve(mock_hmc, EMPTY)
+    _captured_ssh(monkeypatch, "cli-vios-loadopt-occupied")
+
+    with pytest.raises(HMCError, match="was refused") as caught:
+        await _call(load_optical_media, EMPTY, media_name="media_3")
+    assert "HSCL2970" in str(caught.value)
+    assert "already contains a loaded virtual disk" in str(caught.value)

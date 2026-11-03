@@ -1,0 +1,7 @@
+{
+  "capture": "2026-11-03-q1285/vmedia-media-change-d9d0e814.capture.jsonl#124",
+  "command": "viosvrcmd -m sys-R1 --id 100 -c 'loadopt -disk media-3 -vtd dev-14'",
+  "exit_status": 1,
+  "stdout": "HSCL2970 The IOServer command has failed because of the following reason: \nThis device already contains a loaded virtual disk\n\nrc=4\n",
+  "stderr": ""
+}
