@@ -917,11 +917,11 @@ async def _make_plan(
         networks = await _network_plan(
             hmc,
             patch.networks,
-            view,
-            profile,
-            plan,
-            system_uuid,
-            lpar_uuid,
+            view=view,
+            profile=profile,
+            plan=plan,
+            system_uuid=system_uuid,
+            lpar_uuid=lpar_uuid,
             allow_disruption=allow_disruption,
         )
     plan["changes"] += [c for c in (boot_change, media_change) if c is not None]
@@ -947,12 +947,12 @@ async def _make_plan(
 async def _network_plan(
     hmc: HMCClient,
     patch: network.NetworkPatch,
+    *,
     view: dict[str, Any],
     profile: dict[str, Any],
     plan: dict[str, Any],
     system_uuid: str,
     lpar_uuid: str,
-    *,
     allow_disruption: bool,
 ) -> dict[str, Any]:
     """The network writes, after the persistence guard every network change needs.

@@ -219,12 +219,11 @@ async def plan_networks(
                 f"networks.remove[{index}]: adapter {hits[0]['adapter_uuid']} reports no "
                 "virtual slot, so its removal from the profile could not be confirmed"
             )
-        removes.append({"mac": item.mac, **_without_mac(hits[0])})
+        removes.append(
+            {"mac": item.mac}
+            | {k: hits[0][k] for k in ("adapter_uuid", "port_vlan_id", "slot")}
+        )
     return {"add": adds, "remove": removes}
-
-
-def _without_mac(adapter: Mapping[str, Any]) -> dict[str, Any]:
-    return {k: adapter[k] for k in ("adapter_uuid", "port_vlan_id", "slot")}
 
 
 def network_changes(planned: Mapping[str, Any], active: bool) -> list[dict[str, Any]]:
