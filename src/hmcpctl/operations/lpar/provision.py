@@ -626,7 +626,7 @@ def require_install_url(hmc: HMCClient, url: str) -> None:
         require_allowlisted_iso_url(url, hmc.config.iso_url_allowlist_entries)
     except ValueError:
         raise ValueError(
-            "install.media.url: its host is not on HMC_ISO_URL_ALLOWLIST (an unset "
+            "install.media.url: its origin (host and port) is not on HMC_ISO_URL_ALLOWLIST (an unset "
             "allowlist permits nothing); publish the media on a listed origin"
         ) from None
 
