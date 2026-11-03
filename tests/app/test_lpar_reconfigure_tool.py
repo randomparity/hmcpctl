@@ -10,6 +10,8 @@ from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 from unit.test_lpar_reconfigure import LPAR, FakeHMC
 from unit.test_lpar_reconfigure import hmc as hmc  # noqa: PLC0414 - fixture import
+from unit.test_lpar_reconfigure_media import MEDIA, MediaHMC, _provisioned
+from unit.test_lpar_reconfigure_media import media as media  # noqa: PLC0414 - fixture
 
 from hmcpctl.authorization.access_policy import compile_access_policy
 from hmcpctl.server import PRIMARY_TOOLS, TOOL_SECURITY, create_mcp
@@ -18,8 +20,14 @@ TOOL = "hmc_reconfigure_lpar"
 PROFILE_WRITE = "hmc_update_partition_profile"
 MEM, PROC = "hmc_dlpar_mem", "hmc_dlpar_proc"
 MODIFY, RENAME = "hmc_modify_lpar", "hmc_rename_lpar"
+UNMOUNT, BOOT = "hmc_unmount_optical_media", "hmc_set_lpar_boot_order"
 NEW = {"lpar_name_or_uuid": "web1", "system_name_or_uuid": "sysA"}
 MEMORY = {**NEW, "patch": {"memory_mib": 1024}, "exclusive_writer_window": True}
+DETACH = {
+    **NEW,
+    "patch": {"installer_media": "detach"},
+    "exclusive_writer_window": True,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -142,3 +150,45 @@ def test_an_unknown_patch_field_is_refused(hmc: FakeHMC):
     with pytest.raises(ToolError):
         _call(_app(_grant(TOOL, MEM, PROFILE_WRITE)), arguments)
     assert hmc.calls == []
+
+
+def test_detach_without_the_writer_window_is_refused(media: MediaHMC):
+    _provisioned()
+    with pytest.raises(ToolError, match="exclusive_writer_window"):
+        _call(_app(_grant(TOOL, UNMOUNT)), {**DETACH, "exclusive_writer_window": False})
+    assert media.mounted == [MEDIA]
+
+
+def test_detach_runs_under_an_all_targets_unmount_grant(media: MediaHMC):
+    _provisioned()
+    record = _call(_app(_grant(TOOL, UNMOUNT)), DETACH)
+    assert (record["state"], record["outcome"]) == ("terminal", "completed")
+    assert media.mounted == []
+
+
+def test_a_target_limited_unmount_grant_refuses_detach(media: MediaHMC):
+    _provisioned()
+    targets = {"lpar": ["web1"], "managed_system": ["sysA"], "vios": ["vios1"]}
+    app = _app(_grant(TOOL), _grant(UNMOUNT, targets=targets))
+    with pytest.raises(ToolError, match="ADR 0321"):
+        _call(app, DETACH)
+    assert media.fake.calls == []
+
+
+@pytest.mark.parametrize(
+    ("patch", "grants", "missing"),
+    [({"installer_media": "detach"}, (), UNMOUNT), ({"boot": "root_disk"}, (), BOOT)],
+)
+def test_media_and_boot_need_their_delegated_tools(
+    media: MediaHMC, patch, grants, missing
+):
+    arguments = {**NEW, "patch": patch, "exclusive_writer_window": True}
+    with pytest.raises(ToolError, match=missing):
+        _call(_app(_grant(TOOL, *grants)), arguments)
+
+
+def test_boot_alone_needs_no_writer_window(media: MediaHMC):
+    _provisioned()
+    record = _call(_app(_grant(TOOL, BOOT)), {**NEW, "patch": {"boot": "root_disk"}})
+    assert record["outcome"] == "completed"
+    assert media.pending is not None
