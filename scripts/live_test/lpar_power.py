@@ -1043,6 +1043,16 @@ async def _provision_checks(
     )
     token = await _token_of(client, state, run, run.p_uuid or "")
     run.hold(op, "ownership-stamped", token == run.token)
+    reached = await _wait_for_state(
+        client, state, run, run.p_uuid or "", _FIRMWARE_STATES
+    )
+    run.hold(op, "partition-activated", reached in _FIRMWARE_STATES)
+    run.hold(
+        op,
+        "saved-profile-activated",
+        await _saved_profile_active(client, state, run, data),
+    )
+    # Listed after activation: activating a profile without the adapter drops it (#1840).
     st_adapters, adapters = await state.call(
         client,
         "hmc_list_adapters",
@@ -1056,10 +1066,24 @@ async def _provision_checks(
     run.hold(
         op, "storage-mapping-listed", _mapped(await _mappings(client, state, run), run)
     )
-    reached = await _wait_for_state(
-        client, state, run, run.p_uuid or "", _FIRMWARE_STATES
+
+
+async def _saved_profile_active(
+    client: Client, state: RunState, run: Run, data: Any
+) -> bool:
+    """P's default and last-activated profile are the one provision saved (ADR 0313)."""
+    operation = _plain(result_field(data, "operation"))
+    if not isinstance(operation, Mapping) or operation.get("outcome") != "configured":
+        return False
+    saved = f"hmcpctl_{str(operation.get('operation_id', ''))[:12]}"
+    row = await lpar_config._cli(
+        client,
+        state,
+        f"lssyscfg -r lpar -m {shlex.quote(run.system)} "
+        f"--filter {shlex.quote(f'lpar_names={run.p_name}')} "
+        "-F default_profile,curr_profile",
     )
-    run.hold(op, "partition-activated", reached in _FIRMWARE_STATES)
+    return row == f"{saved},{saved}"
 
 
 def _mapped(mappings: frozenset[tuple[str, ...]] | None, run: Run) -> bool:
@@ -1524,6 +1548,10 @@ def _provision_assertions(run: Run) -> list[Assertion]:
         Assertion(
             "partition-activated",
             run.holds("provision.lpar", "partition-activated"),
+        ),
+        Assertion(
+            "saved-profile-activated",
+            run.holds("provision.lpar", "saved-profile-activated"),
         ),
         Assertion(
             "dedicated-slot-refused",

@@ -120,6 +120,7 @@ class World:
         self.provision_fails_after_storage = False
         self.provision_without_uuid = False
         self.refusals_create = False
+        self.saved_profile = "hmcpctl_" + "0" * 12
 
     # -- views ---------------------------------------------------------------
 
@@ -161,6 +162,8 @@ class World:
 
     def _hmc_run_command(self, kwargs: dict[str, Any]) -> Any:
         cmd = kwargs["cmd"]
+        if cmd.endswith("-F default_profile,curr_profile"):
+            return f"{self.saved_profile},{self.saved_profile}\n"
         if cmd.startswith("lssyscfg -r lpar") and cmd.endswith("name,state"):
             rows = [f"{OTHER},Running"]
             rows += [f"{n},{e['state']}" for n, e in self.partitions.items()]
@@ -1230,6 +1233,10 @@ def _p_not_activated(w: World) -> None:
     _wrap(w, "hmc_provision_lpar", change)
 
 
+def _p_activated_from_another_profile(w: World) -> None:
+    w.saved_profile = "default_profile"
+
+
 def _dedicated_dry_run_accepted(w: World) -> None:
     _wrap(
         w,
@@ -1315,6 +1322,7 @@ _DEVIATIONS = [
     ("provision.lpar", "network-adapter-on-vlan", _other_vlan),
     ("provision.lpar", "storage-mapping-listed", _mapping_elsewhere),
     ("provision.lpar", "partition-activated", _p_not_activated),
+    ("provision.lpar", "saved-profile-activated", _p_activated_from_another_profile),
     ("provision.lpar", "dedicated-slot-refused", _dedicated_dry_run_accepted),
     (
         "lpar.decommission",
