@@ -150,8 +150,13 @@ async def save_current_over(
 def _diagnosis(outcome: Any, failure: Exception | None, missing: int) -> str:
     """What the helper reported, without HMC response text (``engine`` module note)."""
     if outcome is None:
+        # The helper's own refusals before any HMC call are ValueError/TypeError text
+        # it writes itself; any other exception may carry HMC text, so only its type.
+        own = isinstance(failure, (ValueError, TypeError))
+        said = f": {str(failure)[:200]}" if own else ""
         return (
-            f"the helper raised {type(failure).__name__}; {missing} adapter(s) missing"
+            f"the helper raised {type(failure).__name__}{said}; "
+            f"{missing} adapter(s) missing"
         )
     return (
         f"execution={outcome.execution}, requested_change={outcome.requested_change}, "

@@ -194,6 +194,16 @@ async def test_an_unconfirmed_save_names_what_the_helper_reported(hmc):
 
 
 @pytest.mark.asyncio
+async def test_a_helper_refusal_before_any_call_is_named(hmc, monkeypatch):
+    async def refused(*_args, **_kwargs):
+        raise ValueError("expected_etag must match a fresh contained profile ETag")
+
+    monkeypatch.setattr(profile_persist, "save_current_partition_profile", refused)
+    with pytest.raises(profile_persist.SaveUnconfirmed, match="expected_etag must"):
+        await _save(hmc)
+
+
+@pytest.mark.asyncio
 async def test_a_missing_profile_is_an_error(hmc):
     hmc.profiles = []
     with pytest.raises(HMCError, match="no profile"):
