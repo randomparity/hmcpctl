@@ -28,6 +28,8 @@ until #1846 is on `main`.
 - `remove[]` (0–4): `mac` (required, the same form).
 - At least one item; no MAC twice across both lists; an add without `mac` shares its VLAN with no
   other add, pinned or not.
+- `networks` never shares a patch with `boot` or `installer_media`: those legs skip the plan's
+  state basis (ADR 0321 Decision 4), and the save after them re-checks it, as for `disks.add`.
 
 **Plan** (phase `validating`, before any write). A patch with `networks` reads the default
 profile under ADR 0314 Decision 2, then:

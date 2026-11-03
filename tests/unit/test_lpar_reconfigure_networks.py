@@ -780,3 +780,11 @@ def test_an_unclassified_add_error_warns_without_the_hmc_body(body):
     assert record.outcome == "needs_attention"
     text = " ".join([*record.warnings, *record.result["warnings"]])
     assert "HMCError" in text and "secret" not in text
+
+
+@pytest.mark.parametrize(
+    "other", [{"boot": "root_disk"}, {"installer_media": "detach"}]
+)
+def test_networks_cannot_share_a_patch_with_the_installer_legs(other):
+    with pytest.raises(ValidationError, match="cannot share a patch"):
+        ReconfigurePatch(networks={"remove": [{"mac": MAC_A}]}, **other)

@@ -209,16 +209,13 @@ class ReconfigurePatch(BaseModel):
             )
         if self.name is not None and not self.name.strip():
             raise ValueError("patch.name must not be blank")
-        if (
-            self.disks is not None
-            and self.disks.add
-            and (self.boot or self.installer_media)
-        ):
+        saves = (self.disks is not None and self.disks.add) or self.networks is not None
+        if saves and (self.boot or self.installer_media):
             # The installer legs skip the plan's state basis (ADR 0321 Decision 4), and
             # the save after them needs it, so the two are separate requests.
             raise ValueError(
-                "disks.add cannot share a patch with boot or installer_media; "
-                "split the patch"
+                "disks.add and networks cannot share a patch with boot or "
+                "installer_media; split the patch"
             )
         return self
 
@@ -730,7 +727,7 @@ async def _planned_detach(
 
 
 async def _require_profile_jobs(hmc: HMCClient) -> None:
-    """The force-save needs #637's profile jobs (ADR 0313 Decision 10)."""
+    """A disk add's force-save needs #637's profile jobs (ADR 0313 Decision 10)."""
     console = await hmc.get_console_info()
     resource = console.get("Resource", {}) if isinstance(console, dict) else {}
     version = console_version(resource)
