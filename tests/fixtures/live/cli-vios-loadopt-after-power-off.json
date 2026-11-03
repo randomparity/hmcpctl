@@ -1,0 +1,7 @@
+{
+  "capture": "2026-11-02-q1284/run2/vmedia-media-change-b62996d0.capture.jsonl#107",
+  "command": "viosvrcmd -m sys-R1 --id 100 -c 'loadopt -disk media-3 -vtd dev-14'",
+  "exit_status": 0,
+  "stdout": ":",
+  "stderr": ""
+}
