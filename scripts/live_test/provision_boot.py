@@ -76,7 +76,9 @@ def producer_result(iso: Path, mac: str) -> dict[str, Any]:
 
 def steps_by_name(data: object) -> dict[str, Mapping[str, Any]]:
     """The result's steps by name; the last of a repeated name wins."""
-    steps = lpar_power._plain(result_field(data, "steps"))
+    # The whole result, so served steps (nested dataclasses) become dicts too.
+    plain = lpar_power._plain(data)
+    steps = plain.get("steps") if isinstance(plain, Mapping) else None
     items = steps if isinstance(steps, list) else []
     return {str(step.get("step")): step for step in items if isinstance(step, Mapping)}
 

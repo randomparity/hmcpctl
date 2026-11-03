@@ -44,6 +44,12 @@ def output_schemas():
 
 
 @pytest.fixture(autouse=True)
+def _typed_outputs(output_schemas):
+    """Served results arrive typed, as the live client hands them to the arm."""
+    arm._OUTPUTS.update(output_schemas)
+
+
+@pytest.fixture(autouse=True)
 def _no_iso_server(monkeypatch):
     monkeypatch.setattr(provision_boot, "_start_iso_server", lambda *_a: None)
     monkeypatch.setattr(provision_boot, "_power_operations_authorized", lambda: True)
