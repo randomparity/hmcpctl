@@ -1,4 +1,4 @@
-"""ST70: hmc_reconfigure_lpar's persistence across profile activation (ADR 0314, #1226).
+"""ST70: hmc_reconfigure_lpar's persistence across profile activation (ADRs 0314, 0322).
 
 One owned scratch partition, lpar-config's fixture and teardown. Inactive, a processor
 and memory change must read back `profile` and survive a profile activation; a rename
@@ -7,20 +7,33 @@ back `pending_activation`, stay out of the running partition, and appear after a
 off and a second profile activation. Live DLPAR is a recorded SKIP: the operator has not
 authorized it on the boundary partition (2026-11-02), and a scratch partition has no
 operating system to bring RMC up.
+
+Added disks (#1846): while inactive, one `lprcf<8 hex>` disk is added in the configured
+volume group. It must read back `profile`, its client adapter must be in the default
+profile, and after the first activation in the running partition. After the final power
+off a detach must remove only its mapping. Teardown detaches what is left, deletes the
+disk, and reports a VIOS server adapter the run left as a manual step.
 """
 
 from __future__ import annotations
 
+import csv
+import re
+import shlex
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter
 from hmcpctl.xmlutil import leaf_text
 
+from . import storage_lifecycle
 from .lpar_config import (
     NAME_PREFIX,
     RESOURCES,
     TOKEN_PREFIX,
+    _cli,
     _compare,
     _profile_uuid,
     _read_lpar,
@@ -32,7 +45,9 @@ from .lpar_config import (
     scratch_partitions,
 )
 from .observation import Assertion, judge_create_result, plain_data
+from .results import entries, resource
 from .results import field as result_field
+from .storage import scsi_adapter_listing
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -51,10 +66,257 @@ _FIRMWARE_STATES = frozenset({"open firmware", "running"})
 #: no bound widens and the classification is the state's alone.
 INACTIVE_PATCH = {"memory_mib": 3072, "processors": 2}
 FIRMWARE_PATCH = {"memory_mib": 2560, "processors": 1}
+VOLUME_PREFIX = "lprcf"
+DISK_MIB = 1024
+_VIOS_NAME = re.compile(r"[A-Za-z0-9_.-]+")
+_RECOVERY_PREFIX = "hmcprec-"
+DISK_ASSERTIONS = (
+    "added-disk-classified-profile",
+    "added-disk-in-default-profile",
+    "added-disk-survives-profile-activation",
+    "detach-removes-only-the-mapping",
+)
 LIVE_DLPAR_SKIP = (
     "live DLPAR on the boundary test LPAR is not authorized (operator 2026-11-02); "
     "a scratch partition never reaches RMC active"
 )
+
+
+def scratch_volumes(names: Iterable[str]) -> list[str]:
+    """The volume names only this arm may have created."""
+    return sorted(name for name in names if name.startswith(VOLUME_PREFIX))
+
+
+@dataclass
+class _Disk:
+    """The VIOS holding the configured group, and what the run did there."""
+
+    vios_uuid: str
+    partition_id: int
+    group: str
+    group_uuid: str
+    name: str
+    adapters: frozenset[str] | None = None
+    attempted: bool = False
+
+
+def _lines(text: str | None) -> frozenset[str] | None:
+    if text is None:
+        return None
+    if text.strip() == HMC_NO_RESULTS:
+        return frozenset()
+    return frozenset(line.strip() for line in text.splitlines() if line.strip())
+
+
+async def _find_disk_group(
+    client: Client, state: RunState, run: _Run, name: str
+) -> _Disk | str:
+    """The one VIOS listing the configured group with 1 GiB free, or why not."""
+    group = state.config.vdisk_volume_group_name
+    if not _VIOS_NAME.fullmatch(group):
+        return f"volume group name {group!r} cannot cross the VIOS command line"
+    st, data = await state.call(client, "hmc_list_vios", system_name_or_uuid=run.system)
+    if st != "PASS":
+        return "the VIOS listing failed"
+    found = []
+    for entry in entries(data):
+        vios_uuid = entry.get("UUID") or entry.get("uuid")
+        partition_id = str(resource(entry).get("PartitionID") or "")
+        if not isinstance(vios_uuid, str) or not partition_id.isdigit():
+            continue
+        st, groups = await state.call(
+            client,
+            "hmc_list_volume_groups",
+            vios_name_or_uuid=vios_uuid,
+            system_name_or_uuid=run.system,
+        )
+        for item in groups if st == "PASS" and isinstance(groups, list) else []:
+            free = item.get("free_space_gib") if isinstance(item, Mapping) else None
+            if (
+                item.get("name") == group
+                and isinstance(free, (int, float))
+                and free >= 1
+            ):
+                found.append(
+                    _Disk(vios_uuid, int(partition_id), group, item["uuid"], name)
+                )
+    if len(found) != 1:
+        return (
+            f"{len(found)} VIOS list {group!r} with 1 GiB free; exactly one is needed"
+        )
+    return found[0]
+
+
+async def _server_adapters(
+    client: Client, state: RunState, run: _Run, disk: _Disk
+) -> frozenset[str] | None:
+    listing = scsi_adapter_listing(run.system, "lpar_ids", disk.partition_id)
+    return _lines(await _cli(client, state, listing))
+
+
+async def _disk_mappings(
+    client: Client, state: RunState, run: _Run, disk: _Disk
+) -> list[Mapping[str, Any]] | None:
+    """The VIOS mappings backed by the run disk; None when unreadable."""
+    st, data = await state.call(
+        client,
+        "hmc_list_storage_mappings",
+        vios_name_or_uuid=disk.vios_uuid,
+        system_name_or_uuid=run.system,
+    )
+    if st != "PASS" or not isinstance(data, list):
+        return None
+    return [
+        entry
+        for entry in data
+        if isinstance(entry, Mapping) and entry.get("backing_name") == disk.name
+    ]
+
+
+async def _mapped_here(client: Client, state: RunState, run: _Run, disk: _Disk) -> bool:
+    found = await _disk_mappings(client, state, run, disk)
+    return bool(found) and all(
+        str(entry.get("lpar_uuid") or "").lower() == (run.uuid or "").lower()
+        for entry in found
+    )
+
+
+async def _volumes(client: Client, state: RunState, run: _Run, disk: _Disk) -> Any:
+    command = (
+        f"viosvrcmd -m {shlex.quote(run.system)} --id {disk.partition_id} "
+        f"-c 'lsvg -lv {disk.group}'"
+    )
+    return storage_lifecycle.volume_names(await _cli(client, state, command))
+
+
+async def _profile_lists_vscsi(client: Client, state: RunState, run: _Run) -> bool:
+    """Whether the partition's one non-recovery profile lists a vSCSI client adapter."""
+    listing = await _cli(
+        client,
+        state,
+        f"lssyscfg -r prof -m {shlex.quote(run.system)} --filter "
+        f"{shlex.quote(build_filter([('lpar_names', run.name)]))} "
+        "-F name,virtual_scsi_adapters",
+    )
+    rows = [
+        row
+        for row in csv.reader((listing or "").splitlines())
+        if row and not row[0].startswith(_RECOVERY_PREFIX)
+    ]
+    return len(rows) == 1 and any("client" in item for item in rows[0][1:])
+
+
+async def _running_vscsi(client: Client, state: RunState, run: _Run) -> bool:
+    """Whether the activated partition holds a vSCSI client adapter."""
+    listing = await _cli(
+        client,
+        state,
+        f"lshwres -r virtualio --rsubtype scsi -m {shlex.quote(run.system)} "
+        f"--level lpar --filter {shlex.quote(build_filter([('lpar_names', run.name)]))} "
+        "-F adapter_type",
+    )
+    return "client" in (_lines(listing) or frozenset())
+
+
+async def _add_disk(
+    client: Client, state: RunState, run: _Run, disk: _Disk, held: dict[str, bool]
+) -> None:
+    disk.adapters = await _server_adapters(client, state, run, disk)
+    disk.attempted = True
+    add = {
+        "vios_uuid": disk.vios_uuid,
+        "vg_uuid": disk.group_uuid,
+        "name": disk.name,
+        "capacity_mib": DISK_MIB,
+    }
+    record = await _reconfigure(
+        client, state, run, "disk-add", {"disks": {"add": [add]}}
+    )
+    if record.get("outcome") != "completed":
+        # A paused add still holds the partition guard; release it so the other
+        # scenarios run. Teardown removes the disk and its mapping either way.
+        await _abandon_open(client, state, run)
+    held["added-disk-classified-profile"] = _applied(record) == {"profile"}
+    held["added-disk-in-default-profile"] = record.get(
+        "outcome"
+    ) == "completed" and await _profile_lists_vscsi(client, state, run)
+
+
+async def _detach_disk(
+    client: Client, state: RunState, run: _Run, disk: _Disk, held: dict[str, bool]
+) -> None:
+    patch = {"disks": {"detach": [{"vios_uuid": disk.vios_uuid, "name": disk.name}]}}
+    record = await _reconfigure(client, state, run, "disk-detach", patch)
+    left = await _disk_mappings(client, state, run, disk)
+    volumes = await _volumes(client, state, run, disk)
+    held["detach-removes-only-the-mapping"] = (
+        record.get("outcome") == "completed"
+        and left == []
+        and volumes is not None
+        and disk.name in volumes
+    )
+
+
+def _manual(state: RunState, label: str, text: str) -> None:
+    state.record(SUBTASK, label, "FAIL", f"MANUAL RECOVERY REQUIRED: {text}")
+
+
+async def _release_mappings(
+    client: Client, state: RunState, run: _Run, disk: _Disk
+) -> bool:
+    """Detach any mapping of the run disk while the partition still exists."""
+    for entry in await _disk_mappings(client, state, run, disk) or []:
+        st, data = await state.call(
+            client,
+            "hmc_detach_storage_mapping",
+            vios_name_or_uuid=disk.vios_uuid,
+            mapping_id=entry.get("id"),
+            system_name_or_uuid=run.system,
+        )
+        state.record(SUBTASK, "hmc_detach_storage_mapping (run disk)", st, data)
+    return await _disk_mappings(client, state, run, disk) == []
+
+
+async def _delete_disk(client: Client, state: RunState, run: _Run, disk: _Disk) -> None:
+    """Delete the run disk and report a server adapter the run left (manual)."""
+    system = shlex.quote(run.system)
+    volumes = await _volumes(client, state, run, disk)
+    if volumes is not None and disk.name in volumes:
+        st, data = await state.call(
+            client,
+            "hmc_delete_virtual_disk",
+            vios_name_or_uuid=disk.vios_uuid,
+            vg_uuid=disk.group_uuid,
+            disk_name=disk.name,
+            system_name_or_uuid=run.system,
+        )
+        state.record(SUBTASK, "hmc_delete_virtual_disk (run disk)", st, data)
+        volumes = await _volumes(client, state, run, disk)
+    if volumes is None or disk.name in volumes:
+        _manual(
+            state,
+            "run disk teardown",
+            f"volume {disk.name!r} may still be in {disk.group!r}: `viosvrcmd -m {system} "
+            f"--id {disk.partition_id} -c 'lsvg -lv {disk.group}'`, then rmlv -f it.",
+        )
+    final = await _server_adapters(client, state, run, disk)
+    if final is None or disk.adapters is None:
+        _manual(
+            state,
+            "VIOS server adapter teardown",
+            f"the vSCSI adapters of VIOS id {disk.partition_id} could not be compared; "
+            "look for one serving the deleted scratch partition",
+        )
+        return
+    for row in sorted(final - disk.adapters):
+        slot = row.split(",", 1)[0]
+        _manual(
+            state,
+            "VIOS server adapter teardown",
+            f"VIOS id {disk.partition_id} has server adapter slot {slot} ({row}) it did "
+            f"not have before the run: `chhwres -r virtualio --rsubtype scsi -m {system} "
+            f"-o r --id {disk.partition_id} -s {slot}`.",
+        )
 
 
 async def _reconfigure(
@@ -102,7 +364,8 @@ async def _current(client: Client, state: RunState, run: _Run) -> dict[str, Any]
 
 
 async def _saved(client: Client, state: RunState, run: _Run) -> dict[str, Any]:
-    """Desired memory and virtual processors in the partition's only profile."""
+    """Desired memory and virtual processors in the partition's one profile that is not
+    a force-save's recovery copy."""
     st, data = await state.call(
         client,
         "hmc_list_partition_profiles",
@@ -110,6 +373,12 @@ async def _saved(client: Client, state: RunState, run: _Run) -> dict[str, Any]:
         lpar_name_or_uuid=run.uuid,
     )
     profiles = result_field(plain_data(data), "profiles") if st == "PASS" else None
+    if isinstance(profiles, list):
+        profiles = [
+            p
+            for p in profiles
+            if not str((p or {}).get("name") or "").startswith(_RECOVERY_PREFIX)
+        ]
     if not isinstance(profiles, list) or len(profiles) != 1:
         return {}
     fields = profiles[0].get("fields") or {}
@@ -204,11 +473,17 @@ async def _create(client: Client, state: RunState, run: _Run) -> bool:
 
 
 async def _scenarios(
-    client: Client, state: RunState, run: _Run, held: dict[str, bool]
+    client: Client,
+    state: RunState,
+    run: _Run,
+    held: dict[str, bool],
+    disk: _Disk | None,
 ) -> None:
     """Run the steps in order; a failed step ends the scenario, never the cleanup."""
     if not await _create(client, state, run):
         return
+    if disk is not None:
+        await _add_disk(client, state, run, disk, held)
     record = await _reconfigure(client, state, run, "inactive", INACTIVE_PATCH)
     held["inactive-change-classified-profile"] = _applied(record) == {"profile"}
     if not held["inactive-change-classified-profile"]:
@@ -224,6 +499,10 @@ async def _scenarios(
     held["inactive-change-survives-profile-activation"] = _holds(
         current, INACTIVE_PATCH
     )
+    if disk is not None and held.get("added-disk-in-default-profile"):
+        held["added-disk-survives-profile-activation"] = await _running_vscsi(
+            client, state, run
+        ) and await _mapped_here(client, state, run, disk)
     record = await _reconfigure(client, state, run, "firmware", FIRMWARE_PATCH)
     held["firmware-change-classified-pending-activation"] = (
         _applied(record) == {"pending_activation"}
@@ -237,6 +516,9 @@ async def _scenarios(
     current = await _current(client, state, run)
     held["pending-change-survives-profile-activation"] = _holds(current, FIRMWARE_PATCH)
     held["rename-persists-across-activations"] = current.get("name") == renamed
+    if disk is not None and disk.attempted and await _power_off(client, state, run):
+        run.data["activated"] = False
+        await _detach_disk(client, state, run, disk, held)
 
 
 async def _abandon_open(client: Client, state: RunState, run: _Run) -> None:
@@ -274,13 +556,30 @@ async def exercise_lpar_reconfigure(client: Client, state: RunState) -> None:
         subtask=SUBTASK,
     )
     held: dict[str, bool] = {}
+    found = await _find_disk_group(client, state, run, VOLUME_PREFIX + suffix)
+    disk = found if isinstance(found, _Disk) else None
+    if disk is None:
+        state.record(SUBTASK, f"{TOOL} (disks)", "FAIL", None, str(found))
+    released = True
     try:
-        await _scenarios(client, state, run, held)
+        await _scenarios(client, state, run, held, disk)
     finally:
         await _abandon_open(client, state, run)
         if run.data.get("activated") and run.uuid is not None:
             await _power_off(client, state, run)
+        if disk is not None and disk.attempted and run.uuid is not None:
+            released = await _release_mappings(client, state, run, disk)
         await _teardown(client, state, run, inactive_only=True)
+        if disk is not None and disk.attempted:
+            if released:
+                await _delete_disk(client, state, run, disk)
+            else:
+                _manual(
+                    state,
+                    "run disk mapping teardown",
+                    f"a mapping backed by {disk.name!r} is still on VIOS id "
+                    f"{disk.partition_id}; rmvdev it, then rmlv -f {disk.name}",
+                )
     same = await _compare(client, state, run, baseline[0])
     names = (
         "inactive-change-classified-profile",
@@ -288,6 +587,7 @@ async def exercise_lpar_reconfigure(client: Client, state: RunState) -> None:
         "firmware-change-classified-pending-activation",
         "pending-change-survives-profile-activation",
         "rename-persists-across-activations",
+        *DISK_ASSERTIONS,
     )
     state.record_verified(
         SUBTASK,
@@ -299,6 +599,7 @@ async def exercise_lpar_reconfigure(client: Client, state: RunState) -> None:
         data={
             "inactive": INACTIVE_PATCH,
             "firmware": FIRMWARE_PATCH,
+            "disk_mib": DISK_MIB,
             "live": "skipped",
         },
     )

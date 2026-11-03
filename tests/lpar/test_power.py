@@ -814,7 +814,12 @@ OTHER_PROFILE_UUID = "00000000-0000-0000-0000-0000000000bb"
 async def test_power_operation_accepts_a_profile_contained_by_the_target_partition():
     """A profile in the partition's own feed reaches the job document."""
     hmc = _power_client()
-    hmc.list_child.return_value = [{"UUID": PROFILE_UUID}, {"UUID": OTHER_PROFILE_UUID}]
+    profiles = [{"UUID": PROFILE_UUID}, {"UUID": OTHER_PROFILE_UUID}]
+
+    async def feed(_parent, _uuid, child):
+        return profiles if child == "LogicalPartitionProfile" else []
+
+    hmc.list_child.side_effect = feed
 
     with patch(
         "hmcpctl.operations.lpar.activation.resolve_lpar_uuid",
@@ -822,8 +827,10 @@ async def test_power_operation_accepts_a_profile_contained_by_the_target_partiti
     ):
         await submit_power_on_lpar(hmc, LPAR_UUID, partition_profile_uuid=PROFILE_UUID)
 
-    hmc.list_child.assert_awaited_once_with(
-        "LogicalPartition", LPAR_UUID, "LogicalPartitionProfile"
+    assert hmc.list_child.await_args_list[0].args == (
+        "LogicalPartition",
+        LPAR_UUID,
+        "LogicalPartitionProfile",
     )
     _, document = hmc.submit_job.await_args.args
     assert _parameter_values(document, "LogicalPartitionProfile") == [PROFILE_UUID]
@@ -964,7 +971,7 @@ def _profile_power_client(profile_slots: list[str], current: dict) -> AsyncMock:
         {"ProfileVirtualSCSIClientAdapter": {"VirtualSlotNumber": slot}}
         for slot in profile_slots
     ]
-    hmc.list_child.return_value = [
+    profiles = [
         {
             "UUID": PROFILE_UUID,
             "Resource": {
@@ -977,13 +984,14 @@ def _profile_power_client(profile_slots: list[str], current: dict) -> AsyncMock:
         }
     ]
 
-    async def list_adapters(lpar_uuid, adapter_type):
+    async def list_child(_parent, _lpar_uuid, child):
+        if child == "LogicalPartitionProfile":
+            return profiles
         return [
-            {"Resource": {"VirtualSlotNumber": slot}}
-            for slot in current.get(adapter_type, [])
+            {"Resource": {"VirtualSlotNumber": slot}} for slot in current.get(child, [])
         ]
 
-    hmc.list_adapters.side_effect = list_adapters
+    hmc.list_child.side_effect = list_child
     return hmc
 
 
@@ -1027,7 +1035,14 @@ async def test_power_on_does_not_warn_when_the_profile_has_every_adapter():
 @pytest.mark.asyncio
 async def test_power_on_submits_with_a_warning_when_an_adapter_feed_read_fails():
     hmc = _profile_power_client([], {})
-    hmc.list_adapters.side_effect = HMCError("GET adapters failed", 500)
+    real = hmc.list_child.side_effect
+
+    async def failing(parent, lpar_uuid, child):
+        if child == "LogicalPartitionProfile":
+            return await real(parent, lpar_uuid, child)
+        raise HMCError("GET adapters failed", 500)
+
+    hmc.list_child.side_effect = failing
 
     result = await _power_on_with_profile(hmc)
 
@@ -1048,7 +1063,7 @@ async def test_power_on_without_a_profile_reads_no_adapter_feed():
         result = await submit_power_on_lpar(hmc, LPAR_UUID)
 
     assert result.warnings == ()
-    hmc.list_adapters.assert_not_awaited()
+    hmc.list_child.assert_not_awaited()
 
 
 @pytest.mark.asyncio

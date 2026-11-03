@@ -108,14 +108,14 @@ def test_summary_names_where_the_change_lives():
 def _adapters(by_type: dict[str, list[str | None]]) -> AsyncMock:
     hmc = AsyncMock()
 
-    async def list_adapters(lpar_uuid, adapter_type):
-        assert lpar_uuid == LPAR_UUID
+    async def list_child(parent, lpar_uuid, adapter_type):
+        assert (parent, lpar_uuid) == ("LogicalPartition", LPAR_UUID)
         return [
             {"Resource": {} if slot is None else {"VirtualSlotNumber": slot}}
             for slot in by_type.get(adapter_type, [])
         ]
 
-    hmc.list_adapters.side_effect = list_adapters
+    hmc.list_child.side_effect = list_child
     return hmc
 
 
@@ -218,7 +218,7 @@ async def test_profile_adapter_warnings_are_empty_when_the_profile_has_every_ada
 @pytest.mark.asyncio
 async def test_profile_adapter_warnings_report_a_failed_feed_read_instead_of_raising():
     hmc = AsyncMock()
-    hmc.list_adapters.side_effect = HMCError("GET feed failed", 500, "")
+    hmc.list_child.side_effect = HMCError("GET feed failed", 500, "")
 
     warnings = await profile_adapter_warnings(hmc, LPAR_UUID, _profile())
 
@@ -353,3 +353,39 @@ async def test_a_failed_partition_read_stops_the_write(monkeypatch):
         await add_vscsi_adapter(hmc, LPAR_UUID, 1, 2, system_name_or_uuid=None)
 
     hmc.add_vscsi_adapter.assert_not_awaited()
+
+
+_VSCSI_FEED = """<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+<id>00000000-0000-0000-0000-0000000000bb</id>
+<content type="application/vnd.ibm.powervm.uom+xml; type=VirtualSCSIClientAdapter">
+<VirtualSCSIClientAdapter:VirtualSCSIClientAdapter
+ xmlns:VirtualSCSIClientAdapter="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
+ xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/" schemaVersion="V1_0">
+<Metadata><Atom/></Metadata>
+<VirtualSlotNumber kxe="false" kb="CUR">2</VirtualSlotNumber>
+</VirtualSCSIClientAdapter:VirtualSCSIClientAdapter></content></entry></feed>"""
+
+
+@pytest.mark.asyncio
+async def test_an_empty_adapter_collection_is_no_adapter_not_an_error(mock_hmc):
+    """A partition with no network adapter: the HMC answers its empty collection 204.
+
+    The profile check must read that as no adapter, so a disk-only profile save can
+    be confirmed (#1846). Only creation identity proof refuses a 204.
+    """
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    base = f"/rest/api/uom/LogicalPartition/{LPAR_UUID}"
+    mock_hmc.get(f"{base}/VirtualSCSIClientAdapter").mock(
+        return_value=httpx.Response(200, text=_VSCSI_FEED)
+    )
+    for empty in ("VirtualFibreChannelClientAdapter", "ClientNetworkAdapter"):
+        mock_hmc.get(f"{base}/{empty}").mock(return_value=httpx.Response(204))
+    profile = parse_feed(PROFILE_FEED)[0]
+
+    async with HMCClient(make_config()) as client:
+        assert await adapters_missing_from_profile(client, LPAR_UUID, profile) == []
+        assert await profile_adapter_warnings(client, LPAR_UUID, profile) == ()

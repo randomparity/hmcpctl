@@ -600,10 +600,14 @@ def _lpar_reconfigure_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
             (
                 f"one AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex> (renamed "
                 "<name>-r): hmc_reconfigure_lpar inactive, rename, two profile "
-                "activations to SMS, immediate power off, matching-token deletion"
+                "activations to SMS, immediate power off, matching-token deletion; "
+                "one lprcf<8 hex> 1 GiB disk added, mapped, detached and deleted in "
+                f"{config.vdisk_volume_group_name}"
             ),
             (
-                "no live DLPAR, no VIOS change; existing scratch prefix must be absent; "
+                "no live DLPAR; a VIOS volume, mapping and server adapter are created "
+                "(the adapter is reported for manual removal); existing scratch prefix "
+                "must be absent; "
                 "independent recovery/resource comparison required"
             ),
         ),
