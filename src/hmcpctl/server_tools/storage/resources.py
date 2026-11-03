@@ -39,8 +39,10 @@ from ...operations.storage.resources import (
     list_optical_media,
     list_storage_mappings,
     list_volume_groups,
+    load_optical_media,
     map_storage,
     mount_optical_media,
+    unload_optical_media,
     unmount_optical_media,
     upload_iso,
 )
@@ -898,8 +900,9 @@ def hmc_unmount_optical_media(
     equals the supplied name, then removes that mapping by its UUID. Empty,
     missing, ambiguous, or malformed identities fail without rewriting the
     VIOS. The backing VirtualOpticalMedia (ISO container) is preserved and can
-    be remounted later. No unload-without-detach path has been identified on
-    the surveyed firmware, so this is also how you detach an optical mapping.
+    be remounted later. To change the medium without detaching the mapping, use
+    ``hmc_unload_optical_media`` and ``hmc_load_optical_media``; a mapping an
+    unload emptied has no MediaName, so load a medium before unmounting it.
     The message ends with where the removal lives (CurrentProfileSync).
 
     The read-modify-write also rewrites the whole VirtualIOServer document from
@@ -934,3 +937,108 @@ def hmc_unmount_optical_media(
         )
 
     return with_client(unmount_media_and_confirm, profile=profile)
+
+
+@tool(effect="destructive", operation="media.load", target_kind="vios")
+def hmc_load_optical_media(
+    vios_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    media_name: str,
+    target_device: str | None = None,
+    release: bool = False,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
+    ownership_override: bool = False,
+) -> dict[str, Any]:
+    """Load a repository medium into an LPAR's existing virtual optical device.
+
+    Runs the VIOS ``loadopt`` command through ``viosvrcmd``; the mapping stays.
+    The device must belong to the LPAR's optical mapping on this VIOS, with or
+    without a medium; when ``target_device`` is omitted the LPAR must have exactly
+    one optical device there. The VIOS does not replace a loaded medium, so unload
+    it first with ``hmc_unload_optical_media``. The VIOS must be running with an
+    active RMC connection. Returns the action, VIOS and LPAR UUIDs, device,
+    medium and ``release``. A refusal, or an answer whose completion is unknown,
+    is an error; nothing is retried, so read the device with
+    ``hmc_list_storage_mappings`` before retrying. ADR 0079 requires callers to
+    serialize concurrent VIOS mapping changes.
+
+    Args:
+        vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.
+        lpar_name_or_uuid: LPAR name or UUID whose optical device is loaded.
+        media_name: Repository medium name ([A-Za-z0-9_.]{1,79}) from
+            ``hmc_list_optical_media``.
+        target_device: Optional virtual target device name ([A-Za-z0-9_]{1,15}),
+            as ``hmc_list_storage_mappings`` reports it.
+        release: Add ``-release`` to force the device free of a stale client
+            reservation. Off by default; every use writes an ``optical-release``
+            audit record before the command.
+        ownership_override: Bypass LPAR ownership rejection after operator approval.
+        profile: TOML profile name, or the environment-default HMC when omitted.
+        system_name_or_uuid: Optional SystemName or UUID that disambiguates the
+            partition name; when omitted the name is searched fleet-wide.
+    """
+
+    async def load(hmc: HMCClient) -> dict[str, Any]:
+        result = await load_optical_media(
+            hmc,
+            vios_name_or_uuid,
+            lpar_name_or_uuid,
+            media_name=media_name,
+            target_device=target_device,
+            release=release,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        )
+        return result.raw
+
+    return with_client(load, profile=profile)
+
+
+@tool(effect="destructive", operation="media.unload", target_kind="vios")
+def hmc_unload_optical_media(
+    vios_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    target_device: str | None = None,
+    release: bool = False,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
+    ownership_override: bool = False,
+) -> dict[str, Any]:
+    """Unload the medium from an LPAR's virtual optical device, keeping the mapping.
+
+    Runs the VIOS ``unloadopt`` command through ``viosvrcmd``, selecting and
+    checking the device as ``hmc_load_optical_media`` does. The backing medium
+    stays in the repository. The emptied mapping is listed only by
+    ``hmc_list_storage_mappings``: ``hmc_list_optical_mappings`` skips it, and
+    ``hmc_unmount_optical_media`` cannot remove it until a medium is loaded
+    again. A refusal, or an answer whose completion is unknown, is an error;
+    nothing is retried.
+
+    Args:
+        vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.
+        lpar_name_or_uuid: LPAR name or UUID whose optical device is unloaded.
+        target_device: Optional virtual target device name ([A-Za-z0-9_]{1,15}),
+            as ``hmc_list_storage_mappings`` reports it.
+        release: Add ``-release`` to force the device free of a stale client
+            reservation. Off by default; every use writes an ``optical-release``
+            audit record before the command.
+        ownership_override: Bypass LPAR ownership rejection after operator approval.
+        profile: TOML profile name, or the environment-default HMC when omitted.
+        system_name_or_uuid: Optional SystemName or UUID that disambiguates the
+            partition name; when omitted the name is searched fleet-wide.
+    """
+
+    async def unload(hmc: HMCClient) -> dict[str, Any]:
+        result = await unload_optical_media(
+            hmc,
+            vios_name_or_uuid,
+            lpar_name_or_uuid,
+            target_device=target_device,
+            release=release,
+            system_name_or_uuid=system_name_or_uuid,
+            ownership_override=ownership_override,
+        )
+        return result.raw
+
+    return with_client(unload, profile=profile)

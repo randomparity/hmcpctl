@@ -343,8 +343,9 @@ async def test_upload_iso_name_collision(mock_hmc, stage_download):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("media_name", ["bad name!.iso", "trailing.iso\n"])
 async def test_upload_iso_refuses_an_invalid_media_name_before_the_download(
-    mock_hmc, stage_download
+    mock_hmc, stage_download, media_name
 ):
     """A media_name outside the assumed Filename grammar is refused without a fetch."""
     download = stage_download()
@@ -357,7 +358,7 @@ async def test_upload_iso_refuses_an_invalid_media_name_before_the_download(
                 hmc,
                 VIOS_UUID,
                 VG_UUID,
-                "bad name!.iso",
+                media_name,
                 ISO_URL,
                 system_name_or_uuid=None,
             )

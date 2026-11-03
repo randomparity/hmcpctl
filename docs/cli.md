@@ -430,11 +430,11 @@ explicit decision, never an automatic consequence of a successful decommission.
 
 ## Storage mutation output migration
 
-The thirteen mutations in `storage` (`create-vg`, `create-disk`, `delete-disk`,
+The fifteen mutations in `storage` (`create-vg`, `create-disk`, `delete-disk`,
 `attach-disk`, `map`, `create-media-repo`, `create-media`, `delete-media-repo`,
-`delete-media`, `mount-optical-media`, `unmount-optical-media`, `detach-mapping`,
-`upload-iso`) use concise results: tables on a terminal, lossless `Field`/`Value`
-TSV when redirected, or explicit `--format table|tsv|json`. `--json/-j` selects
+`delete-media`, `mount-optical-media`, `unmount-optical-media`, `load-optical-media`,
+`unload-optical-media`, `detach-mapping`, `upload-iso`) use concise results: tables on a
+terminal, lossless `Field`/`Value` TSV when redirected, or explicit `--format table|tsv|json`. `--json/-j` selects
 JSON; conflicting format choices fail before contacting the HMC.
 
 Results identify the operation, target and provided parent scope. Most storage

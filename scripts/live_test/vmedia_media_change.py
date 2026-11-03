@@ -1,11 +1,14 @@
 """Capture how the HMC and VIOS change the medium in a virtual optical device (#1284).
 
-ST71 runs only in its own arm and answers the four questions #1285 depends on, on one
+ST71 runs only in its own arm and answers the four questions #1285 depended on, on one
 authorized window: whether a ``ViosSCSIMapping`` POST that replaces a mapping's
-``Storage`` changes the loaded medium (Q1), what ``viosvrcmd`` ``loadopt``/``unloadopt``
-answer (Q2), how they behave after an immediate power-off, without and with ``-release``
-(Q3), and what a create naming a VTD another mapping holds answers, and whether it
-leaves an orphan server adapter (Q4).
+``Storage`` changes the loaded medium (Q1), how ``loadopt``/``unloadopt`` answer (Q2),
+how they behave after an immediate power-off, without and with ``-release`` (Q3), and
+what a create naming a VTD another mapping holds answers, and whether it leaves an
+orphan server adapter (Q4). Since #1285, Q2 and Q3 go through ``hmc_load_optical_media``
+and ``hmc_unload_optical_media`` (ADR 0317): each tool step is followed by an ``lsvopt``
+read and a ``check`` row, and Q2 also records one load into the occupied device, through
+the tool and as the raw command, to capture how a refusal is answered.
 
 Every HMC call it makes goes to a git-ignored capture file for later tokenizing. Its rows
 use ``state.record`` only: a capture promotes no maturity. It creates two blank media,
@@ -111,6 +114,23 @@ def _unready(state: RunState) -> str | None:
     return None
 
 
+_NO_MEDIA = "No Media"
+
+
+def _lsvopt_media(listing: object) -> str | None:
+    """The medium ``lsvopt -vtd`` reads, ``No Media``, or None when unparsable.
+
+    The captured shape is a ``Media  Size(mb)`` header and one row
+    (cli-vios-lsvopt-after-storage-post, cli-vios-lsvopt-no-media).
+    """
+    if not isinstance(listing, str):
+        return None
+    rows = [line.split() for line in listing.splitlines() if line.strip()]
+    if len(rows) != 2 or rows[0][:1] != ["Media"]:
+        return None
+    return _NO_MEDIA if rows[1][:2] == ["No", "Media"] else rows[1][0]
+
+
 def _tag(name: str) -> str:
     return f"{{{UOM_NS}}}{name}"
 
@@ -131,7 +151,6 @@ class _Capture:
         self.media = (f"{BLANK_PREFIX}{_run_tag()}", f"{BLANK_PREFIX}{_run_tag()}")
         self.vtd: str | None = None
         self.powered_on = False
-        self.release_listed = False
         self.baseline: tuple[frozenset[tuple[object, ...]], Adapters] | None = None
         self.mounted_adapters: Adapters | None = None
 
@@ -149,6 +168,56 @@ class _Capture:
 
     def on_vios(self, command: str) -> str:
         return storage.vios_command(self.system, self.vios_id, command)
+
+    async def optical_tool(
+        self, step: str, action: str, media: str | None = None, *, release: bool = False
+    ) -> tuple[str, Any]:
+        """One ``hmc_load_optical_media``/``hmc_unload_optical_media`` call on V."""
+        if action == "load":
+            return self.note(
+                "hmc_load_optical_media",
+                step,
+                await self.state.call(
+                    self.client,
+                    "hmc_load_optical_media",
+                    vios_name_or_uuid=self.vios,
+                    lpar_name_or_uuid=self.lpar,
+                    media_name=media,
+                    system_name_or_uuid=self.system,
+                    target_device=self.vtd,
+                    release=release,
+                ),
+            )
+        return self.note(
+            "hmc_unload_optical_media",
+            step,
+            await self.state.call(
+                self.client,
+                "hmc_unload_optical_media",
+                vios_name_or_uuid=self.vios,
+                lpar_name_or_uuid=self.lpar,
+                system_name_or_uuid=self.system,
+                target_device=self.vtd,
+                release=release,
+            ),
+        )
+
+    async def checked(
+        self, step: str, action: str, media: str | None = None, *, release: bool = False
+    ) -> bool:
+        """A tool step, then ``lsvopt``; PASS only when the device reads as expected."""
+        status, _ = await self.optical_tool(step, action, media, release=release)
+        read, listing = await self.vios_run(f"{step} lsvopt", f"lsvopt -vtd {self.vtd}")
+        held = _lsvopt_media(listing) if read == "PASS" else None
+        expected = media if action == "load" else _NO_MEDIA
+        ok = status == "PASS" and held == expected
+        self.state.record(
+            SUBTASK,
+            f"{step} check",
+            "PASS" if ok else "FAIL",
+            {"tool": status, "lsvopt": held, "expected": expected},
+        )
+        return status == "PASS"
 
     async def vios_run(self, step: str, command: str) -> tuple[str, Any]:
         return self.note(
@@ -369,8 +438,7 @@ class _Capture:
         self.state.record(SUBTASK, VTD_ROW, "PASS", {"vtd": vtd})
 
     async def help(self) -> None:
-        status, text = await self.vios_run("help loadopt", "help loadopt")
-        self.release_listed = status == "PASS" and "-release" in str(text)
+        await self.vios_run("help loadopt", "help loadopt")
         await self.vios_run("help unloadopt", "help unloadopt")
         await self.vios_run("lsvopt", f"lsvopt -vtd {self.vtd}")
 
@@ -487,16 +555,28 @@ class _Capture:
         return True
 
     async def cli_swap(self) -> None:
-        """Q2: unload and load through viosvrcmd while the partition is off."""
-        vtd = self.vtd
-        await self.vios_run("q2 unloadopt", f"unloadopt -vtd {vtd}")
-        await self.vios_run("q2 lsvopt after unload", f"lsvopt -vtd {vtd}")
-        await self.vios_run("q2 loadopt", f"loadopt -disk {self.media[0]} -vtd {vtd}")
-        await self.vios_run("q2 lsvopt after load", f"lsvopt -vtd {vtd}")
+        """Q2: unload and load through the tools while the partition is off.
+
+        Then load the other medium into the occupied device, through the tool and as
+        the raw command, so the capture holds how ``viosvrcmd`` answers a refusal.
+        """
+        await self.checked("q2 unload", "unload")
+        if not await self.checked("q2 load", "load", self.media[0]):
+            return
+        status, _ = await self.optical_tool("q2 occupied", "load", self.media[1])
+        self.state.record(
+            SUBTASK,
+            "q2 occupied check",
+            "PASS" if status == "FAIL" else "FAIL",
+            {"tool": status},
+        )
+        await self.vios_run(
+            "q2 occupied raw", f"loadopt -disk {self.media[1]} -vtd {self.vtd}"
+        )
+        await self.vios_run("q2 occupied lsvopt", f"lsvopt -vtd {self.vtd}")
 
     async def release_cycle(self) -> None:
-        """Q3: the same commands after an immediate power-off, then with -release."""
-        vtd = self.vtd
+        """Q3: the tools after an immediate power-off, without and with ``release``."""
         self.powered_on = True
         powered, _ = self.note(
             "hmc_power_on_lpar",
@@ -527,16 +607,11 @@ class _Capture:
                 wait=True,
             ),
         )
-        status, _ = await self.vios_run("q3 unloadopt", f"unloadopt -vtd {vtd}")
-        if status != "PASS":
-            await self.vios_run(
-                "q3 unloadopt -release", f"unloadopt -release -vtd {vtd}"
-            )
-        load = f"-disk {self.media[1]} -vtd {vtd}"
-        status, _ = await self.vios_run("q3 loadopt", f"loadopt {load}")
-        if status != "PASS" and self.release_listed:
-            await self.vios_run("q3 loadopt -release", f"loadopt -release {load}")
-        await self.vios_run("q3 lsvopt", f"lsvopt -vtd {vtd}")
+        if not await self.checked("q3 unload", "unload"):
+            await self.checked("q3 unload release", "unload", release=True)
+        await self.checked("q3 load release", "load", self.media[1], release=True)
+        await self.checked("q3 unload release again", "unload", release=True)
+        await self.checked("q3 load", "load", self.media[0])
 
     # -- cleanup ------------------------------------------------------------
 
@@ -609,10 +684,11 @@ class _Capture:
             return
         if not empty:
             return
-        load = f"-disk {self.media[0]} -vtd {self.vtd}"
-        status, _ = await self.vios_run("cleanup loadopt", f"loadopt {load}")
+        status, _ = await self.optical_tool("cleanup load", "load", self.media[0])
         if status != "PASS":
-            await self.vios_run("cleanup loadopt -release", f"loadopt -release {load}")
+            await self.optical_tool(
+                "cleanup load release", "load", self.media[0], release=True
+            )
         if await self.empty_target() is not False:
             self.manual(
                 f"{self.vtd} may be mapped with no medium",

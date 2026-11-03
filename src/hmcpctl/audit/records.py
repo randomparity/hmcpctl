@@ -74,6 +74,7 @@ Event = Literal[
     "install-attempted",
     "install-submitted",
     "lpar-power-off",
+    "optical-release",
     "ownership-denied",
     "ownership-override",
     "power-ownership-guard",
@@ -105,6 +106,9 @@ OwnershipDenial = Literal["malformed-token", "foreign-owner"]
 
 #: Closed ownership-denial vocabulary.
 OWNERSHIP_DENIALS: frozenset[str] = frozenset(get_args(OwnershipDenial))
+
+#: Which VIOS optical command a release request rode on (ADR 0317).
+OpticalReleaseAction = Literal["load", "unload"]
 
 #: Whether a console write shared the channel with the collector or held it exclusively.
 ConsoleWriteMode = Literal["shared", "exclusive"]
@@ -474,6 +478,41 @@ def record_power_ownership_guard(
             "authorize_power_operations": authorize_power_operations,
             "source": _bounded_audit_text(source),
             "detail": _bounded_audit_text(detail),
+        }
+
+    emit(_DENY_LEVEL, build)
+
+
+def record_optical_release(
+    *,
+    action: OpticalReleaseAction,
+    system: str,
+    vios: str,
+    lpar: str,
+    target_device: str,
+    media: str | None,
+    host: str,
+    agent_id: str,
+) -> None:
+    """Emit a VIOS optical load or unload requested with ``-release`` (ADR 0317).
+
+    Written before the command, so a command that then fails is still recorded;
+    ``media`` is None for an unload.
+    """
+
+    def build() -> dict[str, Any]:
+        event: Event = "optical-release"
+        return {
+            "time": datetime.now(UTC).isoformat(),
+            "event": event,
+            "action": action,
+            "system": _bounded_audit_text(system),
+            "vios": _bounded_audit_text(vios),
+            "lpar": _bounded_audit_text(lpar),
+            "target_device": _bounded_audit_text(target_device),
+            "media": _bounded_audit_text(media),
+            "host": _bounded_audit_text(host),
+            "attribution": _attribution(agent_id, "config:agent_id"),
         }
 
     emit(_DENY_LEVEL, build)

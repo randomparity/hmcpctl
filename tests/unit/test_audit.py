@@ -496,6 +496,7 @@ def test_events_matches_the_literal_and_every_emitter_uses_it():
         "install-attempted",
         "install-submitted",
         "lpar-power-off",
+        "optical-release",
         "ownership-denied",
         "ownership-override",
         "power-ownership-guard",
@@ -561,6 +562,18 @@ def test_events_matches_the_literal_and_every_emitter_uses_it():
         operation="dumprestart",
         immediate=False,
         restart=False,
+        agent_id="a",
+    )
+    emitted.add(_one(lines)["event"])
+    lines = _capture()
+    audit.record_optical_release(
+        action="unload",
+        system="s",
+        vios="v",
+        lpar="l",
+        target_device="vtopt1",
+        media=None,
+        host="hmc.test",
         agent_id="a",
     )
     emitted.add(_one(lines)["event"])
@@ -636,6 +649,54 @@ def test_the_power_off_record_bounds_its_text_and_keeps_its_booleans():
     assert record["event"] == "lpar-power-off"
     assert len(record["lpar"]) == len(record["operation"]) == audit.MAX_VALUE_LENGTH
     assert (record["immediate"], record["restart"]) == (True, False)
+
+
+def test_the_optical_release_record_names_the_device_and_bounds_its_text():
+    """ADR 0317. A release request is recorded at WARNING with its target, bounded."""
+    levels: list[int] = []
+
+    class _Level(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            levels.append(record.levelno)
+
+    lines = _capture()
+    logging.getLogger(audit_sink.AUDIT_LOGGER_NAME).addHandler(_Level())
+    audit.record_optical_release(
+        action="load",
+        system="sys-a",
+        vios="v" * 300,
+        lpar="11111111-1111-1111-1111-111111111111",
+        target_device="vtopt1",
+        media="install.iso",
+        host="hmc.test",
+        agent_id="agent-7",
+    )
+    record = _one(lines)
+    assert list(record) == [
+        "time",
+        "event",
+        "action",
+        "system",
+        "vios",
+        "lpar",
+        "target_device",
+        "media",
+        "host",
+        "attribution",
+    ]
+    assert record["event"] == "optical-release"
+    assert (record["action"], record["target_device"], record["media"]) == (
+        "load",
+        "vtopt1",
+        "install.iso",
+    )
+    assert len(record["vios"]) == audit.MAX_VALUE_LENGTH
+    assert record["attribution"] == {
+        "claim": "agent-7",
+        "source": "config:agent_id",
+        "verified": False,
+    }
+    assert levels == [logging.WARNING]
 
 
 def test_the_override_record_carries_the_hmc_host():

@@ -6,13 +6,13 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **203** tools are registered.
-- **202** are exposed by a default deployment.
+- **205** tools are registered.
+- **204** are exposed by a default deployment.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
-| `destructive` | 47 |
+| `destructive` | 49 |
 | `mutate` | 64 |
 | `read` | 91 |
 
@@ -41,7 +41,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `job` | 2 | [job.md](job.md) |
 | `lpar` | 51 | [lpar.md](lpar.md) |
 | `lpar_profile` | 11 | [lpar_profile.md](lpar_profile.md) |
-| `media` | 10 | [media.md](media.md) |
+| `media` | 12 | [media.md](media.md) |
 | `memory_pool` | 2 | [memory_pool.md](memory_pool.md) |
 | `metrics` | 4 | [metrics.md](metrics.md) |
 | `network` | 7 | [network.md](network.md) |
@@ -200,6 +200,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_list_virtual_switches` | `read` | [network.md](network.md) |
 | `hmc_list_vnics` | `read` | [vnic.md](vnic.md) |
 | `hmc_list_volume_groups` | `read` | [storage.md](storage.md) |
+| `hmc_load_optical_media` | `destructive` | [media.md](media.md) |
 | `hmc_lpar_summary` | `read` | [lpar.md](lpar.md) |
 | `hmc_map_storage_to_lpar` | `mutate` | [storage.md](storage.md) |
 | `hmc_migrate_abort_lpar` | `destructive` | [lpar.md](lpar.md) |
@@ -269,6 +270,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_system_summary` | `read` | [system.md](system.md) |
 | `hmc_unassign_dedicated_pcie_slot` | `mutate` | [pcie.md](pcie.md) |
 | `hmc_unassign_sriov_logical_port` | `mutate` | [sriov.md](sriov.md) |
+| `hmc_unload_optical_media` | `destructive` | [media.md](media.md) |
 | `hmc_unmount_optical_media` | `destructive` | [media.md](media.md) |
 | `hmc_update_console_software` | `destructive` | [update.md](update.md) |
 | `hmc_update_firmware` | `destructive` | [update.md](update.md) |

@@ -126,8 +126,9 @@ def test_create_mcp_returns_independent_complete_applications():
     # #1776 adds the guarded paging-VIOS switchover.
     # #1770 adds independent VIOS pending-boot read and guarded set tools.
     # #1226 adds the hmc_reconfigure_lpar logical operation.
-    assert len(asyncio.run(first.list_tools())) == 202
-    assert len(asyncio.run(second.list_tools())) == 202
+    # #1285 adds the optical media load and unload tools (ADR 0317).
+    assert len(asyncio.run(first.list_tools())) == 204
+    assert len(asyncio.run(second.list_tools())) == 204
 
 
 def test_operations_do_not_import_application_modules():

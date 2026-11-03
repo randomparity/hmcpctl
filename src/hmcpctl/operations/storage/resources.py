@@ -22,11 +22,27 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_location
 
+from ...audit import records as audit
 from ...config import ISO_URL_ALLOWLIST_HELP
 from ...documents.storage import StorageKind
 from ...errors import HMCError
 from ...jobs import JobOutcome, job_identifier, job_outcome
-from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
+from ...resource_identity import (
+    is_uuid,
+    resolve_lpar_uuid,
+    resolve_system_name,
+    resolve_vios_uuid,
+)
+from ...ssh.transport import HMCCLIError, run_hmc_command
+from ...ssh.vios_optical import (
+    DEVICE_NAME,
+    MEDIA_NAME,
+    OpticalAction,
+    optical_command,
+    require_device_name,
+    require_media_name,
+)
+from ...xmlutil import leaf_text
 
 logger = logging.getLogger(__name__)
 
@@ -1119,8 +1135,8 @@ async def upload_iso(
     # An uncaptured assumption (ADR 0177): no capture or reference states the HMC's
     # Filename grammar. The pattern is a conservative client-side allowlist, and no
     # name outside it is known to have been sent to an HMC, so the HMC may accept more.
-    _MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9_.]{1,79}$")
-    if not _MEDIA_NAME_RE.match(media_name):
+    # Loading a medium applies the same rule (ADR 0317).
+    if not MEDIA_NAME.fullmatch(media_name):
         raise ValueError(
             f"media_name {media_name!r} is refused by hmcpctl before any request. "
             "It must match [A-Za-z0-9_.]{1,79} (no hyphens, spaces, or other special "
@@ -1271,11 +1287,10 @@ async def unmount_optical_media(
     Removing the mapping is the whole unmount as this client implements it:
     mount_optical_media creates a VirtualSCSIMapping with the media referenced
     inside it, so detaching the mapping and unmounting the image are one
-    operation here. The #1284 live survey (V10R3) found two paths that change the
-    loaded medium without detaching: a mapping-group POST that replaces the
-    mapping's ``Storage`` (fixture rest-vios-scsi-mapping-replace-storage), and the
-    VIOS ``unloadopt``/``loadopt`` commands (cli-vios-unloadopt, cli-vios-loadopt).
-    This client uses neither yet (#1285).
+    operation here. To change the loaded medium without detaching, use
+    :func:`load_optical_media` and :func:`unload_optical_media` (ADR 0317). A
+    mapping left with no medium by an unload has no ``MediaName`` to match, so
+    load a medium into it before unmounting it.
 
     Empty, missing, ambiguous, or malformed identities fail without a POST, as
     required by ADR 0079.
@@ -1331,3 +1346,236 @@ async def unmount_optical_media(
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
     return StorageMutationResult.from_raw(asdict(location), change_location=location)
+
+
+#: The only answer ``viosvrcmd`` gave to a successful ``loadopt``/``unloadopt`` in the
+#: #1284 capture (cli-vios-loadopt, cli-vios-unloadopt and their after-power-off pair).
+_OPTICAL_SUCCESS = ":"
+_OPTICAL_OUTPUT_BYTES = 65536
+
+
+async def _optical_device(
+    hmc: HMCClient,
+    vios_uuid: str,
+    lpar_uuid: str,
+    lpar_label: str,
+    target_device: str | None,
+) -> str:
+    """The virtual optical device the LPAR's mapping on this VIOS owns (ADR 0317).
+
+    Reads every mapping of the LPAR, so a device holding no medium is found too.
+    """
+    names: list[str] = []
+    for mapping in await hmc.list_storage_mappings(vios_uuid, lpar_uuid):
+        target = mapping.get("TargetDevice") if isinstance(mapping, dict) else None
+        device = (
+            target.get("VirtualOpticalTargetDevice")
+            if isinstance(target, dict)
+            else None
+        )
+        name = leaf_text(device.get("TargetName")) if isinstance(device, dict) else None
+        if isinstance(name, str) and name:
+            names.append(name)
+    listed = ", ".join(sorted(names)) or "none"
+    if target_device is not None:
+        if target_device not in names:
+            raise HMCError(
+                f"Virtual optical device {target_device!r} is not mapped to LPAR "
+                f"{lpar_label!r} on this VIOS; its optical devices: {listed}"
+            )
+        return target_device
+    if len(names) != 1:
+        raise HMCError(
+            f"LPAR {lpar_label!r} has {len(names)} virtual optical devices on this "
+            f"VIOS ({listed}); name one with target_device"
+        )
+    if not DEVICE_NAME.fullmatch(names[0]):
+        raise HMCError(
+            f"Mapped virtual optical device {names[0]!r} is outside the device-name "
+            "rule [A-Za-z0-9_]{1,15}; these tools cannot address it"
+        )
+    return names[0]
+
+
+async def _vios_native_identity(hmc: HMCClient, vios_uuid: str) -> tuple[str, int]:
+    """The managed-system name and partition id ``viosvrcmd`` addresses the VIOS by."""
+    entry = await hmc.get_vios(vios_uuid)
+    resource = entry.get("Resource") if isinstance(entry, dict) else None
+    resource = resource if isinstance(resource, dict) else {}
+    native = leaf_text(resource.get("PartitionID"))
+    link = resource.get("AssociatedManagedSystem")
+    href = link.get("href") if isinstance(link, Mapping) else None
+    _, marker, system_uuid = (
+        urlparse(href).path.rpartition("/ManagedSystem/")
+        if isinstance(href, str)
+        else ("", "", "")
+    )
+    if (
+        not isinstance(native, str)
+        or not re.fullmatch(r"[1-9][0-9]*", native)
+        or not marker
+        or not is_uuid(system_uuid)
+    ):
+        raise HMCError(
+            f"VIOS {vios_uuid} has no usable PartitionID or AssociatedManagedSystem "
+            "link; nothing was submitted"
+        )
+    return await resolve_system_name(hmc, system_uuid), int(native)
+
+
+async def _change_optical_media(
+    hmc: HMCClient,
+    action: OpticalAction,
+    vios_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    *,
+    media_name: str | None,
+    system_name_or_uuid: str | None,
+    target_device: str | None,
+    release: bool,
+    ownership_override: bool,
+) -> StorageMutationResult:
+    if media_name is not None:
+        require_media_name(media_name)
+    if target_device is not None:
+        require_device_name(target_device)
+    vios_uuid = await resolve_vios_uuid(
+        hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+    )
+    lpar_uuid = await resolve_and_authorize_lpar_mutation(
+        hmc,
+        lpar_name_or_uuid,
+        ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
+    )
+    device = await _optical_device(
+        hmc, vios_uuid, lpar_uuid, lpar_name_or_uuid, target_device
+    )
+    system_name, vios_id = await _vios_native_identity(hmc, vios_uuid)
+    command = optical_command(
+        system_name, vios_id, action, device, media_name, release=release
+    )
+    if release:
+        audit.record_optical_release(
+            action=action,
+            system=system_name,
+            vios=vios_uuid,
+            lpar=lpar_uuid,
+            target_device=device,
+            media=media_name,
+            host=hmc.config.host,
+            agent_id=hmc.config.agent_id or "hmcpctl",
+        )
+    where = f"Optical {action} of {device} on VIOS {vios_uuid}"
+    read_first = (
+        "read the device with hmc_list_storage_mappings before retrying. "
+        "Nothing was retried"
+    )
+    try:
+        answer = await run_hmc_command(
+            hmc.config, command, max_output_bytes=_OPTICAL_OUTPUT_BYTES
+        )
+    except HMCCLIError as error:
+        if error.remote_nonzero_completed:
+            raise HMCError(
+                f"{where} was refused. Nothing was retried: {error}"
+            ) from error
+        raise HMCError(f"{where}: completion unknown; {read_first}: {error}") from error
+    if answer.strip() != _OPTICAL_SUCCESS:
+        raise HMCError(
+            f"{where}: completion unknown, unexpected answer {answer[:512]!r}; "
+            f"{read_first}"
+        )
+    return StorageMutationResult.from_raw(
+        {
+            "action": action,
+            "vios_uuid": vios_uuid,
+            "lpar_uuid": lpar_uuid,
+            "target_device": device,
+            "media_name": media_name,
+            "release": release,
+        },
+        lpar_uuid=lpar_uuid,
+    )
+
+
+async def load_optical_media(
+    hmc: HMCClient,
+    vios_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    *,
+    media_name: str,
+    system_name_or_uuid: str | None = None,
+    target_device: str | None = None,
+    release: bool = False,
+    ownership_override: bool = False,
+) -> StorageMutationResult:
+    """Load a repository medium into the LPAR's existing virtual optical device.
+
+    Runs the VIOS ``loadopt`` through ``viosvrcmd`` (ADR 0317); the mapping stays.
+    The device is the one *target_device* names, or the LPAR's only optical device
+    on this VIOS, and must belong to that LPAR's mapping, loaded or empty. The VIOS
+    does not replace a loaded medium: unload first. *release* adds ``-release``,
+    which forces the device free of a client reservation; it is audited
+    (``optical-release``) before the command. The VIOS must be running with an
+    active RMC connection. ADR 0079 puts serializing VIOS mapping changes on the
+    caller.
+
+    Raises:
+        ValueError: If *media_name* or *target_device* is outside its name rule.
+        ResourceNotFoundError: If a VIOS, LPAR, or managed-system selector cannot
+            be resolved.
+        PermissionError: If the LPAR ownership authorization rejects the mutation.
+        HMCError: If the device cannot be selected, the VIOS identity is unusable,
+            or the command was refused or its completion is unknown.
+    """
+    return await _change_optical_media(
+        hmc,
+        "load",
+        vios_name_or_uuid,
+        lpar_name_or_uuid,
+        media_name=media_name,
+        system_name_or_uuid=system_name_or_uuid,
+        target_device=target_device,
+        release=release,
+        ownership_override=ownership_override,
+    )
+
+
+async def unload_optical_media(
+    hmc: HMCClient,
+    vios_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    *,
+    system_name_or_uuid: str | None = None,
+    target_device: str | None = None,
+    release: bool = False,
+    ownership_override: bool = False,
+) -> StorageMutationResult:
+    """Unload the medium from the LPAR's virtual optical device, keeping the mapping.
+
+    Runs the VIOS ``unloadopt`` through ``viosvrcmd`` (ADR 0317), selecting and
+    checking the device as :func:`load_optical_media` does; *release* is the same
+    audited ``-release``. The emptied mapping is listed only by
+    ``list_storage_mappings``: :func:`list_optical_mappings` skips it and
+    :func:`unmount_optical_media` cannot match it until a medium is loaded again.
+
+    Raises:
+        ValueError: If *target_device* is outside the device-name rule.
+        ResourceNotFoundError: If a VIOS, LPAR, or managed-system selector cannot
+            be resolved.
+        PermissionError: If the LPAR ownership authorization rejects the mutation.
+        HMCError: If the device cannot be selected, the VIOS identity is unusable,
+            or the command was refused or its completion is unknown.
+    """
+    return await _change_optical_media(
+        hmc,
+        "unload",
+        vios_name_or_uuid,
+        lpar_name_or_uuid,
+        media_name=None,
+        system_name_or_uuid=system_name_or_uuid,
+        target_device=target_device,
+        release=release,
+        ownership_override=ownership_override,
+    )

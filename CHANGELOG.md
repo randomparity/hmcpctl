@@ -28,6 +28,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   `hmcpctl_<12 hex>`, read back by name, and made the partition's default, and power-on
   activates that profile, so the client adapter survives the next activation (#1839, #1840).
 
+- `hmc_load_optical_media` and `hmc_unload_optical_media` (`hmcpctl storage
+  load-optical-media` and `unload-optical-media`) change the medium in an LPAR's existing
+  virtual optical device without detaching its mapping, through the VIOS `loadopt` and
+  `unloadopt` commands. An explicit `release` option, off by default, forces the device free
+  of a stale client reservation and writes an `optical-release` audit record (ADR 0317).
+
 - `hmc_reconfigure_lpar` changes an LPAR's processors, memory or partition name as one
   durable logical operation and reports whether each change is `live`, held in the
   `profile`, or `pending_activation` until the default profile is next activated. It writes

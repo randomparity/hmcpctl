@@ -227,6 +227,8 @@ _VMEDIA_MUTATIONS = _REPOSITORY_TOOLS | {
     "hmc_set_lpar_boot_order",
     "hmc_mount_optical_media",
     "hmc_unmount_optical_media",
+    "hmc_load_optical_media",
+    "hmc_unload_optical_media",
 }
 
 
