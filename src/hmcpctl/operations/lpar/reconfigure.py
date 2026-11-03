@@ -1,9 +1,10 @@
-"""``hmc_reconfigure_lpar``'s planner, operation body and classifiers (ADR 0314).
+"""``hmc_reconfigure_lpar``'s planner, operation body and classifiers (ADRs 0314, 0322).
 
 The planner turns one partition read and one profile read into a JSON plan that names
 every change and where it lands (``live``, ``profile``, ``pending_activation``) before
 anything is written. The body records that plan as an effect, then replays the writes
-it names: the default profile, the partition's current configuration, the rename.
+it names: the default profile, the partition's current configuration, the rename, disk
+detaches and adds; after verification an add force-saves the default profile.
 Messages name partitions and profiles by UUID and never echo a caller's selector
 (``engine`` module note).
 """
@@ -22,9 +23,10 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_v
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources, partition_updates
 from ...documents.partition_profile import ProfilePatch
+from ...documents.storage import validate_virtual_disk
 from ...errors import HMCError, LparUpdateError
 from ...resource_identity import resolve_system_uuid
-from ...xmlutil import escape_xml, leaf_text
+from ...xmlutil import console_version, escape_xml, leaf_text
 from ..logical import engine, profile_write, store
 from ..logical.engine import (
     BodyResult,
@@ -34,11 +36,15 @@ from ..logical.engine import (
     OperationFailed,
 )
 from ..logical.models import EffectRecord
+from ..storage.resources import storage_mapping
 from ..systems.fleet import read_system_entry
+from . import profile_persist
 from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
 from .power import open_client as _power_client
 from .profiles import read_partition_profile, update_partition_profile
+from .provision import PROFILE_JOB_MINIMUM, virtual_disk_names
+from .provision_operation import DISK_LEDGER, _ledgered_elsewhere
 
 # ADR 0314 Decision 6: the specialists whose authority each patch field uses.
 DELEGATED: Mapping[str, tuple[str, ...]] = {
@@ -46,11 +52,26 @@ DELEGATED: Mapping[str, tuple[str, ...]] = {
     "memory_mib": ("hmc_dlpar_mem", "hmc_update_partition_profile"),
     "processors": ("hmc_dlpar_proc", "hmc_update_partition_profile"),
 }
+# ADR 0322 Decision 6: the specialists a disk add or detach uses, authorized per VIOS.
+DISK_ADD_TOOLS = (
+    "hmc_create_virtual_disk",
+    "hmc_map_storage_to_lpar",
+    "hmc_save_current_partition_profile",
+)
+DISK_DETACH_TOOLS = ("hmc_detach_storage_mapping",)
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 PLAN_KEY, PLAN_KIND = "plan", "lpar.reconfigure_plan"
 PROFILE_KEY = "profile"
 CURRENT_KEY, CURRENT_KIND = "current", "lpar.current_config"
 RENAME_KEY, RENAME_KIND = "rename", "lpar.rename"
+UNMAP_KIND, DISK_KIND, MAP_KIND = (
+    "vios.storage_unmap",
+    "vios.virtual_disk",
+    "vios.storage_map",
+)
+SAVE_KEY = "profile_save"
+MAX_DISKS = 4
+_UUID = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 SETTLE_SECONDS = 120
 POLL_SECONDS = 5
 _NOT_ACTIVATED = "not activated"
@@ -59,6 +80,62 @@ _RESOURCES = ("memory", "processors")
 _FIELD = {"memory": "memory_mib", "processors": "processors"}
 _LEVELS = ("min", "desired", "max")
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
+
+
+class DiskAdd(BaseModel):
+    """A virtual disk to create in a volume group and map to the partition."""
+
+    model_config = ConfigDict(extra="forbid")
+    vios_uuid: StrictStr = Field(pattern=_UUID, description="UUID of the VIOS.")
+    vg_uuid: StrictStr = Field(
+        pattern=_UUID, description="UUID of the volume group on that VIOS."
+    )
+    name: StrictStr = Field(
+        min_length=1,
+        description="New virtual disk name; a name the VIOS already has is refused, "
+        "so no disk is ever resized.",
+    )
+    capacity_mib: StrictInt = Field(
+        description="Size in MiB, a positive multiple of 1024."
+    )
+
+    @model_validator(mode="after")
+    def _creatable(self) -> DiskAdd:
+        if not self.name.strip():
+            raise ValueError("disks.add name must not be blank")
+        validate_virtual_disk(self.name, self.capacity_mib)
+        return self
+
+
+class DiskDetach(BaseModel):
+    """A virtual disk whose one mapping to the partition is removed; the disk stays."""
+
+    model_config = ConfigDict(extra="forbid")
+    vios_uuid: StrictStr = Field(pattern=_UUID, description="UUID of the VIOS.")
+    name: StrictStr = Field(min_length=1, description="The mapped virtual disk's name.")
+
+
+class DiskPatch(BaseModel):
+    """Disks to add and to detach (ADR 0322 Decision 1)."""
+
+    model_config = ConfigDict(extra="forbid")
+    add: list[DiskAdd] = Field(default_factory=list, max_length=MAX_DISKS)
+    detach: list[DiskDetach] = Field(default_factory=list, max_length=MAX_DISKS)
+
+    @model_validator(mode="after")
+    def _distinct(self) -> DiskPatch:
+        if not self.add and not self.detach:
+            raise ValueError("disks needs at least one add or detach")
+        pairs = [(d.vios_uuid.lower(), d.name) for d in (*self.add, *self.detach)]
+        if len(set(pairs)) != len(pairs):
+            raise ValueError("disks names the same VIOS and disk name twice")
+        return self
+
+    @property
+    def vios_uuids(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(d.vios_uuid.lower() for d in (*self.add, *self.detach))
+        )
 
 
 class ReconfigurePatch(BaseModel):
@@ -80,11 +157,19 @@ class ReconfigurePatch(BaseModel):
     memory_mib: StrictInt | None = Field(
         default=None, gt=0, description="Desired memory in MiB."
     )
+    disks: DiskPatch | None = Field(
+        default=None,
+        description="Virtual disks to add (created, mapped, owned and saved into the "
+        "default profile) and to detach (the mapping only).",
+    )
 
     @model_validator(mode="after")
     def _not_empty(self) -> ReconfigurePatch:
-        if self.name is None and self.processors is None and self.memory_mib is None:
-            raise ValueError("patch needs at least one of name, processors, memory_mib")
+        fields = (self.name, self.processors, self.memory_mib, self.disks)
+        if all(value is None for value in fields):
+            raise ValueError(
+                "patch needs at least one of name, processors, memory_mib, disks"
+            )
         if self.name is not None and not self.name.strip():
             raise ValueError("patch.name must not be blank")
         return self
@@ -93,11 +178,25 @@ class ReconfigurePatch(BaseModel):
     def writes_profile(self) -> bool:
         return self.processors is not None or self.memory_mib is not None
 
+    @property
+    def needs_window(self) -> bool:
+        """Whether the caller must assert ``exclusive_writer_window`` (ADRs 0314, 0322)."""
+        return self.writes_profile or self.disks is not None
+
 
 def delegated_tools(patch: ReconfigurePatch) -> tuple[str, ...]:
     """The specialists *patch* can use, in a stable order, each once."""
     names = [field for field in DELEGATED if getattr(patch, field) is not None]
-    return tuple(dict.fromkeys(tool for field in names for tool in DELEGATED[field]))
+    tools = [tool for field in names for tool in DELEGATED[field]]
+    if patch.disks is not None:
+        tools += DISK_ADD_TOOLS if patch.disks.add else ()
+        tools += DISK_DETACH_TOOLS if patch.disks.detach else ()
+    return tuple(dict.fromkeys(tools))
+
+
+def disk_tool(name: str) -> bool:
+    """Whether specialist *name* acts on a VIOS, so it is authorized per VIOS."""
+    return name in DISK_ADD_TOOLS or name in DISK_DETACH_TOOLS
 
 
 def open_client(connection: str) -> HMCClient:
@@ -426,6 +525,154 @@ def basis(view: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def require_persistable(
+    view: Mapping[str, Any], profile: Mapping[str, Any], changes: list[dict[str, Any]]
+) -> None:
+    """Refuse a force-save that would discard pending profile values (ADR 0322 Decision 4).
+
+    The save copies the current configuration over the whole default profile, so a
+    planned ``pending_activation`` change, or a desired value the profile already holds
+    apart from the partition's, would be lost.
+    """
+    if any(change["applied"] == "pending_activation" for change in changes):
+        raise OperationFailed(
+            "a disk add saves the current configuration over the default profile, which "
+            "would discard this patch's pending_activation change; split the patch"
+        )
+    for resource in ("memory", "processors", "units"):
+        saved, current = profile[resource], view[resource]
+        if saved is not None and current is not None and saved[1] != current[1]:
+            raise OperationFailed(
+                f"the default profile's desired {resource} differs from the partition's; "
+                "a disk add saves the current configuration over it and would discard "
+                "the profile's value. Activate the profile first, or change the value"
+            )
+
+
+def _mapping_ids(entries: list[dict[str, Any]], name: str, lpar_uuid: str) -> list[str]:
+    """The ids of the mappings of virtual disk *name* to partition *lpar_uuid*."""
+    ids = []
+    for entry in entries:
+        found = storage_mapping(entry)
+        if (
+            found.backing_kind == "VirtualDisk"
+            and found.backing_name == name
+            and (found.lpar_uuid or "").lower() == lpar_uuid
+        ):
+            ids.append(found.id or "")
+    return ids
+
+
+async def _disk_plan(
+    hmc: HMCClient,
+    disks: DiskPatch,
+    view: Mapping[str, Any],
+    lpar_uuid: str,
+    allow_disruption: bool,
+) -> dict[str, Any]:
+    """The disk writes *disks* needs, checked against live VIOS state (ADR 0322)."""
+    active = view["state"] != _NOT_ACTIVATED
+    if disks.add and active and (view["state"], view["rmc"]) != ("running", "active"):
+        raise OperationFailed(
+            f"LPAR {lpar_uuid} is {view['state']!r} with RMC {view['rmc']!r}; a disk add "
+            "to an activated partition needs it running with RMC active"
+        )
+    if disks.detach and active and not allow_disruption:
+        raise OperationFailed(
+            f"a disk detach from activated LPAR {lpar_uuid} removes a disk the guest may "
+            "be using; pass allow_disruption=true"
+        )
+    try:
+        adds = [
+            await _planned_add(hmc, item, index) for index, item in enumerate(disks.add)
+        ]
+        detaches = [
+            await _planned_detach(hmc, item, index, lpar_uuid)
+            for index, item in enumerate(disks.detach)
+        ]
+    except (HMCError, ValueError, TypeError) as exc:
+        raise OperationFailed(
+            f"the VIOS storage a disk change names could not be read "
+            f"({type(exc).__name__})"
+        ) from exc
+    if adds:
+        await _require_profile_jobs(hmc)
+    return {"add": adds, "detach": detaches}
+
+
+async def _planned_add(hmc: HMCClient, item: DiskAdd, index: int) -> dict[str, Any]:
+    vios_uuid, vg_uuid = item.vios_uuid.lower(), item.vg_uuid.lower()
+    groups = await hmc.list_volume_groups(vios_uuid)
+    if not any(str(g.get("UUID") or "").lower() == vg_uuid for g in groups):
+        raise OperationFailed(
+            f"disks.add[{index}]: volume group {vg_uuid} is not on VIOS {vios_uuid}"
+        )
+    if any(item.name in virtual_disk_names(group) for group in groups):
+        raise OperationFailed(
+            f"disks.add[{index}]: VIOS {vios_uuid} already has a virtual disk of that "
+            "name; reconfigure never resizes a disk"
+        )
+    return {
+        "vios_uuid": vios_uuid,
+        "vg_uuid": vg_uuid,
+        "name": item.name,
+        "capacity_mib": item.capacity_mib,
+    }
+
+
+async def _planned_detach(
+    hmc: HMCClient, item: DiskDetach, index: int, lpar_uuid: str
+) -> dict[str, Any]:
+    vios_uuid = item.vios_uuid.lower()
+    ids = _mapping_ids(await hmc.list_storage_mappings(vios_uuid), item.name, lpar_uuid)
+    if len(ids) != 1 or not ids[0]:
+        raise OperationFailed(
+            f"disks.detach[{index}]: VIOS {vios_uuid} has {len(ids)} identifiable "
+            f"mappings of that virtual disk to LPAR {lpar_uuid}; exactly one is needed"
+        )
+    return {"vios_uuid": vios_uuid, "name": item.name, "mapping_id": ids[0]}
+
+
+async def _require_profile_jobs(hmc: HMCClient) -> None:
+    """A disk add's force-save needs #637's profile jobs (ADR 0313 Decision 10)."""
+    console = await hmc.get_console_info()
+    resource = console.get("Resource", {}) if isinstance(console, dict) else {}
+    version = console_version(resource)
+    if version is None or version < PROFILE_JOB_MINIMUM:
+        raise OperationFailed(
+            "a disk add saves the partition's profile through a profile job, which needs "
+            "HMC 10.3.1060 or later; this console's level is "
+            f"{'unreadable' if version is None else '.'.join(map(str, version))}"
+        )
+
+
+def _disk_changes(disks: Mapping[str, Any], active: bool) -> list[dict[str, Any]]:
+    applied = "live" if active else "profile"
+    changes = [
+        {
+            "field": "disks.add",
+            "before": None,
+            "after": {
+                k: add[k] for k in ("vios_uuid", "vg_uuid", "name", "capacity_mib")
+            },
+            "applied": applied,
+            "reason": None,
+        }
+        for add in disks["add"]
+    ]
+    changes += [
+        {
+            "field": "disks.detach",
+            "before": {"vios_uuid": item["vios_uuid"], "name": item["name"]},
+            "after": None,
+            "applied": applied,
+            "reason": None,
+        }
+        for item in disks["detach"]
+    ]
+    return changes
+
+
 # ---------------------------------------------------------------------------
 # The operation body
 # ---------------------------------------------------------------------------
@@ -539,7 +786,7 @@ async def _make_plan(
                 f"another partition on managed system {system_uuid} already has the new name"
             )
     profile = record = None
-    if patch.writes_profile:
+    if patch.writes_profile or patch.disks is not None:
         record, profile = await _default_profile(hmc, view, system_uuid, lpar_uuid)
         if patch.memory_mib is not None:
             try:
@@ -552,6 +799,13 @@ async def _make_plan(
                     f"memory, or that bound could not be read ({type(exc).__name__})"
                 ) from exc
     plan = plan_changes(patch, view, profile, allow_disruption)
+    disks = None
+    if patch.disks is not None:
+        assert profile is not None
+        disks = await _disk_plan(hmc, patch.disks, view, lpar_uuid, allow_disruption)
+        if disks["add"]:
+            require_persistable(view, profile, plan["changes"])
+        plan["changes"] += _disk_changes(disks, view["state"] != _NOT_ACTIVATED)
     pending = any(c["applied"] == "pending_activation" for c in plan["changes"])
     plan |= {
         "system_uuid": system_uuid,
@@ -560,6 +814,8 @@ async def _make_plan(
         "profile_name": None if record is None else record.name,
         "profile_etag": None if record is None else record.etag,
         "activation": record.name if record is not None and pending else None,
+        "disks": disks,
+        "save": record.name if record is not None and disks and disks["add"] else None,
     }
     return plan
 
@@ -644,8 +900,94 @@ def _partition_write(
     return write
 
 
+def _unmap_write(hmc: HMCClient, lpar_uuid: str, item: Mapping[str, Any]) -> Write:
+    vios_uuid, mapping_id = item["vios_uuid"], item["mapping_id"]
+
+    async def write() -> Mapping[str, Any]:
+        try:
+            ids = _mapping_ids(
+                await hmc.list_storage_mappings(vios_uuid), item["name"], lpar_uuid
+            )
+        except (HMCError, ValueError, TypeError) as exc:
+            raise EffectNotApplied(
+                f"the mappings of VIOS {vios_uuid} could not be read "
+                f"({type(exc).__name__})"
+            ) from exc
+        if ids != [mapping_id]:
+            raise EffectNotApplied(
+                f"mapping {mapping_id} on VIOS {vios_uuid} no longer maps the planned "
+                f"disk to LPAR {lpar_uuid}; nothing was detached"
+            )
+        try:
+            await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
+        except ValueError as exc:
+            # The ADR 0168 checks before the single POST refused it.
+            raise EffectNotApplied(
+                f"the detach of mapping {mapping_id} was refused before submission"
+            ) from exc
+        return {"vios_uuid": vios_uuid, "mapping_id": mapping_id}
+
+    return write
+
+
+def _disk_write(hmc: HMCClient, add: Mapping[str, Any]) -> Write:
+    async def write() -> Mapping[str, Any]:
+        try:
+            await hmc.create_virtual_disk(
+                add["vios_uuid"], add["vg_uuid"], add["name"], add["capacity_mib"]
+            )
+        except ValueError as exc:
+            raise EffectNotApplied(
+                f"the disk create on VIOS {add['vios_uuid']} was refused before "
+                "submission"
+            ) from exc
+        return {
+            "vios_uuid": add["vios_uuid"],
+            "vg_uuid": add["vg_uuid"],
+            "disk_name": add["name"],
+            "capacity_mib": add["capacity_mib"],
+        }
+
+    return write
+
+
+def _map_write(hmc: HMCClient, lpar_uuid: str, add: Mapping[str, Any]) -> Write:
+    async def write() -> Mapping[str, Any]:
+        try:
+            await hmc.map_storage_to_lpar(
+                add["vios_uuid"], "VirtualDisk", add["name"], lpar_uuid, None
+            )
+        except ValueError as exc:
+            raise EffectNotApplied(
+                f"the mapping on VIOS {add['vios_uuid']} was refused before submission"
+            ) from exc
+        return {"vios_uuid": add["vios_uuid"], "storage_name": add["name"]}
+
+    return write
+
+
+def _ledger(ctx: OperationContext, plan: Mapping[str, Any], index: int) -> None:
+    """Own a disk this operation created (ADR 0322 Decision 2); a replay re-inserts."""
+    add = plan["disks"]["add"][index]
+    ctx.ledger_add(
+        f"added_disk:{index}",
+        DISK_LEDGER,
+        plan["system_uuid"],
+        plan["lpar_uuid"],
+        {
+            "vios_uuid": add["vios_uuid"],
+            "vg_uuid": add["vg_uuid"],
+            "disk_name": add["name"],
+        },
+    )
+
+
+def _index(key: str) -> int:
+    return int(key.rpartition(":")[2])
+
+
 def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
-    """The writes the plan needs, in ADR 0314 Decision 4's order."""
+    """The writes the plan needs, in ADR 0314 Decision 4's then ADR 0322's order."""
     lpar_uuid = plan["lpar_uuid"]
     steps = []
     if plan["profile_patch"]:
@@ -655,6 +997,12 @@ def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
         steps.append((CURRENT_KEY, CURRENT_KIND, f"lpar:{lpar_uuid}"))
     if plan["rename"]:
         steps.append((RENAME_KEY, RENAME_KIND, f"lpar:{lpar_uuid}"))
+    disks = plan.get("disks") or {"add": [], "detach": []}
+    for index, item in enumerate(disks["detach"]):
+        steps.append((f"unmap:{index}", UNMAP_KIND, f"vios:{item['vios_uuid']}"))
+    for index, add in enumerate(disks["add"]):
+        steps.append((f"disk:{index}", DISK_KIND, f"vios:{add['vios_uuid']}"))
+        steps.append((f"map:{index}", MAP_KIND, f"lpar:{lpar_uuid}"))
     return steps
 
 
@@ -682,6 +1030,8 @@ async def _apply(
     for key, kind, target in _steps(plan):
         recorded = ctx.recorded(key)
         if recorded is not None and recorded.status == "applied":
+            if kind == DISK_KIND:
+                _ledger(ctx, plan, _index(key))
             continue
         # ADR 0314 Decisions 6 and 7: target, owner and the plan's basis before every
         # write not yet applied.
@@ -701,11 +1051,46 @@ async def _apply(
                 "the current configuration",
                 resources=LparResources(**plan["current"]),
             )
-        else:
+        elif key == RENAME_KEY:
             write = _partition_write(
                 hmc, lpar_uuid, "the partition name", name=plan["rename"]["after"]
             )
+        elif kind == UNMAP_KIND:
+            write = _unmap_write(hmc, lpar_uuid, plan["disks"]["detach"][_index(key)])
+        elif kind == DISK_KIND:
+            write = _disk_write(hmc, plan["disks"]["add"][_index(key)])
+        else:
+            write = _map_write(hmc, lpar_uuid, plan["disks"]["add"][_index(key)])
         await ctx.effect(key, kind, target, write)
+        if kind == DISK_KIND:
+            _ledger(ctx, plan, _index(key))
+
+
+async def _persist(
+    ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
+) -> None:
+    """Force-save the added disks into the default profile (ADR 0322 Decision 3)."""
+    recorded = ctx.recorded(SAVE_KEY)
+    if recorded is not None and recorded.status == "applied":
+        return
+    lpar_uuid, system_uuid, name = plan["lpar_uuid"], plan["system_uuid"], plan["save"]
+    await _resolve(hmc, system_uuid, lpar_uuid)
+    view = await _read_view(hmc, lpar_uuid)
+    record, profile = await _default_profile(hmc, view, system_uuid, lpar_uuid)
+    if record.name != name or _stale(ctx, plan, view):
+        raise OperationFailed(
+            f"LPAR {lpar_uuid}'s default profile or state changed since the plan was "
+            "made; the added disks were not saved into a profile"
+        )
+    require_persistable(view, profile, [])
+    await ctx.effect(
+        SAVE_KEY,
+        profile_persist.KIND,
+        profile_persist.target(lpar_uuid, name),
+        lambda: profile_persist.save_current_over(
+            hmc, system_uuid, lpar_uuid, name, exclusive_writer_window=True
+        ),
+    )
 
 
 def _expected(plan: Mapping[str, Any]) -> tuple[dict[str, int], dict[str, int]]:
@@ -776,6 +1161,7 @@ def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
             "profile sync is on: a later current-configuration change by another writer "
             "can overwrite the pending profile values (ADR 0201)"
         )
+    warnings += _disk_warnings(ctx, plan)
     return {
         "system_uuid": plan["system_uuid"],
         "lpar_uuid": plan["lpar_uuid"],
@@ -784,6 +1170,33 @@ def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
         "activation": plan["activation"],
         "warnings": warnings,
     }
+
+
+def _disk_warnings(ctx: OperationContext, plan: Mapping[str, Any]) -> list[str]:
+    """Where added disks persist, and the recovery profiles the save kept (ADR 0322)."""
+    if not plan.get("save"):
+        return []
+    saved = ctx.recorded(SAVE_KEY)
+    if saved is not None and saved.status == "applied":
+        kept = (saved.identity or {}).get("recovery_profiles") or []
+        return [
+            (
+                f"the default profile {plan['save']} was overwritten with the current "
+                "configuration; its earlier content is kept in recovery profile(s) "
+                f"{', '.join(kept) or 'none reported'}. Delete them with "
+                "hmc_delete_partition_profile when no longer needed"
+            )
+        ]
+    adds = len(plan["disks"]["add"])
+    if not any(_touched(ctx, f"disk:{index}") for index in range(adds)):
+        return []
+    return [
+        (
+            "the added disks are in the current configuration only: resume to save them "
+            f"into profile {plan['save']}; abandon leaves them out of it, so a profile "
+            "activation drops their client adapters while the disks stay owned"
+        )
+    ]
 
 
 def reconfigure_body(
@@ -819,7 +1232,12 @@ def reconfigure_body(
             ctx.set_phase("applying")
             try:
                 await _apply(ctx, hmc, plan)
-                return await _verify(ctx, hmc, plan)
+                verified = await _verify(ctx, hmc, plan)
+                if verified.outcome != "completed" or not plan.get("save"):
+                    return verified
+                await _persist(ctx, hmc, plan)
+                result = _result(ctx, plan) | {"observed": verified.result["observed"]}
+                return BodyResult("completed", result)
             except Exception as exc:
                 if not any(_touched(ctx, key) for key, _, _ in _steps(plan)):
                     raise
@@ -886,6 +1304,57 @@ async def _classify_rename(
     )
 
 
+def _planned(ctx: OperationContext, effect: EffectRecord, part: str) -> dict[str, Any]:
+    return dict(_plan_of(ctx)["disks"][part][_index(effect.key)])
+
+
+async def _classify_unmap(
+    ctx: OperationContext, effect: EffectRecord
+) -> Classification:
+    item, lpar_uuid = _planned(ctx, effect, "detach"), _plan_of(ctx)["lpar_uuid"]
+    async with open_client(ctx.connection) as hmc:
+        entries = await hmc.list_storage_mappings(item["vios_uuid"])
+    if item["mapping_id"] in _mapping_ids(entries, item["name"], lpar_uuid):
+        return Classification("not_applied")
+    return Classification(
+        "applied", {"vios_uuid": item["vios_uuid"], "mapping_id": item["mapping_id"]}
+    )
+
+
+async def _classify_disk(ctx: OperationContext, effect: EffectRecord) -> Classification:
+    add, plan = _planned(ctx, effect, "add"), _plan_of(ctx)
+    async with open_client(ctx.connection) as hmc:
+        groups = await hmc.list_volume_groups(add["vios_uuid"])
+    group = [g for g in groups if str(g.get("UUID") or "").lower() == add["vg_uuid"]]
+    if len(group) != 1:
+        return Classification(
+            "needs_attention", reason="the volume group is unreadable"
+        )
+    if add["name"] not in virtual_disk_names(group[0]):
+        return Classification("not_applied")
+    identity = {
+        "vios_uuid": add["vios_uuid"],
+        "vg_uuid": add["vg_uuid"],
+        "disk_name": add["name"],
+    }
+    if _ledgered_elsewhere(ctx, DISK_LEDGER, plan["system_uuid"], identity):
+        return Classification(
+            "needs_attention", reason="the disk belongs to another operation"
+        )
+    return Classification("applied", {**identity, "capacity_mib": add["capacity_mib"]})
+
+
+async def _classify_map(ctx: OperationContext, effect: EffectRecord) -> Classification:
+    add, lpar_uuid = _planned(ctx, effect, "add"), _plan_of(ctx)["lpar_uuid"]
+    async with open_client(ctx.connection) as hmc:
+        entries = await hmc.list_storage_mappings(add["vios_uuid"])
+    if _mapping_ids(entries, add["name"], lpar_uuid):
+        return Classification(
+            "applied", {"vios_uuid": add["vios_uuid"], "storage_name": add["name"]}
+        )
+    return Classification("not_applied")
+
+
 # lpar.current_config has none: a DLPAR write cannot be told from a concurrent
 # change, so an open one always pauses for attention (H1 spec *Resume*).
 RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
@@ -894,4 +1363,10 @@ RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
         _profile_values, lambda connection: open_client(connection)
     ),
     RENAME_KIND: _classify_rename,
+    UNMAP_KIND: _classify_unmap,
+    DISK_KIND: _classify_disk,
+    MAP_KIND: _classify_map,
+    profile_persist.KIND: profile_persist.profile_save_classifier(
+        lambda connection: open_client(connection)
+    ),
 }
