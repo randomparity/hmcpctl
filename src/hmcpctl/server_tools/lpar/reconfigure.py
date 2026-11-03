@@ -98,8 +98,8 @@ def reconfigure_handler(
         wait_seconds: int = 60,
         profile: str | None = None,
     ) -> OperationRecord:
-        """Change an LPAR's processors, memory, name, boot or virtual disks, or detach
-        its installer media.
+        """Change an LPAR's processors, memory, name, boot, virtual disks or network
+        adapters, or detach its installer media.
 
         Durable (ADR 0190): the call returns within ``wait_seconds`` and the work
         continues; poll ``hmc_operation_status`` with ``request_id``. Every change is
@@ -144,19 +144,30 @@ def reconfigure_handler(
         partition is not activated or RMC is active: power it off, then detach. Media
         already detached or a boot order already set plans no change.
 
+        ``networks.add`` creates a client network adapter on ``port_vlan_id`` (a virtual
+        network must exist on it), with ``mac`` when given; ``networks.remove`` deletes
+        the one client network adapter carrying ``mac``, and no other. Adds run before
+        removals; then the default profile is overwritten with the current configuration,
+        as for ``disks.add``, so the change survives a profile activation. Refused while
+        the partition holds pending profile values or a ``pending_activation`` change, on
+        an HMC older than 10.3.1060, and on an activated partition unless it is running
+        with RMC active; a removal there also needs ``allow_disruption``. An add needs
+        ``hmc_add_network_adapter``, a removal ``hmc_delete_adapter``, and either
+        ``hmc_save_current_partition_profile`` and ``exclusive_writer_window=true``.
+
         Args:
             request_id: Caller id for this operation, 1-64 of A-Z a-z 0-9 . _ -.
             lpar_name_or_uuid: PartitionName or UUID; required for a new operation.
             system_name_or_uuid: The managed system holding it; required for a new
                 operation.
             patch: name, processors, memory_mib, boot (root_disk), installer_media
-                (detach) and/or disks; omitted fields are unchanged. Required for a
-                new operation.
+                (detach), disks and/or networks; omitted fields are unchanged. Required
+                for a new operation.
             allow_disruption: Permit live removal of memory or processors (default
                 false: a removal on a running partition is pending_activation), and a
-                disk detach from an activated partition.
+                disk detach or network removal on an activated partition.
             exclusive_writer_window: Required true when the patch has processors,
-                memory_mib, installer_media or disks.
+                memory_mib, installer_media, disks or networks.
             continuation: none, resume or abandon; a continuation needs only
                 request_id, and any other value given must match the operation's.
             wait_seconds: Seconds to wait before returning, 0-600.
@@ -175,10 +186,11 @@ def reconfigure_handler(
         model = ReconfigurePatch.model_validate(effective["patch"])
         if model.needs_window and effective["exclusive_writer_window"] is not True:
             raise PermissionError(
-                "processors and memory_mib write the partition's profile, and "
-                "installer_media and disks write VIOS storage: assert "
-                "exclusive_writer_window=true after coordinating other writers of this "
-                "partition, its profiles and its VIOS (ADR 0242, ADR 0321, ADR 0322)"
+                "processors and memory_mib write the partition's profile, "
+                "installer_media and disks write VIOS storage, and networks force-save "
+                "the profile: assert exclusive_writer_window=true after coordinating "
+                "other writers of this partition, its profiles and its VIOS (ADR 0242, "
+                "ADR 0321, ADR 0322, ADR 0325)"
             )
         by_kind = {
             "lpar": effective["lpar_name_or_uuid"],

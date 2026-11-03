@@ -348,3 +348,21 @@ async def test_network_listing_refuses_explicit_continuation(mock_hmc, headers, 
     async with HMCClient(make_config()) as client:
         with pytest.raises(HMCError, match="complete"):
             await client.list_adapters(identity, "ClientNetworkAdapter")
+
+
+@pytest.mark.asyncio
+async def test_network_listing_reads_an_empty_collection_when_allowed(mock_hmc):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
+    ).mock(return_value=httpx.Response(204, text=""))
+    async with HMCClient(make_config()) as client:
+        assert (
+            await client._network_adapter_creation_feed(identity, allow_empty=True)
+            == []
+        )

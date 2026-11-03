@@ -400,7 +400,7 @@ class AdaptersClient(Protocol):
     ) -> httpx.Response: ...
 
     async def _network_adapter_creation_feed(
-        self, lpar_uuid: str
+        self, lpar_uuid: str, *, allow_empty: bool = False
     ) -> list[dict[str, Any]]: ...
 
     async def list_child(

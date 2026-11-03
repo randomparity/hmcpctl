@@ -85,6 +85,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   and on an HMC older than 10.3.1060. `detach` removes one mapping and keeps the disk
   (ADR 0322, #1846).
 
+- `hmc_reconfigure_lpar` takes `patch.networks`. `add` creates a client network adapter on a
+  VLAN, with a pinned MAC when given; `remove` deletes the one client network adapter carrying
+  a MAC and no other. Both then overwrite the default profile with the current configuration,
+  as `disks.add` does, so the change survives a profile activation. A network change is
+  refused while the profile holds pending values, on an HMC older than 10.3.1060, and on an
+  activated partition unless it is running with RMC active; a removal there also needs
+  `allow_disruption` (ADR 0325, #1845).
+
 - Single-backing vNIC creation accepts priority, VLAN and MAC allowlists, automatic
   priority failover and an explicit MAC address through Python, CLI and MCP. Selected
   policy readback is independent of topology verification, including existing-match

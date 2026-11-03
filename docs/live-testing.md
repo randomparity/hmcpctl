@@ -1784,7 +1784,7 @@ execution does not establish POWER10/POWER11 hardware coverage.
 ## LPAR reconfigure persistence (arm 70)
 
 The opt-in `lpar-reconfigure` arm proves `hmc_reconfigure_lpar`'s persistence contract (ADRs
-0314 and 0322) on one owned scratch partition, using lpar-config's fixture, prefix and
+0314, 0322 and 0325) on one owned scratch partition, using lpar-config's fixture, prefix and
 teardown. It also uses one `lprcf<8 hex>` 1 GiB disk in the configured
 `LIVE_TEST_VDISK_VOLUME_GROUP_NAME`, which one VIOS must list with at least 1 GiB free. In
 order:
@@ -1803,11 +1803,17 @@ order:
    2560 MiB, virtual processors 1, and the name still `<name>-r`.
 7. After a further power off, a `disks.detach` must remove the run disk's mapping and leave
    the disk in its group.
+8. Still inactive, a `networks.add` on `LIVE_TEST_PROVISION_VLAN_ID` must read back `profile`,
+   and the profile must list the new adapter's slot in `virtual_eth_adapters`.
+9. A third profile activation to SMS must show that slot in the running partition.
+10. After a power off, a `networks.remove` of the adapter's MAC must read back `profile`, and
+    the profile must no longer list the slot.
 
 Live DLPAR is recorded as SKIP: it is not authorized on the boundary partition (operator,
 2026-11-02), and a scratch partition never reaches RMC active. A failed step ends the scenario;
 open operations are abandoned, the partition is powered off and the guarded inactive-only
-deletion and independent resource comparison follow even after failure. Teardown detaches any
+deletion and independent resource comparison follow even after failure; deleting the partition
+removes any client network adapter the run left. Teardown detaches any
 mapping the run disk still has and deletes the disk. Each VIOS server adapter the mapping
 created and the run left is recorded as a manual step with its `chhwres` command. Recovery
 reports a stranded `lprcf` volume, a mapping it backs, and a server adapter serving a

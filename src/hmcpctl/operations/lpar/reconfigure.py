@@ -1,10 +1,11 @@
-"""``hmc_reconfigure_lpar``'s planner, operation body and classifiers (ADRs 0314, 0322).
+"""``hmc_reconfigure_lpar``'s planner, operation body and classifiers (ADRs 0314, 0322, 0325).
 
 The planner turns one partition read and one profile read into a JSON plan that names
 every change and where it lands (``live``, ``profile``, ``pending_activation``) before
 anything is written. The body records that plan as an effect, then replays the writes
 it names: the default profile, the partition's current configuration, the rename, disk
-detaches and adds; after verification an add force-saves the default profile.
+detaches and adds, client network adapter adds and removals; after verification a disk add
+or any network change force-saves the default profile.
 Messages name partitions and profiles by UUID and never echo a caller's selector
 (``engine`` module note).
 """
@@ -39,6 +40,7 @@ from ..logical.models import EffectRecord
 from ..storage.resources import storage_mapping, volume_group
 from ..systems.fleet import read_system_entry
 from . import profile_persist
+from . import reconfigure_network as network
 from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
 from .power import open_client as _power_client
@@ -191,27 +193,29 @@ class ReconfigurePatch(BaseModel):
         description="Remove the mapping of the installer media provision mounted; the "
         "medium stays in the repository (ADR 0321).",
     )
+    networks: network.NetworkPatch | None = Field(
+        default=None,
+        description="Client network adapters to add by VLAN and to remove by MAC; both "
+        "are saved into the default profile (ADR 0325).",
+    )
 
     @model_validator(mode="after")
     def _not_empty(self) -> ReconfigurePatch:
-        fields = [getattr(self, field) for field in DELEGATED] + [self.disks]
-        if all(value is None for value in fields):
+        fields = [getattr(self, field) for field in DELEGATED]
+        if all(value is None for value in [*fields, self.disks, self.networks]):
             raise ValueError(
                 "patch needs at least one of name, processors, memory_mib, boot, "
-                "installer_media, disks"
+                "installer_media, disks, networks"
             )
         if self.name is not None and not self.name.strip():
             raise ValueError("patch.name must not be blank")
-        if (
-            self.disks is not None
-            and self.disks.add
-            and (self.boot or self.installer_media)
-        ):
+        saves = (self.disks is not None and self.disks.add) or self.networks is not None
+        if saves and (self.boot or self.installer_media):
             # The installer legs skip the plan's state basis (ADR 0321 Decision 4), and
             # the save after them needs it, so the two are separate requests.
             raise ValueError(
-                "disks.add cannot share a patch with boot or installer_media; "
-                "split the patch"
+                "disks.add and networks cannot share a patch with boot or "
+                "installer_media; split the patch"
             )
         return self
 
@@ -226,6 +230,7 @@ class ReconfigurePatch(BaseModel):
             self.writes_profile
             or self.installer_media is not None
             or self.disks is not None
+            or self.networks is not None
         )
 
 
@@ -236,6 +241,9 @@ def delegated_tools(patch: ReconfigurePatch) -> tuple[str, ...]:
     if patch.disks is not None:
         tools += DISK_ADD_TOOLS if patch.disks.add else ()
         tools += DISK_DETACH_TOOLS if patch.disks.detach else ()
+    if patch.networks is not None:
+        tools += network.ADD_TOOLS if patch.networks.add else ()
+        tools += network.REMOVE_TOOLS if patch.networks.remove else ()
     return tuple(dict.fromkeys(tools))
 
 
@@ -871,7 +879,7 @@ async def _make_plan(
                 f"another partition on managed system {system_uuid} already has the new name"
             )
     profile = record = None
-    if patch.writes_profile or patch.disks is not None:
+    if patch.writes_profile or patch.disks is not None or patch.networks is not None:
         record, profile = await _default_profile(hmc, view, system_uuid, lpar_uuid)
         if patch.memory_mib is not None:
             try:
@@ -905,6 +913,19 @@ async def _make_plan(
         if disks["add"]:
             require_persistable(view, profile, plan["changes"])
         plan["changes"] += _disk_changes(disks, view["state"] != _NOT_ACTIVATED)
+    networks = None
+    if patch.networks is not None:
+        assert profile is not None
+        networks = await _network_plan(
+            hmc,
+            patch.networks,
+            view=view,
+            profile=profile,
+            plan=plan,
+            system_uuid=system_uuid,
+            lpar_uuid=lpar_uuid,
+            allow_disruption=allow_disruption,
+        )
     pending = any(c["applied"] == "pending_activation" for c in plan["changes"])
     plan |= {
         "system_uuid": system_uuid,
@@ -916,9 +937,42 @@ async def _make_plan(
         "boot": boot,
         "media": media,
         "disks": disks,
-        "save": record.name if record is not None and disks and disks["add"] else None,
+        "networks": networks,
+        "save": record.name
+        if record is not None and ((disks and disks["add"]) or networks)
+        else None,
     }
     return plan
+
+
+async def _network_plan(
+    hmc: HMCClient,
+    patch: network.NetworkPatch,
+    *,
+    view: dict[str, Any],
+    profile: dict[str, Any],
+    plan: dict[str, Any],
+    system_uuid: str,
+    lpar_uuid: str,
+    allow_disruption: bool,
+) -> dict[str, Any]:
+    """The network writes, after the persistence guard every network change needs.
+
+    Adds and removals alike end in the force-save (ADR 0325 Decision 4), so the guard
+    and the console level apply to both; the plan's changes gain the network entries.
+    """
+    planned = await network.plan_networks(
+        hmc,
+        patch,
+        view,
+        system_uuid,
+        lpar_uuid,
+        allow_disruption=allow_disruption,
+    )
+    require_persistable(view, profile, plan["changes"])
+    await _require_profile_jobs(hmc)
+    plan["changes"] += network.network_changes(planned, view["state"] != _NOT_ACTIVATED)
+    return planned
 
 
 async def _other_names(hmc: HMCClient, system_uuid: str, lpar_uuid: str) -> list[str]:
@@ -1104,6 +1158,7 @@ def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     for index, add in enumerate(disks["add"]):
         steps.append((f"disk:{index}", DISK_KIND, f"vios:{add['vios_uuid']}"))
         steps.append((f"map:{index}", MAP_KIND, f"lpar:{lpar_uuid}"))
+    steps += network.steps(plan)
     if plan.get("boot"):
         steps.append((BOOT_KEY, BOOT_KIND, f"lpar:{lpar_uuid}"))
     if plan.get("media"):
@@ -1152,6 +1207,8 @@ def _write_for(hmc: HMCClient, plan: Mapping[str, Any], key: str, kind: str) -> 
         return _unmap_write(hmc, lpar_uuid, plan["disks"]["detach"][_index(key)])
     if kind == DISK_KIND:
         return _disk_write(hmc, plan["disks"]["add"][_index(key)])
+    if kind in (network.ADD_KIND, network.REMOVE_KIND):
+        return network.write_for(hmc, plan, key)
     return _map_write(hmc, lpar_uuid, plan["disks"]["add"][_index(key)])
 
 
@@ -1190,7 +1247,11 @@ async def _apply(
 async def _persist(
     ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
 ) -> None:
-    """Force-save the added disks into the default profile (ADR 0322 Decision 3)."""
+    """Force-save added disks and network changes into the default profile.
+
+    ADR 0322 Decision 3; a network removal's freed slot must leave the profile, and a
+    save with no add may leave it without a virtual adapter (ADR 0325 Decision 4).
+    """
     recorded = ctx.recorded(SAVE_KEY)
     if recorded is not None and recorded.status == "applied":
         return
@@ -1209,9 +1270,27 @@ async def _persist(
         profile_persist.KIND,
         profile_persist.target(lpar_uuid, name),
         lambda: profile_persist.save_current_over(
-            hmc, system_uuid, lpar_uuid, name, exclusive_writer_window=True
+            hmc,
+            system_uuid,
+            lpar_uuid,
+            name,
+            exclusive_writer_window=True,
+            removed_slots=network.removed_slots(plan),
+            require_adapter=_adds_adapter(plan),
         ),
     )
+
+
+def _adds_adapter(plan: Mapping[str, Any]) -> bool:
+    """Whether the plan adds a client adapter: a disk add's vSCSI, or a network add."""
+    disks = plan.get("disks") or {"add": []}
+    return bool(disks["add"]) or network.adds(plan)
+
+
+def _readback_options(ctx: OperationContext) -> tuple[tuple[str, ...], bool]:
+    """The save readback's options for the recorded plan (ADR 0325 Decision 4)."""
+    plan = _plan_of(ctx)
+    return network.removed_slots(plan), _adds_adapter(plan)
 
 
 def _expected(plan: Mapping[str, Any]) -> tuple[dict[str, int], dict[str, int]]:
@@ -1255,11 +1334,14 @@ async def _verify(
         seen_current = _observed(view, want_current)
         renamed = plan["rename"] is None or view["name"] == plan["rename"]["after"]
         legs, seen_legs = await observed(hmc, plan)
+        networked, seen_networks = await network.observed_networks(ctx, hmc, plan)
+        seen_legs |= seen_networks
         done = (
             seen_profile == want_profile
             and seen_current == want_current
             and renamed
             and legs
+            and networked
         )
         if done or time.monotonic() >= deadline:
             break
@@ -1302,6 +1384,10 @@ def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
             "can overwrite the pending profile values (ADR 0201)"
         )
     warnings += _disk_warnings(ctx, plan)
+    saved = ctx.recorded(SAVE_KEY)
+    warnings += network.warnings(
+        ctx, plan, saved is not None and saved.status == "applied"
+    )
     return {
         "system_uuid": plan["system_uuid"],
         "lpar_uuid": plan["lpar_uuid"],
@@ -1327,7 +1413,7 @@ def _disk_warnings(ctx: OperationContext, plan: Mapping[str, Any]) -> list[str]:
                 "hmc_delete_partition_profile when no longer needed"
             )
         ]
-    adds = len(plan["disks"]["add"])
+    adds = len((plan.get("disks") or {"add": []})["add"])
     if not any(_touched(ctx, f"disk:{index}") for index in range(adds)):
         return []
     return [
@@ -1360,7 +1446,7 @@ def reconfigure_body(
                 if len(json.dumps(made, sort_keys=True)) > store.MAX_IDENTITY_BYTES:
                     raise OperationFailed(
                         "the plan exceeds the operation store's effect identity bound; "
-                        "use a shorter or ASCII partition name"
+                        "use a shorter or ASCII partition name, or split the patch"
                     )
 
                 async def record() -> Mapping[str, Any]:
@@ -1509,7 +1595,13 @@ RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
     DISK_KIND: _classify_disk,
     MAP_KIND: _classify_map,
     profile_persist.KIND: profile_persist.profile_save_classifier(
-        lambda connection: open_client(connection)
+        lambda connection: open_client(connection), _readback_options
+    ),
+    network.ADD_KIND: network.add_classifier(
+        _plan_of, lambda connection: open_client(connection)
+    ),
+    network.REMOVE_KIND: network.remove_classifier(
+        _plan_of, lambda connection: open_client(connection)
     ),
     BOOT_KIND: boot_classifier(_plan_of, lambda connection: open_client(connection)),
     MEDIA_KIND: media_classifier(_plan_of, lambda connection: open_client(connection)),

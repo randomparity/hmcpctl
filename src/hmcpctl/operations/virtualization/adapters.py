@@ -115,7 +115,7 @@ _VSI_ROUTE = (
 )
 
 
-def _classified_add_refusal(error: HMCError, vsi_selected: bool) -> HMCError | None:
+def classified_add_refusal(error: HMCError, vsi_selected: bool) -> HMCError | None:
     """Return the add's known HMC refusal with its next step (ADR 0315), or None."""
     if error.status_code != 500:
         return None
@@ -218,7 +218,7 @@ async def add_network_adapter(
             **selected,
         )
     except HMCError as error:
-        refusal = _classified_add_refusal(
+        refusal = classified_add_refusal(
             error, any(name.startswith("vsi_") for name in selected)
         )
         if refusal is None:
