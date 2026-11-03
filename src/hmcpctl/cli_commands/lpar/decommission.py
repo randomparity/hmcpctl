@@ -51,7 +51,10 @@ def lpars_decommission(
     continuation: str = typer.Option(
         "none",
         "--continuation",
-        help="none, resume or abandon; a continuation reuses the recorded request",
+        help=(
+            "none, resume or abandon; a continuation reuses the recorded request and "
+            "ignores the option flags"
+        ),
     ),
     system: str | None = typer.Option(
         None,
@@ -103,6 +106,11 @@ def lpars_decommission(
     if continuation != "none":
         if dry_run:
             usage_error("--dry-run cannot continue an operation")
+        if name_or_uuid is not None or system is not None:
+            usage_error(
+                "a continuation takes the recorded partition and system; omit the "
+                "partition argument and --system"
+            )
         if continuation == "resume" and not yes:
             confirm_on_stderr(
                 f"Resume decommission request '{terminal_field(request_id, err=True)}'? "
