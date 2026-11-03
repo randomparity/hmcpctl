@@ -31,6 +31,7 @@ from ...ssh.affinity import (
     validate_minimum_affinity_policy,
 )
 from ...ssh.lpar import DEFAULT_PROFILE_NAME, validate_caller_token
+from ...ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
 from ...ssh.selectors import resolve_ssh_names
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import console_version, leaf_text
@@ -41,6 +42,7 @@ from ..affinity.rest import (
 )
 from ..logical.models import OperationRecord
 from ..storage.resources import create_virtual_disk, resolve_volume_group_uuid
+from ..virtualization.pcie import list_dedicated_slots
 from .activation import submit_power_on_lpar
 from .assignments import (
     LparPcieAssignments,
@@ -478,6 +480,43 @@ def validate_provision_assignments(assignments: LparPcieAssignments) -> None:
             )
 
 
+async def _check_dedicated_slots_free(
+    hmc: HMCClient, system_name_or_uuid: str, assignments: LparPcieAssignments
+) -> None:
+    """Refuse a dedicated slot that is unknown, owned, or listed by any profile.
+
+    Found only after every other write otherwise: activation leaves out a slot a
+    running partition owns, since it is written not required, and the specialist
+    refuses one another profile lists (ADR 0318).
+    """
+    if not assignments.dedicated:
+        return
+    inventory = await list_dedicated_slots(hmc, system_name_or_uuid)
+    owners = {slot.drc_index: slot.owner_lpar for slot in inventory.items}
+    rows = await read_profile_io_slot_rows(hmc.config, inventory.system)
+    for item in assignments.dedicated:
+        drc = item.drc_index
+        if drc not in owners:
+            raise ValueError(f"dedicated slot {drc} is not in the system's inventory")
+        if owners[drc] is not None:
+            raise ValueError(f"dedicated slot {drc} is owned by LPAR {owners[drc]!r}")
+        holders = sorted(
+            {
+                row["lpar_name"]
+                for row in rows
+                if drc in row["io_slots"]
+                and any(
+                    s.drc_index == drc for s in parse_profile_io_slots(row["io_slots"])
+                )
+            }
+        )
+        if holders:
+            raise ValueError(
+                f"dedicated slot {drc} is listed by a profile of LPAR "
+                f"{', '.join(holders)}; remove it there first"
+            )
+
+
 def validate_provision_storage(storage: ProvisionStorage) -> None:
     """Refuse a new-disk request that names no volume group or a non-virtual kind."""
     if storage.capacity_mib is None:
@@ -583,6 +622,7 @@ async def _preflight_provision_request(
     await prevalidate_lpar_pcie_assignments(
         hmc, system_name_or_uuid, request.assignments
     )
+    await _check_dedicated_slots_free(hmc, system_name_or_uuid, request.assignments)
 
 
 def _provision_step_names(

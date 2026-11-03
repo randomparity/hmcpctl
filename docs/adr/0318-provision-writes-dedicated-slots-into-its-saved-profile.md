@@ -33,9 +33,10 @@ of the #1390 design.
 
 ## Consequences
 
-- With `power_on`, the activated partition owns each requested slot that no running partition
-  owns. The specialist writes the slot as not required (`<drc>/none/0`) and refuses one another
-  partition's profile lists; provision does not re-read ownership after activation.
+- The preconditions refuse, before anything is recorded, a slot missing from the inventory,
+  owned by a partition, or listed by any profile: the specialist writes the slot not required
+  (`<drc>/none/0`), so activation would leave out an owned slot, and it refuses a listed one
+  only after every other write. Provision does not re-read ownership after activation.
 - A failed slot write settles `uncertain` and resume cannot retry it. After `abandon`, a human
   assigns the slot to the `hmcpctl_…` profile (`hmc_assign_dedicated_pcie_slot`), makes it the
   default (`hmc_set_default_partition_profile`) and powers on with it.

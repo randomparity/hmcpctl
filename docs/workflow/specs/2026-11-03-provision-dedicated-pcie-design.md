@@ -10,7 +10,8 @@ saves (ADR 0313), so the refusal blocks a configuration it can carry. Decision: 
 
 - `validate_provision_assignments` (operations/lpar/provision.py) refuses a dedicated item whose
   `profile_name` is not `default_profile`, naming ADR 0318. It still runs at the operation, MCP
-  tool and CLI entry points before any HMC call, and on dry runs.
+  tool and CLI entry points before any HMC call, and on dry runs. The preconditions also
+  refuse a slot missing from the inventory, owned by a partition, or listed by any profile.
 - `_Run._assignments()` drops dedicated items (and SR-IOV items when physical I/O carried them).
 - `_Run._persist` runs a `dedicated` leg after `profile_readback` when dedicated items exist:
   `apply_validated_lpar_pcie_assignments` with each item's `profile_name` replaced by the saved
@@ -39,9 +40,9 @@ assertion is listed only when the slot was sent. Decommission deletes P, which f
 2. **Invariants and assets:** a slot owned by another partition is never taken; a slot is
    written only to a partition this operation created and stamped; a resumed operation never
    reports `configured` without the slot write applied.
-3. **Accepted:** a slot a running partition owns may be left out of the activation, since it
-   is written not required, and provision does not re-read ownership (the live arm picks a free
-   slot); a slot also named in `physical_io.io_slots` in another form makes the specialist
+3. **Accepted:** a slot taken by another writer between the preconditions and activation may be
+   left out of the activation, since it is written not required, and provision does not re-read
+   ownership (no fence, ADR 0190); a slot also named in `physical_io.io_slots` in another form makes the specialist
    refuse, pausing the run; an interrupted slot write needs a human (no classifier, ADR 0318).
 4. **Covered elsewhere:** slot-environment admission (ADR 0165, `prevalidate`); removing the
    partition and its profiles (decommission, #1847/#1848).

@@ -1482,6 +1482,10 @@ def _provision_with(apply, **overrides):
             new=AsyncMock(),
         ),
         patch(
+            "hmcpctl.operations.lpar.provision._check_dedicated_slots_free",
+            new=AsyncMock(),
+        ),
+        patch(
             "hmcpctl.operations.lpar.provision_operation"
             ".apply_validated_lpar_pcie_assignments",
             new=apply,
@@ -1559,12 +1563,67 @@ def test_a_raising_slot_write_reports_its_own_step(monkeypatch, mock_hmc, persis
     assert result.operation.outcome == "needs_attention"
 
 
+def _slot_reads(monkeypatch, owner, io_slots):
+    from hmcpctl.operations.lpar import provision as provision_module
+
+    async def inventory(_hmc, _system):
+        return SimpleNamespace(
+            system="sys1",
+            items=[SimpleNamespace(drc_index=_SLOT, owner_lpar=owner)],
+        )
+
+    async def rows(_config, system):
+        assert system == "sys1"
+        return [
+            {"lpar_name": "lpar-b", "name": "default_profile", "io_slots": io_slots}
+        ]
+
+    monkeypatch.setattr(provision_module, "list_dedicated_slots", inventory)
+    monkeypatch.setattr(provision_module, "read_profile_io_slot_rows", rows)
+    return provision_module._check_dedicated_slots_free
+
+
+@pytest.mark.parametrize(
+    ("owner", "io_slots", "assignments", "match"),
+    [
+        ("lpar-b", "none", _DEDICATED, "owned by LPAR 'lpar-b'"),
+        (None, f"{_SLOT}/none/0", _DEDICATED, "listed by a profile of LPAR lpar-b"),
+        (
+            None,
+            "none",
+            LparPcieAssignments(
+                dedicated=(DedicatedPcieAssignment("default_profile", "2101FFFF"),)
+            ),
+            "not in the system's inventory",
+        ),
+    ],
+    ids=["owned", "listed", "unknown"],
+)
+def test_an_unavailable_slot_is_refused_before_any_write(
+    monkeypatch, owner, io_slots, assignments, match
+):
+    check = _slot_reads(monkeypatch, owner, io_slots)
+    with pytest.raises(ValueError, match=match):
+        asyncio.run(check(SimpleNamespace(config=None), "sys1", assignments))
+
+
+def test_a_free_slot_passes_the_preflight(monkeypatch):
+    check = _slot_reads(monkeypatch, None, "21010021/none/0")
+    asyncio.run(check(SimpleNamespace(config=None), "sys1", _DEDICATED))
+
+
 def test_a_dry_run_lists_the_slot_after_the_readback(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
-    with patch(
-        "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
-        new=AsyncMock(),
+    with (
+        patch(
+            "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
+            new=AsyncMock(),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.provision._check_dedicated_slots_free",
+            new=AsyncMock(),
+        ),
     ):
         result = hmc_provision_lpar(
             **_provision_args(dry_run=True, assignments=_DEDICATED)
