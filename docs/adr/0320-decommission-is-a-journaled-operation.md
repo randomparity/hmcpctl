@@ -28,7 +28,10 @@ and storage retention stand; only how the writes are recorded changes. #1848 add
 
 1. **Inputs.** `request_id` is required on the MCP tool and as the CLI's `--request-id`, with
    no compatibility path. Both add `continuation` (`none` / `resume` / `abandon`); the tool adds
-   `wait_seconds`. ADR 0027's inputs stay and are recorded with the request. `dry_run` validates
+   `wait_seconds`. ADR 0027's inputs stay and are recorded with the request, but default to
+   `None` in the signatures and take their old defaults (`immediate=false`,
+   `ownership_override=false`, `timeout_seconds=300`, `poll_interval=5`) only for a new request,
+   so a continuation that names none of them matches the record. `dry_run` validates
    `request_id` and stops: no operation, lock or guard. `dry_run` with a continuation is refused.
 2. **Authorization stays the tool's own.** The security keeps kind `lpar` and exhaustive
    targets; both selectors become optional so a continuation can omit them. Under `all-targets`
@@ -37,7 +40,8 @@ and storage retention stand; only how the writes are recorded changes. #1848 add
    differs from the record. No delegated specialist is added.
 3. **Preconditions refuse before recording.** A new request runs the dry-run inventory, ownership
    check included, and raises its error to the caller with nothing recorded. A repeat or a
-   continuation does not.
+   continuation does not. An inventory that reads but is incomplete (unproven vSCSI mappings) is
+   not an error: as today it blocks the writes, and the recorded run ends `needs_attention`.
 4. **Effects**, keyed by the resource each removes, so a re-read inventory that no longer lists a
    removed resource cannot shift a later key:
 
@@ -56,20 +60,32 @@ and storage retention stand; only how the writes are recorded changes. #1848 add
    continues from a fresh inventory, re-checking ownership. A run whose inventory is incomplete
    or whose state check fails ends `needs_attention` without an open effect. A clean run ends
    `completed`. Once `delete_lpar` is applied a run writes and reads nothing and ends
-   `completed`. Phases are `validating` and `tearing_down`.
-6. **Guard.** The body takes the ADR 0190 partition guard on the resolved system and partition
-   UUIDs before its first write; a partition another operation holds ends `failed`.
-7. **Result.** `DecommissionResult` keeps its fields and adds `operation`. The body's result is
-   returned when the outcome is `completed`, or `needs_attention` with steps that agree with the
-   journal; otherwise the steps are rebuilt from the effects (applied → `ok`, else `error`),
-   `workflow_completed` is false and `resource_deleted` follows `delete_lpar`.
+   `completed`. Phases are `validating` and `tearing_down`. An error raised out of the inventory
+   or an ownership check pauses the run with a message naming only the partition UUID (or that
+   it was unresolved) and the error type, since engine warnings carry no request arguments.
+6. **Guard.** The body takes the ADR 0190 partition guard on the lower-cased system and partition
+   UUIDs as soon as its inventory resolves them, before any pause, as power and provision do; a
+   partition another operation holds ends `failed`. A resume whose selector now resolves to
+   another partition is refused by the guard instead of acting on it.
+7. **Result.** `DecommissionResult` keeps its fields and adds `operation`. The stored body result
+   is returned when it is a complete result and the outcome is `completed`, or `needs_attention`
+   with steps that agree with the journal. Otherwise the result is rebuilt: each effect maps to
+   its step by key prefix (`power_off`, `unmap.*` → `detach_storage_mappings`, `adapter.*` →
+   `detach_adapters`, `delete_lpar`), a step is `ok` only when all its effects are applied, and
+   effects still in flight on a running record are left out. `resource_deleted` follows
+   `delete_lpar`, `workflow_completed` is true only for `completed`, `lpar_uuid` is the guarded
+   partition (empty before a guard), `warnings` are the record's, and `blast_radius` is the stored
+   result's when one exists, else the partition UUID with empty members and a warning that the
+   inventory is unavailable. A resume after the delete returns this rebuilt form.
 
 ## Consequences
 
 - Callers must send `request_id`; a repeat returns the same operation and never powers off,
   detaches or deletes twice. The CLI is refused while another process holds the execution lock.
 - A failed PowerOff or detach now pauses for `resume` or `abandon` instead of returning; the
-  partition stays guarded until then.
+  partition stays guarded until then. A PowerOff that failed or timed out with the partition
+  still active pauses on every resume (ADR 0199's rule): abandon, then start a new `request_id`,
+  with `immediate` if wanted.
 - After a resume, `blast_radius` describes what remained at that run, not the first inventory;
   the journal holds what was removed.
 - A result larger than the store's 64 KiB bound pauses the operation for attention.
@@ -91,5 +107,7 @@ and storage retention stand; only how the writes are recorded changes. #1848 add
   authorization contract the issue does not ask for.
 - **Return the bare operation record, as power does.** judgment: fit. The H1 row keeps
   `DecommissionResult` and adds the operation fields; the live arm reads its fields.
-- **Persist the first inventory and replay it.** judgment: complexity. The engine has no store
-  for a body's plan, and a fresh inventory re-checks ownership and what is still attached.
+- **Persist the first inventory and replay it.** verified: a body can store a plan as an applied
+  effect identity (`operations/lpar/reconfigure.py` `PLAN_KEY`, main `35174c09`), but an identity
+  is bounded at 4 KiB (`store.MAX_IDENTITY_BYTES`), which a blast radius with mapping evidence can
+  exceed; and a fresh inventory re-checks ownership and what is still attached.
