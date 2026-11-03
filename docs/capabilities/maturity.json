@@ -6478,6 +6478,32 @@
                 "constraint": "one mapping to this partition only; the disk and its ledger entry stay; allow_disruption on an activated partition"
               }
             ]
+          },
+          {
+            "variant": "networks",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "required true"
+              },
+              {
+                "name": "patch.networks.add",
+                "constraint": "not activated: client network adapter on port_vlan_id, optional pinned mac; force-saves the default profile; refused with pending profile values or HMC below 10.3.1060; native persistence proof pending (#1845)"
+              },
+              {
+                "name": "patch.networks.remove",
+                "constraint": "not activated: the one adapter carrying mac; its slot leaves the default profile by force-save; native proof pending (#1845)"
+              }
+            ]
+          },
+          {
+            "variant": "networks-live",
+            "parameters": [
+              {
+                "name": "patch.networks",
+                "constraint": "activated partition: running with RMC active only; a removal needs allow_disruption; no native DLPAR proof"
+              }
+            ]
           }
         ]
       },
