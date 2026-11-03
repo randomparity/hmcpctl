@@ -7708,7 +7708,7 @@ def test_scenarios_declare_their_expected_assertion_ids():
             "storage-mapping-listed",
             "partition-activated",
             "saved-profile-activated",
-            "dedicated-slot-refused",
+            "pcie-slot-owned",
             "dry-run-inventoried",
             "dry-run-changed-nothing",
             "resource-deleted",
