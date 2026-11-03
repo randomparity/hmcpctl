@@ -926,10 +926,12 @@ def test_install_plan_adds_media_changes_and_unverified() -> None:
     plan = _plan(FakeHMC(World()), _install_request(_prepared()))
     assert plan.plan_digest is not None
     kinds = [change.kind for change in plan.intended_changes]
-    assert kinds[-5:] == [
+    # ADR 0319: the media is mounted before the profile is written.
+    assert kinds[-6:] == [
         "bind_media",
         "upload_media",
         "mount_media",
+        "write_profile",
         "set_boot_order",
         "power_on",
     ]

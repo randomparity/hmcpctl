@@ -1042,15 +1042,21 @@ def _intended_changes(
     if any(counts.values()):
         detail = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
         steps.append(("assign_pcie", system, f"apply {detail}, in order"))
+    if request.install is not None:
+        # Mounted before the save, so the saved profile keeps the media (ADR 0319).
+        steps.extend(
+            [
+                ("bind_media", vios, f"bind {request.install.media.mode} media"),
+                ("upload_media", vios, "upload the installer media"),
+                ("mount_media", vios, "mount the installer media"),
+            ]
+        )
     steps.append(
         ("write_profile", system, "write and read back the partition profile (#637)")
     )
     if request.install is not None:
         steps.extend(
             [
-                ("bind_media", vios, f"bind {request.install.media.mode} media"),
-                ("upload_media", vios, "upload the installer media"),
-                ("mount_media", vios, "mount the installer media"),
                 ("set_boot_order", system, "boot installer media first"),
                 ("power_on", system, _power_detail(request.boot)),
             ]
