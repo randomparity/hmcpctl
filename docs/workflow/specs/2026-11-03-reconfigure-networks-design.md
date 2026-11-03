@@ -22,18 +22,26 @@ until #1846 is on `main`.
 
 **Patch.** `ReconfigurePatch.networks` (optional, `extra="forbid"`):
 
-- `add[]` (0–4): `port_vlan_id` (StrictInt, 1–4094); `mac` (optional, lower-case colon form, a
-  unicast address; provision's `check_mac` rule).
+- `add[]` (0–4): `port_vlan_id` (StrictInt, 1–4094); `mac` (optional). A MAC is lower-case
+  colon form with the group bit clear: `install_media._MAC` plus `check_mac`'s group-bit test,
+  restated in the model, because `check_mac` itself refuses any MAC without prepared media.
 - `remove[]` (0–4): `mac` (required, the same form).
-- At least one item; no MAC twice across both lists; two adds without `mac` never share a VLAN.
+- At least one item; no MAC twice across both lists; an add without `mac` shares its VLAN with no
+  other add, pinned or not.
 
 **Plan** (phase `validating`, before any write). A patch with `networks` reads the default
 profile under ADR 0314 Decision 2, then:
 
-- reads the partition's client network adapters once. It records each adapter's UUID, MAC
-  (`mac_colon_form`), VLAN and slot as `networks.baseline`;
-- a removal needs exactly one baseline adapter with its MAC. The plan records `{mac,
+- reads the partition's client network adapters once, through
+  `hmc.list_child("LogicalPartition", lpar, "ClientNetworkAdapter")`. That read maps an empty
+  (HTTP 204) collection to `[]`; `list_adapters` would route to the creation-proof feed, which
+  treats 204 as unavailable. Every network reader below uses the same `list_child` read. MACs
+  compare through `mac_colon_form`;
+- a removal needs exactly one current adapter with its MAC. The plan records `{mac,
   adapter_uuid, port_vlan_id, slot}`; zero or several matches are refused;
+- an unpinned add records, as its own `baseline`, the UUIDs of the adapters already on its
+  VLAN. Nothing else about the inventory is recorded, which keeps the plan inside
+  `store.MAX_IDENTITY_BYTES`;
 - an add with `mac` is refused when a baseline adapter already has that MAC;
 - an add's VLAN must name a virtual network on the system (`provision.check_vlan_exists`);
 - the console must be at HMC 10.3.1060 or later (`_require_profile_jobs`);
@@ -48,27 +56,29 @@ profile under ADR 0314 Decision 2, then:
   removals' slots.
 
 **Effects** (keys and kinds are persisted, ADR 0195). They come after ADR 0322's disk steps and
-before `profile_save`:
+before `profile_save`, adds first, so no new adapter can take a slot that a removal frees:
 
 | Key | Kind | Target | Identity |
 | --- | --- | --- | --- |
-| `network_remove:<i>` | `lpar.client_network_adapter_remove` | `lpar:<uuid>` | `{adapter_uuid, mac, slot}` |
 | `network_add:<i>` | `lpar.client_network_adapter` | `lpar:<uuid>` | `{adapter_uuid, mac, slot, port_vlan_id}` |
+| `network_remove:<i>` | `lpar.client_network_adapter_remove` | `lpar:<uuid>` | `{adapter_uuid, mac, slot}` |
 
 Each write, like ADR 0322's disk writes, first re-runs the ADR 0011 check and the plan-basis
 staleness check (`_stale`).
 
-- **Remove write.** It re-lists the adapters. The planned UUID must still carry the planned
-  MAC, otherwise `EffectNotApplied`. It then calls `hmc.delete_adapter(lpar,
-  "ClientNetworkAdapter", uuid)`. An `HMCError` is followed by one re-list: still listed →
-  `EffectNotApplied` naming the HTTP status; gone → applied, with `error_status` in the
-  identity and a result warning.
 - **Add write.** It calls `operations.virtualization.adapters.add_network_adapter` with the
   partition UUID, the system UUID, the VLAN and `mac_address` (colons stripped). That helper
-  keeps ADR 0315's REST0269 and HSCLB021 guidance. An `HMCError` or `ValueError` raised before
-  the add returns is `EffectNotApplied` when one re-list shows no new adapter on the VLAN. The
-  identity comes from the response. When the response carries no MAC or UUID, the identity is
-  the one adapter on the VLAN that is absent from the baseline.
+  keeps ADR 0315's REST0269 and HSCLB021 guidance. A `ValueError` or `PermissionError` (raised
+  before submission) or a classified ADR 0315 refusal is `EffectNotApplied`. Any other error
+  propagates and leaves the effect open for the classifier. The identity comes from the response.
+  When the response lacks a UUID or MAC, the identity is the one adapter the classifier rule
+  finds; anything else raises `HMCError`, leaving the effect open.
+- **Remove write.** It re-lists the adapters. When the planned UUID is absent, the write
+  returns the planned identity: the removal already landed. When the UUID is listed with another
+  MAC, it raises `EffectNotApplied`. Otherwise it calls `hmc.delete_adapter(lpar,
+  "ClientNetworkAdapter", uuid)`. When that call raises `HMCError`, one re-list decides: if the
+  UUID is gone, the write returns the identity with `error_status` and the result warns; in every
+  other case the original error propagates and the effect stays open.
 - **Classifiers.** A removal is `not_applied` when the UUID is listed with the MAC, `applied`
   when the UUID is absent, and `needs_attention` when the UUID is listed with another MAC. An
   add with a pinned MAC is `applied` when an adapter has that MAC and `not_applied` otherwise.
@@ -79,22 +89,35 @@ staleness check (`_stale`).
 added identity's UUID is listed. The result's `observed.networks` lists the MACs the partition
 reads.
 
-**Persistence.** It is ADR 0322's `_persist` unchanged, with one addition. The plan's
-`removed_slots` pass to `profile_persist.save_current_over` and to the leg's readback and
-classifier. A removed slot that is still in the profile, and that no current client adapter
-holds, counts as unsaved. It is an additive keyword whose default `()` keeps #1846's behaviour.
-When a network effect applied but `profile_save` did not, the result warns that a profile
-activation would undo the change: the added adapters would be dropped and the removed ones
-restored.
+**Persistence.** ADR 0322's `_persist`, with these changes:
+
+- the leg (`persisted`, `save_current_over`, `profile_save_classifier`) gains two keywords:
+  `removed_slots` (default `()`) and `require_adapter` (default `True`). Their defaults keep
+  #1846's behaviour;
+- a removed slot that is still in the profile, and that no current client adapter holds, counts
+  as unsaved;
+- the rule that a profile with no virtual adapter is unsaved applies only under
+  `require_adapter`. Reconfigure passes `True` when the plan has a disk or network add, so a
+  removal-only save of the last adapter can confirm;
+- the leg reads the current `ClientNetworkAdapter` slots through `list_child` (204 → `[]`). It
+  does not use `adapters_missing_from_profile`'s `list_adapters` route;
+- the classifier reads both keywords from the recorded plan through
+  `plan.get("networks") or {}`, so a plan recorded before this change classifies as before;
+- the refusal texts of `require_persistable`, `_require_profile_jobs` and `_persist` name "a
+  change that saves the current configuration over the default profile" instead of "a disk add";
+- when a network effect applied but `profile_save` did not, a network warning sits beside
+  `_disk_warnings`: a profile activation would drop the added adapters and restore the removed
+  ones. `_disk_warnings` guards on `plan.get("disks")`.
 
 **Handler.** `needs_window` includes `networks`. The delegated tools are
 `hmc_add_network_adapter` for adds, `hmc_delete_adapter` for removals, and
 `hmc_save_current_partition_profile` for either. Each is authorized with the `lpar` and
 `managed_system` targets. The tool docstring and `docs/tools/` are regenerated.
 
-**Docs.** CHANGELOG; the H1 spec's patch and delegated-authorization rows; a `maturity.json`
-variant `networks`. It sits in `missing_scope` until the live arm passes and moves to
-`implemented_scope` after; the running-partition DLPAR path stays in `missing_scope`.
+**Docs.** CHANGELOG; the H1 spec's patch and delegated-authorization rows. `maturity.json`
+gains two variants. `networks` (not activated) sits in `missing_scope` until the live arm passes,
+then moves to `implemented_scope`. `networks-live` (the running-partition DLPAR path) stays in
+`missing_scope`. `just capability-metadata` regenerates `src/hmcpctl/_operation_maturity.json`.
 
 ## Failure model
 
@@ -113,11 +136,13 @@ variant `networks`. It sits in `missing_scope` until the live arm passes and mov
    - the force-save copies the whole current configuration (ADR 0322 Failure model; the
      operator scoped the guard to desired values). The prior content stays in one `hmcprec-`
      copy per run;
-   - slot-based readback: a removed slot reused by a new current adapter reads as saved. That is
-     correct, because the profile then lists the new adapter in that slot;
-   - an add interrupted after the HMC created the adapter but before identity capture, with an
-     unpinned MAC and another writer adding to the same VLAN, classifies `needs_attention`.
-     Accepted under the writer window;
+   - slot-based readback: a removed slot that another writer's adapter takes during the window
+     reads as saved. Adds run before removals, so this operation never causes it; accepted under
+     the writer window;
+   - an unpinned add, interrupted or erroring, while another writer adds to the same VLAN
+     classifies `needs_attention`. Accepted under the writer window;
+   - the empty-collection read (204 → `[]`) is unobserved for `ClientNetworkAdapter` on V10R3. The
+     live arm's first add, on a scratch partition with no adapter, observes it;
    - a removal on a running partition cuts the guest's traffic on that adapter. Gated by
      `allow_disruption`;
    - an add on a not-activated partition with no applied configuration fails REST0269 as
@@ -150,11 +175,12 @@ variant `networks`. It sits in `missing_scope` until the live arm passes and mov
    several; a pinned MAC already present; a VLAN with no virtual network; an activated partition
    that is not running with RMC active; a removal on an activated partition without
    `allow_disruption`; a pending-activation change or a profile/partition desired-value
-   mismatch; a console below 10.3.1060; more than 4 items; a duplicate MAC; `networks` without
+   mismatch; a console below 10.3.1060; more than 4 items; a duplicate MAC; an unpinned add sharing its VLAN with another add; `networks` without
    `exclusive_writer_window`; an unpermitted delegated tool. (criteria 4, 6, 8)
 4. Each new kind classifies `applied` / `not_applied` / `needs_attention` by its live read.
    Resume after an applied `network_add:<i>` does not add again. A save whose helper reports
-   unknown is `applied` only when the readback holds, removed slots included. (criteria 5, 7)
+   unknown is `applied` only when the readback holds, removed slots included; a removal of the
+   partition's last adapter can confirm. (criteria 5, 7)
 5. Tool docs regenerate. `maturity.json`, the CHANGELOG and the H1 spec rows name the change.
    (criterion 10)
 6. Live (arm 70, extended, under a LIVE-GRANT). On the not-activated scratch partition, an add
@@ -170,7 +196,7 @@ Focused tests:
 
 - a new `tests/unit/test_lpar_reconfigure_networks.py`: the patch model, the plan refusals, the
   writes, the classifiers, verification, persistence wiring and resume;
-- `tests/unit/test_profile_persist.py`: the `removed_slots` readback;
+- `tests/unit/test_profile_persist.py`: `removed_slots`, `require_adapter`, the 204 read;
 - `tests/app/test_lpar_reconfigure_tool.py`: the window and delegation gates;
 - `tests/test_live_lpar_reconfigure_arm.py`: the arm's network leg.
 
