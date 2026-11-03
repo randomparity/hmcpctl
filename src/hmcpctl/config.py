@@ -19,6 +19,7 @@ consumer building one config per HMC wants this one.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -116,6 +117,35 @@ ISO_URL_ALLOWLIST_HELP = (
 BUILD_TARGET = "{target}"
 MAX_BUILD_ARGUMENTS = 64
 MAX_BUILD_ARGUMENT_LENGTH = 4096
+
+
+def parse_build_arguments(value: str) -> tuple[str, ...]:
+    """The build entry's argument template from its JSON-array text (ADR 0324)."""
+    try:
+        arguments = json.loads(value)
+    except ValueError:
+        arguments = None
+    if not isinstance(arguments, list) or not all(
+        isinstance(argument, str) for argument in arguments
+    ):
+        raise ValueError("iso_build_arguments must be a JSON array of strings")
+    if len(arguments) > MAX_BUILD_ARGUMENTS:
+        raise ValueError(
+            f"iso_build_arguments holds {len(arguments)} elements; at most "
+            f"{MAX_BUILD_ARGUMENTS} are allowed"
+        )
+    for index, argument in enumerate(arguments):
+        if not argument.isprintable() or len(argument) > MAX_BUILD_ARGUMENT_LENGTH:
+            raise ValueError(
+                f"iso_build_arguments[{index}] must be printable and at most "
+                f"{MAX_BUILD_ARGUMENT_LENGTH} characters"
+            )
+    if arguments.count(BUILD_TARGET) != 1:
+        raise ValueError(
+            f"iso_build_arguments must hold exactly one {BUILD_TARGET} element, "
+            "which becomes the target request file's path"
+        )
+    return tuple(arguments)
 
 
 def parse_iso_url_allowlist(value: str) -> tuple[tuple[str, int | None], ...]:
@@ -302,11 +332,11 @@ class HMCConfig(BaseSettings):
         ),
     )
 
-    iso_build_arguments: tuple[str, ...] = Field(
-        default=(),
+    iso_build_arguments: str = Field(
+        default="",
         description=(
-            "The build entry's fixed arguments: a JSON array of strings in the "
-            "environment, an array in a TOML profile. At most "
+            "The build entry's fixed arguments, written as a JSON array of strings "
+            "(a string holding that array in a TOML profile). At most "
             f"{MAX_BUILD_ARGUMENTS} printable elements of at most "
             f"{MAX_BUILD_ARGUMENT_LENGTH} characters each; exactly one is the literal "
             f"{BUILD_TARGET}, which becomes the path of the per-call target request "
@@ -406,25 +436,9 @@ class HMCConfig(BaseSettings):
 
     @field_validator("iso_build_arguments")
     @classmethod
-    def _validate_iso_build_arguments(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        if not v:
-            return v
-        if len(v) > MAX_BUILD_ARGUMENTS:
-            raise ValueError(
-                f"iso_build_arguments holds {len(v)} elements; at most "
-                f"{MAX_BUILD_ARGUMENTS} are allowed"
-            )
-        for index, argument in enumerate(v):
-            if not argument.isprintable() or len(argument) > MAX_BUILD_ARGUMENT_LENGTH:
-                raise ValueError(
-                    f"iso_build_arguments[{index}] must be printable and at most "
-                    f"{MAX_BUILD_ARGUMENT_LENGTH} characters"
-                )
-        if v.count(BUILD_TARGET) != 1:
-            raise ValueError(
-                f"iso_build_arguments must hold exactly one {BUILD_TARGET} element, "
-                "which becomes the target request file's path"
-            )
+    def _validate_iso_build_arguments(cls, v: str) -> str:
+        if v:
+            parse_build_arguments(v)
         return v
 
     @model_validator(mode="after")
@@ -441,7 +455,7 @@ class HMCConfig(BaseSettings):
         """The build entry followed by its argument template, or None when unset."""
         if not self.iso_build_entry:
             return None
-        return (self.iso_build_entry, *self.iso_build_arguments)
+        return (self.iso_build_entry, *parse_build_arguments(self.iso_build_arguments))
 
     @property
     def iso_url_allowlist_entries(self) -> tuple[tuple[str, int | None], ...]:

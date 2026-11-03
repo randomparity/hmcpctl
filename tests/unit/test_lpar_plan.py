@@ -797,7 +797,7 @@ class FakeHMC:
         entry = (
             {
                 "iso_build_entry": "/opt/build/iso-chain",
-                "iso_build_arguments": ["{target}"],
+                "iso_build_arguments": '["{target}"]',
             }
             if build
             else {}

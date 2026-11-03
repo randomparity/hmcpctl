@@ -15,15 +15,15 @@ neither the configuration names nor the template syntax.
   The request names `profile`, `lpar` (an identifier `[a-z][a-z0-9-]{0,31}` that becomes the
   installer hostname), `mac`, `network`, `operation_binding`, `ssh_authorized_keys` and
   `login_user`. Child tool output goes to stderr.
-- `HMCConfig` fields are environment variables or TOML profile keys. pydantic-settings decodes a
-  tuple-typed field from a JSON environment value, and a TOML profile supplies a native array.
+- `HMCConfig` fields are environment variables or TOML profile keys. The live-test CLI arm
+  re-exports every field to a child process as `str(value)` (`scripts/live_test/cli.py`).
 - Provision runs its body on a worker thread and journals each write as an effect (ADR 0195).
 
 ## Decision
 
 1. **Configuration.** `iso_build_entry` (`HMC_ISO_BUILD_ENTRY`) is an absolute executable path.
-   `iso_build_arguments` (`HMC_ISO_BUILD_ARGUMENTS`) is a tuple of at most 64 strings: a JSON array
-   in the environment, an array in a TOML profile. Each element is printable, with no NUL, and at
+   `iso_build_arguments` (`HMC_ISO_BUILD_ARGUMENTS`) is a string holding a JSON array of at most 64
+   strings, in the environment and in a TOML profile alike. Each element is printable, with no NUL, and at
    most 4096 characters. Exactly one element is the literal `{target}`.
    Nothing is substituted inside an element. Both fields are empty by default, which refuses built
    mode. A field set without the other is a configuration error. The build uses the configuration
@@ -79,8 +79,11 @@ neither the configuration names nor the template syntax.
 - **`{target}` substituted inside an element (`--target={target}`).** judgment: cost; the producer
   takes the path as its own argument, and whole-element substitution cannot form an unintended
   argument.
-- **A JSON string field for the template.** judgment: fit; a tuple field reads as an array from both
-  sources, and a string would need its own parser.
+- **A tuple-typed field, read as a native TOML array.** verified: with the field typed
+  `tuple[str, ...]`, `uv run --no-sync pytest tests/scripts/test_live_cli.py` failed
+  `test_installed_cli_paths_with_only_transports_doubled` (this branch, macOS arm64, Python 3.11):
+  `scripts/live_test/cli.py` re-exports every field with `str()`, and the child refused `()` as
+  JSON. A string field survives that round trip.
 - **A configurable timeout.** judgment: cost; a third field for a value no deployment has asked to
   change.
 - **Classify an uncertain build `not_applied` and rebuild.** judgment: fit. An interruption that

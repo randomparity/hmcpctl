@@ -25,8 +25,9 @@ path to `ready_to_boot`. Out of scope, with owners:
 
 **Components.**
 
-- **`config.py`**: `iso_build_entry: str` and `iso_build_arguments: tuple[str, ...]` (ADR 0324
-  D1), validated when the config is built, and `BUILD_TARGET = "{target}"`. The property
+- **`config.py`**: `iso_build_entry: str` and `iso_build_arguments: str`, a JSON array (ADR 0324
+  D1), validated when the config is built by `parse_build_arguments`, and
+  `BUILD_TARGET = "{target}"`. The property
   `iso_build_command -> tuple[str, ...] | None` returns the entry followed by the template, or
   `None` when unset.
 - **`operations/lpar/media_build.py` (new)**:
@@ -164,7 +165,7 @@ partition, remove any ISO it published, then provision again".
    entry, with an empty allowlist, with `adapters.mac`, or with a non-identifier name. A request
    file that cannot be written, a result nested past the recursion limit, a non-string `url`, and
    a command unset by the time the build leg runs each end `failed`.
-5. Config: a relative entry, an argument value that is not an array of strings, more than 64
+5. Config: a relative entry, an argument value that is not a JSON array of strings, more than 64
    elements, an element that is not printable or is over 4096 characters, zero or two `{target}` elements, or a field without its pair raises at construction.
 6. The `media.iso_build` classifier returns `needs_attention`. A resume after an applied `build`
    does not run the entry again.

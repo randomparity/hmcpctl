@@ -5,6 +5,7 @@ All tests use tmp_path and monkeypatch — no test touches the real user home.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -1450,7 +1451,7 @@ def test_from_mapping_applies_every_supplied_key():
         "authorize_power_operations": True,
         "iso_url_allowlist": "iso.example.internal",
         "iso_build_entry": "/opt/build/iso-chain",
-        "iso_build_arguments": ("--target", "{target}"),
+        "iso_build_arguments": '["--target", "{target}"]',
     }
     assert set(values) == set(HMCConfig.model_fields)
 
@@ -1744,7 +1745,7 @@ def _toml_literal(field_name: str, field_info) -> str:
     if field_name == "iso_build_entry":
         return '"/toml/iso-build-entry"'
     if field_name == "iso_build_arguments":
-        return '["toml", "{target}"]'
+        return """'["toml", "{target}"]'"""
     annotation = field_info.annotation
     if annotation is bool:
         return "false"  # _non_default_env_value yields "true"
@@ -1762,7 +1763,7 @@ def _expected_env_value(field_name: str, field_info):
     if field_name == "iso_build_entry":
         return "/leak/iso-build-entry"
     if field_name == "iso_build_arguments":
-        return ("leak", "{target}")
+        return '["leak", "{target}"]'
     annotation = field_info.annotation
     if annotation is bool:
         return True
@@ -2004,7 +2005,7 @@ def test_iso_build_command_is_the_entry_then_the_template():
     config = HMCConfig.from_mapping(
         {
             "iso_build_entry": "/opt/build/iso-chain",
-            "iso_build_arguments": ["build", "--target", "{target}"],
+            "iso_build_arguments": '["build", "--target", "{target}"]',
         }
     )
     assert config.iso_build_command == (
@@ -2025,16 +2026,30 @@ def test_iso_build_arguments_read_a_json_array_from_the_environment(monkeypatch)
 @pytest.mark.parametrize(
     "values",
     [
-        {"iso_build_entry": "relative/build", "iso_build_arguments": ["{target}"]},
-        {"iso_build_entry": "/opt/b\nx", "iso_build_arguments": ["{target}"]},
-        {"iso_build_entry": "/opt/b", "iso_build_arguments": [1]},
-        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["x"] * 64 + ["{target}"]},
-        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["--target"]},
-        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["{target}", "{target}"]},
-        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["{target}", "a\x00b"]},
-        {"iso_build_entry": "/opt/b", "iso_build_arguments": ["{target}", "a" * 4097]},
+        {"iso_build_entry": "relative/build", "iso_build_arguments": '["{target}"]'},
+        {"iso_build_entry": "/opt/b\nx", "iso_build_arguments": '["{target}"]'},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": "[1]"},
+        {
+            "iso_build_entry": "/opt/b",
+            "iso_build_arguments": json.dumps(["x"] * 64 + ["{target}"]),
+        },
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": '["--target"]'},
+        {
+            "iso_build_entry": "/opt/b",
+            "iso_build_arguments": '["{target}", "{target}"]',
+        },
+        {
+            "iso_build_entry": "/opt/b",
+            "iso_build_arguments": json.dumps(["{target}", "a\x00b"]),
+        },
+        {
+            "iso_build_entry": "/opt/b",
+            "iso_build_arguments": json.dumps(["{target}", "a" * 4097]),
+        },
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": "not json"},
+        {"iso_build_entry": "/opt/b", "iso_build_arguments": '{"a": 1}'},
         {"iso_build_entry": "/opt/b"},
-        {"iso_build_arguments": ["{target}"]},
+        {"iso_build_arguments": '["{target}"]'},
     ],
     ids=[
         "relative-entry",
@@ -2045,6 +2060,8 @@ def test_iso_build_arguments_read_a_json_array_from_the_environment(monkeypatch)
         "two-targets",
         "nul",
         "too-long",
+        "not-json",
+        "object",
         "entry-alone",
         "arguments-alone",
     ],
