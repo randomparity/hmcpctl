@@ -88,6 +88,8 @@ EFFECT_KINDS: Mapping[str, str] = {
     "storage": "vios.storage_map",
     "assignments": "lpar.pcie_assignments",
     "profile": profile_write.KIND,
+    # ADR 0318: the dedicated slots, written into the saved profile.
+    "dedicated": "lpar.pcie_assignments",
     "default_profile": "lpar.default_profile",
     "power_on": "lpar.power_on",
     # Installer media (ADR 0319).
@@ -105,6 +107,7 @@ STEP_NAMES: Mapping[str, str] = {
     "storage": "storage",
     "assignments": "assignments",
     "profile": "save_profile",
+    "dedicated": "dedicated",
     "default_profile": "default_profile",
     "power_on": "power_on",
     "upload": "upload_media",
@@ -139,7 +142,8 @@ DEFAULT_ARGUMENTS: Mapping[str, Any] = {
     "power_on": True,
 }
 _HEX12 = re.compile(r"[0-9a-f]{12}")
-_PERSIST_STEPS = ("save_profile", "profile_readback", "default_profile")
+# Legs whose result is reported as their per-assignment steps.
+_ASSIGNMENT_KEYS = ("assignments", "dedicated")
 _MEDIA_STEPS = ("bind_media", "upload_media", "mount_media")
 _REST0269_MOUNT = (
     "the HMC refused the installer media mapping because the partition has no applied "
@@ -512,7 +516,7 @@ class _Run:
             )
         )
         vios = request.storage.vios_uuid.lower()
-        rest = ("mount_media", *_PERSIST_STEPS)
+        rest = ("mount_media", *self._persist_steps())
         uploaded = await self._leg(
             "upload",
             f"vios:{vios}",
@@ -536,7 +540,7 @@ class _Run:
             definite=True,
         )
         if mounted is None:
-            self._skip_rest(*_PERSIST_STEPS)
+            self._skip_rest(*self._persist_steps())
             return False
         self.optical_slot = int(mounted["client_slot"])
         return True
@@ -568,7 +572,9 @@ class _Run:
             lambda: self._write_profile(system_uuid, lpar_uuid, name),
         )
         if identity is None:
-            self._skip_rest("profile_readback", "default_profile")
+            self._skip_rest(
+                "profile_readback", *self._dedicated_steps(), "default_profile"
+            )
             return None
         profile = await profile_write.profile_by_name(
             self.hmc, lpar_uuid, system_uuid, name
@@ -585,11 +591,19 @@ class _Run:
         )
         if problem is not None:
             self.steps.append(WorkflowStep("profile_readback", "error", problem))
-            self._skip_rest("default_profile")
+            self._skip_rest(*self._dedicated_steps(), "default_profile")
             return None
         self.steps.append(
             WorkflowStep("profile_readback", "ok", {"profile_name": name})
         )
+        if self.request.assignments.dedicated:
+            written = await self._leg(
+                "dedicated", f"lpar:{lpar_uuid}", lambda: self._write_dedicated(name)
+            )
+            self._replace_assignment_step()
+            if written is None:
+                self._skip_rest("default_profile")
+                return None
         if (
             await self._leg(
                 "default_profile",
@@ -710,6 +724,8 @@ class _Run:
     ) -> Mapping[str, Any] | None:
         """Run one effect; an error pauses the run, or with *definite* an
         ``EffectNotApplied`` propagates so the run ends ``failed``."""
+        # Only the steps this leg's own write produced may replace its summary step.
+        self.assignment_steps = ()
         try:
             identity = await self.ctx.effect(key, EFFECT_KINDS[key], target, write)
         except _LEG_ERRORS as exc:
@@ -754,7 +770,7 @@ class _Run:
                 self._skip_rest(
                     *(STEP_NAMES[k] for k, _, _ in legs[index + 1 :]),
                     *media,
-                    *_PERSIST_STEPS,
+                    *self._persist_steps(),
                 )
                 return False
             if key == "network":
@@ -773,14 +789,29 @@ class _Run:
         return True
 
     def _assignments(self) -> LparPcieAssignments:
-        assignments = self.request.assignments
+        """The current-configuration assignments; dedicated slots go to the saved
+        profile instead (ADR 0318)."""
+        assignments = dataclasses.replace(self.request.assignments, dedicated=())
         if self.request.physical_io.requested:
             # The create applied these with its physical I/O.
             return dataclasses.replace(assignments, sriov=())
         return assignments
 
+    def _persist_steps(self) -> list[str]:
+        return [
+            "save_profile",
+            "profile_readback",
+            *self._dedicated_steps(),
+            "default_profile",
+        ]
+
+    def _dedicated_steps(self) -> list[str]:
+        return assignment_step_names(
+            LparPcieAssignments(self.request.assignments.dedicated)
+        )
+
     def _replace_assignment_step(self) -> None:
-        if self.assignment_steps and self.steps[-1].step == "assignments":
+        if self.assignment_steps and self.steps[-1].step in _ASSIGNMENT_KEYS:
             self.steps[-1:] = list(self.assignment_steps)
 
     async def _write_policy(self, policy: MinimumAffinityPolicy) -> dict[str, Any]:
@@ -882,6 +913,21 @@ class _Run:
         if not result.workflow_completed:
             failed = [s.step for s in result.steps if s.status == "error"]
             raise HMCError(f"assignment steps reported errors: {', '.join(failed)}")
+        return {"steps": [[s.step, s.status] for s in result.steps]}
+
+    async def _write_dedicated(self, profile_name: str) -> dict[str, Any]:
+        """Write each requested slot into the saved profile (ADR 0318)."""
+        dedicated = tuple(
+            dataclasses.replace(item, profile_name=profile_name)
+            for item in self.request.assignments.dedicated
+        )
+        result = await apply_validated_lpar_pcie_assignments(
+            self.hmc, self.system, self.request.name, LparPcieAssignments(dedicated)
+        )
+        self.assignment_steps = result.steps
+        if not result.workflow_completed:
+            failed = [s.step for s in result.steps if s.status == "error"]
+            raise HMCError(f"dedicated slot steps reported errors: {', '.join(failed)}")
         return {"steps": [[s.step, s.status] for s in result.steps]}
 
     async def _write_profile(
@@ -1164,7 +1210,7 @@ def _agrees(result: ProvisionResult, record: OperationRecord) -> bool:
     steps = {step.step: step for step in reversed(result.steps)}
     for effect in record.effects:
         step = steps.get(STEP_NAMES.get(effect.key, effect.key))
-        if effect.key == "assignments" and step is None:
+        if effect.key in _ASSIGNMENT_KEYS and step is None:
             continue  # reported as its per-assignment steps
         if step is None or (step.status == "ok") != (effect.status == "applied"):
             return False

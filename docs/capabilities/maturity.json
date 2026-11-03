@@ -5014,6 +5014,15 @@
             ]
           },
           {
+            "variant": "dedicated-assignment",
+            "parameters": [
+              {
+                "name": "assignments.dedicated",
+                "constraint": "profile_name default_profile; an unowned slot no profile lists, written into the saved hmcpctl_ profile before activation (ADR 0318)"
+              }
+            ]
+          },
+          {
             "variant": "prepared-install-media",
             "parameters": [
               {
@@ -5043,15 +5052,6 @@
               {
                 "name": "boot",
                 "constraint": "immediate with install refused; installer power-on, continuation boot and boot_started are owned by issue #1849"
-              }
-            ]
-          },
-          {
-            "variant": "dedicated-assignment",
-            "parameters": [
-              {
-                "name": "assignments.dedicated",
-                "constraint": "refused before provisioning; lifting it on saved-profile activation is owned by issue #1841"
               }
             ]
           },

@@ -2211,7 +2211,7 @@ def test_registered_operation_requires_automated_test_links(
     assert errors == ["operation evidence hmc_list_systems: tests must not be empty"]
 
 
-def test_baseline_scope_distinguishes_fixed_serialization_and_denied_assignment():
+def test_baseline_scope_distinguishes_fixed_serialization_and_carried_assignment():
     records = inventory.load_json(ROOT / "docs/capabilities/maturity.json")[
         "operations"
     ]
@@ -2227,14 +2227,11 @@ def test_baseline_scope_distinguishes_fixed_serialization_and_denied_assignment(
     assert {row["variant"] for row in provision["missing_scope"]} == {
         "built-install-media",
         "installer-boot",
-        "dedicated-assignment",
         "c12-positive-virtual-slot-linkage",
     }
-    assert not any(
-        "dedicated" in parameter["constraint"]
-        for row in provision["implemented_scope"]
-        for parameter in row["parameters"]
-    )
+    assert "dedicated-assignment" in {
+        row["variant"] for row in provision["implemented_scope"]
+    }
 
 
 def test_configured_host_inventory_has_no_hmc_reference_claim():

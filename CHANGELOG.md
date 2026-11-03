@@ -320,14 +320,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   v0.1.0, without runtime age decay. Ordinary capability metadata regeneration combines current
   catalog structure with the committed release snapshot; explicit `--release` inventory and
   artifact checks detect candidate closure drift (#1508).
-- `hmc_provision_lpar` and `hmcpctl lpars provision` refuse a dedicated PCIe slot
-  (`assignments.dedicated`) before any HMC call, dry runs included. Provision powers on the
-  current configuration then, so a slot written into the new profile was never owned by the
-  running partition: the 0.1.0 known issue (#1390). To give a new partition a dedicated slot,
-  create it with `hmc_create_lpar` (optionally with `assignments.dedicated`) or assign the slot
-  with `hmc_assign_dedicated_pcie_slot`, then power on with the partition profile, as the
-  [bare-CEC LPAR recipe](docs/recipes/bare-cec-lpar.md) does. Lifting the refusal now that
-  provision activates its saved profile is tracked in #1841.
+- `hmc_provision_lpar` and `hmcpctl lpars provision` write each dedicated PCIe slot
+  (`assignments.dedicated`) into the `hmcpctl_…` profile they save, after its readback and
+  before it becomes the default, so the partition activated from it owns the slot unless
+  another partition takes it first; this addresses the 0.1.0 known issue (#1390). A slot
+  missing from the inventory, owned, or listed by a profile is refused before any write. A dedicated item must name `default_profile`, the
+  profile the create writes; any other name is refused before any HMC call. The write runs as
+  `hmc_assign_dedicated_pcie_slot`, which the policy must permit, and its steps report after
+  `profile_readback` (ADR 0318, #1841).
 - `hmc_remove_memory_pool` and `hmcpctl memory-pools remove` no longer take a pool name. A
   managed system has at most one shared memory pool, so the remove now sends the documented
   `chhwres -r mempool -m <system> -o r`. It refuses when the system has no pool, and when any
