@@ -952,6 +952,8 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "restore_lpar_baseline",
         "read_accelerator_qos",
         "verify_fixture",
+        "_profile_lists_vscsi",
+        "_running_vscsi",
     }
 
 
