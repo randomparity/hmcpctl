@@ -226,4 +226,6 @@ Focused tests:
   classifiers, and handler refusals and delegation;
 - `tests/storage/test_upload_iso.py`: the digest gate.
 
-The existing plan and provision suites pass unchanged (Success 7).
+For requests without `install`, the existing plan and provision suites pass unchanged (Success 7).
+`tests/unit/test_lpar_plan.py`'s install step-order test is updated to the ADR 0319 order. Callers
+of the moved install types import them from `install_media`; `plan.py` keeps no re-export.
