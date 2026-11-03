@@ -275,3 +275,29 @@ async def test_without_the_volume_group_the_disk_assertions_fail(cleanup):
 
 def test_scratch_volumes_match_only_the_arm_prefix():
     assert arm.scratch_volumes(["lprcf0a1b2c3d", "lppwr1", "keep"]) == ["lprcf0a1b2c3d"]
+
+
+@pytest.mark.asyncio
+async def test_a_paused_disk_add_is_abandoned_so_the_other_scenarios_run(cleanup):
+    surface = Surface()
+    real = surface.hmc_reconfigure_lpar
+    abandoned = []
+
+    def paused(patch=None, continuation="none", **kwargs):
+        if continuation == "abandon":
+            abandoned.append(kwargs["request_id"])
+            return "PASS", {"outcome": "abandoned"}
+        if "disks" in patch and "add" in patch["disks"]:
+            surface.volumes.add(patch["disks"]["add"][0]["name"])
+            surface.mapped = patch["disks"]["add"][0]["name"]
+            return "PASS", {"outcome": "needs_attention", "result": {"changes": []}}
+        return real(patch=patch, continuation=continuation, **kwargs)
+
+    surface.hmc_reconfigure_lpar = paused
+    state = _state(surface)
+    await arm.exercise_lpar_reconfigure(object(), state)
+    held, _ = _held(state)
+    assert any(r.endswith("-disk-add") for r in abandoned)
+    assert held["added-disk-in-default-profile"] is False
+    assert held["rename-persists-across-activations"] is True
+    assert surface.volumes == {"keep1"} and surface.mapped is None

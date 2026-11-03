@@ -232,6 +232,10 @@ async def _add_disk(
     record = await _reconfigure(
         client, state, run, "disk-add", {"disks": {"add": [add]}}
     )
+    if record.get("outcome") != "completed":
+        # A paused add still holds the partition guard; release it so the other
+        # scenarios run. Teardown removes the disk and its mapping either way.
+        await _abandon_open(client, state, run)
     held["added-disk-classified-profile"] = _applied(record) == {"profile"}
     held["added-disk-in-default-profile"] = record.get(
         "outcome"
