@@ -495,7 +495,7 @@ class World:
 
 def _record(state: str) -> dict[str, Any]:
     """An ADR 0313 operation record in *state*, as the served result carries it."""
-    outcome = "completed" if state == "terminal" else "needs_attention"
+    outcome = "configured" if state == "terminal" else "needs_attention"
     return asdict(
         OperationRecord(
             "0" * 32,
@@ -603,7 +603,7 @@ def _run(schemas, world: World, group: str = "lpar-power", **config: Any):
             system_name=SYSTEM,
             vdisk_volume_group_name=GROUP,
             provision_vlan_id=VLAN,
-            **config,
+            **{"partition_profile_writer_window": True, **config},
         ),
         group=group,
     )
@@ -838,6 +838,26 @@ def test_without_the_vlan_provision_is_skipped(schemas):
         "no virtual network"
         in _rows(state, "hmc_provision_lpar / hmc_decommission_lpar")[0]["note"]
     )
+
+
+def test_without_the_writer_window_provision_is_skipped_before_any_write(schemas):
+    world = World()
+    state = _run(schemas, world, partition_profile_writer_window=False)
+
+    (probe,) = world.calls_to("hmc_provision_lpar")
+    assert probe["dry_run"] is True
+    assert "hmc_create_virtual_disk" not in world.tools()
+    (row,) = _rows(state, "hmc_provision_lpar")
+    assert row["status"] == "SKIP"
+    assert row["note"] == lpar_power.PROVISION_WINDOW_SKIP
+
+
+def test_provision_attests_the_writer_window(schemas):
+    world = World()
+    _run(schemas, world)
+
+    _probe, real = world.calls_to("hmc_provision_lpar")
+    assert real["exclusive_writer_window"] is True
 
 
 def test_a_dry_run_dedicated_slot_is_refused_and_never_sent_for_real(schemas):

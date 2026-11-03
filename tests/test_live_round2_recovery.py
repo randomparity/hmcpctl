@@ -14,6 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_recovery as recovery
 from live_test import baseline, inventory, provisioning, runner
+from live_test import config as live_config
 
 from hmcpctl.config import HMCConfig
 
@@ -58,7 +59,10 @@ def snapshot(state):
 
 @pytest.fixture
 def state():
-    value = runner.RunState(group="round2")
+    value = runner.RunState(
+        config=live_config.LiveTestConfig(partition_profile_writer_window=True),
+        group="round2",
+    )
     value.artifacts.vios_uuid = VIOS_UUID
     value.artifacts.vios_partition_id = 7
     value.artifacts.vg_uuid = "volume-group"

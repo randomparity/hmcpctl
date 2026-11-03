@@ -49,6 +49,10 @@ NAME_PREFIX = "hmcpctl-live-pwr-"
 TOKEN_PREFIX = "lparpwr-"
 VOLUME_PREFIX = "lppwr"
 SCENARIO = "st41-lpar-power"
+PROVISION_WINDOW_SKIP = (
+    "provision writes a partition profile and needs "
+    "LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true (ADR 0313)"
+)
 
 RESOURCES = lpar_config.RESOURCES
 VOLUME_MIB = 1024
@@ -978,6 +982,11 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
     vios = run.vios
     assert vios is not None
     refused = await _dedicated_slot_refused(client, state, run)
+    if not state.config.partition_profile_writer_window:
+        # Provision writes a partition profile (ADR 0313), which needs the operator's
+        # writer-window attestation; without it nothing is created.
+        state.skip(SUBTASK, "hmc_provision_lpar", PROVISION_WINDOW_SKIP)
+        return False
     if not await _create_volume(client, state, run):
         return False
     request_id = f"{run.token}-p"
@@ -998,6 +1007,7 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
         },
         resources=RESOURCES,
         power_on=True,
+        exclusive_writer_window=True,
     )
     record_status, note = judge_create_result(st, data)
     state.record(SUBTASK, "hmc_provision_lpar", record_status, data, note)

@@ -299,6 +299,14 @@ async def _provision_from_baseline(
 ) -> None:
     config = state.config
     vios_uuid, vg_uuid = fixture["vios_uuid"], fixture["vg_uuid"]
+    if not config.partition_profile_writer_window:
+        state.skip(
+            14,
+            "hmc_provision_lpar (live)",
+            "provision writes a partition profile and needs "
+            "LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true (ADR 0313)",
+        )
+        return
     status, data = await state.call(
         client,
         "hmc_provision_lpar",
@@ -318,6 +326,7 @@ async def _provision_from_baseline(
         partition_type="AIX/Linux",
         power_on=True,
         dry_run=False,
+        exclusive_writer_window=True,
     )
     result, reason = judge_create_result(status, data)
     state.record(14, "hmc_provision_lpar (live)", result, data, reason)
