@@ -36,10 +36,10 @@ from .decommission_storage import (
     clean_storage,
     deleted_from_effects,
     owned_items,
+    pending_from_effects,
     plan_storage,
     same_item,
     storage_classifiers,
-    storage_from_effects,
 )
 from .power import open_client
 from .workflow_contract import WorkflowStep
@@ -371,7 +371,6 @@ def _storage(
     latest = (
         stored.storage if stored is not None else (record.result or {}).get("storage")
     )
-    journal = storage_from_effects(record.effects)
     deleted = deleted_from_effects(record.effects)
     gone = {same_item(item) for item in deleted}
     earlier = (latest or {}).get("retained", ())
@@ -379,7 +378,7 @@ def _storage(
     return {
         "deleted": deleted,
         "retained": tuple(retained),
-        "pending": journal["pending"],
+        "pending": pending_from_effects(record.effects),
     }
 
 

@@ -456,7 +456,7 @@ def test_the_dry_run_plan_lists_deletable_items_as_pending(hmc):
     hmc.delete_virtual_disk.assert_not_awaited()
 
 
-def test_storage_from_effects_reads_applied_and_open_deletes():
+def test_the_journal_reads_applied_deletes_as_deleted_and_open_ones_as_pending():
     applied = EffectRecord(
         "disk.0", "vios.virtual_disk_delete", "vios:v/vg:g/disk:d", "applied", DISK
     )
@@ -465,10 +465,9 @@ def test_storage_from_effects_reads_applied_and_open_deletes():
     )
     other = EffectRecord("delete_lpar", "lpar.delete", "lpar:x", "applied", {})
 
-    storage = cleanup.storage_from_effects([applied, open_, other])
+    effects = [applied, open_, other]
 
-    assert storage == {
-        "deleted": ({"kind": "virtual_disk", **DISK},),
-        "retained": (),
-        "pending": ({"kind": "installer_media", "target": "vios:v/vg:g/media:m"},),
-    }
+    assert cleanup.deleted_from_effects(effects) == ({"kind": "virtual_disk", **DISK},)
+    assert cleanup.pending_from_effects(effects) == (
+        {"kind": "installer_media", "target": "vios:v/vg:g/media:m"},
+    )

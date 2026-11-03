@@ -39,6 +39,7 @@ DELETE_KINDS: Mapping[str, str] = {
     DISK_LEDGER: "vios.virtual_disk_delete",
     MEDIA_LEDGER: "vios.optical_media_delete",
 }
+_LEDGER_OF = {kind: ledger for ledger, kind in DELETE_KINDS.items()}
 _STORAGE_SECTIONS = (
     ("VirtualDisk", "DiskName", DISK_LEDGER),
     ("VirtualOpticalMedia", "MediaName", MEDIA_LEDGER),
@@ -450,11 +451,13 @@ async def plan_storage(
 
 def deleted_from_effects(effects: Iterable[EffectRecord]) -> tuple[dict[str, str], ...]:
     """Every applied cleanup delete of the operation, across all of its runs."""
-    kinds = {kind: ledger for ledger, kind in DELETE_KINDS.items()}
     return tuple(
-        {"kind": kinds[e.kind], **{k: str(v) for k, v in (e.identity or {}).items()}}
+        {
+            "kind": _LEDGER_OF[e.kind],
+            **{k: str(v) for k, v in (e.identity or {}).items()},
+        }
         for e in effects
-        if e.kind in kinds and e.status == "applied"
+        if e.kind in _LEDGER_OF and e.status == "applied"
     )
 
 
@@ -464,19 +467,13 @@ def same_item(entry: Mapping[str, Any]) -> tuple[Any, ...]:
     return entry.get("kind"), entry.get("vios_uuid"), name
 
 
-def storage_from_effects(effects: Iterable[EffectRecord]) -> DecommissionStorage:
-    """The storage block rebuilt from the journal alone: open deletes are pending."""
-    effects = tuple(effects)
-    kinds = {kind: ledger for ledger, kind in DELETE_KINDS.items()}
-    return {
-        "deleted": deleted_from_effects(effects),
-        "retained": (),
-        "pending": tuple(
-            {"kind": kinds[e.kind], "target": e.target}
-            for e in effects
-            if e.kind in kinds and e.status in ("intended", "uncertain")
-        ),
-    }
+def pending_from_effects(effects: Iterable[EffectRecord]) -> tuple[dict[str, str], ...]:
+    """The cleanup deletes whose outcome the journal does not know yet."""
+    return tuple(
+        {"kind": _LEDGER_OF[e.kind], "target": e.target}
+        for e in effects
+        if e.kind in _LEDGER_OF and e.status in ("intended", "uncertain")
+    )
 
 
 def _parse_target(effect: EffectRecord) -> tuple[str, str, str]:
