@@ -54,7 +54,9 @@ persisted, ADR 0195):
 | `map:<i>` | `vios.storage_map` | `lpar:<uuid>` | `{vios_uuid, storage_name}` | a mapping of that backing to this partition → applied, else not applied |
 | `profile_save` | `lpar.profile_save` | `lpar:<uuid>/profile-name:<default>` | `{profile_name, recovery_profile}` | no current client adapter is missing from the named profile → applied; else not applied |
 
-The order is the detaches, then each add (`disk:<i>`, `map:<i>`), then ADR 0314's
+`profile_save` is the last effect this issue adds. A leg that a sibling issue adds after it
+(#1844's `boot` and `media_detach`) runs after the save and owns its own persistence; the
+save never runs again after it. The order is the detaches, then each add (`disk:<i>`, `map:<i>`), then ADR 0314's
 verification poll, then `profile_save`. After `disk:<i>` applies, the body writes ledger
 key `added_disk:<i>` with kind `virtual_disk`, the partition, and identity
 `{vios_uuid, vg_uuid, disk_name}`. The insert is idempotent, under this reconfigure
@@ -122,6 +124,9 @@ of the profile, so a profile activation drops their client adapters.
      effect identity, and a human deletes it with `hmc_delete_virtual_disk`;
    - a same-named disk another writer creates between planning and the write is classified
      applied and ledgered. Accepted under the writer window above;
+   - the new VIOS server adapter is not saved into the VIOS's own profile. A VIOS activated
+     from a profile without it loses the mapping's server side. Provision has the same
+     exposure today; it is reported as a follow-up candidate, not fixed here;
    - other writers inside the window are not fenced: the caller's `exclusive_writer_window`
      assertion, the profile ETag and the pre-write re-reads are the controls (ADR 0242);
    - a detached disk's client adapter stays in the profile with no backing; activation keeps
@@ -132,8 +137,7 @@ of the profile, so a profile activation drops their client adapters.
    - deleting owned disks → #1848 (ADR 0192);
    - installer media and boot → #1844;
    - network attachments → #1845;
-   - the VIOS's own profile persistence of its server adapter → unchanged (provision has the
-     same exposure; follow-up candidate).
+
 
 ### Threat model
 
@@ -192,6 +196,8 @@ Focused tests:
 - the arm and recovery tests (`tests/test_live_lpar_reconfigure_arm.py`, and the recovery
   module's test).
 
-Then run `just static`, the four `just test-group` groups, `just smoke`, `just build`,
+The arm needs `scripts/live_test_recovery.py`'s subtask-70 check and its test module, a
+necessary consequence of AGENTS.md's recovery-after-every-arm rule. Then run
+`just static`, the four `just test-group` groups, `just smoke`, `just build`,
 `just verify-artifacts` and `uv run --no-sync prek run --all-files`. Under a LIVE-GRANT run
 preflight, then the arm, then recovery, then `scripts/live_test_evidence.py`.
