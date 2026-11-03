@@ -51,9 +51,9 @@ def evidence_result(monkeypatch):
             ),
         },
     )
-    monkeypatch.setattr(command, "with_client", lambda callback: result)
+    monkeypatch.setattr(command, "with_client", lambda callback: (result, None))
     monkeypatch.setattr(command, "_submit", lambda *_args: _PAUSED)
-    monkeypatch.setattr(command, "result_from_record", lambda _record: result)
+    monkeypatch.setattr(command, "result_from_record", lambda _record, **_kw: result)
     return result
 
 
@@ -162,9 +162,9 @@ from hmcpctl.operations.lpar.decommission import DecommissionResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 result = {evidence_result!r}
 from types import SimpleNamespace
-command.with_client = lambda callback: result
+command.with_client = lambda callback: (result, None)
 command._submit = lambda *_args: SimpleNamespace(outcome="needs_attention")
-command.result_from_record = lambda _record: result
+command.result_from_record = lambda _record, **_kw: result
 cli.app(args=['lpars', 'decommission', 'target', '--request-id', 'r1', '--system', 'system-a', '--yes'])
 """
     run = subprocess.run(

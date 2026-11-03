@@ -157,8 +157,12 @@ def lpars_decommission(
                 f"of LPAR '{terminal_field(recorded['lpar_name_or_uuid'], err=True)}' "
                 f"on system '{terminal_field(recorded['system_name_or_uuid'], err=True)}'"
                 "? It continues powering off, detaching and deleting that partition"
-                + _storage_clause(recorded)
-                + ".",
+                + (
+                    ", then deletes its recorded virtual disks and installer media that "
+                    "no other partition maps."
+                    if deletes_owned(recorded)
+                    else "."
+                ),
                 abort=True,
             )
         _run(request_id, continuation, recorded, selected)
@@ -183,11 +187,11 @@ def lpars_decommission(
                 f"{terminal_field(system, err=True)}'? This powers it off, detaches its vSCSI mappings "
                 f"before client adapters and partition deletion"
                 + (
-                    _storage_clause(arguments)
+                    ", then deletes its recorded virtual disks and installer media that "
+                    "no other partition maps."
                     if deletes_owned(arguments)
-                    else ", and retains backing storage"
+                    else ", and retains backing storage."
                 )
-                + "."
             ),
             abort=True,
         )
@@ -227,15 +231,6 @@ def _require_window(arguments: Mapping[str, Any], window: bool) -> None:
             "other writer changes these VIOS volume groups until the operation ends "
             "(ADR 0323); a resume asserts it again"
         )
-
-
-def _storage_clause(arguments: Mapping[str, Any]) -> str:
-    if not deletes_owned(arguments):
-        return ""
-    return (
-        ", then deletes its recorded virtual disks and installer media that no other "
-        "partition maps"
-    )
 
 
 def _run(
