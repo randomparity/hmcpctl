@@ -959,7 +959,10 @@ async def _detach_storage_mappings(
             await hmc.delete_storage_mapping(
                 mapping["vios_uuid"], mapping["mapping_id"], inventory.lpar_uuid
             )
-            return dict(mapping)
+            return {
+                "vios_uuid": mapping["vios_uuid"].lower(),
+                "mapping_id": mapping["mapping_id"],
+            }
 
         vios_uuid = mapping["vios_uuid"].lower()
         try:
