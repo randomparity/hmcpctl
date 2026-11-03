@@ -165,8 +165,12 @@ then moves to `implemented_scope`. `networks-live` (the running-partition DLPAR 
 - **Controls.** Strict typed patch (VLAN range, MAC regex, bounded lists, `extra="forbid"`);
   delegated permit and authorize per tool (ADR 0189 Decision 2); the ADR 0011 check before every
   write; the remove write's UUID+MAC re-check; the XML builder's existing escaping. Messages
-  carry UUIDs, MACs the caller supplied, and HMC codes, never raw HMC bodies.
-- **Out of scope.** Independent HMC actors (accepted above).
+  this change writes carry UUIDs, MACs the caller supplied, and ADR 0315's add guidance
+  without the HMC's message text. An unexpected HMC error is shown as the engine shows it
+  for every reconfigure leg: by type only when an effect is open, and with the HMC's bounded
+  `<Message>` when a live check or a plan-time read fails.
+- **Out of scope.** Independent HMC actors (accepted above); the engine's rendering of
+  unexpected `HMCError` text, which every logical tool shares.
 
 ## Success
 

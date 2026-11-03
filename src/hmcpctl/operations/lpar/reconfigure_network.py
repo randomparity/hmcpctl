@@ -320,7 +320,7 @@ def _add_write(hmc: HMCClient, lpar_uuid: str, add: Mapping[str, Any]) -> Write:
             if refusal is None:
                 raise
             # The guidance only: HMCError appends the HMC's own <Message> after the
-            # status, and an operation warning carries no HMC body text (ADR 0325).
+            # status, and this refusal's warning needs none of it (ADR 0325).
             guidance = str(refusal).partition(f" (HTTP {refusal.status_code})")[0]
             raise EffectNotApplied(guidance) from exc
         identity = _identity(_adapter(created or {}))
