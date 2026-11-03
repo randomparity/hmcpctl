@@ -1931,6 +1931,50 @@ def test_lpar_power_run_is_witnessed(tmp_path, monkeypatch, capsys, detach_probe
     assert "CLEAN" in capsys.readouterr().out
 
 
+@pytest.mark.asyncio
+async def test_lpar_reconfigure_disk_residue_is_reported():
+    listing = (
+        "vios-A,Running,vioserver,2\nhmcpctl-live-pwr-0a1b2c3d-p,Running,aixlinux,9\n"
+    )
+    mappings = [
+        {"id": "vhost3/vtscsi3", "backing_name": "lppwr0a1b2c3d"},
+        {"id": "vhost4/vtscsi4", "backing_name": "lprcf0a1b2c3d"},
+    ]
+    adapters = "5,hmcpctl-live-pwr-0a1b2c3d-p,2\n6,hmcpctl-live-lpar-0a1b2c3d-r,2\n"
+    volumes = (
+        "datavg:\nLV NAME TYPE LPs PPs PVs LV STATE MOUNT POINT\n"
+        "lprcf0a1b2c3d jfs2 1 1 1 closed/syncd N/A\n"
+    )
+    inputs = recovery.lpar_reconfigure_inputs_from_document(
+        {"config": {"system_name": _SYSTEM, "vdisk_volume_group_name": "datavg"}},
+        [70],
+    )
+
+    findings = await recovery.check_run(
+        _lpar_power_caller(listing, mappings, adapters, volumes),
+        ((recovery.check_lpar_reconfigure_storage, inputs),),
+    )
+
+    assert [f.what for f in findings] == [
+        "mapping vhost4/vtscsi4 on VIOS vios-A",
+        "vSCSI server adapter 6 on VIOS vios-A",
+        "volume lprcf0a1b2c3d on VIOS vios-A",
+    ]
+    assert all("lpar-reconfigure" in f.detail for f in findings)
+
+
+def test_lpar_reconfigure_inputs_need_its_subtask_and_system():
+    document = {"config": {"system_name": _SYSTEM}}
+    assert recovery.lpar_reconfigure_inputs_from_document(document, [39]) is None
+    assert recovery.lpar_reconfigure_inputs_from_document({}, [70]) is None
+    inputs = recovery.lpar_reconfigure_inputs_from_document(document, [70])
+    assert (inputs.system_name, inputs.volume_group, inputs.label) == (
+        _SYSTEM,
+        "",
+        "lpar-reconfigure",
+    )
+
+
 # ---------------------------------------------------------------------------
 # The vios-backup arm (ST37, #1349)
 # ---------------------------------------------------------------------------

@@ -1,7 +1,8 @@
 """Run opt-in arm 70: hmc_reconfigure_lpar's persistence across profile activation.
 
-This mutates a managed system: it creates one scratch partition, changes its processors,
-memory and name, activates its profile to SMS twice, then deletes it. Run
+This mutates a managed system: it creates one scratch partition, adds and later detaches
+one scratch disk in the configured volume group, changes its processors, memory and name,
+activates its profile to SMS twice, then deletes it and the disk. Run
 live_test_preflight.py --group lpar-reconfigure first and live_test_recovery.py
 afterwards, including after apparent success. Live DLPAR is not exercised.
 """

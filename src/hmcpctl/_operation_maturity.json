@@ -452,7 +452,7 @@
     },
     {
       "operation": "lpar.reconfigure",
-      "implementation": "implemented",
+      "implementation": "partial",
       "verification": "unevidenced",
       "reason": null,
       "observed_at": null
