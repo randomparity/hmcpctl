@@ -16,10 +16,11 @@ saves (ADR 0313), so the refusal blocks a configuration it can carry. Decision: 
   `apply_validated_lpar_pcie_assignments` with each item's `profile_name` replaced by the saved
   name. A failed or raising leg skips `default_profile` and `power_on` and ends
   `needs_attention`. Its `dedicated[i]` steps replace the leg's summary step, as `assignments`
-  does; `_agrees` treats both keys alike.
+  does, from steps that leg produced; `_agrees` treats both keys alike.
 - Dry-run step names list `dedicated[i]` after `profile_readback`.
 - `delegated_tools` adds `hmc_assign_dedicated_pcie_slot` with `assignments.dedicated`.
-- The tool and CLI help describe the carried slot instead of the refusal.
+- The tool and CLI (`--pcie-assignments`) help describe the carried slot instead of the
+  refusal. `hmc_plan_lpar`'s coarse step order is unchanged (follow-up candidate).
 
 ## Live arm
 
@@ -38,9 +39,10 @@ assertion is listed only when the slot was sent. Decommission deletes P, which f
 2. **Invariants and assets:** a slot owned by another partition is never taken; a slot is
    written only to a partition this operation created and stamped; a resumed operation never
    reports `configured` without the slot write applied.
-3. **Accepted:** a slot another partition owns at activation makes `power_on` fail and pause
-   (the HMC refuses; no preflight ownership check, as before #1390); an interrupted slot write
-   needs a human (no classifier, ADR 0318).
+3. **Accepted:** a slot a running partition owns may be left out of the activation, since it
+   is written not required, and provision does not re-read ownership (the live arm picks a free
+   slot); a slot also named in `physical_io.io_slots` in another form makes the specialist
+   refuse, pausing the run; an interrupted slot write needs a human (no classifier, ADR 0318).
 4. **Covered elsewhere:** slot-environment admission (ADR 0165, `prevalidate`); removing the
    partition and its profiles (decommission, #1847/#1848).
 

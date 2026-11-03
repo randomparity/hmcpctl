@@ -33,8 +33,12 @@ of the #1390 design.
 
 ## Consequences
 
-- With `power_on`, the activated partition owns each requested slot, provided no running
-  partition owns it; an activation refused for that reason pauses at `power_on`.
+- With `power_on`, the activated partition owns each requested slot that no running partition
+  owns. The specialist writes the slot as not required (`<drc>/none/0`) and refuses one another
+  partition's profile lists; provision does not re-read ownership after activation.
+- A failed slot write settles `uncertain` and resume cannot retry it. After `abandon`, a human
+  assigns the slot to the `hmcpctl_…` profile (`hmc_assign_dedicated_pcie_slot`), makes it the
+  default (`hmc_set_default_partition_profile`) and powers on with it.
 - `default_profile` never lists the slot; only the saved profile does.
 - The steps report `dedicated[i]` after `profile_readback`, not after `storage`.
 
@@ -47,5 +51,9 @@ of the #1390 design.
 - **Add the slot by DLPAR after power-on.** verified: needs RMC and a running OS, which a
   partition at firmware lacks (docs/workflow/specs/2026-10-13-provision-dedicated-pcie-refusal-design.md).
 - **Ignore `profile_name`.** judgment: fit. A silently ignored field misleads the caller.
-- **A new kind with a live classifier.** judgment: cost. The H1 Resume table gives
-  assignments no classifier, and a human already resolves an assignment pause.
+- **A live classifier.** verified: classifiers are keyed by kind (`provision_classifiers`,
+  operations/lpar/provision_operation.py), so one for `lpar.pcie_assignments` would also judge
+  the `assignments` effect; it needs a new persisted kind. judgment: cost, for a pause the H1
+  Resume table already leaves to a human.
+- **Route the slot through `physical_io.io_slots`.** judgment: fit. That field is the create's
+  own profile path, and no capture shows the save carrying an applied profile's slots.
