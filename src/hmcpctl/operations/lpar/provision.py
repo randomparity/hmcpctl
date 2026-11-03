@@ -630,8 +630,8 @@ def require_install_url(hmc: HMCClient, url: str) -> None:
         ) from None
 
 
-def require_build_entry(hmc: HMCClient) -> tuple[str, ...]:
-    """The configured build command, refusing one that cannot run (ADR 0324)."""
+def require_build_entry(hmc: HMCClient) -> None:
+    """Refuse a build entry that is unset or cannot run, or nowhere to publish (ADR 0324)."""
     command = hmc.config.iso_build_command
     if command is None:
         raise ValueError(
@@ -647,7 +647,6 @@ def require_build_entry(hmc: HMCClient) -> tuple[str, ...]:
             "install.media.mode: built media publishes to an origin on "
             "HMC_ISO_URL_ALLOWLIST, which is empty"
         )
-    return command
 
 
 async def preflight_install(hmc: HMCClient, request: ProvisionRequest) -> None:
