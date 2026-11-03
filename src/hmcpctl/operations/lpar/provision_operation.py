@@ -408,6 +408,7 @@ class _Run:
         self.change_location = None
         self.assignment_steps: tuple[WorkflowStep, ...] = ()
         self.optical_slot: int | None = None
+        self.optical_path = ""
 
     def _result(
         self, lpar_uuid: str, completed: bool, unverified: tuple[str, ...] = ()
@@ -544,18 +545,17 @@ class _Run:
             self._skip_rest(*self._persist_steps())
             return False
         self.optical_slot = int(mounted["client_slot"])
+        self.optical_path = str(mounted["device_path"])
         return True
 
     async def _ready(self, lpar_uuid: str, completed: bool) -> BodyResult:
         """Write the boot order after the default profile, then pause (ADR 0319)."""
         if completed:
-            mount = self.ctx.recorded("mount")
-            optical = str(((mount.identity or {}) if mount else {})["device_path"])
             completed = (
                 await self._leg(
                     "boot_order",
                     f"lpar:{lpar_uuid}",
-                    lambda: self._write_boot(lpar_uuid, optical),
+                    lambda: self._write_boot(lpar_uuid, self.optical_path),
                 )
                 is not None
             )
