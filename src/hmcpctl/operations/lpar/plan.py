@@ -1104,7 +1104,7 @@ def _bind_detail(install: LparInstall) -> str:
 def _power_detail(boot: Boot) -> str:
     if boot == "deferred":
         return "boot: deferred stops before this step; continuation boot runs it"
-    return "power on to the installer"
+    return "power on to the installer, then poll reference codes"
 
 
 _UNVERIFIED_INSTALL = (
@@ -1115,7 +1115,7 @@ _UNVERIFIED_INSTALL = (
     "the media binding and producer result (#1227), and the built-media build entry",
     "that the VIOS copy matches the upload",
     "that the guest can reach the installer source",
-    "boot_started, which no operation reports until #1230",
+    "boot_started, which no operation reports until native evidence fills its codes (#1850)",
 )
 
 
