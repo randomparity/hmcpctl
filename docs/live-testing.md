@@ -173,6 +173,8 @@ below. The table does not grant hardware or VIOS access.
 | lpar-power | `uv run --no-sync python scripts/live_lpar_power.py` | subtask 41 |
 | lpar-reconfigure | `uv run --no-sync python scripts/live_lpar_reconfigure.py` | subtask 70 |
 | provision-boot | `uv run --no-sync python scripts/live_provision_boot.py` | subtask 72; powers on a partition with installer media |
+| native-ubuntu-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py ubuntu` | subtask 72; boots the Ubuntu launcher and records refcodes for up to 15 minutes |
+| native-rocky-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py rocky` | subtask 72; boots the Rocky launcher and records refcodes for up to 15 minutes |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
 managed system, and a concurrent run makes the recovery check in step 4
@@ -900,6 +902,29 @@ In the boot wait, the twenty newest reference codes all carried one HMC timestam
 the HMC's row order separated them. The run's repository, volume-group and boundary-partition
 reads before and after were identical.
 
+### The native boot-started arms
+
+The `native-ubuntu-boot-started` and `native-rocky-boot-started` groups (subtask 72, #1850,
+ADR 0328) run the provision-boot arm with one profile's producer-built launcher, so the guest
+reaches the distribution's installer. Each window needs its own operator authorization: it
+powers a partition on and puts a guest on the network.
+
+- **Inputs.** The provision-boot arm's, plus `LIVE_TEST_NATIVE_BOOT_MAC` and, per profile,
+  `LIVE_TEST_NATIVE_<UBUNTU|ROCKY>_ISO_PATH` and `LIVE_TEST_NATIVE_<UBUNTU|ROCKY>_MEDIA_RESULT`.
+  The result is the producer's `iso-chain-media-v1` output for an unbound build; the arm
+  refuses it unless it names the group's profile and the configured MAC and describes the
+  ISO's own SHA-256 and size. The launcher's network comes from that result, so its address
+  must be one the operator assigned and whose usual owner stays powered off.
+- **Run.** The partition gets 6,656 MiB, the configured MAC and the producer's network, and
+  boots that ISO. After the provision call it reads the VIOS's `os_version`, the HMC's `date`
+  between two runner UTC reads, then up to 100 reference codes and the partition state every
+  15 s, until 900 s after the first provision call. Every read is kept whole in the private
+  results.
+- **Assertions.** The provision-boot arm's eight, plus `vios-level-read`, `hmc-clock-read`
+  and `refcodes-read-while-running`.
+- **After.** The provision-boot arm's teardown and recovery: recovery witnesses it as
+  subtask 72.
+
 ### The bare-cec arm
 
 The bare-cec arm is the release path end to end. It creates a partition, assigns
@@ -996,8 +1021,8 @@ uv run --no-sync python scripts/live_test_recovery.py --results test-results-ded
 
 After the other arms pass `test-results-<arm>.json` the same way: `vmedia`,
 `bare-cec`, `round2`, `sriov`, `profiles`, `users`, `vios-backup`, `pcm`,
-`network`, `lpar-config`, `storage`, `lpar-power`, `provision-boot` or
-`vmedia-media-change`.
+`network`, `lpar-config`, `storage`, `lpar-power`, `provision-boot`,
+`native-ubuntu-boot-started`, `native-rocky-boot-started` or `vmedia-media-change`.
 
 The check reads the subtasks the run dispatched from the document, and witnesses
 these sets of them:
@@ -1012,7 +1037,7 @@ these sets of them:
 | 39 (lpar-config) | any partition named `hmcpctl-live-lpar-*` on the run's system, whichever run left it |
 | 0, 3, 40, 42 (storage) | a mapping (its virtual target device) backed by an `hpctl<8 hex>` volume, such a volume still in `LIVE_TEST_VDISK_VOLUME_GROUP_NAME`, and a VIOS vSCSI server adapter toward the test partition with no mapping; 0 and 3 only read; ST42 also reports `hpvg<8 hex>` groups or unresolved pending restoration |
 | 41 (lpar-power) | any partition named `hmcpctl-live-pwr-*`, running or not; on each VIOS, any mapping backed by an `lppwr*` volume, any vSCSI adapter serving a `hmcpctl-live-pwr-*` partition, and any `lppwr*` volume left in the configured volume group (read with the one admitted `viosvrcmd … -c 'lsvg -lv <group>'` command) |
-| 72 (provision-boot) | everything 41 reads, plus the run's installer medium (`hmcpctl_<12 hex>.iso`) still in the media repository; a run that recorded the provision call but no medium name reads as unreadable, not clean |
+| 72 (provision-boot and the native boot-started groups) | everything 41 reads, plus the run's installer medium (`hmcpctl_<12 hex>.iso`) still in the media repository; a run that recorded the provision call but no medium name reads as unreadable, not clean |
 | 2, 9 (network) | a network on the run's test VLAN, the test partition's client adapters off the run's baseline, the serving VIOS's FC-port labels off their originals, and a vFC group label named `hmcl-*` |
 
 A complete current round2 run carries a fresh producer baseline. Recovery validates

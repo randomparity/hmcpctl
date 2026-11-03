@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import functools
 import io
 import sys
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ from live_test import (
     partition_profiles,
     processor_move,
     profiles,
+    provision_boot,
     runner,
     storage_lifecycle,
     storage_volume_group,
@@ -691,6 +693,43 @@ def _provision_boot_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _native_boot_verdict(group: str, config: live_config.LiveTestConfig) -> ArmVerdict:
+    """Name what one native boot-started arm (#1850) creates, boots and reads."""
+    distro, release = provision_boot.NATIVE_GROUPS[group]
+    media = provision_boot.native_media(config, group)
+    if isinstance(media, str):
+        return ArmVerdict(group, False, media, (), config.system_name)
+    return ArmVerdict(
+        group,
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            (
+                f"one partition {lpar_power.NAME_PREFIX}<8 hex>-p with "
+                f"{provision_boot.NATIVE_MEMORY_MIB} MiB, booted once from the "
+                f"{distro} {release} launcher {media.iso} with the configured MAC and "
+                "the producer's network, then powered off and deleted"
+            ),
+            (
+                f"refcodes and partition state read every 15 s for at most "
+                f"{int(provision_boot.NATIVE_WINDOW_S)} s from the first provision call"
+            ),
+            (
+                f"one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}"
+                f"<8 hex> in volume group {config.vdisk_volume_group_name}, and one "
+                "medium hmcpctl_<12 hex>.iso in the VIOS's media repository, both "
+                "deleted"
+            ),
+            (
+                "no other partition, volume or mapping: the lpar-power arm's pre-run "
+                "read is compared after teardown"
+            ),
+        ),
+        config.system_name,
+    )
+
+
 def _network_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the network arm (#629) changes, each reversed by the arm itself."""
     return ArmVerdict(
@@ -939,6 +978,10 @@ _ARM_VERDICTS = {
     "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "provision-boot": _provision_boot_verdict,
+    **{
+        group: functools.partial(_native_boot_verdict, group)
+        for group in provision_boot.NATIVE_GROUPS
+    },
     "vmedia": _vmedia_verdict,
     "vmedia-media-change": _vmedia_media_change_verdict,
     "storage": _storage_verdict,

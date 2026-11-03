@@ -60,6 +60,12 @@ class LiveTestConfig:
     system_profile_activation_action: str = "none"
     system_profile_continue_on_error: bool = False
     system_profile_ownership_override: bool = False
+    # The native boot-started arms' launcher media and their one pinned MAC (#1850).
+    native_boot_mac: str = ""
+    native_ubuntu_iso_path: str = ""
+    native_ubuntu_media_result: str = ""
+    native_rocky_iso_path: str = ""
+    native_rocky_media_result: str = ""
     scratch_create_desired_memory_mib: int = 1536
     scratch_create_max_memory_mib: int = 3072
     scratch_create_desired_vcpus: int = 3
@@ -196,6 +202,11 @@ class LiveTestConfig:
         "LIVE_TEST_SYSTEM_PROFILE_ACTIVATION_ACTION": "system_profile_activation_action",
         "LIVE_TEST_SYSTEM_PROFILE_CONTINUE_ON_ERROR": "system_profile_continue_on_error",
         "LIVE_TEST_SYSTEM_PROFILE_OWNERSHIP_OVERRIDE": "system_profile_ownership_override",
+        "LIVE_TEST_NATIVE_BOOT_MAC": "native_boot_mac",
+        "LIVE_TEST_NATIVE_UBUNTU_ISO_PATH": "native_ubuntu_iso_path",
+        "LIVE_TEST_NATIVE_UBUNTU_MEDIA_RESULT": "native_ubuntu_media_result",
+        "LIVE_TEST_NATIVE_ROCKY_ISO_PATH": "native_rocky_iso_path",
+        "LIVE_TEST_NATIVE_ROCKY_MEDIA_RESULT": "native_rocky_media_result",
         "LIVE_TEST_SCRATCH_PV_NAME": "scratch_pv_name",
         "LIVE_TEST_SCRATCH_VG_NAME": "scratch_vg_name",
         "LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME": "dedicated_pcie_system_name",
@@ -563,6 +574,11 @@ def decode_saved_config(value: Any) -> LiveTestConfig:
         "system_profile_activation_action",
         "system_profile_continue_on_error",
         "system_profile_ownership_override",
+        "native_boot_mac",
+        "native_ubuntu_iso_path",
+        "native_ubuntu_media_result",
+        "native_rocky_iso_path",
+        "native_rocky_media_result",
     ):
         parsed.setdefault(name, expected[name])
     if set(parsed) != set(expected):
