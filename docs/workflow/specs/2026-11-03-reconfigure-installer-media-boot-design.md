@@ -110,7 +110,8 @@ Before maturity is recorded, the Q5 answer is read back into the refusal message
 3. **Accepted failure classes**
    - the HMC refuses the unmount on a partition that passed the RMC guard, for example because a
      guest holds the device, which is unevidenced. The effect is `not_applied` and the message
-     names the status and the recovery;
+     names the status and the recovery. A refusal that already removed the mapping, as in the Q5
+     capture, is `applied`, and the result warns about a leftover client vSCSI adapter;
    - a degraded VIOS read that returns no mappings reads as "detached". The result is a false
      `unchanged`, with the mapping left intact and visible to `hmc_inspect_lpar`. The specialist's
      own lookup has the same blind spot;
@@ -158,7 +159,7 @@ Before maturity is recorded, the Q5 answer is read back into the refusal message
 
 ## Validation
 
-New `tests/lpar/test_reconfigure_media.py` (ledger lookup, plan, writes, classifiers, body on a
+New `tests/unit/test_lpar_reconfigure_media.py` (ledger lookup, plan, writes, classifiers, body on a
 fake HMC with seeded ledger); handler gates in `tests/app/test_lpar_reconfigure_tool.py`; Q5 in
-`tests/scripts/test_live_vmedia_media_change.py`; then `just verify` and
+`tests/test_live_vmedia_media_change_arm.py`; then `just verify` and
 `uv run --no-sync prek run --all-files`.
