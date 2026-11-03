@@ -6476,6 +6476,23 @@
                 "constraint": "not-activated partition: one mapping to this partition only; the disk and its ledger entry stay"
               }
             ]
+          },
+          {
+            "variant": "networks",
+            "parameters": [
+              {
+                "name": "exclusive_writer_window",
+                "constraint": "required true"
+              },
+              {
+                "name": "patch.networks.add",
+                "constraint": "not-activated partition: client network adapter on port_vlan_id, optional pinned mac; force-saves the default profile, read back before completed; refused with pending profile values, beside boot or installer_media, or HMC below 10.3.1060"
+              },
+              {
+                "name": "patch.networks.remove",
+                "constraint": "not-activated partition: the one adapter carrying mac; its slot leaves the default profile by force-save"
+              }
+            ]
           }
         ],
         "missing_scope": [
@@ -6489,23 +6506,6 @@
               {
                 "name": "patch.disks.add",
                 "constraint": "running partition with RMC active (DLPAR client adapter); no native proof yet"
-              }
-            ]
-          },
-          {
-            "variant": "networks",
-            "parameters": [
-              {
-                "name": "exclusive_writer_window",
-                "constraint": "required true"
-              },
-              {
-                "name": "patch.networks.add",
-                "constraint": "not activated: client network adapter on port_vlan_id, optional pinned mac; force-saves the default profile; refused with pending profile values or HMC below 10.3.1060; native persistence proof pending (#1845)"
-              },
-              {
-                "name": "patch.networks.remove",
-                "constraint": "not activated: the one adapter carrying mac; its slot leaves the default profile by force-save; native proof pending (#1845)"
               }
             ]
           },
