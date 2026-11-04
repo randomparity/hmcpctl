@@ -545,3 +545,18 @@ def test_a_vios_level_that_is_not_one_fails_that_assertion(schemas, tmp_path):
     state = _run_native(schemas, world, config)
 
     assert "vios-level-read" not in _observation(state)["assertions"]
+
+
+def test_needs_attention_after_seeing_a_boot_started_code_fails_the_wait_assertion(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    seen = {
+        "reason": "x",
+        "observed": [{"time_stamp": "11/03/2026 10:00:09", "refcode": "CA00E105"}],
+    }
+    world.overrides["hmc_provision_lpar"] = _ending(world, "needs_attention", seen)
+
+    state = _run(schemas, world, tmp_path)
+
+    assert "boot-wait-ended-truthfully" not in _observation(state)["assertions"]

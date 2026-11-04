@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from fastmcp import Client
 
@@ -523,7 +523,7 @@ class _OneFileHandler(http.server.SimpleHTTPRequestHandler):
     served = ""
 
     def send_head(self) -> Any:
-        if urlparse(self.path).path != "/" + self.served:
+        if unquote(urlparse(self.path).path) != "/" + self.served:
             self.send_error(404)
             return None
         return super().send_head()

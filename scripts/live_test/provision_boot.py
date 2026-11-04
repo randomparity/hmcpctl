@@ -196,7 +196,15 @@ def _boot_wait_truthful(outcome: object, wait: Mapping[str, Any] | None) -> bool
         return False
     if outcome == "boot_started":
         return result.get("refcode") in BOOT_STARTED_CODES
-    return outcome == "needs_attention" and "observed" in result
+    observed = result.get("observed")
+    return (
+        outcome == "needs_attention"
+        and isinstance(observed, list)
+        and not any(
+            isinstance(row, Mapping) and row.get("refcode") in BOOT_STARTED_CODES
+            for row in observed
+        )
+    )
 
 
 def _ok(steps: Mapping[str, Mapping[str, Any]], name: str) -> bool:

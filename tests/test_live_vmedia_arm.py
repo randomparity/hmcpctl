@@ -1148,7 +1148,7 @@ def test_every_registered_vmedia_stage_is_covered_here():
     } == covered
 
 
-def test_iso_http_fixture_serves_directory_once_and_releases_socket(
+def test_iso_http_fixture_serves_only_the_iso_once_and_releases_socket(
     tmp_path, monkeypatch
 ):
     for name in list(os.environ):
