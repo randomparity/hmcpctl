@@ -49,12 +49,14 @@ INSPECT_SECURITY = ToolSecurity(
 )
 
 
-def _admitter(
+def admitter(
     tool_security: Mapping[str, ToolSecurity],
     permits: Callable[[str], bool],
     authorize: Authorize,
     profile: str | None,
 ) -> Admit:
+    """Admit a delegated section read as its own tool; the denial text, or None."""
+
     def admit(name: str, by_kind: Mapping[str, str | None]) -> str | None:
         if not permits(name):
             return f"{name} is not permitted by this server's access policy"
@@ -115,7 +117,7 @@ def inspect_handler(
             {"lpar": lpar_name_or_uuid, "managed_system": system_name_or_uuid},
             profile,
         )
-        admit = _admitter(tool_security, permits, authorize, profile)
+        admit = admitter(tool_security, permits, authorize, profile)
         connection = connection_label(profile, tool=INSPECT_TOOL_NAME)
         inspection = with_client(
             lambda hmc: inspect_lpar(

@@ -497,6 +497,7 @@ _FACTORY_TOOLS = frozenset(
         "hmc_search_tools",
         "hmc_invoke_tool",
         "hmc_inspect_lpar",
+        "hmc_prepare_host_handoff",
         "hmc_inventory",
         "hmc_plan_lpar",
         "hmc_power_lpar",
@@ -1314,6 +1315,8 @@ _NOT_EXHAUSTIVE = frozenset(
         "hmc_switch_lpar_paging_vios",
         # Selectors, but the VIOS reads sit below the signature (ADR 0200).
         "hmc_inspect_lpar",
+        # Selectors, but the VIOS and adapter reads sit below the signature (ADR 0329).
+        "hmc_prepare_host_handoff",
         # Selectors, but one of them is a per-system slot number the fleet-wide
         # `vios` allowlist cannot pin down.
         "hmc_add_vfc_adapter",
@@ -1364,6 +1367,7 @@ def test_every_selector_less_tool_is_unbounded_and_no_other_is_by_accident():
         "hmc_get_job",
         "hmc_inspect_lpar",
         "hmc_modify_lpar",
+        "hmc_prepare_host_handoff",
         "hmc_plan_lpar",
         "hmc_power_lpar",
         "hmc_reconfigure_lpar",

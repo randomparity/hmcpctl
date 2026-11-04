@@ -2,7 +2,7 @@
 
 # `lpar` tools
 
-51 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+52 tools in the `lpar` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -48,6 +48,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_power_lpar` | `destructive` | `lpar.power` | `console` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Start, stop or restart one LPAR, wait a bounded time, and verify its state. |
 | `hmc_power_off_lpar` | `destructive` | `lpar.power_off` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Submit a PowerOff job for a logical partition, optionally restarting it or selecting the shutdown operation. |
 | `hmc_power_on_lpar` | `mutate` | `lpar.power_on` | `lpar` | `partial` | `current` | `existing-runtime-guards` | Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection. |
+| `hmc_prepare_host_handoff` | `mutate` | `lpar.prepare_host_handoff` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Prepare a partition for an external consumer such as kdive, or release it. |
 | `hmc_read_lpar_refcodes` | `read` | `lpar.list_refcodes` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Read recent partition reference codes with offline POWER9 definitions. |
 | `hmc_reconfigure_lpar` | `destructive` | `lpar.reconfigure` | `console` | `partial` | `unevidenced` | `existing-runtime-guards` | Change an LPAR's processors, memory, name, boot, virtual disks or network |
 | `hmc_remote_restart_lpar` | `destructive` | `lpar.remote_restart` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Remote-restart a failed LPAR on another managed system. |

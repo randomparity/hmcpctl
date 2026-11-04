@@ -451,6 +451,13 @@
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
+      "operation": "lpar.prepare_host_handoff",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.reconfigure",
       "implementation": "partial",
       "verification": "unevidenced",
