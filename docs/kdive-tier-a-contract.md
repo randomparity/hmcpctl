@@ -124,8 +124,8 @@ declared, and what kdive's doctor/adopt still has to check
   reads are not checked.
 - **Library calls are not checked.** The hold binds the MCP server and CLI on the host that
   placed it. The library operations above, hmcpctl on other hosts, the HMC GUI and direct
-  HMC commands are not fenced, nor is any tool that neither selects nor derives a partition; the
-  document's `unfenced` and `unchecked_tools` name them.
+  HMC commands are not fenced, nor is any tool the hold hook does not check; the document's
+  `unfenced` and `unchecked_tools` name them.
 - **Release is explicit.** `hmc_prepare_host_handoff` with `action` release and the
   `hold_id` drops the hold and never deletes the partition. Holds do not expire; the host's
   operator can list and release them with `hmcpctl holds`.

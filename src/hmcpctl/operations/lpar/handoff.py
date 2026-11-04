@@ -46,8 +46,13 @@ UNFENCED = (
     "direct HMC commands",
     "hmcpctl raw",
     (
-        "every non-read hmcpctl tool that neither selects nor derives a partition, listed "
-        "in unchecked_tools (ADR 0327 Decision 5)"
+        "every non-read hmcpctl tool the hold hook does not check, listed in "
+        "unchecked_tools (ADR 0327 Decision 5); hmc_invoke_tool is checked as the tool "
+        "it dispatches"
+    ),
+    (
+        "hmc_capture_lpar_console, exempt because console leasing is kdive's "
+        "(ADR 0193 Decision 3)"
     ),
 )
 DeclaredSource = Literal["ok", "none", "unavailable"]

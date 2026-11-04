@@ -67,12 +67,12 @@ calling agent id placed the hold, and always null on `release`. `document` is nu
   `host_identity`, each stating that kdive's doctor/adopt checks it. Nothing claims guest
   readiness or trust.
 - `unfenced`: ADR 0193 D6's surfaces (the hmcpctl library, other hosts, the HMC GUI, direct HMC
-  commands), `hmcpctl raw`, and the statement that every non-read tool that neither selects nor
-  derives a partition is unchecked (ADR 0327 D5) — VIOS, storage, system and firmware writes
-  included.
+  commands), `hmcpctl raw`, the exempt console capture (ADR 0193 D3), and the statement that
+  every non-read tool the hold hook does not check is unchecked (ADR 0327 D5) — VIOS, storage,
+  system and firmware writes included; `hmc_invoke_tool` is checked as the tool it dispatches.
 - `unchecked_tools`: those tools by name, computed by the tool layer from the served registry
-  (`effect != "read"` and not `hold_guarded`, the handoff tool excluded), so the list cannot
-  drift from the hook.
+  (`effect != "read"`, not `hold_guarded`, not in `HOLD_EXEMPT_TOOLS`, not `hmc_invoke_tool`),
+  so the list cannot drift from the hook.
 
 **Release.** Resolve the partition as prepare step 1 does, authorized as the tool alone (H1
 row), then `release_hold(system, partition, agent_id, hold_id)`. `hold_mismatch` reaches the

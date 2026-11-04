@@ -15,6 +15,7 @@ from typing import Literal
 from fastmcp import FastMCP
 
 from ..._app import with_client
+from ...call_context import HOLD_EXEMPT_TOOLS
 from ...config import build_config
 from ...operations.logical.store import connection_label
 from ...operations.lpar.handoff import (
@@ -33,6 +34,7 @@ from ...tool_registry import (
     validate_security,
 )
 from ..delegation import authorize_as
+from ..gateway import INVOKE_TOOL_NAME
 from .inspect import admitter
 
 HANDOFF_TOOL_NAME = "hmc_prepare_host_handoff"
@@ -53,13 +55,18 @@ PERMITTED = (*REQUIRED, "hmc_get_vios_storage_detail")
 
 
 def unchecked_tools(tool_security: Mapping[str, ToolSecurity]) -> list[str]:
-    """The non-read tools the hold hook never checks (ADR 0327 Decision 5)."""
+    """The non-read tools the hold hook never checks (ADR 0327 Decision 5).
+
+    The exempt tools are named on their own in the document, and ``hmc_invoke_tool`` is
+    left out because the tool it dispatches is checked as if called directly.
+    """
     return sorted(
         name
         for name, security in tool_security.items()
         if security.effect != "read"
         and not hold_guarded(name, security)
-        and name != HANDOFF_TOOL_NAME
+        and name not in HOLD_EXEMPT_TOOLS
+        and name != INVOKE_TOOL_NAME
     )
 
 

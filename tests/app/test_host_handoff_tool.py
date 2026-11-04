@@ -145,11 +145,13 @@ def test_unchecked_tools_match_the_registry():
         for name, security in TOOL_SECURITY.items()
         if security.effect != "read"
         and not hold_guarded(name, security)
-        and name != HANDOFF
+        and name not in HOLD_EXEMPT_TOOLS
+        and name != "hmc_invoke_tool"
     )
     assert document["unchecked_tools"] == expected
     assert {"hmc_run_command", "hmc_restore_lpar_profiles"} <= set(expected)
-    assert "hmc_power_lpar" not in expected
+    assert not {"hmc_power_lpar", "hmc_invoke_tool", HANDOFF} & set(expected)
+    assert "hmc_capture_lpar_console" not in expected
 
 
 @pytest.mark.parametrize("withheld", REQUIRED)
