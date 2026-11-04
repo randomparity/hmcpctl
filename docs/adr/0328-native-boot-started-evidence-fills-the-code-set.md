@@ -48,7 +48,16 @@ Neither profile has a PowerVM record in the producer's own matrix.
 
    Every read is kept whole, newest first. The window bound is the operator's 15-minute
    powered-on limit, counted from before power-on.
-3. **Grounding.** The boot-started set takes only codes these windows observed, after the
+3. **`If-Match` probe.** A separate `vg-if-match` window runs ST42 against one scratch
+   volume group the run creates on one free physical volume, the operator's chosen target.
+   - The shared volume group, its PVs and every LV the run doesn't own stay unwritten. In
+     REST, an LV or a medium is only an element of the whole VolumeGroup entity, so no
+     smaller run-owned object exists.
+   - Between create and cleanup the run GETs the group and POSTs that same body through
+     hmcpctl's own VolumeGroup write, under `If-Match: "stale-<16 hex>"`, a tag no ETag ever
+     had.
+   - It records only the HTTP status, plus an error body's `<Message>` and REST/HSCL codes.
+4. **Grounding.** The boot-started set takes only codes these windows observed, after the
    power-on and while the installer media was booting.
    - QEMU runs, the provision-boot arm's other-distribution run, and skipped arms do not count.
    - Raw results stay private; this record carries only codes, orderings and summaries.
