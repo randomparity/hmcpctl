@@ -228,11 +228,11 @@ def _children_named(parent: ET.Element, name: str) -> list[ET.Element]:
 
 
 def _required_etag(etag: str | None) -> str:
-    """The GET's ETag; a VolumeGroup write never falls back to an unconditional POST."""
+    """Require the GET's ETag; its presence does not guarantee HMC enforcement."""
     if not etag:
         raise HMCError(
             "VolumeGroup GET returned no ETag; refusing a whole-group write "
-            "that could overwrite a concurrent change. Retry, and report the HMC version "
+            "without the expected ETag header. Retry, and report the HMC version "
             "if it persists."
         )
     return etag
@@ -632,9 +632,13 @@ class StorageMixin:
 
         Read-modify-write (#936): GET the whole VolumeGroup, insert the new
         VirtualDisk after the VirtualDisks Metadata, and POST the whole element
-        back with If-Match set to the GET's ETag, so existing disks and physical
-        volumes are carried through unchanged. Refuses, without writing, a GET
+        back with If-Match set to the GET's ETag. Existing disks and physical
+        volumes from that GET are carried through. Refuses, without writing, a GET
         with no ETag and a name the group already holds.
+
+        The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
+        whole-group write can silently lose a concurrent change. Callers must
+        serialize writers to the same VolumeGroup.
         """
 
         for argument, value in (("vios_uuid", vios_uuid), ("vg_uuid", vg_uuid)):
@@ -665,6 +669,10 @@ class StorageMixin:
         VirtualDisk whose DiskName matches, and POST the whole element back with
         If-Match set to the GET's ETag. Refuses, without writing, a GET with no
         ETag and zero or several matching disks.
+
+        The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
+        whole-group write can silently lose a concurrent change. Callers must
+        serialize writers to the same VolumeGroup.
         """
 
         etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
@@ -1015,6 +1023,10 @@ class StorageMixin:
 
         ``size_mib`` is MiB; the HMC's RepositorySize is GiB, so it is sent as
         ``size_mib / 1024`` and must be a whole number of GiB.
+
+        The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
+        whole-group write can silently lose a concurrent change. Callers must
+        serialize writers to the same VolumeGroup.
         """
         size_gib = _whole_gib(size_mib)
         etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
@@ -1070,6 +1082,10 @@ class StorageMixin:
 
         ``size_mib`` is MiB; the medium's Size is GiB, so it is sent as
         ``size_mib / 1024`` and must be a whole number of GiB.
+
+        The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
+        whole-group write can silently lose a concurrent change. Callers must
+        serialize writers to the same VolumeGroup.
         """
         size_gib = _whole_gib(size_mib)
         etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
@@ -1139,6 +1155,10 @@ class StorageMixin:
         block this GET observed still holds any VirtualOpticalMedia — the caller's own
         emptiness check is a separate, earlier GET, so a medium created between the two
         would otherwise be deleted with it (#1012).
+
+        The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
+        whole-group write can silently lose a concurrent change. Callers must
+        serialize writers to the same VolumeGroup.
         """
         etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
@@ -1172,6 +1192,10 @@ class StorageMixin:
         Uses a read-modify-write pattern: GET the full VolumeGroup XML, remove the
         named VirtualOpticalMedia node from the OpticalMedia container, then POST back
         with If-Match set to the GET's ETag (ADR 0171).
+
+        The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
+        whole-group write can silently lose a concurrent change. Callers must
+        serialize writers to the same VolumeGroup.
         """
         etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
