@@ -4,27 +4,24 @@
 
 `HMCClient` pools HTTP/1.1 connections with httpx's default `keepalive_expiry` of 5.0 s.
 Read-only probes on 2026-11-04 measured four HMCs closing an idle connection 4.85–5.01 s after
-their last response. The server's idle clock starts first, so a request sent after about 4.8 s
-of REST idleness can go out on a connection the HMC is closing. On the test HMC, 2 of 18
-requests sent after 4.0–4.99 s gaps failed with `Server disconnected without sending a
-response`. `_request` sends once, so the caller gets `HMCTransportError`.
+their last response. The server's idle clock starts first, so a request after about 4.8 s idle
+can go out on a connection the HMC is closing. On the test HMC, 2 of 18 requests after
+4.0–4.99 s gaps failed: `Server disconnected without sending a response`. `_request` sends once, so the caller gets `HMCTransportError`.
 
 ## Scope
 
-`_new_http_client` passes `httpx.Limits(keepalive_expiry=1.0)` from a named module constant.
-That covers the initial client and the legacy-port fallback client. A connection idle for 1 s
-is discarded, 4 s inside the measured close. Requests under 1 s apart still reuse it. A longer
-gap costs one TLS handshake, which is small next to the HMC's ~2 s feed responses. Nothing is
-retried, so request counts and the live-test wrappers around `HMCClient._request` stay
-unchanged.
+`_new_http_client` passes `httpx.Limits` with httpx's default caps (100 connections, 20
+idle) and `keepalive_expiry=1.0` from a named constant, for the initial and legacy-port
+clients. A connection idle for 1 s is discarded, 4 s inside the measured close; requests under
+1 s apart still reuse it. A longer gap costs one TLS handshake, small beside ~2 s feed
+responses. Nothing is retried, so request counts and the live-test wrappers around
+`HMCClient._request` stay unchanged.
 
 Not taken:
 
-- Disable pooling. Every back-to-back feed read would pay a handshake, though a 1 s expiry
-  already leaves a 4 s margin.
-- Retry an idempotent request once on `RemoteProtocolError`. It adds a request the budget
-  wrappers cannot see and leaves logoff `DELETE` uncovered. The operator excluded retry
-  redesign.
+- Disable pooling. Every back-to-back read would pay a handshake for no added margin.
+- Retry an idempotent request once on `RemoteProtocolError`. It adds requests the budget
+  wrappers cannot see and leaves logoff `DELETE` uncovered; retry redesign is excluded.
 
 ### Failure model
 
@@ -55,5 +52,6 @@ Not taken:
 - Back-to-back reuse (Success 2): focused-test, same module. Two requests 0.1 s apart arrive on
   one server-side connection. Red: `max_keepalive_connections=0` fails it.
 - Single send (Success 3): focused-test, same module. The fake HMC counts one request per call.
-- Live behaviour: task-test-not-applicable. The HMC's idle close is hardware behaviour. The
-  evidence is the read-only gap probe from the Problem section, run on old and new code.
+- Pool caps unchanged: focused-test, same module asserts 100/20 on the built pool.
+- Live (read-only probe, no harness: nothing mutates): 20 requests after 1.5–4.9 s gaps. Pass:
+  new code opens a new connection for each and none fails; old code reuses one.
