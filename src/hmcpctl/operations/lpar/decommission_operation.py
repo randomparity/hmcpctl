@@ -94,6 +94,11 @@ def effective_arguments(
                 "not_found",
                 f"no operation has request_id {request_id}; omit continuation to start one",
             )
+        if any(key in given and given[key] != recorded.get(key) for key in _REQUIRED):
+            raise OperationRefused(
+                "request_conflict",
+                "continuation selectors must match the recorded operation",
+            )
         return {**recorded, **given}, True
     return new_arguments(given), recorded is not None
 
