@@ -287,25 +287,27 @@ async def test_each_record_shape_completes_verified_and_unchanged(
 
 
 @pytest.mark.parametrize(
-    ("error", "submission", "code"),
+    ("error", "submission", "code", "changed"),
     [
         (
             HMCCLIError("HSCLAB12 refused", remote_refusal_code="HSCLAB12"),
             "rejected",
             "HSCLAB12",
+            False,
         ),
         (
             HMCCLIError("invalid attribute value", remote_nonzero_completed=True),
             "rejected",
             None,
+            False,
         ),
-        (HMCCLIError("SSH timed out"), "unknown", None),
-        (OSError("connection reset"), "unknown", None),
+        (HMCCLIError("SSH timed out"), "unknown", None, None),
+        (OSError("connection reset"), "unknown", None, None),
     ],
 )
 @pytest.mark.asyncio
 async def test_a_failed_submission_is_read_back_once_and_raised(
-    monkeypatch, error, submission, code
+    monkeypatch, error, submission, code, changed
 ) -> None:
     reads, mutation = _setup(monkeypatch, [_row()], [_row()], error)
     with pytest.raises(VnicPartialError) as caught:
@@ -317,7 +319,7 @@ async def test_a_failed_submission_is_read_back_once_and_raised(
     assert reads.await_count == 2
     assert (result.submission, result.refusal_code) == (submission, code)
     assert result.readback.mismatched_fields == ("pvid_priority",)
-    assert (result.preservation, result.changed) == ("unchanged", False)
+    assert (result.preservation, result.changed) == ("unchanged", changed)
 
 
 @pytest.mark.asyncio

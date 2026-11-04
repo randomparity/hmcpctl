@@ -1139,7 +1139,8 @@ async def update_vnic_policy(
     else:
         old, new = before_by_slot.get(slot_num, {}), (after_rows or {}).get(slot_num)
         unchanged = new is not None and all(new.get(f) == old.get(f) for f in expected)
-        changed = False if unchanged else None
+        # An unknown submission may still apply after the readback (ADR 0332).
+        changed = False if unchanged and submission != "unknown" else None
     result = VnicPolicyUpdateResult(
         operation="update_policy",
         slot_num=slot_num,

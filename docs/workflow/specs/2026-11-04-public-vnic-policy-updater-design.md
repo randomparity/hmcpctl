@@ -112,7 +112,8 @@ One `list_vnic_rows` after submission, whatever the outcome, retained raw as `R2
   `R1`. Equal → `unchanged`; else `drifted` with `drifted_fields` as sorted
   `"<slot>:<field>"` strings (a slot added or removed reads as `"<slot>:*"`).
 - **changed**: `True` when completed, verified and unchanged; `False` when the
-  read succeeded and every submitted field still equals its baseline; else `None`.
+  submission is not `unknown`, the read succeeded and every submitted field still
+  equals its baseline; else `None`, since an unknown submission may still apply.
 
 Any result other than `completed`/`verified`/`unchanged` raises
 `VnicPartialError(message, result)`, chained from the submission or read error.
