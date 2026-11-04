@@ -177,7 +177,7 @@ def _listed_tools(application) -> dict[str, Any]:
 
 def test_mcp_discovery_adds_shared_maturity_after_ceiling_filtering() -> None:
     permitted = ("hmc_list_systems", "hmc_set_sriov_adapter_mode")
-    application = create_mcp(_policy(*permitted))
+    application = create_mcp(_policy(*permitted), catalog="registered")
     before = {
         tool.name: tool
         for tool in asyncio.run(application.list_tools(run_middleware=False))
@@ -215,7 +215,7 @@ def test_cli_and_mcp_keep_historical_verification(tmp_path, monkeypatch, verific
     name = "hmc_list_systems"
     rows = capability_commands.capability_rows({name: TOOL_SECURITY[name]})
     assert rows[0]["verification"] == verification
-    application = create_mcp(_policy(name))
+    application = create_mcp(_policy(name), catalog="registered")
     for _ in range(2):
         assert (
             _listed_tools(application)[name].meta[MATURITY_META_KEY]["verification"]
@@ -231,7 +231,7 @@ def test_mcp_and_cli_discovery_use_the_same_operation_evidence() -> None:
         for row in capability_commands.capability_rows({name: TOOL_SECURITY[name]})
         if row["operation"] == operation
     )
-    tool = _listed_tools(create_mcp(_policy(name)))[name]
+    tool = _listed_tools(create_mcp(_policy(name), catalog="registered"))[name]
 
     assert tool.meta[MATURITY_META_KEY] == {
         key: value for key, value in row.items() if key not in {"operation", "tools"}

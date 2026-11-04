@@ -48,7 +48,7 @@ import ipaddress
 import logging
 import socket
 from collections.abc import Callable
-from typing import Final
+from typing import Final, Literal
 
 from fastmcp import FastMCP
 
@@ -113,7 +113,9 @@ def _gates(policy: AccessPolicy) -> tuple[Callable[[str], bool], Authorize]:
     return policy.permits_tool, dispatch_authorizer(policy)
 
 
-def create_mcp(policy: AccessPolicy) -> FastMCP:
+def create_mcp(
+    policy: AccessPolicy, *, catalog: Literal["primary", "registered"] = "primary"
+) -> FastMCP:
     """Compose a fresh MCP application bounded by *policy*.
 
     A policy is mandatory (ADR 0041). This is the only composer in the package,
@@ -136,7 +138,15 @@ def create_mcp(policy: AccessPolicy) -> FastMCP:
     registry (ADR 0048). The string is fixed at construction and shipped whole at
     ``initialize``, so the qualification has to be decided here, where the policy
     and the authoritative tool index are both in hand.
+
+    *catalog* chooses what ``tools/list`` returns (ADR 0330). ``"primary"`` lists the
+    ADR 0189 primary set the policy admits, which is what every served application
+    shows a client. ``"registered"`` lists every registered tool, for in-repo harnesses
+    that read specialist schemas over a client session. Either way every registered
+    tool stays callable by name and through ``hmc_invoke_tool``.
     """
+    if catalog not in ("primary", "registered"):
+        raise ValueError(f"catalog must be 'primary' or 'registered', not {catalog!r}")
     if policy is None:
         raise TypeError(
             "create_mcp requires an access policy; composing without one is no longer "
@@ -179,7 +189,11 @@ def create_mcp(policy: AccessPolicy) -> FastMCP:
         application, TOOL_SECURITY, permits=permits, authorize=authorize
     )
     application.add_middleware(
-        OperationMaturityMiddleware(TOOL_SECURITY, primary_tools=PRIMARY_TOOLS)
+        OperationMaturityMiddleware(
+            TOOL_SECURITY,
+            primary_tools=PRIMARY_TOOLS,
+            list_only_primary=catalog == "primary",
+        )
     )
     return application
 

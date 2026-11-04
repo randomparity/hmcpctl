@@ -11,19 +11,26 @@ from hmcpctl._app import (
     ceiling_aware_instructions,
     create_mcp,
 )
+from hmcpctl.server_tools.catalog import PRIMARY_TOOLS
 
-# The composite and workflow tools the prose recommends by name. Named here rather
-# than derived, so the derivation under test is checked against an independent list
-# and cannot agree with itself.
-_RECOMMENDED = (
-    "hmc_lpar_summary",
-    "hmc_system_summary",
-    "hmc_capacity_report",
-    "hmc_fleet_health",
-    "hmc_find_placement",
+# The tools the prose recommends by name: the ADR 0189 primary catalog it is written
+# around (ADR 0330) and the specialists it names. Named here rather than derived, so the
+# derivation under test is checked against an independent list and cannot agree with
+# itself.
+_PRIMARY = (
+    "hmc_inventory",
+    "hmc_plan_lpar",
     "hmc_provision_lpar",
-    "hmc_create_lpar",
+    "hmc_reconfigure_lpar",
+    "hmc_decommission_lpar",
+    "hmc_power_lpar",
+    "hmc_inspect_lpar",
+    "hmc_prepare_host_handoff",
+    "hmc_operation_status",
+    "hmc_search_tools",
+    "hmc_invoke_tool",
 )
+_RECOMMENDED = (*_PRIMARY, "hmc_capture_lpar_console", "hmc_create_lpar")
 
 _CONVENTIONS_HEADING = "## Resource addressing and asynchronous jobs"
 _WORKFLOWS_HEADING = "## Recommended workflows"
@@ -59,6 +66,13 @@ def test_instructions_publish_resource_and_wait_conventions():
     assert instructions[conventions_start:workflows_start] == _EXPECTED_CONVENTIONS
 
 
+def test_the_instructions_describe_every_primary_tool():
+    """ADR 0330: the prose is written around what ``tools/list`` carries."""
+    assert set(_PRIMARY) == PRIMARY_TOOLS
+    for name in _PRIMARY:
+        assert name in INSTRUCTIONS
+
+
 def test_a_ceiling_that_withholds_nothing_leaves_the_instructions_untouched():
     """ADR 0048: no suffix and no noise for the case every shipped policy reaches."""
     qualified = ceiling_aware_instructions(lambda _name: True, _RECOMMENDED)
@@ -88,12 +102,12 @@ def test_only_names_in_the_authoritative_index_are_reported_as_withheld():
     as a withheld tool would send a client looking for something that never
     existed, so the scan is intersected with the index rather than trusted alone.
     """
-    qualified = ceiling_aware_instructions(lambda _name: False, ["hmc_lpar_summary"])
+    qualified = ceiling_aware_instructions(lambda _name: False, ["hmc_inventory"])
     suffix = qualified.split(CEILING_HEADING)[1]
 
-    assert "hmc_lpar_summary" in suffix
+    assert "hmc_inventory" in suffix
     assert "hmc_timeout_minutes" not in suffix
-    assert "hmc_system_summary" not in suffix
+    assert "hmc_plan_lpar" not in suffix
 
 
 def test_a_withheld_tool_the_prose_never_names_produces_no_suffix():
@@ -117,11 +131,12 @@ def test_the_inspection_tool_is_recommended_only_when_the_policy_grants_it():
     """
     granted = ceiling_aware_instructions(
         lambda name: name == "hmc_effective_permissions",
-        ["hmc_lpar_summary", "hmc_effective_permissions"],
+        ["hmc_inventory", "hmc_effective_permissions"],
     )
-    withheld = ceiling_aware_instructions(lambda _name: False, ["hmc_lpar_summary"])
+    withheld = ceiling_aware_instructions(lambda _name: False, ["hmc_inventory"])
 
     assert "Call hmc_effective_permissions" in granted
     assert "hmc_effective_permissions" not in withheld
-    assert "`tools/list` is the authoritative set" in granted
-    assert "`tools/list` is the authoritative set" in withheld
+    for qualified in (granted, withheld):
+        assert "cannot be called, by name or through hmc_invoke_tool" in qualified
+        assert "hmc_search_tools finds the rest it exposes" in qualified

@@ -47,7 +47,9 @@ def _policy(grants: list[dict], name: str = "test"):
 
 
 def _names(application) -> set[str]:
-    return {tool.name for tool in asyncio.run(application.list_tools())}
+    return {
+        tool.name for tool in asyncio.run(application.list_tools(run_middleware=False))
+    }
 
 
 def _call(application, tool: str, arguments: dict):
@@ -207,7 +209,9 @@ def test_inspection_matches_the_registry_and_the_policy():
     application = create_mcp(policy)
 
     reported = [tool["name"] for tool in _inspect(application)["tools"]]
-    live = sorted(tool.name for tool in asyncio.run(application.list_tools()))
+    live = sorted(
+        tool.name for tool in asyncio.run(application.list_tools(run_middleware=False))
+    )
     expected = sorted(
         {name for name in TOOL_SECURITY if policy.permits_tool(name)}
         - {"hmc_run_command"}
@@ -478,7 +482,7 @@ def test_inspection_tracks_the_arbitrary_command_toggle():
     reported = [tool["name"] for tool in result["tools"]]
 
     assert reported == sorted(
-        tool.name for tool in asyncio.run(application.list_tools())
+        tool.name for tool in asyncio.run(application.list_tools(run_middleware=False))
     )
     assert "hmc_run_command" in reported
     assert "arbitrary-command" in result["effects"]
@@ -812,7 +816,9 @@ def test_entry_points_serve_a_freshly_composed_filtered_application(entry_point)
 
     def _capture(self, **_kwargs):
         served["app"] = self
-        served["names"] = {tool.name for tool in asyncio.run(self.list_tools())}
+        served["names"] = {
+            tool.name for tool in asyncio.run(self.list_tools(run_middleware=False))
+        }
 
     served_apps = []
 
@@ -1197,23 +1203,30 @@ def test_the_instructions_shipped_at_initialize_recommend_no_withheld_tool():
     while `tools/list` carried exactly one, with no correction anywhere in the
     text — and a `tools`-only grant is the shape that can also withhold
     `hmc_effective_permissions`, so the client had no second opinion to consult.
+
+    Since ADR 0330 the listing is the primary catalog, which this grant admits none
+    of: the session lists nothing, `hmc_list_systems` stays callable by name only,
+    and the correction names both gateway tools as withheld.
     """
     from hmcpctl._app import CEILING_HEADING
 
     policy = _policy(TOOLS_ONLY_GRANT)
-    instructions, names = _initialize(create_mcp(policy))
+    application = create_mcp(policy)
+    instructions, names = _initialize(application)
     prose, correction = _split_correction(instructions)
 
-    assert names == {"hmc_list_systems"}
-    assert PERMISSIONS_TOOL_NAME not in names
+    assert names == set()
+    assert _names(application) == {"hmc_list_systems"}
     assert CEILING_HEADING in instructions
 
     recommended = _indexed_names(prose)
     assert len(recommended) > 1, "the prose must still recommend tools by name"
     assert recommended - names - _indexed_names(correction) == set()
+    withheld_list = correction.partition("They cannot be called")[0]
+    assert {"hmc_search_tools", "hmc_invoke_tool"} <= _indexed_names(withheld_list)
     # The correction cannot recommend a tool this very policy shape withholds.
     assert PERMISSIONS_TOOL_NAME not in correction
-    assert "`tools/list` is the authoritative set" in correction
+    assert "hmc_search_tools finds the rest it exposes" in correction
 
 
 def test_a_legacy_ceiling_ships_the_instructions_unqualified():
@@ -1241,17 +1254,19 @@ def test_a_read_only_ceiling_corrects_the_write_recommendations_it_withholds():
     """
     from hmcpctl._app import CEILING_HEADING
 
-    instructions, names = _initialize(create_mcp(_policy(READ_ONLY_GRANT)))
+    application = create_mcp(_policy(READ_ONLY_GRANT))
+    instructions, names = _initialize(application)
     _prose, correction = _split_correction(instructions)
     named = _indexed_names(correction)
 
     assert CEILING_HEADING in instructions
-    assert PERMISSIONS_TOOL_NAME in names
+    # Registered and callable by name, though not in the primary listing (ADR 0330).
+    assert PERMISSIONS_TOOL_NAME in _names(application)
     assert f"Call {PERMISSIONS_TOOL_NAME}" in correction
-    for withheld in ("hmc_create_lpar", "hmc_provision_lpar", "hmc_migrate_lpar"):
+    for withheld in ("hmc_create_lpar", "hmc_provision_lpar", "hmc_reconfigure_lpar"):
         assert withheld not in names
         assert withheld in named
-    for granted in ("hmc_lpar_summary", "hmc_capacity_report", "hmc_fleet_health"):
+    for granted in ("hmc_inventory", "hmc_inspect_lpar", "hmc_operation_status"):
         assert granted in names
         assert granted not in named
 
@@ -1291,7 +1306,7 @@ def test_served_power_off_admits_no_dump_restart():
     application = create_mcp(_policy(POWER_OFF_ONLY))
     (tool,) = [
         tool
-        for tool in asyncio.run(application.list_tools())
+        for tool in asyncio.run(application.list_tools(run_middleware=False))
         if tool.name == "hmc_power_off_lpar"
     ]
     properties = tool.parameters["properties"]

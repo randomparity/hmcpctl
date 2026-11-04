@@ -539,7 +539,7 @@ async def test_mcp_role_target_denial_before_remote(role_app_boundary):
         TOOL_SECURITY,
         "test-policy.toml",
     )
-    async with Client(create_mcp(policy)) as client:
+    async with Client(create_mcp(policy, catalog="registered")) as client:
         result = await client.call_tool(
             name,
             {

@@ -44,7 +44,7 @@ def policy_app(*names):
         TOOL_SECURITY,
         "test-policy.toml",
     )
-    return create_mcp(policy)
+    return create_mcp(policy, catalog="registered")
 
 
 @pytest.mark.asyncio

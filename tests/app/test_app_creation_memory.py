@@ -223,7 +223,7 @@ def test_invalid_cli_input_precedes_confirmation_and_client(adapter, flags):
 
 @pytest.mark.asyncio
 async def test_served_numeric_schema_and_strict_runtime(adapter):
-    async with Client(create_mcp(policy(adapter))) as client:
+    async with Client(create_mcp(policy(adapter), catalog="registered")) as client:
         tools = {tool.name: tool for tool in await client.list_tools()}
         schema = tools[adapter.tool].input_schema
         memory_schema = schema["properties"]["creation_memory"]
@@ -297,7 +297,7 @@ async def test_all_targets_policy_retains_independent_owner_denial(
         return asyncio.run(fn(b.hmc))
 
     monkeypatch.setattr(tools, "with_client", run)
-    async with Client(create_mcp(policy(adapter))) as client:
+    async with Client(create_mcp(policy(adapter), catalog="registered")) as client:
         result = await client.call_tool(
             adapter.tool,
             {

@@ -109,9 +109,9 @@ TOOL_SECURITY: Mapping[str, ToolSecurity] = build_tool_security(
     },
 )
 
-# ADR 0189 Decision 1: the logical catalog's primary set. Until #1232 switches the
-# default listing to it, membership is only listing metadata; a name not yet
-# registered marks nothing.
+# ADR 0189 Decision 1: the logical catalog's primary set. A served application's
+# tools/list is this set less what the policy withholds (ADR 0330); every other
+# registered tool stays callable by name and through hmc_invoke_tool.
 PRIMARY_TOOLS: frozenset[str] = frozenset(
     {
         INVENTORY_TOOL_NAME,

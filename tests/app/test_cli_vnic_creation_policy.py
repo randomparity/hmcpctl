@@ -110,7 +110,8 @@ def test_mcp_schema_exposes_selected_policy_shape():
 
         async with Client(
             create_mcp(
-                compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
+                compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)),
+                catalog="registered",
             )
         ) as client:
             return next(

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
+from typing import Literal
 from unittest.mock import AsyncMock, call
 
 import pytest
@@ -71,8 +72,8 @@ def _grant(*tools: str, connections: tuple[str, ...] = ("<default>",)) -> dict:
     }
 
 
-def _app(*tools: str) -> FastMCP:
-    return create_mcp(_policy(_grant(*_GATEWAY, *tools)))
+def _app(*tools: str, catalog: Literal["primary", "registered"] = "primary") -> FastMCP:
+    return create_mcp(_policy(_grant(*_GATEWAY, *tools)), catalog=catalog)
 
 
 def _call(app: FastMCP, name: str, arguments: dict):
@@ -317,8 +318,23 @@ def test_gateway_tools_are_absent_when_the_policy_withholds_them():
     assert set(listed) == {_STATUS}
 
 
-def test_listing_marks_primary_tools_without_changing_the_listing():
+def test_default_listing_is_the_primary_catalog():
     listed = _listed(_app("hmc_provision_lpar", "hmc_list_lpars", _STATUS))
+    assert set(listed) == {*_GATEWAY, "hmc_provision_lpar", _STATUS}
+    assert {tool.meta[TIER_META_KEY] for tool in listed.values()} == {"primary"}
+
+
+def test_an_unlisted_permitted_specialist_is_still_found_and_called_by_name():
+    app = _app("hmc_list_lpars", _STATUS)
+    assert "hmc_list_lpars" not in _listed(app)
+    assert _names(_call(app, SEARCH, {"name": "hmc_list_lpars"})) == ["hmc_list_lpars"]
+    with pytest.raises(ToolError, match="Missing HMC configuration"):
+        _call(app, "hmc_list_lpars", {})
+
+
+def test_registered_listing_marks_tiers():
+    policy = _policy(_grant(*_GATEWAY, "hmc_provision_lpar", "hmc_list_lpars", _STATUS))
+    listed = _listed(create_mcp(policy, catalog="registered"))
     assert set(listed) == {*_GATEWAY, "hmc_provision_lpar", "hmc_list_lpars", _STATUS}
     tiers = {name: tool.meta[TIER_META_KEY] for name, tool in listed.items()}
     assert tiers == {
@@ -328,6 +344,11 @@ def test_listing_marks_primary_tools_without_changing_the_listing():
         _STATUS: "primary",
         "hmc_list_lpars": "secondary",
     }
+
+
+def test_create_mcp_refuses_an_unknown_catalog():
+    with pytest.raises(ValueError, match="'primary' or 'registered'"):
+        create_mcp(_policy(_grant(_STATUS)), catalog="full")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("has_job", [False, True])
@@ -353,7 +374,7 @@ def test_workflow_step_job_survives_actual_mcp_schema_and_serialization(
         (),
     )
     monkeypatch.setattr(resources, "with_client", lambda op, **kwargs: result)
-    app = _app(name)
+    app = _app(name, catalog="registered")
     response = _call(
         app,
         name,
@@ -415,7 +436,7 @@ def test_get_job_wire_preserves_corrected_handle_and_raw_entry(monkeypatch, miss
         return asyncio.run(operation(hmc))
 
     monkeypatch.setattr(jobs, "with_client", with_client)
-    app = _app("hmc_get_job")
+    app = _app("hmc_get_job", catalog="registered")
     schema = _listed(app)["hmc_get_job"].output_schema
     assert set(schema["required"]) == {
         "job_id",

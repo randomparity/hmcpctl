@@ -25,7 +25,10 @@ from hmcpctl.server_tools.virtualization import network as server_network
 # surface the unpolicied composition used to (pinned by G2 in
 # tests/app/test_fail_closed_startup.py), and the dispatch wrapper is schema-transparent,
 # so every assertion below reads the same registry it always did.
-mcp = create_mcp(compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)))
+mcp = create_mcp(
+    compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)),
+    catalog="registered",
+)
 
 
 GUIDE = Path(__file__).parents[2] / "docs/operations.md"

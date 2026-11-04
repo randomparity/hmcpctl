@@ -186,7 +186,8 @@ def app(environment) -> tuple[FastMCP, Spy, Any]:
     application = create_mcp(
         compile_legacy_policy(
             TOOL_SECURITY, ("<default>",), include_arbitrary_command=False
-        )
+        ),
+        catalog="registered",
     )
     spy = Spy()
     install_partition_guard(

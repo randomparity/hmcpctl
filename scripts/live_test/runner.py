@@ -1038,7 +1038,9 @@ async def served_client() -> AsyncGenerator[Client]:
     policy = compile_legacy_policy(
         TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,), include_arbitrary_command=True
     )
-    mcp = create_mcp(policy)
+    # The registered listing (ADR 0330): the runner reads every specialist's served
+    # schema, and a listed tool's structured result reaches it typed.
+    mcp = create_mcp(policy, catalog="registered")
     permits, authorize = _gates(policy)
     await configure_arbitrary_command_tool(
         True, mcp, permits=permits, authorize=authorize

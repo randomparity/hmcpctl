@@ -173,7 +173,7 @@ async def test_real_mcp_schema_and_round_trip(adapter):
         TOOL_SECURITY,
         "test-policy.toml",
     )
-    server = create_mcp(policy)
+    server = create_mcp(policy, catalog="registered")
     async with Client(server) as client:
         tools = {t.name: t for t in await client.list_tools()}
         schema = tools[tool].input_schema

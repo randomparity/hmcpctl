@@ -196,16 +196,17 @@ def _operation(name: str, operation: str) -> str:
 async def load_descriptions() -> dict[str, str | None]:
     """Every registered tool's MCP description, from a fully granted application.
 
-    Composed with the arbitrary-command tool both granted and enabled, which is
-    what makes ``list_tools()`` cover the registered set instead of the default
-    deployment's 147. Composition only -- no HMC connection is opened.
+    Composed with the registered listing (ADR 0330) and the arbitrary-command tool
+    both granted and enabled, which is what makes ``list_tools()`` cover the
+    registered set instead of the default deployment's primary catalog. Composition
+    only -- no HMC connection is opened.
     """
     policy = compile_legacy_policy(
         TOOL_SECURITY,
         (DEFAULT_CONNECTION_TOKEN,),
         include_arbitrary_command=True,
     )
-    mcp = create_mcp(policy)
+    mcp = create_mcp(policy, catalog="registered")
     await configure_arbitrary_command_tool(
         True,
         mcp,

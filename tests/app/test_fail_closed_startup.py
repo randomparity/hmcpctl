@@ -90,7 +90,9 @@ def _legacy_policy(*, include_arbitrary_command: bool = False):
 
 
 def _names(application) -> set[str]:
-    return {tool.name for tool in asyncio.run(application.list_tools())}
+    return {
+        tool.name for tool in asyncio.run(application.list_tools(run_middleware=False))
+    }
 
 
 def _unstyle(text: str) -> str:
