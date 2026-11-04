@@ -240,13 +240,14 @@ def _storage_source(
     return listing
 
 
-async def _resources(
+async def read_resources(
     hmc: Any,
     admit: Admit,
     system: str,
     system_uuid: str,
     entry: dict[str, Any],
 ) -> Resources:
+    """The resources section: figures from *entry*, then each admitted VIOS's mappings."""
     resource = entry.get("Resource") or {}
     memory = resource_container(resource, "PartitionMemoryConfiguration")
     processors = processor_figures(resource)
@@ -320,7 +321,7 @@ async def inspect_lpar(
         state=state,
         rmc=rmc,
         resources=(
-            await _resources(hmc, admit, system, system_uuid, entry)
+            await read_resources(hmc, admit, system, system_uuid, entry)
             if "resources" in include
             else None
         ),

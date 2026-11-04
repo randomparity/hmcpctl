@@ -757,6 +757,29 @@ def ledger_entries(
     ]
 
 
+def ledger_request(
+    conn: sqlite3.Connection, kind: str, system_uuid: str, partition_uuid: str
+) -> tuple[str, str | None, str | None, dict[str, Any] | None] | None:
+    """The newest operation whose *kind* entry names the partition (ADR 0329 Decision 2).
+
+    Returns (operation id, state, outcome, request arguments); the last three are None once
+    retention has pruned the operation, and the whole is None when no entry names the
+    partition. UUIDs compare case-insensitively.
+    """
+    row = conn.execute(
+        "SELECT l.operation_id, o.state, o.outcome, o.request_json FROM ledger l"
+        " LEFT JOIN operations o ON o.operation_id = l.operation_id"
+        " WHERE l.kind = ? AND lower(l.system_uuid) = ? AND lower(l.partition_uuid) = ?"
+        " ORDER BY l.created_at DESC LIMIT 1",
+        (kind, system_uuid.lower(), partition_uuid.lower()),
+    ).fetchone()
+    if row is None:
+        return None
+    raw = row["request_json"]
+    arguments = None if raw is None else json.loads(raw)["arguments"]
+    return row["operation_id"], row["state"], row["outcome"], arguments
+
+
 def remove_ledger(
     conn: sqlite3.Connection,
     kind: str,
