@@ -429,7 +429,7 @@ async def _applied_problem(
     if profiles != {name}:
         return f"its default and last-activated profiles are not both {name}"
     if _state(resource) != "not activated":
-        return f"it is {_state(resource) or 'in an unread state'}, not not activated"
+        return f"it is {_state(resource) or 'in an unread state'}, not Not Activated"
     if not await _adapters_on_vlan(hmc, lpar_uuid, request.adapters.port_vlan_id):
         return "it lists no client network adapter on the requested VLAN"
     if not await _root_mappings(hmc, request, lpar_uuid):
@@ -1267,8 +1267,8 @@ class _Run:
         state = _state(resource)
         if state != "not activated":
             raise EffectNotApplied(
-                f"LPAR {lpar_uuid} is {state or 'in an unread state'}, not not "
-                "activated: its saved profile was not applied"
+                f"LPAR {lpar_uuid} is {state or 'in an unread state'}, not Not "
+                "Activated: its saved profile was not applied"
             )
         system_name, _ = await resolve_ssh_names(self.hmc, system_uuid, None)
         lpar_name = str(leaf_text(resource.get("PartitionName")) or "")

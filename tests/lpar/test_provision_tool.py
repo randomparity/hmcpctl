@@ -995,6 +995,26 @@ def test_an_unproven_apply_pauses_the_provision(
     assert result.operation.outcome == "needs_attention"
 
 
+def test_a_partition_without_a_name_is_never_applied(
+    monkeypatch, mock_hmc, saved_apply
+):
+    from hmcpctl.operations.lpar import provision_operation
+
+    async def unnamed(*_args):
+        return None, None
+
+    monkeypatch.setattr(provision_operation, "resolve_ssh_names", unnamed)
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+
+    result = hmc_provision_lpar(**_provision_args(power_on=False))
+
+    assert saved_apply.applied == []
+    assert result.operation is not None
+    assert result.operation.effects[-1].status == "not_applied"
+
+
 def test_an_activated_partition_is_never_applied(monkeypatch, mock_hmc, saved_apply):
     """The guard refuses before the write, so the effect is definitely not applied."""
     _hmc_env(monkeypatch)
@@ -1109,8 +1129,13 @@ def test_provision_lpar_vg_not_found(monkeypatch, mock_hmc):
 # ---------------------------------------------------------------------- #
 
 
-def test_provision_lpar_partial_failure_skips_remaining(monkeypatch, mock_hmc):
-    """When the storage step fails, power_on is recorded as skipped."""
+@pytest.mark.parametrize(
+    ("power_on", "tail"), [(True, "power_on"), (False, "apply_saved_profile")]
+)
+def test_provision_lpar_partial_failure_skips_remaining(
+    monkeypatch, mock_hmc, saved_apply, power_on, tail
+):
+    """When the storage step fails, the run's last step is recorded as skipped."""
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
 
@@ -1143,14 +1168,15 @@ def test_provision_lpar_partial_failure_skips_remaining(monkeypatch, mock_hmc):
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn"
     )
 
-    result = hmc_provision_lpar(**_provision_args())
+    result = hmc_provision_lpar(**_provision_args(power_on=power_on))
 
     steps = {s.step: s for s in result.steps}
     assert steps["create"].status == "ok"
     assert steps["network"].status == "ok"
     assert "vscsi" not in steps
     assert steps["storage"].status == "error"
-    assert steps["power_on"].status == "skipped"
+    assert steps[tail].status == "skipped"
+    assert saved_apply.applied == []
     assert storage_route.called
     assert not power_on_route.called
     assert result.resource_created is True

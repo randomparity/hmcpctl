@@ -58,6 +58,8 @@ A follow-up capture the same day, on one owned scratch partition provisioned wit
    when it creates through `mksyscfg`. No delegated tool is added and no policy changes.
 6. **Disclosure.** `hmc_reconfigure_lpar`'s description states ADR 0314 Decision 2's refusal, so
    an agent can anticipate it for partitions provisioned elsewhere.
+   `hmc_plan_lpar` lists the apply as intended change `apply_profile` where it lists
+   `power_on` for a powered-on run.
 
 ## Consequences
 

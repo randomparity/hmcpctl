@@ -292,8 +292,8 @@ def provision_handler(
         ``hmcpctl_<12 hex>``, reads it back (memory, processors, adapters), makes it the
         default, and with ``power_on`` activates from it; without ``power_on`` (and
         without ``install``) it applies that profile without activation, so it is also
-        the last-activated profile ``hmc_reconfigure_lpar`` requires (ADR 0331); only
-        then does the run end ``configured``. It needs HMC 10.3.1060 or later. ``dry_run`` validates every
+        the last-activated profile ``hmc_reconfigure_lpar`` requires (ADR 0331; this
+        apply uses the SSH transport); only then does the run end ``configured``. It needs HMC 10.3.1060 or later. ``dry_run`` validates every
         precondition and records nothing. No rollback is attempted.
 
         With ``install`` (prepared media; ADR 0191, ADR 0319) the
