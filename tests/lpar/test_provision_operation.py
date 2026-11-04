@@ -249,18 +249,64 @@ def test_default_profile_classifies_by_the_partition_setting(default, status):
     assert _classify(hmc, "default_profile", f"lpar:{LPAR}").status == status
 
 
+def _applied_hmc() -> FakeHMC:
+    """A partition after a proven apply: both profiles saved, adapter and disk held."""
+    hmc = FakeHMC()
+    hmc.last_activated = hmc.default = SAVED
+    hmc.adapters = [_adapter("net-1")]
+    hmc.mappings = [
+        {
+            "Resource": {
+                "Storage": {"VirtualDisk": {"DiskName": "lv-a"}},
+                "AssociatedLogicalPartition": {
+                    "href": f"https://hmc.test/rest/api/uom/LogicalPartition/{LPAR}"
+                },
+            }
+        }
+    ]
+    return hmc
+
+
+def _not_last(hmc: FakeHMC) -> None:
+    hmc.last_activated = "default_profile"
+
+
+def _not_last_and_active(hmc: FakeHMC) -> None:
+    hmc.last_activated, hmc.state = "default_profile", "open firmware"
+
+
+def _active(hmc: FakeHMC) -> None:
+    hmc.state = "open firmware"
+
+
+def _other_default(hmc: FakeHMC) -> None:
+    hmc.default = "default_profile"
+
+
+def _no_adapter(hmc: FakeHMC) -> None:
+    hmc.adapters = []
+
+
+def _no_mapping(hmc: FakeHMC) -> None:
+    hmc.mappings = []
+
+
 @pytest.mark.parametrize(
-    ("state", "last", "status"),
+    ("change", "status"),
     [
-        ("not activated", SAVED, "applied"),
-        ("not activated", "default_profile", "not_applied"),
-        ("open firmware", "default_profile", "needs_attention"),
+        (lambda _hmc: None, "applied"),
+        (_not_last, "not_applied"),
+        (_not_last_and_active, "needs_attention"),
+        (_active, "needs_attention"),
+        (_other_default, "needs_attention"),
+        (_no_adapter, "needs_attention"),
+        (_no_mapping, "needs_attention"),
     ],
 )
-def test_the_saved_profile_apply_classifies_by_the_last_activated(state, last, status):
-    """ADR 0331: an apply is proven by LastActivatedProfile, never resubmitted blind."""
-    hmc = FakeHMC()
-    hmc.state, hmc.last_activated = state, last
+def test_the_saved_profile_apply_classifies_by_the_whole_proof(change, status):
+    """ADR 0331: a resumed apply is applied only on the write's own full proof."""
+    hmc = _applied_hmc()
+    change(hmc)
     assert _classify(hmc, "apply_saved", f"lpar:{LPAR}").status == status
 
 

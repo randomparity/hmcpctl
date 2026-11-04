@@ -890,8 +890,8 @@ class SavedApply:
         assert vlan == VLAN_ID
         return self.adapters
 
-    async def root_mapped(self, _hmc, _request, _lpar):
-        return self.mapped
+    async def root_mappings(self, _hmc, _request, _lpar):
+        return [{"mapped": True}] if self.mapped else []
 
 
 @pytest.fixture
@@ -908,7 +908,7 @@ def saved_apply(monkeypatch, persistence):
     monkeypatch.setattr(provision_operation, "_partition_resource", resource)
     monkeypatch.setattr(provision_operation, "apply_lpar_profile_via_cli", fake.apply)
     monkeypatch.setattr(provision_operation, "_adapters_on_vlan", fake.on_vlan)
-    monkeypatch.setattr(provision_operation, "_root_disk_mapped", fake.root_mapped)
+    monkeypatch.setattr(provision_operation, "_root_mappings", fake.root_mappings)
     return fake
 
 
@@ -993,6 +993,20 @@ def test_an_unproven_apply_pauses_the_provision(
     assert steps["apply_saved_profile"].status == "error"
     assert result.operation is not None
     assert result.operation.outcome == "needs_attention"
+
+
+def test_an_activated_partition_is_never_applied(monkeypatch, mock_hmc, saved_apply):
+    """The guard refuses before the write, so the effect is definitely not applied."""
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    saved_apply.state = "open firmware"
+
+    result = hmc_provision_lpar(**_provision_args(power_on=False))
+
+    assert saved_apply.applied == []
+    assert result.operation is not None
+    assert result.operation.effects[-1].status == "not_applied"
 
 
 # ---------------------------------------------------------------------- #

@@ -35,8 +35,9 @@ A follow-up capture the same day, on one owned scratch partition provisioned wit
    `apply_saved_profile`). Two cases are unchanged:
    - with `power_on`, activating the saved profile already makes it last-activated;
    - with `install`, every `boot` choice ends by activating the saved profile.
-2. **How.** The body re-reads the partition and requires it Not Activated; otherwise the step
-   errors without writing. It then runs
+2. **How.** The body re-reads the partition and requires it Not Activated. Otherwise, or when
+   the partition or its system has no name, the effect is definitely not applied and nothing is
+   written. It then runs
    `chsyscfg -r lpar -m <system> -o apply -p <partition> -n <saved>` through
    `apply_lpar_profile_via_cli`. No activation is requested.
 3. **Verification.** After the apply the body requires all of these:
@@ -48,7 +49,8 @@ A follow-up capture the same day, on one owned scratch partition provisioned wit
    If any is missing, the step errors and the run pauses `needs_attention`. Nothing is rolled
    back, as in ADR 0313; decommission removes what the run created.
 4. **Resume.** The classifier reads the partition:
-   - `LastActivatedProfile` equal to the saved profile → `applied`;
+   - `LastActivatedProfile` equal to the saved profile → `applied` only when Decision 3's
+     whole proof holds, otherwise `needs_attention`;
    - otherwise, a state other than Not Activated → `needs_attention`;
    - otherwise → `not_applied`, and the apply runs again. Applying the same profile twice is
      the same write.
@@ -60,7 +62,11 @@ A follow-up capture the same day, on one owned scratch partition provisioned wit
 ## Consequences
 
 - A `power_on=false` provision now needs the SSH transport, as `install` and
-  `minimum_affinity_policy` already do.
+  `minimum_affinity_policy` already do. `dry_run` does not check that transport.
+- The native capture covered a partition with one client network adapter, its vSCSI client
+  adapter and the root disk. With `assignments` (dedicated slots, SR-IOV logical ports, vNICs),
+  the apply also brings the saved profile's assignments into the current configuration. That
+  path has no native proof, and Decision 3 does not verify those assignments.
 - `provision.lpar`'s closure changes, so live evidence recorded before this change is stale for
   release claims.
 - ADR 0314 Decision 2 is unchanged. Every partition provision leaves `configured` now satisfies
