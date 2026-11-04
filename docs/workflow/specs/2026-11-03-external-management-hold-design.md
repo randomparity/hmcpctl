@@ -95,7 +95,7 @@ anything kdive-side, and fencing the library, other hosts, the GUI or direct HMC
 - **CLI.** New `cli_commands/tool_mirrors.py` holds `CLI_TOOL_MIRRORS: Mapping[str, str | None]`
   keyed by command path (`"lpars power-on"`). `CLICommand` adds a `--hold-id` option to commands
   whose mirror is hold-guarded, pops it in `invoke`, and runs the command inside `calling(...)`.
-  New `cli_commands/holds.py`: `hmcpctl holds list [--json]` and
+  New `cli_commands/holds.py`: `hmcpctl holds list` and
   `hmcpctl holds release PARTITION_UUID`, both local-only with no HMC call.
 - **Docs.** `docs/mcp-server.md` (holds under *Logical operation state*; the upgrade is
   one-way; restart every hmcpctl process after upgrading, and an old process reporting `unknown

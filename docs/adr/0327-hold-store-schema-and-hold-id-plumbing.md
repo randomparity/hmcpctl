@@ -61,9 +61,9 @@ and 7 on the ADR 0190 store; ADR 0193's prepare/release tool is #1852.
   as `store_corrupt` with ADR 0190's delete-or-restore advice. Nothing is corrupt: restart or
   upgrade that process. `docs/mcp-server.md` says to restart every hmcpctl process after
   upgrading, and to list holds before any restore or deletion so they can be re-placed.
-- Every hold-guarded tool's schema gains `hold_id`, so `docs/tools/` regenerates and a tool
-  added later gains it with no handler edit. A new tool with a partition selector and a
-  hand-written `hold_id` keeps its own.
+- Every hold-guarded tool's published input schema gains `hold_id`, and a tool added later gains
+  it with no handler edit; `docs/tools/` lists no parameters and does not change. A new tool
+  with a partition selector and a hand-written `hold_id` keeps its own.
 - A new CLI command fails the mirror-table exhaustiveness test until it is listed.
 
 ## Considered & rejected
