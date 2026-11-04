@@ -393,7 +393,7 @@ def test_a_native_run_boots_the_producers_medium_and_records_the_window(
     state = _run_native(schemas, world, config)
 
     observation = _observation(state)
-    assert observation["scenario"] == "st72-native-rocky-boot-started"
+    assert observation["scenario"] == provision_boot.SCENARIO
     assert observation["result"] == "passed" and observation["cleanup"] == "passed"
     assert len(observation["assertions"]) == 11
     (sent,) = world.provisions

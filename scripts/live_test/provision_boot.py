@@ -595,7 +595,7 @@ async def exercise_provision_boot(client: Client, state: RunState) -> None:
         SUBTASK,
         "hmc_provision_lpar",
         operation="provision.lpar",
-        scenario=f"st{SUBTASK}-{group}" if group in NATIVE_GROUPS else SCENARIO,
+        scenario=SCENARIO,
         assertions=[
             Assertion(name, run.holds("provision.lpar", name))
             for name in (
