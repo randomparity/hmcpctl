@@ -184,8 +184,25 @@ def release_hold(
     return held
 
 
+def _locatable() -> bool:
+    """Whether this host has a state directory; one with none can hold no partition.
+
+    ADR 0190 Decision 1: with neither sentinel nor store the hold check finds no hold. Every
+    other store failure still refuses (ADR 0193 Decision 5).
+    """
+    try:
+        store.state_dir()
+    except OperationRefused as refused:
+        if refused.reason != "state_dir_unresolved":
+            raise
+        return False
+    return True
+
+
 def find_hold(partition_uuid: str) -> Hold | None:
     """Return the hold on *partition_uuid* on any system; never creates a store."""
+    if not _locatable():
+        return None
     with store.read_session() as conn:
         row = None if conn is None else _row(conn, partition_uuid)
     return None if row is None else _hold(row)
@@ -193,6 +210,8 @@ def find_hold(partition_uuid: str) -> Hold | None:
 
 def holds_present() -> bool:
     """Whether any partition is held; False when no store exists."""
+    if not _locatable():
+        return False
     with store.read_session() as conn:
         return conn is not None and (
             conn.execute("SELECT 1 FROM holds LIMIT 1").fetchone() is not None
