@@ -3166,7 +3166,8 @@ There is no supplied slot or command: the one created vNIC determines the target
 
 The `policy` object has exactly `pvid_priority`, `auto_priority_failover`,
 `allowed_vlan_ids` and `allowed_os_mac_addrs`: scalars must be explicit (including
-zero/false), and each list must contain exactly one valid finite member. No
+zero/false). For the six fixed cases each list must contain exactly one valid
+finite member; the `finite-update` case below has its own list rule. No
 `mac_addr` input is allowed; generated MAC is independently observed and preserved.
 `port_vlan_id` remains an explicit integer `0..4094`. The six fixed cases are
 `vlan-replace-all`, `vlan-replace-none`, `vlan-remove-last`, `mac-replace-all`,
@@ -3177,8 +3178,8 @@ After the usual preflight/digest binding, capture records B0, creates one fresh
 single-backing vNIC, independently verifies its singleton B1 baseline, and attempts
 one native update. B2 independently observes the selected raw policy and bounded
 preservation of the captured identity, MAC, backing/capacity and foreign inventory.
-Only acknowledged completion, literal expected `all`/`none` and unchanged
-preservation qualify the case. Clear means explicit `=none`, never reset or omitted
+For the six fixed cases, only acknowledged completion, literal expected
+`all`/`none` and unchanged preservation qualify the case. Clear means explicit `=none`, never reset or omitted
 policy; an empty, missing or malformed readback is unavailable, not positive `none`.
 Remove-last is a distinct hypothesis with the same literal `none` candidate oracle.
 
@@ -3222,9 +3223,44 @@ never paste it into an issue, PR or matrix. It cannot recover a previously lost 
 
 Output is labelled `vnic-update-source SOURCE ONLY`. Its private version-2 history
 carries `evidence_class=source-only`, never optional-policy verification credit.
-CLEAN establishes only the bounded stored-policy/history observations. All five
-parent adapter fields, later delta/two-list modes and the public updater remain
-#1828 work; `all` minus finite members still has no justified positive oracle.
+CLEAN establishes only the bounded stored-policy/history observations. The public
+updater remains #1858 work; `all` minus finite members still has no justified
+positive oracle.
+
+#### Finite update case (#1857)
+
+A version-2 packet with `case` `"finite-update"` adds one key, `update`. The six
+fixed cases reject that key. The
+[finite update design](workflow/specs/2026-11-04-vnic-finite-update-cases-design.md)
+defines the rules; the operator-facing summary is:
+
+- `policy` is the creation baseline. Scalars are explicit. Each list is a finite
+  nonempty list, `"all"` or `"none"`.
+- `update` is a nonempty list of `{"field", "operation", "value"}` actions, at
+  most one per field. `set` applies to `port_vlan_id` (0..4094), `pvid_priority`
+  (0..7) and `auto_priority_failover` (bool). `set`, `add` and `remove` apply to
+  `allowed_vlan_ids` and `allowed_os_mac_addrs`, with finite nonempty values.
+- The packet is refused before any effect when:
+  - a `set` repeats the baseline;
+  - a value is a sentinel;
+  - a list action meets a sentinel baseline;
+  - an `add` repeats a member;
+  - a `remove` names a member not present, or every member;
+  - two list values contain a comma.
+
+The harness derives one `chhwres -o s` record. Pairs follow the field order above,
+and any quoted list moves to the end. Policy verification compares each action
+field's canonical readback with its expected value: the set value, the union for
+`add`, or the remainder for `remove`. Preservation restores B1's cells in those
+fields and then requires B2 to equal B1. Budgets, removal, recovery and output
+labels are the version-2 ones.
+
+The planned case set is eleven packets, one window each, in the design's order. It
+exceeds the fixture's six source histories, so the fixture is removed with the
+ownership-checked inactive-only `hmcpctl lpars delete` afterwards. Remove a
+non-qualified case's captured slot with the ownership-checked
+`hmcpctl network remove-vnic` before the next case. The next preflight must
+reproduce the fixture baseline.
 
 #### Recorded source outcomes (#1856)
 
@@ -3263,6 +3299,72 @@ pre-fixture baseline. This version-2 procedure's results carry no
 `run.tested_commit` block, so `scripts/live_test_evidence.py` does not apply to
 them. The raw journals stay private. None of this is product update support.
 
+
+#### Recorded finite update outcomes (#1857)
+
+The finite cases ran once each on HMC V10R3 M1060 against one owned inactive
+fixture. The fixture was prepared, and W1 through W2b ran, at commit
+`ec993f1e65c2984c5cfda5bb860d054b17e86d32`. W3 through W11 and the fixture
+deletion ran at `acde3f572bebddad8babb6189e3e231bc07f2af4`. That commit is the same
+harness with main's REST keep-alive fix (#1926) merged in, and the update record
+built at its command site with identical bytes.
+
+Every baseline used `port_vlan_id=0`, `pvid_priority=0` and finite lists unless the
+table says otherwise. W1 created its vNIC with `auto_priority_failover=0`. W2 is
+listed with its baseline. Every later case used `auto_priority_failover=1`. VLAN
+IDs and MAC addresses are shown as tokens.
+
+| Case | Baseline | Record | Submission | Policy | Preservation | Outcome |
+|---|---|---|---|---|---|---|
+| W1 | failover 0 | `pvid_priority=5` | completed | verified | drifted: `auto_priority_failover` 0→1 | unresolved |
+| W2 | failover 0 | `auto_priority_failover=1` | completed | verified | unchanged | qualified |
+| W1b | failover 1 | `pvid_priority=5` | completed | verified | unchanged | qualified |
+| W2b | pvid 5, failover 1 | `auto_priority_failover=0` | completed | verified | unchanged; pvid stayed 5 | qualified |
+| W3 | VLAN `none` | `port_vlan_id=<V1>` | completed | verified | unchanged | qualified |
+| W4 | VLAN {V1} | `"allowed_vlan_ids=<V2>,<V3>"` | rejected `HSCLAB1F` | unchanged | unchanged | refused |
+| W5 | VLAN {V1} | `allowed_vlan_ids+=<V2>` | completed | verified | unchanged | qualified |
+| W6 | VLAN {V1,V2} | `allowed_vlan_ids-=<V2>` | rejected `HSCLAB1F` | unchanged | unchanged | refused |
+| W7 | MAC {M1} | `"allowed_os_mac_addrs=<M2>,<M3>"` | rejected `HSCLAB20` | unchanged | unchanged | refused |
+| W8 | MAC {M1} | `allowed_os_mac_addrs+=<M2>` | completed | verified | unchanged | qualified |
+| W9 | MAC {M1,M2} | `allowed_os_mac_addrs-=<M2>` | rejected `HSCLAB20` | unchanged | unchanged | refused |
+| W10 | VLAN {V1}, MAC {M1,M2} | `allowed_os_mac_addrs-=<M2>,"allowed_vlan_ids+=<V2>,<V3>"` | rejected `HSCLAB20` | unchanged, VLAN add not applied | unchanged | refused |
+| W11 | VLAN {V1} | `port_vlan_id=<V2>` | rejected `HSCLAB12` | unchanged | unchanged | refused |
+
+Each qualified case removed its own vNIC, and its independent recovery reached
+CLEAN. W1b's first recovery came back MANUAL_RECOVERY only because its own logoff
+was disconnected. One read-only re-run reached CLEAN. W3's first capture attempt
+stopped on a REST disconnect before any effect. That disconnect led to #1926.
+
+On this HMC, then:
+
+- **An omitted `auto_priority_failover` resets to its default (1)** when a
+  `chhwres -o s` update changes another field. An omitted `pvid_priority` is not
+  reset.
+- **`pvid_priority` and `auto_priority_failover` updates qualify.** A
+  `port_vlan_id` change from 0 qualifies with allowed VLAN IDs `none`.
+- **`HSCLAB12` refuses a port VLAN ID change between zero and nonzero while
+  allowed VLAN IDs are configured.** Its text reads "The port VLAN ID cannot be
+  changed from zero to a non-zero value or from a non-zero value to zero when
+  allowed VLAN IDs are configured."
+- **Allowed VLAN and MAC lists are add-only on an existing vNIC.**
+  - `+=` qualifies.
+  - `-=` is refused for any member, not only the last.
+  - A `=` replacement that drops an existing member is refused with the same
+    codes.
+  - A replacement that only adds members was not tested.
+- **A record carrying several pairs is applied or refused as a whole.** In W10 a
+  refused MAC removal also left the VLAN addition unapplied. No two-list record
+  qualified, because W10 combined a refused removal.
+
+Each refused or unresolved case's vNIC was removed separately, after a read-only
+inventory check, through the ownership-checked `hmcpctl network remove-vnic`. The
+fixture was then deleted through the ownership-checked inactive-only
+`hmcpctl lpars delete`. A witness fixture preflight returned READY and its recovery
+UNCHANGED, which reproduces the pre-fixture baseline.
+
+One REST session may have persisted until the HMC's own timeout: W1b's first
+recovery logoff. The raw journals stay private, and `scripts/live_test_evidence.py`
+has no route for them. None of this is product update support; that remains #1858.
 
 ### Retained fixture prerequisite for vNIC source qualification
 
