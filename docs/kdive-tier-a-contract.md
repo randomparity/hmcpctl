@@ -107,6 +107,29 @@ fleet-wide search; an override skips that search. A failed ownership read fails 
 with no job submitted. See
 [ADR 0092](adr/0092-uniform-lpar-ownership-authorization-rule.md).
 
+## Holds
+
+A partition handed to kdive can carry an external-management hold
+([ADR 0193](adr/0193-host-handoff-external-management-hold.md)). The agent that hands the
+partition over calls `hmc_prepare_host_handoff` with `hold` true and a `consumer_label`; the
+result's `hold` carries the `hold_id`, returned only to that agent, which passes it to kdive.
+The tool's `document` reports what was observed during the call, what this host's provision
+declared, and what kdive's doctor/adopt still has to check
+([ADR 0329](adr/0329-host-handoff-document-sources.md)). It never claims the guest is ready.
+
+- **MCP power calls on a held partition need `hold_id`.** `hmc_power_on_lpar`,
+  `hmc_power_off_lpar`, `hmc_dump_restart_lpar` and `hmc_power_lpar` refuse a held partition
+  with `partition_held` unless the call presents the matching `hold_id`, whatever
+  `authorize_power_operations` is set to. Console capture (`hmc_capture_lpar_console`) and
+  reads are not checked.
+- **Library calls are not checked.** The hold binds the MCP server and CLI on the host that
+  placed it. The library operations above, hmcpctl on other hosts, the HMC GUI and direct
+  HMC commands are not fenced, nor is any tool that neither selects nor derives a partition; the
+  document's `unfenced` and `unchecked_tools` name them.
+- **Release is explicit.** `hmc_prepare_host_handoff` with `action` release and the
+  `hold_id` drops the hold and never deletes the partition. Holds do not expire; the host's
+  operator can list and release them with `hmcpctl holds`.
+
 ## SSH host-key verification
 
 Console capture and the power operations' guarded ownership check run over SSH;

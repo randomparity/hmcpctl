@@ -17,6 +17,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.jobs.requests import POWER_OFF_OPERATIONS
 from hmcpctl.operations.lpar.activation import power_off_lpar, submit_power_on_lpar
 from hmcpctl.server import TOOL_SECURITY
+from hmcpctl.tool_registry import hold_guarded
 
 ROOT = Path(__file__).resolve().parents[2]
 PAGE = ROOT / "docs" / "kdive-tier-a-contract.md"
@@ -54,6 +55,15 @@ EXPECTED_TOOLS = {
     "hmc_capture_lpar_console",
     "hmc_list_lpar_ownership",
     "hmc_get_job",
+    "hmc_prepare_host_handoff",
+    "hmc_power_lpar",
+}
+#: The power tools the *Holds* section says refuse a held partition without its hold_id.
+HELD_POWER_TOOLS = {
+    "hmc_power_on_lpar",
+    "hmc_power_off_lpar",
+    "hmc_dump_restart_lpar",
+    "hmc_power_lpar",
 }
 EXPECTED_SETTINGS = {"HMC_AUTHORIZE_POWER_OPERATIONS", "HMC_SSH_VERIFY_HOST_KEY"}
 #: kdive's vocabulary, the vendor's, a result key, a builtin, or an HMC CLI command.
@@ -69,6 +79,15 @@ PROSE_TERMS = {
     "mkvterm",
     "rmvterm",
     "~/.ssh/known_hosts",
+    "hold",
+    "hold_id",
+    "consumer_label",
+    "document",
+    "partition_held",
+    "action",
+    "unfenced",
+    "unchecked_tools",
+    "hmcpctl holds",
 }
 
 
@@ -151,3 +170,10 @@ def test_page_is_linked_once_from_the_index() -> None:
     assert (ROOT / "docs" / "index.md").read_text(encoding="utf-8").count(
         PAGE_LINK
     ) == 1
+
+
+def test_holds_section_names_the_hold_guarded_power_tools() -> None:
+    for name in HELD_POWER_TOOLS:
+        assert hold_guarded(name, TOOL_SECURITY[name]), name
+    handoff = "hmc_prepare_host_handoff"
+    assert not hold_guarded(handoff, TOOL_SECURITY[handoff])
