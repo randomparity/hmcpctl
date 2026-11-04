@@ -729,14 +729,19 @@ def _finite_pairs(packet: dict) -> list[tuple[str, str]]:
     return sorted(pairs, key=lambda pair: "," in pair[1])
 
 
-def _source_record(packet: dict) -> str:
+_SOURCE_QUOTED = [name + suffix for name in _LISTS for suffix in ("", "+", "-")]
+
+
+def _source_pairs(packet: dict) -> list[tuple[str, str]]:
     if packet["case"] != _FINITE:
         _, attribute, value, _ = _case(packet)
-        return build_attribute_record([(attribute, value)], surface="`chhwres -a`")
+        return [(attribute, value)]
+    return _finite_pairs(packet)
+
+
+def _source_record(packet: dict) -> str:
     return build_attribute_record(
-        _finite_pairs(packet),
-        quoted=[name + suffix for name in _LISTS for suffix in ("", "+", "-")],
-        surface="`chhwres -a`",
+        _source_pairs(packet), quoted=_SOURCE_QUOTED, surface="`chhwres -a`"
     )
 
 
@@ -1514,7 +1519,9 @@ def _history_complete(packet, journal, current) -> bool:
 
 
 def _source_command(packet, identity, slot) -> str:
-    record = _source_record(packet)
+    record = build_attribute_record(
+        _source_pairs(packet), quoted=_SOURCE_QUOTED, surface="`chhwres -a`"
+    )
     return (
         "chhwres -r virtualio --rsubtype vnic -o s"
         f" -m {shlex.quote(identity['system'])} -p {shlex.quote(identity['lpar'])}"
