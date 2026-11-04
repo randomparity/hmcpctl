@@ -148,15 +148,21 @@ async def remove_vnic_slot(
 
 def build_vnic_update_attributes(pairs: Sequence[tuple[str, str]]) -> str:
     """Render a ``chhwres -o s`` record; a quoted list add must be the last pair."""
-    return build_attribute_record(
+    payload = build_attribute_record(
         pairs,
         quoted=("allowed_vlan_ids+", "allowed_os_mac_addrs+"),
         surface="`chhwres -a`",
     )
+    return payload
 
 
 async def update_vnic_slot_policy(
-    config: HMCConfig, system_name: str, lpar_name: str, slot_num: str, record: str
+    config: HMCConfig,
+    system_name: str,
+    lpar_name: str,
+    slot_num: str,
+    pairs: Sequence[tuple[str, str]],
 ) -> str:
+    record = build_vnic_update_attributes(pairs)
     command = f"chhwres -r virtualio --rsubtype vnic -o s -m {shlex.quote(system_name)} -p {shlex.quote(lpar_name)} -s {shlex.quote(slot_num)} -a {shlex.quote(record)}"
     return await run_hmc_command(config, command)

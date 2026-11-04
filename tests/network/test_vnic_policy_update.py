@@ -13,6 +13,7 @@ from hmcpctl.operations.virtualization.vnic import (
     update_vnic_policy,
 )
 from hmcpctl.ssh.transport import HMCCLIError
+from hmcpctl.ssh.vnic import build_vnic_update_attributes
 
 _MODULE = "hmcpctl.operations.virtualization.vnic"
 _MAC_1 = "0a0b0c0d0e01"
@@ -268,7 +269,8 @@ async def test_each_record_shape_completes_verified_and_unchanged(
     )
     result = await _update(**inputs)
     mutation.assert_awaited_once()
-    assert mutation.await_args.args[1:] == ("system-a", "client-a", "4", record)
+    assert mutation.await_args.args[1:4] == ("system-a", "client-a", "4")
+    assert build_vnic_update_attributes(mutation.await_args.args[4]) == record
     assert (result.submission, result.readback.status, result.preservation) == (
         "completed",
         "verified",

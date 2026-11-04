@@ -1018,14 +1018,18 @@ def _satisfied_update(before: VnicSnapshot, field: str) -> VnicPolicyUpdateResul
 
 
 async def _submit_update(
-    config: HMCConfig, system_name: str, lpar_name: str, slot_num: str, record: str
+    config: HMCConfig,
+    system_name: str,
+    lpar_name: str,
+    slot_num: str,
+    pairs: list[tuple[str, str]],
 ) -> tuple[
     Literal["completed", "rejected", "unknown"], str | None, str, Exception | None
 ]:
     """Submit once; classify the outcome without retrying."""
     try:
         output = await update_vnic_slot_policy(
-            config, system_name, lpar_name, slot_num, record
+            config, system_name, lpar_name, slot_num, pairs
         )
     except Exception as error:  # noqa: BLE001 - one attempt; the outcome is read back, never retried
         if isinstance(error, HMCCLIError) and (
@@ -1107,7 +1111,7 @@ async def update_vnic_policy(
     pairs, expected = derived
     record = build_vnic_update_attributes(pairs)
     submission, refusal_code, output, cause = await _submit_update(
-        config, system_name, lpar_name, slot_num, record
+        config, system_name, lpar_name, slot_num, pairs
     )
     errors = [f"update submission {submission}: {cause}"] if cause else []
     after_rows, after, read_error = await _read_update_after(

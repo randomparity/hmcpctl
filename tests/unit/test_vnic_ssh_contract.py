@@ -395,8 +395,9 @@ async def test_update_command_shape(monkeypatch, config) -> None:
         return ""
 
     monkeypatch.setattr("hmcpctl.ssh.vnic.run_hmc_command", fake_run)
+    pairs = [("auto_priority_failover", "0"), ("allowed_vlan_ids+", "20,30")]
     record = 'auto_priority_failover=0,"allowed_vlan_ids+=20,30"'
-    await update_vnic_slot_policy(config, "system one", "client one", "4", record)
+    await update_vnic_slot_policy(config, "system one", "client one", "4", pairs)
 
     assert shlex.split(calls[0]) == [
         "chhwres",
