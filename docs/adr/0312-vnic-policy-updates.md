@@ -14,6 +14,8 @@ implemented with offline boundary proof and independent product/security review 
 `475e544b`. This record does not settle the complete updater design.
 On 2026-11-04, #1856 amended the fixture's hypervisor-memory refusal policy
 from one fixed value to a bound, as an operator-approved run-exposed correction.
+On 2026-11-04, #1857 added the version-2 `finite-update` case for scalar and
+finite list-mode updates; its native outcomes are recorded under Consequences.
 
 ## Context
 
@@ -72,9 +74,29 @@ Absent or opaque native provenance remains unknown; diagnostic text is never an
 oracle or cleanup authority. Preserve private-file/journal limits and public
 exclusion. This does not recover an already discarded error or admit a retry.
 
+#1857 adds one version-2 case, `finite-update`, which carries an `update` list of
+one to five actions, at most one per field. `set` applies to all five fields;
+`add` (`+=`) and `remove` (`-=`) apply to the finite lists only. The harness derives
+the record and the oracle from the packet. It refuses before any effect:
+
+- a no-op `set`;
+- any sentinel value;
+- a list action on an `all` or `none` baseline;
+- an `add` that repeats a member;
+- a `remove` that names a member not present, or every member;
+- more than one list value containing a comma.
+
+So `all` minus finite members stays unqualified. The record places any quoted
+list last and keeps the shared builder's final-pair restriction (ADR 0311). List
+oracles compare canonical members, not raw order. The six earlier cases
+are unchanged. The case set tests the port VLAN constraint that #1856 met at
+creation: `HSCL12E9 The SR-IOV physical port supports only the Deny all VLAN ID
+restriction when a port VLAN ID is specified`. See the
+[finite update design](../workflow/specs/2026-11-04-vnic-finite-update-cases-design.md).
+
 No activation, reseed, alternative encoding, automatic retry, rollback or maturity
-promotion follows. The full
-five-field updater, later list modes and two-list composition remain #1828 work.
+promotion follows. The public
+five-field updater remains #1858 work.
 The [source qualification design](../workflow/specs/2026-11-01-vnic-update-source-design.md)
 defines the packet, evidence, proposed bounds and implementation admission gates.
 The [retained-fixture design](../workflow/specs/2026-11-01-vnic-retained-fixture-design.md)
@@ -102,6 +124,22 @@ the last member is refused. Later update modes must be designed around finite
 lists. The outcome table is in the
 [operator procedure](../live-testing.md#recorded-source-outcomes-1856).
 
+#1857 ran the `finite-update` cases on the same HMC. The outcome table is in the
+[operator procedure](../live-testing.md#recorded-finite-update-outcomes-1857).
+
+- **Scalars qualified.** `pvid_priority` and `auto_priority_failover` each
+  qualified. `port_vlan_id` 0→nonzero qualified with allowed VLAN IDs `none`.
+- **`HSCLAB12` refuses a zero/nonzero port VLAN change while allowed VLAN IDs are
+  configured.**
+- **An omitted `auto_priority_failover` was reset to 1** by a `chhwres -o s` that
+  set only `pvid_priority`. An omitted `pvid_priority` was not reset. #1858's
+  updater must therefore submit every scalar explicitly, or expect that reset.
+- **Allowed VLAN and MAC lists are add-only on an existing vNIC.** `+=`
+  qualified. Removing any member, by `-=` or by a `=` that drops one, was refused
+  with `HSCLAB1F` or `HSCLAB20`.
+- **A record with several pairs was refused as a whole**, with no partial apply.
+- **Not qualified:** a two-list record, and a replacement that only adds members.
+
 ## Considered & rejected
 
 - **Infer update support from creation.** verified: the retained command reference
@@ -125,3 +163,16 @@ lists. The outcome table is in the
   `_capture_source` stores only the caught exception class, while `main` emits only
   stage/status or exception type. The former loses the failure detail; widening
   public output would violate the approved private evidence boundary.
+- **One fixed case name per finite shape (#1857).** judgment: about eleven
+  near-identical case names would each need operand keys anyway. A validated action
+  list with a derived oracle covers the same shapes with one parser.
+- **Exact raw list literals as the finite oracle (#1857).** verified: #1856's
+  recorded runs (`docs/live-testing.md`, "Recorded source outcomes") used only
+  singleton finite baselines. No evidence fixes the order or case of a list
+  with several members, so a raw-order oracle would be a guess.
+- **Remove a refused case's vNIC inside the harness (#1857).** judgment: this
+  record already rejects cleanup after a refusal. Per-case removal through the
+  ownership-checked CLI stays the operator's separately granted action.
+- **Opt the update record into `allow_nontrailing_quoted` (#1857).** judgment:
+  ADR 0311 limits that opt-in to typed creation. Moving the one quoted list to the
+  end tests two-list composition without widening that decision.
