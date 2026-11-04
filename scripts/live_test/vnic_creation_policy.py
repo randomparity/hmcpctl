@@ -747,12 +747,6 @@ def _source_expected(packet: dict) -> dict:
     return _plain(_finite_expected(packet))
 
 
-def _source_fields(packet: dict) -> list[str]:
-    if packet["case"] != _FINITE:
-        return [_case(packet)[0]]
-    return list(_finite_expected(packet))
-
-
 def _source_policy(packet: dict, row: dict) -> str:
     if packet["case"] != _FINITE:
         field, _, _, oracle = _case(packet)
@@ -1532,7 +1526,10 @@ def _source_compare(packet, before, after, slot) -> tuple[str, str]:
     old, new = _source_row(before, slot), _source_row(after, slot)
     preserved = deepcopy(after)
     row = _source_row(preserved, slot)
-    for field in _source_fields(packet):
+    changed = (
+        _finite_expected(packet) if packet["case"] == _FINITE else [_case(packet)[0]]
+    )
+    for field in changed:
         row[field] = old[field]
     return _source_policy(
         packet, new
