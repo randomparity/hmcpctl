@@ -20,6 +20,7 @@ import pytest_asyncio
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
+from hmcpctl.errors import HMCTransportError
 
 # Below every gap the stale-connection case waits, so an unfixed client reuses it.
 _HMC_IDLE_CLOSE_SECONDS = 1.1
@@ -33,6 +34,7 @@ class _IdleClosingHMC:
 
     def __init__(self) -> None:
         self.received: list[int] = []
+        self.drop_reused = False
         self._connections = 0
 
     async def handle(
@@ -47,7 +49,9 @@ class _IdleClosingHMC:
                 await reader.readuntil(b"\r\n\r\n")
                 self.received.append(connection)
                 idle = None if last_response is None else loop.time() - last_response
-                if idle is not None and idle >= _HMC_IDLE_CLOSE_SECONDS:
+                if idle is not None and (
+                    self.drop_reused or idle >= _HMC_IDLE_CLOSE_SECONDS
+                ):
                     return
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
                 await writer.drain()
@@ -148,6 +152,18 @@ async def test_back_to_back_requests_reuse_one_connection(hmc) -> None:
     await client._request("GET", _PATH)
     await asyncio.sleep(0.1)
     await client._request("GET", _PATH)
+
+    assert fake.received == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_dropped_request_is_sent_once(hmc) -> None:
+    fake, client = hmc
+    fake.drop_reused = True
+    await client._request("GET", _PATH)
+
+    with pytest.raises(HMCTransportError, match="Server disconnected"):
+        await client._request("GET", _PATH)
 
     assert fake.received == [1, 1]
 

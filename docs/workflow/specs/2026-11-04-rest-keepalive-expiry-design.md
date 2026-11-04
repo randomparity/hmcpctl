@@ -51,7 +51,7 @@ Not taken:
   Green: `uv run --no-sync pytest tests/unit/test_client_keepalive.py -q`.
 - Back-to-back reuse (Success 2): focused-test, same module. Two requests 0.1 s apart arrive on
   one server-side connection. Red: `max_keepalive_connections=0` fails it.
-- Single send (Success 3): focused-test, same module. The fake HMC counts one request per call.
+- Single send (Success 3): focused-test, same module. A request the fake drops is sent once.
 - Pool caps unchanged: focused-test, same module asserts 100/20 on the built pool.
 - Live: an operator-authorized read-only private probe, 24 requests after 1.5–6 s gaps. Pass:
   new code opens a new connection for each and none fails; old code reuses one under 5 s.
