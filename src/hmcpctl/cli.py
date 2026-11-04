@@ -19,6 +19,7 @@ from types import ModuleType
 
 from .cli_commands import (
     config,
+    holds,
     jobs,
     metrics,
     operations,
@@ -36,6 +37,7 @@ from .cli_commands.app import (
     cluster_app,
     config_app,
     console_app,
+    holds_app,
     jobs_app,
     lpars_app,
     memory_pools_app,
@@ -109,6 +111,7 @@ def _register_commands() -> None:
         (cluster, cluster_app),
         (config, config_app),
         (console_commands, console_app),
+        (holds, holds_app),
         (jobs, jobs_app),
         (operations, operations_app),
         (lpar_inventory, lpars_app),

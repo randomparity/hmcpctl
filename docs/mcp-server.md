@@ -538,6 +538,36 @@ and pages with `next_cursor`. `profile` selects whose records it lists: those wi
 `agent_id` (`hmcpctl` when unset) that were started on that profile's connection and HMC host,
 or on the environment connection and its `HMC_HOST` when `profile` is omitted.
 
+### External-management holds
+
+A hold marks a partition as handed to an external consumer such as kdive (ADR 0193). The store
+keeps at most one hold per partition. While a partition is held, this host's MCP server and CLI
+refuse every partition-mutation tool and command that resolves it, with `partition_held`, unless
+the call presents the hold's `hold_id`. Every such tool takes an optional `hold_id` argument and
+every such CLI command takes `--hold-id`; `hold_id` is not part of a logical operation's
+request, so a continuation of a paused operation may add it. A logical operation refused for a
+hold ends `failed`, and a repeat of its `request_id` returns that record, so retry with a new
+`request_id`. Reads, `hmc_capture_lpar_console` and the handoff tool
+are not refused. A store that cannot be read refuses these calls too.
+
+A hold binds only this host's front ends. The library API, other hosts, the HMC GUI and direct
+HMC commands are not fenced, and neither are tools that never resolve a partition: system-scoped
+writes such as `hmc_restore_lpar_profiles`, system power and system profile activation, and
+`hmc_run_command` and `hmcpctl raw` (ADR 0327). While any hold exists, a mutation that names its
+partition only by name over SSH resolves the name through REST first; when REST cannot identify
+it, the call is refused with `partition_hold_unverified`.
+
+Holds never expire. `hmcpctl holds list` shows every hold on the host, without its `hold_id`,
+and `hmcpctl holds release <partition-uuid>` releases one; neither contacts the HMC, and release
+never deletes the partition. A restored backup lacks holds placed after it was taken, and
+deleting the state directory removes every hold: list the holds first and have them placed again.
+
+Holds arrived with store schema 2. The first hmcpctl process of this version to open an older
+store adds the holds table in place, keeping every operation, guard and ledger entry. The change
+is one-way: restart every hmcpctl process after upgrading. An older process that then reports
+the store as corrupt with `unknown schema version` needs a restart or an upgrade, not a
+deleted store.
+
 ## Client setup
 
 The [README quick start](../README.md#mcp-quick-start) shows a stdio client configuration.

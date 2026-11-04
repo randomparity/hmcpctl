@@ -39,7 +39,12 @@ from ...jobs import (
     validate_wait_timing,
     wait_for_submitted_job,
 )
-from ...resource_identity import is_uuid, resolve_system_uuid, system_name_from_uuid
+from ...resource_identity import (
+    guard_partition,
+    is_uuid,
+    resolve_system_uuid,
+    system_name_from_uuid,
+)
 from ...ssh.transport import run_hmc_command
 from ...xmlutil import console_version, leaf_text
 from .ownership import authorize_lpar_ownership_description
@@ -156,6 +161,8 @@ async def _target(
     if len(matches) != 1 or not is_uuid(matches[0].get("UUID", "")):
         raise ValueError("partition is missing,ambiguous or outside the managed system")
     uuid = matches[0]["UUID"]
+    if kind == "LogicalPartition":
+        guard_partition(uuid)
     entry = await hmc.get_uom(kind, uuid)
     if (
         not isinstance(entry, dict)

@@ -210,7 +210,7 @@ def test_garbage_db_is_corrupt():
 def test_unknown_schema_version_is_corrupt():
     _open_write()
     raw = store._connect(store.state_dir() / store.DB_NAME)
-    raw.execute("UPDATE meta SET value = '2' WHERE key = 'schema_version'")
+    raw.execute("UPDATE meta SET value = '3' WHERE key = 'schema_version'")
     raw.close()
     assert _reason(_open_read) == "store_corrupt"
 

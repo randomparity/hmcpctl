@@ -14,6 +14,7 @@ from hmcpctl.documents.lpar_memory import LparMemoryChange
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.resource_identity import (
+    guard_partition,
     is_uuid,
     resolve_system_uuid,
     system_name_from_uuid,
@@ -441,6 +442,8 @@ async def _contained_partition(
         raise ValueError(
             "Memory target is missing, ambiguous or outside the selected system"
         )
+    if matches[0][0] == "LogicalPartition":
+        guard_partition(matches[0][1])
     return matches[0]
 
 

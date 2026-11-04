@@ -136,6 +136,15 @@ def no_ambient_hmc_settings(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def uninstall_partition_guard():
+    """Leave no ADR 0193 hold hook behind: create_mcp and the CLI install it process-wide."""
+    yield
+    from hmcpctl.resource_identity import install_partition_guard
+
+    install_partition_guard(None)
+
+
+@pytest.fixture(autouse=True)
 def isolate_operation_state(monkeypatch, tmp_path_factory):
     """Point the ADR 0190 operation store at a per-test directory nobody created yet.
 

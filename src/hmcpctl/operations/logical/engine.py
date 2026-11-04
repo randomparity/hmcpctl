@@ -8,6 +8,7 @@ raise messages that carry no request arguments.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import dataclasses
 import hashlib
 import json
@@ -22,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from . import store
+from .holds import HoldRefused
 from .models import (
     EffectRecord,
     EffectStatus,
@@ -312,9 +314,12 @@ def _start_worker(
     continuation: str,
     classifiers: Mapping[str, Classifier],
 ) -> None:
+    # The worker runs as the submitting call, so the ADR 0193 hold hook sees that call's
+    # tool and hold_id in the operation body (ADR 0327 Decision 4).
+    call = contextvars.copy_context()
     thread = threading.Thread(
-        target=_work,
-        args=(operation_id, body, continuation, classifiers),
+        target=call.run,
+        args=(_work, operation_id, body, continuation, classifiers),
         name=f"hmcpctl-operation-{operation_id[:8]}",
         daemon=True,
     )
@@ -424,7 +429,7 @@ async def _run(
     try:
         result = await body(ctx)
         result_json = _result_json(result)
-    except (OperationFailed, EffectNotApplied) as exc:
+    except (OperationFailed, EffectNotApplied, HoldRefused) as exc:
         definite = not ctx.has_uncertain()
         warnings = [_warning(_failure(exc))]
         carried = getattr(exc, "result", None)
