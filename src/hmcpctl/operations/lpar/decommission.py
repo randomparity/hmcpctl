@@ -32,7 +32,7 @@ from ...jobs import (
     validate_wait_timing,
     wait_for_submitted_job,
 )
-from ...resource_identity import is_uuid, resolve_system_uuid
+from ...resource_identity import guard_partition, is_uuid, resolve_system_uuid
 from ...xmlutil import leaf_text
 from ..logical.models import EffectRecord, OperationRecord
 from .workflow_contract import WorkflowStep
@@ -425,6 +425,14 @@ def _backing_device(mapping: dict[str, Any]) -> str | None:
     return None
 
 
+def _guarded(child: dict[str, Any]) -> dict[str, Any]:
+    """Run the ADR 0193 hold hook on the resolved child; one without a UUID is refused later."""
+    lpar_uuid = _text(child.get("UUID"))
+    if lpar_uuid is not None:
+        guard_partition(lpar_uuid)
+    return child
+
+
 async def resolve_target_lpar(
     hmc: HMCClient, system_uuid: str, lpar_name_or_uuid: str
 ) -> dict[str, Any]:
@@ -432,12 +440,12 @@ async def resolve_target_lpar(
     if is_uuid(lpar_name_or_uuid):
         matches = _children_matching_uuid(children, lpar_name_or_uuid)
         if len(matches) == 1:
-            return matches[0]
+            return _guarded(matches[0])
         raise _missing_target_error(system_uuid, lpar_name_or_uuid)
 
     matches = _children_matching_name(children, lpar_name_or_uuid)
     if len(matches) == 1:
-        return matches[0]
+        return _guarded(matches[0])
     if not matches:
         raise _missing_target_error(system_uuid, lpar_name_or_uuid)
     raise _ambiguous_name_error(matches, system_uuid, lpar_name_or_uuid)

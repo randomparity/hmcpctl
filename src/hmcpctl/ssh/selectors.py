@@ -7,8 +7,17 @@ from typing import overload
 from hmcpctl.client.core import HMCClient
 
 from ..config import HMCConfig
-from ..errors import HMCTransportError
-from ..resource_identity import is_uuid, lpar_name_from_uuid, system_name_from_uuid
+from ..errors import HMCError, HMCTransportError
+from ..operations.logical.holds import HoldRefused
+from ..operations.logical.store import OperationRefused
+from ..resource_identity import (
+    guard_partition,
+    is_uuid,
+    lpar_name_from_uuid,
+    partition_names_need_resolution,
+    resolve_lpar_uuid,
+    system_name_from_uuid,
+)
 from .lpar import resolve_lpar_cli_name, resolve_system_cli_name
 
 
@@ -93,6 +102,32 @@ async def resolve_ssh_names(
     return await _resolve_ssh_names(config, system_name_or_uuid, lpar_name_or_uuid)
 
 
+async def _guard_named_partition(
+    config: HMCConfig | HMCClient, system: str | None, lpar_name: str
+) -> None:
+    """Resolve a name-only partition so the ADR 0193 hold hook can check it.
+
+    Called only while some partition is held, so hosts without holds make no extra read. A
+    name REST cannot resolve refuses rather than passing: a hold must never be skipped
+    because its partition could not be identified (ADR 0193 Decision 5).
+    """
+    try:
+        if isinstance(config, HMCConfig):
+            async with HMCClient(config) as hmc:
+                await resolve_lpar_uuid(hmc, lpar_name, system_name_or_uuid=system)
+        else:
+            await resolve_lpar_uuid(config, lpar_name, system_name_or_uuid=system)
+    except OperationRefused:
+        raise
+    except (HMCError, ValueError) as error:
+        raise HoldRefused(
+            "partition_hold_unverified",
+            f"partitions on this host are held and LPAR {lpar_name!r} could not be identified "
+            f"to check for a hold ({type(error).__name__}); name it by UUID or retry when the "
+            "HMC REST API answers",
+        ) from error
+
+
 async def _resolve_ssh_names(
     config: HMCConfig | HMCClient,
     system_name_or_uuid: str | None,
@@ -100,6 +135,11 @@ async def _resolve_ssh_names(
     *,
     system_is_name: bool = False,
 ) -> tuple[str | None, str | None]:
+    if lpar_name_or_uuid:
+        if is_uuid(lpar_name_or_uuid):
+            guard_partition(lpar_name_or_uuid)
+        elif partition_names_need_resolution():
+            await _guard_named_partition(config, system_name_or_uuid, lpar_name_or_uuid)
     if (system_is_name or not is_uuid(system_name_or_uuid or "")) and not is_uuid(
         lpar_name_or_uuid or ""
     ):

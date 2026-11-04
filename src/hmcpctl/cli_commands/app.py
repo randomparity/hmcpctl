@@ -12,16 +12,66 @@ from typing import Any, NoReturn
 import typer
 from typer import _click
 from typer._click.core import ParameterSource
-from typer.core import TyperCommand, TyperGroup
+from typer.core import TyperCommand, TyperGroup, TyperOption
 
+from ..call_context import CallContext, calling
+from ..operations.logical.holds import HOLD_GUARD
+from ..resource_identity import install_partition_guard
+from ..server_tools.catalog import TOOL_SECURITY
+from ..tool_registry import hold_guarded
 from .capabilities import capabilities
 from .output import usage_error
 from .runtime import GlobalOpts
 from .serve import serve
+from .tool_mirrors import CLI_TOOL_MIRRORS
+
+_HOLD_ID_OPTION = "hold_id"
+
+
+def _command_path(ctx: _click.Context) -> str:
+    """The command's path below the root, as ``CLI_TOOL_MIRRORS`` keys it."""
+    names: list[str] = []
+    while ctx.parent is not None:
+        names.append(ctx.info_name or "")
+        ctx = ctx.parent
+    return " ".join(reversed(names))
+
+
+def _mirrored_tool(ctx: _click.Context) -> str | None:
+    return CLI_TOOL_MIRRORS.get(_command_path(ctx))
+
+
+def _takes_hold_id(tool: str | None) -> bool:
+    return tool is not None and hold_guarded(tool, TOOL_SECURITY[tool])
 
 
 class CLICommand(TyperCommand):
-    """Enrich only known missing-input errors using the installed parser."""
+    """Enrich only known missing-input errors, and run as the registry tool it mirrors.
+
+    A command mirroring a hold-guarded tool takes ``--hold-id``. Every command runs inside
+    the call context its mirrored tool would get over MCP (ADR 0193, ADR 0327 Decision 3).
+    """
+
+    def get_params(self, ctx: _click.Context) -> list[_click.Parameter]:
+        params = super().get_params(ctx)
+        if not _takes_hold_id(_mirrored_tool(ctx)):
+            return params
+        hold_id = TyperOption(
+            param_decls=["--hold-id", _HOLD_ID_OPTION],
+            default=None,
+            help=(
+                "The hold_id of the external-management hold on the partition, when one "
+                "is placed; a held partition refuses this command without it"
+            ),
+        )
+        return [*params, hold_id]
+
+    def invoke(self, ctx: _click.Context) -> Any:
+        tool = _mirrored_tool(ctx)
+        hold_id = ctx.params.pop(_HOLD_ID_OPTION, None)
+        read = tool is not None and TOOL_SECURITY[tool].effect == "read"
+        with calling(CallContext(tool=tool, read=read, hold_id=hold_id)):
+            return super().invoke(ctx)
 
     def parse_args(self, ctx: _click.Context, args: list[str]) -> list[str]:
         original = list(args)
@@ -115,6 +165,10 @@ templates_app = typer.Typer(
 )
 vios_app = typer.Typer(help="Virtual I/O Servers.", no_args_is_help=True)
 console_app = typer.Typer(help="The HMC itself.", no_args_is_help=True)
+holds_app = typer.Typer(
+    help="Local external-management holds across all agents; no HMC calls.",
+    no_args_is_help=True,
+)
 operations_app = typer.Typer(
     help="Local logical-operation records across all agents and connections; no HMC calls.",
     no_args_is_help=True,
@@ -135,6 +189,7 @@ app.add_typer(vios_app, name="vios")
 app.add_typer(console_app, name="console")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(operations_app, name="operations")
+app.add_typer(holds_app, name="holds")
 app.add_typer(raw_app, name="raw")
 app.add_typer(snapshot_app, name="snapshot")
 
@@ -232,6 +287,8 @@ def main(
         for name in option_names
         if ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE
     )
+    # The CLI, like the server, enforces ADR 0193 holds; the library installs no guard.
+    install_partition_guard(HOLD_GUARD)
     ctx.obj = GlobalOpts(
         host=host,
         user=user,
