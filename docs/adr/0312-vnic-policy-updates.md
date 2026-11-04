@@ -15,7 +15,7 @@ implemented with offline boundary proof and independent product/security review 
 On 2026-11-04, #1856 amended the fixture's hypervisor-memory refusal policy
 from one fixed value to a bound, as an operator-approved run-exposed correction.
 On 2026-11-04, #1857 added the version-2 `finite-update` case for scalar and
-finite list-mode updates; its native outcomes are to be recorded under Consequences.
+finite list-mode updates; its native outcomes are recorded under Consequences.
 
 ## Context
 
@@ -123,6 +123,22 @@ So for this environment, these list sentinels are creation-only, and removing
 the last member is refused. Later update modes must be designed around finite
 lists. The outcome table is in the
 [operator procedure](../live-testing.md#recorded-source-outcomes-1856).
+
+#1857 ran the `finite-update` cases on the same HMC. The outcome table is in the
+[operator procedure](../live-testing.md#recorded-finite-update-outcomes-1857).
+
+- **Scalars qualified.** `pvid_priority` and `auto_priority_failover` each
+  qualified. `port_vlan_id` 0→nonzero qualified with allowed VLAN IDs `none`.
+- **`HSCLAB12` refuses a zero/nonzero port VLAN change while allowed VLAN IDs are
+  configured.**
+- **An omitted `auto_priority_failover` was reset to 1** by a `chhwres -o s` that
+  set only `pvid_priority`. An omitted `pvid_priority` was not reset. #1858's
+  updater must therefore submit every scalar explicitly, or expect that reset.
+- **Allowed VLAN and MAC lists are add-only on an existing vNIC.** `+=`
+  qualified. Removing any member, by `-=` or by a `=` that drops one, was refused
+  with `HSCLAB1F` or `HSCLAB20`.
+- **A record with several pairs was refused as a whole**, with no partial apply.
+- **Not qualified:** a two-list record, and a replacement that only adds members.
 
 ## Considered & rejected
 

@@ -3300,6 +3300,72 @@ pre-fixture baseline. This version-2 procedure's results carry no
 them. The raw journals stay private. None of this is product update support.
 
 
+#### Recorded finite update outcomes (#1857)
+
+The finite cases ran once each on HMC V10R3 M1060 against one owned inactive
+fixture. The fixture was prepared, and W1 through W2b ran, at commit
+`ec993f1e65c2984c5cfda5bb860d054b17e86d32`. W3 through W11 and the fixture
+deletion ran at `acde3f572bebddad8babb6189e3e231bc07f2af4`. That commit is the same
+harness with main's REST keep-alive fix (#1926) merged in, and the update record
+built at its command site with identical bytes.
+
+Every baseline used `port_vlan_id=0`, `pvid_priority=0` and finite lists unless the
+table says otherwise. W1 created its vNIC with `auto_priority_failover=0`. W2 is
+listed with its baseline. Every later case used `auto_priority_failover=1`. VLAN
+IDs and MAC addresses are shown as tokens.
+
+| Case | Baseline | Record | Submission | Policy | Preservation | Outcome |
+|---|---|---|---|---|---|---|
+| W1 | failover 0 | `pvid_priority=5` | completed | verified | drifted: `auto_priority_failover` 0→1 | unresolved |
+| W2 | failover 0 | `auto_priority_failover=1` | completed | verified | unchanged | qualified |
+| W1b | failover 1 | `pvid_priority=5` | completed | verified | unchanged | qualified |
+| W2b | pvid 5, failover 1 | `auto_priority_failover=0` | completed | verified | unchanged; pvid stayed 5 | qualified |
+| W3 | VLAN `none` | `port_vlan_id=<V1>` | completed | verified | unchanged | qualified |
+| W4 | VLAN {V1} | `"allowed_vlan_ids=<V2>,<V3>"` | rejected `HSCLAB1F` | unchanged | unchanged | refused |
+| W5 | VLAN {V1} | `allowed_vlan_ids+=<V2>` | completed | verified | unchanged | qualified |
+| W6 | VLAN {V1,V2} | `allowed_vlan_ids-=<V2>` | rejected `HSCLAB1F` | unchanged | unchanged | refused |
+| W7 | MAC {M1} | `"allowed_os_mac_addrs=<M2>,<M3>"` | rejected `HSCLAB20` | unchanged | unchanged | refused |
+| W8 | MAC {M1} | `allowed_os_mac_addrs+=<M2>` | completed | verified | unchanged | qualified |
+| W9 | MAC {M1,M2} | `allowed_os_mac_addrs-=<M2>` | rejected `HSCLAB20` | unchanged | unchanged | refused |
+| W10 | VLAN {V1}, MAC {M1,M2} | `allowed_os_mac_addrs-=<M2>,"allowed_vlan_ids+=<V2>,<V3>"` | rejected `HSCLAB20` | unchanged, VLAN add not applied | unchanged | refused |
+| W11 | VLAN {V1} | `port_vlan_id=<V2>` | rejected `HSCLAB12` | unchanged | unchanged | refused |
+
+Each qualified case removed its own vNIC, and its independent recovery reached
+CLEAN. W1b's first recovery came back MANUAL_RECOVERY only because its own logoff
+was disconnected. One read-only re-run reached CLEAN. W3's first capture attempt
+stopped on a REST disconnect before any effect. That disconnect led to #1926.
+
+On this HMC, then:
+
+- **An omitted `auto_priority_failover` resets to its default (1)** when a
+  `chhwres -o s` update changes another field. An omitted `pvid_priority` is not
+  reset.
+- **`pvid_priority` and `auto_priority_failover` updates qualify.** A
+  `port_vlan_id` change from 0 qualifies with allowed VLAN IDs `none`.
+- **`HSCLAB12` refuses a port VLAN ID change between zero and nonzero while
+  allowed VLAN IDs are configured.** Its text reads "The port VLAN ID cannot be
+  changed from zero to a non-zero value or from a non-zero value to zero when
+  allowed VLAN IDs are configured."
+- **Allowed VLAN and MAC lists are add-only on an existing vNIC.**
+  - `+=` qualifies.
+  - `-=` is refused for any member, not only the last.
+  - A `=` replacement that drops an existing member is refused with the same
+    codes.
+  - A replacement that only adds members was not tested.
+- **A record carrying several pairs is applied or refused as a whole.** In W10 a
+  refused MAC removal also left the VLAN addition unapplied. No two-list record
+  qualified, because W10 combined a refused removal.
+
+Each refused or unresolved case's vNIC was removed separately, after a read-only
+inventory check, through the ownership-checked `hmcpctl network remove-vnic`. The
+fixture was then deleted through the ownership-checked inactive-only
+`hmcpctl lpars delete`. A witness fixture preflight returned READY and its recovery
+UNCHANGED, which reproduces the pre-fixture baseline.
+
+One REST session may have persisted until the HMC's own timeout: W1b's first
+recovery logoff. The raw journals stay private, and `scripts/live_test_evidence.py`
+has no route for them. None of this is product update support; that remains #1858.
+
 ### Retained fixture prerequisite for vNIC source qualification
 
 The `vnic-creation-policy` named owner also accepts a separate version-3
