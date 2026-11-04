@@ -20,6 +20,7 @@ from ...operations.virtualization.vnic import (
     list_sea_adapters,
     list_vnics,
     remove_vnic,
+    update_vnic_policy,
 )
 from ..output import output, print_json, terminal_field
 from ..runtime import with_client
@@ -193,6 +194,69 @@ def network_remove_vnic(
         raise typer.Exit(1)
 
 
+def network_update_vnic_policy(
+    system_name: str = typer.Argument(..., help="Managed system name or UUID"),
+    lpar: str = typer.Argument(..., help="LPAR name or UUID"),
+    slot_num: str = typer.Argument(..., help="vNIC slot number (from list-vnics)"),
+    port_vlan_id: int | None = typer.Option(
+        None, "--port-vlan-id", help="1..4094; only from a current value of 0"
+    ),
+    pvid_priority: int | None = typer.Option(
+        None, "--pvid-priority", help="Priority 0..7"
+    ),
+    auto_priority_failover: bool | None = typer.Option(
+        None, "--auto-priority-failover/--no-auto-priority-failover"
+    ),
+    add_allowed_vlan_ids: str | None = typer.Option(
+        None, "--add-allowed-vlan-ids", help="VLANs 1..4094 to add, comma-separated"
+    ),
+    add_allowed_os_mac_addrs: str | None = typer.Option(
+        None, "--add-allowed-os-mac-addrs", help="12-hex MACs to add, comma-separated"
+    ),
+    ownership_override: bool = typer.Option(False, "--ownership-override"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+) -> None:
+    """Apply one natively qualified policy change to an existing vNIC."""
+    vlans = None
+    if add_allowed_vlan_ids is not None:
+        parts = add_allowed_vlan_ids.split(",")
+        if not all(re.fullmatch(r"[0-9]+", part) for part in parts):
+            raise typer.BadParameter("use comma-separated integer VLAN IDs")
+        vlans = [int(part) for part in parts]
+    macs = (
+        None
+        if add_allowed_os_mac_addrs is None
+        else add_allowed_os_mac_addrs.split(",")
+    )
+    if not yes and not _confirm_on_stderr(
+        f"Update policy of vNIC slot {slot_num} on '{lpar}' on '{system_name}'?"
+    ):
+        raise typer.Abort()
+
+    async def operation(hmc: HMCClient):
+        try:
+            return await update_vnic_policy(
+                hmc,
+                lpar,
+                slot_num,
+                system_name_or_uuid=system_name,
+                ownership_override=ownership_override,
+                port_vlan_id=port_vlan_id,
+                pvid_priority=pvid_priority,
+                auto_priority_failover=auto_priority_failover,
+                add_allowed_vlan_ids=vlans,
+                add_allowed_os_mac_addrs=macs,
+            )
+        except VnicPartialError as exc:
+            return exc
+
+    outcome = with_client(operation)
+    result = outcome.result if isinstance(outcome, VnicPartialError) else outcome
+    print_json(asdict(result))
+    if isinstance(outcome, VnicPartialError):
+        raise typer.Exit(1)
+
+
 def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
     group.command("list-fc-ports")(network_list_fc_ports)
@@ -200,3 +264,4 @@ def register_commands(group: typer.Typer) -> None:
     group.command("list-vnics")(network_list_vnics)
     group.command("add-vnic")(network_add_vnic)
     group.command("remove-vnic")(network_remove_vnic)
+    group.command("update-vnic-policy")(network_update_vnic_policy)

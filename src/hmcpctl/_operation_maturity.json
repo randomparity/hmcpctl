@@ -1443,6 +1443,13 @@
       "verification": "unevidenced",
       "reason": null,
       "observed_at": null
+    },
+    {
+      "operation": "vnic.update_policy",
+      "implementation": "partial",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     }
   ]
 }

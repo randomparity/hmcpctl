@@ -15,6 +15,7 @@ from hmcpctl.operations.virtualization.vnic import (
 from hmcpctl.server_tools.virtualization.vnic import (
     hmc_add_vnic,
     hmc_remove_vnic,
+    hmc_update_vnic_policy,
 )
 
 
@@ -158,3 +159,53 @@ def test_remove_vnic_forwards_ownership_override(monkeypatch) -> None:
         "ownership_override": True,
         "system_name_or_uuid": "system",
     }
+
+
+def test_update_vnic_policy_forwards_one_change(monkeypatch) -> None:
+    monkeypatch.setenv("HMC_HOST", "h")
+    monkeypatch.setenv("HMC_USER", "u")
+    monkeypatch.setenv("HMC_PASSWORD", "p")
+    operation = AsyncMock(return_value=_result("add", "4"))
+    monkeypatch.setattr(
+        "hmcpctl.server_tools.virtualization.vnic.update_vnic_policy", operation
+    )
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
+
+    hmc_update_vnic_policy("system", "lpar", "4", add_allowed_vlan_ids=[20])
+
+    assert operation.await_args.args[1:] == ("lpar", "4")
+    assert operation.await_args.kwargs == {
+        "system_name_or_uuid": "system",
+        "ownership_override": False,
+        "port_vlan_id": None,
+        "pvid_priority": None,
+        "auto_priority_failover": None,
+        "add_allowed_vlan_ids": [20],
+        "add_allowed_os_mac_addrs": None,
+    }
+
+
+def test_update_vnic_policy_partial_error_retains_serialized_result(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HMC_HOST", "h")
+    monkeypatch.setenv("HMC_USER", "u")
+    monkeypatch.setenv("HMC_PASSWORD", "p")
+    partial = VnicPartialError("incomplete", _result("add", "4"))
+    operation = AsyncMock(side_effect=partial)
+    monkeypatch.setattr(
+        "hmcpctl.server_tools.virtualization.vnic.update_vnic_policy", operation
+    )
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
+
+    with pytest.raises(VnicPartialError) as caught:
+        hmc_update_vnic_policy("system", "lpar", "4", pvid_priority=5)
+
+    assert caught.value.result is partial.result
+    assert '"slot_num": "4"' in str(caught.value)
