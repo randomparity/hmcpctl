@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from hmcpctl.operations.lpar.provision_boot import BOOT_STARTED_CODES
 from hmcpctl.ssh.commands import build_filter
 
 from . import lpar_config, lpar_power
@@ -46,8 +47,9 @@ if TYPE_CHECKING:
 GROUP = "provision-boot"
 SUBTASK = 72
 SCENARIO = "st72-provision-boot"
-#: Within the H1 maximum; the call may return first, and the operation is polled.
-WAIT_SECONDS = 120
+#: Within the H1 maximum, and past the ~130 s from power-on to CA00E105 seen natively
+#: (ADR 0328); the call may return first, and the operation is polled.
+WAIT_SECONDS = 300
 _PROFILE = ("ubuntu", "26.04.1")
 # Documentation addresses (RFC 5737): the guest never reaches its installer source here.
 _NETWORK: dict[str, Any] = {
@@ -78,7 +80,7 @@ _ASSERTIONS = (
     "activated-from-saved-profile",
     "optical-adapter-after-activation",
     "optical-mapping-after-activation",
-    "refcodes-observed-without-boot-started-claim",
+    "boot-wait-ended-truthfully",
 )
 _NATIVE_ASSERTIONS = (
     "vios-level-read",
@@ -184,6 +186,16 @@ def steps_by_name(data: object) -> dict[str, Mapping[str, Any]]:
     steps = plain.get("steps") if isinstance(plain, Mapping) else None
     items = steps if isinstance(steps, list) else []
     return {str(step.get("step")): step for step in items if isinstance(step, Mapping)}
+
+
+def _boot_wait_truthful(outcome: object, wait: Mapping[str, Any] | None) -> bool:
+    """boot_started on a boot-started code, or needs_attention with what it saw."""
+    result = (wait or {}).get("result")
+    if not isinstance(result, Mapping):
+        return False
+    if outcome == "boot_started":
+        return result.get("refcode") in BOOT_STARTED_CODES
+    return outcome == "needs_attention" and "observed" in result
 
 
 def _ok(steps: Mapping[str, Mapping[str, Any]], name: str) -> bool:
@@ -417,13 +429,10 @@ async def _boot(
         "provision.lpar", "revalidated-before-power-on", _ok(steps, "revalidate_boot")
     )
     run.hold("provision.lpar", "installer-powered-on", _ok(steps, "power_on"))
-    wait = steps.get("wait_boot_started") or {}
     run.hold(
         "provision.lpar",
-        "refcodes-observed-without-boot-started-claim",
-        operation.get("outcome") == "needs_attention"
-        and isinstance(wait.get("result"), Mapping)
-        and "observed" in wait["result"],
+        "boot-wait-ended-truthfully",
+        _boot_wait_truthful(operation.get("outcome"), steps.get("wait_boot_started")),
     )
     bound = (steps.get("bind_media") or {}).get("result")
     name = bound.get("media_name") if isinstance(bound, Mapping) else None

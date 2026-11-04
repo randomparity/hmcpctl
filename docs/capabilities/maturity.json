@@ -5082,7 +5082,7 @@
             "parameters": [
               {
                 "name": "boot",
-                "constraint": "immediate boots in the same call; deferred pauses at ready_to_boot for continuation boot; revalidates before power-on, journals a refcode baseline, activates the saved profile once and polls refcodes until wait_seconds (ADR 0326)"
+                "constraint": "immediate boots in the same call; deferred pauses at ready_to_boot for continuation boot; revalidates before power-on, journals a refcode baseline, activates the saved profile once and polls refcodes until wait_seconds (ADR 0326); a newer CA00E105 ends boot_started (ADR 0328)"
               },
               {
                 "name": "continuation",
@@ -5092,15 +5092,6 @@
           }
         ],
         "missing_scope": [
-          {
-            "variant": "boot-started-codes",
-            "parameters": [
-              {
-                "name": "boot",
-                "constraint": "the boot-started reference-code set is empty until native evidence fills it, so no operation reports boot_started; owned by issue #1850"
-              }
-            ]
-          },
           {
             "variant": "c12-positive-virtual-slot-linkage",
             "parameters": [

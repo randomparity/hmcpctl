@@ -3,7 +3,8 @@
 ## Status
 
 Accepted (2026-10-01), issue #1216. Selection made by the operator on 2026-10-01 from the
-evidence below.
+evidence below. ADR 0328 records Decision 3's two arms and the VIOS level they observed, which
+enters Decision 2's envelope.
 
 ## Context
 

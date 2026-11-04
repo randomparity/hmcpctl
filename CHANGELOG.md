@@ -18,6 +18,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `hmc_provision_lpar` reports `boot_started` (#1850, ADR 0328): a reference code newer than the
+  pre-power-on baseline that is `CA00E105`, partition firmware passing control to the boot image,
+  ends the installer boot `boot_started`. Native Ubuntu 26.04.1 and Rocky 9.8 windows on POWER9
+  (HMC V10R3 M1060, VIOS 4.1.2.00) both posted it about 130 seconds after power-on and nothing
+  after it, so a call's `wait_seconds`, counted from its start, must also cover creation and
+  upload; a shorter call ends `needs_attention` and `resume` polls again. `boot_started` still
+  means only that the boot image started, not that the installer ran.
+
 - `hmc_decommission_lpar` and `hmcpctl lpars decommission` take `storage_cleanup`
   (`--storage-cleanup`): `retain`, the default and the old behaviour, or `delete_owned`. After
   the partition is deleted, `delete_owned` deletes each virtual disk and installer medium the

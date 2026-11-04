@@ -879,19 +879,21 @@ the media and the run length: it powers a partition on.
 - **Run.** It provisions one partition `hmcpctl-live-pwr-<8 hex>-p` on a new 1 GiB
   volume `lppwr<8 hex>`, with prepared media described from the ISO's own SHA-256 and
   size, a locally administered MAC and documentation addresses, and `boot: immediate`
-  with `wait_seconds` 120. A run still going is repeated until it pauses or ends.
+  with `wait_seconds` 300. A run still going is repeated until it pauses or ends.
 - **Assertions.** `mount-accepted` (no REST0269 on the provision-created partition),
   `saved-profile-optical-slot`, `revalidated-before-power-on`, `installer-powered-on`,
   `activated-from-saved-profile` (`curr_profile` is the saved `hmcpctl_…` profile),
   `optical-adapter-after-activation` (the mount's client slot is in the running
   partition's vSCSI adapters), `optical-mapping-after-activation`, and
-  `refcodes-observed-without-boot-started-claim` (the run pauses `needs_attention`
-  with the codes it saw). The observed reference codes stay in the private results.
+  `boot-wait-ended-truthfully` (the run ends `boot_started` on a code in the
+  boot-started set, or pauses `needs_attention` with the codes it saw). The observed
+  reference codes stay in the private results.
 - **After.** It abandons the operation, powers the partition off, unmounts and deletes
   the medium, then runs the lpar-power arm's teardown (detach, delete the partition and
   the volume) and compares the lpar-power baseline.
 
-It does not record the boot-started code set or the other #1850 facts.
+Its first run below used `wait_seconds` 120 and the assertion
+`refcodes-observed-without-boot-started-claim`, from before #1850 filled the code set.
 
 Live on V10R3 (2026-11-03, POWER9, commit `02389897`), all eight assertions passed and
 recovery reported CLEAN:
@@ -925,6 +927,17 @@ powers a partition on and puts a guest on the network.
   and `refcodes-read-while-running`.
 - **After.** The provision-boot arm's teardown and recovery: recovery witnesses it as
   subtask 72.
+
+Live on V10R3 (2026-11-04, POWER9, VIOS 4.1.2.00):
+- **Runs:** Ubuntu at commit `e2c31395` (grant #26) and Rocky at `62198c15` (grant #27). The boot
+  arm is unchanged between them.
+- **Result:** all eleven assertions held each time, recovery reported CLEAN, and the before and
+  after reads were identical.
+- **Refcodes:** both runs ended at `CA00E105`, about 130 seconds after power-on, and posted
+  nothing after it while Running.
+- **Clock:** the refcode clock ran about 1 h 44 min ahead of the HMC's UTC `date`.
+
+ADR 0328 records these findings.
 
 ### The vg-if-match arm
 

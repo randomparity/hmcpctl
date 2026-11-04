@@ -475,3 +475,43 @@ def test_an_unreadable_media_result_skips_untouched(schemas, tmp_path):
     _run_native(schemas, world, config)
 
     assert world.calls == []
+
+
+def test_a_boot_started_run_holds_the_wait_assertion_on_the_handoff_code(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    handoff = {"time_stamp": "11/03/2026 10:00:09", "refcode": "CA00E105"}
+    world.overrides["hmc_provision_lpar"] = _ending(world, "boot_started", handoff)
+
+    state = _run(schemas, world, tmp_path)
+
+    assert "boot-wait-ended-truthfully" in _observation(state)["assertions"]
+
+
+def test_a_boot_started_claim_on_another_code_fails_the_wait_assertion(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    other = {"time_stamp": "11/03/2026 10:00:09", "refcode": "CA00E14D"}
+    world.overrides["hmc_provision_lpar"] = _ending(world, "boot_started", other)
+
+    state = _run(schemas, world, tmp_path)
+
+    assert "boot-wait-ended-truthfully" not in _observation(state)["assertions"]
+
+
+def _ending(world: BootWorld, outcome: str, row: dict[str, Any]):
+    """The healthy answer, ending *outcome* with *row* as the wait's result."""
+
+    def respond(kwargs: dict[str, Any]) -> Any:
+        answer = BootWorld._hmc_provision_lpar(world, kwargs)
+        if kwargs.get("continuation") == "abandon":
+            return answer
+        for step in answer["steps"]:
+            if step["step"] == "wait_boot_started":
+                step.update(status="ok", result=row)
+        answer["operation"] = {**answer["operation"], "outcome": outcome}
+        return answer
+
+    return respond

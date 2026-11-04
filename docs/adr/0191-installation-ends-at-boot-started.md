@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-10-01), issue #1216.
+Accepted (2026-10-01), issue #1216. ADR 0328 fills Decision 2's boot-started set and records
+the timestamp's zone handling from native evidence.
 
 ## Context
 

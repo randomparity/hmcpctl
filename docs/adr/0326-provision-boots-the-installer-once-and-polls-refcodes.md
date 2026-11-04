@@ -4,7 +4,8 @@
 
 Accepted (2026-11-03), issue #1849 (part of #1230). Fills in ADR 0191 Decisions 1–2 and the H1 spec's
 steps 8–9 for `install`. ADRs 0313 and 0319 stand: this record adds effects after ADR 0319's
-`boot_order` effect and changes nothing before it.
+`boot_order` effect and changes nothing before it. ADR 0328 fills the boot-started set
+(Decision 6) from native evidence.
 
 ## Context
 
