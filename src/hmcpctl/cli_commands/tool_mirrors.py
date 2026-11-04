@@ -141,6 +141,7 @@ CLI_TOOL_MIRRORS: Mapping[str, str | None] = MappingProxyType(
         "network list-vnics": "hmc_list_vnics",
         "network add-vnic": "hmc_add_vnic",
         "network remove-vnic": "hmc_remove_vnic",
+        "network update-vnic-policy": "hmc_update_vnic_policy",
         "templates list": "hmc_list_partition_templates",
         "templates show": "hmc_get_partition_template",
         "templates deploy": "hmc_deploy_partition_template",

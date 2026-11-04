@@ -190,6 +190,7 @@ wildcard records the operation's actual scope.
 | `unassign_sriov_logical_port` | `operations/virtualization/pcie.py::unassign_sriov_logical_port` | guarded (`operations/virtualization/pcie.py::unassign_sriov_logical_port`, via `resolve_and_authorize_lpar_names`) | — |
 | `add_vnic` | `operations/virtualization/vnic.py::add_vnic` | guarded (`operations/virtualization/vnic.py::add_vnic`, via `_preflight_add` → `resolve_and_authorize_lpar_names`) | — |
 | `remove_vnic` | `operations/virtualization/vnic.py::remove_vnic` | guarded (`operations/virtualization/vnic.py::remove_vnic`) | — |
+| `update_vnic_policy` | `operations/virtualization/vnic.py::update_vnic_policy` | guarded (`operations/virtualization/vnic.py::update_vnic_policy`, via `resolve_and_authorize_lpar_names`) | #1858 / ADR 0332 |
 | `set_minimum_affinity_policy` | `operations/affinity/ssh.py::set_minimum_affinity_policy` | guarded (`operations/affinity/ssh.py::set_minimum_affinity_policy`) | — |
 | `set_lpar_processors` | `operations/lpar/dlpar.py::set_lpar_processors` | guarded (`operations/lpar/dlpar.py::set_lpar_processors`, via `_apply_dlpar_document` → `_resolve_and_authorize_lpar`) | — |
 | `set_lpar_memory` | `operations/lpar/dlpar.py::set_lpar_memory` | guarded (`operations/lpar/dlpar.py::set_lpar_memory`, via `_apply_dlpar_document`) | — |

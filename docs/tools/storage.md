@@ -8,10 +8,10 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_attach_disk_to_lpar` | `mutate` | `storage.attach_disk` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create and attach a virtual disk to an existing LPAR. |
-| `hmc_create_virtual_disk` | `mutate` | `storage.create_disk` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create a Virtual Disk (logical volume) inside a Volume Group. |
+| `hmc_attach_disk_to_lpar` | `mutate` | `storage.attach_disk` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create and attach a virtual disk; concurrent VolumeGroup changes can be lost. |
+| `hmc_create_virtual_disk` | `mutate` | `storage.create_disk` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create a virtual disk (logical volume); concurrent VolumeGroup changes can be lost. |
 | `hmc_create_volume_group` | `mutate` | `storage.create_volume_group` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Create a Volume Group on a VIOS from one or more physical volumes. |
-| `hmc_delete_virtual_disk` | `destructive` | `storage.delete_disk` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Delete a Virtual Disk from a Volume Group. |
+| `hmc_delete_virtual_disk` | `destructive` | `storage.delete_disk` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Delete a virtual disk (logical volume); concurrent VolumeGroup changes can be lost. |
 | `hmc_detach_storage_mapping` | `destructive` | `storage.detach_mapping` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Detach a VirtualSCSIMapping by its inventory ID. |
 | `hmc_list_storage_mappings` | `read` | `storage.list_mappings` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List VirtualSCSIMappings on a VIOS, optionally filtered by LPAR. |
 | `hmc_list_volume_groups` | `read` | `storage.list_volume_groups` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List Volume Groups on a VIOS. |

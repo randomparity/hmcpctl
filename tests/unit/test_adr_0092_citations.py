@@ -109,6 +109,7 @@ _CLASSIFIED_MUTATORS = frozenset(
         "delete_adapter",
         "add_vnic",
         "remove_vnic",
+        "update_vnic_policy",
         "clear_lpar_boot_order",
         "set_lpar_accelerator_qos",
         "set_lpar_boot_order",

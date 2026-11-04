@@ -94,6 +94,7 @@ OVERRIDES: dict[str, dict[str, Any]] = {
     "hmc_detach_storage_mapping": {"mapping_id": "vhost0/vtscsi0"},
     "hmc_update_network_adapter": {"adapter_uuid": VIOS, "tagged": True, **_WINDOW},
     "hmc_update_partition_profile": _WINDOW,
+    "hmc_update_vnic_policy": {"pvid_priority": 1},
 }
 
 

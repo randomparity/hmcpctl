@@ -2,8 +2,8 @@
 
 V10R3 rejects a sparse VolumeGroup document at schema validation. Both writes GET
 the whole group, add or remove one VirtualDisk, and POST the whole element back
-conditioned on the GET's ETag. The fixture follows the live V10R3 shape with
-synthetic values.
+with If-Match set to the GET's ETag (not a server-enforced concurrency guard).
+The fixture follows the live V10R3 shape with synthetic values.
 """
 
 import xml.etree.ElementTree as ET
