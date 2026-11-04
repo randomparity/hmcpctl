@@ -918,7 +918,9 @@ powers a partition on and puts a guest on the network.
   refuses it unless it names the group's profile and the configured MAC and describes the
   ISO's own SHA-256 and size. The launcher's network comes from that result, so its address
   must be one the operator assigned and whose usual owner stays powered off: the arm SKIPs
-  unless `LIVE_TEST_LPAR_NAME` reads Not Activated.
+  unless `LIVE_TEST_LPAR_NAME` reads Not Activated. The launcher embeds that network, and the
+  runner's ISO server listens on `LIVE_TEST_ISO_BIND_HOST` (default all interfaces). Bind it to
+  the interface the HMC reaches, so other hosts cannot download the launcher during the window.
 - **Run.** The partition gets 6,656 MiB, the configured MAC and the producer's network, and
   boots that ISO. After the provision call it reads the VIOS's `os_version`, the HMC's `date`
   between two runner UTC reads, then up to 100 reference codes and the partition state every
@@ -960,6 +962,12 @@ own operator authorization naming the physical volume.
   cleans up.
 - **After.** ST42's guarded `reducevg` removes the group, and its PV and group snapshots must
   equal the pre-run ones. Recovery witnesses it as subtask 42.
+
+Live on V10R3 (2026-11-04, VIOS 4.1.2.00, commit `40f40259`, grant #28):
+- **Result:** all 28 rows and all five assertions passed, recovery reported CLEAN, and the
+  physical-volume and group reads before and after were identical.
+- **Finding:** the stale-`If-Match` POST was accepted, so the HMC does not enforce `If-Match` on
+  VolumeGroup writes (ADR 0328).
 
 ### The bare-cec arm
 

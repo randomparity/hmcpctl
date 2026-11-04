@@ -128,10 +128,17 @@ console, nothing shows the distribution installer itself running.
      `resume` polls again without a second power-on.
    - The arm now passes 300 s.
 5. **VIOS 4.1.2.00** enters ADR 0194 D2's envelope as the observed VIOS level.
-6. **`If-Match` on a VolumeGroup write: not yet observed.** The `vg-if-match` window (grant #28)
-   stopped before any HMC contact, because the runner host had lost its route to the HMC. Until
-   it runs, hmcpctl's VolumeGroup writes keep sending `If-Match` without knowing whether the HMC
-   enforces it. VIOS (mapping) writes are not probed: no run-owned VIOS object exists to write.
+6. **The HMC does not enforce `If-Match` on a VolumeGroup write.**
+   - **Run:** `vg-if-match` window (grant #28, commit `40f40259`, 2026-11-04).
+   - **Setup:** a scratch group `hpvg<8 hex>`, created on the VIOS's one free physical volume.
+   - **Result:** the POST of the group's own body under `If-Match: "stale-<16 hex>"` was accepted
+     with a 2xx.
+   - **Cleanup:** the guarded `reducevg` removed the group, recovery reported CLEAN, and the `lspv`
+     and `lsvg` reads before and after were identical.
+   - **Consequence:** hmcpctl's VolumeGroup read-modify-write sends the GET's ETag, but this HMC
+     (V10R3 M1060, VIOS 4.1.2.00) does not check it. Those writes have no server-side guard
+     against a concurrent change.
+   - **Not probed:** VIOS (mapping) writes, because no run-owned VIOS object exists to write.
 
 ## Consequences
 
