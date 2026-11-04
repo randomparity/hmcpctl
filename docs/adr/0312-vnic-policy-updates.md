@@ -157,3 +157,6 @@ lists. The outcome table is in the
 - **Remove a refused case's vNIC inside the harness (#1857).** judgment: this
   record already rejects cleanup after a refusal. Per-case removal through the
   ownership-checked CLI stays the operator's separately granted action.
+- **Opt the update record into `allow_nontrailing_quoted` (#1857).** judgment:
+  ADR 0311 limits that opt-in to typed creation. Moving the one quoted list to the
+  end tests two-list composition without widening that decision.
