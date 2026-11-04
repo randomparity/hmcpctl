@@ -357,14 +357,7 @@ def _authorize_call(
     return bound.arguments
 
 
-def _call_context(
-    name: str,
-    security: ToolSecurity,
-    injected: bool,
-    kwargs: dict[str, Any],
-    arguments: Mapping[str, Any],
-) -> CallContext:
-    hold_id = kwargs.get(HOLD_ID) if injected else arguments.get(HOLD_ID)
+def _call_context(name: str, security: ToolSecurity, hold_id: object) -> CallContext:
     return CallContext(
         tool=name,
         read=security.effect == "read",
@@ -415,11 +408,12 @@ def authorized(
 
         @functools.wraps(handler)
         async def guarded(*args: Any, **kwargs: Any) -> Any:
-            presented = {HOLD_ID: kwargs.pop(HOLD_ID, None)} if injected else {}
+            presented = kwargs.pop(HOLD_ID, None) if injected else None
             arguments = _authorize_call(
                 signature, name, security, authorize, args, kwargs
             )
-            context = _call_context(name, security, injected, presented, arguments)
+            hold_id = presented if injected else arguments.get(HOLD_ID)
+            context = _call_context(name, security, hold_id)
             with calling(context):
                 return await handler(*args, **kwargs)
 
@@ -427,11 +421,12 @@ def authorized(
 
         @functools.wraps(handler)
         def guarded(*args: Any, **kwargs: Any) -> Any:
-            presented = {HOLD_ID: kwargs.pop(HOLD_ID, None)} if injected else {}
+            presented = kwargs.pop(HOLD_ID, None) if injected else None
             arguments = _authorize_call(
                 signature, name, security, authorize, args, kwargs
             )
-            context = _call_context(name, security, injected, presented, arguments)
+            hold_id = presented if injected else arguments.get(HOLD_ID)
+            context = _call_context(name, security, hold_id)
             with calling(context):
                 return handler(*args, **kwargs)
 

@@ -168,3 +168,24 @@ def test_logical_worker_runs_in_the_submitting_call():
     with calling(CallContext("hmc_power_lpar", read=False, hold_id="h1")):
         record = engine.submit(request, body, wait_seconds=10)
     assert record.result == {"tool": "hmc_power_lpar", "hold_id": "h1"}
+
+
+def test_a_handler_declaring_hold_id_keeps_it_and_sets_the_call_context():
+    from hmcpctl.tool_registry import TargetSelector, ToolSecurity, authorized
+
+    security = ToolSecurity(
+        effect="mutate",
+        operation="lpar.handoff",
+        target_kind="lpar",
+        targets=(TargetSelector("lpar", "lpar_name_or_uuid", True),),
+    )
+
+    def handler(
+        lpar_name_or_uuid: str, hold_id: str | None = None, profile: str | None = None
+    ):
+        return hold_id, current_call()
+
+    wrapped = authorized("hmc_test_handoff", security, handler, lambda *_: None)
+    received, call = wrapped(LPAR, hold_id="h1")
+    assert received == "h1"
+    assert call == CallContext("hmc_test_handoff", read=False, hold_id="h1")
