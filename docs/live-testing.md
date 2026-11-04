@@ -938,8 +938,8 @@ Live on V10R3 (2026-11-04, POWER9, VIOS 4.1.2.00):
 - **Result:** the eleven assertions of those commits held each time, recovery reported CLEAN,
   and the before and after reads were identical. Those commits still had an empty code set, a
   120-second wait and the assertion `refcodes-observed-without-boot-started-claim`.
-- **`boot_started` path:** at commit `c34e8b6c` (2026-11-04, #1854), with the filled set and a
-  300-second wait, both runs ended `boot_started` on `CA00E105`. All eleven assertions held,
+- **`boot_started` path:** at commits `c34e8b6c` and `00733928` (2026-11-04, #1854), with the
+  filled set and a 300-second wait, every run ended `boot_started` on `CA00E105`. All eleven assertions held,
   including `boot-wait-ended-truthfully`; recovery reported CLEAN, and the before and after
   reads were identical.
 - **Refcodes:** both runs ended at `CA00E105`, about 130 seconds after power-on, and posted
@@ -992,6 +992,17 @@ partition's last-activated profile was still the creation profile. Recovery repo
 the before and after reads were identical. A capture the same day showed that applying the saved
 profile without activation sets both `LastActivatedProfile` and `curr_profile` to it and keeps
 the adapters and mapping; ADR 0331 records it.
+
+Live on V10R3 (2026-11-04, POWER9) at commit `00733928`, with ADR 0331: 17 rows, all PASS.
+Every observation passed with cleanup passed:
+- `provision.lpar` 6/6, including `last-activated-is-default` and `adapters-after-apply`;
+- `lpar.reconfigure` 1/1;
+- `lpar.inspect` 2/2;
+- `lpar.power` 3/3;
+- `lpar.decommission` 8/8.
+
+Recovery reported CLEAN, and the before and after reads were identical. Both native
+boot-started arms passed at the same commit.
 
 ### The vg-if-match arm
 
