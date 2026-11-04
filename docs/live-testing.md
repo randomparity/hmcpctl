@@ -173,6 +173,9 @@ below. The table does not grant hardware or VIOS access.
 | lpar-power | `uv run --no-sync python scripts/live_lpar_power.py` | subtask 41 |
 | lpar-reconfigure | `uv run --no-sync python scripts/live_lpar_reconfigure.py` | subtask 70 |
 | provision-boot | `uv run --no-sync python scripts/live_provision_boot.py` | subtask 72; powers on a partition with installer media |
+| native-ubuntu-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py ubuntu` | subtask 72; boots the Ubuntu launcher and records refcodes for up to 15 minutes |
+| native-rocky-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py rocky` | subtask 72; boots the Rocky launcher and records refcodes for up to 15 minutes |
+| vg-if-match | `uv run --no-sync python scripts/live_vg_if_match.py` | subtasks 0 and 42; a scratch volume group and one stale-`If-Match` write to it |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
 managed system, and a concurrent run makes the recovery check in step 4
@@ -876,19 +879,21 @@ the media and the run length: it powers a partition on.
 - **Run.** It provisions one partition `hmcpctl-live-pwr-<8 hex>-p` on a new 1 GiB
   volume `lppwr<8 hex>`, with prepared media described from the ISO's own SHA-256 and
   size, a locally administered MAC and documentation addresses, and `boot: immediate`
-  with `wait_seconds` 120. A run still going is repeated until it pauses or ends.
+  with `wait_seconds` 300. A run still going is repeated until it pauses or ends.
 - **Assertions.** `mount-accepted` (no REST0269 on the provision-created partition),
   `saved-profile-optical-slot`, `revalidated-before-power-on`, `installer-powered-on`,
   `activated-from-saved-profile` (`curr_profile` is the saved `hmcpctl_…` profile),
   `optical-adapter-after-activation` (the mount's client slot is in the running
   partition's vSCSI adapters), `optical-mapping-after-activation`, and
-  `refcodes-observed-without-boot-started-claim` (the run pauses `needs_attention`
-  with the codes it saw). The observed reference codes stay in the private results.
+  `boot-wait-ended-truthfully` (the run ends `boot_started` on a code in the
+  boot-started set, or pauses `needs_attention` with the codes it saw). The observed
+  reference codes stay in the private results.
 - **After.** It abandons the operation, powers the partition off, unmounts and deletes
   the medium, then runs the lpar-power arm's teardown (detach, delete the partition and
   the volume) and compares the lpar-power baseline.
 
-It does not record the boot-started code set or the other #1850 facts.
+Its first run below used `wait_seconds` 120 and the assertion
+`refcodes-observed-without-boot-started-claim`, from before #1850 filled the code set.
 
 Live on V10R3 (2026-11-03, POWER9, commit `02389897`), all eight assertions passed and
 recovery reported CLEAN:
@@ -899,6 +904,70 @@ recovery reported CLEAN:
 In the boot wait, the twenty newest reference codes all carried one HMC timestamp, so only
 the HMC's row order separated them. The run's repository, volume-group and boundary-partition
 reads before and after were identical.
+
+### The native boot-started arms
+
+The `native-ubuntu-boot-started` and `native-rocky-boot-started` groups (subtask 72, #1850,
+ADR 0328) run the provision-boot arm with one profile's producer-built launcher, so the guest
+reaches the distribution's installer. Each window needs its own operator authorization: it
+powers a partition on and puts a guest on the network.
+
+- **Inputs.** The provision-boot arm's, plus `LIVE_TEST_NATIVE_BOOT_MAC` and, per profile,
+  `LIVE_TEST_NATIVE_<UBUNTU|ROCKY>_ISO_PATH` and `LIVE_TEST_NATIVE_<UBUNTU|ROCKY>_MEDIA_RESULT`.
+  The result is the producer's `iso-chain-media-v1` output for an unbound build; the arm
+  refuses it unless it names the group's profile and the configured MAC and describes the
+  ISO's own SHA-256 and size. The launcher's network comes from that result, so its address
+  must be one the operator assigned and whose usual owner stays powered off: the arm SKIPs
+  unless `LIVE_TEST_LPAR_NAME` reads Not Activated. The launcher embeds that network, and the
+  runner's ISO server listens on `LIVE_TEST_ISO_BIND_HOST` (default all interfaces). Bind it to
+  the interface the HMC reaches, so other hosts cannot download the launcher during the window.
+- **Run.** The partition gets 6,656 MiB, the configured MAC and the producer's network, and
+  boots that ISO. After the provision call it reads the VIOS's `os_version`, the HMC's `date`
+  between two runner UTC reads, then up to 100 reference codes and the partition state every
+  15 s, until 900 s after the first provision call. Every read is kept whole in the private
+  results.
+- **Assertions.** The provision-boot arm's eight, plus `vios-level-read`, `hmc-clock-read`
+  and `refcodes-read-while-running`.
+- **After.** The provision-boot arm's teardown and recovery: recovery witnesses it as
+  subtask 72.
+
+Live on V10R3 (2026-11-04, POWER9, VIOS 4.1.2.00):
+- **Runs:** Ubuntu at commit `e2c31395` (grant #26) and Rocky at `62198c15` (grant #27). The boot
+  arm is unchanged between them.
+- **Result:** the eleven assertions of those commits held each time, recovery reported CLEAN,
+  and the before and after reads were identical. Those commits still had an empty code set, a
+  120-second wait and the assertion `refcodes-observed-without-boot-started-claim`.
+- **Not yet run:** the `boot_started` path, with the filled set, a 300-second wait and
+  `boot-wait-ended-truthfully`, has not run on hardware.
+- **Refcodes:** both runs ended at `CA00E105`, about 130 seconds after power-on, and posted
+  nothing after it while Running.
+- **Clock:** the refcode clock ran about 1 h 44 min ahead of the HMC's UTC `date`.
+
+ADR 0328 records these findings.
+
+### The vg-if-match arm
+
+The vg-if-match arm (subtasks 0 and 42, #1850, ADR 0328) answers whether the HMC enforces
+`If-Match` on a VolumeGroup write, against a group the run itself creates. Each run needs its
+own operator authorization naming the physical volume.
+
+- **Inputs.** `LIVE_TEST_SCRATCH_PV_NAME`, one physical volume that `lspv -free` lists and that
+  belongs to no group, and `LIVE_TEST_SCRATCH_VG_NAME`, a fresh `hpvg<8 hex>`.
+- **Run.** ST42 creates the group only after its free/no-VG identity guards. It then GETs the
+  group and POSTs the same body back through hmcpctl's own VolumeGroup write, with an
+  `If-Match` that no ETag ever had (`"stale-<16 hex>"`). Only the HTTP status is kept, plus the
+  `<Message>` and REST/HSCL codes of an error body.
+- **Assertions.** ST42's four, plus `if-match-probe-decisive`: the POST answered 412 or
+  succeeded. Any other answer, or a probe that cannot ask, fails that assertion and still
+  cleans up.
+- **After.** ST42's guarded `reducevg` removes the group, and its PV and group snapshots must
+  equal the pre-run ones. Recovery witnesses it as subtask 42.
+
+Live on V10R3 (2026-11-04, VIOS 4.1.2.00, commit `40f40259`, grant #28):
+- **Result:** all 28 rows and all five assertions passed, recovery reported CLEAN, and the
+  physical-volume and group reads before and after were identical.
+- **Finding:** the stale-`If-Match` POST was accepted, so the HMC does not enforce `If-Match` on
+  VolumeGroup writes (ADR 0328).
 
 ### The bare-cec arm
 
@@ -996,7 +1065,8 @@ uv run --no-sync python scripts/live_test_recovery.py --results test-results-ded
 
 After the other arms pass `test-results-<arm>.json` the same way: `vmedia`,
 `bare-cec`, `round2`, `sriov`, `profiles`, `users`, `vios-backup`, `pcm`,
-`network`, `lpar-config`, `storage`, `lpar-power`, `provision-boot` or
+`network`, `lpar-config`, `storage`, `lpar-power`, `provision-boot`,
+`native-ubuntu-boot-started`, `native-rocky-boot-started`, `vg-if-match` or
 `vmedia-media-change`.
 
 The check reads the subtasks the run dispatched from the document, and witnesses
@@ -1012,7 +1082,7 @@ these sets of them:
 | 39 (lpar-config) | any partition named `hmcpctl-live-lpar-*` on the run's system, whichever run left it |
 | 0, 3, 40, 42 (storage) | a mapping (its virtual target device) backed by an `hpctl<8 hex>` volume, such a volume still in `LIVE_TEST_VDISK_VOLUME_GROUP_NAME`, and a VIOS vSCSI server adapter toward the test partition with no mapping; 0 and 3 only read; ST42 also reports `hpvg<8 hex>` groups or unresolved pending restoration |
 | 41 (lpar-power) | any partition named `hmcpctl-live-pwr-*`, running or not; on each VIOS, any mapping backed by an `lppwr*` volume, any vSCSI adapter serving a `hmcpctl-live-pwr-*` partition, and any `lppwr*` volume left in the configured volume group (read with the one admitted `viosvrcmd … -c 'lsvg -lv <group>'` command) |
-| 72 (provision-boot) | everything 41 reads, plus the run's installer medium (`hmcpctl_<12 hex>.iso`) still in the media repository; a run that recorded the provision call but no medium name reads as unreadable, not clean |
+| 72 (provision-boot and the native boot-started groups) | everything 41 reads, plus the run's installer medium (`hmcpctl_<12 hex>.iso`) still in the media repository; a run that recorded the provision call but no medium name reads as unreadable, not clean |
 | 2, 9 (network) | a network on the run's test VLAN, the test partition's client adapters off the run's baseline, the serving VIOS's FC-port labels off their originals, and a vFC group label named `hmcl-*` |
 
 A complete current round2 run carries a fresh producer baseline. Recovery validates

@@ -17,7 +17,7 @@ SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_preflight as preflight  # noqa: E402
 from live_test import config as live_config  # noqa: E402
-from live_test import runner  # noqa: E402
+from live_test import provision_boot, runner  # noqa: E402
 
 
 def _env_text(**overrides: str) -> str:
@@ -1453,3 +1453,62 @@ def test_vnic_creation_preflight_refuses_bypass(monkeypatch, extra):
         preflight.main(args + extra)
     assert caught.value.code == 2
     route.assert_not_called()
+
+
+def test_a_native_boot_arm_names_its_medium_window_and_partition(tmp_path):
+    import json
+
+    iso = tmp_path / "launcher.iso"
+    iso.write_bytes(b"launcher")
+    result = tmp_path / "result.json"
+    described = provision_boot._describe(iso)
+    result.write_text(
+        json.dumps(
+            {
+                "format": "iso-chain-media-v1",
+                "distribution": "ubuntu",
+                "release": "26.04.1",
+                "architecture": "ppc64le",
+                "mac": "02:00:00:00:00:a1",
+                "network": {"address": "192.0.2.20/24"},
+                **described,
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = live_config.LiveTestConfig(
+        system_name="sys-A",
+        native_boot_mac="02:00:00:00:00:a1",
+        native_ubuntu_iso_path=str(iso),
+        native_ubuntu_media_result=str(result),
+    )
+
+    verdict = preflight._ARM_VERDICTS["native-ubuntu-boot-started"](config)
+    refused = preflight._ARM_VERDICTS["native-rocky-boot-started"](config)
+
+    assert verdict.runnable
+    text = " ".join(verdict.mutates)
+    assert str(iso) in text and "ubuntu 26.04.1" in text and "900 s" in text
+    assert not refused.runnable
+    assert "LIVE_TEST_NATIVE_ROCKY_ISO_PATH" in refused.reason
+
+
+@pytest.mark.parametrize(
+    ("pv", "group", "runnable"),
+    [
+        ("hdisk9", "hpvg1234abcd", True),
+        ("", "hpvg1234abcd", False),
+        ("hdisk9", "rootvg", False),
+    ],
+)
+def test_vg_if_match_names_its_pv_and_group_or_refuses(pv, group, runnable):
+    config = live_config.LiveTestConfig(
+        system_name="sys-A", scratch_pv_name=pv, scratch_vg_name=group
+    )
+
+    verdict = preflight._ARM_VERDICTS["vg-if-match"](config)
+
+    assert verdict.runnable is runnable
+    if runnable:
+        text = " ".join(verdict.mutates)
+        assert "hdisk9" in text and "hpvg1234abcd" in text and "If-Match" in text

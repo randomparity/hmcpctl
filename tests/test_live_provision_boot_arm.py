@@ -7,6 +7,7 @@ touches: the media repository, the optical mapping and the boot's steps.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,8 @@ class BootWorld(World):
         self.activated_profile = SAVED
         self.provisions: list[dict[str, Any]] = []
         self.stop_before_media = False
+        self.boundary_state = "not activated"
+        self.vios_level = "VIOS 4.1.0.00"
 
     def _hmc_run_command(self, kwargs: dict[str, Any]) -> Any:
         cmd = kwargs["cmd"]
@@ -82,7 +85,28 @@ class BootWorld(World):
             return f"{self.activated_profile},{entry['state']}"
         if cmd.endswith("-F slot_num") and "lpar_names=hmcpctl-live-pwr-" in cmd:
             return "2\n4\n" if self.optical else HMC_NO_RESULTS
+        if cmd.endswith("-F os_version"):
+            return self.vios_level
+        if cmd == "date":
+            return "Tue Nov  3 12:00:00 UTC 2026"
         return super()._hmc_run_command(kwargs)
+
+    def _hmc_get_lpar_state(self, kwargs: dict[str, Any]) -> Any:
+        if kwargs["lpar_name_or_uuid"] == live_config.LiveTestConfig().lp3_name:
+            return self.boundary_state
+        return super()._hmc_get_lpar_state(kwargs)
+
+    def _hmc_read_lpar_refcodes(self, kwargs: dict[str, Any]) -> Any:
+        return [
+            {
+                "lpar_name": kwargs["lpar_name_or_uuid"],
+                "time_stamp": "11/03/2026 12:00:00",
+                "refcode": code,
+                "definition": None,
+                "definition_source": None,
+            }
+            for code in ("CA260200", "C2008119")
+        ]
 
     def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
         if kwargs.get("continuation") == "abandon":
@@ -156,13 +180,13 @@ class BootWorld(World):
 
     def _hmc_unmount_optical_media(self, kwargs: dict[str, Any]) -> Any:
         self.optical.remove(kwargs["media_name"])
-        return {"unmounted": True}
+        return f"Unmounted {kwargs['media_name']}"
 
     def _hmc_delete_optical_media(self, kwargs: dict[str, Any]) -> Any:
         if kwargs["media_name"] in self.optical:
             return ValueError("the medium is mapped")
         self.media.discard(kwargs["media_name"])
-        return {"deleted": True}
+        return f"Deleted {kwargs['media_name']}"
 
     def _hmc_list_optical_media(self, kwargs: dict[str, Any]) -> Any:
         return [{"name": name} for name in sorted(self.media)]
@@ -311,3 +335,228 @@ def test_a_stop_before_any_medium_still_deletes_the_partition(schemas, tmp_path)
     assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}
     assert "hmc_unmount_optical_media" not in world.tools()
     assert _observation(state)["cleanup"] == "passed"
+
+
+# -- native boot-started groups (#1850, ADR 0328) -------------------------------
+
+NATIVE_MAC = "02:00:00:00:00:a1"
+NATIVE_NETWORK = {
+    "address": "192.0.2.20/24",
+    "routes": [{"destination": "0.0.0.0/0", "gateway": "192.0.2.1"}],
+    "dns": ["192.0.2.53"],
+}
+
+
+def _native_config(tmp_path: Path, **result_overrides: Any):
+    iso = tmp_path / "launcher.iso"
+    iso.write_bytes(b"launcher")
+    result = {
+        "format": "iso-chain-media-v1",
+        "iso_sha256": provision_boot._describe(iso)["iso_sha256"],
+        "iso_size": 8,
+        "manifest_sha256": "1" * 64,
+        "distribution": "rocky",
+        "release": "9.8",
+        "architecture": "ppc64le",
+        "mac": NATIVE_MAC,
+        "network": NATIVE_NETWORK,
+        **result_overrides,
+    }
+    described = tmp_path / "result.json"
+    described.write_text(json.dumps(result), encoding="utf-8")
+    return live_config.LiveTestConfig(
+        system_name=SYSTEM,
+        vdisk_volume_group_name=GROUP,
+        provision_vlan_id=VLAN,
+        partition_profile_writer_window=True,
+        native_boot_mac=NATIVE_MAC.upper(),
+        native_rocky_iso_path=str(iso),
+        native_rocky_media_result=str(described),
+    ), result
+
+
+def _run_native(schemas, world: World, config, group="native-rocky-boot-started"):
+    state = runner.RunState(config=config, group=group)
+    state.schemas = schemas
+    asyncio.run(
+        provision_boot.exercise_provision_boot(FakeClient(world, arm._OUTPUTS), state)
+    )
+    return state
+
+
+@pytest.fixture
+def _short_window(monkeypatch):
+    monkeypatch.setattr(provision_boot, "_RECORD_DELAY_S", 0.01)
+    monkeypatch.setattr(provision_boot, "NATIVE_WINDOW_S", 0.05)
+
+
+@pytest.mark.usefixtures("_short_window")
+def test_a_native_run_boots_the_producers_medium_and_records_the_window(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    config, result = _native_config(tmp_path)
+
+    state = _run_native(schemas, world, config)
+
+    observation = _observation(state)
+    assert observation["scenario"] == provision_boot.SCENARIO
+    assert observation["result"] == "passed" and observation["cleanup"] == "passed"
+    assert len(observation["assertions"]) == 11
+    (sent,) = world.provisions
+    assert sent["install"]["media"]["producer_result"] == result
+    assert sent["install"]["profile"] == "rocky-9.8"
+    assert sent["install"]["network"] == NATIVE_NETWORK
+    assert sent["adapters"]["mac"] == NATIVE_MAC
+    assert sent["resources"]["desired_memory"] == provision_boot.NATIVE_MEMORY_MIB
+    assert state.config.iso_path == config.native_rocky_iso_path
+    (row,) = [r for r in state.results if r["tool"] == "hmc_provision_lpar"][-1:]
+    data = row["data"]
+    assert data["vios_level"] == "VIOS 4.1.0.00"
+    assert [c["hmc"] for c in data["hmc_clock"]] == ["Tue Nov  3 12:00:00 UTC 2026"] * 2
+    reads = data["refcode_reads"]
+    assert len(reads) >= 2
+    assert reads[0]["state"] == "running"
+    assert [r["refcode"] for r in reads[0]["rows"]] == ["CA260200", "C2008119"]
+    assert world.partitions == {} and world.media == set()
+
+
+@pytest.mark.usefixtures("_short_window")
+def test_a_native_window_that_never_reads_running_fails_that_assertion(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    world.overrides["hmc_read_lpar_refcodes"] = lambda _kw: ValueError("down")
+    config, _ = _native_config(tmp_path)
+
+    state = _run_native(schemas, world, config)
+
+    observation = _observation(state)
+    assert observation["result"] == "failed"
+    assert "refcodes-read-while-running" not in observation["assertions"]
+    assert world.partitions == {}
+
+
+@pytest.mark.usefixtures("_short_window")
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"distribution": "ubuntu"},
+        {"release": "9.7"},
+        {"mac": "02:00:00:00:00:a2"},
+        {"iso_size": 9},
+        {"iso_sha256": "0" * 64},
+        {"format": "iso-chain-media-v0"},
+        {"network": None},
+    ],
+)
+def test_a_media_result_that_does_not_describe_the_medium_skips_untouched(
+    schemas, tmp_path, overrides
+):
+    world = BootWorld()
+    config, _ = _native_config(tmp_path, **overrides)
+
+    state = _run_native(schemas, world, config)
+
+    assert world.calls == []
+    assert state.observations == []
+    assert any(r["status"] == "SKIP" for r in state.results)
+
+
+def test_a_native_group_without_its_media_settings_skips_untouched(schemas, tmp_path):
+    world = BootWorld()
+    config, _ = _native_config(tmp_path)
+
+    state = _run_native(schemas, world, config, group="native-ubuntu-boot-started")
+
+    assert world.calls == []
+    (row,) = state.results
+    assert "LIVE_TEST_NATIVE_UBUNTU_ISO_PATH" in str(row)
+
+
+def test_an_unreadable_media_result_skips_untouched(schemas, tmp_path):
+    world = BootWorld()
+    config, _ = _native_config(tmp_path)
+    Path(config.native_rocky_media_result).write_text("{", encoding="utf-8")
+
+    _run_native(schemas, world, config)
+
+    assert world.calls == []
+
+
+def test_a_boot_started_run_holds_the_wait_assertion_on_the_handoff_code(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    handoff = {"time_stamp": "11/03/2026 10:00:09", "refcode": "CA00E105"}
+    world.overrides["hmc_provision_lpar"] = _ending(world, "boot_started", handoff)
+
+    state = _run(schemas, world, tmp_path)
+
+    assert "boot-wait-ended-truthfully" in _observation(state)["assertions"]
+
+
+def test_a_boot_started_claim_on_another_code_fails_the_wait_assertion(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    other = {"time_stamp": "11/03/2026 10:00:09", "refcode": "CA00E14D"}
+    world.overrides["hmc_provision_lpar"] = _ending(world, "boot_started", other)
+
+    state = _run(schemas, world, tmp_path)
+
+    assert "boot-wait-ended-truthfully" not in _observation(state)["assertions"]
+
+
+def _ending(world: BootWorld, outcome: str, row: dict[str, Any]):
+    """The healthy answer, ending *outcome* with *row* as the wait's result."""
+
+    def respond(kwargs: dict[str, Any]) -> Any:
+        answer = BootWorld._hmc_provision_lpar(world, kwargs)
+        if kwargs.get("continuation") == "abandon":
+            return answer
+        for step in answer["steps"]:
+            if step["step"] == "wait_boot_started":
+                step.update(status="ok", result=row)
+        answer["operation"] = {**answer["operation"], "outcome": outcome}
+        return answer
+
+    return respond
+
+
+def test_a_native_run_refuses_while_the_address_owner_is_active(schemas, tmp_path):
+    world = BootWorld()
+    world.boundary_state = "running"
+    config, _ = _native_config(tmp_path)
+
+    state = _run_native(schemas, world, config)
+
+    assert "hmc_provision_lpar" not in world.tools()
+    assert state.observations == []
+    assert any("would share its address" in str(row) for row in state.results)
+
+
+@pytest.mark.usefixtures("_short_window")
+def test_a_vios_level_that_is_not_one_fails_that_assertion(schemas, tmp_path):
+    world = BootWorld()
+    world.vios_level = "No results were found."
+    config, _ = _native_config(tmp_path)
+
+    state = _run_native(schemas, world, config)
+
+    assert "vios-level-read" not in _observation(state)["assertions"]
+
+
+def test_needs_attention_after_seeing_a_boot_started_code_fails_the_wait_assertion(
+    schemas, tmp_path
+):
+    world = BootWorld()
+    seen = {
+        "reason": "x",
+        "observed": [{"time_stamp": "11/03/2026 10:00:09", "refcode": "CA00E105"}],
+    }
+    world.overrides["hmc_provision_lpar"] = _ending(world, "needs_attention", seen)
+
+    state = _run(schemas, world, tmp_path)
+
+    assert "boot-wait-ended-truthfully" not in _observation(state)["assertions"]

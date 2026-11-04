@@ -309,9 +309,10 @@ def provision_handler(
         ``needs_attention`` without powering on. It records the newest reference code,
         activates the saved profile once, and reads reference codes every 15 seconds
         until ``wait_seconds`` passes. ``boot_started`` needs a newer code in the
-        boot-started set, which stays empty until native evidence fills it, so the wait
-        ends ``needs_attention`` with the newer codes it saw; ``resume`` polls again and
-        never powers on twice. A mismatch ends ``failed``; nothing is rebuilt or
+        boot-started set, ``CA00E105`` (firmware passing control to the boot image, ADR
+        0328), which natively came about 130 seconds after power-on; a wait that ends
+        first is ``needs_attention`` with the newer codes it saw, and ``resume`` polls
+        again and never powers on twice. A mismatch ends ``failed``; nothing is rebuilt or
         overwritten. These writes also need ``hmc_upload_iso``,
         ``hmc_mount_optical_media``, ``hmc_set_lpar_boot_order``, ``hmc_power_on_lpar``
         and ``hmc_read_lpar_refcodes``. ``unverified`` lists what is not checked.
@@ -378,9 +379,10 @@ def provision_handler(
             continuation: none, resume or abandon, or boot for a ``ready_to_boot``
                 operation; a continuation needs only request_id, and any other value
                 given must match the operation's.
-            wait_seconds: Seconds to wait before returning, 0-600; an installer boot
-                reads reference codes for this long, so the call may return while the
-                operation is still running.
+            wait_seconds: Seconds to wait before returning, 0-600, counted from the
+                call's start; an installer boot reads reference codes until then, so
+                reaching ``boot_started`` in one call needs time for creation, upload
+                and about 130 seconds after power-on.
             profile: Optional TOML profile name; uses environment defaults when omitted.
 
         Returns:

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from fastmcp import Client
 
@@ -517,6 +517,18 @@ async def vmedia_short_repo_lifecycle(client: Client, state: RunState) -> None:
 # ---------------------------------------------------------------------------
 
 
+class _OneFileHandler(http.server.SimpleHTTPRequestHandler):
+    """Serves only the configured ISO; its directory may hold private build files."""
+
+    served = ""
+
+    def send_head(self) -> Any:
+        if unquote(urlparse(self.path).path) != "/" + self.served:
+            self.send_error(404)
+            return None
+        return super().send_head()
+
+
 class IsoHttpServer:
     """Invocation-owned HTTP fixture for virtual-media ISO uploads."""
 
@@ -524,12 +536,12 @@ class IsoHttpServer:
         self._server: http.server.HTTPServer | None = None
 
     def start(self, config: LiveTestConfig) -> None:
-        """Start serving the configured ISO directory once for this invocation."""
+        """Start serving the configured ISO, and nothing beside it, once per invocation."""
         _allow_iso_host(config)
         if self._server is not None:
             return
         handler = functools.partial(
-            http.server.SimpleHTTPRequestHandler,
+            type("_IsoHandler", (_OneFileHandler,), {"served": config.iso_filename}),
             directory=str(Path(config.iso_path).parent),
         )
         startup_decided = threading.Event()

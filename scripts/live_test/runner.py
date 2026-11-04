@@ -22,7 +22,9 @@ ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71 and ST72 require named gro
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71 and 72 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract`, `partition-profiles`,
-`vmedia-media-change` and `provision-boot` groups. A bare
+`vmedia-media-change` and `provision-boot` groups (72 also in the
+`native-ubuntu-boot-started` and `native-rocky-boot-started` groups, and 42 also
+in `vg-if-match`). A bare
 number runs that one subtask; `--group NAME` runs one arm. Results go to `test-results-<group>.json`, or `test-results-round2.json`
 for a bare or whole-suite run, unless
 `--results-file` names another path. That path must be git-ignored.
@@ -798,6 +800,13 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "vmedia-media-change": [16, 71, 22],
     # Not in "all": activates a partition with installer media (#1849, ADR 0326).
     "provision-boot": [72],
+    # Not in "all": each boots one profile's producer launcher on the guest network and
+    # records refcodes for up to 15 minutes (#1850, ADR 0328).
+    "native-ubuntu-boot-started": [72],
+    "native-rocky-boot-started": [72],
+    # Not in "all": ST42's scratch group on one released PV, plus the If-Match probe
+    # between its create and cleanup (#1850, ADR 0328).
+    "vg-if-match": [0, 42],
     "all": list(range(26)),
 }
 

@@ -15,9 +15,10 @@ from typing import Any
 
 from ...ssh.transport import HMCCLIError
 
-# Codes that mean the installer boot has started. #1850 fills this from native
-# evidence; it is never seeded from guesses (ADR 0191 Decision 2).
-BOOT_STARTED_CODES: frozenset[str] = frozenset()
+# Codes that mean the installer boot has started, observed in both native windows
+# (ADR 0328): CA00E105, partition firmware passing control to the boot image. Only
+# native evidence adds a code (ADR 0191 Decision 2).
+BOOT_STARTED_CODES: frozenset[str] = frozenset({"CA00E105"})
 POLL_SECONDS = 15.0
 REFCODE_ROWS = 20
 _TIMESTAMP = "%m/%d/%Y %H:%M:%S"
@@ -106,10 +107,5 @@ async def wait_for_boot(
         if clock() + POLL_SECONDS > deadline:
             break
         await sleep(POLL_SECONDS)
-    reason = (
-        "no newer reference code is in the boot-started set, which stays empty until "
-        "native evidence fills it (#1850)"
-        if not BOOT_STARTED_CODES
-        else "no newer reference code reached the boot-started set before wait_seconds"
-    )
+    reason = "no newer reference code reached the boot-started set before wait_seconds"
     return BootWait(None, observed, reason)

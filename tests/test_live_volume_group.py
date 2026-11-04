@@ -524,3 +524,161 @@ async def test_registered_runner_native_wire_contract(monkeypatch, tmp_path, fau
             assert not any(tool == "hmc_run_command" for tool, _ in fake.calls)
         if fault == "schema-create":
             assert not any(tool == "hmc_create_volume_group" for tool, _ in fake.calls)
+
+
+# -- the vg-if-match group's probe (#1850, ADR 0328) ------------------------------
+
+_ERROR_BODY = (
+    '<HttpErrorResponse xmlns="http://www.ibm.com/xmlns/systems/power/firmware/web/'
+    'mc/2012_10/"><HTTPStatus>412</HTTPStatus><RequestURI>/rest/api/uom/x</RequestURI>'
+    "<Message>REST0412 precondition failed for sys-A</Message></HttpErrorResponse>"
+)
+
+
+class FakeHMC:
+    def __init__(self, error=None, groups=(GROUP,)):
+        self.error = error
+        self.groups = groups
+        self.posts = []
+
+    def __call__(self, _config):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def list_volume_groups(self, vios):
+        assert vios == "vios-A"
+        return [
+            {"UUID": f"uuid-{n}", "Resource": {"GroupName": n}} for n in self.groups
+        ]
+
+    async def _get_vg_raw_xml(self, vios, vg_uuid):
+        return '"current"', ("element", vg_uuid)
+
+    async def _post_vg_xml(self, vios, vg_uuid, element, *, operation, etag):
+        self.posts.append((vg_uuid, element, etag))
+        if self.error is not None:
+            raise self.error
+
+
+@pytest.mark.asyncio
+async def test_the_probe_posts_the_groups_own_body_under_a_never_matched_tag(
+    monkeypatch,
+):
+    hmc = FakeHMC(error=vg.HMCError("refused", 412, _ERROR_BODY))
+    monkeypatch.setattr(vg, "HMCClient", hmc)
+
+    probe = await vg.if_match_probe(HMCConfig.from_mapping({}), "vios-A", GROUP)
+
+    ((vg_uuid, element, etag),) = hmc.posts
+    assert vg_uuid == f"uuid-{GROUP}" and element == ("element", vg_uuid)
+    assert etag.startswith('"stale-') and etag != '"current"'
+    assert probe == {
+        "if_match": "never-matched",
+        "status": 412,
+        "message": "REST0412 precondition failed for sys-A",
+        "codes": ["REST0412"],
+    }
+    assert "RequestURI" not in json.dumps(probe)
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_post_records_that_if_match_was_not_enforced(monkeypatch):
+    monkeypatch.setattr(vg, "HMCClient", FakeHMC())
+
+    probe = await vg.if_match_probe(HMCConfig.from_mapping({}), "vios-A", GROUP)
+
+    assert probe == {"if_match": "never-matched", "status": "2xx"}
+
+
+@pytest.mark.asyncio
+async def test_the_probe_writes_nothing_unless_the_group_is_listed_once(monkeypatch):
+    hmc = FakeHMC(groups=(GROUP, GROUP))
+    monkeypatch.setattr(vg, "HMCClient", hmc)
+
+    probe = await vg.if_match_probe(HMCConfig.from_mapping({}), "vios-A", GROUP)
+
+    assert probe["status"] is None and hmc.posts == []
+
+
+@pytest.fixture
+def probing(scratch, monkeypatch):
+    state, fake = scratch
+    state.group = vg.IF_MATCH_GROUP
+    state.hmc_config = HMCConfig.from_mapping({})
+    seen = []
+
+    async def probe(_config, vios, group):
+        seen.append(len(mutations(fake)))
+        return {"if_match": "never-matched", "status": 412}
+
+    monkeypatch.setattr(vg, "if_match_probe", probe)
+    return state, fake, seen
+
+
+@pytest.mark.asyncio
+async def test_the_probe_runs_between_create_and_cleanup(probing):
+    state, fake, seen = probing
+
+    await vg.exercise_volume_group(None, state)
+
+    assert seen == [1]  # after the create, before the reducevg
+    assert len(mutations(fake)) == 2 and fake.groups == set(GROUPS)
+    assert "if-match-probe-decisive" in observation(state)["assertions"]
+    assert observation(state)["result"] == "passed"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [vg.HMCError("connection reset"), RuntimeError("unexpected"), KeyError("x")],
+)
+@pytest.mark.asyncio
+async def test_a_probe_that_cannot_ask_still_cleans_up(probing, monkeypatch, error):
+    state, fake, _ = probing
+
+    async def broken(*_args):
+        raise error
+
+    monkeypatch.setattr(vg, "if_match_probe", broken)
+
+    await vg.exercise_volume_group(None, state)
+
+    assert fake.groups == set(GROUPS) and fake.inventory == BEFORE
+    assert observation(state)["result"] == "failed"
+    assert observation(state)["cleanup"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_the_storage_arm_never_probes(scratch, monkeypatch):
+    state, _ = scratch
+
+    async def forbidden(*_args):
+        raise AssertionError("probed outside vg-if-match")
+
+    monkeypatch.setattr(vg, "if_match_probe", forbidden)
+
+    await vg.exercise_volume_group(None, state)
+
+    assert "if-match-probe-decisive" not in str(state.observations)
+
+
+@pytest.mark.parametrize("status", [400, 500, None])
+@pytest.mark.asyncio
+async def test_an_indecisive_answer_fails_the_probe_assertion(
+    probing, monkeypatch, status
+):
+    state, fake, _ = probing
+
+    async def answered(*_args):
+        return {"if_match": "never-matched", "status": status}
+
+    monkeypatch.setattr(vg, "if_match_probe", answered)
+
+    await vg.exercise_volume_group(None, state)
+
+    assert "if-match-probe-decisive" not in observation(state)["assertions"]
+    assert fake.groups == set(GROUPS)

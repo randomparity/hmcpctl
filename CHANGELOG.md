@@ -18,6 +18,13 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `hmc_provision_lpar` reports `boot_started` (#1850, ADR 0328): a reference code newer than the
+  pre-power-on baseline that is `CA00E105`, partition firmware passing control to the boot image,
+  ends the installer boot `boot_started`. Native Ubuntu 26.04.1 and Rocky 9.8 windows on POWER9
+  (HMC V10R3 M1060, VIOS 4.1.2.00) both posted it about 130 seconds after power-on and nothing
+  after it, so a call's `wait_seconds`, counted from its start, must also cover creation and
+  upload; a shorter call ends `needs_attention` and `resume` polls again. `boot_started` still
+  means only that the boot image started, not that the installer ran.
 - `hmc_prepare_host_handoff` (ADR 0193, ADR 0329): `prepare` places a partition's
   external-management hold for a consumer such as kdive, returning its `hold_id` only to the
   placing agent, and returns a handoff document of observed, declared and unverified facts that

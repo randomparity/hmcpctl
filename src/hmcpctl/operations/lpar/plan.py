@@ -1115,7 +1115,10 @@ _UNVERIFIED_INSTALL = (
     "the media binding and producer result (#1227), and the built-media build entry",
     "that the VIOS copy matches the upload",
     "that the guest can reach the installer source",
-    "boot_started, which no operation reports until native evidence fills its codes (#1850)",
+    (
+        "that the installer runs: boot_started means only that partition firmware passed "
+        "control to the boot image (ADR 0328)"
+    ),
 )
 
 

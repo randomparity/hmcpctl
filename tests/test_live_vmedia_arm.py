@@ -1148,7 +1148,7 @@ def test_every_registered_vmedia_stage_is_covered_here():
     } == covered
 
 
-def test_iso_http_fixture_serves_directory_once_and_releases_socket(
+def test_iso_http_fixture_serves_only_the_iso_once_and_releases_socket(
     tmp_path, monkeypatch
 ):
     for name in list(os.environ):
@@ -1157,6 +1157,7 @@ def test_iso_http_fixture_serves_directory_once_and_releases_socket(
     monkeypatch.setenv("HMC_ISO_URL_ALLOWLIST", "existing.example.test:80")
     image = tmp_path / "fixture.iso"
     image.write_bytes(b"synthetic ISO fixture")
+    (tmp_path / "result.json").write_text('{"mac": "private"}', encoding="utf-8")
     config = replace(
         live_config.LiveTestConfig(),
         iso_path=str(image),
@@ -1178,6 +1179,11 @@ def test_iso_http_fixture_serves_directory_once_and_releases_socket(
             response = connection.getresponse()
             assert response.status == 200
             assert response.read() == image.read_bytes()
+            for path in ("/result.json", "/", "/fixture.iso/../result.json"):
+                connection.request("GET", path)
+                refused = connection.getresponse()
+                refused.read()
+                assert refused.status == 404, path
         finally:
             connection.close()
         assert os.environ["HMC_ISO_URL_ALLOWLIST"].split(",") == [

@@ -175,7 +175,7 @@ def test_an_immediate_boot_powers_on_once_and_reports_the_codes_it_saw(boot):
     assert wait.result["observed"] == [
         {"time_stamp": "11/03/2026 10:00:05", "refcode": "CA00E1F1"}
     ]
-    assert "#1850" in wait.result["reason"]
+    assert "before wait_seconds" in wait.result["reason"]
     assert _step(record, "revalidate_boot").status == "ok"
     assert result_from_record(record).unverified == UNVERIFIED
     assert record.next_actions == ("resume", "abandon")
@@ -211,6 +211,42 @@ def test_a_code_in_the_boot_started_set_ends_boot_started(boot, monkeypatch):
         "time_stamp": "11/03/2026 10:00:05",
         "refcode": "CA00E1F1",
     }
+
+
+def test_the_native_set_is_the_firmware_handoff_code_alone():
+    """ADR 0328: both native windows ended at CA00E105 and posted nothing after it."""
+    assert provision_boot.BOOT_STARTED_CODES == frozenset({"CA00E105"})
+
+
+def test_a_resume_that_sees_the_handoff_code_ends_boot_started(boot):
+    """Natively the handoff came ~130 s after power-on, past a short first wait."""
+    rid = f"boot-{next(_IDS)}"
+    early = _row("11/03/2026 10:00:05", "CA00E14D")
+    handoff = _row("11/03/2026 10:00:09", "CA00E105")
+    boot.refcodes = [[OLD], [early, OLD], [handoff, early, OLD]]
+    first = _submit(boot, rid=rid)
+    assert first.outcome == "needs_attention"
+    boot.hmc.state = "running"
+
+    resumed = _submit(boot, continuation="resume", rid=rid)
+
+    assert (resumed.state, resumed.outcome) == ("terminal", "boot_started")
+    assert boot.calls.count("power_on") == 1
+    assert _step(resumed, "wait_boot_started").result == {
+        "time_stamp": "11/03/2026 10:00:09",
+        "refcode": "CA00E105",
+    }
+
+
+def test_a_handoff_code_older_than_the_baseline_never_counts(boot):
+    """A previous boot's CA00E105 sits behind the baseline row and is not newer."""
+    stale = _row("11/03/2026 09:00:00", "CA00E105")
+    boot.refcodes = [[OLD, stale], [OLD, stale]]
+
+    record = _submit(boot)
+
+    assert record.outcome == "needs_attention"
+    assert _step(record, "wait_boot_started").result["observed"] == []
 
 
 def test_the_baseline_code_itself_never_counts_as_boot_started(boot, monkeypatch):
