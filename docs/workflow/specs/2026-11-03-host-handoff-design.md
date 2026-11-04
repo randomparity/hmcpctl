@@ -37,36 +37,42 @@ calling agent id placed the hold, and always null on `release`. `document` is nu
 
 **Prepare** (ADR 0193 D1, ADR 0329):
 
-1. Authorize as `hmc_get_lpar` and `hmc_list_lpar_ownership` (refuse when the policy withholds
-   either); resolve the system and the partition from the system's partition feed.
-2. With `hold=True`, `place_hold(system, partition, consumer_label, agent_id, connection)`;
-   its `partition_guarded` / `partition_held` refusals reach the caller unchanged. Without it,
-   `find_hold(partition)` reports any existing hold.
-3. Read the document's sections, each reported with a `SectionSource` (`ok` / `unavailable` /
+1. Refuse unless the policy permits `hmc_get_lpar`, `hmc_list_lpar_ownership` and
+   `hmc_get_vios_storage_detail`; authorize the first two for the caller's selectors; resolve the
+   system and the partition from the system's partition feed.
+2. Read the document's sections, each reported with a `SectionSource` (`ok` / `unavailable` /
    `denied`) and never refusing the call:
    - `ownership`: the ADR 0011 stamp parsed from the partition read in step 1;
    - `storage`: `inspect.read_resources` — `hmc_list_vios`, then `hmc_get_vios_storage_detail`
-     per VIOS, each admitted as that tool (ADR 0200's per-section rule);
-   - `adapters`: the client network adapter feed, admitted as `hmc_list_adapters`; MAC, VLAN,
-     slot per adapter.
+     admitted per VIOS (ADR 0200's per-section rule; a VIOS outside the grant is `denied`);
+   - `adapters`: the client network adapter feed, admitted as `hmc_list_adapters` with the
+     caller's selectors (as inspect's refcodes are); MAC, VLAN, slot per adapter.
+3. Last, so a call that fails earlier places nothing: with `hold=True`, `place_hold(system,
+   partition, consumer_label, agent_id, connection)`, whose `partition_guarded` /
+   `partition_held` refusals reach the caller unchanged; without it, `find_hold(partition)`.
 
 **Document.** `identity` (`connection`, `system_uuid`, `partition_uuid`, `name`,
 `partition_id`); `references` (`connection`, `agent_id`; never a secret); `observed` (`state`,
 `rmc_state`, the resource figures, `ownership`, `storage`, `adapters`); `declared`; `unverified`;
-`hold`; `unfenced`.
+`hold`; `unfenced`; `unchecked_tools`.
 
 - `declared` (ADR 0329 D2): from this host's store. The partition's `partition` ledger entry names
   the provision operation; its recorded request yields `install_profile`, `network` (`address`,
   `routes`, `dns`) and, for `built` media only, `login_user` and `ssh_key_fingerprints`
-  (`SHA256:` base64 of each key's blob; keys never echoed). `source` is `ok`, `none` (no ledger
-  entry: not provisioned by hmcpctl on this host) or `unavailable` (operation pruned or its
-  request unreadable), with `detail`.
+  (`SHA256:` base64 of each key's blob; keys never echoed), plus the operation's
+  `operation_state` and `operation_outcome`, since it is what was requested, not what was
+  applied. `source` is `ok`, `none` (no ledger entry: not provisioned by hmcpctl on this host) or
+  `unavailable` (operation pruned or its request unreadable), with `detail`.
 - `unverified`: fixed items `os`, `kernel`, `bootloader`, `kdump_fadump`, `ssh_reachability`,
   `host_identity`, each stating that kdive's doctor/adopt checks it. Nothing claims guest
   readiness or trust.
 - `unfenced`: ADR 0193 D6's surfaces (the hmcpctl library, other hosts, the HMC GUI, direct HMC
-  commands) and ADR 0327 D5's tools the hold hook does not check (`hmc_restore_lpar_profiles`,
-  system power and system profile activation, `hmc_run_command`, `hmcpctl raw`).
+  commands), `hmcpctl raw`, and the statement that every non-read tool that neither selects nor
+  derives a partition is unchecked (ADR 0327 D5) — VIOS, storage, system and firmware writes
+  included.
+- `unchecked_tools`: those tools by name, computed by the tool layer from the served registry
+  (`effect != "read"` and not `hold_guarded`, the handoff tool excluded), so the list cannot
+  drift from the hook.
 
 **Release.** Resolve the partition as prepare step 1 does, authorized as the tool alone (H1
 row), then `release_hold(system, partition, agent_id, hold_id)`. `hold_mismatch` reaches the
@@ -82,7 +88,9 @@ rename, with their one caller each: `operations/lpar/inspect.py`'s `_resources` 
 the read-only `ledger_request`. The H1 spec's handoff
 row is amended to ADR 0329's delegated set. `docs/kdive-tier-a-contract.md` gains a *Holds*
 section: an MCP power call (`hmc_power_on_lpar`, `hmc_power_off_lpar`, `hmc_dump_restart_lpar`,
-`hmc_power_lpar`) on a held partition needs `hold_id`; library calls are not checked.
+`hmc_power_lpar`) on a held partition needs `hold_id`; library calls are not checked; its test
+asserts each named power tool is `hold_guarded` and the handoff tool is not. `maturity.json` edits
+are followed by `just capability-metadata`, which regenerates `src/hmcpctl/_operation_maturity.json`.
 
 ## Failure model
 
@@ -101,8 +109,9 @@ section: an MCP power call (`hmc_power_on_lpar`, `hmc_power_off_lpar`, `hmc_dump
 3. **Accepted failure classes**
    - *Facts change after the call.* Accepted: the document is a point-in-time read; kdive
      re-checks (H1 *Failure model*).
-   - *A hold placed and then a section read fails.* Accepted: the hold stands; the section says
-     `unavailable`, and a repeat with the same label returns the hold.
+   - *A response lost after the hold is placed* (client timeout, transport drop). Accepted: a
+     repeat with the same label from the same agent returns the hold, or the operator releases it;
+     the docstring says so. Placement is the last step, so a read failure places nothing.
    - *`declared` absent for partitions provisioned elsewhere or pruned after 30 days.* Accepted:
      reported as `none`/`unavailable`, never inferred (ADR 0329 D2).
    - *Placing a hold on a partition another agent's ADR 0011 stamp names.* Accepted: ownership is
@@ -132,9 +141,9 @@ section: an MCP power call (`hmc_power_on_lpar`, `hmc_power_off_lpar`, `hmc_dump
 | Criterion | Proof |
 | --- | --- |
 | C1 prepare/release shape and D1 rules | unit tests on the operation; app test through `create_mcp` |
-| C2 document groups, no readiness claim, `unfenced` list, no secrets | unit tests on `prepare` |
-| C3 delegated authorization | app tests: withheld `hmc_get_lpar` refuses; withheld section tool → `denied` |
-| C4 kdive contract | `test_kdive_tier_a_contract` resolves the new tokens |
+| C2 document groups, no readiness claim, `unfenced` and `unchecked_tools`, no secrets | unit tests on `prepare`; app test: `unchecked_tools` equals the registry computation and includes `hmc_run_command`, `hmc_restore_lpar_profiles` |
+| C3 delegated authorization | app tests: withheld `hmc_get_lpar`, `hmc_list_lpar_ownership` or `hmc_get_vios_storage_detail` refuses; withheld `hmc_list_adapters` → `denied`; a name-scoped grant admits adapters |
+| C4 kdive contract | `test_kdive_tier_a_contract` resolves the new tokens and asserts the named power tools are `hold_guarded` |
 | C5 interlocks | app tests: after `prepare(hold=True)`, `hmc_power_lpar`, `hmc_reconfigure_lpar`, `hmc_decommission_lpar` refuse `partition_held` and pass with `hold_id`; after `release` they pass; `prepare(hold=True)` refuses `partition_guarded` while a provision operation guards the partition |
 | C6 ledgers and guardrails | `just capability-inventory`, `just tool-docs-check`, the split `just verify` |
 | C7 no live proof | none run; `maturity.json` carries no evidence row |
