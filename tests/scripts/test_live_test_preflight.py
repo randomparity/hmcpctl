@@ -1491,3 +1491,24 @@ def test_a_native_boot_arm_names_its_medium_window_and_partition(tmp_path):
     assert str(iso) in text and "ubuntu 26.04.1" in text and "900 s" in text
     assert not refused.runnable
     assert "LIVE_TEST_NATIVE_ROCKY_ISO_PATH" in refused.reason
+
+
+@pytest.mark.parametrize(
+    ("pv", "group", "runnable"),
+    [
+        ("hdisk9", "hpvg1234abcd", True),
+        ("", "hpvg1234abcd", False),
+        ("hdisk9", "rootvg", False),
+    ],
+)
+def test_vg_if_match_names_its_pv_and_group_or_refuses(pv, group, runnable):
+    config = live_config.LiveTestConfig(
+        system_name="sys-A", scratch_pv_name=pv, scratch_vg_name=group
+    )
+
+    verdict = preflight._ARM_VERDICTS["vg-if-match"](config)
+
+    assert verdict.runnable is runnable
+    if runnable:
+        text = " ".join(verdict.mutates)
+        assert "hdisk9" in text and "hpvg1234abcd" in text and "If-Match" in text

@@ -730,6 +730,38 @@ def _native_boot_verdict(group: str, config: live_config.LiveTestConfig) -> ArmV
     )
 
 
+def _vg_if_match_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    """Name the scratch group the vg-if-match arm (#1850) creates, probes and removes."""
+    pv, group = config.scratch_pv_name, config.scratch_vg_name
+    if not storage_volume_group.configured_scratch(pv, group):
+        return ArmVerdict(
+            "vg-if-match",
+            False,
+            "LIVE_TEST_SCRATCH_PV_NAME (hdiskN) and LIVE_TEST_SCRATCH_VG_NAME "
+            "(hpvg<8 hex>) are required",
+            (),
+            config.system_name,
+        )
+    return ArmVerdict(
+        "vg-if-match",
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            (
+                f"scratch volume group {group} on physical volume {pv}, created only "
+                "when that PV is free and in no group, and removed by reducevg"
+            ),
+            (
+                f"one VolumeGroup POST of {group}'s own body under an If-Match no ETag "
+                "ever had; status and error message/codes recorded"
+            ),
+            "no other volume group, physical volume or partition",
+        ),
+        config.system_name,
+    )
+
+
 def _network_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the network arm (#629) changes, each reversed by the arm itself."""
     return ArmVerdict(
@@ -978,6 +1010,7 @@ _ARM_VERDICTS = {
     "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "provision-boot": _provision_boot_verdict,
+    "vg-if-match": _vg_if_match_verdict,
     **{
         group: functools.partial(_native_boot_verdict, group)
         for group in provision_boot.NATIVE_GROUPS

@@ -175,6 +175,7 @@ below. The table does not grant hardware or VIOS access.
 | provision-boot | `uv run --no-sync python scripts/live_provision_boot.py` | subtask 72; powers on a partition with installer media |
 | native-ubuntu-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py ubuntu` | subtask 72; boots the Ubuntu launcher and records refcodes for up to 15 minutes |
 | native-rocky-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py rocky` | subtask 72; boots the Rocky launcher and records refcodes for up to 15 minutes |
+| vg-if-match | `uv run --no-sync python scripts/live_vg_if_match.py` | subtasks 0 and 42; a scratch volume group and one stale-`If-Match` write to it |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
 managed system, and a concurrent run makes the recovery check in step 4
@@ -925,6 +926,23 @@ powers a partition on and puts a guest on the network.
 - **After.** The provision-boot arm's teardown and recovery: recovery witnesses it as
   subtask 72.
 
+### The vg-if-match arm
+
+The vg-if-match arm (subtasks 0 and 42, #1850, ADR 0328) answers whether the HMC enforces
+`If-Match` on a VolumeGroup write, against a group the run itself creates. Each run needs its
+own operator authorization naming the physical volume.
+
+- **Inputs.** `LIVE_TEST_SCRATCH_PV_NAME`, one physical volume that `lspv -free` lists and that
+  belongs to no group, and `LIVE_TEST_SCRATCH_VG_NAME`, a fresh `hpvg<8 hex>`.
+- **Run.** ST42 creates the group only after its free/no-VG identity guards. It then GETs the
+  group and POSTs the same body back through hmcpctl's own VolumeGroup write, with an
+  `If-Match` that no ETag ever had (`"stale-<16 hex>"`). Only the HTTP status is kept, plus the
+  `<Message>` and REST/HSCL codes of an error body.
+- **Assertions.** ST42's four, plus `if-match-probe-answered`. A probe that cannot ask fails
+  that assertion and still cleans up.
+- **After.** ST42's guarded `reducevg` removes the group, and its PV and group snapshots must
+  equal the pre-run ones. Recovery witnesses it as subtask 42.
+
 ### The bare-cec arm
 
 The bare-cec arm is the release path end to end. It creates a partition, assigns
@@ -1022,7 +1040,8 @@ uv run --no-sync python scripts/live_test_recovery.py --results test-results-ded
 After the other arms pass `test-results-<arm>.json` the same way: `vmedia`,
 `bare-cec`, `round2`, `sriov`, `profiles`, `users`, `vios-backup`, `pcm`,
 `network`, `lpar-config`, `storage`, `lpar-power`, `provision-boot`,
-`native-ubuntu-boot-started`, `native-rocky-boot-started` or `vmedia-media-change`.
+`native-ubuntu-boot-started`, `native-rocky-boot-started`, `vg-if-match` or
+`vmedia-media-change`.
 
 The check reads the subtasks the run dispatched from the document, and witnesses
 these sets of them:

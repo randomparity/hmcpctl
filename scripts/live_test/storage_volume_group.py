@@ -1,11 +1,21 @@
-"""ST42: one explicitly released physical volume's scratch group (#1370)."""
+"""ST42: one explicitly released physical volume's scratch group (#1370).
+
+In the `vg-if-match` group (#1850, ADR 0328) the run also probes, between create and
+cleanup, whether the HMC enforces `If-Match` on a VolumeGroup write: it POSTs the run
+group's own body back under an `If-Match` that never matched.
+"""
 
 from __future__ import annotations
 
 import re
+import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError
+from hmcpctl.xmlutil import find_text
 
 from .observation import Assertion
 from .results import resource
@@ -15,10 +25,14 @@ from .storage_lifecycle import volume_names
 if TYPE_CHECKING:
     from fastmcp import Client
 
+    from hmcpctl.config import HMCConfig
     from live_test.runner import RunState
 
 SUBTASK = 42
 SCENARIO = "st42-scratch-volume-group"
+GROUPS = frozenset({"storage", "vg-if-match"})
+IF_MATCH_GROUP = "vg-if-match"
+_ERROR_CODES = re.compile(r"\b(?:REST|HSCL)[0-9A-Z]{4}\b")
 _PV = re.compile(r"hdisk[0-9]+")
 _RUN_GROUP = re.compile(r"hpvg[0-9a-f]{8}")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -76,6 +90,41 @@ def rest_group_names(data: object) -> frozenset[str] | None:
             return None
         names.append(name)
     return frozenset(names)
+
+
+async def if_match_probe(config: HMCConfig, vios: str, group: str) -> dict[str, Any]:
+    """POST *group*'s own body back under an `If-Match` no ETag ever had (#1850).
+
+    Goes through hmcpctl's own VolumeGroup write. Records the HTTP status, and from an
+    error body only its `<Message>` and REST/HSCL codes, never the body itself.
+    """
+    stale = f'"stale-{secrets.token_hex(8)}"'
+    async with HMCClient(config) as hmc:
+        listed = [
+            entry.get("UUID")
+            for entry in await hmc.list_volume_groups(vios)
+            if resource(entry).get("GroupName") == group
+        ]
+        if len(listed) != 1 or not isinstance(listed[0], str):
+            return {"status": None, "reason": f"{group} is not listed exactly once"}
+        _, element = await hmc._get_vg_raw_xml(vios, listed[0])
+        try:
+            await hmc._post_vg_xml(
+                vios, listed[0], element, operation="if_match_probe", etag=stale
+            )
+        except HMCError as exc:
+            body = exc.body or ""
+            try:
+                message = find_text(body, "Message") or ""
+            except Exception:  # noqa: BLE001 - a non-XML body keeps only its codes
+                message = ""
+            return {
+                "if_match": "never-matched",
+                "status": exc.status_code,
+                "message": message[:300],
+                "codes": sorted(set(_ERROR_CODES.findall(body))),
+            }
+    return {"if_match": "never-matched", "status": "2xx"}
 
 
 def create_guard(pv: str, group: str, inventory, free, groups) -> bool:
@@ -195,10 +244,29 @@ class _Scenario:
             )
         return restored, True
 
+    async def probe(self) -> dict[str, Any]:
+        """The If-Match probe; a failure to ask is recorded and never stops cleanup."""
+        config = self.state.hmc_config
+        try:
+            if config is None:
+                raise ValueError("no HMC configuration for a direct REST client")
+            probe = await if_match_probe(config, self.vios, self.group)
+        except (HMCError, OSError, ValueError) as exc:
+            self.state.record(
+                SUBTASK, "If-Match probe", "FAIL", None, f"{type(exc).__name__}"
+            )
+            return {}
+        answered = isinstance(probe.get("status"), int) or probe.get("status") == "2xx"
+        self.state.record(
+            SUBTASK, "If-Match probe", "PASS" if answered else "FAIL", probe
+        )
+        return probe if answered else {}
+
     async def run(self, baseline: _Snapshot) -> None:
         self.state.artifacts.storage_volume_group_name = self.group
         accepted = rest_listed = vios_listed = selected_only = restored = False
         data: Any = None
+        probe: dict[str, Any] = {}
         try:
             status, data = await self.state.call(
                 self.client,
@@ -221,6 +289,8 @@ class _Scenario:
                 if not restored:
                     self.manual("create left physical-volume or group snapshot drift")
                 return
+            if self.state.group == IF_MATCH_GROUP:
+                probe = await self.probe()
             restored, selected_only = await self.cleanup(baseline, current)
         finally:
             if restored:
@@ -235,6 +305,11 @@ class _Scenario:
                     Assertion("rest-group-listed", rest_listed),
                     Assertion("vios-group-listed", vios_listed),
                     Assertion("selected-pv-only", selected_only),
+                    *(
+                        [Assertion("if-match-probe-answered", "status" in probe)]
+                        if self.state.group == IF_MATCH_GROUP
+                        else []
+                    ),
                 ],
                 cleanup="passed" if restored else "failed",
                 data=data,
@@ -246,11 +321,11 @@ async def exercise_volume_group(client: Client, state: RunState) -> None:
     config = state.config
     pv, group = config.scratch_pv_name, config.scratch_vg_name
     vios, vios_id = state.artifacts.vios_uuid, state.artifacts.vios_partition_id
-    if state.group != "storage" or not configured_scratch(pv, group):
+    if state.group not in GROUPS or not configured_scratch(pv, group):
         state.skip(
             SUBTASK,
             "scratch volume group",
-            "storage arm and both valid scratch PV/VG settings required",
+            "storage or vg-if-match arm and both valid scratch PV/VG settings required",
         )
         return
     if (
