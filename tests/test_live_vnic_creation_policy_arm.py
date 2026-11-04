@@ -2580,6 +2580,27 @@ async def test_fixture_accounting_refuses_hypervisor_change_during_stamp(
     ] == "MANUAL_RECOVERY"
 
 
+@pytest.mark.asyncio
+async def test_fixture_recovery_refuses_journal_with_stamp_allocation_change(
+    fixture_wire, fixture_packet, tmp_path
+):
+    w = fixture_wire
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "PREPARED"
+    for memory in (
+        w.system["AssociatedSystemMemoryConfiguration"],
+        result["retained"]["snapshot"]["system"]["memory"],
+    ):
+        memory["MemoryUsedByHypervisor"] = str(
+            Decimal(memory["MemoryUsedByHypervisor"]) + 16
+        )
+        for key in ("CurrentAvailableSystemMemory", "PendingAvailableSystemMemory"):
+            memory[key] = str(Decimal(memory[key]) - 16)
+    recovered = await arm.recover(w.client(), fixture_packet, result)
+    assert recovered["status"] == "MANUAL_RECOVERY"
+    assert recovered["reason"] == "fixture allocation changed during ownership stamping"
+
+
 @pytest.mark.parametrize("drift", ["none", "attributes", "shape", "unknown"])
 @pytest.mark.asyncio
 async def test_fixture_accounting_attributed_preservation(

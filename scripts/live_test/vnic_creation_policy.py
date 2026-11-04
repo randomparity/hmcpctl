@@ -2190,7 +2190,6 @@ async def _fixture_run(hmc, packet, stage, output=None, journal=None):
                             }
                             held = await _fixture_held(hmc, packet, current)
                             _fixture_owned(hmc, packet, held)
-                            _fixture_stamp_allocation(document["before_stamp"], held)
                             document["retained"] = held
                             document["status"] = "PREPARED"
                         else:
