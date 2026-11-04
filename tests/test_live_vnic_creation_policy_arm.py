@@ -2575,6 +2575,7 @@ async def test_fixture_accounting_refuses_hypervisor_change_during_stamp(
     monkeypatch.setattr(arm.lpar_core, "stamp_created_lpar_ownership", shifted_stamp)
     result = await fixture_prepare(w, fixture_packet, tmp_path)
     assert result["status"] == "MANUAL_RECOVERY"
+    assert result["reason"] == "fixture allocation changed during ownership stamping"
     assert (await arm.recover(w.client(), fixture_packet, result))[
         "status"
     ] == "MANUAL_RECOVERY"
