@@ -52,7 +52,8 @@ The result reports three independent axes: submission (`not_submitted`,
 `completed`, `rejected`, `unknown`), selected-policy readback against the derived
 expected values, and preservation of every other cell of the partition's vNIC rows.
 Anything short of completed, verified and unchanged raises `VnicPartialError` with
-the full result attached.
+the full result attached. After an `unknown` submission `changed` stays null even
+when the readback shows no change, because the command may still apply later.
 
 ## Consequences
 

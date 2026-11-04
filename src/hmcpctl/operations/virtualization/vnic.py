@@ -960,7 +960,7 @@ def _update_readback(
     mismatched, unavailable = [], []
     observed = observed_policy(row) if row is not None else None
     for name, value in expected.items():
-        if row is None or observed is None:
+        if row is None:
             actual = None
         elif name == "port_vlan_id":
             raw = row.get(name, "")
