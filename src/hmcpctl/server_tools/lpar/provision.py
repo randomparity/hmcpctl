@@ -270,7 +270,13 @@ def provision_handler(
         wait_seconds: int = 60,
         profile: str | None = None,
     ) -> ProvisionResult:
-        """Provision an LPAR with a virtual Ethernet adapter, vSCSI storage, and optional power-on.
+        """Provision an LPAR; creating its disk can lose concurrent VolumeGroup changes.
+
+        Includes virtual Ethernet, vSCSI storage and optional power-on. Creating a
+        virtual disk writes the whole VolumeGroup. The HMC may ignore If-Match
+        (observed on V10R3 M1060), so callers must serialize writers to that group
+        for the entire operation. The profile-only ``exclusive_writer_window``
+        assertion does not establish VolumeGroup coordination.
 
         Durable (ADR 0190, ADR 0313): the call returns within ``wait_seconds`` and the
         work continues; poll ``hmc_operation_status`` with ``request_id``. A repeat

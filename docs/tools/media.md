@@ -8,10 +8,10 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_create_media_repository` | `mutate` | `media.create_repository` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Create the Virtual Media Repository (named VMLibrary) on a Volume Group. |
-| `hmc_create_optical_media` | `mutate` | `media.create` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create a blank VirtualOpticalMedia (ISO container) in the media repository. |
-| `hmc_delete_media_repository` | `destructive` | `media.delete_repository` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Delete the Virtual Media Repository from a Volume Group. |
-| `hmc_delete_optical_media` | `destructive` | `media.delete` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Delete a VirtualOpticalMedia (ISO image) from the media repository. |
+| `hmc_create_media_repository` | `mutate` | `media.create_repository` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Create a media repository; concurrent VolumeGroup changes can be lost. |
+| `hmc_create_optical_media` | `mutate` | `media.create` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Create blank optical media; concurrent VolumeGroup changes can be lost. |
+| `hmc_delete_media_repository` | `destructive` | `media.delete_repository` | `vios` | `implemented` | `unevidenced` | `existing-runtime-guards` | Delete a media repository; concurrent VolumeGroup changes can be lost. |
+| `hmc_delete_optical_media` | `destructive` | `media.delete` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Delete optical media (ISO image); concurrent VolumeGroup changes can be lost. |
 | `hmc_get_media_repository` | `read` | `media.get_repository` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Get the VolumeGroup Atom entry containing a Virtual Media Repository. |
 | `hmc_list_optical_mappings` | `read` | `media.list_mappings` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List VirtualSCSIMappings for optical media on a VIOS, optionally filtered by LPAR. |
 | `hmc_list_optical_media` | `read` | `media.list` | `vios` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List Virtual Optical Media in the Virtual Media Repository. |
