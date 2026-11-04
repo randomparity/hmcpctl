@@ -34,7 +34,7 @@ recovered values. Ordinary raw-call errors and decisions remain unchanged.
 
 Matching supplied selectors and partial omissions work. Before overlay, the existing
 `effective_arguments` continuation path rejects conflicting supplied selectors with
-`OperationRefused(request_conflict)` and fixed wording. This also protects its CLI caller.
+`OperationRefused(request_conflict)` and fixed wording. The CLI keeps its separate recorded-only continuation path.
 The engine retains full argument, connection, host and tool binding. Authorization can
 allow a recorded target before operation validation rejects a conflicting request; this
 is a completed authorization, not a preliminary allow. Owned-storage specialist checks
