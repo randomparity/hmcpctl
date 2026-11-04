@@ -13,9 +13,9 @@ can go out on a connection the HMC is closing. On the test HMC, 2 of 18 requests
 `_new_http_client` passes `httpx.Limits` with httpx's default caps (100 connections, 20
 idle) and `keepalive_expiry=1.0` from a named constant, for the initial and legacy-port
 clients. A connection idle for 1 s is discarded, 4 s inside the measured close; requests under
-1 s apart still reuse it. A longer gap costs one TLS handshake, small beside ~2 s feed
-responses. Nothing is retried, so request counts and the live-test wrappers around
-`HMCClient._request` stay unchanged.
+1 s apart still reuse it; a longer gap costs one TLS handshake. `CHANGELOG.md` gets a Fixed
+entry. Nothing is retried, so request counts and the `HMCClient._request` live-test wrappers
+stay unchanged.
 
 Not taken:
 
@@ -53,5 +53,5 @@ Not taken:
   one server-side connection. Red: `max_keepalive_connections=0` fails it.
 - Single send (Success 3): focused-test, same module. The fake HMC counts one request per call.
 - Pool caps unchanged: focused-test, same module asserts 100/20 on the built pool.
-- Live (read-only probe, no harness: nothing mutates): 20 requests after 1.5–4.9 s gaps. Pass:
-  new code opens a new connection for each and none fails; old code reuses one.
+- Live: an operator-authorized read-only private probe, 24 requests after 1.5–6 s gaps. Pass:
+  new code opens a new connection for each and none fails; old code reuses one under 5 s.
