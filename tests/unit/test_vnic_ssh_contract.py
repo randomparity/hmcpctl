@@ -9,11 +9,13 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.ssh.vnic import (
     add_vnic_backing,
+    build_vnic_update_attributes,
     list_vnic_backing_rows,
     list_vnic_rows,
     list_vnics,
     read_vios_identity,
     remove_vnic_slot,
+    update_vnic_slot_policy,
 )
 
 
@@ -339,3 +341,77 @@ def test_policy_encoded_record_byte_boundary():
     )
     with pytest.raises(ValueError, match="65536-byte"):
         build_vnic_add_attributes(backing + "é", 0, {"pvid_priority": "0"})
+
+
+@pytest.mark.parametrize(
+    ("pairs", "record"),
+    [
+        (
+            [("pvid_priority", "5"), ("auto_priority_failover", "0")],
+            "pvid_priority=5,auto_priority_failover=0",
+        ),
+        ([("auto_priority_failover", "1")], "auto_priority_failover=1"),
+        (
+            [("auto_priority_failover", "0"), ("allowed_vlan_ids+", "20")],
+            "auto_priority_failover=0,allowed_vlan_ids+=20",
+        ),
+        (
+            [("auto_priority_failover", "0"), ("allowed_vlan_ids+", "20,30")],
+            'auto_priority_failover=0,"allowed_vlan_ids+=20,30"',
+        ),
+        (
+            [
+                ("auto_priority_failover", "1"),
+                ("allowed_os_mac_addrs+", "0a0b0c0d0e0f,0a0b0c0d0e10"),
+            ],
+            'auto_priority_failover=1,"allowed_os_mac_addrs+=0a0b0c0d0e0f,0a0b0c0d0e10"',
+        ),
+    ],
+)
+def test_update_record_renders_list_add_last_and_quoted(pairs, record) -> None:
+    assert build_vnic_update_attributes(pairs) == record
+
+
+@pytest.mark.parametrize(
+    "pairs",
+    [
+        [("pvid_priority", "5,auto_priority_failover=1")],
+        [("allowed_vlan_ids+", "20,30"), ("auto_priority_failover", "0")],
+        [("allowed_vlan_ids+", '20"'), ("auto_priority_failover", "0")],
+        [],
+    ],
+)
+def test_update_record_refuses_record_structure_in_values(pairs) -> None:
+    with pytest.raises(HMCCLIError):
+        build_vnic_update_attributes(pairs)
+
+
+@pytest.mark.asyncio
+async def test_update_command_shape(monkeypatch, config) -> None:
+    calls: list[str] = []
+
+    async def fake_run(_config, command: str) -> str:
+        calls.append(command)
+        return ""
+
+    monkeypatch.setattr("hmcpctl.ssh.vnic.run_hmc_command", fake_run)
+    record = 'auto_priority_failover=0,"allowed_vlan_ids+=20,30"'
+    await update_vnic_slot_policy(config, "system one", "client one", "4", record)
+
+    assert shlex.split(calls[0]) == [
+        "chhwres",
+        "-r",
+        "virtualio",
+        "--rsubtype",
+        "vnic",
+        "-o",
+        "s",
+        "-m",
+        "system one",
+        "-p",
+        "client one",
+        "-s",
+        "4",
+        "-a",
+        record,
+    ]

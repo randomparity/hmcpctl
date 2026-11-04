@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Literal
+from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
@@ -30,13 +31,16 @@ from hmcpctl.ssh.sriov import (
     list_sriov_configured_logical_port_rows,
     list_sriov_physical_port_rows,
 )
+from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.ssh.vnic import (
     add_vnic_backing,
     build_vnic_add_attributes,
+    build_vnic_update_attributes,
     list_vnic_backing_rows,
     list_vnic_rows,
     read_vios_identity,
     remove_vnic_slot,
+    update_vnic_slot_policy,
 )
 from hmcpctl.ssh.vnic import (
     list_vnics as _list_vnics,
@@ -110,6 +114,24 @@ class VnicChangeResult:
 
 
 @dataclass(frozen=True)
+class VnicPolicyUpdateResult:
+    operation: Literal["update_policy"]
+    slot_num: str
+    mutation_dispatched: bool
+    changed: bool | None
+    record: str
+    submission: Literal["not_submitted", "completed", "rejected", "unknown"]
+    refusal_code: str | None
+    vnic_before: VnicSnapshot
+    vnic_after: VnicSnapshot | None
+    readback: VnicPolicyVerification
+    preservation: Literal["not_applicable", "unchanged", "drifted", "unavailable"]
+    drifted_fields: tuple[str, ...]
+    output: str
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _VnicPreflightContext:
     system_name: str
     lpar_name: str
@@ -136,7 +158,7 @@ class VnicCapabilityError(RuntimeError):
 class VnicPartialError(RuntimeError):
     """Raised when a dispatched mutation cannot be fully reconciled."""
 
-    def __init__(self, message: str, result: VnicChangeResult):
+    def __init__(self, message: str, result: VnicChangeResult | VnicPolicyUpdateResult):
         super().__init__(message)
         self.result = result
 
@@ -855,4 +877,283 @@ async def remove_vnic(
         if cause is not None:
             raise partial from cause
         raise partial
+    return result
+
+
+_UPDATE_LISTS = ("allowed_vlan_ids", "allowed_os_mac_addrs")
+
+
+def _requested_update(values: dict[str, object]) -> tuple[str, Any]:
+    """Validate the one requested change and return its policy field and value."""
+    given = [(name, value) for name, value in values.items() if value is not None]
+    if len(given) != 1:
+        raise ValueError(
+            f"a vNIC policy update takes exactly one of {', '.join(values)}; "
+            "combined changes are not natively qualified"
+        )
+    name, value = given[0]
+    if name == "port_vlan_id":
+        if type(value) is not int or not 1 <= value <= 4094:
+            raise ValueError(
+                "port_vlan_id must be an integer between 1 and 4094; only a change "
+                "from 0 to a nonzero port VLAN ID is natively qualified"
+            )
+        return name, value
+    field = name.removeprefix("add_")
+    if field in _UPDATE_LISTS and (not isinstance(value, list) or not value):
+        raise ValueError(
+            f"{name} requires a nonempty list of members to add; replacement, "
+            "removal and all/none are not natively qualified updates"
+        )
+    return field, getattr(creation_policy(**{field: value}), field)
+
+
+def _update_pairs(
+    before: VnicSnapshot, field: str, value: Any
+) -> tuple[list[tuple[str, str]], dict[str, Any]] | None:
+    """Derive the record pairs and expected values, or ``None`` when satisfied."""
+    policy = before.policy
+    added: tuple[Any, ...] = ()
+    if field == "port_vlan_id":
+        if before.port_vlan_id == value:
+            return None
+        if before.port_vlan_id != 0 or policy.allowed_vlan_ids != "none":
+            raise VnicCapabilityError(
+                "port_vlan_id changes are natively qualified only from 0 while "
+                "allowed_vlan_ids is none; the HMC refuses others (HSCLAB12)"
+            )
+    elif field in _UPDATE_LISTS:
+        current = getattr(policy, field)
+        if not isinstance(current, tuple):
+            raise VnicCapabilityError(
+                f"{field} additions are natively qualified only on a finite member "
+                f"list; observed {current or 'an unavailable value'}"
+            )
+        added = tuple(member for member in value if member not in current)
+        if not added:
+            return None
+        value = tuple(sorted({*current, *added}))
+    elif getattr(policy, field) == value:
+        return None
+    failover: bool | None = (
+        bool(value)
+        if field == "auto_priority_failover"
+        else policy.auto_priority_failover
+    )
+    if failover is None:
+        raise VnicCapabilityError(
+            "auto_priority_failover is unavailable; every update must submit it "
+            "explicitly because the HMC resets an omitted value to 1"
+        )
+    pairs: list[tuple[str, str]] = []
+    if field in ("port_vlan_id", "pvid_priority"):
+        pairs.append((field, str(value)))
+    pairs.append(("auto_priority_failover", str(int(failover))))
+    if added:
+        pairs.append((f"{field}+", ",".join(map(str, added))))
+    return pairs, {field: value, "auto_priority_failover": failover}
+
+
+def _update_readback(
+    row: dict[str, str] | None, expected: dict[str, Any]
+) -> VnicPolicyVerification:
+    mismatched, unavailable = [], []
+    observed = observed_policy(row) if row is not None else None
+    for name, value in expected.items():
+        if row is None or observed is None:
+            actual = None
+        elif name == "port_vlan_id":
+            raw = row.get(name, "")
+            actual = int(raw) if re.fullmatch(r"[0-9]+", raw) else None
+        else:
+            actual = getattr(observed, name)
+        if actual is None:
+            unavailable.append(name)
+        elif actual != value:
+            mismatched.append(name)
+    status: Literal["verified", "mismatched", "unavailable"] = (
+        "mismatched" if mismatched else "unavailable" if unavailable else "verified"
+    )
+    return VnicPolicyVerification(
+        status, tuple(expected), tuple(mismatched), tuple(unavailable)
+    )
+
+
+def _update_preservation(
+    before: dict[str, dict[str, str]],
+    after: dict[str, dict[str, str]],
+    slot_num: str,
+    targeted: dict[str, Any],
+) -> tuple[str, ...]:
+    drifted = []
+    for slot in sorted(before.keys() | after.keys()):
+        if slot not in before or slot not in after:
+            drifted.append(f"{slot}:*")
+            continue
+        for name in sorted(before[slot].keys() | after[slot].keys()):
+            if slot == slot_num and name in targeted:
+                continue
+            if before[slot].get(name) != after[slot].get(name):
+                drifted.append(f"{slot}:{name}")
+    return tuple(drifted)
+
+
+def _satisfied_update(before: VnicSnapshot, field: str) -> VnicPolicyUpdateResult:
+    return VnicPolicyUpdateResult(
+        operation="update_policy",
+        slot_num=before.slot_num,
+        mutation_dispatched=False,
+        changed=False,
+        record="",
+        submission="not_submitted",
+        refusal_code=None,
+        vnic_before=before,
+        vnic_after=before,
+        readback=VnicPolicyVerification("verified", (field,)),
+        preservation="not_applicable",
+        drifted_fields=(),
+        output="",
+        errors=(),
+    )
+
+
+async def _submit_update(
+    config: HMCConfig, system_name: str, lpar_name: str, slot_num: str, record: str
+) -> tuple[
+    Literal["completed", "rejected", "unknown"], str | None, str, Exception | None
+]:
+    """Submit once; classify the outcome without retrying."""
+    try:
+        output = await update_vnic_slot_policy(
+            config, system_name, lpar_name, slot_num, record
+        )
+    except Exception as error:  # noqa: BLE001 - one attempt; the outcome is read back, never retried
+        if isinstance(error, HMCCLIError) and (
+            error.remote_nonzero_completed or error.remote_refusal_code
+        ):
+            return "rejected", error.remote_refusal_code, "", error
+        return "unknown", None, "", error
+    return "completed", None, output, None
+
+
+async def _read_update_after(
+    config: HMCConfig, system_name: str, lpar_name: str, slot_num: str
+) -> tuple[dict[str, dict[str, str]] | None, VnicSnapshot | None, Exception | None]:
+    """Read the partition's rows keyed by slot; the parser refuses duplicate slots."""
+    try:
+        rows = await list_vnic_rows(config, system_name, lpar_name)
+        snapshots = _parse_vnic_snapshots(rows)
+    except Exception as error:  # noqa: BLE001 - reported as unavailable readback and preservation
+        return None, None, error
+    after = next((item for item in snapshots if item.slot_num == slot_num), None)
+    return {row["slot_num"]: row for row in rows}, after, None
+
+
+async def update_vnic_policy(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    slot_num: str,
+    *,
+    system_name_or_uuid: str,
+    ownership_override: bool = False,
+    port_vlan_id: int | None = None,
+    pvid_priority: int | None = None,
+    auto_priority_failover: bool | None = None,
+    add_allowed_vlan_ids: list[int] | None = None,
+    add_allowed_os_mac_addrs: list[str] | None = None,
+) -> VnicPolicyUpdateResult:
+    """Apply one natively qualified policy change to an existing vNIC (ADR 0332).
+
+    The request is desired state: a change already in place returns without
+    dispatch. Every record carries ``auto_priority_failover`` explicitly. The
+    command is submitted once, with no retry or rollback.
+
+    Raises:
+        ValueError: If the request is not exactly one valid change, the slot is
+            unsafe, or the partition's vNIC inventory is malformed.
+        VnicCapabilityError: If the slot is absent or the change is not a
+            natively qualified mode for its current policy.
+        VnicPartialError: If a dispatched update is not completed, verified and
+            preserved; the attached result carries every axis.
+    """
+    field, value = _requested_update(
+        {
+            "port_vlan_id": port_vlan_id,
+            "pvid_priority": pvid_priority,
+            "auto_priority_failover": auto_priority_failover,
+            "add_allowed_vlan_ids": add_allowed_vlan_ids,
+            "add_allowed_os_mac_addrs": add_allowed_os_mac_addrs,
+        }
+    )
+    slot_num = require_command_safe_text(slot_num, "slot_num")
+    system_name, lpar_name = await resolve_and_authorize_lpar_names(
+        hmc,
+        lpar_name_or_uuid,
+        ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
+    )
+    config = hmc.config
+    await require_admitted_environment(config, system_name)
+    before_rows = await list_vnic_rows(config, system_name, lpar_name)
+    selected = [
+        item for item in _parse_vnic_snapshots(before_rows) if item.slot_num == slot_num
+    ]
+    if not selected:
+        raise VnicCapabilityError(f"vNIC slot {slot_num!r} is not on the partition")
+    before = selected[0]
+    derived = _update_pairs(before, field, value)
+    if derived is None:
+        return _satisfied_update(before, field)
+    pairs, expected = derived
+    record = build_vnic_update_attributes(pairs)
+    submission, refusal_code, output, cause = await _submit_update(
+        config, system_name, lpar_name, slot_num, record
+    )
+    errors = [f"update submission {submission}: {cause}"] if cause else []
+    after_rows, after, read_error = await _read_update_after(
+        config, system_name, lpar_name, slot_num
+    )
+    if read_error is not None:
+        cause = cause or read_error
+        errors.append(f"vNIC readback failed: {read_error}")
+    readback = _update_readback(
+        after_rows.get(slot_num) if after_rows else None, expected
+    )
+    before_by_slot = {row["slot_num"]: row for row in before_rows}
+    drifted: tuple[str, ...] = ()
+    if after_rows is None:
+        preservation: Literal["unchanged", "drifted", "unavailable"] = "unavailable"
+    else:
+        drifted = _update_preservation(before_by_slot, after_rows, slot_num, expected)
+        preservation = "drifted" if drifted else "unchanged"
+    if readback.status != "verified":
+        errors.append(f"selected policy readback is {readback.status}")
+    if drifted:
+        errors.append(f"untargeted vNIC configuration drifted: {', '.join(drifted)}")
+    if submission == "completed" and not errors:
+        changed: bool | None = True
+    else:
+        old, new = before_by_slot.get(slot_num, {}), (after_rows or {}).get(slot_num)
+        unchanged = new is not None and all(new.get(f) == old.get(f) for f in expected)
+        changed = False if unchanged else None
+    result = VnicPolicyUpdateResult(
+        operation="update_policy",
+        slot_num=slot_num,
+        mutation_dispatched=True,
+        changed=changed,
+        record=record,
+        submission=submission,
+        refusal_code=refusal_code,
+        vnic_before=before,
+        vnic_after=after,
+        readback=readback,
+        preservation=preservation,
+        drifted_fields=drifted,
+        output=output,
+        errors=tuple(errors),
+    )
+    if result.errors:
+        raise VnicPartialError(
+            "vNIC policy update could not be fully verified", result
+        ) from cause
     return result
