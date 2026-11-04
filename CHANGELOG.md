@@ -25,6 +25,11 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   after it, so a call's `wait_seconds`, counted from its start, must also cover creation and
   upload; a shorter call ends `needs_attention` and `resume` polls again. `boot_started` still
   means only that the boot image started, not that the installer ran.
+- `hmc_prepare_host_handoff` (ADR 0193, ADR 0329): `prepare` places a partition's
+  external-management hold for a consumer such as kdive, returning its `hold_id` only to the
+  placing agent, and returns a handoff document of observed, declared and unverified facts that
+  names what a hold does not fence; `release` drops the hold. Neither writes to the HMC. The
+  kdive Tier A contract states that MCP power calls on a held partition need `hold_id` (#1852).
 - External-management holds (ADR 0193, ADR 0327): while a partition is held, every
   partition-mutation tool and CLI command that resolves it is refused with `partition_held`
   unless the call presents the hold's `hold_id` (`--hold-id` on the CLI); reads and console

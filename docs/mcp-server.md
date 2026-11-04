@@ -557,6 +557,19 @@ writes such as `hmc_restore_lpar_profiles`, system power and system profile acti
 partition only by name over SSH resolves the name through REST first; when REST cannot identify
 it, the call is refused with `partition_hold_unverified`.
 
+`hmc_prepare_host_handoff` places and releases holds (ADR 0329). `prepare` with `hold` true and a
+`consumer_label` places the partition's hold and returns its `hold_id` only to the placing agent
+id; a repeat from that agent with the same label returns the same hold, which is how to recover a
+lost response. It is refused while a logical operation runs on the partition or another agent or
+label holds it. `prepare` also returns a handoff document: `observed` facts read during the call,
+`declared` facts from this host's provision record (what was requested, with that operation's
+state and outcome), the guest facts left `unverified` for kdive, and `unfenced` and
+`unchecked_tools`, which say what a hold does not stop. It needs `hmc_get_lpar`,
+`hmc_list_lpar_ownership` and `hmc_get_vios_storage_detail`; the storage section is read as
+`hmc_list_vios` and each VIOS's detail, and the adapters section as `hmc_list_adapters`, each
+reported `denied` when the policy withholds it. `release` drops the hold given its `hold_id` or
+from the placing agent. Neither action writes to the HMC.
+
 Holds never expire. `hmcpctl holds list` shows every hold on the host, without its `hold_id`,
 and `hmcpctl holds release <partition-uuid>` releases one; neither contacts the HMC, and release
 never deletes the partition. A restored backup lacks holds placed after it was taken, and

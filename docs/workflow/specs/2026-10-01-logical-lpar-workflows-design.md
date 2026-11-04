@@ -153,7 +153,7 @@ the dispatch authorizer admits the call, as that tool, for each resolved target.
 | decommission `retain` | `hmc_decommission_lpar`'s existing set |
 | decommission `delete_owned` | adds `hmc_detach_storage_mapping`, `hmc_unmount_optical_media`, `hmc_delete_optical_media`, `hmc_delete_virtual_disk` |
 | inspect | `hmc_get_lpar` (required); `refcodes` adds `hmc_read_lpar_refcodes`; `resources` adds `hmc_list_vios` and `hmc_get_vios_storage_detail` for each VIOS; each section authorized on its own (ADR 0200); `profile_drift` adds #637's profile read |
-| handoff `prepare` | `hmc_get_lpar`, `hmc_list_lpar_ownership`, `hmc_get_vios_storage_detail` for each serving VIOS |
+| handoff `prepare` | `hmc_get_lpar`, `hmc_list_lpar_ownership` and `hmc_get_vios_storage_detail` (required); `hmc_list_vios`, `hmc_get_vios_storage_detail` per VIOS and `hmc_list_adapters`, each section authorized on its own (ADR 0329) |
 | handoff `release` | none beyond the tool itself |
 | operation status | none beyond the tool itself; it lists only records with the caller's agent id |
 

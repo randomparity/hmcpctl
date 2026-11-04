@@ -26,7 +26,7 @@ from fastmcp.exceptions import ToolError
 
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
 from hmcpctl.client.core import HMCClient
-from hmcpctl.operations.logical import holds
+from hmcpctl.operations.logical import holds, store
 from hmcpctl.operations.logical.holds import HoldRefused
 from hmcpctl.operations.storage import resources as storage_resources
 from hmcpctl.resource_identity import PartitionGuard, install_partition_guard
@@ -38,6 +38,7 @@ SYS = "0b3f9a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
 LPAR = "7d1e2f3a-4b5c-4d6e-8f70-819a2b3c4d5e"
 VIOS = "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
 NAME = "lpar-a"
+HANDOFF = "hmc_prepare_host_handoff"
 
 GUARDED = sorted(
     name for name, security in TOOL_SECURITY.items() if hold_guarded(name, security)
@@ -285,7 +286,8 @@ def test_every_guarded_tool_publishes_hold_id_and_no_other_does(app):
     tools = asyncio.run(listed())
     for name, tool in tools.items():
         has = "hold_id" in tool.input_schema["properties"]
-        assert has == (name in GUARDED), name
+        # The handoff tool is exempt from holds and takes its own hold_id for release.
+        assert has == (name in GUARDED or name == HANDOFF), name
 
 
 # Tools whose partition selector names a VIOS: holds are placed on client partitions, and
@@ -370,3 +372,75 @@ def test_reads_and_exempt_tools_pass_a_held_partition(app, tool):
     outcome = _call(application, tool, LPAR)
     assert "partition_held" not in outcome, outcome
     assert spy.refused == [] and spy.passed == [LPAR], (spy.passed, outcome)
+
+
+@pytest.fixture
+def handoff_app(app, monkeypatch):
+    """The composed server with the handoff document's section reads stubbed empty."""
+
+    async def no_vios(_self: Any, _system_uuid: str) -> list[dict[str, Any]]:
+        return []
+
+    async def no_adapters(
+        _self: Any, _lpar_uuid: str, *, allow_empty: bool = False
+    ) -> list[dict[str, Any]]:
+        return []
+
+    monkeypatch.setattr(HMCClient, "list_vios", no_vios)
+    monkeypatch.setattr(HMCClient, "_network_adapter_creation_feed", no_adapters)
+    return app
+
+
+def _handoff(application: FastMCP, **arguments: Any) -> dict[str, Any]:
+    async def go() -> dict[str, Any]:
+        async with Client(application) as client:
+            result = await client.call_tool(
+                HANDOFF,
+                {"lpar_name_or_uuid": NAME, "system_name_or_uuid": SYS, **arguments},
+            )
+        return result.structured_content
+
+    return asyncio.run(go())
+
+
+LOGICAL_MUTATIONS = ("hmc_power_lpar", "hmc_reconfigure_lpar", "hmc_decommission_lpar")
+
+
+def test_handoff_hold_refuses_logical_mutations_until_release(handoff_app):
+    application, _, router = handoff_app
+    placed = _handoff(application, action="prepare", hold=True, consumer_label="kdive")
+    hold_id = placed["hold"]["hold_id"]
+    for tool in LOGICAL_MUTATIONS:
+        assert "partition_held" in _call(application, tool, LPAR), tool
+    assert_no_mutating_requests(router)
+    for tool in LOGICAL_MUTATIONS:
+        assert "partition_held" not in _call(application, tool, LPAR, hold_id=hold_id)
+    released = _handoff(application, action="release", hold_id=hold_id)
+    assert released["hold"]["consumer_label"] == "kdive"
+    for tool in LOGICAL_MUTATIONS:
+        assert "partition_held" not in _call(application, tool, LPAR), tool
+
+
+def test_handoff_refuses_a_partition_a_provision_guards(handoff_app):
+    application, _, _ = handoff_app
+    with store.session() as conn, store.write_transaction(conn):
+        store.insert_operation(
+            conn,
+            operation_id="c" * 32,
+            agent_id="agent-p",
+            request_id="provision-1",
+            tool="hmc_provision_lpar",
+            connection="<default>",
+            host="hmc.test",
+            digest="d",
+            request_json="{}",
+        )
+        store.set_partition(conn, "c" * 32, SYS, LPAR)
+    try:
+        outcome = json.dumps(
+            _handoff(application, action="prepare", hold=True, consumer_label="kdive")
+        )
+    except ToolError as error:
+        outcome = str(error)
+    assert "partition_guarded" in outcome and "c" * 32 in outcome
+    assert holds.find_hold(LPAR) is None
