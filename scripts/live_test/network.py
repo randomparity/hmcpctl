@@ -1012,7 +1012,8 @@ class _Arm:
         self, vlan: int, switch: int, baseline: Adapters
     ) -> None:
         kind = "ClientNetworkAdapter"
-        if _network_keys(baseline) is None:
+        baseline_keys = _network_keys(baseline)
+        if baseline_keys is None:
             self.manual(
                 "client adapter baseline identity is unavailable",
                 "inspect the baseline; no adapter was created",
@@ -1029,6 +1030,13 @@ class _Arm:
         after = await self.adapters(kind, "after add")
         identity = result[1].get("UUID") if isinstance(result[1], Mapping) else None
         fixture = _network_fixture(after, baseline, identity, vlan, switch)
+        after_keys = _network_keys(after)
+        if (
+            added == "FAIL"
+            and after_keys is not None
+            and after_keys.keys() == baseline_keys.keys()
+        ):
+            raise _Stop("N1 add failed with unchanged adapter identities")
         if added != "PASS" or after is None or fixture is None:
             self.manual(
                 "N1 creation identity is unverified",
