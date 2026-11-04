@@ -14,6 +14,8 @@ implemented with offline boundary proof and independent product/security review 
 `475e544b`. This record does not settle the complete updater design.
 On 2026-11-04, #1856 amended the fixture's hypervisor-memory refusal policy
 from one fixed value to a bound, as an operator-approved run-exposed correction.
+On 2026-11-04, #1857 added the version-2 `finite-update` case for scalar and
+finite list-mode updates; its native outcomes are recorded under Consequences.
 
 ## Context
 
@@ -72,6 +74,23 @@ Absent or opaque native provenance remains unknown; diagnostic text is never an
 oracle or cleanup authority. Preserve private-file/journal limits and public
 exclusion. This does not recover an already discarded error or admit a retry.
 
+#1857 adds one version-2 case, `finite-update`, which carries an `update` list of
+one to five actions, at most one per field. `set` applies to all five fields;
+`add` (`+=`) and `remove` (`-=`) apply to the finite lists only. The harness derives
+the record and the oracle from the packet. It refuses before any effect:
+
+- a no-op `set`;
+- any sentinel value;
+- a delta on an `all` baseline;
+- an `add` that repeats a member;
+- a `remove` that names a member not present, or every member.
+
+So `all` minus finite members stays unqualified. The record may carry quoted lists
+that are not its last pair, the form the retained reference shows for an existing
+vNIC. List oracles compare canonical members, not raw order. The six earlier cases
+are unchanged. See the
+[finite update design](../workflow/specs/2026-11-04-vnic-finite-update-cases-design.md).
+
 No activation, reseed, alternative encoding, automatic retry, rollback or maturity
 promotion follows. The full
 five-field updater, later list modes and two-list composition remain #1828 work.
@@ -125,3 +144,13 @@ lists. The outcome table is in the
   `_capture_source` stores only the caught exception class, while `main` emits only
   stage/status or exception type. The former loses the failure detail; widening
   public output would violate the approved private evidence boundary.
+- **One fixed case name per finite shape (#1857).** judgment: about eleven
+  near-identical case names would each need operand keys anyway. A validated action
+  list with a derived oracle covers the same shapes with one parser.
+- **Exact raw list literals as the finite oracle (#1857).** verified: #1856's
+  recorded runs (`docs/live-testing.md`, "Recorded source outcomes") used only
+  singleton finite baselines. No evidence fixes the order or case of a list
+  with several members, so a raw-order oracle would be a guess.
+- **Remove a refused case's vNIC inside the harness (#1857).** judgment: this
+  record already rejects cleanup after a refusal. Per-case removal through the
+  ownership-checked CLI stays the operator's separately granted action.
