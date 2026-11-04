@@ -1,0 +1,362 @@
+"""The logical-workflow live arm (ST73, #1854) against a scripted HMC.
+
+It reuses the lpar-power arm's scripted system and adds what the workflow touches:
+an inactive provision, a reconfigure, an inspection and current figures after start.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+import test_live_lpar_power_arm as arm
+from live_test import config as live_config
+from live_test import logical_workflow, runner
+from test_live_lpar_power_arm import GROUP, SYSTEM, VLAN, FakeClient, World
+
+from hmcpctl.operations.logical.models import OperationRecord
+from hmcpctl.server_tools.catalog import PRIMARY_TOOLS
+
+PATCH = logical_workflow.PATCH
+
+
+@pytest.fixture(scope="module")
+def schemas():
+    return arm.schemas.__wrapped__()
+
+
+@pytest.fixture(scope="module")
+def output_schemas():
+    return arm.output_schemas.__wrapped__()
+
+
+@pytest.fixture(autouse=True)
+def _typed_outputs(output_schemas):
+    """Served results arrive typed, as the live client hands them to the arm."""
+    arm._OUTPUTS.update(output_schemas)
+
+
+@pytest.fixture(autouse=True)
+def _no_waiting(monkeypatch):
+    lpar_power = logical_workflow.lpar_power
+    for name in (
+        "_STATE_POLL_DELAY_S",
+        "_OPERATION_POLL_DELAY_S",
+        "_COMPARE_REREAD_DELAY_S",
+    ):
+        monkeypatch.setattr(lpar_power, name, 0)
+    monkeypatch.setattr(lpar_power.dedicated_pcie, "_ABSENCE_REREAD_DELAY_S", 0)
+    monkeypatch.setattr(lpar_power, "_STATE_POLL_ATTEMPTS", 2)
+    monkeypatch.setattr(logical_workflow, "_power_operations_authorized", lambda: True)
+
+
+def _operation(tool: str, state: str, outcome: str | None, result: Any) -> dict:
+    record = asdict(
+        OperationRecord(
+            "1" * 32,
+            "r",
+            tool,
+            "<default>",
+            None,
+            None,
+            state,
+            "done",
+            outcome,
+            (),
+            (),
+            False,
+            (),
+            (),
+            None,
+            "t",
+            "t",
+        )
+    )
+    return {**record, "result": result}
+
+
+class WorkflowWorld(World):
+    """Answers the logical workflow as a healthy HMC would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.applied = "profile"
+        self.reconfigure_state = "terminal"
+        self.start_applies_change = True
+        self.inspected_state = None
+        self.inspected_memory = None
+
+    def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
+        answer = super()._hmc_provision_lpar(kwargs)
+        if kwargs.get("continuation") is None:
+            # power_on false: the partition stays as created.
+            self.partitions[kwargs["name"]]["state"] = "Not Activated"
+            answer["steps"] = [s for s in answer["steps"] if s["step"] != "power_on"]
+        return answer
+
+    def _hmc_reconfigure_lpar(self, kwargs: dict[str, Any]) -> Any:
+        request_id = kwargs["request_id"]
+        if kwargs.get("continuation") == "abandon":
+            record = self.operations[request_id]
+            record["state"] = "terminal"
+            return record
+        entry = self.by_selector(kwargs["lpar_name_or_uuid"])
+        assert entry is not None
+        patch = kwargs["patch"]
+        entry["resources"] = {
+            **entry["resources"],
+            "desired_memory": patch["memory_mib"],
+            "desired_vcpus": patch["processors"],
+        }
+        changes = [
+            {"field": key, "applied": self.applied, "value": value}
+            for key, value in patch.items()
+        ]
+        outcome = "completed" if self.reconfigure_state == "terminal" else None
+        record = _operation(
+            "hmc_reconfigure_lpar",
+            self.reconfigure_state,
+            outcome,
+            {"changes": changes},
+        )
+        record["request_id"] = request_id
+        self.operations[request_id] = record
+        return record
+
+    def _hmc_inspect_lpar(self, kwargs: dict[str, Any]) -> Any:
+        entry = self.by_selector(kwargs["lpar_name_or_uuid"])
+        assert entry is not None
+        r = entry["resources"]
+        return {
+            "connection": "<default>",
+            "id": "x",
+            "system_uuid": "s",
+            "uuid": entry["uuid"],
+            "name": self.name_of(entry),
+            "partition_id": 9,
+            "state": self.inspected_state or entry["state"].lower(),
+            "rmc": {"source": {"status": "ok", "tool": "hmc_get_lpar"}, "state": None},
+            "resources": {
+                "current_memory_mib": None,
+                "desired_memory_mib": self.inspected_memory or r["desired_memory"],
+                "current_proc_units": None,
+                "desired_proc_units": r["desired_procs"],
+                "desired_vcpus": r["desired_vcpus"],
+                "has_dedicated_processors": False,
+                "storage_source": {"status": "ok", "tool": "hmc_list_vios"},
+                "vios": [{"uuid": arm.VIOS_UUID, "status": "ok"}],
+                "mappings": [
+                    {"backing": m["backing_name"]}
+                    for m in self.mappings
+                    if m["lpar_uuid"] == entry["uuid"]
+                ],
+                "unresolved_mappings": 0,
+            },
+            "refcodes": None,
+            "profile_drift": None,
+            "next_actions": [],
+        }
+
+    def _hmc_get_lpar(self, kwargs: dict[str, Any]) -> Any:
+        answer = super()._hmc_get_lpar(kwargs)
+        entry = self.by_selector(kwargs["lpar_name_or_uuid"])
+        if entry is None or entry["state"] == "Not Activated":
+            return answer
+        r = entry["resources"]
+        current = self.start_applies_change
+        resource = answer["Resource"]
+        resource["PartitionMemoryConfiguration"]["CurrentMemory"] = str(
+            r["desired_memory"] if current else 2048
+        )
+        resource["PartitionProcessorConfiguration"][
+            "CurrentSharedProcessorConfiguration"
+        ] = {"AllocatedVirtualProcessors": str(r["desired_vcpus"] if current else 1)}
+        return answer
+
+
+def _run(schemas, world: World, group: str = logical_workflow.GROUP, **config: Any):
+    state = runner.RunState(
+        config=live_config.LiveTestConfig(
+            system_name=SYSTEM,
+            vdisk_volume_group_name=GROUP,
+            provision_vlan_id=VLAN,
+            **{"partition_profile_writer_window": True, **config},
+        ),
+        group=group,
+    )
+    state.schemas = schemas
+    asyncio.run(
+        logical_workflow.exercise_logical_workflow(
+            FakeClient(world, arm._OUTPUTS), state
+        )
+    )
+    return state
+
+
+def _results(state) -> dict[str, str]:
+    return {e["operation"]: e["observation"]["result"] for e in state.observations}
+
+
+def _held(state, operation: str) -> list[str]:
+    (entry,) = [e for e in state.observations if e["operation"] == operation]
+    return entry["observation"]["assertions"]
+
+
+_OPERATIONS = {
+    "provision.lpar",
+    "lpar.reconfigure",
+    "lpar.inspect",
+    "lpar.power",
+    "lpar.decommission",
+}
+
+
+def test_the_workflow_tools_are_the_primary_catalogs():
+    assert logical_workflow.WORKFLOW_TOOLS <= PRIMARY_TOOLS
+
+
+def test_a_clean_workflow_passes_every_operation_and_leaves_nothing(schemas):
+    world = WorkflowWorld()
+
+    state = _run(schemas, world)
+
+    assert _results(state) == dict.fromkeys(_OPERATIONS, "passed")
+    for operation, names in logical_workflow._ASSERTIONS.items():
+        assert sorted(_held(state, operation)) == sorted(names)
+    assert world.partitions == {}
+    assert world.volumes == {"hd5", "lv_op"}
+    (sent,) = world.calls_to("hmc_provision_lpar")
+    assert sent["power_on"] is False and sent["exclusive_writer_window"] is True
+    (patched,) = world.calls_to("hmc_reconfigure_lpar")
+    assert patched["patch"] == PATCH
+    actions = [kwargs["action"] for kwargs in world.calls_to("hmc_power_lpar")]
+    assert actions == ["start", "stop"]
+
+
+def test_the_workflow_itself_calls_only_primary_tools(schemas):
+    """Witness reads aside, no specialist choreography stands in for a workflow step."""
+    world = WorkflowWorld()
+
+    _run(schemas, world)
+
+    mutating = set(world.tools()) & arm.MUTATIONS
+    assert mutating <= logical_workflow.WORKFLOW_TOOLS
+    assert mutating == {
+        "hmc_provision_lpar",
+        "hmc_power_lpar",
+        "hmc_decommission_lpar",
+    }
+
+
+def test_outside_its_group_it_calls_nothing(schemas):
+    world = WorkflowWorld()
+
+    state = _run(schemas, world, group="lpar-power")
+
+    assert world.calls == []
+    assert state.observations == []
+
+
+def test_without_the_writer_window_it_writes_nothing(schemas):
+    world = WorkflowWorld()
+
+    _run(schemas, world, partition_profile_writer_window=False)
+
+    assert world.calls == []
+
+
+def test_a_stranded_run_partition_stops_it_before_any_write(schemas):
+    world = WorkflowWorld()
+    world._new("hmcpctl-live-pwr-00000000", "lparpwr-00000000", {})
+
+    _run(schemas, world)
+
+    assert not set(world.tools()) & arm.MUTATIONS
+
+
+def test_a_change_not_classified_profile_ends_the_workflow_and_cleans_up(schemas):
+    world = WorkflowWorld()
+    world.applied = "pending_activation"
+
+    state = _run(schemas, world)
+
+    assert _results(state) == {
+        "provision.lpar": "passed",
+        "lpar.reconfigure": "failed",
+    }
+    assert "hmc_power_lpar" not in world.tools()
+    assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}
+
+
+def test_an_unsettled_reconfigure_is_abandoned_in_teardown(schemas):
+    world = WorkflowWorld()
+    world.reconfigure_state = "running"
+
+    _run(schemas, world)
+
+    abandons = [
+        kwargs
+        for kwargs in world.calls_to("hmc_reconfigure_lpar")
+        if kwargs.get("continuation") == "abandon"
+    ]
+    assert len(abandons) == 1
+    assert world.partitions == {}
+
+
+def test_a_start_without_the_change_fails_that_assertion(schemas):
+    world = WorkflowWorld()
+    world.start_applies_change = False
+
+    state = _run(schemas, world)
+
+    assert "started-with-the-change" not in _held(state, "lpar.power")
+    assert _results(state)["lpar.power"] == "failed"
+
+
+def test_an_inspection_reading_another_state_fails_that_assertion(schemas):
+    world = WorkflowWorld()
+    world.inspected_state = "running"
+
+    state = _run(schemas, world)
+
+    assert "reports-the-change-inactive" not in _held(state, "lpar.inspect")
+    assert _results(state)["lpar.inspect"] == "failed"
+
+
+def test_an_inspection_without_the_new_memory_fails_that_assertion(schemas):
+    world = WorkflowWorld()
+    world.inspected_memory = 2048
+
+    state = _run(schemas, world)
+
+    assert "reports-the-change-inactive" not in _held(state, "lpar.inspect")
+
+
+def test_an_inspection_listing_only_a_foreign_mapping_fails_that_assertion(schemas):
+    world = WorkflowWorld()
+    real = world._hmc_inspect_lpar
+    world.overrides["hmc_inspect_lpar"] = lambda kwargs: {
+        **(answer := real(kwargs)),
+        "resources": {**answer["resources"], "mappings": [{"backing": "lv_op"}]},
+    }
+
+    state = _run(schemas, world)
+
+    assert "reports-the-owned-mapping" not in _held(state, "lpar.inspect")
+
+
+def test_a_paused_stop_skips_the_decommission_and_teardown_removes_all(schemas):
+    world = WorkflowWorld()
+    world.composite_pauses = True
+
+    state = _run(schemas, world)
+
+    assert "lpar.decommission" not in _results(state)
+    assert "hmc_decommission_lpar" not in world.tools()
+    assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}

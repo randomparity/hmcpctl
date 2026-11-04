@@ -175,6 +175,7 @@ below. The table does not grant hardware or VIOS access.
 | provision-boot | `uv run --no-sync python scripts/live_provision_boot.py` | subtask 72; powers on a partition with installer media |
 | native-ubuntu-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py ubuntu` | subtask 72; boots the Ubuntu launcher and records refcodes for up to 15 minutes |
 | native-rocky-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py rocky` | subtask 72; boots the Rocky launcher and records refcodes for up to 15 minutes |
+| logical-workflow | `uv run --no-sync python scripts/live_logical_workflow.py` | subtask 73; provisions, reconfigures, powers and decommissions one partition through the workflow tools |
 | vg-if-match | `uv run --no-sync python scripts/live_vg_if_match.py` | subtasks 0 and 42; a scratch volume group and one stale-`If-Match` write to it |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
@@ -945,6 +946,39 @@ Live on V10R3 (2026-11-04, POWER9, VIOS 4.1.2.00):
 
 ADR 0328 records these findings.
 
+### The logical-workflow arm
+
+The `logical-workflow` arm (subtask 73, #1854) runs the create, reconfigure and destroy
+workflow on one partition through the primary catalog's tools only (ADR 0189, ADR 0330):
+`hmc_provision_lpar`, `hmc_reconfigure_lpar`, `hmc_inspect_lpar`, `hmc_power_lpar`,
+`hmc_decommission_lpar` and `hmc_operation_status`. Every other tool it calls is an
+independent witness read or teardown. It needs its own operator authorization: it powers
+a partition on once.
+
+- **Inputs.** The provision part of the lpar-power arm's: one VIOS listing
+  `LIVE_TEST_VDISK_VOLUME_GROUP_NAME` with 1 GiB free, a virtual network on
+  `LIVE_TEST_PROVISION_VLAN_ID`, `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` and
+  `HMC_AUTHORIZE_POWER_OPERATIONS`. It creates nothing while a `hmcpctl-live-pwr-*`
+  partition or `lppwr*` volume exists.
+- **Run.** Each step needs the one before it:
+  1. Provision `hmcpctl-live-pwr-<8 hex>-p` with `power_on` false, on a new 1 GiB volume
+     `lppwr<8 hex>` and the VLAN: `workflow-completed`, `ownership-stamped`,
+     `left-not-activated`, `storage-mapping-listed`.
+  2. Reconfigure `{memory_mib: 3072, processors: 2}`; every change must read back
+     `profile` (`inactive-change-classified-profile`).
+  3. Inspect with `resources` and `rmc`: the partition reads Not Activated with the new
+     desired memory and virtual processors (`reports-the-change-inactive`), and the
+     resources section lists a mapping backed by the run volume
+     (`reports-the-owned-mapping`).
+  4. `hmc_power_lpar` start (`start-completed-activated`); once in firmware,
+     `hmc_get_lpar` must show 3072 MiB current memory and 2 allocated virtual
+     processors (`started-with-the-change`). Then stop, immediate
+     (`stop-immediate-completed-not-activated`).
+  5. The lpar-power arm's decommission cases: a dry run that inventories and changes
+     nothing, then `storage_cleanup=delete_owned` with its eight assertions.
+- **After.** An open reconfigure is abandoned with its own tool, then the lpar-power arm's
+  teardown and baseline compare run. Recovery reads for it what it reads for subtask 41.
+
 ### The vg-if-match arm
 
 The vg-if-match arm (subtasks 0 and 42, #1850, ADR 0328) answers whether the HMC enforces
@@ -1066,8 +1100,8 @@ uv run --no-sync python scripts/live_test_recovery.py --results test-results-ded
 After the other arms pass `test-results-<arm>.json` the same way: `vmedia`,
 `bare-cec`, `round2`, `sriov`, `profiles`, `users`, `vios-backup`, `pcm`,
 `network`, `lpar-config`, `storage`, `lpar-power`, `provision-boot`,
-`native-ubuntu-boot-started`, `native-rocky-boot-started`, `vg-if-match` or
-`vmedia-media-change`.
+`native-ubuntu-boot-started`, `native-rocky-boot-started`, `logical-workflow`,
+`vg-if-match` or `vmedia-media-change`.
 
 The check reads the subtasks the run dispatched from the document, and witnesses
 these sets of them:
@@ -1083,6 +1117,7 @@ these sets of them:
 | 0, 3, 40, 42 (storage) | a mapping (its virtual target device) backed by an `hpctl<8 hex>` volume, such a volume still in `LIVE_TEST_VDISK_VOLUME_GROUP_NAME`, and a VIOS vSCSI server adapter toward the test partition with no mapping; 0 and 3 only read; ST42 also reports `hpvg<8 hex>` groups or unresolved pending restoration |
 | 41 (lpar-power) | any partition named `hmcpctl-live-pwr-*`, running or not; on each VIOS, any mapping backed by an `lppwr*` volume, any vSCSI adapter serving a `hmcpctl-live-pwr-*` partition, and any `lppwr*` volume left in the configured volume group (read with the one admitted `viosvrcmd … -c 'lsvg -lv <group>'` command) |
 | 72 (provision-boot and the native boot-started groups) | everything 41 reads, plus the run's installer medium (`hmcpctl_<12 hex>.iso`) still in the media repository; a run that recorded the provision call but no medium name reads as unreadable, not clean |
+| 73 (logical-workflow) | everything 41 reads |
 | 2, 9 (network) | a network on the run's test VLAN, the test partition's client adapters off the run's baseline, the serving VIOS's FC-port labels off their originals, and a vFC group label named `hmcl-*` |
 
 A complete current round2 run carries a fresh producer baseline. Recovery validates

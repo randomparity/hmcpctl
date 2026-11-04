@@ -2060,6 +2060,16 @@ def test_a_provision_boot_run_is_witnessed_by_both_checks(
     assert "CLEAN" in capsys.readouterr().out
 
 
+def test_a_logical_workflow_run_is_witnessed_by_the_lpar_power_check():
+    """ST73 reuses lpar-power's names, so its residue is found the same way."""
+    document = {"config": {"system_name": _SYSTEM, "vdisk_volume_group_name": "vg"}}
+
+    assert recovery.lpar_power_inputs_from_document(
+        document, [73]
+    ) == recovery.LparPowerInputs(_SYSTEM, "vg")
+    assert 73 in recovery._WITNESSED_SUBTASKS
+
+
 def test_a_provision_boot_run_refused_before_its_call_reads_no_medium():
     document = {"config": {"system_name": _SYSTEM}, "artifacts": {}}
 
