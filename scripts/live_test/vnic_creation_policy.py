@@ -678,6 +678,8 @@ def _finite_expected(packet: dict) -> dict:
     for action in actions:
         _keys(action, {"field", "operation", "value"})
         name, operation, value = action["field"], action["operation"], action["value"]
+        if value is None:
+            raise ValueError("finite update values must be explicit")
         if name not in _UPDATE_FIELDS or name in expected:
             raise ValueError("finite update fields must be known and distinct")
         if operation not in (("set", "add", "remove") if name in _LISTS else ("set",)):

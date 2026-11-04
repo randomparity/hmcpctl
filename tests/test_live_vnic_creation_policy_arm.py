@@ -1619,6 +1619,8 @@ def _finite_action(field, operation, value):
         ({}, _finite_action("mac_addr", "set", "aabbccddee09")),
         ({}, _finite_action("pvid_priority", "set", True)),
         ({}, _finite_action("pvid_priority", "set", 8)),
+        ({}, _finite_action("pvid_priority", "set", None)),
+        ({}, _finite_action("auto_priority_failover", "set", None)),
         ({}, _finite_action("port_vlan_id", "set", 4095)),
         ({}, _finite_action("auto_priority_failover", "set", 1)),
         ({}, _finite_action("allowed_vlan_ids", "add", [])),
