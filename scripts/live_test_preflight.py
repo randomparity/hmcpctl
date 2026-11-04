@@ -696,6 +696,22 @@ def _provision_boot_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
 
 def _logical_workflow_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the partition and volume the logical-workflow arm (#1854) creates."""
+    refusals = [
+        reason
+        for failed, reason in (
+            (
+                not config.partition_profile_writer_window,
+                lpar_power.PROVISION_WINDOW_SKIP,
+            ),
+            (
+                not bare_cec._power_operations_authorized(),
+                "HMC_AUTHORIZE_POWER_OPERATIONS must be true",
+            ),
+        )
+        if failed
+    ]
+    if refusals:
+        return ArmVerdict(logical_workflow.GROUP, False, "; ".join(refusals))
     return ArmVerdict(
         logical_workflow.GROUP,
         True,

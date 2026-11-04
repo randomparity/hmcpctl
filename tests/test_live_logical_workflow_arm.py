@@ -87,6 +87,7 @@ class WorkflowWorld(World):
     def __init__(self) -> None:
         super().__init__()
         self.applied = "profile"
+        self.changed_fields = {"memory_mib", "processors"}
         self.reconfigure_state = "terminal"
         self.start_applies_change = True
         self.inspected_state = None
@@ -115,8 +116,9 @@ class WorkflowWorld(World):
             "desired_vcpus": patch["processors"],
         }
         changes = [
-            {"field": key, "applied": self.applied, "value": value}
+            {"field": key, "applied": self.applied, "after": value}
             for key, value in patch.items()
+            if key in self.changed_fields
         ]
         outcome = "completed" if self.reconfigure_state == "terminal" else None
         record = _operation(
@@ -140,7 +142,8 @@ class WorkflowWorld(World):
             "uuid": entry["uuid"],
             "name": self.name_of(entry),
             "partition_id": 9,
-            "state": self.inspected_state or entry["state"].lower(),
+            # PartitionState as the HMC spells it, not lower-cased.
+            "state": self.inspected_state or entry["state"],
             "rmc": {"source": {"status": "ok", "tool": "hmc_get_lpar"}, "state": None},
             "resources": {
                 "current_memory_mib": None,
@@ -347,7 +350,7 @@ def test_a_start_without_the_change_fails_that_assertion(schemas):
 
 def test_an_inspection_reading_another_state_fails_that_assertion(schemas):
     world = WorkflowWorld()
-    world.inspected_state = "running"
+    world.inspected_state = "Running"
 
     state = _run(schemas, world)
 
@@ -433,9 +436,73 @@ def _start_already_running(world: WorkflowWorld) -> None:
     _changes(world, "hmc_power_lpar", change)
 
 
+def _inspected_vcpus(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        answer["resources"]["desired_vcpus"] = 1
+        return answer
+
+    _changes(world, "hmc_inspect_lpar", change)
+
+
+def _current_vcpus(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        resource = answer.get("Resource") if isinstance(answer, dict) else None
+        shared = (resource or {}).get("PartitionProcessorConfiguration", {})
+        if "CurrentSharedProcessorConfiguration" in shared:
+            shared["CurrentSharedProcessorConfiguration"] = {
+                "AllocatedVirtualProcessors": "1"
+            }
+        return answer
+
+    _changes(world, "hmc_get_lpar", change)
+
+
+def _never_in_firmware(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        return "starting" if answer in {"running", "open firmware"} else answer
+
+    _changes(world, "hmc_get_lpar_state", change)
+
+
+def _stop_already_off(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        if kwargs.get("action") == "stop":
+            answer["result"]["already_in_state"] = True
+        return answer
+
+    _changes(world, "hmc_power_lpar", change)
+
+
+def _mixed_classification(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        if kwargs.get("continuation") is None:
+            answer["result"]["changes"][0]["applied"] = "live"
+        return answer
+
+    _changes(world, "hmc_reconfigure_lpar", change)
+
+
+def _processors_unplanned(world: WorkflowWorld) -> None:
+    world.changed_fields = {"memory_mib"}
+
+
 @pytest.mark.parametrize(
     ("change", "operation", "assertion"),
     [
+        (_inspected_vcpus, "lpar.inspect", "reports-the-change-inactive"),
+        (_current_vcpus, "lpar.power", "started-with-the-change"),
+        (_never_in_firmware, "lpar.power", "started-with-the-change"),
+        (_stop_already_off, "lpar.power", "stop-immediate-completed-not-activated"),
+        (
+            _mixed_classification,
+            "lpar.reconfigure",
+            "inactive-change-classified-profile",
+        ),
+        (
+            _processors_unplanned,
+            "lpar.reconfigure",
+            "inactive-change-classified-profile",
+        ),
         (_foreign_token, "provision.lpar", "ownership-stamped"),
         (_left_running, "provision.lpar", "left-not-activated"),
         (_mapping_unlisted, "provision.lpar", "storage-mapping-listed"),
@@ -466,13 +533,13 @@ def test_the_stop_is_immediate_and_the_start_states_no_mode(schemas):
     assert modes == {"start": None, "stop": "immediate"}
 
 
-def test_a_refused_reconfigure_polls_nothing_and_abandons_nothing(schemas):
+def test_a_refused_reconfigure_is_looked_up_once_and_not_abandoned(schemas):
     world = WorkflowWorld()
     world.overrides["hmc_reconfigure_lpar"] = lambda kwargs: ValueError("refused")
 
     state = _run(schemas, world)
 
-    assert "hmc_operation_status" not in world.tools()
+    assert len(world.calls_to("hmc_operation_status")) == 1
     assert len(world.calls_to("hmc_reconfigure_lpar")) == 1
     assert _results(state)["lpar.reconfigure"] == "failed"
     assert world.partitions == {}
@@ -519,4 +586,18 @@ def test_a_paused_stop_skips_the_decommission_and_teardown_removes_all(schemas):
 
     assert "lpar.decommission" not in _results(state)
     assert "hmc_decommission_lpar" not in world.tools()
+    assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}
+
+
+def test_an_abandon_that_raises_still_tears_the_run_down(schemas, monkeypatch):
+    async def raises(*_args):
+        raise RuntimeError("abandon blew up")
+
+    monkeypatch.setattr(logical_workflow, "_abandon_reconfigure", raises)
+    world = WorkflowWorld()
+    world.applied = "pending_activation"
+
+    with pytest.raises(RuntimeError):
+        _run(schemas, world)
+
     assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}

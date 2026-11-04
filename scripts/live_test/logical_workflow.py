@@ -47,6 +47,19 @@ _STOPPED = frozenset({lpar_power._NOT_ACTIVATED})
 _SETTLED = frozenset({"terminal", "paused"})
 
 
+async def _status(
+    client: Client, state: RunState, request_id: str
+) -> Mapping[str, Any] | None:
+    """The recorded operation for *request_id*, or None when none is listed."""
+    st, page = await state.call(client, "hmc_operation_status", request_id=request_id)
+    found = [
+        item
+        for item in lpar_power._items(page, "operations")
+        if item.get("request_id") == request_id
+    ]
+    return found[0] if st == "PASS" and found else None
+
+
 async def _settle(
     client: Client, state: RunState, request_id: str, record: Mapping[str, Any] | None
 ) -> Mapping[str, Any] | None:
@@ -55,15 +68,7 @@ async def _settle(
         if record is None or record.get("state") in _SETTLED:
             break
         await asyncio.sleep(lpar_power._OPERATION_POLL_DELAY_S)
-        st, page = await state.call(
-            client, "hmc_operation_status", request_id=request_id
-        )
-        found = [
-            item
-            for item in lpar_power._items(page, "operations")
-            if item.get("request_id") == request_id
-        ]
-        record = found[0] if st == "PASS" and found else record
+        record = await _status(client, state, request_id) or record
     return record
 
 
@@ -168,11 +173,15 @@ async def _reconfigure(client: Client, state: RunState, run: lpar_power.Run) -> 
     record = await _settle(client, state, request_id, _operation_record(st, data))
     run.data["lpar.reconfigure"] = record
     result = (record or {}).get("result") or {}
-    applied = {change.get("applied") for change in result.get("changes") or []}
+    changes = {
+        change.get("field"): (change.get("after"), change.get("applied"))
+        for change in result.get("changes") or []
+    }
     run.hold(
         "lpar.reconfigure",
         "inactive-change-classified-profile",
-        (record or {}).get("outcome") == "completed" and applied == {"profile"},
+        (record or {}).get("outcome") == "completed"
+        and changes == {key: (value, "profile") for key, value in PATCH.items()},
     )
     return run.holds("lpar.reconfigure", "inactive-change-classified-profile")
 
@@ -283,13 +292,18 @@ async def _abandon_reconfigure(
 ) -> bool:
     """Abandon a reconfigure left open; whether none is left open.
 
+    A call that failed may still have recorded the operation, so status is asked once.
     The engine refuses to abandon an operation still running, so only a terminal
     answer counts.
     """
+    request_id = run.data.get("reconfigure_request")
+    if request_id is None:
+        return True
     record = run.data.get("lpar.reconfigure")
+    if record is None:
+        record = await _status(client, state, request_id)
     if record is None or record.get("state") == "terminal":
         return True
-    request_id = run.data["reconfigure_request"]
     st, data = await state.call(
         client,
         "hmc_reconfigure_lpar",
@@ -439,7 +453,9 @@ async def exercise_logical_workflow(client: Client, state: RunState) -> None:
     try:
         await _workflow(client, state, run)
     finally:
-        closed = await _abandon_reconfigure(client, state, run)
-        await lpar_power._teardown(client, state, run)
+        try:
+            closed = await _abandon_reconfigure(client, state, run)
+        finally:
+            await lpar_power._teardown(client, state, run)
     same = await lpar_power._compare(client, state, run, ready)
     _observe(state, run, "passed" if closed and run.clean and same else "failed")

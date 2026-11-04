@@ -960,7 +960,8 @@ a partition on once.
   `LIVE_TEST_PROVISION_VLAN_ID`, `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` and
   `HMC_AUTHORIZE_POWER_OPERATIONS`. It creates nothing while a `hmcpctl-live-pwr-*`
   partition or `lppwr*` volume exists.
-- **Run.** Each step needs the one before it:
+- **Run.** A failed provision or reconfigure ends the workflow, and a stop that does not
+  complete skips the decommission:
   1. Provision `hmcpctl-live-pwr-<8 hex>-p` with `power_on` false, on a new 1 GiB volume
      `lppwr<8 hex>` and the VLAN: `workflow-completed`, `ownership-stamped`,
      `left-not-activated`, `storage-mapping-listed`.
