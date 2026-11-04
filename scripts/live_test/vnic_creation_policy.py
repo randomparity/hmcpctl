@@ -354,20 +354,55 @@ def _fixture_number(value):
     return result
 
 
-_FIXTURE_ALLOCATION_DELTAS = {
-    ("memory", "CurrentAvailableSystemMemory"): Decimal(-560),
-    ("memory", "PendingAvailableSystemMemory"): Decimal(-560),
+# Hypervisor memory for this fixed tuple was +48 MiB on 2026-11-02 and +32 MiB on
+# 2026-11-04 (ADR 0312). It is bounded to 0..64 MiB in whole logical memory blocks;
+# available memory must fall by exactly the fixture's 512 MiB plus that change.
+_FIXTURE_HYPERVISOR_MAX = Decimal(64)
+_FIXTURE_AVAILABLE_MEMORY = (
+    ("memory", "CurrentAvailableSystemMemory"),
+    ("memory", "PendingAvailableSystemMemory"),
+)
+_FIXTURE_EXACT_DELTAS = {
     ("memory", "CurrentAssignedMemoryToPartitions"): Decimal(512),
-    ("memory", "MemoryUsedByHypervisor"): Decimal(48),
     ("cpu", "CurrentAvailableSystemProcessorUnits"): Decimal("-0.05"),
     ("cpu", "PendingAvailableSystemProcessorUnits"): Decimal("-0.05"),
 }
 
 
+def _fixture_deltas(baseline, after):
+    before = baseline["memory"]
+    hypervisor = _fixture_number(
+        after["memory"]["MemoryUsedByHypervisor"]
+    ) - _fixture_number(before["MemoryUsedByHypervisor"])
+    block = _fixture_number(before["CurrentLogicalMemoryBlockSize"])
+    if (
+        not 0 <= hypervisor <= _FIXTURE_HYPERVISOR_MAX
+        or block <= 0
+        or hypervisor % block
+    ):
+        raise ValueError("fixture hypervisor memory change is outside its bound")
+    return _fixture_bounded_deltas(hypervisor)
+
+
+def _fixture_bounded_deltas(hypervisor):
+    return {
+        **_FIXTURE_EXACT_DELTAS,
+        ("memory", "MemoryUsedByHypervisor"): hypervisor,
+        **dict.fromkeys(_FIXTURE_AVAILABLE_MEMORY, -(512 + hypervisor)),
+    }
+
+
+def _fixture_stamp_allocation(before, held):
+    if before["snapshot"]["system"] != held["snapshot"]["system"]:
+        raise ValueError("fixture allocation changed during ownership stamping")
+
+
 def _fixture_capacity(system):
     memory = system["AssociatedSystemMemoryConfiguration"]
     cpu = system["AssociatedSystemProcessorConfiguration"]
-    for (section, key), delta in _FIXTURE_ALLOCATION_DELTAS.items():
+    for (section, key), delta in _fixture_bounded_deltas(
+        _FIXTURE_HYPERVISOR_MAX
+    ).items():
         value = _fixture_number((memory if section == "memory" else cpu)[key])
         if value + delta < 0:
             raise ValueError("fixed fixture allocation counters are unavailable")
@@ -493,7 +528,9 @@ def _fixture_foreign(snapshot, uid, baseline):
     value = deepcopy(snapshot)
     target = value["partitions"].pop(uid)
     value["profiles"] -= len(target["profiles"])
-    for (section, key), delta in _FIXTURE_ALLOCATION_DELTAS.items():
+    for (section, key), delta in _fixture_deltas(
+        baseline["system"], value["system"]
+    ).items():
         before = baseline["system"][section][key]
         after = value["system"][section][key]
         if _fixture_number(after) - _fixture_number(before) != delta:
@@ -1866,6 +1903,7 @@ def _fixture_prepared(hmc, packet, original):
         target["resource"], held["native_description_raw"]
     ):
         raise ValueError("fixture retained description contradicts current resource")
+    _fixture_stamp_allocation(before, held)
     prior = _fixture_target(p, before["snapshot"], baseline)
     if (
         before["target"] != prior

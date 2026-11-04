@@ -3226,6 +3226,43 @@ CLEAN establishes only the bounded stored-policy/history observations. All five
 parent adapter fields, later delta/two-list modes and the public updater remain
 #1828 work; `all` minus finite members still has no justified positive oracle.
 
+#### Recorded source outcomes (#1856)
+
+All six fixed cases ran once each on HMC V10R3 M1060 at commit
+`300cf9de1245e5d0c845c09c9584863194346b78`. They used one owned inactive fixture,
+`port_vlan_id=0`, and singleton finite baselines for both lists. No case qualified.
+In every case the independent readback showed the selected policy unchanged and
+preservation unchanged:
+
+| Case | Native reply | Harness submission | Recorded outcome |
+|---|---|---|---|
+| `vlan-replace-none` | exit 1, "An invalid attribute value was entered" naming `allowed_vlan_ids=none`, no HSCL code | `unknown` | refused, text-evidenced |
+| `vlan-remove-last` | `HSCLAB1F` Allowed VLAN IDs for a virtual NIC cannot be removed | `rejected` | refused, HSCL-coded |
+| `mac-remove-last` | `HSCLAB20` Allowed O/S defined MAC addresses for a virtual NIC cannot be removed | `rejected` | refused, HSCL-coded |
+| `vlan-replace-all` | exit 1, invalid attribute value naming `allowed_vlan_ids=all`, no code | `unknown` | refused, text-evidenced |
+| `mac-replace-all` | exit 1, invalid attribute value naming `allowed_os_mac_addrs=all`, no code | `unknown` | refused, text-evidenced |
+| `mac-replace-none` | exit 1, invalid attribute value naming `allowed_os_mac_addrs=none`, no code | `unknown` | refused, text-evidenced |
+
+The harness classifies a rejection only by an HSCL refusal code. It therefore
+keeps the four sentinel cases as `unknown`/`unresolved`, and their capture and
+recovery histories remain MANUAL_RECOVERY. Calling those four cases refused rests
+on the HMC's message text plus the unchanged independent readback. That reading
+is the operator's recorded decision, not a harness classification. A reviewer may
+disagree.
+
+On this HMC, `all` and `none` are therefore creation-only values for these lists.
+An existing vNIC cannot have its last allowed VLAN or MAC member removed.
+
+Each refused case's captured vNIC was removed separately, under its own grant,
+through the ownership-checked `hmcpctl network remove-vnic`. The next case's
+fresh preflight reproduced the original fixture baseline each time. The failed
+source histories disarm the fixture's own cleanup by design. The fixture was
+therefore deleted through the ownership-checked inactive-only
+`hmcpctl lpars delete`. A later fixture preflight and recovery reproduced the
+pre-fixture baseline. This version-2 procedure's results carry no
+`run.tested_commit` block, so `scripts/live_test_evidence.py` does not apply to
+them. The raw journals stay private. None of this is product update support.
+
 
 ### Retained fixture prerequisite for vNIC source qualification
 
@@ -3265,9 +3302,11 @@ The fixed tuple is512/512/1024MiB, shared capped0.05/0.05/0.05 units,
 vCPU1/1/1 and8virtual slots. Missing capacity/alignment/minimum eligibility
 refuses; never increase resources or switch modes to force the test through.
 All six allocation counters must be available and strictly scalar before create.
-This fixed fixture requires assigned memory+512MiB, hypervisor+48MiB, current and
-pending available memory-560MiB, and current and pending available CPU-0.05.
-These are empirical acceptance values, not general allocation costs. Other raw
+This fixed fixture requires assigned memory+512MiB and current and pending
+available CPU-0.05 exactly. Hypervisor memory may rise by 0..64MiB in whole
+logical memory blocks (observed +48MiB and +32MiB), and current and pending
+available memory must fall by exactly 512MiB plus that rise. Stamping must not
+move any counter. These are acceptance values, not general allocation costs. Other raw
 fields and scalar attributes remain exact. Only a proven fresh pre-stamp target
 may omit REST Description, paired with independently blank native text; owned
 and stamped descriptions remain mandatory. A cleanup counter lag is a failure,

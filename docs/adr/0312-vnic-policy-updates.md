@@ -12,6 +12,8 @@ public setter remain unfinished; hardware windows and publication need separate
 admission. A separately approved bounded private submission-error extension is
 implemented with offline boundary proof and independent product/security review at
 `475e544b`. This record does not settle the complete updater design.
+On 2026-11-04, #1856 amended the fixture's hypervisor-memory refusal policy
+from one fixed value to a bound, as an operator-approved run-exposed correction.
 
 ## Context
 
@@ -49,10 +51,16 @@ declaration completeness within the coordinated writer deployment. Configured
 resources come from the unique contained default saved profile; inactive current
 placeholders and unknown fields remain observations, not desired-value defaults.
 For this fixed 512MiB/0.05-unit fixture only, require six observed allocation
-changes: assigned memory +512MiB, hypervisor +48MiB, current/pending available
-memory -560MiB and current/pending available CPU -0.05. Validate the baseline
-counter leaves before create and preserve their attributes and other observations.
-These empirical values are an explicit refusal policy, not universal HMC costs.
+changes: assigned memory +512MiB and current/pending available CPU -0.05 exactly;
+hypervisor memory `h`, a non-negative multiple of the baseline logical memory
+block of at most 64MiB; and current/pending available memory exactly -(512+`h`)MiB.
+Stamping must not move any counter. Validate the baseline counter leaves against
+the worst case before create and preserve their attributes and other observations.
+These values are an explicit refusal policy, not universal HMC costs. #1856
+amended the original fixed hypervisor +48MiB/available -560MiB after the same
+tuple on the same system was observed at +48MiB in one window and +32MiB in a
+later one; see the
+[allocation bound design](../workflow/specs/2026-11-04-vnic-fixture-allocation-bound-design.md).
 A missing REST Description is permitted only before stamping a proven fresh
 created target with independently blank native text. Explicit empty remains
 valid; null, malformed or nonempty values do not become absence. Stamped/owned
@@ -79,6 +87,20 @@ operator disposition. Recovery can report residue but cannot remove it or repair
 uncertain history from current absence. A qualified source result establishes only
 the exact stored-policy case and environment; it does not establish traffic,
 failover, public updater support or completion of #1828.
+
+#1856 ran all six fixed cases once on HMC V10R3 M1060. None qualified.
+
+- Both remove-last cases were refused with codes `HSCLAB1F` and `HSCLAB20`.
+- The four `all`/`none` replacements were rejected with the HMC's generic
+  invalid-attribute-value text and no code. The harness therefore keeps them as
+  `unknown`, without changing its oracle.
+- Every independent readback was unchanged.
+- The operator recorded those four cases as refusals evidenced by text.
+
+So for this environment, these list sentinels are creation-only, and removing
+the last member is refused. Later update modes must be designed around finite
+lists. The outcome table is in the
+[operator procedure](../live-testing.md#recorded-source-outcomes-1856).
 
 ## Considered & rejected
 

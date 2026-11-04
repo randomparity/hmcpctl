@@ -1438,6 +1438,7 @@ class FixtureWire(SourceWire):
         self.null_pending = False
         self.name_failure_pending = False
         self.name_failures = 0
+        self.deltas = {}
         self.trace = []
         self.system = {
             "SystemName": "system-a",
@@ -1524,6 +1525,7 @@ class FixtureWire(SourceWire):
         self.before_create = deepcopy(self.system)
         self.add().pop("Description")
         for group, key, delta in FIXTURE_OBSERVED_DELTAS:
+            delta = self.deltas.get(key, delta)
             prior = self.system[group][key]
             text = prior["text"] if isinstance(prior, dict) else prior
             value = str(Decimal(text) + Decimal(delta))
@@ -2482,6 +2484,122 @@ async def test_fixture_accounting_wrong_delta_disarms_stamp(
     assert result["status"] == "MANUAL_RECOVERY"
     assert [e["kind"] for e in result["effects"]] == ["create-rest"]
     assert len(w.fixture_writes) == 1 and LPAR in w.entries
+
+
+def hypervisor_deltas(hypervisor, current=None, pending=None):
+    available = -(512 + hypervisor)
+    return {
+        "MemoryUsedByHypervisor": str(hypervisor),
+        "CurrentAvailableSystemMemory": str(available if current is None else current),
+        "PendingAvailableSystemMemory": str(available if pending is None else pending),
+    }
+
+
+@pytest.mark.parametrize(
+    "block,hypervisor",
+    [("16", 0), ("16", 32), ("16", 48), ("16", 64), ("32", 32), ("32", 64)],
+)
+@pytest.mark.asyncio
+async def test_fixture_accounting_accepts_bounded_hypervisor(
+    fixture_wire, fixture_packet, tmp_path, block, hypervisor
+):
+    w = fixture_wire
+    w.system["AssociatedSystemMemoryConfiguration"]["CurrentLogicalMemoryBlockSize"] = (
+        block
+    )
+    w.deltas = hypervisor_deltas(hypervisor)
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "PREPARED", result.get("reason")
+    assert (await arm.recover(w.client(), fixture_packet, result))[
+        "status"
+    ] == "RETAINED"
+
+
+@pytest.mark.parametrize(
+    "block,deltas",
+    [
+        ("16", hypervisor_deltas(80)),
+        ("16", hypervisor_deltas(24)),
+        ("16", hypervisor_deltas(-16)),
+        ("32", hypervisor_deltas(48)),
+        ("16", hypervisor_deltas(32, current=-560)),
+        ("16", hypervisor_deltas(32, pending=-560)),
+        ("16", hypervisor_deltas(32, current=-528, pending=-528)),
+    ],
+)
+@pytest.mark.asyncio
+async def test_fixture_accounting_refuses_unbounded_hypervisor(
+    fixture_wire, fixture_packet, tmp_path, block, deltas
+):
+    w = fixture_wire
+    w.system["AssociatedSystemMemoryConfiguration"]["CurrentLogicalMemoryBlockSize"] = (
+        block
+    )
+    w.deltas = deltas
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert [e["kind"] for e in result["effects"]] == ["create-rest"]
+    assert len(w.fixture_writes) == 1 and LPAR in w.entries
+
+
+@pytest.mark.asyncio
+async def test_fixture_accounting_refuses_worst_case_pending_memory(
+    fixture_wire, fixture_packet, tmp_path
+):
+    w = fixture_wire
+    w.system["AssociatedSystemMemoryConfiguration"]["PendingAvailableSystemMemory"] = (
+        "570"
+    )
+    result = await arm.preflight(w.client(), fixture_packet, tmp_path / "read")
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert not w.fixture_writes
+
+
+@pytest.mark.asyncio
+async def test_fixture_accounting_refuses_hypervisor_change_during_stamp(
+    fixture_wire, fixture_packet, tmp_path, monkeypatch
+):
+    w = fixture_wire
+    stamp = arm.lpar_core.stamp_created_lpar_ownership
+
+    async def shifted_stamp(*args, **kwargs):
+        result = await stamp(*args, **kwargs)
+        memory = w.system["AssociatedSystemMemoryConfiguration"]
+        memory["MemoryUsedByHypervisor"] = str(
+            Decimal(memory["MemoryUsedByHypervisor"]) + 16
+        )
+        for key in ("CurrentAvailableSystemMemory", "PendingAvailableSystemMemory"):
+            memory[key] = str(Decimal(memory[key]) - 16)
+        return result
+
+    monkeypatch.setattr(arm.lpar_core, "stamp_created_lpar_ownership", shifted_stamp)
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "MANUAL_RECOVERY"
+    assert result["reason"] == "fixture allocation changed during ownership stamping"
+    assert (await arm.recover(w.client(), fixture_packet, result))[
+        "status"
+    ] == "MANUAL_RECOVERY"
+
+
+@pytest.mark.asyncio
+async def test_fixture_recovery_refuses_journal_with_stamp_allocation_change(
+    fixture_wire, fixture_packet, tmp_path
+):
+    w = fixture_wire
+    result = await fixture_prepare(w, fixture_packet, tmp_path)
+    assert result["status"] == "PREPARED"
+    for memory in (
+        w.system["AssociatedSystemMemoryConfiguration"],
+        result["retained"]["snapshot"]["system"]["memory"],
+    ):
+        memory["MemoryUsedByHypervisor"] = str(
+            Decimal(memory["MemoryUsedByHypervisor"]) + 16
+        )
+        for key in ("CurrentAvailableSystemMemory", "PendingAvailableSystemMemory"):
+            memory[key] = str(Decimal(memory[key]) - 16)
+    recovered = await arm.recover(w.client(), fixture_packet, result)
+    assert recovered["status"] == "MANUAL_RECOVERY"
+    assert recovered["reason"] == "fixture allocation changed during ownership stamping"
 
 
 @pytest.mark.parametrize("drift", ["none", "attributes", "shape", "unknown"])
