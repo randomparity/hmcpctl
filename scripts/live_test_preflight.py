@@ -50,6 +50,7 @@ from live_test import (
     creation_memory,
     creation_memory_layout,
     dedicated_pcie,
+    logical_workflow,
     lpar_config,
     lpar_power,
     lpar_reconfigure,
@@ -693,6 +694,51 @@ def _provision_boot_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _logical_workflow_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
+    """Name the partition and volume the logical-workflow arm (#1854) creates."""
+    refusals = [
+        reason
+        for failed, reason in (
+            (
+                not config.partition_profile_writer_window,
+                lpar_power.PROVISION_WINDOW_SKIP,
+            ),
+            (
+                not bare_cec._power_operations_authorized(),
+                "HMC_AUTHORIZE_POWER_OPERATIONS must be true",
+            ),
+        )
+        if failed
+    ]
+    if refusals:
+        return ArmVerdict(logical_workflow.GROUP, False, "; ".join(refusals))
+    return ArmVerdict(
+        logical_workflow.GROUP,
+        True,
+        "configuration validated",
+        (
+            f"managed system {config.system_name}",
+            (
+                f"one partition {lpar_power.NAME_PREFIX}<8 hex>-p, provisioned inactive "
+                f"on VLAN {config.provision_vlan_id}, reconfigured to "
+                f"{logical_workflow.PATCH['memory_mib']} MiB and "
+                f"{logical_workflow.PATCH['processors']} virtual processors, started "
+                "once and stopped immediately, then decommissioned"
+            ),
+            (
+                f"one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}"
+                f"<8 hex> in volume group {config.vdisk_volume_group_name}, created by "
+                "provision and deleted by decommission"
+            ),
+            (
+                "no other partition, volume or mapping: the lpar-power arm's pre-run "
+                "read is compared after teardown"
+            ),
+        ),
+        config.system_name,
+    )
+
+
 def _native_boot_verdict(group: str, config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what one native boot-started arm (#1850) creates, boots and reads."""
     distro, release = provision_boot.NATIVE_GROUPS[group]
@@ -1010,6 +1056,7 @@ _ARM_VERDICTS = {
     "lpar-linux-roles": _lpar_linux_roles_verdict,
     "lpar-power": _lpar_power_verdict,
     "provision-boot": _provision_boot_verdict,
+    logical_workflow.GROUP: _logical_workflow_verdict,
     "vg-if-match": _vg_if_match_verdict,
     **{
         group: functools.partial(_native_boot_verdict, group)

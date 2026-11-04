@@ -1002,6 +1002,10 @@ def test_intended_changes_order(request_: PlanRequest, expected: list[str]) -> N
         assert kinds.index("write_profile") > kinds.index("assign_pcie")
     if request_.power_on is False:
         assert "power_on" not in kinds
+        # ADR 0331: without power-on the saved profile is applied instead.
+        assert kinds[kinds.index("write_profile") + 1] == "apply_profile"
+    else:
+        assert "apply_profile" not in kinds
     assert [change.order for change in plan.intended_changes] == list(
         range(1, len(kinds) + 1)
     )

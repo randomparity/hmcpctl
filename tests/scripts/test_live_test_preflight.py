@@ -1493,6 +1493,44 @@ def test_a_native_boot_arm_names_its_medium_window_and_partition(tmp_path):
     assert "LIVE_TEST_NATIVE_ROCKY_ISO_PATH" in refused.reason
 
 
+def test_the_logical_workflow_verdict_names_what_it_creates_and_deletes(monkeypatch):
+    monkeypatch.setenv("HMC_AUTHORIZE_POWER_OPERATIONS", "true")
+    config = live_config.LiveTestConfig(
+        system_name="sys-A",
+        vdisk_volume_group_name="datavg",
+        provision_vlan_id=7,
+        partition_profile_writer_window=True,
+    )
+
+    verdict = preflight._ARM_VERDICTS["logical-workflow"](config)
+
+    assert verdict.runnable
+    text = " ".join(verdict.mutates)
+    assert "hmcpctl-live-pwr-<8 hex>-p" in text and "VLAN 7" in text
+    assert "3072 MiB" in text and "decommissioned" in text and "datavg" in text
+
+
+@pytest.mark.parametrize(
+    ("window", "power", "missing"),
+    [
+        (False, "true", "LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW"),
+        (True, "false", "HMC_AUTHORIZE_POWER_OPERATIONS"),
+    ],
+)
+def test_the_logical_workflow_verdict_refuses_without_its_settings(
+    monkeypatch, window, power, missing
+):
+    monkeypatch.setenv("HMC_AUTHORIZE_POWER_OPERATIONS", power)
+    config = live_config.LiveTestConfig(
+        system_name="sys-A", partition_profile_writer_window=window
+    )
+
+    verdict = preflight._ARM_VERDICTS["logical-workflow"](config)
+
+    assert not verdict.runnable
+    assert missing in verdict.reason
+
+
 @pytest.mark.parametrize(
     ("pv", "group", "runnable"),
     [

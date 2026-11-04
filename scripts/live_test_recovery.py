@@ -75,6 +75,7 @@ from live_test import config as live_config
 from live_test import (
     creation_memory,
     creation_memory_layout,
+    logical_workflow,
     lpar_affinity_group,
     lpar_config,
     lpar_hardware_memory,
@@ -209,6 +210,7 @@ _WITNESSED_SUBTASKS = (
         lpar_linux_roles.SUBTASK,
         lpar_power.SUBTASK,
         provision_boot.SUBTASK,
+        logical_workflow.SUBTASK,
     }
 )
 
@@ -844,13 +846,15 @@ class LparPowerInputs:
 def lpar_power_inputs_from_document(
     document: dict[str, Any], subtasks: list[int]
 ) -> LparPowerInputs | None:
-    """The run's system when it dispatched ST41 or ST72, else `None`; found by prefix.
+    """The run's system when it dispatched ST41, ST72 or ST73, else `None`; found by prefix.
 
-    ST72 (provision-boot) reuses lpar-power's partition and volume names.
+    ST72 (provision-boot) and ST73 (logical-workflow) reuse lpar-power's partition and
+    volume names.
     """
     config = document.get("config")
     system = config.get("system_name") if isinstance(config, dict) else None
-    if not {lpar_power.SUBTASK, provision_boot.SUBTASK} & set(subtasks) or not system:
+    witnessed = {lpar_power.SUBTASK, provision_boot.SUBTASK, logical_workflow.SUBTASK}
+    if not witnessed & set(subtasks) or not system:
         return None
     group = config.get("vdisk_volume_group_name") if isinstance(config, dict) else ""
     return LparPowerInputs(str(system), str(group or ""))

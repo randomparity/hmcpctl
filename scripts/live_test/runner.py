@@ -17,14 +17,14 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 72; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71 and ST72 require named groups and are excluded from default and all selections.
-Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71 and 72 SKIP outside their
+Registered subtasks span 0 through 73; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71, ST72 and ST73 require named groups and are excluded from default and all selections.
+Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71, 72 and 73 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract`, `partition-profiles`,
 `vmedia-media-change` and `provision-boot` groups (72 also in the
 `native-ubuntu-boot-started` and `native-rocky-boot-started` groups, and 42 also
-in `vg-if-match`). A bare
+in `vg-if-match`, and 73 in `logical-workflow`). A bare
 number runs that one subtask; `--group NAME` runs one arm. Results go to `test-results-<group>.json`, or `test-results-round2.json`
 for a bare or whole-suite run, unless
 `--results-file` names another path. That path must be git-ignored.
@@ -91,6 +91,7 @@ from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
 from live_test.detach_probe import exercise_detach_probe
 from live_test.escape_hatch import exercise_cli_escape_hatch
 from live_test.inventory import capture_lpar_baseline
+from live_test.logical_workflow import exercise_logical_workflow
 from live_test.lpar import (
     exercise_lpar_lifecycle,
     mutate_lpar_properties,
@@ -729,6 +730,7 @@ SUBTASKS = {
     64: exercise_accelerator_qos,
     71: vmedia_media_change,
     72: exercise_provision_boot,
+    73: exercise_logical_workflow,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -804,6 +806,9 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     # records refcodes for up to 15 minutes (#1850, ADR 0328).
     "native-ubuntu-boot-started": [72],
     "native-rocky-boot-started": [72],
+    # Not in "all": provisions, reconfigures, powers and decommissions its own
+    # partition through the logical workflow tools (#1854).
+    "logical-workflow": [73],
     # Not in "all": ST42's scratch group on one released PV, plus the If-Match probe
     # between its create and cleanup (#1850, ADR 0328).
     "vg-if-match": [0, 42],

@@ -5089,6 +5089,15 @@
                 "constraint": "boot accepted on a ready_to_boot operation; needs exclusive_writer_window"
               }
             ]
+          },
+          {
+            "variant": "unpowered-reconfigurable",
+            "parameters": [
+              {
+                "name": "power_on",
+                "constraint": "false without install: applies the saved hmcpctl_ profile without activation and reads it back as default and last-activated, so hmc_reconfigure_lpar accepts the partition (ADR 0331)"
+              }
+            ]
           }
         ],
         "missing_scope": [

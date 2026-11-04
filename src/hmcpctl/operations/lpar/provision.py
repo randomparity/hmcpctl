@@ -745,6 +745,8 @@ def _provision_step_names(
         names.append("set_boot_order")
     if request.power_on:
         names.append("power_on")
+    elif request.install is None:
+        names.append("apply_saved_profile")
     if request.affinity_assessment is not None:
         names.append("affinity_assessment")
     return names

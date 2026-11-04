@@ -387,6 +387,7 @@ ChangeKind = Literal[
     "map_storage",
     "assign_pcie",
     "write_profile",
+    "apply_profile",
     "power_on",
     "assess_affinity",
     "bind_media",
@@ -1087,6 +1088,11 @@ def _intended_changes(
         )
     elif request.power_on is not False:
         steps.append(("power_on", system, "power on the partition"))
+    else:
+        # ADR 0331: so the saved profile is also the last-activated one.
+        steps.append(
+            ("apply_profile", system, "apply the saved profile without activation")
+        )
     if request.affinity_assessment is not None:
         steps.append(("assess_affinity", system, "assess affinity after activation"))
     return [

@@ -858,8 +858,62 @@ def test_provision_lpar_preserves_complete_resource_input(
 # ---------------------------------------------------------------------- #
 
 
-def test_provision_lpar_no_power_on(monkeypatch, mock_hmc):
-    """power_on=False skips the PowerOn job step entirely."""
+class SavedApply:
+    """The partition as provision reads it around ADR 0331's apply, and the apply."""
+
+    def __init__(self):
+        self.state = "not activated"
+        self.default = None
+        self.last = "default_profile"
+        self.applied: list[tuple] = []
+        self.refusal: Exception | None = None
+        self.moves_last = True
+        self.adapters = [{"Resource": {"PortVLANID": str(VLAN_ID)}}]
+        self.mapped = True
+
+    async def resource(self, _hmc, _lpar):
+        return {
+            "PartitionState": self.state,
+            "PartitionName": "web01",
+            "DefaultProfileName": self.default,
+            "LastActivatedProfile": self.last,
+        }
+
+    async def apply(self, _config, system, lpar, profile_name):
+        if self.refusal is not None:
+            raise self.refusal
+        self.applied.append((system, lpar, profile_name))
+        if self.moves_last:
+            self.last = profile_name
+
+    async def on_vlan(self, _hmc, _lpar, vlan):
+        assert vlan == VLAN_ID
+        return self.adapters
+
+    async def root_mappings(self, _hmc, _request, _lpar):
+        return [{"mapped": True}] if self.mapped else []
+
+
+@pytest.fixture
+def saved_apply(monkeypatch, persistence):
+    """Stub the partition reads and the CLI apply; the default follows the save."""
+    from hmcpctl.operations.lpar import provision_operation
+
+    fake = SavedApply()
+
+    async def resource(hmc, lpar):
+        fake.default = persistence.defaults[-1] if persistence.defaults else None
+        return await fake.resource(hmc, lpar)
+
+    monkeypatch.setattr(provision_operation, "_partition_resource", resource)
+    monkeypatch.setattr(provision_operation, "apply_lpar_profile_via_cli", fake.apply)
+    monkeypatch.setattr(provision_operation, "_adapters_on_vlan", fake.on_vlan)
+    monkeypatch.setattr(provision_operation, "_root_mappings", fake.root_mappings)
+    return fake
+
+
+def test_provision_lpar_no_power_on(monkeypatch, mock_hmc, saved_apply):
+    """power_on=False applies the saved profile instead of powering on (ADR 0331)."""
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     _mock_execution_steps(mock_hmc)
@@ -867,8 +921,112 @@ def test_provision_lpar_no_power_on(monkeypatch, mock_hmc):
     result = hmc_provision_lpar(**_provision_args(power_on=False))
 
     assert result.workflow_completed is True
-    step_names = [s.step for s in result.steps]
-    assert "power_on" not in step_names
+    steps = {s.step: s for s in result.steps}
+    assert "power_on" not in steps
+    assert [s.step for s in result.steps][-2:] == [
+        "default_profile",
+        "apply_saved_profile",
+    ]
+    (saved,) = {name for *_, name in saved_apply.applied}
+    assert saved.startswith("hmcpctl_")
+    assert saved_apply.applied == [("sys1", "web01", saved)]
+    assert steps["apply_saved_profile"].result == {"profile_name": saved}
+    operation = result.operation
+    assert operation is not None
+    assert (operation.state, operation.outcome) == ("terminal", "configured")
+    assert operation.effects[-1].kind == "lpar.profile_apply"
+
+
+def test_a_powered_on_provision_never_applies(monkeypatch, mock_hmc, saved_apply):
+    """Activating the saved profile already makes it last-activated."""
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+
+    hmc_provision_lpar(**_provision_args())
+
+    assert saved_apply.applied == []
+
+
+def _unconfirmed_apply(fake: SavedApply) -> None:
+    fake.moves_last = False
+
+
+def _refused_apply(fake: SavedApply) -> None:
+    fake.refusal = HMCCLIError("HSCL0000 refused", 1)
+
+
+def _activated_before_apply(fake: SavedApply) -> None:
+    fake.state = "open firmware"
+
+
+def _adapter_gone(fake: SavedApply) -> None:
+    fake.adapters = []
+
+
+def _mapping_gone(fake: SavedApply) -> None:
+    fake.mapped = False
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        _unconfirmed_apply,
+        _refused_apply,
+        _activated_before_apply,
+        _adapter_gone,
+        _mapping_gone,
+    ],
+)
+def test_an_unproven_apply_pauses_the_provision(
+    monkeypatch, mock_hmc, saved_apply, change
+):
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    change(saved_apply)
+
+    result = hmc_provision_lpar(**_provision_args(power_on=False))
+
+    assert result.workflow_completed is False
+    steps = {s.step: s for s in result.steps}
+    assert steps["apply_saved_profile"].status == "error"
+    assert result.operation is not None
+    assert result.operation.outcome == "needs_attention"
+
+
+def test_a_partition_without_a_name_is_never_applied(
+    monkeypatch, mock_hmc, saved_apply
+):
+    from hmcpctl.operations.lpar import provision_operation
+
+    async def unnamed(*_args):
+        return None, None
+
+    monkeypatch.setattr(provision_operation, "resolve_ssh_names", unnamed)
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+
+    result = hmc_provision_lpar(**_provision_args(power_on=False))
+
+    assert saved_apply.applied == []
+    assert result.operation is not None
+    assert result.operation.effects[-1].status == "not_applied"
+
+
+def test_an_activated_partition_is_never_applied(monkeypatch, mock_hmc, saved_apply):
+    """The guard refuses before the write, so the effect is definitely not applied."""
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    _mock_execution_steps(mock_hmc)
+    saved_apply.state = "open firmware"
+
+    result = hmc_provision_lpar(**_provision_args(power_on=False))
+
+    assert saved_apply.applied == []
+    assert result.operation is not None
+    assert result.operation.effects[-1].status == "not_applied"
 
 
 # ---------------------------------------------------------------------- #
@@ -971,8 +1129,13 @@ def test_provision_lpar_vg_not_found(monkeypatch, mock_hmc):
 # ---------------------------------------------------------------------- #
 
 
-def test_provision_lpar_partial_failure_skips_remaining(monkeypatch, mock_hmc):
-    """When the storage step fails, power_on is recorded as skipped."""
+@pytest.mark.parametrize(
+    ("power_on", "tail"), [(True, "power_on"), (False, "apply_saved_profile")]
+)
+def test_provision_lpar_partial_failure_skips_remaining(
+    monkeypatch, mock_hmc, saved_apply, power_on, tail
+):
+    """When the storage step fails, the run's last step is recorded as skipped."""
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
 
@@ -1005,14 +1168,15 @@ def test_provision_lpar_partial_failure_skips_remaining(monkeypatch, mock_hmc):
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn"
     )
 
-    result = hmc_provision_lpar(**_provision_args())
+    result = hmc_provision_lpar(**_provision_args(power_on=power_on))
 
     steps = {s.step: s for s in result.steps}
     assert steps["create"].status == "ok"
     assert steps["network"].status == "ok"
     assert "vscsi" not in steps
     assert steps["storage"].status == "error"
-    assert steps["power_on"].status == "skipped"
+    assert steps[tail].status == "skipped"
+    assert saved_apply.applied == []
     assert storage_route.called
     assert not power_on_route.called
     assert result.resource_created is True
@@ -1169,7 +1333,7 @@ def test_provision_operation_rejects_bad_token_before_any_round_trip(monkeypatch
         )
 
 
-def test_provision_passes_caller_token_to_creation(monkeypatch, mock_hmc):
+def test_provision_passes_caller_token_to_creation(monkeypatch, mock_hmc, saved_apply):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     create_route = _mock_execution_steps(mock_hmc)
@@ -1205,7 +1369,9 @@ def test_provision_policy_rejects_unsupported_system_before_mutation(
     assert_no_mutating_requests(mock_hmc)
 
 
-def test_provision_applies_explicit_fail_policy_before_network(monkeypatch, mock_hmc):
+def test_provision_applies_explicit_fail_policy_before_network(
+    monkeypatch, mock_hmc, saved_apply
+):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     _mock_execution_steps(mock_hmc)
