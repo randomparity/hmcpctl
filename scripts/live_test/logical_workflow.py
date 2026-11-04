@@ -263,7 +263,15 @@ async def _power_cases(client: Client, state: RunState, run: lpar_power.Run) -> 
         and all(current.get(key) == value for key, value in PATCH.items()),
     )
     stop = await _power(client, state, run, "stop")
-    run.hold(op, "stop-immediate-completed-not-activated", _moved(stop, _STOPPED))
+    # Decommission follows only once an independent read also says Not Activated.
+    off = await lpar_power._wait_for_state(
+        client, state, run, run.p_uuid or "", _STOPPED
+    )
+    run.hold(
+        op,
+        "stop-immediate-completed-not-activated",
+        _moved(stop, _STOPPED) and off in _STOPPED,
+    )
     return run.holds(op, "stop-immediate-completed-not-activated")
 
 

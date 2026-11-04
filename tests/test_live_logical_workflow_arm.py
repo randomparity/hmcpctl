@@ -486,9 +486,23 @@ def _processors_unplanned(world: WorkflowWorld) -> None:
     world.changed_fields = {"memory_mib"}
 
 
+def _still_on_after_stop(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        if kwargs.get("action") == "stop":
+            world.by_selector(kwargs["lpar_name_or_uuid"])["state"] = "Open Firmware"
+        return answer
+
+    _changes(world, "hmc_power_lpar", change)
+
+
 @pytest.mark.parametrize(
     ("change", "operation", "assertion"),
     [
+        (
+            _still_on_after_stop,
+            "lpar.power",
+            "stop-immediate-completed-not-activated",
+        ),
         (_inspected_vcpus, "lpar.inspect", "reports-the-change-inactive"),
         (_current_vcpus, "lpar.power", "started-with-the-change"),
         (_never_in_firmware, "lpar.power", "started-with-the-change"),
@@ -576,6 +590,15 @@ def test_a_reconfigure_that_will_not_abandon_fails_the_cleanup(schemas):
 
     (entry,) = [e for e in state.observations if e["operation"] == "provision.lpar"]
     assert entry["observation"]["cleanup"] == "failed"
+
+
+def test_a_partition_still_on_after_the_stop_is_not_decommissioned(schemas):
+    world = WorkflowWorld()
+    _still_on_after_stop(world)
+
+    _run(schemas, world)
+
+    assert "hmc_decommission_lpar" not in world.tools()
 
 
 def test_a_paused_stop_skips_the_decommission_and_teardown_removes_all(schemas):

@@ -973,8 +973,10 @@ a partition on once.
      (`reports-the-owned-mapping`).
   4. `hmc_power_lpar` start (`start-completed-activated`); once in firmware,
      `hmc_get_lpar` must show 3072 MiB current memory and 2 allocated virtual
-     processors (`started-with-the-change`). Then stop, immediate
-     (`stop-immediate-completed-not-activated`).
+     processors (`started-with-the-change`). Then stop, immediate; the stop's own job and an
+     independent state read must both say Not Activated
+     (`stop-immediate-completed-not-activated`) before the decommission runs. The partition
+     has no installer media or operating system, so it stays in firmware.
   5. The lpar-power arm's decommission cases: a dry run that inventories and changes
      nothing, then `storage_cleanup=delete_owned` with its eight assertions.
 - **After.** An open reconfigure is abandoned with its own tool, then the lpar-power arm's
