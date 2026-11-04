@@ -144,6 +144,6 @@ are followed by `just capability-metadata`, which regenerates `src/hmcpctl/_oper
 | C2 document groups, no readiness claim, `unfenced` and `unchecked_tools`, no secrets | unit tests on `prepare`; app test: `unchecked_tools` equals the registry computation and includes `hmc_run_command`, `hmc_restore_lpar_profiles` |
 | C3 delegated authorization | app tests: withheld `hmc_get_lpar`, `hmc_list_lpar_ownership` or `hmc_get_vios_storage_detail` refuses; withheld `hmc_list_adapters` → `denied`; a name-scoped grant admits adapters |
 | C4 kdive contract | `test_kdive_tier_a_contract` resolves the new tokens and asserts the named power tools are `hold_guarded` |
-| C5 interlocks | app tests: after `prepare(hold=True)`, `hmc_power_lpar`, `hmc_reconfigure_lpar`, `hmc_decommission_lpar` refuse `partition_held` and pass with `hold_id`; after `release` they pass; `prepare(hold=True)` refuses `partition_guarded` while a provision operation guards the partition |
+| C5 interlocks | app tests: after `prepare(hold=True)`, `hmc_power_lpar`, `hmc_reconfigure_lpar`, `hmc_decommission_lpar` refuse `partition_held` and pass with `hold_id`; after `release` they pass; `prepare(hold=True)` refuses `partition_guarded` while a provision operation guards the partition (provision creates a new partition and selects none, so this is its interlock) |
 | C6 ledgers and guardrails | `just capability-inventory`, `just tool-docs-check`, the split `just verify` |
 | C7 no live proof | none run; `maturity.json` carries no evidence row |
