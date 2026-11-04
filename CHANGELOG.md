@@ -430,6 +430,11 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- A REST request sent after nearly 5 seconds without one, such as the first after a run of SSH
+  commands, no longer intermittently fails with `Server disconnected without sending a response`
+  (#1926). HMCs close an idle connection about 5 seconds after their last response, and the client
+  kept it pooled for the same 5 seconds, so it could reuse a connection the HMC was closing. The
+  client now drops an idle connection after 1 second; requests are still sent once.
 - `hmc_provision_lpar` with `power_on=false` now applies its saved `hmcpctl_` profile without
   activating the partition (#1854, ADR 0331). Before, the partition's last-activated profile stayed
   the creation profile, so `hmc_reconfigure_lpar` refused it under ADR 0314 Decision 2. A native

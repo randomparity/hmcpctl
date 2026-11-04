@@ -53,6 +53,18 @@ _logger = logging.getLogger(__name__)
 MEDIA_WEB = "application/vnd.ibm.powervm.web+xml"
 MEDIA_UOM = "application/vnd.ibm.powervm.uom+xml"
 
+# HMCs close an idle keep-alive connection about 5 s after their last response,
+# which is also httpx's default expiry. The HMC's clock starts first, so a request
+# sent just under 5 s idle can reach a connection the HMC is closing and fail with
+# "Server disconnected". Expiring well inside that window avoids the reuse (#1926).
+_KEEPALIVE_EXPIRY_SECONDS = 1.0
+# httpx's own default caps, restated because passing limits= replaces them.
+_HTTP_LIMITS = httpx.Limits(
+    max_connections=100,
+    max_keepalive_connections=20,
+    keepalive_expiry=_KEEPALIVE_EXPIRY_SECONDS,
+)
+
 # Bounds on what a rejection message renders. The set it renders is whatever
 # the discovery read returned. The parse is captured at V1_17_0 and V1_20_0
 # (ADR 0142), so this is no longer the inference it was written against -- but
@@ -544,6 +556,7 @@ class HMCClient(
             base_url=base_url,
             verify=verify,
             timeout=self.config.timeout,
+            limits=_HTTP_LIMITS,
             headers={
                 "X-Audit-Memento": self.config.effective_audit_memento,
                 # Most HMC builds ignore charset but honour JSON when asked;
