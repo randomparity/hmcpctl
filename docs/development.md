@@ -61,7 +61,9 @@ just smoke
 # Connected. <N> tools exposed.
 ```
 
-Use `just smoke-verbose` to list every exposed tool when diagnosing the registry.
+The count is what a client's `tools/list` carries: the primary catalog the policy admits
+(ADR 0330). Use `just smoke-verbose` to list those tools; the generated
+[tool reference](tools/index.md) covers the whole registry.
 
 ### 3. Live check against a real HMC
 
