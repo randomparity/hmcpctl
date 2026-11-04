@@ -18,6 +18,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `hmc_update_vnic_policy` and `hmcpctl network update-vnic-policy` (#1858, ADR 0332) change
+  one policy field of an existing vNIC: `pvid_priority`, `auto_priority_failover`, `port_vlan_id`
+  from 0 while allowed VLAN IDs are `none`, or additions to a finite allowed VLAN or OS MAC list.
+  Only modes qualified on HMC V10R3 M1060 are offered; list replacement, removal and `all`/`none`
+  clears were refused natively and are not. Each call submits once, always carries the current
+  `auto_priority_failover`, and reports submission, readback and preservation separately.
 - `hmc_provision_lpar` reports `boot_started` (#1850, ADR 0328): a reference code newer than the
   pre-power-on baseline that is `CA00E105`, partition firmware passing control to the boot image,
   ends the installer boot `boot_started`. Native Ubuntu 26.04.1 and Rocky 9.8 windows on POWER9
