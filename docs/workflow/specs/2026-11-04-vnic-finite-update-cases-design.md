@@ -50,36 +50,36 @@ The packet is refused before any effect in each of these cases:
 
 - `set` gives the field's baseline value. A no-op cannot be told apart from an
   ignored update.
-- `add` or `remove` targets a baseline of `"all"` or `"none"`. This keeps `all`
-  minus finite members, and every other sentinel delta, unqualified.
+- A list action targets a baseline of `"all"` or `"none"`. This keeps `all`
+  minus finite members, every other sentinel delta, and replacement of a
+  sentinel, unqualified.
 - `add` repeats a baseline member.
 - `remove` names a member the baseline lacks, or names every member. Removing the
   last member is already known to be refused.
 - A value is `"all"` or `"none"`. The sentinels are creation-only on the observed
   HMC.
+- More than one list value contains a comma. Only a final quoted pair is allowed
+  (below).
 
-Starting a `set` from a sentinel baseline is allowed. That is a replacement, not
-a delta.
+A sentinel baseline is still useful for a scalar action, as case 3 shows.
 
 ### Native record
 
 The record has one pair per action, in fixed field order: `port_vlan_id`,
 `pvid_priority`, `auto_priority_failover`, `allowed_vlan_ids`,
-`allowed_os_mac_addrs`. The attribute is the field name, with `+` appended for
+`allowed_os_mac_addrs`, except that a list whose value contains a comma moves to
+the end. The attribute is the field name, with `+` appended for
 `add` and `-` for `remove`. List values are the sorted canonical members joined by
 commas. A bool renders as `0` or `1`.
 
 The record is built with `build_attribute_record`. The list attributes, with and
-without the suffixes, are quotable, and `allow_nontrailing_quoted=True` is passed.
-The retained command reference shows this exact form for an existing vNIC,
-`"allowed_vlan_ids+=10,20,30",pvid_priority=5`
-(`docs/refs/hmc-commands-p11/commands/chhwres.md:292`). That is source support,
-not native evidence. ADR 0311 limits the opt-in to typed vNIC creation; the ADR
-0312 amendment extends it to this source-only harness and nowhere else. The
-builder's docstring still names only creation; correcting it is outside this
-change's surface and is reported as a follow-up. The shared builder's code and
-every other caller are unchanged. The record stays inside the existing update
-token and shell quoting.
+without the suffixes, are quotable. `allow_nontrailing_quoted` stays off, so the
+builder's final-pair restriction (ADR 0311) still holds. A record with two
+comma-bearing lists is refused at validation. The retained command reference shows
+a quoted list pair on an existing vNIC (`docs/refs/hmc-commands-p11/commands/chhwres.md:292`).
+That is source support, not native evidence. The shared builder and every other
+caller are unchanged. The record stays inside the existing update token and shell
+quoting.
 
 ### Oracle and axes
 
@@ -151,7 +151,7 @@ scalars. VLAN IDs `A`..`C` and MAC addresses
 | 7 | VLAN {A}, MAC {M1} | MAC set to {M2, M3} | qualified |
 | 8 | VLAN {A}, MAC {M1} | MAC add {M2} | qualified |
 | 9 | VLAN {A}, MAC {M1, M2} | MAC remove {M2} | qualified |
-| 10 | VLAN {A}, MAC {M1, M2} | VLAN add {B, C} and MAC remove {M2}, in one record whose first list pair is quoted and not last | qualified |
+| 10 | VLAN {A}, MAC {M1, M2} | VLAN add {B, C} and MAC remove {M2}, in one record ending with the quoted VLAN pair | qualified |
 | 11 | VLAN {A}, MAC {M1} | `port_vlan_id` set to a nonzero value | refused, like creation's `HSCL12E9` |
 
 Case 11 checks the constraint on an update. Any case's outcome is recorded as the
@@ -186,17 +186,16 @@ HMC returns it; a hypothesis is never a result.
   - system defaults #680;
   - multi-backing #638;
   - profile CRUD #1724/#637;
-  - the evidence-script route for source journals, a follow-up already reported
-    by #1856;
-  - the `build_attribute_record` docstring naming only creation, a reported
-    follow-up.
+  - no owner: the evidence-script route for source journals. This gap predates
+    #1857; #1856 reported it unfiled, and this run reports it again as a
+    follow-up candidate.
 
 ## Threat model
 
 - **Boundaries:**
   - Widened: the version-2 packet parser gains the `update` list.
-  - Widened: a derived native record now carries several pairs and quoted lists
-    that are not last.
+  - Widened: a derived native record now carries several pairs, with at most one
+    quoted list, placed last.
   - No new listener, credential or file path.
 - **Actors:**
   - the local operator, who writes the packet;
@@ -230,7 +229,7 @@ HMC returns it; a hypothesis is never a result.
 | Contract | Mode | Evidence |
 | --- | --- | --- |
 | Packet rules | focused-test | parametrized refusals in `tests/test_live_vnic_creation_policy_arm.py` |
-| Record derivation | focused-test | exact `-a` record per action shape, including the two-list record that is not last |
+| Record derivation | focused-test | exact `-a` record per action shape, including the two-list record with its quoted pair last |
 | Oracle and axes | focused-test | lifecycle per shape, reordered readback, side-effect drift, a mismatch per field |
 | Cleanup and recovery | focused-test | qualified `CLEAN`; refusal and unknown hold; forged history refused |
 | Unchanged cases | focused-test | the existing source, version-1 and fixture tests, unmodified |

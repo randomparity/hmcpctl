@@ -81,16 +81,14 @@ the record and the oracle from the packet. It refuses before any effect:
 
 - a no-op `set`;
 - any sentinel value;
-- a delta on an `all` or `none` baseline;
+- a list action on an `all` or `none` baseline;
 - an `add` that repeats a member;
-- a `remove` that names a member not present, or every member.
+- a `remove` that names a member not present, or every member;
+- more than one list value containing a comma.
 
-So `all` minus finite members stays unqualified. A `set` may start from a
-sentinel baseline. The record may carry quoted lists that are not its last pair.
-That form is shown for an existing vNIC by the retained reference
-(`docs/refs/hmc-commands-p11/commands/chhwres.md:292`). This extends ADR 0311's
-creation-only `allow_nontrailing_quoted` opt-in to this source-only harness, and
-nowhere else; it is not native evidence until a case qualifies it. List oracles compare canonical members, not raw order. The six earlier cases
+So `all` minus finite members stays unqualified. The record places any quoted
+list last and keeps the shared builder's final-pair restriction (ADR 0311). List
+oracles compare canonical members, not raw order. The six earlier cases
 are unchanged. The case set tests the port VLAN constraint that #1856 met at
 creation: `HSCL12E9 The SR-IOV physical port supports only the Deny all VLAN ID
 restriction when a port VLAN ID is specified`. See the
