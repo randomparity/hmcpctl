@@ -312,7 +312,7 @@ def test_complete_wire_records_equal_uncached_reference(selection):
             if reference
             else nullcontext()
         ):
-            application = create_mcp(policy)
+            application = create_mcp(policy, catalog="registered")
         permits, authorize = _gates(policy)
         await configure_arbitrary_command_tool(
             True, application, permits=permits, authorize=authorize

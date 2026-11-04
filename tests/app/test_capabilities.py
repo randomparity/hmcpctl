@@ -38,7 +38,7 @@ from hmcpctl.server_tools.vios.core import hmc_delete_vios
 # tests/app/test_fail_closed_startup.py), and the dispatch wrapper is schema-transparent,
 # so every assertion below reads the same registry it always did.
 _LEGACY = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
-mcp = create_mcp(_LEGACY)
+mcp = create_mcp(_LEGACY, catalog="registered")
 
 # The escape hatch's gates come from a policy that *grants* it. Since ADR 0041
 # `configure_arbitrary_command_tool` requires both gates, and the flag and the grant

@@ -295,7 +295,7 @@ def test_sync_tool_schema_offers_only_the_three_modes():
     policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
 
     async def schema():
-        async with Client(create_mcp(policy)) as client:
+        async with Client(create_mcp(policy, catalog="registered")) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
             return tools["hmc_sync_lpar_profile"].input_schema
 
@@ -309,7 +309,7 @@ def test_restore_tool_schema_requires_documented_restore_type():
     policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
 
     async def schema():
-        async with Client(create_mcp(policy)) as client:
+        async with Client(create_mcp(policy, catalog="registered")) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
             return tools["hmc_restore_lpar_profiles"].input_schema
 
@@ -323,7 +323,7 @@ def test_restore_tool_description_warns_merge_unconfigures_partitions():
     policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
 
     async def description():
-        async with Client(create_mcp(policy)) as client:
+        async with Client(create_mcp(policy, catalog="registered")) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
             return tools["hmc_restore_lpar_profiles"].description
 

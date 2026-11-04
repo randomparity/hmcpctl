@@ -154,7 +154,10 @@ def test_native_mcp_schema_is_closed_and_typed_without_changing_security():
     from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
     from hmcpctl.server import TOOL_SECURITY, create_mcp
 
-    mcp = create_mcp(compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)))
+    mcp = create_mcp(
+        compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)),
+        catalog="registered",
+    )
     tools = asyncio.run(mcp.list_tools())
     tool = next(tool for tool in tools if tool.name == "hmc_dlpar_mem")
     schema = tool.parameters

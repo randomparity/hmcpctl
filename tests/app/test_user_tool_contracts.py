@@ -222,7 +222,7 @@ def test_verify_session_timeout_is_refused_at_the_mcp_boundary(tool, value) -> N
     policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
 
     async def call() -> dict:
-        async with Client(create_mcp(policy)) as client:
+        async with Client(create_mcp(policy, catalog="registered")) as client:
             tools = {item.name: item for item in await client.list_tools()}
             with pytest.raises(ToolError, match="verify_session_timeout"):
                 await client.call_tool(

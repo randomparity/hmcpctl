@@ -22,7 +22,7 @@ import difflib
 import os
 import sys
 import tempfile
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from operator import attrgetter
 from pathlib import Path
@@ -31,7 +31,7 @@ from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
 from hmcpctl.authorization.dispatch_scope import dispatch_authorizer
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
 from hmcpctl.operation_maturity import OperationMaturityError, operation_maturity
-from hmcpctl.server import TOOL_SECURITY, create_mcp
+from hmcpctl.server import PRIMARY_TOOLS, TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.command import configure_arbitrary_command_tool
 from hmcpctl.tool_registry import ToolSecurity
 
@@ -67,9 +67,9 @@ SUMMARY_NOTE = (
     "The Summary column on each domain page is the first line of the tool's MCP "
     "description. The complete text, including the conditions under which a tool "
     "refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. "
-    "An MCP client's `tools/list` carries that docstring's prose as the "
-    "description and its argument detail in the input schema; `Returns:` and "
-    "`Raises:` sections are not sent."
+    "An MCP client receives that docstring's prose as the tool's description and "
+    "its argument detail in the input schema; `Returns:` and `Raises:` sections "
+    "are not sent."
 )
 
 _ENABLEMENT_NOTE = (
@@ -101,6 +101,7 @@ class ToolRecord:
     verification_reason: str | None
     runtime_eligibility: str
     exposed_by_default: bool
+    listed_by_default: bool
 
     @property
     def domain(self) -> str:
@@ -117,6 +118,8 @@ def build_records(
     descriptions: Mapping[str, str | None],
     security: Mapping[str, ToolSecurity],
     exposed_by_default: Callable[[str], bool],
+    *,
+    primary: Collection[str],
 ) -> tuple[ToolRecord, ...]:
     """Join MCP descriptions to registry metadata, or raise.
 
@@ -124,6 +127,9 @@ def build_records(
     must name exactly the same tools: a registered tool the walk did not reach would
     be silently absent from the reference, and a served tool with no record has no
     effect class to publish.
+
+    A tool is listed by default when a default deployment exposes it and it is in
+    *primary*, the set ``tools/list`` is filtered to (ADR 0330).
     """
     missing = sorted(set(security) - set(descriptions))
     if missing:
@@ -147,6 +153,7 @@ def build_records(
         if operation not in maturity_by_operation:
             maturity_by_operation[operation] = operation_maturity(operation)
         maturity = maturity_by_operation[operation]
+        exposed = exposed_by_default(name)
         records.append(
             ToolRecord(
                 name=name,
@@ -158,7 +165,8 @@ def build_records(
                 verification=maturity.verification,
                 verification_reason=maturity.reason,
                 runtime_eligibility=maturity.runtime_eligibility,
-                exposed_by_default=exposed_by_default(name),
+                exposed_by_default=exposed,
+                listed_by_default=exposed and name in primary,
             )
         )
     return tuple(records)
@@ -196,16 +204,17 @@ def _operation(name: str, operation: str) -> str:
 async def load_descriptions() -> dict[str, str | None]:
     """Every registered tool's MCP description, from a fully granted application.
 
-    Composed with the arbitrary-command tool both granted and enabled, which is
-    what makes ``list_tools()`` cover the registered set instead of the default
-    deployment's 147. Composition only -- no HMC connection is opened.
+    Composed with the registered listing (ADR 0330) and the arbitrary-command tool
+    both granted and enabled, which is what makes ``list_tools()`` cover the
+    registered set instead of the default deployment's primary catalog. Composition
+    only -- no HMC connection is opened.
     """
     policy = compile_legacy_policy(
         TOOL_SECURITY,
         (DEFAULT_CONNECTION_TOKEN,),
         include_arbitrary_command=True,
     )
-    mcp = create_mcp(policy)
+    mcp = create_mcp(policy, catalog="registered")
     await configure_arbitrary_command_tool(
         True,
         mcp,
@@ -313,6 +322,7 @@ def _render_index(groups: Mapping[str, list[ToolRecord]]) -> str:
         key=lambda item: item.name,
     )
     withheld = [record for record in records if not record.exposed_by_default]
+    listed = [record.name for record in records if record.listed_by_default]
     lines = [
         BANNER,
         "",
@@ -326,7 +336,12 @@ def _render_index(groups: Mapping[str, list[ToolRecord]]) -> str:
         SUMMARY_NOTE,
         "",
         f"- **{len(records)}** tools are registered.",
-        f"- **{len(records) - len(withheld)}** are exposed by a default deployment.",
+        f"- **{len(records) - len(withheld)}** are callable in a default deployment.",
+        (
+            f"- **{len(listed)}** are listed by `tools/list` in a default deployment "
+            "(ADR 0330); `hmc_search_tools` finds the rest, which are called by name "
+            "or through `hmc_invoke_tool`."
+        ),
         "",
         "| Effect class | Tools |",
         "| --- | --- |",
@@ -369,6 +384,15 @@ def _render_index(groups: Mapping[str, list[ToolRecord]]) -> str:
         f"| `{group}` | {len(members)} | [{group}.md]({group}.md) |"
         for group, members in sorted(groups.items())
     )
+    if listed:
+        lines.extend(
+            [
+                "",
+                "## Listed by default",
+                "",
+                ", ".join(f"`{name}`" for name in listed) + ".",
+            ]
+        )
     if withheld:
         lines.extend(["", "## Not exposed by default", *_enablement_note(records)])
     lines.extend(
@@ -486,7 +510,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         records = build_records(
-            asyncio.run(load_descriptions()), TOOL_SECURITY, default_exposure()
+            asyncio.run(load_descriptions()),
+            TOOL_SECURITY,
+            default_exposure(),
+            primary=PRIMARY_TOOLS,
         )
         pages = render_pages(records)
         if not args.check:

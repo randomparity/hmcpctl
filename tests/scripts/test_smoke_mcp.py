@@ -7,6 +7,8 @@ from typing import cast
 
 import pytest
 
+from hmcpctl.server import PRIMARY_TOOLS
+
 ROOT = Path(__file__).parents[2]
 
 
@@ -28,14 +30,12 @@ def test_main_reports_only_the_tool_count_by_default(
     assert "  - " not in output
 
 
-def test_main_lists_the_live_tool_registry_when_verbose(
+def test_main_lists_the_default_listing_when_verbose(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The smoke leg serves what a client sees: the primary catalog (ADR 0330)."""
     _main()(["--verbose"])
 
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].startswith("Connected. ")
-    assert lines[0].endswith(" tools exposed:")
-    assert "  - hmc_list_systems" in lines
-    assert "  - hmc_list_lpars" in lines
-    assert len(lines) > 100
+    assert lines[0] == f"Connected. {len(PRIMARY_TOOLS)} tools exposed:"
+    assert {line.removeprefix("  - ") for line in lines[1:]} == PRIMARY_TOOLS

@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 import hmcpctl.operation_maturity as maturity
-from hmcpctl.server import TOOL_SECURITY
+from hmcpctl.server import PRIMARY_TOOLS, TOOL_SECURITY
 from hmcpctl.tool_registry import ToolSecurity
 
 ROOT = Path(__file__).parents[2]
@@ -55,8 +55,11 @@ def _records(**overrides):
     descriptions = {**DESCRIPTIONS, **overrides.pop("descriptions", {})}
     security = {**SECURITY, **overrides.pop("security", {})}
     exposed = overrides.pop("exposed", lambda name: True)
+    primary = overrides.pop("primary", frozenset())
     assert not overrides
-    return gen_tool_reference.build_records(descriptions, security, exposed)
+    return gen_tool_reference.build_records(
+        descriptions, security, exposed, primary=primary
+    )
 
 
 def _install_projection(
@@ -199,7 +202,10 @@ def test_records_reject_malformed_projection_grammar(
 def test_a_missing_registered_tool_raises_rather_than_being_omitted() -> None:
     with pytest.raises(gen_tool_reference.ToolReferenceError) as error:
         gen_tool_reference.build_records(
-            {"hmc_alpha": DESCRIPTIONS["hmc_alpha"]}, SECURITY, lambda _: True
+            {"hmc_alpha": DESCRIPTIONS["hmc_alpha"]},
+            SECURITY,
+            lambda _: True,
+            primary=frozenset(),
         )
 
     assert "hmc_beta" in str(error.value)
@@ -296,7 +302,7 @@ def test_every_page_says_the_summary_is_a_first_line_and_where_the_rest_lives() 
     note = gen_tool_reference.SUMMARY_NOTE
     assert "first line of the tool's MCP description" in note
     assert "refuses" in note
-    assert "`tools/list`" in note
+    assert "input schema" in note
     assert (
         "complete text, including the conditions under which a tool refuses, "
         "is the tool handler's docstring"
@@ -318,7 +324,20 @@ def test_a_tool_a_default_deployment_withholds_is_named_on_its_page() -> None:
     )
     assert "## Not exposed by default" in pages["index.md"]
     assert "- **2** tools are registered." in pages["index.md"]
-    assert "- **1** are exposed by a default deployment." in pages["index.md"]
+    assert "- **1** are callable in a default deployment." in pages["index.md"]
+
+
+def test_the_index_names_the_tools_a_default_deployment_lists() -> None:
+    """ADR 0330: tools/list carries only the primary tools a deployment exposes."""
+    pages = gen_tool_reference.render_pages(
+        _records(primary={"hmc_alpha", "hmc_beta"}, exposed=lambda n: n != "hmc_beta")
+    )
+    index = pages["index.md"]
+
+    assert "- **1** are listed by `tools/list` in a default deployment" in index
+    listed = index.split("## Listed by default", 1)[1].split("\n## ", 1)[0]
+    assert "`hmc_alpha`" in listed
+    assert "`hmc_beta`" not in listed
 
 
 def test_check_reports_a_stale_page_a_missing_page_and_an_orphan(tmp_path) -> None:
@@ -431,6 +450,7 @@ def test_the_committed_reference_matches_the_live_registry() -> None:
         asyncio.run(gen_tool_reference.load_descriptions()),
         TOOL_SECURITY,
         gen_tool_reference.default_exposure(),
+        primary=PRIMARY_TOOLS,
     )
 
     assert len(records) == len(TOOL_SECURITY)

@@ -82,7 +82,10 @@ def test_mcp_modes_and_security():
     from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
     from hmcpctl.server import TOOL_SECURITY, create_mcp
 
-    mcp = create_mcp(compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)))
+    mcp = create_mcp(
+        compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)),
+        catalog="registered",
+    )
     tool = next(t for t in asyncio.run(mcp.list_tools()) if t.name == "hmc_dlpar_proc")
     model = next(
         s

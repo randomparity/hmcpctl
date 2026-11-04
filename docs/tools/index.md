@@ -4,10 +4,11 @@
 
 This reference covers every tool the server registers, including the ones a default deployment does not expose. It is generated from the server's tool registry, so it cannot drift from what the code registers.
 
-The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client's `tools/list` carries that docstring's prose as the description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
+The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
 - **206** tools are registered.
-- **205** are exposed by a default deployment.
+- **205** are callable in a default deployment.
+- **11** are listed by `tools/list` in a default deployment (ADR 0330); `hmc_search_tools` finds the rest, which are called by name or through `hmc_invoke_tool`.
 
 | Effect class | Tools |
 | --- | --- |
@@ -69,6 +70,10 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `vios_label` | 7 | [vios_label.md](vios_label.md) |
 | `vios_profile` | 6 | [vios_profile.md](vios_profile.md) |
 | `vnic` | 3 | [vnic.md](vnic.md) |
+
+## Listed by default
+
+`hmc_decommission_lpar`, `hmc_inspect_lpar`, `hmc_inventory`, `hmc_invoke_tool`, `hmc_operation_status`, `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_prepare_host_handoff`, `hmc_provision_lpar`, `hmc_reconfigure_lpar`, `hmc_search_tools`.
 
 ## Not exposed by default
 

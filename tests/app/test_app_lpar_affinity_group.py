@@ -72,7 +72,7 @@ def application(name, targets="all-targets"):
         TOOL_SECURITY,
         "test-policy.toml",
     )
-    return create_mcp(policy)
+    return create_mcp(policy, catalog="registered")
 
 
 def forwarded(adapter):

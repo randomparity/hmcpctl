@@ -24,7 +24,8 @@ hmcpctl serve --access-policy lab --audit-level WARNING   # authorization denial
 
 `--access-policy NAME` enforces the named policy from the platform-native
 `access-policy.toml`: the server registers only the tools that policy permits, so
-a withheld tool never appears in `tools/list` and cannot be called by name. Omitting
+a withheld tool is absent from `tools/list` and from `hmc_search_tools`, and cannot be
+called by name or through `hmc_invoke_tool`. Omitting
 it is a usage error (exit 2) that starts nothing; a policy that is selected but
 cannot be read, parsed, or compiled — or whose file does not exist — exits 1 and
 starts nothing. Both refusals name the generator and the file they looked for.
@@ -96,10 +97,10 @@ planned for 0.2.0 and 0.1.0 makes no live-verification claim for them
 
 `hmc_search_tools` (`read`) and `hmc_invoke_tool` (`destructive`) let a client find and call
 tools by name without loading the whole catalog (ADR 0189). Both read this server's own
-registry, so they see exactly what `tools/list` shows: the tools the policy's ceiling admits
-and the capabilities this server enabled. Search takes a `query` of at most 200 characters or
-an exact `name`, returns at most 20 entries, and returns an input schema only for an exact
-`name`.
+registry, so they see every tool the policy's ceiling admits and the capabilities this server
+enabled, including the specialists `tools/list` does not carry. Search takes a `query` of at
+most 200 characters or an exact `name`, returns at most 20 entries, and returns an input schema
+only for an exact `name`.
 
 `hmc_invoke_tool` runs the named tool's own registration, so that tool's argument validation,
 connection and target scope, ownership guards and authorization audit record apply exactly as
@@ -197,11 +198,27 @@ reports `ok`, `unavailable` or `denied` on its own, with no data unless `ok` (AD
 target grant may still deny one. It never opens a console: `hmc_capture_lpar_console` is
 named, not run.
 
-`tools/list` marks each tool's catalog tier under the
-`io.github.randomparity.hmcpctl/catalog-tier` metadata key: `primary` for the ADR 0189
-primary set, `secondary` for every other tool. The listing itself is unchanged; #1232 decides
-when a default deployment lists only the primary set. Calling any listed tool directly keeps
-working either way.
+`tools/list` carries only the ADR 0189 primary set the policy admits (ADR 0330):
+`hmc_inventory`, `hmc_plan_lpar`, `hmc_provision_lpar`, `hmc_reconfigure_lpar`,
+`hmc_decommission_lpar`, `hmc_power_lpar`, `hmc_inspect_lpar`, `hmc_prepare_host_handoff`,
+`hmc_operation_status`, `hmc_search_tools` and `hmc_invoke_tool`. Every other permitted tool is
+a specialist: `hmc_search_tools` finds it, and a client calls it by name or through
+`hmc_invoke_tool`, under the same validation and authorization as before. Each listed tool
+carries `primary` under the `io.github.randomparity.hmcpctl/catalog-tier` metadata key. There is
+no option to list every tool.
+
+Three consequences follow from what a policy grants:
+
+- `hmc_invoke_tool` is `destructive`, so an `effects = ["read"]` or read-and-mutate grant
+  withholds it. Under the read-only example below, `tools/list` carries five tools and a
+  specialist is reached by finding it with `hmc_search_tools` and calling it by name.
+- A grant that names specialists but neither gateway tool leaves them callable only by a client
+  that already knows their names; with no primary tool granted, `tools/list` is empty.
+- `hmc_run_command` is never listed and `hmc_invoke_tool` refuses it, so with
+  `--enable-arbitrary-command` and a grant it is reachable only by a direct call of its name.
+
+A client receives no output schema for an unlisted tool, so it cannot validate a direct call's
+structured result against one.
 
 ### Migrating to a required access policy
 

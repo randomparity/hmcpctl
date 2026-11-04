@@ -415,7 +415,7 @@ def test_mcp_registers_both_resource_group_affinity_tools():
     policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
 
     async def names():
-        async with Client(create_mcp(policy)) as client:
+        async with Client(create_mcp(policy, catalog="registered")) as client:
             return {tool.name for tool in await client.list_tools()}
 
     assert {

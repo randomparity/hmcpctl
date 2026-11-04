@@ -141,7 +141,8 @@ def test_move_schema():
     from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
 
     application = create_mcp(
-        compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
+        compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,)),
+        catalog="registered",
     )
     tool = next(t for t in asyncio.run(application.list_tools()) if t.name == TOOL)
     assert {

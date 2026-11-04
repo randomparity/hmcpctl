@@ -382,7 +382,7 @@ async def test_mcp_mutation_wire_and_schema_exclude_internal_result(monkeypatch,
         TOOL_SECURITY,
         "test-storage.toml",
     )
-    async with Client(create_mcp(policy)) as mcp:
+    async with Client(create_mcp(policy, catalog="registered")) as mcp:
         tool = next(tool for tool in await mcp.list_tools() if tool.name == name)
         assert tool.output_schema == {
             "properties": {

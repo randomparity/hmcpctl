@@ -151,7 +151,7 @@ def test_cli_cancel_invalid(monkeypatch, args):
 async def test_mcp_schema_and_delegate(presentation_boundary, caplog):
     b = presentation_boundary
     b.partition["Resource"]["ResourceMonitoringControlState"] = "inactive"
-    application = create_mcp(_policy([GRANT]))
+    application = create_mcp(_policy([GRANT]), catalog="registered")
     async with Client(application) as client:
         tools = {tool.name: tool for tool in await client.list_tools()}
         assert TOOL in tools
@@ -236,7 +236,7 @@ async def test_mcp_schema_and_delegate(presentation_boundary, caplog):
 async def test_mcp_schema_and_delegate_strict(monkeypatch, change):
     opened = []
     _seal_every_outbound_path(monkeypatch, opened)
-    async with Client(create_mcp(_policy([GRANT]))) as client:
+    async with Client(create_mcp(_policy([GRANT]), catalog="registered")) as client:
         with pytest.raises(ToolError, match="validation error"):
             await client.call_tool(TOOL, {**ARGUMENTS, "change": change})
     assert opened == []
@@ -269,7 +269,7 @@ async def test_mcp_schema_and_delegate_strict(monkeypatch, change):
 async def test_mcp_target_denial(monkeypatch, grants, arguments, reason):
     opened = []
     _seal_every_outbound_path(monkeypatch, opened)
-    async with Client(create_mcp(_policy(grants))) as client:
+    async with Client(create_mcp(_policy(grants), catalog="registered")) as client:
         with pytest.raises(ToolError, match=reason):
             await client.call_tool(TOOL, arguments)
     assert opened == []
@@ -282,7 +282,7 @@ async def test_mcp_target_denial_complete_grant_succeeds(
 ):
     b = presentation_boundary
     grant = {**GRANT, "connections": ["lab", "<default>"]}
-    async with Client(create_mcp(_policy([grant]))) as client:
+    async with Client(create_mcp(_policy([grant]), catalog="registered")) as client:
         arguments = {**ARGUMENTS, "profile": profile}
         if profile is None:
             arguments.pop("profile")
@@ -320,7 +320,7 @@ def test_cli_mapping_confirmed(presentation_boundary):
 async def test_mcp_target_denial_ownership(presentation_boundary, caplog):
     b = presentation_boundary
     b.description = "[hmcpctl owner:foreign created:2026-10-26]"
-    async with Client(create_mcp(_policy([GRANT]))) as client:
+    async with Client(create_mcp(_policy([GRANT]), catalog="registered")) as client:
         with (
             caplog.at_level(logging.INFO, logger="hmcpctl.audit"),
             pytest.raises(ToolError, match="owned by"),

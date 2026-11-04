@@ -18,6 +18,25 @@ Run it only against an HMC, managed system, and VIOS you own.
 > and console text. Keep transcripts in a protected location. Do not paste real values into
 > issues, pull requests, or this file. The values below are placeholders.
 
+## From an MCP client
+
+This recipe drives the `hmcpctl` CLI. An MCP client's `tools/list` carries only the primary
+tools ([ADR 0330](../adr/0330-default-listing-is-the-primary-catalog.md)), and for a supported
+installation profile the whole of steps 2 to 5 is one durable operation:
+
+- `hmc_plan_lpar` checks the inputs and placement without writing anything;
+- `hmc_provision_lpar` with `install` creates the partition, adapter and disk, binds the media,
+  sets the boot order and powers on, ending at `boot_started` (the boot image started, nothing
+  more); `hmc_operation_status` reads it, and a repeat with the same `request_id` and
+  `continuation="resume"` continues it;
+- `hmc_inspect_lpar` with `refcodes` replaces step 5's reference-code reads;
+- `hmc_reconfigure_lpar` with `installer_media: detach` and `boot: root_disk` replaces step 6;
+- `hmc_decommission_lpar` with `storage_cleanup: delete_owned` replaces step 7.
+
+`install` accepts only its named profiles. For any other ISO, follow the steps below over MCP
+through the specialist tools: `hmc_search_tools` finds each one, and the client calls it by name
+or through `hmc_invoke_tool`. See [Tool search and invocation](../mcp-server.md#tool-search-and-invocation).
+
 ## Safety model
 
 - **Nothing here is atomic.** Each command commits its own change. When a later step fails,
