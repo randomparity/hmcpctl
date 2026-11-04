@@ -814,6 +814,14 @@ class SourceWire(Wire):
                 else:
                     cell = value
                 self.source_values[key] = cell
+            if self.source_fault == "wrong":
+                self.source_values[key] = {
+                    "port_vlan_id": "9",
+                    "pvid_priority": "4",
+                    "auto_priority_failover": "0",
+                    "allowed_vlan_ids": "99",
+                    "allowed_os_mac_addrs": "aabbccddee09",
+                }[key]
             if self.source_fault in ("blank", "malformed", "mismatch"):
                 self.source_values[key] = {
                     "blank": "",
@@ -1531,6 +1539,25 @@ async def test_finite_reordered_readback(finite_wire, tmp_path):
 @pytest.mark.parametrize(
     "shape,fault,submission,policy,preservation,qualification",
     [
+        (
+            "pvid-priority",
+            "wrong",
+            "completed",
+            "mismatched",
+            "unchanged",
+            "unresolved",
+        ),
+        ("failover", "wrong", "completed", "mismatched", "unchanged", "unresolved"),
+        ("mac-add", "wrong", "completed", "mismatched", "unchanged", "unresolved"),
+        (
+            "port-vlan-none",
+            "wrong",
+            "completed",
+            "mismatched",
+            "unchanged",
+            "unresolved",
+        ),
+        ("vlan-add", "unknown", "unknown", "mismatched", "unchanged", "unresolved"),
         ("vlan-add", "unselected", "completed", "verified", "drifted", "unresolved"),
         ("vlan-add", "mismatch", "completed", "mismatched", "unchanged", "unresolved"),
         ("two-list", "blank", "completed", "unavailable", "unchanged", "unresolved"),
@@ -1620,6 +1647,11 @@ def _finite_action(field, operation, value):
         ({}, _finite_action("pvid_priority", "set", True)),
         ({}, _finite_action("pvid_priority", "set", 8)),
         ({}, _finite_action("pvid_priority", "set", None)),
+        ({"allowed_vlan_ids": None}, _finite_action("pvid_priority", "set", 5)),
+        (
+            {"allowed_os_mac_addrs": None},
+            _finite_action("allowed_vlan_ids", "add", [3]),
+        ),
         ({}, _finite_action("auto_priority_failover", "set", None)),
         ({}, _finite_action("port_vlan_id", "set", 4095)),
         ({}, _finite_action("auto_priority_failover", "set", 1)),

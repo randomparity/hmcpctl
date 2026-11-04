@@ -656,6 +656,8 @@ def validate_packet(packet: dict) -> None:
     if policy.pvid_priority is None or policy.auto_priority_failover is None:
         raise ValueError("source baseline requires explicit scalar policies")
     if finite:
+        if any(getattr(policy, name) is None for name in _LISTS):
+            raise ValueError("finite update baseline lists must be explicit")
         _finite_expected(packet)
         try:
             _source_record(packet)
