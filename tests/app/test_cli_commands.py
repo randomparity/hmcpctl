@@ -4682,7 +4682,7 @@ def test_lpars_set_msp_forwards_ownership_override(monkeypatch, fake_hmc):
     }
 
 
-@pytest.mark.parametrize("command", ["add-vnic", "remove-vnic"])
+@pytest.mark.parametrize("command", ["add-vnic", "remove-vnic", "update-vnic-policy"])
 def test_vnic_mutation_cli_exposes_ownership_override(command):
     result = RUNNER.invoke(cli.app, ["network", command, "--help"])
 
@@ -4780,6 +4780,103 @@ def test_remove_vnic_cli_default_confirmation_keeps_partial_stdout_json(monkeypa
         "ownership_override": True,
         "system_name_or_uuid": "system",
     }
+
+
+def test_update_vnic_policy_cli_parses_one_list_and_keeps_stdout_json(monkeypatch):
+    partial = VnicPartialError("incomplete", _vnic_result("add"))
+    operation = AsyncMock(side_effect=partial)
+    monkeypatch.setattr(
+        "hmcpctl.cli_commands.virtualization.vnic.update_vnic_policy", operation
+    )
+    monkeypatch.setattr(
+        "hmcpctl.cli_commands.virtualization.vnic.with_client",
+        lambda fn: asyncio.run(fn(object())),
+    )
+
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "network",
+            "update-vnic-policy",
+            "system",
+            "lpar",
+            "4",
+            "--add-allowed-vlan-ids",
+            "20,30",
+        ],
+        input="y\n",
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["slot_num"] == "4"
+    assert "Update policy of vNIC slot 4" in result.stderr
+    assert operation.await_args.args[1:] == ("lpar", "4")
+    assert operation.await_args.kwargs == {
+        "system_name_or_uuid": "system",
+        "ownership_override": False,
+        "port_vlan_id": None,
+        "pvid_priority": None,
+        "auto_priority_failover": None,
+        "add_allowed_vlan_ids": [20, 30],
+        "add_allowed_os_mac_addrs": None,
+    }
+
+
+def test_update_vnic_policy_cli_refuses_non_integer_vlans(monkeypatch):
+    operation = AsyncMock()
+    monkeypatch.setattr(
+        "hmcpctl.cli_commands.virtualization.vnic.update_vnic_policy", operation
+    )
+
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "network",
+            "update-vnic-policy",
+            "system",
+            "lpar",
+            "4",
+            "--add-allowed-vlan-ids",
+            "none",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 2
+    operation.assert_not_awaited()
+
+
+def test_update_vnic_policy_cli_forwards_scalars_and_macs(monkeypatch):
+    operation = AsyncMock(return_value=_vnic_result("add"))
+    monkeypatch.setattr(
+        "hmcpctl.cli_commands.virtualization.vnic.update_vnic_policy", operation
+    )
+    monkeypatch.setattr(
+        "hmcpctl.cli_commands.virtualization.vnic.with_client",
+        lambda fn: asyncio.run(fn(object())),
+    )
+
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "network",
+            "update-vnic-policy",
+            "system",
+            "lpar",
+            "4",
+            "--no-auto-priority-failover",
+            "--add-allowed-os-mac-addrs",
+            "0a0b0c0d0e01,0a0b0c0d0e02",
+            "--ownership-override",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    kwargs = operation.await_args.kwargs
+    assert kwargs["auto_priority_failover"] is False
+    assert kwargs["add_allowed_os_mac_addrs"] == ["0a0b0c0d0e01", "0a0b0c0d0e02"]
+    assert kwargs["ownership_override"] is True
 
 
 # --------------------------------------------------------------------------- #

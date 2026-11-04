@@ -3366,7 +3366,72 @@ One REST session may have persisted until the HMC's own timeout: W1b's first
 recovery logoff. The raw journals stay private, and `scripts/live_test_evidence.py`
 has no route for them. None of this is product update support; that remains #1858.
 
-### Retained fixture prerequisite for vNIC source qualification
+### Public vNIC policy updater qualification (#1858)
+
+`hmcpctl network update-vnic-policy` (ADR 0332) offers one change per request and
+always submits the current `auto_priority_failover`. That pairing, and multi-member
+list additions, were not in the #1857 case set, so these cases run once through the
+CLI on an owned fixture before the updater is called qualified. Each step needs a
+root grant naming the exact commit; a stop below ends the window.
+
+1. Prepare one owned inactive fixture with the version-3 `prepare` packet, exactly
+   as in [the retained fixture prerequisite](#retained-fixture-prerequisite-for-vnic-source-qualification),
+   requiring READY/UNCHANGED, then PREPARED/RETAINED.
+2. Create vNIC 1 with `hmcpctl network add-vnic --yes --port-vlan-id 0
+   --pvid-priority 0 --no-auto-priority-failover --allowed-vlan-ids <A>
+   --allowed-os-mac-addrs <M1>` and its single backing, and read it with
+   `hmcpctl network list-vnics --json`.
+3. Run each case with `hmcpctl network update-vnic-policy --yes <system> <fixture>
+   <slot>` and the one option shown, keeping the printed JSON as the case's private
+   journal. Every case must report `submission` `completed`, `readback.status`
+   `verified`, `preservation` `unchanged` and the record shown:
+
+   | Case | Baseline | Option | Record |
+   |---|---|---|---|
+   | U1 | vNIC 1 | `--pvid-priority 5` | `pvid_priority=5,auto_priority_failover=0` |
+   | U2 | U1's result | `--add-allowed-vlan-ids <B>,<C>` | `auto_priority_failover=0,"allowed_vlan_ids+=<B>,<C>"` |
+   | U3 | U2's result | `--add-allowed-vlan-ids <D>` | `auto_priority_failover=0,allowed_vlan_ids+=<D>` |
+   | U4 | U3's result | `--add-allowed-os-mac-addrs <M2>,<M3>` | `auto_priority_failover=0,"allowed_os_mac_addrs+=<M2>,<M3>"` |
+   | U5 | U4's result | `--add-allowed-os-mac-addrs <M4>` | `auto_priority_failover=0,allowed_os_mac_addrs+=<M4>` |
+   | U6 | U5's result | `--auto-priority-failover` | `auto_priority_failover=1` |
+   | U7 | vNIC 2 | `--port-vlan-id <V>` | `port_vlan_id=<V>,auto_priority_failover=0` |
+
+   vNIC 2 is created like vNIC 1 but with `--allowed-vlan-ids none`, after vNIC 1 is
+   removed with `hmcpctl network remove-vnic --yes`.
+4. Remove vNIC 2 the same way, delete the fixture with the ownership-checked
+   inactive-only `hmcpctl lpars delete`, and run a witness fixture preflight and
+   recovery, which must return READY and UNCHANGED.
+
+Stop on any other case result, on any vNIC or partition the fixture does not own
+appearing in a read, and on any preflight drift. On a stop, keep the result, take a
+read-only `list-vnics`, and leave removal and fixture deletion to a separate grant,
+as #1856 and #1857 did. VLAN IDs, MAC addresses and the fixture's names are private
+operator values; the public record uses the tokens above.
+
+#### Recorded updater outcomes (#1858)
+
+The cases ran once each through the CLI on HMC V10R3 M1060, at commit
+`188b9fc34dfec9a5f9c83afb1f52aca99ac00353`, against one owned inactive fixture.
+Every case returned `submission` `completed`, `readback.status` `verified`,
+`preservation` `unchanged`, `changed` true and the exact record in the table above.
+U1–U5 kept `auto_priority_failover` at 0 through the explicit pair, and U4/U5 left
+U2/U3's VLAN additions in place.
+
+| Case | Outcome |
+|---|---|
+| U1–U6 (vNIC 1) | qualified |
+| U7 (vNIC 2) | qualified |
+
+Both vNICs were created and removed through `add-vnic` and `remove-vnic` with
+verified results, and the fixture was deleted through `hmcpctl lpars delete`. The
+first witness preflight returned READY but with a different baseline, and its
+recovery returned MANUAL_RECOVERY: the system's available CPU and memory and its
+hypervisor memory still carried the deleted fixture's 0.05 units and 512+32 MiB, and
+were moving during recovery. A fresh read-only witness a few minutes later returned
+READY and UNCHANGED at the pre-window baseline. A witness taken immediately after
+deleting a fixture can therefore see its allocation not yet released. The raw
+results stay private. Configuration readback is not traffic or failover evidence.
+
 
 The `vnic-creation-policy` named owner also accepts a separate version-3
 `vnic-source-fixture` packet. Its explicit action is `prepare` or `cleanup`.
