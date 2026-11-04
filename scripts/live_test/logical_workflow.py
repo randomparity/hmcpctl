@@ -165,7 +165,7 @@ async def _reconfigure(client: Client, state: RunState, run: lpar_power.Run) -> 
         wait_seconds=600,
     )
     state.record(SUBTASK, "hmc_reconfigure_lpar", st, data)
-    record = await _settle(client, state, request_id, lpar_power._plain(data))
+    record = await _settle(client, state, request_id, _operation_record(st, data))
     run.data["lpar.reconfigure"] = record
     result = (record or {}).get("result") or {}
     applied = {change.get("applied") for change in result.get("changes") or []}
@@ -202,7 +202,7 @@ async def _inspect(client: Client, state: RunState, run: lpar_power.Run) -> None
         "reports-the-owned-mapping",
         (resources.get("storage_source") or {}).get("status") == "ok"
         and any(
-            run.volume in map(str, mapping.values())
+            mapping.get("backing_device") == run.volume
             for mapping in resources.get("mappings") or []
         ),
     )
@@ -240,9 +240,7 @@ async def _power_cases(client: Client, state: RunState, run: lpar_power.Run) -> 
     op = "lpar.power"
     start = await _power(client, state, run, "start")
     run.hold(
-        op,
-        "start-completed-activated",
-        lpar_power._completed(start, lpar_power._ACTIVATED_STATES),
+        op, "start-completed-activated", _moved(start, lpar_power._ACTIVATED_STATES)
     )
     reached = await lpar_power._wait_for_state(
         client, state, run, run.p_uuid or "", lpar_power._FIRMWARE_STATES
@@ -256,12 +254,17 @@ async def _power_cases(client: Client, state: RunState, run: lpar_power.Run) -> 
         and all(current.get(key) == value for key, value in PATCH.items()),
     )
     stop = await _power(client, state, run, "stop")
-    run.hold(op, "stop-immediate-completed-not-activated", _completed_stop(stop))
+    run.hold(op, "stop-immediate-completed-not-activated", _moved(stop, _STOPPED))
     return run.holds(op, "stop-immediate-completed-not-activated")
 
 
-def _completed_stop(record: Mapping[str, Any] | None) -> bool:
-    return lpar_power._completed(record, _STOPPED)
+def _moved(record: Mapping[str, Any] | None, wanted: frozenset[str]) -> bool:
+    """Completed in *wanted* by a job of its own, not because it was already there."""
+    result = (record or {}).get("result") or {}
+    return (
+        lpar_power._completed(record, wanted)
+        and result.get("already_in_state") is False
+    )
 
 
 async def _workflow(client: Client, state: RunState, run: lpar_power.Run) -> None:
@@ -277,11 +280,16 @@ async def _workflow(client: Client, state: RunState, run: lpar_power.Run) -> Non
 
 async def _abandon_reconfigure(
     client: Client, state: RunState, run: lpar_power.Run
-) -> None:
-    request_id = run.data.get("reconfigure_request")
+) -> bool:
+    """Abandon a reconfigure left open; whether none is left open.
+
+    The engine refuses to abandon an operation still running, so only a terminal
+    answer counts.
+    """
     record = run.data.get("lpar.reconfigure")
-    if request_id is None or (record or {}).get("state") == "terminal":
-        return
+    if record is None or record.get("state") == "terminal":
+        return True
+    request_id = run.data["reconfigure_request"]
     st, data = await state.call(
         client,
         "hmc_reconfigure_lpar",
@@ -289,7 +297,15 @@ async def _abandon_reconfigure(
         continuation="abandon",
         wait_seconds=0,
     )
-    state.record(SUBTASK, f"hmc_reconfigure_lpar ({request_id} abandon)", st, data)
+    closed = (_operation_record(st, data) or {}).get("state") == "terminal"
+    state.record(
+        SUBTASK,
+        f"hmc_reconfigure_lpar ({request_id} abandon)",
+        "PASS" if closed else "FAIL",
+        data,
+        "" if closed else "MANUAL RECOVERY REQUIRED: the reconfigure is still open",
+    )
+    return closed
 
 
 async def _preconditions(
@@ -419,10 +435,11 @@ async def exercise_logical_workflow(client: Client, state: RunState) -> None:
         state.skip(SUBTASK, GROUP, ready)
         return
     state.record(SUBTASK, "system baseline", "PASS", lpar_power._baseline_data(ready))
+    closed = False
     try:
         await _workflow(client, state, run)
     finally:
-        await _abandon_reconfigure(client, state, run)
+        closed = await _abandon_reconfigure(client, state, run)
         await lpar_power._teardown(client, state, run)
     same = await lpar_power._compare(client, state, run, ready)
-    _observe(state, run, "passed" if run.clean and same else "failed")
+    _observe(state, run, "passed" if closed and run.clean and same else "failed")

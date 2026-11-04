@@ -152,7 +152,12 @@ class WorkflowWorld(World):
                 "storage_source": {"status": "ok", "tool": "hmc_list_vios"},
                 "vios": [{"uuid": arm.VIOS_UUID, "status": "ok"}],
                 "mappings": [
-                    {"backing": m["backing_name"]}
+                    {
+                        "vios_uuid": arm.VIOS_UUID,
+                        "type": "VirtualSCSIMapping",
+                        "uuid": "m",
+                        "backing_device": m["backing_name"],
+                    }
                     for m in self.mappings
                     if m["lpar_uuid"] == entry["uuid"]
                 ],
@@ -239,19 +244,40 @@ def test_a_clean_workflow_passes_every_operation_and_leaves_nothing(schemas):
     assert actions == ["start", "stop"]
 
 
-def test_the_workflow_itself_calls_only_primary_tools(schemas):
-    """Witness reads aside, no specialist choreography stands in for a workflow step."""
+#: The read-only tools the arm may call beside the workflow: its independent witnesses.
+WITNESSES = frozenset(
+    {
+        "hmc_list_vios",
+        "hmc_list_volume_groups",
+        "hmc_list_virtual_networks",
+        "hmc_list_storage_mappings",
+        "hmc_get_vios_storage_detail",
+        "hmc_get_lpar",
+        "hmc_get_lpar_state",
+        "hmc_get_lpar_description",
+        "hmc_list_adapters",
+        "hmc_run_command",
+    }
+)
+
+
+def test_a_clean_run_calls_only_workflow_tools_and_witness_reads(schemas):
+    """No specialist choreography stands in for a workflow step."""
     world = WorkflowWorld()
 
     _run(schemas, world)
 
-    mutating = set(world.tools()) & arm.MUTATIONS
-    assert mutating <= logical_workflow.WORKFLOW_TOOLS
-    assert mutating == {
-        "hmc_provision_lpar",
-        "hmc_power_lpar",
-        "hmc_decommission_lpar",
-    }
+    called = set(world.tools())
+    assert called - logical_workflow.WORKFLOW_TOOLS <= WITNESSES
+    # hmc_operation_status is polled only for an operation the call left running.
+    assert logical_workflow.WORKFLOW_TOOLS - {"hmc_operation_status"} <= called
+    commands = [kwargs["cmd"] for kwargs in world.calls_to("hmc_run_command")]
+    assert all(
+        cmd.split()[0] in {"lssyscfg", "lshwres", "viosvrcmd"} for cmd in commands
+    )
+    assert not any(
+        verb in cmd for cmd in commands for verb in ("chsyscfg", "chhwres", "rmsyscfg")
+    )
 
 
 def test_outside_its_group_it_calls_nothing(schemas):
@@ -343,12 +369,146 @@ def test_an_inspection_listing_only_a_foreign_mapping_fails_that_assertion(schem
     real = world._hmc_inspect_lpar
     world.overrides["hmc_inspect_lpar"] = lambda kwargs: {
         **(answer := real(kwargs)),
-        "resources": {**answer["resources"], "mappings": [{"backing": "lv_op"}]},
+        "resources": {**answer["resources"], "mappings": [{"backing_device": "lv_op"}]},
     }
 
     state = _run(schemas, world)
 
     assert "reports-the-owned-mapping" not in _held(state, "lpar.inspect")
+
+
+def _changes(world: WorkflowWorld, tool: str, change) -> None:
+    real = getattr(world, "_" + tool)
+    world.overrides[tool] = lambda kwargs: change(kwargs, real(kwargs))
+
+
+def _foreign_token(world: WorkflowWorld) -> None:
+    _changes(
+        world,
+        "hmc_get_lpar_description",
+        lambda kwargs, answer: answer.replace("lparpwr-", "lparcfg-"),
+    )
+
+
+def _left_running(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        world.partitions[kwargs["name"]]["state"] = "Open Firmware"
+        return answer
+
+    _changes(world, "hmc_provision_lpar", change)
+
+
+def _mapping_unlisted(world: WorkflowWorld) -> None:
+    world.overrides["hmc_list_storage_mappings"] = lambda kwargs: [
+        dict(item) for item in world.mappings if item["backing_name"] == "lv_op"
+    ]
+
+
+def _needs_attention(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        if kwargs.get("continuation") is None:
+            answer["operation"]["outcome"] = "needs_attention"
+        return answer
+
+    _changes(world, "hmc_provision_lpar", change)
+
+
+def _storage_unavailable(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        answer["resources"]["storage_source"] = {
+            "status": "unavailable",
+            "tool": "hmc_list_vios",
+        }
+        return answer
+
+    _changes(world, "hmc_inspect_lpar", change)
+
+
+def _start_already_running(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        if kwargs.get("action") == "start":
+            answer["result"]["already_in_state"] = True
+        return answer
+
+    _changes(world, "hmc_power_lpar", change)
+
+
+@pytest.mark.parametrize(
+    ("change", "operation", "assertion"),
+    [
+        (_foreign_token, "provision.lpar", "ownership-stamped"),
+        (_left_running, "provision.lpar", "left-not-activated"),
+        (_mapping_unlisted, "provision.lpar", "storage-mapping-listed"),
+        (_needs_attention, "provision.lpar", "workflow-completed"),
+        (_storage_unavailable, "lpar.inspect", "reports-the-owned-mapping"),
+        (_start_already_running, "lpar.power", "start-completed-activated"),
+    ],
+)
+def test_each_unmet_postcondition_fails_its_assertion(
+    schemas, change, operation, assertion
+):
+    world = WorkflowWorld()
+    change(world)
+
+    state = _run(schemas, world)
+
+    assert assertion not in _held(state, operation)
+    assert _results(state)[operation] == "failed"
+
+
+def test_the_stop_is_immediate_and_the_start_states_no_mode(schemas):
+    """A graceful stop needs RMC, which a partition with no OS never has."""
+    world = WorkflowWorld()
+
+    _run(schemas, world)
+
+    modes = {k["action"]: k.get("mode") for k in world.calls_to("hmc_power_lpar")}
+    assert modes == {"start": None, "stop": "immediate"}
+
+
+def test_a_refused_reconfigure_polls_nothing_and_abandons_nothing(schemas):
+    world = WorkflowWorld()
+    world.overrides["hmc_reconfigure_lpar"] = lambda kwargs: ValueError("refused")
+
+    state = _run(schemas, world)
+
+    assert "hmc_operation_status" not in world.tools()
+    assert len(world.calls_to("hmc_reconfigure_lpar")) == 1
+    assert _results(state)["lpar.reconfigure"] == "failed"
+    assert world.partitions == {}
+
+
+def test_a_paused_provision_is_abandoned_with_its_own_tool(schemas):
+    world = WorkflowWorld()
+    world.provision_fails_after_storage = True
+
+    _run(schemas, world)
+
+    abandons = [
+        kwargs
+        for kwargs in world.calls_to("hmc_provision_lpar")
+        if kwargs.get("continuation") == "abandon"
+    ]
+    assert len(abandons) == 1
+    assert "hmc_reconfigure_lpar" not in world.tools()
+
+
+def test_a_reconfigure_that_will_not_abandon_fails_the_cleanup(schemas):
+    world = WorkflowWorld()
+    world.reconfigure_state = "running"
+    real = world._hmc_reconfigure_lpar
+
+    def refuse_abandon(kwargs):
+        if kwargs.get("continuation") == "abandon":
+            return ValueError("operation is running; abandon is refused")
+        return real(kwargs)
+
+    world.overrides["hmc_reconfigure_lpar"] = refuse_abandon
+
+    state = _run(schemas, world)
+
+    (entry,) = [e for e in state.observations if e["operation"] == "provision.lpar"]
+    assert entry["observation"]["cleanup"] == "failed"
 
 
 def test_a_paused_stop_skips_the_decommission_and_teardown_removes_all(schemas):
