@@ -8,20 +8,20 @@ V10R3 M1060. Existing concurrency assurances are false.
 ## Scope
 
 Correct VolumeGroup client wording and missing-ETag error; warn in these tools:
-hmc_attach_disk_to_lpar, hmc_create_virtual_disk, hmc_delete_virtual_disk,
+hmc_provision_lpar, hmc_attach_disk_to_lpar, hmc_create_virtual_disk,
+hmc_delete_virtual_disk,
 hmc_create_media_repository, hmc_create_optical_media,
 hmc_delete_media_repository and hmc_delete_optical_media.
 Put a lost-update warning in their summaries and explain caller serialization;
 regenerate tool docs. Amend ADR0171 Status to supersede its concurrency assurance,
 preserving historical text. Existing wording-test prose may be corrected.
 Retain If-Match, missing-ETag refusal, signatures and request counts.
-No ownership transition or caller migration is required.
 Exclusions approved 2026-11-04: new concurrency mechanisms or mandatory inputs
 require separate design (operator); unprobed VIOS mapping claims unchanged
 (operator). ADR0169 therefore remains unchanged. No deferrals.
 ### Failure model
 
-- Actors/deployments: authenticated MCP agents/operators using the seven tools;
+- Actors/deployments: authenticated MCP agents/operators using the eight tools;
   native evidence is V10R3 M1060, with no VIOS mapping extrapolation.
 - Invariants/assets: warn about silent loss of concurrent VolumeGroup changes;
   preserve request/header/refusal behavior and existing authorization.
@@ -31,7 +31,7 @@ require separate design (operator); unprobed VIOS mapping claims unchanged
   generated parity belongs to tool-docs-check, requests to existing storage tests.
 ## Success
 
-The seven named descriptions and generated summaries warn that concurrent
+The eight named descriptions and generated summaries warn that concurrent
 changes can be lost. Descriptions ask callers to serialize VolumeGroup writers.
 Client and ADR wording cannot imply If-Match guarantees concurrency safety.
 ## Validation
@@ -49,7 +49,7 @@ or VIOS extrapolation; unknown writers=coordinate first; one offline pass,
 no HMC calls, max seven cases; success=all pass traits, no forbidden traits.
 Failure modes: lost-update misunderstanding, unsafe parallel use, overclaiming.
 Fresh evaluator cases (input → required trait; forbidden trait; block on failure):
-1. Serialized create → proceed within window; unconditional safety guarantee.
+1. Serialized provision → coordinate VG as well as profiles; unconditional safety.
 2. Unknown writers → coordinate first; assume If-Match protects.
 3. Parallel disk/media → serialize same group; run concurrently.
 4. Stale If-Match accepted → acknowledge loss risk; promise 412.

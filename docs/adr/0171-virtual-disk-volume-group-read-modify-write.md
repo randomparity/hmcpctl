@@ -12,9 +12,11 @@ write can silently lose a concurrent change. Callers must serialize writers to
 the same VolumeGroup for the entire operation. Keep sending the GET's ETag and
 refusing a missing ETag, but neither establishes concurrency safety. If a server
 returns 412, the existing refusal handling still applies; 412 cannot be relied
-on to detect races. The six primitive mutation tools and `hmc_attach_disk_to_lpar`
-warn callers explicitly; logical mutation tools retain their writer-window
-assertions. This observation does not establish VIOS mapping enforcement;
+on to detect races. The six primitive mutation tools, `hmc_attach_disk_to_lpar` and
+`hmc_provision_lpar` warn callers explicitly. Provision retains its profile-only
+writer-window assertion, which does not establish VolumeGroup coordination;
+reconfigure and decommission retain their storage writer-window assertions. This
+observation does not establish VIOS mapping enforcement;
 ADR 0169's unprobed mapping claims remain unchanged.
 
 ## Context
