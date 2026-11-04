@@ -35,6 +35,7 @@ from hmcpctl.server_tools.lpar.decommission import (
     DECOMMISSION_SECURITY,
     DECOMMISSION_TOOL_NAME,
 )
+from hmcpctl.server_tools.lpar.handoff import HANDOFF_SECURITY, HANDOFF_TOOL_NAME
 from hmcpctl.server_tools.lpar.inspect import INSPECT_SECURITY, INSPECT_TOOL_NAME
 from hmcpctl.server_tools.lpar.plan import PLAN_SECURITY, PLAN_TOOL_NAME
 from hmcpctl.server_tools.lpar.power import POWER_SECURITY, POWER_TOOL_NAME
@@ -104,6 +105,7 @@ TOOL_SECURITY: Mapping[str, ToolSecurity] = build_tool_security(
         PROVISION_TOOL_NAME: PROVISION_SECURITY,
         RECONFIGURE_TOOL_NAME: RECONFIGURE_SECURITY,
         INSPECT_TOOL_NAME: INSPECT_SECURITY,
+        HANDOFF_TOOL_NAME: HANDOFF_SECURITY,
     },
 )
 
@@ -119,7 +121,7 @@ PRIMARY_TOOLS: frozenset[str] = frozenset(
         DECOMMISSION_TOOL_NAME,
         POWER_TOOL_NAME,
         INSPECT_TOOL_NAME,
-        "hmc_prepare_host_handoff",
+        HANDOFF_TOOL_NAME,
         "hmc_operation_status",
         SEARCH_TOOL_NAME,
         INVOKE_TOOL_NAME,

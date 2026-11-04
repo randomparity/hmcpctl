@@ -231,7 +231,7 @@ def extract_source_units(topic_id: str, text: str) -> list[dict[str, object]]:
 
 def _bound_handlers() -> dict[str, Callable[..., object]]:
     """The handlers built only by a factory: gateway, inventory, plan, power, provision,
-    reconfigure, decommission, inspect."""
+    reconfigure, decommission, inspect, handoff."""
     from fastmcp import FastMCP
 
     from hmcpctl.server_tools.catalog import TOOL_SECURITY
@@ -244,6 +244,7 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
         DECOMMISSION_TOOL_NAME,
         decommission_handler,
     )
+    from hmcpctl.server_tools.lpar.handoff import HANDOFF_TOOL_NAME, handoff_handler
     from hmcpctl.server_tools.lpar.inspect import INSPECT_TOOL_NAME, inspect_handler
     from hmcpctl.server_tools.lpar.plan import PLAN_TOOL_NAME, plan_handler
     from hmcpctl.server_tools.lpar.power import POWER_TOOL_NAME, power_handler
@@ -277,6 +278,9 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
         TOOL_SECURITY, lambda _name: False, lambda *_args: None
     )
     handlers[INSPECT_TOOL_NAME] = inspect_handler(
+        TOOL_SECURITY, lambda _name: False, lambda *_args: None
+    )
+    handlers[HANDOFF_TOOL_NAME] = handoff_handler(
         TOOL_SECURITY, lambda _name: False, lambda *_args: None
     )
     return handlers

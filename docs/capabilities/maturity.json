@@ -6550,6 +6550,67 @@
         ]
       },
       "evidence": []
+    },
+    {
+      "operation": "lpar.prepare_host_handoff",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "prepare",
+            "parameters": [
+              {
+                "name": "hold",
+                "constraint": "true places the hold; false reports any existing hold"
+              },
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "PartitionName or UUID"
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "SystemName or UUID"
+              }
+            ]
+          },
+          {
+            "variant": "prepare-hold",
+            "parameters": [
+              {
+                "name": "consumer_label",
+                "constraint": "1-64 printable characters"
+              },
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "PartitionName or UUID"
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "SystemName or UUID"
+              }
+            ]
+          },
+          {
+            "variant": "release",
+            "parameters": [
+              {
+                "name": "hold_id",
+                "constraint": "the hold's id, or omitted when the placing agent releases"
+              },
+              {
+                "name": "lpar_name_or_uuid",
+                "constraint": "PartitionName or UUID"
+              },
+              {
+                "name": "system_name_or_uuid",
+                "constraint": "SystemName or UUID"
+              }
+            ]
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
     }
   ]
 }
