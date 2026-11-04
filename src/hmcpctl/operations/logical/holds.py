@@ -9,8 +9,10 @@ Refusals and listings never carry a ``hold_id``; :func:`place_hold` returns it t
 from __future__ import annotations
 
 import hmac
+import os
 import secrets
 import sqlite3
+import sys
 from dataclasses import dataclass
 
 from ...call_context import HOLD_EXEMPT_TOOLS, current_call
@@ -185,18 +187,16 @@ def release_hold(
 
 
 def _locatable() -> bool:
-    """Whether this host has a state directory; one with none can hold no partition.
+    """Whether this host can have a store; one on a platform with no default can hold nothing.
 
-    ADR 0190 Decision 1: with neither sentinel nor store the hold check finds no hold. Every
-    other store failure still refuses (ADR 0193 Decision 5).
+    ADR 0190 Decision 1: with neither sentinel nor store the hold check finds no hold. Only an
+    unset ``HMCPCTL_STATE_DIR`` on a platform with no default directory means that; a relative
+    override or an unresolvable home still refuses, so a misconfigured process cannot skip
+    holds another process placed (ADR 0193 Decision 5).
     """
-    try:
-        store.state_dir()
-    except OperationRefused as refused:
-        if refused.reason != "state_dir_unresolved":
-            raise
-        return False
-    return True
+    return bool(os.environ.get(store.STATE_DIR_ENV)) or sys.platform.startswith(
+        ("darwin", "linux")
+    )
 
 
 def find_hold(partition_uuid: str) -> Hold | None:

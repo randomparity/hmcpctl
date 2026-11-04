@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 import threading
 from contextlib import closing
 
@@ -312,10 +313,16 @@ def test_opening_a_schema_two_store_takes_no_write_lock():
         blocker.close()
 
 
-def test_a_host_with_no_state_directory_holds_nothing(monkeypatch):
-    def unresolved():
-        raise OperationRefused("state_dir_unresolved", "set HMCPCTL_STATE_DIR")
-
-    monkeypatch.setattr(store, "state_dir", unresolved)
+def test_a_platform_with_no_state_directory_holds_nothing(monkeypatch):
+    monkeypatch.delenv(store.STATE_DIR_ENV)
+    monkeypatch.setattr(sys, "platform", "win32")
     _enforce(CallContext("hmc_power_lpar", read=False, hold_id=None))
     assert holds.holds_present() is False
+
+
+@pytest.mark.parametrize("override", ["relative/state", "~/state"])
+def test_a_misconfigured_state_directory_refuses(monkeypatch, override):
+    monkeypatch.setenv(store.STATE_DIR_ENV, override)
+    assert _reason(
+        _enforce, CallContext("hmc_power_lpar", read=False, hold_id=None)
+    ) == ("state_dir_unresolved")

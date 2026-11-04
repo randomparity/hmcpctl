@@ -126,6 +126,9 @@ anything kdive-side, and fencing the library, other hosts, the GUI or direct HMC
      alone and so refuses more, never less.
    - While any hold exists, a name-addressed SSH mutation whose name cannot be resolved over REST
      (REST down, not found, ambiguous) is refused `partition_hold_unverified`: fail closed.
+   - A process with no `HMCPCTL_STATE_DIR` on a platform with no default state directory
+     can see no store, so it finds no hold (ADR 0190 Decision 1); a relative override or an
+     unresolvable home refuses instead.
    - Version skew: an hmcpctl older than this change refuses the upgraded store as
      `store_corrupt`; restart or upgrade it (ADR 0327 consequences, `docs/mcp-server.md`).
    - Restoring a backup or deleting the state directory drops holds placed since; the operator
