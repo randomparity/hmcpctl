@@ -624,7 +624,7 @@ async def test_provision_unknown_create_preserves_uncertainty_and_stops_legs(
     effect = record.effects[0]
     if exists:
         assert (effect.status, record.outcome) == ("uncertain", "needs_attention")
-        assert "inspect before retrying" in record.warnings[0]
+        assert record.warnings == ("HMCError: HTTP status unavailable",)
     else:
         assert (effect.status, record.outcome) == ("not_applied", "failed")
     create.assert_awaited_once()
