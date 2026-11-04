@@ -430,6 +430,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- `hmc_provision_lpar` with `power_on=false` now applies its saved `hmcpctl_` profile without
+  activating the partition (#1854, ADR 0331). Before, the partition's last-activated profile stayed
+  the creation profile, so `hmc_reconfigure_lpar` refused it under ADR 0314 Decision 2. A native
+  run found this. `hmc_reconfigure_lpar`'s description now states that refusal.
 - `report utilization` refuses to run while `HMC_CA_BUNDLE` or `HMC_TRUST_SYSTEM_STORE` is
   exported, as it already does for the other per-profile overrides. An exported value overrode
   every profile's own TLS trust setting, so profiles signed by a different CA failed as

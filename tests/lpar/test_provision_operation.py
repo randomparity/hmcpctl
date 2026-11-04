@@ -249,6 +249,21 @@ def test_default_profile_classifies_by_the_partition_setting(default, status):
     assert _classify(hmc, "default_profile", f"lpar:{LPAR}").status == status
 
 
+@pytest.mark.parametrize(
+    ("state", "last", "status"),
+    [
+        ("not activated", SAVED, "applied"),
+        ("not activated", "default_profile", "not_applied"),
+        ("open firmware", "default_profile", "needs_attention"),
+    ],
+)
+def test_the_saved_profile_apply_classifies_by_the_last_activated(state, last, status):
+    """ADR 0331: an apply is proven by LastActivatedProfile, never resubmitted blind."""
+    hmc = FakeHMC()
+    hmc.state, hmc.last_activated = state, last
+    assert _classify(hmc, "apply_saved", f"lpar:{LPAR}").status == status
+
+
 def _profile_element(*, vlan="100", vscsi=True, vnics=0, sriov=0, memory=512):
     from xml.etree import ElementTree as ET
 

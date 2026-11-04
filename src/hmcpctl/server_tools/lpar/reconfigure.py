@@ -108,6 +108,9 @@ def reconfigure_handler(
         ``profile`` (the partition is not activated; its profile and current
         configuration both hold it) or ``pending_activation`` (saved in the default
         profile only; it applies when ``result.activation``, the profile, is activated).
+        A partition whose last-activated profile is not its default profile is refused
+        before any write: a change to one would not persist through activation of the
+        other (ADR 0314 Decision 2).
         A change is live only when the partition is running, RMC is active, the value
         is inside the running minimum and maximum, and it is an increase or
         ``allow_disruption`` is true. A value outside the profile's minimum or maximum

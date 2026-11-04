@@ -24,6 +24,7 @@ from hmcpctl.operations.logical.models import OperationRecord
 from hmcpctl.server_tools.catalog import PRIMARY_TOOLS
 
 PATCH = logical_workflow.PATCH
+SAVED = "hmcpctl_000000000000"
 
 
 @pytest.fixture(scope="module")
@@ -92,6 +93,8 @@ class WorkflowWorld(World):
         self.start_applies_change = True
         self.inspected_state = None
         self.inspected_memory = None
+        # ADR 0331: provision applies its saved profile, so both name it.
+        self.last_activated = SAVED
 
     def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
         answer = super()._hmc_provision_lpar(kwargs)
@@ -174,7 +177,11 @@ class WorkflowWorld(World):
     def _hmc_get_lpar(self, kwargs: dict[str, Any]) -> Any:
         answer = super()._hmc_get_lpar(kwargs)
         entry = self.by_selector(kwargs["lpar_name_or_uuid"])
-        if entry is None or entry["state"] == "Not Activated":
+        if entry is None:
+            return answer
+        answer["Resource"]["DefaultProfileName"] = SAVED
+        answer["Resource"]["LastActivatedProfile"] = self.last_activated
+        if entry["state"] == "Not Activated":
             return answer
         r = entry["resources"]
         current = self.start_applies_change
@@ -436,6 +443,17 @@ def _start_already_running(world: WorkflowWorld) -> None:
     _changes(world, "hmc_power_lpar", change)
 
 
+def _last_is_the_creation_profile(world: WorkflowWorld) -> None:
+    world.last_activated = "default_profile"
+
+
+def _vscsi_adapter_gone(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        return [] if kwargs["adapter_type"] == "VirtualSCSIClientAdapter" else answer
+
+    _changes(world, "hmc_list_adapters", change)
+
+
 def _inspected_vcpus(world: WorkflowWorld) -> None:
     def change(kwargs, answer):
         answer["resources"]["desired_vcpus"] = 1
@@ -503,6 +521,8 @@ def _still_on_after_stop(world: WorkflowWorld) -> None:
             "lpar.power",
             "stop-immediate-completed-not-activated",
         ),
+        (_last_is_the_creation_profile, "provision.lpar", "last-activated-is-default"),
+        (_vscsi_adapter_gone, "provision.lpar", "adapters-after-apply"),
         (_inspected_vcpus, "lpar.inspect", "reports-the-change-inactive"),
         (_current_vcpus, "lpar.power", "started-with-the-change"),
         (_never_in_firmware, "lpar.power", "started-with-the-change"),

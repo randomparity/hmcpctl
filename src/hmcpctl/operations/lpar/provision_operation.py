@@ -23,6 +23,7 @@ from ...errors import HMCError
 from ...jobs import JobOutcome, job_identifier
 from ...resource_identity import resolve_system_uuid
 from ...ssh.affinity import MinimumAffinityPolicy
+from ...ssh.lpar import apply_lpar_profile_via_cli
 from ...ssh.refcodes import list_lpar_refcodes
 from ...ssh.selectors import resolve_ssh_names
 from ...ssh.transport import HMCCLIError
@@ -102,6 +103,8 @@ EFFECT_KINDS: Mapping[str, str] = {
     "dedicated": "lpar.pcie_assignments",
     "default_profile": "lpar.default_profile",
     "power_on": "lpar.power_on",
+    # ADR 0331: a run that does not power on applies its saved profile instead.
+    "apply_saved": "lpar.profile_apply",
     # Installer media (ADR 0319); the build is built media's (ADR 0324).
     "build": "media.iso_build",
     "upload": "vios.optical_media_upload",
@@ -123,6 +126,7 @@ STEP_NAMES: Mapping[str, str] = {
     "dedicated": "dedicated",
     "default_profile": "default_profile",
     "power_on": "power_on",
+    "apply_saved": "apply_saved_profile",
     "build": "build_media",
     "upload": "upload_media",
     "mount": "mount_media",
@@ -298,6 +302,10 @@ async def _partition_resource(hmc: HMCClient, lpar_uuid: str) -> Mapping[str, An
     return resource
 
 
+def _state(resource: Mapping[str, Any]) -> str:
+    return str(leaf_text(resource.get("PartitionState")) or "").strip().lower()
+
+
 def _agent(hmc: HMCClient) -> str:
     # stamp_lpar_ownership's own default when no agent id is configured.
     return hmc.config.agent_id or "hmcpctl"
@@ -385,6 +393,20 @@ def _mount_identity(vios_uuid: str, media_name: str, path: str) -> dict[str, Any
     }
 
 
+async def _root_disk_mapped(
+    hmc: HMCClient, request: ProvisionRequest, lpar_uuid: str
+) -> bool:
+    """Whether the request's root disk is still mapped to *lpar_uuid*."""
+    storage = request.storage
+    return any(
+        found.backing_name == storage.storage_name
+        and (found.lpar_uuid or "").lower() == lpar_uuid
+        for found in map(
+            storage_mapping, await hmc.list_storage_mappings(storage.vios_uuid)
+        )
+    )
+
+
 async def boot_devices(
     hmc: HMCClient, request: ProvisionRequest, lpar_uuid: str, optical_path: str
 ) -> list[str]:
@@ -457,7 +479,7 @@ async def boot_problem(
     """Why the partition is no longer as the run left it before power-on, or None
     (ADR 0191 Decision 1, ADR 0326 Decision 2)."""
     resource = await _partition_resource(hmc, lpar_uuid)
-    state = str(leaf_text(resource.get("PartitionState")) or "").strip().lower()
+    state = _state(resource)
     if state != "not activated":
         return f"the partition is {state or 'in an unread state'}, not powered off"
     vios = request.storage.vios_uuid.lower()
@@ -575,6 +597,15 @@ class _Run:
                 )
                 is not None
             )
+        elif completed:
+            completed = (
+                await self._leg(
+                    "apply_saved",
+                    f"lpar:{lpar_uuid}",
+                    lambda: self._write_apply(system_uuid, lpar_uuid),
+                )
+                is not None
+            )
         if completed:
             completed, warnings = await _run_affinity_stage(
                 self.steps, self.hmc, self.request
@@ -589,7 +620,7 @@ class _Run:
         if self.request.install is not None:
             tail = ["set_boot_order", *(_BOOT_STEPS if self._booting() else ())]
         else:
-            tail = ["power_on"] if self.request.power_on else []
+            tail = ["power_on" if self.request.power_on else "apply_saved_profile"]
         _skip_steps(self.steps, [*steps, *tail])
 
     async def _media(self, system_uuid: str, lpar_uuid: str) -> bool:
@@ -1210,6 +1241,47 @@ class _Run:
             f"the default profile of LPAR {lpar_uuid} is unconfirmed ({outcome.execution})"
         )
 
+    async def _write_apply(self, system_uuid: str, lpar_uuid: str) -> dict[str, Any]:
+        """Apply the saved profile without activation, then prove it (ADR 0331).
+
+        A partition never activated keeps its creation profile as last activated, and
+        ``hmc_reconfigure_lpar`` refuses a last-activated profile other than the
+        default (ADR 0314 Decision 2).
+        """
+        name = profile_name_for(self.ctx.operation_id)
+        resource = await _partition_resource(self.hmc, lpar_uuid)
+        state = _state(resource)
+        if state != "not activated":
+            raise HMCError(
+                f"LPAR {lpar_uuid} is {state or 'unreadable'}, not not activated: "
+                "its saved profile is not applied"
+            )
+        system_name, _ = await resolve_ssh_names(self.hmc, system_uuid, None)
+        lpar_name = str(leaf_text(resource.get("PartitionName")) or "")
+        if not system_name or not lpar_name:
+            raise HMCError(f"LPAR {lpar_uuid} or its system has no name to apply by")
+        await apply_lpar_profile_via_cli(
+            self.hmc.config, system_name, lpar_name, profile_name=name
+        )
+        resource = await _partition_resource(self.hmc, lpar_uuid)
+        profiles = {
+            leaf_text(resource.get(field))
+            for field in ("LastActivatedProfile", "DefaultProfileName")
+        }
+        if profiles != {name} or _state(resource) != "not activated":
+            raise HMCError(
+                f"LPAR {lpar_uuid} did not read back {name} as its default and "
+                "last-activated profile after the apply"
+            )
+        if not await _adapters_on_vlan(
+            self.hmc, lpar_uuid, self.request.adapters.port_vlan_id
+        ) or not await _root_disk_mapped(self.hmc, self.request, lpar_uuid):
+            raise HMCError(
+                f"LPAR {lpar_uuid} lost its network adapter or root disk mapping "
+                "after the apply"
+            )
+        return {"profile_name": name}
+
     async def _write_power(self, lpar_uuid: str, profile_uuid: str) -> dict[str, Any]:
         result = await _power_on(
             self.hmc,
@@ -1362,7 +1434,7 @@ def provision_classifiers(
     async def power_on(ctx: OperationContext, effect: EffectRecord) -> Classification:
         async with client_factory(ctx.connection) as hmc:
             resource = await _partition_resource(hmc, _target_uuid(effect))
-        state = str(leaf_text(resource.get("PartitionState")) or "").strip().lower()
+        state = _state(resource)
         if state not in ACTIVATED_STATES:
             return Classification(
                 "needs_attention",
@@ -1376,6 +1448,21 @@ def provision_classifiers(
                 reason="the partition is active from another profile; inspect, then abandon",
             )
         return Classification("applied", {"job_id": None})
+
+    async def apply_saved(
+        ctx: OperationContext, effect: EffectRecord
+    ) -> Classification:
+        name = profile_name_for(ctx.operation_id)
+        async with client_factory(ctx.connection) as hmc:
+            resource = await _partition_resource(hmc, _target_uuid(effect))
+        if leaf_text(resource.get("LastActivatedProfile")) == name:
+            return Classification("applied", {"profile_name": name})
+        if _state(resource) != "not activated":
+            return Classification(
+                "needs_attention",
+                reason="the partition is active from another profile; inspect, then abandon",
+            )
+        return Classification("not_applied")
 
     async def default_profile(
         ctx: OperationContext, effect: EffectRecord
@@ -1453,6 +1540,7 @@ def provision_classifiers(
         ),
         EFFECT_KINDS["default_profile"]: default_profile,
         EFFECT_KINDS["power_on"]: power_on,
+        EFFECT_KINDS["apply_saved"]: apply_saved,
         EFFECT_KINDS["build"]: build,
         EFFECT_KINDS["upload"]: upload,
         EFFECT_KINDS["mount"]: mount,

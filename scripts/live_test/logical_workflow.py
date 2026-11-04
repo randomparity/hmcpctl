@@ -17,9 +17,12 @@ import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from hmcpctl.xmlutil import leaf_text
+
 from . import lpar_config, lpar_power
 from .bare_cec import _power_operations_authorized
 from .observation import Assertion
+from .results import entries, resource
 from .results import field as result_field
 
 if TYPE_CHECKING:
@@ -140,7 +143,45 @@ async def _provision(client: Client, state: RunState, run: lpar_power.Run) -> bo
         "storage-mapping-listed",
         lpar_power._mapped(await lpar_power._mappings(client, state, run), run),
     )
+    # ADR 0331: the saved profile is the last-activated one, so reconfigure accepts it.
+    partition = lpar_config._section(
+        await lpar_power._get_lpar(client, state, run, run.p_uuid), ()
+    )
+    profiles = {
+        leaf_text(partition.get(name))
+        for name in ("LastActivatedProfile", "DefaultProfileName")
+    }
+    run.data["profiles_after_provision"] = sorted(map(str, profiles))
+    run.hold(
+        op,
+        "last-activated-is-default",
+        len(profiles) == 1 and str(profiles.pop() or "").startswith("hmcpctl_"),
+    )
+    run.hold(op, "adapters-after-apply", await _adapters_held(client, state, run))
     return run.holds(op, "workflow-completed")
+
+
+async def _adapters_held(client: Client, state: RunState, run: lpar_power.Run) -> bool:
+    """A client network adapter on the run VLAN and a vSCSI client adapter are listed."""
+    st, network = await state.call(
+        client,
+        "hmc_list_adapters",
+        lpar_name_or_uuid=run.p_uuid,
+        adapter_type="ClientNetworkAdapter",
+    )
+    vlans = {str(resource(item).get("PortVLANID")) for item in entries(network)}
+    st_scsi, scsi = await state.call(
+        client,
+        "hmc_list_adapters",
+        lpar_name_or_uuid=run.p_uuid,
+        adapter_type="VirtualSCSIClientAdapter",
+    )
+    return (
+        st == "PASS"
+        and str(run.vlan) in vlans
+        and st_scsi == "PASS"
+        and bool(entries(scsi))
+    )
 
 
 def _current(data: object) -> dict[str, Any]:
@@ -361,6 +402,8 @@ _ASSERTIONS: dict[str, tuple[str, ...]] = {
         "ownership-stamped",
         "left-not-activated",
         "storage-mapping-listed",
+        "last-activated-is-default",
+        "adapters-after-apply",
     ),
     "lpar.reconfigure": ("inactive-change-classified-profile",),
     "lpar.inspect": ("reports-the-change-inactive", "reports-the-owned-mapping"),

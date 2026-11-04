@@ -938,8 +938,10 @@ Live on V10R3 (2026-11-04, POWER9, VIOS 4.1.2.00):
 - **Result:** the eleven assertions of those commits held each time, recovery reported CLEAN,
   and the before and after reads were identical. Those commits still had an empty code set, a
   120-second wait and the assertion `refcodes-observed-without-boot-started-claim`.
-- **Not yet run:** the `boot_started` path, with the filled set, a 300-second wait and
-  `boot-wait-ended-truthfully`, has not run on hardware.
+- **`boot_started` path:** at commit `c34e8b6c` (2026-11-04, #1854), with the filled set and a
+  300-second wait, both runs ended `boot_started` on `CA00E105`. All eleven assertions held,
+  including `boot-wait-ended-truthfully`; recovery reported CLEAN, and the before and after
+  reads were identical.
 - **Refcodes:** both runs ended at `CA00E105`, about 130 seconds after power-on, and posted
   nothing after it while Running.
 - **Clock:** the refcode clock ran about 1 h 44 min ahead of the HMC's UTC `date`.
@@ -964,7 +966,9 @@ a partition on once.
   complete skips the decommission:
   1. Provision `hmcpctl-live-pwr-<8 hex>-p` with `power_on` false, on a new 1 GiB volume
      `lppwr<8 hex>` and the VLAN: `workflow-completed`, `ownership-stamped`,
-     `left-not-activated`, `storage-mapping-listed`.
+     `left-not-activated`, `storage-mapping-listed`, `last-activated-is-default` (provision
+     applied its saved profile, ADR 0331) and `adapters-after-apply` (a client network
+     adapter on the VLAN and a vSCSI client adapter are still listed).
   2. Reconfigure `{memory_mib: 3072, processors: 2}`; every change must read back
      `profile` (`inactive-change-classified-profile`).
   3. Inspect with `resources` and `rmc`: the partition reads Not Activated with the new
@@ -981,6 +985,13 @@ a partition on once.
      nothing, then `storage_cleanup=delete_owned` with its eight assertions.
 - **After.** An open reconfigure is abandoned with its own tool, then the lpar-power arm's
   teardown and baseline compare run. Recovery reads for it what it reads for subtask 41.
+
+Live on V10R3 (2026-11-04, POWER9) at commit `c34e8b6c`, before ADR 0331: provision passed,
+and reconfigure ended `failed` in phase `validating` with ADR 0314 Decision 2's refusal. The
+partition's last-activated profile was still the creation profile. Recovery reported CLEAN and
+the before and after reads were identical. A capture the same day showed that applying the saved
+profile without activation sets both `LastActivatedProfile` and `curr_profile` to it and keeps
+the adapters and mapping; ADR 0331 records it.
 
 ### The vg-if-match arm
 
