@@ -3166,7 +3166,8 @@ There is no supplied slot or command: the one created vNIC determines the target
 
 The `policy` object has exactly `pvid_priority`, `auto_priority_failover`,
 `allowed_vlan_ids` and `allowed_os_mac_addrs`: scalars must be explicit (including
-zero/false), and each list must contain exactly one valid finite member. No
+zero/false). For the six fixed cases each list must contain exactly one valid
+finite member; the `finite-update` case below has its own list rule. No
 `mac_addr` input is allowed; generated MAC is independently observed and preserved.
 `port_vlan_id` remains an explicit integer `0..4094`. The six fixed cases are
 `vlan-replace-all`, `vlan-replace-none`, `vlan-remove-last`, `mac-replace-all`,
@@ -3177,8 +3178,8 @@ After the usual preflight/digest binding, capture records B0, creates one fresh
 single-backing vNIC, independently verifies its singleton B1 baseline, and attempts
 one native update. B2 independently observes the selected raw policy and bounded
 preservation of the captured identity, MAC, backing/capacity and foreign inventory.
-Only acknowledged completion, literal expected `all`/`none` and unchanged
-preservation qualify the case. Clear means explicit `=none`, never reset or omitted
+For the six fixed cases, only acknowledged completion, literal expected
+`all`/`none` and unchanged preservation qualify the case. Clear means explicit `=none`, never reset or omitted
 policy; an empty, missing or malformed readback is unavailable, not positive `none`.
 Remove-last is a distinct hypothesis with the same literal `none` candidate oracle.
 
@@ -3222,9 +3223,44 @@ never paste it into an issue, PR or matrix. It cannot recover a previously lost 
 
 Output is labelled `vnic-update-source SOURCE ONLY`. Its private version-2 history
 carries `evidence_class=source-only`, never optional-policy verification credit.
-CLEAN establishes only the bounded stored-policy/history observations. All five
-parent adapter fields, later delta/two-list modes and the public updater remain
-#1828 work; `all` minus finite members still has no justified positive oracle.
+CLEAN establishes only the bounded stored-policy/history observations. The public
+updater remains #1858 work; `all` minus finite members still has no justified
+positive oracle.
+
+#### Finite update case (#1857)
+
+A version-2 packet with `case` `"finite-update"` adds one key, `update`. The six
+fixed cases reject that key. The
+[finite update design](workflow/specs/2026-11-04-vnic-finite-update-cases-design.md)
+defines the rules; the operator-facing summary is:
+
+- `policy` is the creation baseline. Scalars are explicit. Each list is a finite
+  nonempty list, `"all"` or `"none"`.
+- `update` is a nonempty list of `{"field", "operation", "value"}` actions, at
+  most one per field. `set` applies to `port_vlan_id` (0..4094), `pvid_priority`
+  (0..7) and `auto_priority_failover` (bool). `set`, `add` and `remove` apply to
+  `allowed_vlan_ids` and `allowed_os_mac_addrs`, with finite nonempty values.
+- The packet is refused before any effect when:
+  - a `set` repeats the baseline;
+  - a value is a sentinel;
+  - a list action meets a sentinel baseline;
+  - an `add` repeats a member;
+  - a `remove` names a member not present, or every member;
+  - two list values contain a comma.
+
+The harness derives one `chhwres -o s` record. Pairs follow the field order above,
+and any quoted list moves to the end. Policy verification compares each action
+field's canonical readback with its expected value: the set value, the union for
+`add`, or the remainder for `remove`. Preservation restores B1's cells in those
+fields and then requires B2 to equal B1. Budgets, removal, recovery and output
+labels are the version-2 ones.
+
+The planned case set is eleven packets, one window each, in the design's order. It
+exceeds the fixture's six source histories, so the fixture is removed with the
+ownership-checked inactive-only `hmcpctl lpars delete` afterwards. Remove a
+non-qualified case's captured slot with the ownership-checked
+`hmcpctl network remove-vnic` before the next case. The next preflight must
+reproduce the fixture baseline.
 
 #### Recorded source outcomes (#1856)
 
