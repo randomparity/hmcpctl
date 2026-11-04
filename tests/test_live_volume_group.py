@@ -628,16 +628,20 @@ async def test_the_probe_runs_between_create_and_cleanup(probing):
 
     assert seen == [1]  # after the create, before the reducevg
     assert len(mutations(fake)) == 2 and fake.groups == set(GROUPS)
-    assert "if-match-probe-answered" in observation(state)["assertions"]
+    assert "if-match-probe-decisive" in observation(state)["assertions"]
     assert observation(state)["result"] == "passed"
 
 
+@pytest.mark.parametrize(
+    "error",
+    [vg.HMCError("connection reset"), RuntimeError("unexpected"), KeyError("x")],
+)
 @pytest.mark.asyncio
-async def test_a_probe_that_cannot_ask_still_cleans_up(probing, monkeypatch):
+async def test_a_probe_that_cannot_ask_still_cleans_up(probing, monkeypatch, error):
     state, fake, _ = probing
 
     async def broken(*_args):
-        raise vg.HMCError("connection reset")
+        raise error
 
     monkeypatch.setattr(vg, "if_match_probe", broken)
 
@@ -659,4 +663,22 @@ async def test_the_storage_arm_never_probes(scratch, monkeypatch):
 
     await vg.exercise_volume_group(None, state)
 
-    assert "if-match-probe-answered" not in str(state.observations)
+    assert "if-match-probe-decisive" not in str(state.observations)
+
+
+@pytest.mark.parametrize("status", [400, 500, None])
+@pytest.mark.asyncio
+async def test_an_indecisive_answer_fails_the_probe_assertion(
+    probing, monkeypatch, status
+):
+    state, fake, _ = probing
+
+    async def answered(*_args):
+        return {"if_match": "never-matched", "status": status}
+
+    monkeypatch.setattr(vg, "if_match_probe", answered)
+
+    await vg.exercise_volume_group(None, state)
+
+    assert "if-match-probe-decisive" not in observation(state)["assertions"]
+    assert fake.groups == set(GROUPS)

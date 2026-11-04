@@ -128,16 +128,23 @@ console, nothing shows the distribution installer itself running.
      `resume` polls again without a second power-on.
    - The arm now passes 300 s.
 5. **VIOS 4.1.2.00** enters ADR 0194 D2's envelope as the observed VIOS level.
+6. **`If-Match` on a VolumeGroup write: not yet observed.** The `vg-if-match` window (grant #28)
+   stopped before any HMC contact, because the runner host had lost its route to the HMC. Until
+   it runs, hmcpctl's VolumeGroup writes keep sending `If-Match` without knowing whether the HMC
+   enforces it. VIOS (mapping) writes are not probed: no run-owned VIOS object exists to write.
 
 ## Consequences
 
+- The windows ran before the set was filled. The `boot_started` path itself, with a 300 s wait,
+  has not yet run on hardware; the next native run of either group exercises it.
 - `BOOT_STARTED_CODES` is `{"CA00E105"}`. ST72's wait assertion becomes
   `boot-wait-ended-truthfully`: `boot_started` on a set code, or `needs_attention` with the codes
   it saw.
 - Another firmware level, POWER10, or another HMC could post different codes. Adding one takes new
   native evidence, not this record's inference.
 - Each window powers a partition on the operator's assigned guest address. The test LPAR that
-  normally holds that address is never activated, so the two cannot be up at once.
+  normally holds that address is never activated, and the arm skips unless it reads Not
+  Activated, so the two cannot be up at once.
 
 ## Considered & rejected
 

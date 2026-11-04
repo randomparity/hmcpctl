@@ -75,6 +75,8 @@ class BootWorld(World):
         self.activated_profile = SAVED
         self.provisions: list[dict[str, Any]] = []
         self.stop_before_media = False
+        self.boundary_state = "not activated"
+        self.vios_level = "VIOS 4.1.0.00"
 
     def _hmc_run_command(self, kwargs: dict[str, Any]) -> Any:
         cmd = kwargs["cmd"]
@@ -84,10 +86,15 @@ class BootWorld(World):
         if cmd.endswith("-F slot_num") and "lpar_names=hmcpctl-live-pwr-" in cmd:
             return "2\n4\n" if self.optical else HMC_NO_RESULTS
         if cmd.endswith("-F os_version"):
-            return "VIOS 4.1.0.00"
+            return self.vios_level
         if cmd == "date":
             return "Tue Nov  3 12:00:00 UTC 2026"
         return super()._hmc_run_command(kwargs)
+
+    def _hmc_get_lpar_state(self, kwargs: dict[str, Any]) -> Any:
+        if kwargs["lpar_name_or_uuid"] == live_config.LiveTestConfig().lp3_name:
+            return self.boundary_state
+        return super()._hmc_get_lpar_state(kwargs)
 
     def _hmc_read_lpar_refcodes(self, kwargs: dict[str, Any]) -> Any:
         return [
@@ -515,3 +522,26 @@ def _ending(world: BootWorld, outcome: str, row: dict[str, Any]):
         return answer
 
     return respond
+
+
+def test_a_native_run_refuses_while_the_address_owner_is_active(schemas, tmp_path):
+    world = BootWorld()
+    world.boundary_state = "running"
+    config, _ = _native_config(tmp_path)
+
+    state = _run_native(schemas, world, config)
+
+    assert "hmc_provision_lpar" not in world.tools()
+    assert state.observations == []
+    assert any("would share its address" in str(row) for row in state.results)
+
+
+@pytest.mark.usefixtures("_short_window")
+def test_a_vios_level_that_is_not_one_fails_that_assertion(schemas, tmp_path):
+    world = BootWorld()
+    world.vios_level = "No results were found."
+    config, _ = _native_config(tmp_path)
+
+    state = _run_native(schemas, world, config)
+
+    assert "vios-level-read" not in _observation(state)["assertions"]

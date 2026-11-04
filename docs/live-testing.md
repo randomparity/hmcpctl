@@ -917,7 +917,8 @@ powers a partition on and puts a guest on the network.
   The result is the producer's `iso-chain-media-v1` output for an unbound build; the arm
   refuses it unless it names the group's profile and the configured MAC and describes the
   ISO's own SHA-256 and size. The launcher's network comes from that result, so its address
-  must be one the operator assigned and whose usual owner stays powered off.
+  must be one the operator assigned and whose usual owner stays powered off: the arm SKIPs
+  unless `LIVE_TEST_LPAR_NAME` reads Not Activated.
 - **Run.** The partition gets 6,656 MiB, the configured MAC and the producer's network, and
   boots that ISO. After the provision call it reads the VIOS's `os_version`, the HMC's `date`
   between two runner UTC reads, then up to 100 reference codes and the partition state every
@@ -931,8 +932,11 @@ powers a partition on and puts a guest on the network.
 Live on V10R3 (2026-11-04, POWER9, VIOS 4.1.2.00):
 - **Runs:** Ubuntu at commit `e2c31395` (grant #26) and Rocky at `62198c15` (grant #27). The boot
   arm is unchanged between them.
-- **Result:** all eleven assertions held each time, recovery reported CLEAN, and the before and
-  after reads were identical.
+- **Result:** the eleven assertions of those commits held each time, recovery reported CLEAN,
+  and the before and after reads were identical. Those commits still had an empty code set, a
+  120-second wait and the assertion `refcodes-observed-without-boot-started-claim`.
+- **Not yet run:** the `boot_started` path, with the filled set, a 300-second wait and
+  `boot-wait-ended-truthfully`, has not run on hardware.
 - **Refcodes:** both runs ended at `CA00E105`, about 130 seconds after power-on, and posted
   nothing after it while Running.
 - **Clock:** the refcode clock ran about 1 h 44 min ahead of the HMC's UTC `date`.
@@ -951,8 +955,9 @@ own operator authorization naming the physical volume.
   group and POSTs the same body back through hmcpctl's own VolumeGroup write, with an
   `If-Match` that no ETag ever had (`"stale-<16 hex>"`). Only the HTTP status is kept, plus the
   `<Message>` and REST/HSCL codes of an error body.
-- **Assertions.** ST42's four, plus `if-match-probe-answered`. A probe that cannot ask fails
-  that assertion and still cleans up.
+- **Assertions.** ST42's four, plus `if-match-probe-decisive`: the POST answered 412 or
+  succeeded. Any other answer, or a probe that cannot ask, fails that assertion and still
+  cleans up.
 - **After.** ST42's guarded `reducevg` removes the group, and its PV and group snapshots must
   equal the pre-run ones. Recovery witnesses it as subtask 42.
 

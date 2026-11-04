@@ -251,12 +251,14 @@ class _Scenario:
             if config is None:
                 raise ValueError("no HMC configuration for a direct REST client")
             probe = await if_match_probe(config, self.vios, self.group)
-        except (HMCError, OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - any failure must still reach cleanup
+            # Not BaseException: an interrupt still stops the run, as everywhere else.
             self.state.record(
                 SUBTASK, "If-Match probe", "FAIL", None, f"{type(exc).__name__}"
             )
             return {}
-        answered = isinstance(probe.get("status"), int) or probe.get("status") == "2xx"
+        # Only a 412 or a success says whether If-Match is enforced.
+        answered = probe.get("status") in (412, "2xx")
         self.state.record(
             SUBTASK, "If-Match probe", "PASS" if answered else "FAIL", probe
         )
@@ -306,7 +308,7 @@ class _Scenario:
                     Assertion("vios-group-listed", vios_listed),
                     Assertion("selected-pv-only", selected_only),
                     *(
-                        [Assertion("if-match-probe-answered", "status" in probe)]
+                        [Assertion("if-match-probe-decisive", "status" in probe)]
                         if self.state.group == IF_MATCH_GROUP
                         else []
                     ),

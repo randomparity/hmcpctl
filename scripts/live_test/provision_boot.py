@@ -20,6 +20,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import re
 import shlex
 import time
 import uuid
@@ -393,7 +394,12 @@ async def _record_window(
         await asyncio.sleep(_RECORD_DELAY_S)
     clocks.append(await _clock(client, state))
     run.data.update(hmc_clock=clocks, refcode_reads=reads)
-    run.hold("provision.lpar", "vios-level-read", bool(run.data["vios_level"]))
+    level = run.data["vios_level"]
+    run.hold(
+        "provision.lpar",
+        "vios-level-read",
+        isinstance(level, str) and re.fullmatch(r"VIOS \d+(\.\d+)+", level) is not None,
+    )
     run.hold("provision.lpar", "hmc-clock-read", all(c["hmc"] for c in clocks))
     run.hold(
         "provision.lpar",
@@ -546,6 +552,14 @@ async def _preconditions(
         return lpar_power.PROVISION_WINDOW_SKIP
     if not _power_operations_authorized():
         return "HMC_AUTHORIZE_POWER_OPERATIONS is off"
+    if state.group in NATIVE_GROUPS:
+        # The guest takes the address the test partition normally holds (ADR 0328).
+        owner = await lpar_power._lpar_state(client, state, run, state.config.lp3_name)
+        if owner != lpar_power._NOT_ACTIVATED:
+            return (
+                f"the test partition {state.config.lp3_name!r} reads {owner!r}, not "
+                "Not Activated: the native guest would share its address"
+            )
     why = await lpar_power._find_vios(client, state, run) or (
         await lpar_power._vlan_refusal(client, state, run)
     )
