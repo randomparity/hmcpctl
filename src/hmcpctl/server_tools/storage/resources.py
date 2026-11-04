@@ -136,7 +136,7 @@ def hmc_attach_disk_to_lpar(
     system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
 ) -> AttachDiskResult:
-    """Create and attach a virtual disk to an existing LPAR.
+    """Create and attach a virtual disk; concurrent VolumeGroup changes can be lost.
 
     Validates the LPAR and volume group before mutation. The execution order is
     create disk, then map it; the mapping makes the HMC create the vSCSI
@@ -146,6 +146,10 @@ def hmc_attach_disk_to_lpar(
     ``change_location`` on a real run: the partition's ``CurrentProfileSync``
     and whether the mapping also reaches its current profile; null, with a
     warning, when the read fails.
+
+    This writes the whole VolumeGroup. The HMC may ignore If-Match (observed
+    on V10R3 M1060), so callers must serialize writers to the same VolumeGroup
+    for the entire operation; the header does not guarantee concurrency safety.
 
     Args:
         lpar_name_or_uuid: Target partition name or UUID.
@@ -183,11 +187,15 @@ def hmc_create_virtual_disk(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Create a Virtual Disk (logical volume) inside a Volume Group.
+    """Create a virtual disk (logical volume); concurrent VolumeGroup changes can be lost.
 
     The disk becomes backing storage that you
     then attach to an LPAR with hmc_map_storage_to_lpar (storage_kind
     'VirtualDisk'). Find vg_uuid with hmc_list_volume_groups.
+
+    This writes the whole VolumeGroup. The HMC may ignore If-Match (observed
+    on V10R3 M1060), so callers must serialize writers to the same VolumeGroup
+    for the entire operation; the header does not guarantee concurrency safety.
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.
@@ -224,10 +232,14 @@ def hmc_delete_virtual_disk(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Delete a Virtual Disk from a Volume Group.
+    """Delete a virtual disk (logical volume); concurrent VolumeGroup changes can be lost.
 
     Validates that the disk is not mapped to any LPAR before deletion.
     Raises an error if the disk is in use; otherwise deletes the disk.
+
+    This writes the whole VolumeGroup. The HMC may ignore If-Match (observed
+    on V10R3 M1060), so callers must serialize writers to the same VolumeGroup
+    for the entire operation; the header does not guarantee concurrency safety.
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.
@@ -314,11 +326,15 @@ def hmc_create_media_repository(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Create the Virtual Media Repository (named VMLibrary) on a Volume Group.
+    """Create a media repository; concurrent VolumeGroup changes can be lost.
 
-    The repository holds file-backed ISO images for client partitions; only one
+    The repository (named VMLibrary) holds file-backed ISO images; only one
     can exist per VIOS. size_mib is MiB; the HMC's RepositorySize is GiB, so
     size_mib must be a multiple of 1024 and is sent as size_mib / 1024.
+
+    This writes the whole VolumeGroup. The HMC may ignore If-Match (observed
+    on V10R3 M1060), so callers must serialize writers to the same VolumeGroup
+    for the entire operation; the header does not guarantee concurrency safety.
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.
@@ -354,11 +370,15 @@ def hmc_create_optical_media(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    """Create a blank VirtualOpticalMedia (ISO container) in the media repository.
+    """Create blank optical media; concurrent VolumeGroup changes can be lost.
 
     Only blank media can be created via the API; media_name is the file name
     (e.g. 'aix.iso'). size_mib is MiB; the HMC's media Size is GiB, so
     size_mib must be a multiple of 1024 and is sent as size_mib / 1024.
+
+    This writes the whole VolumeGroup. The HMC may ignore If-Match (observed
+    on V10R3 M1060), so callers must serialize writers to the same VolumeGroup
+    for the entire operation; the header does not guarantee concurrency safety.
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.
@@ -394,10 +414,14 @@ def hmc_delete_media_repository(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> str:
-    """Delete the Virtual Media Repository from a Volume Group.
+    """Delete a media repository; concurrent VolumeGroup changes can be lost.
 
     This is an immediate (synchronous) delete — it returns a confirmation
     string once the HMC has applied the change; there is no job to poll.
+
+    This writes the whole VolumeGroup. The HMC may ignore If-Match (observed
+    on V10R3 M1060), so callers must serialize writers to the same VolumeGroup
+    for the entire operation; the header does not guarantee concurrency safety.
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.
@@ -423,10 +447,14 @@ def hmc_delete_optical_media(
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> str:
-    """Delete a VirtualOpticalMedia (ISO image) from the media repository.
+    """Delete optical media (ISO image); concurrent VolumeGroup changes can be lost.
 
     Refuses deletion if the media is currently mounted to any LPAR. Unmount
     all references first.
+
+    This writes the whole VolumeGroup. The HMC may ignore If-Match (observed
+    on V10R3 M1060), so callers must serialize writers to the same VolumeGroup
+    for the entire operation; the header does not guarantee concurrency safety.
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID from ``hmc_list_vios``.

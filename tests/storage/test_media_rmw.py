@@ -1,8 +1,9 @@
-"""Media-repository VolumeGroup writes are conditioned on the GET's ETag (#996, ADR 0171).
+"""Media-repository VolumeGroup writes send the GET's ETag (#996, ADR 0171).
 
 Each of the four media writes GETs the whole VolumeGroup and POSTs it back. Like the
 virtual-disk writes, the POST carries If-Match set to the GET's ETag, a GET without one
-refuses before any POST, and a 412 is the concurrent-change error with nothing written.
+refuses before any POST, and a returned 412 is handled as a refusal. The HMC may
+ignore If-Match, so these request checks do not prove concurrency protection.
 """
 
 import re
