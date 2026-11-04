@@ -35,7 +35,7 @@ def main(args: list[str] | None = None) -> None:
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="list every exposed tool after the handshake",
+        help="list the tools tools/list carries (the primary catalog) after the handshake",
     )
     parsed_args = parser.parse_args(args)
     asyncio.run(_run_smoke(parsed_args.verbose))

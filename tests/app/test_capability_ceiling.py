@@ -1226,7 +1226,8 @@ def test_the_instructions_shipped_at_initialize_recommend_no_withheld_tool():
     assert {"hmc_search_tools", "hmc_invoke_tool"} <= _indexed_names(withheld_list)
     # The correction cannot recommend a tool this very policy shape withholds.
     assert PERMISSIONS_TOOL_NAME not in correction
-    assert "hmc_search_tools finds the rest it exposes" in correction
+    assert "finds the rest" not in correction
+    assert "callable only by a client that knows their names" in correction
 
 
 def test_a_legacy_ceiling_ships_the_instructions_unqualified():

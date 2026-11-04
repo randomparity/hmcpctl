@@ -29,10 +29,11 @@ In:
    keeps the addressing, ownership and `HMC_AGENT_ID` paragraphs. Every `hmc_*` name it
    mentions must be registered (existing `_mentioned_tools` intersection), and the only
    non-primary names it may mention are named as invoke targets. `ceiling_aware_instructions`
-   wording changes from "absent from `tools/list` and cannot be called" to "cannot be called,
-   by name or through `hmc_invoke_tool`", and its closing sentence from "`tools/list` is the
+   wording changes from "absent from `tools/list` and cannot be called" to "cannot be called
+   by any route", and its closing sentence from "`tools/list` is the
    authoritative set of what this server exposes" to "`tools/list` lists this server's primary
-   tools; `hmc_search_tools` finds the rest it exposes". The `_initialize` tests in
+   tools; `hmc_search_tools` finds the rest it exposes" (or, when the policy withholds search,
+   that the rest are callable only by known name). The `_initialize` tests in
    `tests/app/test_capability_ceiling.py` are re-decided against this text, not recomposed as
    `registered`.
 3. **Harness compositions.** Callers that need specialist schemas compose with

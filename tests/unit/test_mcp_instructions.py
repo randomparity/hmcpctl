@@ -138,5 +138,21 @@ def test_the_inspection_tool_is_recommended_only_when_the_policy_grants_it():
     assert "Call hmc_effective_permissions" in granted
     assert "hmc_effective_permissions" not in withheld
     for qualified in (granted, withheld):
-        assert "cannot be called, by name or through hmc_invoke_tool" in qualified
-        assert "hmc_search_tools finds the rest it exposes" in qualified
+        assert "cannot be called by any route" in qualified
+
+
+def test_search_is_recommended_only_when_the_policy_grants_it():
+    """ADR 0330: the correction never sends a client to a search it withholds."""
+    granted = ceiling_aware_instructions(
+        lambda name: name == "hmc_search_tools", ["hmc_inventory", "hmc_search_tools"]
+    )
+    withheld = ceiling_aware_instructions(
+        lambda _name: False, ["hmc_inventory", "hmc_search_tools"]
+    )
+
+    assert (
+        "hmc_search_tools finds the rest it exposes"
+        in granted.split(CEILING_HEADING)[1]
+    )
+    assert "finds the rest" not in withheld.split(CEILING_HEADING)[1]
+    assert "callable only by a client that knows their names" in withheld

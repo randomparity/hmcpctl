@@ -122,7 +122,7 @@ test-verbose:
 smoke:
     uv run --no-sync python scripts/smoke_mcp.py
 
-# MCP stdio handshake with the full exposed tool registry
+# MCP stdio handshake listing the tools a client's tools/list carries
 smoke-verbose:
     uv run --no-sync python scripts/smoke_mcp.py --verbose
 

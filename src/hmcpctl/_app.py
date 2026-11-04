@@ -172,14 +172,18 @@ def ceiling_aware_instructions(
         if permits("hmc_effective_permissions")
         else ""
     )
+    rest = (
+        "hmc_search_tools finds the rest it exposes."
+        if permits("hmc_search_tools")
+        else "the rest it exposes are callable only by a client that knows their names."
+    )
     return (
         f"{INSTRUCTIONS}\n\n{CEILING_HEADING}\n\n"
         "The guidance above is written for the full tool set. This server's access "
         "policy withholds these tools it names: "
-        f"{', '.join(withheld)}. They cannot be called, by name or through "
-        "hmc_invoke_tool, so disregard any recommendation above to use one. "
-        "`tools/list` lists this server's primary tools; hmc_search_tools finds the "
-        f"rest it exposes.{inspect}"
+        f"{', '.join(withheld)}. They cannot be called by any route, so disregard "
+        "any recommendation above to use one. `tools/list` lists this server's "
+        f"primary tools; {rest}{inspect}"
     )
 
 
