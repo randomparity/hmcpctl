@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed, 2026-11-04 (#1858). Native qualification cases U1–U7 in
-`docs/live-testing.md` gate acceptance.
+Accepted, 2026-11-04 (#1858). Native cases U1–U7 qualified every record shape at
+`188b9fc3` on HMC V10R3 M1060; see "Recorded updater outcomes (#1858)" in
+`docs/live-testing.md`.
 
 ## Context
 
@@ -62,8 +63,8 @@ mutations, which is the environment the evidence came from. Every mode beyond
 those listed stays unoffered until a native run qualifies it; widening one is a
 code change, not a configuration choice. Pairing a change with the preserving
 `auto_priority_failover`, and multi-member adds, were not in #1857's set; the #1858
-native cases U1–U7 in `docs/live-testing.md` exercise each of the five shapes,
-bare and quoted, before merge. A concurrent writer between the baseline read and the
+native cases U1–U7 in `docs/live-testing.md` qualified each of the five shapes,
+bare and quoted. The ledger row stays `unevidenced`: promotion is out of scope. A concurrent writer between the baseline read and the
 submission can have its `auto_priority_failover` change overwritten; preservation
 then reports drift only for cells the update did not target.
 
