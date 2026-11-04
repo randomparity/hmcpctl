@@ -11,8 +11,10 @@ lifecycle, recovery and removal rules hold unless this document changes them.
 The six version-2 cases tested only the `all`/`none` sentinels and removal of the
 last member. #1856 ran them on HMC V10R3 M1060. On an existing vNIC the sentinels
 were rejected, and removing the last VLAN or MAC member was refused (`HSCLAB1F`,
-`HSCLAB20`). Creation with a nonzero port VLAN ID and a finite VLAN list was
-refused (`HSCL12E9`). Nothing has tested an update of `port_vlan_id`,
+`HSCLAB20`). Creation with port VLAN ID 1 and a singleton VLAN list was refused
+with `HSCL12E9 The SR-IOV physical port supports only the Deny all VLAN ID
+restriction when a port VLAN ID is specified` (#1856 run record on the issue).
+Read literally, a nonzero port VLAN ID requires `allowed_vlan_ids=none`. Nothing has tested an update of `port_vlan_id`,
 `pvid_priority` or `auto_priority_failover`, a finite replacement, a finite add
 (`+=`) or remove (`-=`), or two lists in one submission. #1858's updater may offer
 only modes that a native run qualified.
@@ -31,8 +33,8 @@ A `finite-update` packet has the 20 version-2 keys plus `update`. Version-2 chec
 apply as before, except for the `policy` list rule below.
 
 `policy` is the creation baseline. `pvid_priority` and `auto_priority_failover`
-must be explicit. Each list is a finite nonempty list or `"all"`. `"none"` is
-refused, and so is `mac_addr`.
+must be explicit. Each list is a finite nonempty list, `"all"` or `"none"`.
+`mac_addr` is refused.
 
 `update` is a list of one to five actions, with at most one action per field. Each
 action is exactly `{"field", "operation", "value"}`:
@@ -48,16 +50,16 @@ The packet is refused before any effect in each of these cases:
 
 - `set` gives the field's baseline value. A no-op cannot be told apart from an
   ignored update.
-- `add` or `remove` targets a baseline of `"all"`. This keeps `all` minus finite
-  members, and every other sentinel delta, unqualified.
+- `add` or `remove` targets a baseline of `"all"` or `"none"`. This keeps `all`
+  minus finite members, and every other sentinel delta, unqualified.
 - `add` repeats a baseline member.
 - `remove` names a member the baseline lacks, or names every member. Removing the
   last member is already known to be refused.
 - A value is `"all"` or `"none"`. The sentinels are creation-only on the observed
   HMC.
 
-Starting a `set` from an `"all"` baseline is allowed. That is a replacement, not a
-delta.
+Starting a `set` from a sentinel baseline is allowed. That is a replacement, not
+a delta.
 
 ### Native record
 
@@ -71,10 +73,13 @@ The record is built with `build_attribute_record`. The list attributes, with and
 without the suffixes, are quotable, and `allow_nontrailing_quoted=True` is passed.
 The retained command reference shows this exact form for an existing vNIC,
 `"allowed_vlan_ids+=10,20,30",pvid_priority=5`
-(`docs/refs/hmc-commands-p11/commands/chhwres.md:292`). vNIC creation already
-sends quoted lists that are not last (ADR 0311). The shared builder and every
-other caller are unchanged. The record stays inside the existing update token and
-shell quoting.
+(`docs/refs/hmc-commands-p11/commands/chhwres.md:292`). That is source support,
+not native evidence. ADR 0311 limits the opt-in to typed vNIC creation; the ADR
+0312 amendment extends it to this source-only harness and nowhere else. The
+builder's docstring still names only creation; correcting it is outside this
+change's surface and is reported as a follow-up. The shared builder's code and
+every other caller are unchanged. The record stays inside the existing update
+token and shell quoting.
 
 ### Oracle and axes
 
@@ -119,32 +124,39 @@ history labelled `finite-update` and edited by hand cannot produce `CLEAN`.
 
 Physical budgets and suffix reserves are unchanged, because the case still makes
 one create, one update and one remove. The fixture's limit of six source histories
-is unchanged. A sequence of more than six cases, or one that contains a non-CLEAN
-history, removes the fixture through the ownership-checked inactive-only
-`hmcpctl lpars delete`, as #1856 did.
+is unchanged. The eleven-case set exceeds it, so the fixture is removed through
+the ownership-checked inactive-only `hmcpctl lpars delete`, as #1856 did. Splitting
+the set across two fixtures would restore version-3 cleanup but costs a second
+prepare window and still fails on any non-qualified case.
 
 ### Live case set
 
-Each row is one packet and one admitted window, run in this order. Every baseline
-has `port_vlan_id=0` and explicit scalars. VLAN IDs `A`..`C` and MAC addresses
+Each row is one packet and one window, run in this order. Root may admit the
+sequence in one grant, but each case still binds its own packet, preflight and
+recovery. A non-qualified case (refused or unresolved) leaves its captured vNIC.
+The operator removes that slot through the ownership-checked
+`hmcpctl network remove-vnic` before the next case, and the next preflight must
+reproduce the fixture baseline. Every baseline has `port_vlan_id=0` and explicit
+scalars. VLAN IDs `A`..`C` and MAC addresses
 `M1`..`M3` are private operator values.
 
 | # | Baseline lists | Actions | Hypothesis |
 | --- | --- | --- | --- |
 | 1 | VLAN {A}, MAC {M1} | `pvid_priority` set to a different value | qualified |
 | 2 | VLAN {A}, MAC {M1} | `auto_priority_failover` set to the opposite | qualified |
-| 3 | VLAN `all`, MAC {M1} | `port_vlan_id` set to a nonzero value | qualified |
+| 3 | VLAN `none`, MAC {M1} | `port_vlan_id` set to a nonzero value | qualified, per the `HSCL12E9` text |
 | 4 | VLAN {A}, MAC {M1} | VLAN set to {B, C} | qualified |
 | 5 | VLAN {A}, MAC {M1} | VLAN add {B} | qualified |
 | 6 | VLAN {A, B}, MAC {M1} | VLAN remove {B} | qualified |
 | 7 | VLAN {A}, MAC {M1} | MAC set to {M2, M3} | qualified |
 | 8 | VLAN {A}, MAC {M1} | MAC add {M2} | qualified |
 | 9 | VLAN {A}, MAC {M1, M2} | MAC remove {M2} | qualified |
-| 10 | VLAN {A}, MAC {M1, M2} | VLAN add {B} and MAC remove {M2}, in one record | qualified |
+| 10 | VLAN {A}, MAC {M1, M2} | VLAN add {B, C} and MAC remove {M2}, in one record whose first list pair is quoted and not last | qualified |
 | 11 | VLAN {A}, MAC {M1} | `port_vlan_id` set to a nonzero value | refused, like creation's `HSCL12E9` |
 
-Case 11 runs last because its expected residue disarms the fixture cleanup. The
-outcome recorded is whatever the HMC returns. A hypothesis is never a result.
+Case 11 checks the constraint on an update. Any case's outcome is recorded as the
+HMC returns it; a hypothesis is never a result.
+
 
 ## Failure model
 
@@ -175,7 +187,9 @@ outcome recorded is whatever the HMC returns. A hypothesis is never a result.
   - multi-backing #638;
   - profile CRUD #1724/#637;
   - the evidence-script route for source journals, a follow-up already reported
-    by #1856.
+    by #1856;
+  - the `build_attribute_record` docstring naming only creation, a reported
+    follow-up.
 
 ## Threat model
 
@@ -208,7 +222,7 @@ outcome recorded is whatever the HMC returns. A hypothesis is never a result.
   arms removal. A forged `finite-update` history never recovers as `CLEAN`.
 - The six existing cases, version 1 and version 3 keep their behaviour, and their
   existing tests pass unchanged.
-- The native case set runs under separate grants. Its public-safe outcomes are
+- The native case set runs in root-admitted windows, one packet per case. Its public-safe outcomes are
   recorded in `docs/live-testing.md` and ADR 0312.
 
 ## Validation

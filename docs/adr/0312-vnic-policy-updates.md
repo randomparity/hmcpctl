@@ -15,7 +15,7 @@ implemented with offline boundary proof and independent product/security review 
 On 2026-11-04, #1856 amended the fixture's hypervisor-memory refusal policy
 from one fixed value to a bound, as an operator-approved run-exposed correction.
 On 2026-11-04, #1857 added the version-2 `finite-update` case for scalar and
-finite list-mode updates; its native outcomes are recorded under Consequences.
+finite list-mode updates; its native outcomes are to be recorded under Consequences.
 
 ## Context
 
@@ -81,19 +81,24 @@ the record and the oracle from the packet. It refuses before any effect:
 
 - a no-op `set`;
 - any sentinel value;
-- a delta on an `all` baseline;
+- a delta on an `all` or `none` baseline;
 - an `add` that repeats a member;
 - a `remove` that names a member not present, or every member.
 
-So `all` minus finite members stays unqualified. The record may carry quoted lists
-that are not its last pair, the form the retained reference shows for an existing
-vNIC. List oracles compare canonical members, not raw order. The six earlier cases
-are unchanged. See the
+So `all` minus finite members stays unqualified. A `set` may start from a
+sentinel baseline. The record may carry quoted lists that are not its last pair.
+That form is shown for an existing vNIC by the retained reference
+(`docs/refs/hmc-commands-p11/commands/chhwres.md:292`). This extends ADR 0311's
+creation-only `allow_nontrailing_quoted` opt-in to this source-only harness, and
+nowhere else; it is not native evidence until a case qualifies it. List oracles compare canonical members, not raw order. The six earlier cases
+are unchanged. The case set tests the port VLAN constraint that #1856 met at
+creation: `HSCL12E9 The SR-IOV physical port supports only the Deny all VLAN ID
+restriction when a port VLAN ID is specified`. See the
 [finite update design](../workflow/specs/2026-11-04-vnic-finite-update-cases-design.md).
 
 No activation, reseed, alternative encoding, automatic retry, rollback or maturity
-promotion follows. The full
-five-field updater, later list modes and two-list composition remain #1828 work.
+promotion follows. The public
+five-field updater remains #1858 work.
 The [source qualification design](../workflow/specs/2026-11-01-vnic-update-source-design.md)
 defines the packet, evidence, proposed bounds and implementation admission gates.
 The [retained-fixture design](../workflow/specs/2026-11-01-vnic-retained-fixture-design.md)
