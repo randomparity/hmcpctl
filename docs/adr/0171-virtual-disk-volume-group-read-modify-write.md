@@ -5,6 +5,18 @@
 Accepted (2026-09-23). Scope amended 2026-09-23 (#996) to cover every VolumeGroup write: the
 four media-repository operations join the virtual-disk writes under the same contract.
 
+Concurrency assurance superseded (2026-11-04, #1888): ADR 0328 Finding 6 records
+V10R3 M1060 accepting a VolumeGroup POST with a never-matching `If-Match`.
+The historical concurrency claims below do not hold on that HMC: a whole-group
+write can silently lose a concurrent change. Callers must serialize writers to
+the same VolumeGroup for the entire operation. Keep sending the GET's ETag and
+refusing a missing ETag, but neither establishes concurrency safety. If a server
+returns 412, the existing refusal handling still applies; 412 cannot be relied
+on to detect races. The six primitive mutation tools and `hmc_attach_disk_to_lpar`
+warn callers explicitly; logical mutation tools retain their writer-window
+assertions. This observation does not establish VIOS mapping enforcement;
+ADR 0169's unprobed mapping claims remain unchanged.
+
 ## Context
 
 `create_virtual_disk` and `delete_virtual_disk` POSTed a sparse `VolumeGroup` document holding
