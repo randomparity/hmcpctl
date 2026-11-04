@@ -190,6 +190,15 @@ _SOURCE_CASES = {
     "mac-replace-none": ("allowed_os_mac_addrs", "=", "none"),
     "mac-remove-last": ("allowed_os_mac_addrs", "-", "none"),
 }
+_FINITE = "finite-update"
+_UPDATE_FIELDS = (
+    "port_vlan_id",
+    "pvid_priority",
+    "auto_priority_failover",
+    "allowed_vlan_ids",
+    "allowed_os_mac_addrs",
+)
+_LISTS = ("allowed_vlan_ids", "allowed_os_mac_addrs")
 _SOURCE_EXTRA = {"purpose", "case", "expected_lpar_state", "allow_one_update"}
 _SOURCE_POLICY = {
     "pvid_priority",
@@ -626,12 +635,18 @@ def validate_packet(packet: dict) -> None:
         raise ValueError("source packet is missing required fields")
     if packet["purpose"] != "update-mode-source" or not isinstance(packet["case"], str):
         raise ValueError("source packet requires one fixed purpose and case")
-    if packet["case"] not in _SOURCE_CASES or packet["allow_one_update"] is not True:
+    finite = packet["case"] == _FINITE
+    if (packet["case"] not in _SOURCE_CASES and not finite) or packet[
+        "allow_one_update"
+    ] is not True:
         raise ValueError("source packet requires a case and one-update acknowledgement")
     state = packet["expected_lpar_state"]
     if not isinstance(state, str) or not state or not state.isprintable():
         raise ValueError("source packet requires an exact printable state")
-    base = {key: value for key, value in packet.items() if key not in _SOURCE_EXTRA}
+    extra = _SOURCE_EXTRA | ({"update"} if finite else set())
+    if finite and "update" not in packet:
+        raise ValueError("finite update packet requires its update actions")
+    base = {key: value for key, value in packet.items() if key not in extra}
     base["version"] = 1
     _validate_creation_packet(base)
     if not packet["hmc_identity"]["host"].isprintable():
@@ -640,10 +655,122 @@ def validate_packet(packet: dict) -> None:
     policy = creation_policy(**packet["policy"])
     if policy.pvid_priority is None or policy.auto_priority_failover is None:
         raise ValueError("source baseline requires explicit scalar policies")
-    for name in ("allowed_vlan_ids", "allowed_os_mac_addrs"):
+    if finite:
+        _finite_expected(packet)
+        try:
+            _source_record(packet)
+        except transport.HMCCLIError as error:
+            raise ValueError("finite update allows one comma list, last") from error
+        return
+    for name in _LISTS:
         members = getattr(policy, name)
         if not isinstance(members, tuple) or len(members) != 1:
             raise ValueError("source baseline requires finite singleton lists")
+
+
+def _finite_expected(packet: dict) -> dict:
+    """Validate the finite-update actions and return each field's expected value."""
+    baseline = creation_policy(**packet["policy"])
+    actions = packet["update"]
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("finite update requires at least one action")
+    expected = {}
+    for action in actions:
+        _keys(action, {"field", "operation", "value"})
+        name, operation, value = action["field"], action["operation"], action["value"]
+        if name not in _UPDATE_FIELDS or name in expected:
+            raise ValueError("finite update fields must be known and distinct")
+        if operation not in (("set", "add", "remove") if name in _LISTS else ("set",)):
+            raise ValueError("finite update operation does not apply to its field")
+        if name == "port_vlan_id":
+            if type(value) is not int or not 0 <= value <= 4094:
+                raise ValueError("finite port VLAN must be an integer 0..4094")
+            old, new = packet["port_vlan_id"], value
+        else:
+            old, new = (
+                getattr(baseline, name),
+                getattr(creation_policy(**{name: value}), name),
+            )
+        if name in _LISTS:
+            if not isinstance(old, tuple) or not isinstance(new, tuple):
+                raise ValueError("finite list actions require finite lists")
+            if operation == "add":
+                if set(new) & set(old):
+                    raise ValueError("finite add repeats a baseline member")
+                new = tuple(sorted(set(old) | set(new)))
+            elif operation == "remove":
+                if not set(new) < set(old):
+                    raise ValueError("finite remove must leave a baseline member")
+                new = tuple(sorted(set(old) - set(new)))
+        if new == old:
+            raise ValueError("finite update must change its field")
+        expected[name] = new
+    return expected
+
+
+def _finite_pairs(packet: dict) -> list[tuple[str, str]]:
+    actions = {action["field"]: action for action in packet["update"]}
+    pairs = []
+    for name in _UPDATE_FIELDS:
+        if name not in actions:
+            continue
+        action = actions[name]
+        value = action["value"]
+        if name in _LISTS:
+            text = ",".join(map(str, getattr(creation_policy(**{name: value}), name)))
+        else:
+            text = str(int(value) if type(value) is bool else value)
+        suffix = {"set": "", "add": "+", "remove": "-"}[action["operation"]]
+        pairs.append((name + suffix, text))
+    return sorted(pairs, key=lambda pair: "," in pair[1])
+
+
+def _source_record(packet: dict) -> str:
+    if packet["case"] != _FINITE:
+        _, attribute, value, _ = _case(packet)
+        return build_attribute_record([(attribute, value)], surface="`chhwres -a`")
+    return build_attribute_record(
+        _finite_pairs(packet),
+        quoted=[name + suffix for name in _LISTS for suffix in ("", "+", "-")],
+        surface="`chhwres -a`",
+    )
+
+
+def _source_expected(packet: dict) -> dict:
+    if packet["case"] != _FINITE:
+        field, _, _, oracle = _case(packet)
+        return {"field": field, "value": oracle}
+    return _plain(_finite_expected(packet))
+
+
+def _source_fields(packet: dict) -> list[str]:
+    if packet["case"] != _FINITE:
+        return [_case(packet)[0]]
+    return list(_finite_expected(packet))
+
+
+def _source_policy(packet: dict, row: dict) -> str:
+    if packet["case"] != _FINITE:
+        field, _, _, oracle = _case(packet)
+        if getattr(observed_policy(row), field) is None:
+            return "unavailable"
+        return "verified" if row.get(field) == oracle else "mismatched"
+    observed, status = observed_policy(row), "verified"
+    for name, value in _finite_expected(packet).items():
+        if name == "port_vlan_id":
+            raw = row.get(name)
+            actual = (
+                int(raw)
+                if isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw)
+                else None
+            )
+        else:
+            actual = getattr(observed, name)
+        if actual is None:
+            return "unavailable"
+        if actual != value:
+            status = "mismatched"
+    return status
 
 
 def _case(packet: dict) -> tuple[str, str, str, str]:
@@ -1210,16 +1337,8 @@ async def snapshot(
             packet["expected_lpar_id"]
         ):
             raise ValueError("source selected-row identity differs")
-        selected_field, _, _, oracle = _case(packet)
         source_result["selected_after"] = dict(row)
-        available = getattr(observed_policy(row), selected_field) is not None
-        source_result["policy_verification"] = (
-            "unavailable"
-            if not available
-            else "verified"
-            if row.get(selected_field) == oracle
-            else "mismatched"
-        )
+        source_result["policy_verification"] = _source_policy(packet, row)
     backings = await list_vnic_backing_rows(hmc.config, system_name)
     direct = await list_sriov_configured_logical_port_rows(
         hmc.config, system_name, packet["selector"]["adapter_id"]
@@ -1397,8 +1516,7 @@ def _history_complete(packet, journal, current) -> bool:
 
 
 def _source_command(packet, identity, slot) -> str:
-    _, attribute, value, _ = _case(packet)
-    record = build_attribute_record([(attribute, value)], surface="`chhwres -a`")
+    record = _source_record(packet)
     return (
         "chhwres -r virtualio --rsubtype vnic -o s"
         f" -m {shlex.quote(identity['system'])} -p {shlex.quote(identity['lpar'])}"
@@ -1407,28 +1525,32 @@ def _source_command(packet, identity, slot) -> str:
 
 
 def _source_compare(packet, before, after, slot) -> tuple[str, str]:
-    field, _, _, oracle = _case(packet)
     old, new = _source_row(before, slot), _source_row(after, slot)
-    available = getattr(observed_policy(new), field) is not None
-    policy = (
-        "unavailable"
-        if not available
-        else "verified"
-        if new.get(field) == oracle
-        else "mismatched"
-    )
     preserved = deepcopy(after)
-    _source_row(preserved, slot)[field] = old[field]
-    return policy, "unchanged" if preserved == before else "drifted"
+    row = _source_row(preserved, slot)
+    for field in _source_fields(packet):
+        row[field] = old[field]
+    return _source_policy(
+        packet, new
+    ), "unchanged" if preserved == before else "drifted"
 
 
 def _source_cleanup(packet, baseline, before, after, created) -> str:
     slot = created["slot_num"]
     if _source_compare(packet, before, after, slot) != ("verified", "unchanged"):
         raise ValueError("source selected policy or preservation is unqualified")
-    field, _, _, oracle = _case(packet)
     expected_packet, expected_create = deepcopy(packet), deepcopy(created)
-    expected_packet["policy"][field] = oracle
+    if packet["case"] == _FINITE:
+        for field, value in _plain(_finite_expected(packet)).items():
+            target = (
+                expected_packet
+                if field == "port_vlan_id"
+                else expected_packet["policy"]
+            )
+            target[field] = value
+    else:
+        field, _, _, oracle = _case(packet)
+        expected_packet["policy"][field] = oracle
     expected_create["vnic_after"] = [
         _plain(asdict(vnic._parse_vnic_snapshots([_source_row(after, slot)])[0]))
     ]
@@ -1650,14 +1772,11 @@ async def _capture_source(hmc, packet, document, output, budget):
         b1["identity"]["description"],
         operation="lpar-mutation",
     )
-    field, attribute, value, oracle = _case(packet)
     source = document["source"] = {
         "captured_slot": slot,
         "before_update": b1,
-        "native_record": build_attribute_record(
-            [(attribute, value)], surface="`chhwres -a`"
-        ),
-        "expected": {"field": field, "value": oracle},
+        "native_record": _source_record(packet),
+        "expected": _source_expected(packet),
         "submission": "not_dispatched",
         "submission_error": None,
         "remote_refusal_code": None,
@@ -1807,14 +1926,10 @@ def _source_history(packet, journal, current) -> bool:
     if _cleanup_candidate(packet, current, b1, created) != slot:
         return False
     _source_complete(_source_row(b1, slot))
-    field, attribute, value, oracle = _case(packet)
-    expected_record = build_attribute_record(
-        [(attribute, value)], surface="`chhwres -a`"
-    )
     if not (
         source.get("captured_slot") == slot
-        and source.get("native_record") == expected_record
-        and source.get("expected") == {"field": field, "value": oracle}
+        and source.get("native_record") == _source_record(packet)
+        and source.get("expected") == _source_expected(packet)
         and source.get("submission") == "completed"
         and source.get("remote_refusal_code") is None
         and source.get("qualification") == "qualified"

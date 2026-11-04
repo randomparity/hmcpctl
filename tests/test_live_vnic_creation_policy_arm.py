@@ -789,8 +789,7 @@ class SourceWire(Wire):
             assert max_output_bytes == arm.MIB
             self.commands.append(command)
             self.updated = True
-            record = tokens[tokens.index("-a") + 1]
-            name, value = record.split("=", 1)
+            pairs = next(csv.reader([tokens[tokens.index("-a") + 1]]))
             if self.source_fault == "refused":
                 raise transport.HMCCLIError(
                     "synthetic refusal",
@@ -801,8 +800,20 @@ class SourceWire(Wire):
                 raise TimeoutError("synthetic uncertain update")
             if self.source_fault == "generic":
                 raise transport.HMCCLIError("synthetic unstructured nonzero")
-            key = name.removesuffix("-")
-            self.source_values[key] = "none" if name.endswith("-") else value
+            for pair in pairs:
+                name, value = pair.split("=", 1)
+                key = name.rstrip("+-")
+                cell = self.source_values.get(key, "")
+                if name.endswith("-") and self.packet.get("case") != "finite-update":
+                    cell = "none"
+                elif name.endswith("-"):
+                    removed = value.split(",")
+                    cell = ",".join(m for m in cell.split(",") if m not in removed)
+                elif name.endswith("+"):
+                    cell = f"{cell},{value}"
+                else:
+                    cell = value
+                self.source_values[key] = cell
             if self.source_fault in ("blank", "malformed", "mismatch"):
                 self.source_values[key] = {
                     "blank": "",
@@ -1384,6 +1395,264 @@ async def test_source_intent_dispatch_timeout(
     assert result["status"] == "CLEAN"
     assert write_allowances == [275, 265, 255]
     assert result["session"]["logged_off"]
+
+
+FINITE_MACS = ["001122334455", "aabbccddee02"]
+FINITE_SHAPES = {
+    "pvid-priority": ({}, [("pvid_priority", "set", 5)], "pvid_priority=5"),
+    "failover": (
+        {},
+        [("auto_priority_failover", "set", True)],
+        "auto_priority_failover=1",
+    ),
+    "port-vlan-none": (
+        {"allowed_vlan_ids": "none"},
+        [("port_vlan_id", "set", 7)],
+        "port_vlan_id=7",
+    ),
+    "vlan-set": (
+        {},
+        [("allowed_vlan_ids", "set", [40, 30])],
+        '"allowed_vlan_ids=30,40"',
+    ),
+    "vlan-add": ({}, [("allowed_vlan_ids", "add", [30])], "allowed_vlan_ids+=30"),
+    "vlan-remove": (
+        {"allowed_vlan_ids": [2, 3]},
+        [("allowed_vlan_ids", "remove", [3])],
+        "allowed_vlan_ids-=3",
+    ),
+    "mac-set": (
+        {},
+        [("allowed_os_mac_addrs", "set", ["AABBCCDDEE03", "aabbccddee02"])],
+        '"allowed_os_mac_addrs=aabbccddee02,aabbccddee03"',
+    ),
+    "mac-add": (
+        {},
+        [("allowed_os_mac_addrs", "add", ["AABBCCDDEE02"])],
+        "allowed_os_mac_addrs+=aabbccddee02",
+    ),
+    "mac-remove": (
+        {"allowed_os_mac_addrs": FINITE_MACS},
+        [("allowed_os_mac_addrs", "remove", ["aabbccddee02"])],
+        "allowed_os_mac_addrs-=aabbccddee02",
+    ),
+    "two-list": (
+        {"allowed_os_mac_addrs": FINITE_MACS},
+        [
+            ("allowed_vlan_ids", "add", [30, 40]),
+            ("allowed_os_mac_addrs", "remove", ["aabbccddee02"]),
+        ],
+        'allowed_os_mac_addrs-=aabbccddee02,"allowed_vlan_ids+=30,40"',
+    ),
+    "port-vlan-finite": ({}, [("port_vlan_id", "set", 7)], "port_vlan_id=7"),
+}
+
+
+def finite(source_packet, shape):
+    baseline, actions, _ = FINITE_SHAPES[shape]
+    result = deepcopy(source_packet)
+    result["case"] = "finite-update"
+    result["policy"].update(deepcopy(baseline))
+    result["update"] = [
+        {"field": name, "operation": operation, "value": value}
+        for name, operation, value in actions
+    ]
+    return result
+
+
+def raw_cell(value):
+    return value if isinstance(value, str) else ",".join(map(str, value))
+
+
+@pytest.fixture
+def finite_wire(monkeypatch, source_packet):
+    def build(shape):
+        packet = finite(source_packet, shape)
+        wire = SourceWire(packet)
+        for name in ("allowed_vlan_ids", "allowed_os_mac_addrs"):
+            wire.source_values[name] = raw_cell(packet["policy"][name])
+        monkeypatch.setattr(transport, "_run_hmc_command", wire.ssh)
+        monkeypatch.setattr(
+            HMCClient,
+            "_new_http_client",
+            lambda self, port: httpx.AsyncClient(
+                base_url="https://hmc.test:443",
+                transport=httpx.MockTransport(wire.http),
+            ),
+        )
+        monkeypatch.setattr(arm, "_revision", lambda: ("a" * 40, True))
+        return wire, packet
+
+    return build
+
+
+@pytest.mark.parametrize("shape", FINITE_SHAPES)
+def test_finite_record(source_packet, shape):
+    packet = finite(source_packet, shape)
+    arm.validate_packet(packet)
+    command = arm._source_command(
+        packet, {"system": "system-a", "lpar": "client-a"}, "2"
+    )
+    tokens = shlex.split(command)
+    assert tokens[tokens.index("-a") + 1] == FINITE_SHAPES[shape][2]
+    assert tokens[:6] == ["chhwres", "-r", "virtualio", "--rsubtype", "vnic", "-o"]
+    assert tokens[6] == "s" and tokens[tokens.index("-s") + 1] == "2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", FINITE_SHAPES)
+async def test_finite_lifecycle(finite_wire, tmp_path, shape):
+    wire, packet = finite_wire(shape)
+    await prepare(wire, packet, tmp_path)
+    result = await arm.capture(wire.client(), packet, tmp_path / "capture")
+    assert result["status"] == "CLEAN", result
+    source = result["source"]
+    assert (source["submission"], source["qualification"]) == ("completed", "qualified")
+    assert source["native_record"] == FINITE_SHAPES[shape][2]
+    assert result["counts"] == {"rest": 23, "ssh": 50}
+    recovered = await arm.recover(wire.client(), packet, result)
+    assert recovered["status"] == "CLEAN" and len(wire.writes) == 3
+
+
+@pytest.mark.asyncio
+async def test_finite_reordered_readback(finite_wire, tmp_path):
+    wire, packet = finite_wire("vlan-add")
+    packet["policy"]["allowed_vlan_ids"] = [30]
+    packet["update"][0]["value"] = [2]
+    wire.source_values["allowed_vlan_ids"] = "30"
+    await prepare(wire, packet, tmp_path)
+    result = await arm.capture(wire.client(), packet, tmp_path / "capture")
+    assert result["source"]["selected_after"]["allowed_vlan_ids"] == "30,2"
+    assert result["source"]["expected"] == {"allowed_vlan_ids": [2, 30]}
+    assert result["status"] == "CLEAN"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "shape,fault,submission,policy,preservation,qualification",
+    [
+        ("vlan-add", "unselected", "completed", "verified", "drifted", "unresolved"),
+        ("vlan-add", "mismatch", "completed", "mismatched", "unchanged", "unresolved"),
+        ("two-list", "blank", "completed", "unavailable", "unchanged", "unresolved"),
+        (
+            "port-vlan-finite",
+            "refused",
+            "rejected",
+            "mismatched",
+            "unchanged",
+            "refused",
+        ),
+    ],
+)
+async def test_finite_holds(
+    finite_wire, tmp_path, shape, fault, submission, policy, preservation, qualification
+):
+    wire, packet = finite_wire(shape)
+    await prepare(wire, packet, tmp_path)
+    wire.source_fault = fault
+    result = await arm.capture(wire.client(), packet, tmp_path / "capture")
+    source = result["source"]
+    assert result["status"] == "MANUAL_RECOVERY" and len(wire.writes) == 2
+    assert (
+        source["submission"],
+        source["policy_verification"],
+        source["preservation"],
+        source["qualification"],
+    ) == (submission, policy, preservation, qualification)
+    assert (await arm.recover(wire.client(), packet, result))[
+        "status"
+    ] == "MANUAL_RECOVERY"
+
+
+@pytest.mark.asyncio
+async def test_finite_history_forged(finite_wire, tmp_path):
+    wire, packet = finite_wire("two-list")
+    await prepare(wire, packet, tmp_path)
+    result = await arm.capture(wire.client(), packet, tmp_path / "capture")
+    assert result["status"] == "CLEAN"
+    forged = []
+    for key, value in (
+        ("expected", {"allowed_vlan_ids": [2, 30]}),
+        ("native_record", "allowed_vlan_ids+=30"),
+    ):
+        changed = deepcopy(result)
+        changed["source"][key] = value
+        forged.append((packet, changed))
+    changed = deepcopy(result)
+    changed["effect_commands"][1]["command"] = changed["effect_commands"][1][
+        "command"
+    ].replace("30,40", "30")
+    forged.append((packet, changed))
+    other = deepcopy(packet)
+    other["update"][0]["value"] = [30]
+    forged.append((other, deepcopy(result)))
+    for forged_packet, journal in forged:
+        assert (await arm.recover(wire.client(), forged_packet, journal))[
+            "status"
+        ] == "MANUAL_RECOVERY"
+
+
+def _finite_action(field, operation, value):
+    return [{"field": field, "operation": operation, "value": value}]
+
+
+@pytest.mark.parametrize(
+    "policy,update",
+    [
+        ({}, _finite_action("pvid_priority", "set", 0)),
+        ({}, _finite_action("auto_priority_failover", "set", False)),
+        ({}, _finite_action("port_vlan_id", "set", 0)),
+        ({}, _finite_action("allowed_vlan_ids", "set", [2])),
+        ({}, _finite_action("allowed_vlan_ids", "set", "all")),
+        ({}, _finite_action("allowed_os_mac_addrs", "set", "none")),
+        (
+            {"allowed_vlan_ids": "all"},
+            _finite_action("allowed_vlan_ids", "remove", [2]),
+        ),
+        ({"allowed_vlan_ids": "none"}, _finite_action("allowed_vlan_ids", "add", [2])),
+        ({"allowed_vlan_ids": "all"}, _finite_action("allowed_vlan_ids", "set", [2])),
+        ({}, _finite_action("allowed_vlan_ids", "add", [2])),
+        ({}, _finite_action("allowed_vlan_ids", "add", [2, 30])),
+        ({}, _finite_action("allowed_vlan_ids", "remove", [3])),
+        ({}, _finite_action("allowed_vlan_ids", "remove", [2])),
+        ({}, _finite_action("pvid_priority", "add", [5])),
+        ({}, _finite_action("mac_addr", "set", "aabbccddee09")),
+        ({}, _finite_action("pvid_priority", "set", True)),
+        ({}, _finite_action("pvid_priority", "set", 8)),
+        ({}, _finite_action("port_vlan_id", "set", 4095)),
+        ({}, _finite_action("auto_priority_failover", "set", 1)),
+        ({}, _finite_action("allowed_vlan_ids", "add", [])),
+        ({}, _finite_action("allowed_vlan_ids", "add", [30, 30])),
+        ({}, []),
+        ({}, _finite_action("pvid_priority", "set", 5) * 2),
+        ({}, [{"field": "pvid_priority", "operation": "set"}]),
+        ({}, {"field": "pvid_priority"}),
+        (
+            {},
+            _finite_action("allowed_vlan_ids", "set", [30, 40])
+            + _finite_action("allowed_os_mac_addrs", "set", FINITE_MACS),
+        ),
+        ({"allowed_vlan_ids": []}, _finite_action("pvid_priority", "set", 5)),
+        ({"pvid_priority": None}, _finite_action("port_vlan_id", "set", 5)),
+    ],
+)
+def test_finite_packet_refused(source_packet, policy, update):
+    packet = deepcopy(source_packet)
+    packet["case"] = "finite-update"
+    packet["policy"].update(policy)
+    packet["update"] = update
+    with pytest.raises((ValueError, TypeError)):
+        arm.validate_packet(packet)
+
+
+def test_finite_update_key_only_for_finite_case(source_packet):
+    source_packet["update"] = _finite_action("pvid_priority", "set", 5)
+    with pytest.raises(ValueError):
+        arm.validate_packet(source_packet)
+    source_packet.pop("update")
+    source_packet["case"] = "finite-update"
+    with pytest.raises(ValueError):
+        arm.validate_packet(source_packet)
 
 
 @pytest.fixture
