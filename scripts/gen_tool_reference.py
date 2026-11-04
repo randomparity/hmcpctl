@@ -153,6 +153,7 @@ def build_records(
         if operation not in maturity_by_operation:
             maturity_by_operation[operation] = operation_maturity(operation)
         maturity = maturity_by_operation[operation]
+        exposed = exposed_by_default(name)
         records.append(
             ToolRecord(
                 name=name,
@@ -164,8 +165,8 @@ def build_records(
                 verification=maturity.verification,
                 verification_reason=maturity.reason,
                 runtime_eligibility=maturity.runtime_eligibility,
-                exposed_by_default=exposed_by_default(name),
-                listed_by_default=name in primary and exposed_by_default(name),
+                exposed_by_default=exposed,
+                listed_by_default=exposed and name in primary,
             )
         )
     return tuple(records)
