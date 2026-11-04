@@ -8,6 +8,7 @@ import threading
 
 import pytest
 
+from hmcpctl.errors import HMCError, HMCTransportError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import (
     BodyResult,
@@ -335,6 +336,45 @@ def test_effect_with_unknown_outcome_needs_attention():
     assert record.next_actions == ("resume", "abandon")
 
 
+@pytest.mark.parametrize("error_type", [HMCError, HMCTransportError])
+@pytest.mark.parametrize("status_code", [503, None])
+@pytest.mark.parametrize("source", ["body", "classifier"])
+def test_hmc_failure_warning_persists_only_type_and_status(
+    error_type, status_code, source
+):
+    error = error_type(
+        "SENSITIVE_MESSAGE_SENTINEL",
+        status_code,
+        body="<Error><Message>SENSITIVE_BODY_SENTINEL</Message></Error>",
+    )
+    writer = Writer(raises=error)
+    if source == "body":
+        record = _submit(body=_body(writer))
+    else:
+        _crashed()
+        record = _submit(
+            body=_body(writer),
+            continuation="resume",
+            classifiers={"test.k0": _classify("applied", raises=error)},
+        )
+    detail = "HTTP 503" if status_code == 503 else "HTTP status unavailable"
+    expected = f"{error_type.__name__}: {detail}"
+    if source == "classifier":
+        expected = f"effect step0 live check failed ({expected}); retry resume"
+    assert record.warnings == (expected,)
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert record.effects[0].status == "uncertain"
+    assert writer.calls == (1 if source == "body" else 0)
+    later = store.operation_status(
+        agent_id="agent-a",
+        connection="<default>",
+        host="hmc.test",
+        operation_id=record.operation_id,
+    ).operations[0]
+    assert later.warnings == (expected,)
+    assert (later.state, later.outcome) == ("paused", "needs_attention")
+
+
 def test_warning_text_is_bounded(monkeypatch):
     classifiers = {}
     record = _submit(
@@ -434,6 +474,7 @@ def test_operation_failed_is_terminal():
 
     record = _submit(body=body)
     assert (record.state, record.outcome) == ("terminal", "failed")
+    assert record.warnings == ("OperationFailed: precondition failed",)
 
 
 def test_resume_applied_classifier_skips_the_write(monkeypatch):
