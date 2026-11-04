@@ -3226,6 +3226,43 @@ CLEAN establishes only the bounded stored-policy/history observations. All five
 parent adapter fields, later delta/two-list modes and the public updater remain
 #1828 work; `all` minus finite members still has no justified positive oracle.
 
+#### Recorded source outcomes (#1856)
+
+All six fixed cases ran once each on HMC V10R3 M1060 at commit
+`300cf9de1245e5d0c845c09c9584863194346b78`. They used one owned inactive fixture,
+`port_vlan_id=0`, and singleton finite baselines for both lists. No case qualified.
+In every case the independent readback showed the selected policy unchanged and
+preservation unchanged:
+
+| Case | Native reply | Harness submission | Recorded outcome |
+|---|---|---|---|
+| `vlan-replace-none` | exit 1, "An invalid attribute value was entered" naming `allowed_vlan_ids=none`, no HSCL code | `unknown` | refused, text-evidenced |
+| `vlan-remove-last` | `HSCLAB1F` Allowed VLAN IDs for a virtual NIC cannot be removed | `rejected` | refused, HSCL-coded |
+| `mac-remove-last` | `HSCLAB20` Allowed O/S defined MAC addresses for a virtual NIC cannot be removed | `rejected` | refused, HSCL-coded |
+| `vlan-replace-all` | exit 1, invalid attribute value naming `allowed_vlan_ids=all`, no code | `unknown` | refused, text-evidenced |
+| `mac-replace-all` | exit 1, invalid attribute value naming `allowed_os_mac_addrs=all`, no code | `unknown` | refused, text-evidenced |
+| `mac-replace-none` | exit 1, invalid attribute value naming `allowed_os_mac_addrs=none`, no code | `unknown` | refused, text-evidenced |
+
+The harness classifies a rejection only by an HSCL refusal code. It therefore
+keeps the four sentinel cases as `unknown`/`unresolved`, and their capture and
+recovery histories remain MANUAL_RECOVERY. Calling those four cases refused rests
+on the HMC's message text plus the unchanged independent readback. That reading
+is the operator's recorded decision, not a harness classification. A reviewer may
+disagree.
+
+On this HMC, `all` and `none` are therefore creation-only values for these lists.
+An existing vNIC cannot have its last allowed VLAN or MAC member removed.
+
+Each refused case's captured vNIC was removed separately, under its own grant,
+through the ownership-checked `hmcpctl network remove-vnic`. The next case's
+fresh preflight reproduced the original fixture baseline each time. The failed
+source histories disarm the fixture's own cleanup by design. The fixture was
+therefore deleted through the ownership-checked inactive-only
+`hmcpctl lpars delete`. A later fixture preflight and recovery reproduced the
+pre-fixture baseline. This version-2 procedure's results carry no
+`run.tested_commit` block, so `scripts/live_test_evidence.py` does not apply to
+them. The raw journals stay private. None of this is product update support.
+
 
 ### Retained fixture prerequisite for vNIC source qualification
 

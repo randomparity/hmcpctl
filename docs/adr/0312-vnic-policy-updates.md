@@ -88,6 +88,20 @@ uncertain history from current absence. A qualified source result establishes on
 the exact stored-policy case and environment; it does not establish traffic,
 failover, public updater support or completion of #1828.
 
+#1856 ran all six fixed cases once on HMC V10R3 M1060. None qualified.
+
+- Both remove-last cases were refused with codes `HSCLAB1F` and `HSCLAB20`.
+- The four `all`/`none` replacements were rejected with the HMC's generic
+  invalid-attribute-value text and no code. The harness therefore keeps them as
+  `unknown`, without changing its oracle.
+- Every independent readback was unchanged.
+- The operator recorded those four cases as refusals evidenced by text.
+
+So for this environment, these list sentinels are creation-only, and removing
+the last member is refused. Later update modes must be designed around finite
+lists. The outcome table is in the
+[operator procedure](../live-testing.md#recorded-source-outcomes-1856).
+
 ## Considered & rejected
 
 - **Infer update support from creation.** verified: the retained command reference
