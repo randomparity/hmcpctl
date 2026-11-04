@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, 2026-11-04 (#1858).
+Proposed, 2026-11-04 (#1858). Native qualification cases U1–U7 in
+`docs/live-testing.md` gate acceptance.
 
 ## Context
 
