@@ -1,9 +1,9 @@
 """Tool search and invocation over the served registry (ADR 0189 Decision 3).
 
 ``hmc_search_tools`` and ``hmc_invoke_tool`` read the application they are
-registered on, so they see exactly what ``tools/list`` sees: the tools the access
-policy's ceiling admitted and the capabilities this server enabled. Neither keeps
-a catalog of its own.
+registered on, so they see every tool the access policy's ceiling admitted and
+the capabilities this server enabled — a superset of ``tools/list``, which carries
+only the primary catalog (ADR 0330). Neither keeps a catalog of its own.
 
 Invocation runs the named tool's own registered ``Tool``: FastMCP validates the
 arguments against that tool's schema, then calls the ``authorized()`` wrapper,
@@ -175,10 +175,10 @@ def gateway_handlers(
     ) -> ToolSearchResult:
         """Find tools this server exposes by intent, or describe one tool by exact name.
 
-        Searches only the tools this server's access policy and enabled capabilities
-        expose, the same set ``tools/list`` returns. A ``query`` matches words in tool
-        names and descriptions and returns the best matches, name first, without input
-        schemas. An exact ``name`` returns that one tool with its full input schema, or
+        Searches every tool this server's access policy and enabled capabilities
+        expose, including the specialists ``tools/list`` does not carry. A ``query``
+        matches words in tool names and descriptions and returns the best matches,
+        name first, without input schemas. An exact ``name`` returns that one tool with its full input schema, or
         no tool when this server does not expose it. Each entry carries the tool's
         one-line summary, effect class and operation maturity. Call a found tool
         directly, or through ``hmc_invoke_tool``.

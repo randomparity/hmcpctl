@@ -31,7 +31,8 @@ Other things produce no record, by design:
 
 - a call to a tool the policy's ceiling withheld — it is never registered, so nothing
   reaches the boundary;
-- `tools/list`, which discloses the whole ceiling in one call.
+- `tools/list`, which lists the primary tools the ceiling admits (ADR 0330). The rest of the
+  ceiling is disclosed by `hmc_search_tools`, which is a call and is recorded.
 
 `hmc_list_configured_hosts` and `hmc_effective_permissions` declare no connection
 argument and used to be a third case. They are recorded now: the target dimension

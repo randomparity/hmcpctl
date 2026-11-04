@@ -338,6 +338,12 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Changed
 
+- **Breaking:** an MCP server's `tools/list` carries only the eleven primary tools the access
+  policy admits (ADR 0330, carrying out ADR 0189 Decision 4). Every other permitted tool is found
+  with `hmc_search_tools` and called by name or through `hmc_invoke_tool`, under unchanged
+  validation and authorization. The server instructions now describe the primary tools. A policy
+  that withholds `hmc_invoke_tool`, such as an `effects = ["read"]` grant, reaches specialists only
+  by a direct call of their names; see [Tool search and invocation](docs/mcp-server.md#tool-search-and-invocation).
 - **Breaking:** `hmc_decommission_lpar` requires `request_id`, and `hmcpctl lpars
   decommission` requires `--request-id`, with no compatibility path (ADR 0320). The decommission
   runs as one journaled logical operation: a repeat returns the same operation and never powers
