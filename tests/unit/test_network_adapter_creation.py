@@ -265,6 +265,51 @@ async def test_missing_repeated_or_malformed_required_leaf_is_unavailable(hmc, r
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested", "status", "mismatched"),
+    [([], "verified", []), ([2], "mismatched", ["addl_vlan_ids"])],
+)
+async def test_absent_tagged_vlan_ids_means_empty(hmc, requested, status, mismatched):
+    values = {key: value for key, value in STORED.items() if key != "TaggedVLANIDs"}
+    hmc._network_adapter_creation_feed.side_effect = [[], [entry(values=values)]]
+    result = await create(hmc, addl_vlan_ids=requested)
+    assert result.creation_verification == {
+        "status": status,
+        "checked_fields": ["addl_vlan_ids"],
+        "mismatched_fields": mismatched,
+        "unavailable_fields": [],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [None, ["2"], {"text": "2"}, "2.0", "0", "4095"])
+async def test_null_or_malformed_tagged_vlan_ids_stays_unavailable(hmc, raw):
+    hmc._network_adapter_creation_feed.side_effect = [
+        [],
+        [entry(values={**STORED, "TaggedVLANIDs": raw})],
+    ]
+    result = await create(hmc, addl_vlan_ids=[])
+    assert result.creation_verification["status"] == "unavailable"
+    assert result.creation_verification["unavailable_fields"] == ["addl_vlan_ids"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "observed",
+    [
+        {"UUID": CREATED, "ResourceType": "ClientNetworkAdapter"},
+        entry(values=[]),
+        {**entry(), "ResourceType": "OtherAdapter"},
+    ],
+)
+async def test_absent_vlans_does_not_verify_missing_or_wrong_resource(hmc, observed):
+    hmc._network_adapter_creation_feed.side_effect = [[], [observed]]
+    result = await create(hmc, addl_vlan_ids=[])
+    assert result.creation_verification["status"] == "unavailable"
+    assert result.creation_verification["unavailable_fields"] == ["addl_vlan_ids"]
+
+
+@pytest.mark.asyncio
 async def test_explicit_empty_mac_none_and_disabled_qos_are_not_omission(hmc):
     values = {
         **STORED,

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import csv
+import os
 import stat
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from typer import Typer
 from typer.testing import CliRunner
 
 from hmcpctl import cli
 from hmcpctl.cli_commands import report
-from hmcpctl.config import ConfigError, HMCConfig
+from hmcpctl.cli_commands.runtime import GlobalOpts
+from hmcpctl.config import ConfigError, HMCConfig, load_profile
 from hmcpctl.operations.inventory.utilization import (
     AdapterFigures,
     CpuFigures,
@@ -78,18 +81,11 @@ SURVEY = FleetSurvey(
 
 @pytest.fixture
 def configured(monkeypatch):
-    for name in (
-        "HMC_HOST",
-        "HMC_USER",
-        "HMC_PASSWORD",
-        "HMC_PORT",
-        "HMC_VERIFY_SSL",
-        "HMC_CERT_FINGERPRINT",
-        "HMC_CA_BUNDLE",
-        "HMC_TRUST_SYSTEM_STORE",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.delenv("HMC_PROFILE", raising=False)
+    wanted = {f"HMC_{field.upper()}" for field in HMCConfig.model_fields}
+    wanted.add("HMC_PROFILE")
+    for name in list(os.environ):
+        if name.upper() in wanted:
+            monkeypatch.delenv(name)
     names = ["hmc-a", "hmc-b", "hmc-c"]
     monkeypatch.setattr(
         report,
@@ -288,6 +284,14 @@ def test_unknown_profile_is_a_usage_error(configured, tmp_path) -> None:
         ("HMC_CERT_FINGERPRINT", ":".join(["AB"] * 32)),
         ("HMC_CA_BUNDLE", "/etc/hmcpctl/other-ca.pem"),
         ("HMC_TRUST_SYSTEM_STORE", "true"),
+        ("HMC_SSH_KEY_FILE", "/report-key"),
+        ("HMC_SSH_KEY_FILE", ""),
+        ("HMC_SSH_VERIFY_HOST_KEY", "false"),
+        ("HMC_SSH_VERIFY_HOST_KEY", ""),
+        ("HMC_AGENT_ID", "report-agent"),
+        ("HMC_AGENT_ID", ""),
+        ("HMC_MAX_RESPONSE_BYTES", "4096"),
+        ("HMC_MAX_RESPONSE_BYTES", ""),
     ],
 )
 def test_exported_connection_override_is_refused(
@@ -509,3 +513,63 @@ def test_no_configured_profiles_fails(configured, tmp_path, monkeypatch) -> None
 
     assert result.exit_code == 1
     assert "no connection profiles are configured" in result.stderr
+
+
+def test_report_config_classification_is_exhaustive() -> None:
+    assert report._GLOBAL_FIELDS == {"timeout", "schema_version"}
+    assert not report._PROFILE_FIELDS & report._GLOBAL_FIELDS
+    assert report._PROFILE_FIELDS | report._GLOBAL_FIELDS == set(HMCConfig.model_fields)
+
+
+@pytest.mark.parametrize(
+    "field", sorted(set(HMCConfig.model_fields) - {"timeout", "schema_version"})
+)
+@pytest.mark.parametrize("lowercase", [False, True])
+@pytest.mark.parametrize("value", ["", "report-private-sentinel"])
+def test_every_per_profile_export_is_refused(
+    configured, tmp_path, monkeypatch, field, lowercase, value
+):
+    name = f"HMC_{field.upper()}"
+    monkeypatch.setenv(name.lower() if lowercase else name, value)
+
+    def unexpected_load(profile):
+        pytest.fail("refused report must not load a profile")
+
+    monkeypatch.setattr(report, "load_profile", unexpected_load)
+    out = tmp_path / "r.csv"
+    app = Typer()
+    app.command()(report.report_utilization)
+    result = RUNNER.invoke(app, ["--csv", str(out)], obj=GlobalOpts())
+    assert result.exit_code == 2, result.output
+    assert f"unset {name}" in result.stderr
+    assert "report-private-sentinel" not in result.output
+    assert "surveys" not in configured
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("lowercase", [False, True])
+def test_global_exports_apply_to_each_profile(
+    configured, tmp_path, monkeypatch, lowercase
+):
+    path = tmp_path / "profiles.toml"
+    path.write_text(
+        "\n".join(
+            f'[profiles."{name}"]\nhost = "{name}.example.test"\ntimeout = {index}\nschema_version = "V1_0"'
+            for index, name in enumerate(("hmc-a", "hmc-b", "hmc-c"), start=1)
+        )
+    )
+    for name, value in (("HMC_TIMEOUT", "19"), ("HMC_SCHEMA_VERSION", "V1_1")):
+        monkeypatch.setenv(name.lower() if lowercase else name, value)
+    monkeypatch.setattr(
+        report, "load_profile", lambda name: load_profile(name, config_path=path)
+    )
+    monkeypatch.setattr(report, "HMCClient", lambda config: config)
+    result = RUNNER.invoke(
+        cli.app, ["report", "utilization", "--csv", str(tmp_path / "r.csv")]
+    )
+    assert result.exit_code == 0, result.output
+    for name in configured["profiles"]:
+        config = configured["open_client"](name)
+        assert config.host == f"{name}.example.test"
+        assert config.timeout == 19
+        assert config.schema_version == "V1_1"
