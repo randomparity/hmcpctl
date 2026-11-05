@@ -7,7 +7,7 @@ Issue #1890 identifies partition and retained-resource rows that consume capacit
 The operator approved the provenance-preserving rule on 2026-11-04, recorded in
 [the approval](https://github.com/randomparity/hmcpctl/issues/1890#issuecomment-6647344871)
 and frozen in [scope](https://github.com/randomparity/hmcpctl/issues/1890#issuecomment-6647359549).
-[ADR 0336](../../adr/0336-terminal-decommission-ledger-reclamation.md) records the decision.
+[ADR 0341](../../adr/0341-terminal-decommission-ledger-reclamation.md) records the decision.
 
 ## Global Constraints
 

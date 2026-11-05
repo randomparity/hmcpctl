@@ -1,4 +1,4 @@
-# 0336 — Reclaim terminal decommission ledger rows after preserving provenance
+# 0341 — Reclaim terminal decommission ledger rows after preserving provenance
 
 ## Status
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-> **Decision 4 retained/partition-row lifetime superseded by [0336](0336-terminal-decommission-ledger-reclamation.md)** (2026-11-04); physical cleanup and other decisions remain unchanged.
+> **Decision 4 retained/partition-row lifetime superseded by [0341](0341-terminal-decommission-ledger-reclamation.md)** (2026-11-04); physical cleanup and other decisions remain unchanged.
 
 Accepted (2026-11-03), issue #1848 (piece 2 of #1229). Implements ADR 0192 on the journaled
 decommission of ADR 0320, whose effect keys, kinds and retain path stand. Consumes ADR 0313
