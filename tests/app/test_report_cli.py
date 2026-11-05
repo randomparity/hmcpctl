@@ -328,15 +328,48 @@ def test_hmc_text_cells_cannot_start_a_spreadsheet_formula(
     assert failure["notes"] == "'=cmd|x"
 
 
-def test_root_connection_option_is_refused(configured, tmp_path) -> None:
-    result = RUNNER.invoke(
-        cli.app,
-        ["--profile", "hmc-a", "report", "utilization", "--csv",
-         str(tmp_path / "r.csv")],
-    )  # fmt: skip
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["--host", "other.example.test"], "--host"),
+        (["--user", "other-user"], "--user"),
+        (["-u", "other-user"], "--user"),
+        (["--password", "private-value"], "--password"),
+        (["-p", "private-value"], "--password"),
+        (["--verify-ssl"], "--verify-ssl"),
+        (["--no-verify-ssl"], "--verify-ssl"),
+        (["--trust-system-store"], "--trust-system-store"),
+        (["--no-trust-system-store"], "--trust-system-store"),
+        (["--ca-bundle", "other-ca.pem"], "--ca-bundle"),
+        (["--cert-fingerprint", "AA:BB:CC"], "--cert-fingerprint"),
+        (["--profile", "hmc-a"], "--profile"),
+        (["--host", "first.example.test", "--host", "second.example.test"], "--host"),
+        (
+            ["--profile", "hmc-a", "--no-trust-system-store", "--password", "private-value",
+             "--ca-bundle", "other-ca.pem"],
+            "--ca-bundle, --password, --profile, --trust-system-store",
+        ),
+    ],
+)  # fmt: skip
+def test_root_connection_option_is_refused(
+    configured, tmp_path, monkeypatch, args, expected
+) -> None:
+    def unexpected(*args, **kwargs):
+        pytest.fail("refused report must not inspect profiles or survey")
 
-    assert result.exit_code == 2
-    assert "drop the global" in result.stderr
+    monkeypatch.setattr(report, "config_inventory", unexpected)
+    monkeypatch.setattr(report, "load_profile", unexpected)
+    monkeypatch.setattr(report, "survey_fleet", unexpected)
+    out = tmp_path / "r.csv"
+    result = RUNNER.invoke(cli.app, [*args, "report", "utilization", "--csv", str(out)])
+
+    assert result.exit_code == 2, result.output
+    error = " ".join(result.stderr.split("Error: ", 1)[1].split())
+    assert error == (
+        "report utilization connects to each profile's own host; drop the global "
+        f"{expected} options"
+    )
+    assert not out.exists()
 
 
 def test_write_failure_keeps_failure_lines_and_leaves_no_file(

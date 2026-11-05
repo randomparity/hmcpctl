@@ -415,10 +415,14 @@ def report_utilization(
             "report utilization logs on to each profile's own host with that profile's "
             f"credentials and TLS setting; unset {', '.join(exported)}"
         )
-    if current_options().command_line_options:
+    command_line_options = current_options().command_line_options
+    if command_line_options:
+        options = ", ".join(
+            f"--{name.replace('_', '-')}" for name in sorted(command_line_options)
+        )
         usage_error(
             "report utilization connects to each profile's own host; drop the global "
-            "--host, --user, --password, --verify-ssl and --profile options"
+            f"{options} options"
         )
     try:
         selected = _selected_profiles(profiles)
