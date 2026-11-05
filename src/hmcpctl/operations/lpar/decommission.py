@@ -193,7 +193,7 @@ class DecommissionStorage(TypedDict):
     """What ``delete_owned`` deleted, retained (with a reason) and has yet to delete."""
 
     deleted: tuple[dict[str, str], ...]
-    retained: tuple[dict[str, str], ...]
+    retained: tuple[dict[str, Any], ...]
     pending: tuple[dict[str, str], ...]
 
 

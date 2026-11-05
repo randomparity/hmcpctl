@@ -808,3 +808,72 @@ def test_a_resume_after_the_delete_keeps_the_first_runs_inventory(hmc):
     assert result.blast_radius["lpar_name"] == "aix-prod"
     assert not any("inventory is unavailable" in w for w in result.warnings)
     assert len(result.storage["deleted"]) == 1
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_terminal_reclamation_preserves_unreadable_and_readable_namesakes(hmc, failed):
+    _owned_disks(hmc, "data", "fail" if failed else "extra")
+    other_group = "77777777-7777-7777-7777-777777777777"
+    malformed = [
+        {"disk_name": "partial", "extra": [None, 7, {"flag": True}]},
+        {"disk_name": "partial", "extra": {"second": False}},
+    ]
+    with store.session() as conn, store.write_transaction(conn):
+        for index, identity in enumerate(
+            [
+                {"vios_uuid": VIOS_UUID, "vg_uuid": other_group, "disk_name": "data"},
+                *malformed,
+            ]
+        ):
+            store.add_ledger(
+                conn,
+                "expired",
+                key=f"kept{index}",
+                kind="virtual_disk",
+                system_uuid=SYSTEM_UUID,
+                partition_uuid=LPAR_UUID,
+                identity=identity,
+            )
+        store.add_ledger(
+            conn,
+            "expired",
+            key="partition",
+            kind="partition",
+            system_uuid=SYSTEM_UUID,
+            partition_uuid=LPAR_UUID,
+            identity={"lpar_uuid": LPAR_UUID},
+        )
+    original = hmc.get_volume_group.return_value
+    hmc.get_volume_group.side_effect = lambda _vios, group: (
+        {"Resource": {"VirtualDisks": ""}} if group == other_group else original
+    )
+    if failed:
+        hmc.delete_virtual_disk.side_effect = [None, HMCError("changed", 412)]
+    record = _submit(hmc, arguments=OWNED)
+    assert record.outcome == ("failed" if failed else "completed")
+    for observed in (record, _submit(hmc, arguments=OWNED)):
+        retained = result_from_record(observed, delete_owned=True).storage["retained"]
+        assert [
+            r["ledger_identity"] for r in retained if r["reason"] == "unreadable_record"
+        ] == malformed
+        assert any(r.get("vg_uuid") == other_group for r in retained)
+    with store.session() as conn:
+        assert conn.execute("SELECT count(*) FROM ledger").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_oversized_terminal_provenance_keeps_ledger(hmc, monkeypatch, failed):
+    _owned_disks(hmc, "data")
+    if failed:
+        hmc.delete_virtual_disk.side_effect = HMCError("changed", 412)
+    else:
+        hmc.get_volume_group.return_value = {"Resource": {"VirtualDisks": ""}}
+    monkeypatch.setattr(store, "MAX_RESULT_BYTES", 1)
+    record = _submit(hmc, arguments=OWNED)
+    assert (record.state, record.outcome) == (
+        ("terminal", "failed") if failed else ("paused", "needs_attention")
+    )
+    assert record.result is None
+    assert _statuses(record)["delete_lpar"] == "applied"
+    with store.session() as conn:
+        assert conn.execute("SELECT count(*) FROM ledger").fetchone()[0] == 1

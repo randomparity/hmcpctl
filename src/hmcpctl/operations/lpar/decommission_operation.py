@@ -379,7 +379,11 @@ def _storage(
     deleted = deleted_from_effects(record.effects)
     gone = {same_item(item) for item in deleted}
     earlier = (latest or {}).get("retained", ())
-    retained = [i for i in earlier if same_item(i) not in gone]
+    retained = [
+        i
+        for i in earlier
+        if i.get("reason") == "unreadable_record" or same_item(i) not in gone
+    ]
     return {
         "deleted": deleted,
         "retained": tuple(retained),
