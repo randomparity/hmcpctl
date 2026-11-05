@@ -10,7 +10,9 @@ an independent runner output boundary.
 ## Decision
 Extend existing failure redaction with lexical XML-region and header removal,
 before generic path handling. Respect CDATA, comments, nesting and self-closing
-tags; unclosed sensitive regions consume through EOF. Keep callers/schema intact.
+tags; unclosed sensitive regions consume through EOF. Collect identifiable named
+values once per failure object, then replace their exact echoes across that object's
+nested values before generic redaction. Keep callers/schema intact; no cross-row registry.
 
 ## Consequences
 Diagnostic text inside a removed region is lost conservatively; siblings retain

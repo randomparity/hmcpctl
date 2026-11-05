@@ -10,17 +10,26 @@ quoted attributes, CDATA and comments. Track nested named sensitive elements
 (RequestHeaders, Cookie, Set-Cookie, sessionCookie, X-API-Session), ignoring case
 and allowing namespace prefixes. CDATA/comments cannot terminate a region;
 self-closing elements end immediately. Unclosed regions consume through EOF.
-Replace each sensitive region, and values under those dictionary keys, with
-`<REDACTED-SECRET>`. Then remove named session header lines (colon/equals,
+Collect identifiable named session values before replacing sensitive XML regions
+and dictionary values with `<REDACTED-SECRET>`. Collect header values with quoted
+value handling, XML text/CDATA and named dictionary values; stdlib cookie parsing
+extracts cookie values. Retain raw and unquoted/XML-entity-decoded source values.
+Then remove named session header lines (colon/equals,
 quoted keys, whitespace-prefixed continuation lines), before existing generic
 secret/path redaction. Header removal includes the whole credential-bearing line.
+A preparation traversal collects values across one complete failure data object;
+a finishing traversal replaces their exact echoes across its string values with
+one escaped-literal pattern before generic redaction. Longer values match first.
+No rescanning to a fixed point, speculative encodings or cross-row secret registry.
+`_redact_failure_text` uses the same boundary for a single string. Empty values
+are not replacement patterns. Invalid cookie syntax retains the raw named value.
 
 ## Success and validation
 C1/C2: constructed raw header/XML failures, nested dictionaries and CallFailure
-messages lose session values in console and saved JSON, without upstream help.
+messages lose named values and their identifiable exact echoes in console and JSON.
 C3: preserve row status/shape and non-sensitive sibling diagnostics. Offline
 runner tests cover case/prefix/attributes, repetition, truncation, CDATA, comments,
-nesting and self-closing sibling messages. Full verification and hooks must pass.
+nesting, self-closing sibling messages and earlier/later nested exact echoes. Full verification and hooks must pass.
 
 ## Failure model
 - Actors/deployments: local live-test operators; HMC/transport diagnostic input;
