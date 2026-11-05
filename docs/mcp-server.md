@@ -567,7 +567,7 @@ hold ends `failed`, and a repeat of its `request_id` returns that record, so ret
 `request_id`. Reads, `hmc_capture_lpar_console` and the handoff tool
 are not refused. A store that cannot be read refuses these calls too.
 
-System-wide partition writes also consult the hold store (ADR 0339): `hmc_modify_system`,
+System-wide partition writes also consult the hold store (ADR 0343): `hmc_modify_system`,
 `hmc_power_on_system`, `hmc_power_off_system`, `hmc_activate_system_profile`,
 `hmc_restore_lpar_profiles` and `hmc_update_firmware` refuse with `system_held` when any
 partition on the selected system is held. Their existing CLI mirrors enforce the same rule.

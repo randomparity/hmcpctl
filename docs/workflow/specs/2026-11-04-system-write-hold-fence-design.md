@@ -1,7 +1,7 @@
 # System-wide writes respect external-management holds
 
 Issue #1887; scope token `q1887-92586ba1`; full-spec, M/250, iterating.
-Decision: [ADR 0339](../../adr/0339-system-write-hold-fence.md).
+Decision: [ADR 0343](../../adr/0343-system-write-hold-fence.md).
 Source baseline: `0dcb93630a66efcae7aed85d3265ba85f8289c58`.
 
 ## Problem and scope
@@ -91,7 +91,7 @@ added or removed. ADR 0327 gets only a Status banner identifying D5's partial su
 
 ## Success
 
-- C1: the six-tool checked set and the other 17 system records are classified above; ADR 0339
+- C1: the six-tool checked set and the other 17 system records are classified above; ADR 0343
   records the policy and tradeoffs and ADR 0327's body remains unchanged.
 - C2: each of the six tools refuses `system_held` before its HMC mutation when its system has
   at least one hold at the resolver check, including a hold placed by the calling agent.

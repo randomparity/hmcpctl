@@ -124,7 +124,7 @@ declared, and what kdive's doctor/adopt still has to check
   reads are not checked.
 - **System-wide partition writes require release first.** System modification, power on/off,
   system-profile activation, profile restore and firmware update refuse `system_held` while
-  any partition on that system is held ([ADR 0339](adr/0339-system-write-hold-fence.md)).
+  any partition on that system is held ([ADR 0343](adr/0343-system-write-hold-fence.md)).
   These whole-tool checks have no token or ownership override, including validate-only
   activation and rename-only modification. Existing CLI mirrors enforce the same rule.
   Coordinate handoff with already-admitted system operations; this check does not lock a job.

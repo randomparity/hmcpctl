@@ -2,7 +2,7 @@
 
 ## Status
 
-> **Decision 5 superseded by [0339](0339-system-write-hold-fence.md)** (2026-11-04),
+> **Decision 5 superseded by [0343](0343-system-write-hold-fence.md)** (2026-11-04),
 > for the six system-wide partition-write tools only.
 
 Accepted (2026-11-03), issue #1851 (piece 1 of #1231). Implements ADR 0193 Decisions 1, 2, 5
