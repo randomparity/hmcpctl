@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-11-04), issue #1887. Supersedes ADR 0327 Decision 5 only for the
+Accepted (2026-11-04), issue #1887. Supersedes ADR 0327 Decision 5 only for the
 six system-wide tools enumerated in the accompanying design.
 
 ## Context
