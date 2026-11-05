@@ -5817,6 +5817,20 @@ def test_session_redaction_keeps_empty_quoted_diagnostics(value):
         ),
         ("X-API-Session: SYN_A\n SYN_B", ("SYN_A\n SYN_B",)),
         ("X-API-Session:\nHSCL0001 refused", ()),
+        (
+            (
+                "HTTP status <500 diagnostic: <X-API-Session>SYN_A</X-API-Session>"
+                "<Message>HSCL0001 refused</Message>"
+            ),
+            ("SYN_A",),
+        ),
+        (
+            (
+                '<Error detail="<500 diagnostic"><X-API-Session>SYN_A</X-API-Session>'
+                "<Message>HSCL0001 refused</Message></Error>"
+            ),
+            ("SYN_A",),
+        ),
         ("sessionCookie: SYN_A\r\n\tSYN_B", ("SYN_A\r\n\tSYN_B",)),
         (
             (
@@ -5903,7 +5917,7 @@ async def test_session_header_echoes_are_redacted_at_both_sinks(
     if "HSCL0001 refused" in header:
         assert "HSCL0001 refused" in rows[0]["data"]["body"]
         assert "HSCL0001 refused" in rows[1]["data"]
-    if "<Message>" in header:
+    if "<Message>" in header and "denied" in header:
         assert "denied" in rows[0]["data"]["body"]
 
 
