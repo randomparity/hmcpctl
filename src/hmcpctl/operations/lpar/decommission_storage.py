@@ -136,7 +136,7 @@ def _item(kind: str, identity: Mapping[str, Any]) -> OwnedItem | None:
 
 def owned_items(
     system_uuid: str, partition_uuid: str
-) -> tuple[tuple[OwnedItem, ...], tuple[dict[str, str], ...]]:
+) -> tuple[tuple[OwnedItem, ...], tuple[dict[str, Any], ...]]:
     """The partition's ledgered items, and those retained because another partition's
     entry names them too (ADR 0323 Decision 1). No store means nothing is owned."""
     partition = partition_uuid.lower()
@@ -152,13 +152,19 @@ def owned_items(
         )
     mine: dict[OwnedItem, None] = {}
     elsewhere: set[OwnedItem] = set()
-    unreadable: list[dict[str, str]] = []
+    unreadable: list[dict[str, Any]] = []
     for kind, (_operation, lpar, identity) in rows:
         item = _item(kind, identity)
         ours = (lpar or "").lower() == partition
         if item is None:
             if ours:
-                unreadable.append({"kind": kind, "reason": "unreadable_record"})
+                unreadable.append(
+                    {
+                        "kind": kind,
+                        "reason": "unreadable_record",
+                        "ledger_identity": identity,
+                    }
+                )
             continue
         if ours:
             mine[item] = None
@@ -368,7 +374,7 @@ async def clean_storage(
     partition_uuid: str,
     *,
     authorized_vios: frozenset[str],
-) -> tuple[tuple[dict[str, str], ...], str | None]:
+) -> tuple[tuple[dict[str, Any], ...], str | None]:
     """Delete the partition's deletable owned items; return the retained ones, and the
     failure to end with when a delete got HTTP 412 (ADR 0323 Decision 3) after every item
     was tried. Any other HMC error propagates with its effect open."""
@@ -446,8 +452,8 @@ def deleted_from_effects(effects: Iterable[EffectRecord]) -> tuple[dict[str, str
 
 def same_item(entry: Mapping[str, Any]) -> tuple[Any, ...]:
     """What identifies one item across report entries, whatever else they carry."""
-    name = entry.get("disk_name", entry.get("media_name"))
-    return entry.get("kind"), entry.get("vios_uuid"), name
+    item = _item(entry.get("kind", ""), entry)
+    return () if item is None else (item.kind, item.vios_uuid, item.vg_uuid, item.name)
 
 
 def pending_from_effects(effects: Iterable[EffectRecord]) -> tuple[dict[str, str], ...]:
