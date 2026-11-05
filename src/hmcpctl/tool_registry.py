@@ -214,6 +214,7 @@ class ToolSecurity:
     targets: tuple[TargetSelector, ...] = ()
     connection_argument: str | None = "profile"
     exhaustive_targets: bool = False
+    system_partition_write: bool = False
 
 
 @dataclass(frozen=True)
@@ -362,6 +363,7 @@ def _call_context(name: str, security: ToolSecurity, hold_id: object) -> CallCon
         tool=name,
         read=security.effect == "read",
         hold_id=hold_id if isinstance(hold_id, str) else None,
+        system_partition_write=security.system_partition_write,
     )
 
 
@@ -585,6 +587,16 @@ def validate_security(security: ToolSecurity, handler: Callable[..., Any]) -> No
             "policy targets table would have nothing to bind on"
         )
 
+    if security.system_partition_write and (
+        security.effect == "read"
+        or security.target_kind != "managed_system"
+        or not any(t.kind == "managed_system" and t.required for t in security.targets)
+    ):
+        raise ValueError(
+            f"{name}: system_partition_write requires a non-read managed-system tool "
+            "with a required managed-system selector"
+        )
+
     _validate_arguments(security, inspect.signature(handler).parameters, name)
 
     if security.target_kind == "none":
@@ -635,6 +647,7 @@ class _ToolCollector:
         extra_targets: Iterable[tuple[TargetKind, str]],
         connection_argument: str | None,
         exhaustive_targets: bool,
+        system_partition_write: bool,
     ) -> None:
         self._definitions = definitions
         self._effect = effect
@@ -643,6 +656,7 @@ class _ToolCollector:
         self._extra_targets = extra_targets
         self._connection_argument = connection_argument
         self._exhaustive_targets = exhaustive_targets
+        self._system_partition_write = system_partition_write
 
     def __call__(self, fn: ToolHandlerT) -> ToolHandlerT:
         name = getattr(fn, "__name__", "<handler>")
@@ -651,6 +665,7 @@ class _ToolCollector:
             operation=self._operation,
             target_kind=self._target_kind,
             connection_argument=self._connection_argument,
+            system_partition_write=self._system_partition_write,
         )
         try:
             targets = build_targets(fn, self._extra_targets)
@@ -681,6 +696,7 @@ class _ToolModuleBuilder:
         extra_targets: Iterable[tuple[TargetKind, str]] = (),
         connection_argument: str | None = "profile",
         exhaustive_targets: bool = True,
+        system_partition_write: bool = False,
     ) -> HandlerDecorator:
         return _ToolCollector(
             self.definitions,
@@ -690,6 +706,7 @@ class _ToolModuleBuilder:
             extra_targets=extra_targets,
             connection_argument=connection_argument,
             exhaustive_targets=exhaustive_targets,
+            system_partition_write=system_partition_write,
         )
 
     def register_tools(

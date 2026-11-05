@@ -567,12 +567,20 @@ hold ends `failed`, and a repeat of its `request_id` returns that record, so ret
 `request_id`. Reads, `hmc_capture_lpar_console` and the handoff tool
 are not refused. A store that cannot be read refuses these calls too.
 
-A hold binds only this host's front ends. The library API, other hosts, the HMC GUI and direct
-HMC commands are not fenced, and neither are tools that never resolve a partition: system-scoped
-writes such as `hmc_restore_lpar_profiles`, system power and system profile activation, and
-`hmc_run_command` and `hmcpctl raw` (ADR 0327). While any hold exists, a mutation that names its
-partition only by name over SSH resolves the name through REST first; when REST cannot identify
-it, the call is refused with `partition_hold_unverified`.
+System-wide partition writes also consult the hold store (ADR 0343): `hmc_modify_system`,
+`hmc_power_on_system`, `hmc_power_off_system`, `hmc_activate_system_profile`,
+`hmc_restore_lpar_profiles` and `hmc_update_firmware` refuse with `system_held` when any
+partition on the selected system is held. Their existing CLI mirrors enforce the same rule.
+Release all holds on that system first; neither a matching `hold_id` nor ownership override
+bypasses it. The entire tool is covered, including rename-only modification and validate-only
+profile activation. This is a check at system resolution, not a lock spanning an HMC job:
+coordinate handoff with operations already admitted before the hold was placed.
+
+A hold binds only this host's front ends. The library API, other hosts, the HMC GUI, direct
+HMC commands, `hmc_run_command` and `hmcpctl raw` remain unfenced. Other unchecked tools are
+listed in the handoff document. While any hold exists, a mutation that names its partition
+only by name over SSH resolves the name through REST first; when REST cannot identify it,
+the call is refused with `partition_hold_unverified`.
 
 `hmc_prepare_host_handoff` places and releases holds (ADR 0329). `prepare` with `hold` true and a
 `consumer_label` places the partition's hold and returns its `hold_id` only to the placing agent

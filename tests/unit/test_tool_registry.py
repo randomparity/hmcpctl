@@ -629,3 +629,35 @@ def test_the_wrapper_authorizes_before_a_coroutine_handler_runs():
     with pytest.raises(RuntimeError, match="denied"):
         asyncio.run(guarded("lab"))
     assert reached == []
+
+
+@pytest.mark.parametrize(
+    "effect,kind,argument",
+    [
+        ("read", "managed_system", "system_name_or_uuid"),
+        ("mutate", "lpar", "system_name_or_uuid"),
+        ("mutate", "managed_system", "other"),
+    ],
+)
+def test_system_write_marker_requires_mutation_and_required_system_selector(
+    effect, kind, argument
+):
+    def handler(**kwargs):
+        pass
+
+    handler.__signature__ = inspect.Signature(
+        [
+            inspect.Parameter(
+                argument, inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str
+            )
+        ]
+    )
+    tool, _, _ = tool_module()
+    with pytest.raises(ValueError, match="system_partition_write"):
+        tool(
+            effect=effect,
+            operation="system.write",
+            target_kind=kind,
+            connection_argument=None,
+            system_partition_write=True,
+        )(handler)
