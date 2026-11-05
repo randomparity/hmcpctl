@@ -22,6 +22,8 @@ one escaped-literal pattern before generic redaction. Longer values match first.
 No rescanning to a fixed point, speculative encodings or cross-row secret registry.
 Comment/processing-instruction interiors also supply named header values. Empty
 values are not replacement patterns. Invalid cookie syntax retains the raw named value.
+Decoded header captures map back to raw value spans using stdlib entity decoding;
+source-span scans admit at most 1,000,000 characters per failure object.
 
 Collection admits at most 65,536 source characters and 4,096 object nodes, with
 object/XML depth at most 32. Parent text collection pauses across sensitive children,

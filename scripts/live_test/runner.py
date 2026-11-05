@@ -291,6 +291,36 @@ def _remember_session(value: str, secrets: set[str], *, cookie: bool) -> None:
                 retain(unquote(item.coded_value), encoded_quotes=encoded_quotes)
 
 
+def _raw_session_header_value(fragment: str, match: re.Match[str]) -> str:
+    start, end = match.span("value")
+    raw_start, raw_end = start, end
+    removed = 0
+    # Each ampersand-delimited chunk can undergo only one stdlib entity replacement.
+    for part in re.finditer(r"&[^&]*", fragment):
+        raw = part.group()
+        decoded = html.unescape(raw)
+        difference = len(raw) - len(decoded)
+        if not difference:
+            continue
+        suffix = 0
+        while suffix < len(decoded) and raw[-suffix - 1] == decoded[-suffix - 1]:
+            suffix += 1
+        decoded_start = part.start() - removed
+        decoded_end = decoded_start + len(decoded) - suffix
+        if start > decoded_end or (
+            start == decoded_end and decoded_start < decoded_end
+        ):
+            raw_start += difference
+        elif start > decoded_start:
+            raw_start = part.start()
+        if end >= decoded_end:
+            raw_end += difference
+        elif end > decoded_start:
+            raw_end = part.end() - suffix
+        removed += difference
+    return fragment[raw_start:raw_end]
+
+
 def _session_xml_text(match: re.Match[str]) -> str:
     token = match.group()
     if not token.startswith("<![CDATA["):
@@ -387,11 +417,12 @@ def _redact_failure_data(data: Any) -> Any:
     secrets: set[str] = set()
     remaining_chars = 65_536
     remaining_nodes = 4096
+    remaining_source_work = 1_000_000
     prepared_chars = 0
 
     # None is outside a named source; False learns exact values, True also parses cookies.
     def prepare(value: Any, depth: int = 0, cookie: bool | None = None) -> Any:
-        nonlocal remaining_chars, remaining_nodes, prepared_chars
+        nonlocal remaining_chars, remaining_nodes, prepared_chars, remaining_source_work
         remaining_nodes -= 1
         if depth > 32 or remaining_nodes < 0:
             raise _FailureRedactionLimit
@@ -438,8 +469,14 @@ def _redact_failure_data(data: Any) -> Any:
             for source in {fragment, html.unescape(fragment)}:
                 for matcher in (_SESSION_VALUE_RE, _SESSION_HEADER_VALUE_RE):
                     for match in matcher.finditer(source):
+                        value = match["value"]
+                        if source != fragment:
+                            remaining_source_work -= len(fragment)
+                            if remaining_source_work < 0:
+                                raise _FailureRedactionLimit
+                            value = _raw_session_header_value(fragment, match)
                         _remember_session(
-                            match["value"],
+                            value,
                             secrets,
                             cookie=match["name"].lower() in {"cookie", "set-cookie"},
                         )

@@ -5808,6 +5808,101 @@ def test_session_redaction_decodes_named_entities_once(field, source, decoded):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["X-API-Session", "Cookie"])
+@pytest.mark.parametrize(
+    "form",
+    [
+        "plain",
+        "encoded_delimiter",
+        "encoded_name",
+        "encoded_quotes",
+        "numeric",
+        "semicolonless",
+        "nonentity_amp",
+        "multiple",
+        "discarded_numeric",
+    ],
+)
+async def test_header_entity_decoding_preserves_unrelated_diagnostics(
+    monkeypatch, tmp_path, capsys, field, form
+):
+    _isolate_runner(monkeypatch)
+    prefix = "opaque=" if field == "Cookie" else ""
+    encoded_value = "&amp;quot;SYN_A&amp;quot;"
+    decoded_value = "&quot;SYN_A&quot;"
+    if form == "numeric":
+        encoded_value = "&#38;quot;SYN_A&#38;quot;"
+    elif form == "semicolonless":
+        encoded_value = "&ampquot;SYN_A&ampquot;"
+    elif form == "nonentity_amp":
+        encoded_value += "&noise"
+        decoded_value += "&noise"
+    elif form == "discarded_numeric":
+        encoded_value = "&#x7f;" + encoded_value + "&#127;"
+    raw, decoded = prefix + encoded_value, prefix + decoded_value
+    label = field
+    if form == "encoded_name":
+        label = field.replace("o", "&#111;").replace("-", "&#45;")
+    elif form == "encoded_quotes":
+        label = "&quot;" + field + "&quot;"
+    body = label + (": " if form == "plain" else "&#58; ") + raw
+    if form == "multiple":
+        body = "ordinary &noise &amp; context\n" + body + "\nX-API-Session: SYN_OTHER"
+    message = "SYN_A diagnostic"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            {
+                "message": message,
+                "raw_echo": raw,
+                "decoded_echo": decoded,
+                "body": body,
+            },
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(
+                RuntimeError(message + "\n" + raw + "\n" + decoded + "\n" + body)
+            ),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    assert rows[0]["data"]["message"] == message
+    assert rows[0]["data"]["raw_echo"] == "<REDACTED-SECRET>"
+    assert rows[0]["data"]["decoded_echo"] == "<REDACTED-SECRET>"
+    assert message in rows[1]["data"]
+    assert message in output
+    assert "SYN_OTHER" not in json.dumps(rows)
+    assert "SYN_OTHER" not in output
+    for echo in (raw, decoded):
+        assert echo not in json.dumps(rows)
+        assert echo not in output
+
+
+@pytest.mark.parametrize(
+    "header", ["X-API-Session&#58; SYN_A", "Cookie&#58; sid=SYN_A"]
+)
+def test_encoded_header_recognition_keeps_source_values(header):
+    result = runner._redact_failure_data({"message": "SYN_A denied", "body": header})
+    assert result["message"] == "<REDACTED-SECRET> denied"
+    assert "SYN_A" not in result["body"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("header", "secrets"),
     [
@@ -6165,12 +6260,16 @@ def test_ordinary_containers_do_not_identify_session_values():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("closed", [False, True])
-@pytest.mark.parametrize("limit", ["depth", "size", "values", "pattern", "matching"])
+@pytest.mark.parametrize(
+    "limit", ["depth", "size", "values", "pattern", "matching", "source_mapping"]
+)
 async def test_failure_redaction_resource_exhaustion_fails_closed(
     monkeypatch, tmp_path, capsys, closed, limit
 ):
     _isolate_runner(monkeypatch)
-    if limit == "pattern":
+    if limit == "source_mapping":
+        source = "\n".join(f"X-API-Session&#58; SYN_{i}" for i in range(140))
+    elif limit == "pattern":
         source = 'X-API-Session: "' + "x" * 40_000 + '"'
     elif limit == "matching":
         source = "\n".join(f"X-API-Session: SYN_{i}" for i in range(100))
