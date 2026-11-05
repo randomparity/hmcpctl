@@ -84,7 +84,10 @@ from .server_tools.command import (
 )
 from .server_tools.gateway import register_gateway_tools
 from .server_tools.inventory.logical import register_inventory_tool
-from .server_tools.lpar.decommission import register_decommission_tool
+from .server_tools.lpar.decommission import (
+    decommission_authorization_targets,
+    register_decommission_tool,
+)
 from .server_tools.lpar.handoff import register_handoff_tool
 from .server_tools.lpar.inspect import register_inspect_tool
 from .server_tools.lpar.plan import register_plan_tool
@@ -110,7 +113,9 @@ def _gates(policy: AccessPolicy) -> tuple[Callable[[str], bool], Authorize]:
     policy is now mandatory, so there is no composition for a ``None`` gate to
     describe.
     """
-    return policy.permits_tool, dispatch_authorizer(policy)
+    return policy.permits_tool, dispatch_authorizer(
+        policy, resolve_targets=decommission_authorization_targets
+    )
 
 
 def create_mcp(

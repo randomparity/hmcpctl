@@ -10,12 +10,14 @@ replaces: kind ``lpar``, exhaustive selectors.
 from __future__ import annotations
 
 import dataclasses
+import sqlite3
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 from fastmcp import FastMCP
 
 from ..._app import with_client
+from ...authorization.target_scope import TargetScopeError
 from ...config import build_config
 from ...operations.logical import engine, store
 from ...operations.logical.engine import OperationRequest
@@ -68,6 +70,30 @@ WINDOW_WARNING = (
 )
 Continuation = Literal["none", "resume", "abandon"]
 StorageCleanup = Literal["retain", "delete_owned"]
+
+
+def decommission_authorization_targets(
+    name: str, arguments: Mapping[str, Any]
+) -> Mapping[str, Any] | None:
+    """Recover immutable original selectors after dispatch's connection eligibility check."""
+    if name != TOOL_NAME or arguments.get("continuation") not in ("resume", "abandon"):
+        return None
+    try:
+        config = build_config(profile=arguments["profile"])
+        recorded = engine.recorded_arguments(
+            config.agent_id or "hmcpctl", arguments["request_id"], TOOL_NAME
+        )
+        selectors = ("system_name_or_uuid", "lpar_name_or_uuid")
+        if not isinstance(recorded, Mapping) or any(
+            not isinstance(recorded.get(key), str) or not recorded[key].strip()
+            for key in selectors
+        ):
+            raise ValueError("unavailable recorded selectors")
+        return {key: recorded[key] for key in selectors}
+    except (ValueError, OSError, sqlite3.Error, KeyError, TypeError):
+        raise TargetScopeError(
+            "hmc_decommission_lpar cannot authorize this operation's recorded targets"
+        ) from None
 
 
 def _require_window(window: bool | None) -> None:

@@ -4471,6 +4471,68 @@
       "evidence": []
     },
     {
+      "operation": "vnic.update_policy",
+      "implementation": {
+        "state": "partial",
+        "implemented_scope": [
+          {
+            "variant": "scalar-set",
+            "parameters": [
+              {
+                "name": "auto_priority_failover",
+                "constraint": "boolean"
+              },
+              {
+                "name": "pvid_priority",
+                "constraint": "integer 0 through 7"
+              }
+            ]
+          },
+          {
+            "variant": "port-vlan-from-zero",
+            "parameters": [
+              {
+                "name": "port_vlan_id",
+                "constraint": "1 through 4094, from 0, while allowed_vlan_ids is none"
+              }
+            ]
+          },
+          {
+            "variant": "finite-list-add",
+            "parameters": [
+              {
+                "name": "add_allowed_os_mac_addrs",
+                "constraint": "members added to a finite list"
+              },
+              {
+                "name": "add_allowed_vlan_ids",
+                "constraint": "members added to a finite list"
+              }
+            ]
+          }
+        ],
+        "missing_scope": [
+          {
+            "variant": "list-replace-or-remove",
+            "parameters": []
+          },
+          {
+            "variant": "list-sentinel-all-or-none",
+            "parameters": []
+          },
+          {
+            "variant": "combined-changes",
+            "parameters": []
+          },
+          {
+            "variant": "other-port-vlan-transitions",
+            "parameters": []
+          }
+        ]
+      },
+      "evidence": []
+    },
+    {
       "operation": "storage.list_volume_groups",
       "implementation": {
         "state": "implemented",

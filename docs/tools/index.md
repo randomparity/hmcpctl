@@ -6,15 +6,15 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **206** tools are registered.
-- **205** are callable in a default deployment.
+- **207** tools are registered.
+- **206** are callable in a default deployment.
 - **11** are listed by `tools/list` in a default deployment (ADR 0330); `hmc_search_tools` finds the rest, which are called by name or through `hmc_invoke_tool`.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
 | `destructive` | 49 |
-| `mutate` | 65 |
+| `mutate` | 66 |
 | `read` | 91 |
 
 ## Maturity vocabulary
@@ -69,7 +69,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `vios` | 16 | [vios.md](vios.md) |
 | `vios_label` | 7 | [vios_label.md](vios_label.md) |
 | `vios_profile` | 6 | [vios_profile.md](vios_profile.md) |
-| `vnic` | 3 | [vnic.md](vnic.md) |
+| `vnic` | 4 | [vnic.md](vnic.md) |
 
 ## Listed by default
 
@@ -285,6 +285,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_update_system_profile` | `mutate` | [system_profile.md](system_profile.md) |
 | `hmc_update_vios_partition_profile` | `mutate` | [vios_profile.md](vios_profile.md) |
 | `hmc_update_vios_vfc_group_label` | `mutate` | [vios_label.md](vios_label.md) |
+| `hmc_update_vnic_policy` | `mutate` | [vnic.md](vnic.md) |
 | `hmc_upload_iso` | `mutate` | [media.md](media.md) |
 | `hmc_vios_update` | `destructive` | [update.md](update.md) |
 | `hmc_vios_upgrade` | `destructive` | [upgrade.md](upgrade.md) |

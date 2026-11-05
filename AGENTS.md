@@ -384,6 +384,14 @@ global executable may differ. `just setup` installs the git hook script, not a
 
 ## Repository conventions
 
+**Every issue carries a release milestone.** Releases are GitHub milestones
+(`docs/development.md`, *Releasing*), so an issue filed without one is unscheduled
+work nobody will find. Assign the milestone whose theme the issue serves, and put
+anything not yet scheduled on the latest open milestone rather than leaving the
+field empty. An issue's `Blocked by` targets must sit in the same or an earlier
+milestone; a blocker in a later milestone means one of the two is misassigned.
+Epics span milestones and carry none.
+
 **Implementation plans are local and transient.** Never commit files under
 `docs/workflow/plans/`; the directory is gitignored. Use a plan only as a
 sequencing aid during implementation, delete it when the implementation is

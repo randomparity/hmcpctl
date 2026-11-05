@@ -16,7 +16,7 @@ is the only place in the package that iterates ``AccessPolicy.grants_for``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from hmcpctl.audit import records as audit
@@ -29,6 +29,7 @@ from hmcpctl.authorization.connection_scope import (
 )
 from hmcpctl.authorization.target_scope import (
     Selected,
+    TargetScopeError,
     audit_state,
     denial_reason,
     selected_targets,
@@ -71,7 +72,12 @@ def _audit_view(
         return None, None
 
 
-def dispatch_authorizer(policy: AccessPolicy) -> Authorize:
+def dispatch_authorizer(
+    policy: AccessPolicy,
+    *,
+    resolve_targets: Callable[[str, Mapping[str, Any]], Mapping[str, Any] | None]
+    | None = None,
+) -> Authorize:
     """An authorizer denying any call no single grant of *policy* covers whole.
 
     The returned callable is what ``server._gates`` hands to every registration
@@ -145,6 +151,7 @@ def dispatch_authorizer(policy: AccessPolicy) -> Authorize:
         )
 
         connection_matched = False
+        resolved_targets = False
         # One conjunction per grant, never a union across them. Both conditions
         # are evaluated against the *same* grant before it can permit, so a policy
         # whose first grant allows the connection and whose second allows the
@@ -158,6 +165,18 @@ def dispatch_authorizer(policy: AccessPolicy) -> Authorize:
                 connection, grant.connections
             ):
                 continue
+            if not connection_matched and resolve_targets is not None:
+                try:
+                    replacements = resolve_targets(name, arguments)
+                except TargetScopeError:
+                    record("deny", "target-selector-unreadable", resolved, None)
+                    raise
+                if replacements is not None:
+                    extracted = selected_targets(security, replacements)
+                    resolved, audited = _audit_view(
+                        connection, extracted, scoped=argument is not None
+                    )
+                    resolved_targets = True
             connection_matched = True
             if targets_permitted(grant.targets, security, extracted):
                 record("allow", "permitted", resolved, audited)
@@ -172,6 +191,11 @@ def dispatch_authorizer(policy: AccessPolicy) -> Authorize:
             record("deny", "connection-not-granted", resolved, audited)
             raise connection_denial(name, policy.name, argument, token, connection)
         record("deny", denial_reason(security, extracted), resolved, audited)
+        if resolved_targets:
+            raise TargetScopeError(
+                f"{name} is not permitted for this operation's recorded targets "
+                "by the access policy."
+            )
         raise target_denial(name, policy.name, security, extracted)
 
     return authorize

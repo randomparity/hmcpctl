@@ -721,13 +721,16 @@ def _unguarded_a_values(
     """Trace the vNIC preflight helper's returned record through the same builder."""
     builder = BUILDER_NAME
     vnic_source = _REPO_ROOT / "src/hmcpctl/ssh/vnic.py"
-    if (source_path, func.name) in {
-        (vnic_source, "add_vnic_backing"),
-        (_REPO_ROOT / "scripts/live_test/vnic_creation_policy.py", "_capture"),
-        (_REPO_ROOT / "scripts/live_test/vnic_creation_policy.py", "_capture_source"),
-        (_REPO_ROOT / "scripts/live_test/vnic_creation_policy.py", "_source_history"),
-    }:
-        builder = "build_vnic_add_attributes"
+    harness = _REPO_ROOT / "scripts/live_test/vnic_creation_policy.py"
+    helpers = {
+        (vnic_source, "add_vnic_backing"): "build_vnic_add_attributes",
+        (vnic_source, "update_vnic_slot_policy"): "build_vnic_update_attributes",
+        (harness, "_capture"): "build_vnic_add_attributes",
+        (harness, "_capture_source"): "build_vnic_add_attributes",
+        (harness, "_source_history"): "build_vnic_add_attributes",
+    }
+    if (source_path, func.name) in helpers:
+        builder = helpers[(source_path, func.name)]
         tree = ast.parse(vnic_source.read_text())
         helper = next(
             node
@@ -907,6 +910,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "_set_ethernet_adapter",
         "assign_sriov_logical_port_dynamic",
         "add_vnic_backing",
+        "update_vnic_slot_policy",
     }
     assert by_label["--filter"] == {
         "_native",
