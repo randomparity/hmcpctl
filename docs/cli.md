@@ -605,13 +605,23 @@ system the HMC cannot list is absent from the report, with only a warning on std
 replaces `PATH` only once it is complete. A run killed by a signal other than Ctrl-C can leave
 an empty, owner-only `.<name>.*.tmp` file beside `PATH`; delete it.
 
-The command refuses to run when `HMC_HOST`, `HMC_USER`, `HMC_PASSWORD`, `HMC_PORT`,
-`HMC_VERIFY_SSL`, `HMC_CERT_FINGERPRINT`, `HMC_CA_BUNDLE` or `HMC_TRUST_SYSTEM_STORE` is
-exported, even as an empty value, or when a global connection option
-(`--host`, `--user`, `--password`, `--verify-ssl`, `--profile`) is given. An exported value
-overrides every profile's own, so one HMC's host, credentials or TLS setting would reach all of
-them; the global options would be ignored. `HMC_TIMEOUT` and `HMC_SCHEMA_VERSION` still apply
-to every profile.
+The command classifies every `HMCConfig` field for this report:
+
+- Per-profile settings are refused when exported, even as an empty value or with a
+  differently cased name: `HMC_HOST`, `HMC_PORT`, `HMC_USER`, `HMC_PASSWORD`,
+  `HMC_SSH_KEY_FILE`, `HMC_SSH_VERIFY_HOST_KEY`, `HMC_VERIFY_SSL`, `HMC_CA_BUNDLE`,
+  `HMC_CERT_FINGERPRINT`, `HMC_TRUST_SYSTEM_STORE`, `HMC_UPLOAD_TIMEOUT`,
+  `HMC_MAX_RESPONSE_BYTES`, `HMC_SSH_TIMEOUT`, `HMC_AUDIT_MEMENTO`, `HMC_AGENT_ID`,
+  `HMC_AUTHORIZE_POWER_OPERATIONS`, `HMC_ISO_URL_ALLOWLIST`, `HMC_ISO_BUILD_ENTRY`
+  and `HMC_ISO_BUILD_ARGUMENTS`.
+- The two global settings, `HMC_TIMEOUT` and `HMC_SCHEMA_VERSION`, still apply to
+  every profile and override its TOML values.
+
+Unset the per-profile exports and configure those settings in individual TOML profiles.
+An exported setting would otherwise override every profile's own credentials, trust,
+attribution or limits. The refusal also covers settings this read-only report does not use.
+The command also refuses global connection options
+(`--host`, `--user`, `--password`, `--verify-ssl`, `--profile`), which would be ignored.
 
 When profiles fail, the `fleet` row's `notes` says how many and which: a system that only a
 failed profile manages is missing from the fleet totals. It also says how many systems
