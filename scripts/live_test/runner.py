@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import html
 import inspect
 import json
 import os
@@ -63,6 +64,7 @@ from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequenc
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
+from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
 
@@ -164,6 +166,24 @@ from live_test.vmedia_media_change import vmedia_media_change
 # ---------------------------------------------------------------------------
 
 
+_SESSION_FIELD_RE = re.compile(
+    r"(?i)(?:RequestHeaders|Cookie|Set-Cookie|sessionCookie|X-API-Session)"
+)
+_SESSION_XML_TOKEN_RE = re.compile(
+    r"(?s)<!\[CDATA\[.*?(?:\]\]>|\Z)|<!--.*?(?:-->|\Z)|"
+    r"<(?P<closing>/)?(?P<tag>[\w.:-]+)(?=[\s/>])"
+    r"(?:[^'\">]|'[^']*(?:'|\Z)|\"[^\"]*(?:\"|\Z))*(?:>|\Z)"
+)
+_SESSION_HEADER_RE = re.compile(
+    r"(?i)(?<![\w-])(?:Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][^\r\n]*"
+    r"(?:\r?\n[ \t]+[^\r\n]*)*"
+)
+_SESSION_VALUE_RE = re.compile(
+    r"(?i)(?=(?<![\w-])(?P<name>Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=]\s*"
+    r"""(?P<value>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;{}]+))"""
+)
+
+
 _SECRET_VALUE_RE = re.compile(
     r"(?i)\b(?P<name>password|passwd|token|secret|api[_-]?key)"
     r"(?P<separator>\s*(?:=|:)\s*)(?P<quote>['\"]?)(?P<value>[^\s,;'\"&]+)"
@@ -205,21 +225,134 @@ def _redact_hostname(match: re.Match[str]) -> str:
     return "<REDACTED-HOST>"
 
 
-def _redact_failure_text(value: str) -> str:
-    """Replace sensitive values in runner failure diagnostics."""
-    value = _SECRET_VALUE_RE.sub(r"\g<name>\g<separator><REDACTED-SECRET>", value)
-    value = _URL_USERINFO_RE.sub(r"\g<scheme><REDACTED-URL-USERINFO>@", value)
-    value = _HOSTNAME_RE.sub(_redact_hostname, value)
-    return _ABSOLUTE_PATH_RE.sub("<REDACTED-PATH>", value)
+def _remember_session(value: str, secrets: set[str], *, cookie: bool = False) -> None:
+    raw = value.strip()
+    value = raw
+    if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":
+        value = re.sub(r"\\(.)", r"\1", value[1:-1])
+    if not value:
+        return
+    secrets.update((raw, html.unescape(value)))
+    if cookie:
+        parsed = SimpleCookie()
+        try:
+            parsed.load(value)
+        except CookieError:
+            return  # The raw named value still protects exact echoes of malformed cookies.
+        secrets.update(item.value for item in parsed.values() if item.value)
+
+
+def _session_xml_text(match: re.Match[str]) -> str:
+    token = match.group()
+    if not token.startswith("<![CDATA["):
+        return ""
+    return token[9:-3] if token.endswith("]]>") else token[9:]
+
+
+def _redact_session_xml(value: str, secrets: set[str]) -> str:
+    parts: list[str] = []
+    stack: list[tuple[str, int]] = []
+    cursor = 0
+    for match in _SESSION_XML_TOKEN_RE.finditer(value):
+        tag = match["tag"]
+        if tag is None or not _SESSION_FIELD_RE.fullmatch(tag.rsplit(":", 1)[-1]):
+            continue
+        tag = tag.lower()
+        if match["closing"]:
+            if not stack or stack[-1][0] != tag:
+                continue
+            _, start = stack.pop()
+            if tag.rsplit(":", 1)[-1] != "requestheaders":
+                content = value[start : match.start()]
+                content = _SESSION_XML_TOKEN_RE.sub(
+                    _session_xml_text,
+                    content,
+                )
+                _remember_session(
+                    content,
+                    secrets,
+                    cookie=tag.rsplit(":", 1)[-1] in {"cookie", "set-cookie"},
+                )
+        else:
+            if not stack:
+                parts.append(value[cursor : match.start()])
+            if not match.group().endswith("/>"):
+                stack.append((tag, match.end()))
+        if not stack:
+            parts.append("<REDACTED-SECRET>")
+            cursor = match.end()
+    for tag, start in stack:
+        if tag.rsplit(":", 1)[-1] != "requestheaders":
+            content = _SESSION_XML_TOKEN_RE.sub(
+                _session_xml_text,
+                value[start:],
+            )
+            _remember_session(content, secrets)
+    parts.append("<REDACTED-SECRET>" if stack else value[cursor:])
+    return "".join(parts)
 
 
 def _redact_failure_data(data: Any) -> Any:
-    """Preserve failure result shapes while redacting their string leaves."""
-    if isinstance(data, dict):
-        return {key: _redact_failure_data(value) for key, value in data.items()}
-    if isinstance(data, list):
-        return [_redact_failure_data(value) for value in data]
-    return _redact_failure_text(str(data))
+    secrets: set[str] = set()
+
+    def prepare(value: Any) -> Any:
+        if isinstance(value, dict):
+            prepared = {}
+            for key, child in value.items():
+                safe_child = prepare(child)
+                if _SESSION_FIELD_RE.fullmatch(str(key)):
+                    if str(key).lower() != "requestheaders" and isinstance(child, str):
+                        _remember_session(
+                            child,
+                            secrets,
+                            cookie=str(key).lower() in {"cookie", "set-cookie"},
+                        )
+                    safe_child = "<REDACTED-SECRET>"
+                prepared[key] = safe_child
+            return prepared
+        if isinstance(value, list):
+            return [prepare(child) for child in value]
+        text = str(value)
+        fragments = [text]
+        cursor = 0
+        for token in _SESSION_XML_TOKEN_RE.finditer(text):
+            fragments.append(text[cursor : token.start()])
+            if token.group().startswith("<![CDATA["):
+                fragments.append(_session_xml_text(token))
+            cursor = token.end()
+        fragments.append(text[cursor:])
+        for fragment in fragments:
+            for match in _SESSION_VALUE_RE.finditer(html.unescape(fragment)):
+                _remember_session(
+                    match["value"],
+                    secrets,
+                    cookie=match["name"].lower() in {"cookie", "set-cookie"},
+                )
+        text = _redact_session_xml(text, secrets)
+        return _SESSION_HEADER_RE.sub("<REDACTED-SECRET>", text)
+
+    prepared = prepare(data)
+    pattern = re.compile(
+        "|".join(re.escape(s) for s in sorted(secrets, key=len, reverse=True))
+        or r"(?!)"
+    )
+
+    def finish(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: finish(child) for key, child in value.items()}
+        if isinstance(value, list):
+            return [finish(child) for child in value]
+        value = pattern.sub("<REDACTED-SECRET>", value)
+        value = _SECRET_VALUE_RE.sub(r"\g<name>\g<separator><REDACTED-SECRET>", value)
+        value = _URL_USERINFO_RE.sub(r"\g<scheme><REDACTED-URL-USERINFO>@", value)
+        value = _HOSTNAME_RE.sub(_redact_hostname, value)
+        return _ABSOLUTE_PATH_RE.sub("<REDACTED-PATH>", value)
+
+    return finish(prepared)
+
+
+def _redact_failure_text(value: str) -> str:
+    return _redact_failure_data(value)
 
 
 #: The `HMC_*` names whose reader folds their casing: `HMCConfig`'s own fields,

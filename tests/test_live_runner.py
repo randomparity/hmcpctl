@@ -5690,6 +5690,103 @@ async def test_main_redacts_direct_failure_before_persisting(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Cookie: sessionCookie=SYNTHETIC_SESSION; other=SYNTHETIC_SECOND",
+        "set-cookie: sessionCookie=SYNTHETIC_SESSION; Path=/",
+        "sessionCookie=SYNTHETIC_SESSION",
+        "'X-API-Session': 'SYNTHETIC_SESSION with spaces'",
+        "x-api-session: SYNTHETIC_SESSION\n\tSYNTHETIC_SECOND",
+        '<n:X-API-Session xmlns:n="urn:test">SYNTHETIC_SESSION</n:X-API-Session>',
+        "<sessionCookie>SYNTHETIC_SESSION</sessionCookie>",
+        "<Cookie>SYNTHETIC_SESSION</Cookie><X-API-Session>SYNTHETIC_SECOND</X-API-Session>",
+        '<RequestHeaders id="test">\n<opaque>SYNTHETIC_SESSION</opaque>\n</RequestHeaders>',
+        "<RequestHeaders>SYNTHETIC_SESSION",
+        "<X-API-Session>SYNTHETIC_SESSION",
+        "<RequestHeaders><![CDATA[Cookie: first</RequestHeaders>SYNTHETIC_SESSION]]></RequestHeaders>",
+        "<RequestHeaders><!-- </RequestHeaders> -->SYNTHETIC_SESSION</RequestHeaders>",
+        "<RequestHeaders><RequestHeaders/>SYNTHETIC_SESSION</RequestHeaders>",
+        '<RequestHeaders attr=">">SYNTHETIC_SESSION</RequestHeaders>',
+        '<RequestHeaders attr="SYNTHETIC_SESSION',
+        "<RequestHeaders/><Message>HSCL0001 refused</Message>",
+        "<Cookie /><Message>HSCL0001 refused</Message>",
+        "<RequestHeaders>Cookie: sessionCookie=SYNTHETIC_SESSION</RequestHeaders><Message>SYNTHETIC_SESSION denied</Message>",
+        "<X-API-Session><![CDATA[SYNTHETIC_SESSION]]></X-API-Session><Message>SYNTHETIC_SESSION denied</Message>",
+        "X-API-Session: 'SYNTHETIC_SESSION with spaces'\nSYNTHETIC_SESSION with spaces denied",
+        "<RequestHeaders>{cookie=sessionCookie=SYNTHETIC_SESSION, x-api-session=SYNTHETIC_SECOND}</RequestHeaders><Message>SYNTHETIC_SESSION SYNTHETIC_SECOND denied</Message>",
+        {
+            "RequestHeaders": {"Cookie": "sessionCookie=SYNTHETIC_SESSION"},
+            "message": "SYNTHETIC_SESSION denied",
+        },
+        {
+            "message": "SYNTHETIC_SESSION denied",
+            "nested": [{"X-API-Session": "SYNTHETIC_SESSION"}],
+        },
+        {
+            "Cookie": 'opaque="SYNTHETIC_SESSION with spaces"',
+            "message": "SYNTHETIC_SESSION with spaces denied",
+        },
+    ],
+)
+async def test_main_scrubs_session_failure_data(monkeypatch, tmp_path, capsys, body):
+    _isolate_runner(monkeypatch)
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            {
+                "status": 400,
+                "message": "HSCL0001 refused",
+                "nested": [
+                    {
+                        "body": body,
+                        "X-API-Session": "SYNTHETIC_SECOND",
+                        "RequestHeaders": {"opaque": "SYNTHETIC_SESSION"},
+                    }
+                ],
+            },
+        )
+        state.record(
+            0, "fake", "FAIL", observation.classify_failure(RuntimeError(body))
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    results_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(results_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    persisted = results_path.read_text()
+    output = capsys.readouterr().out
+    for secret in ("SYNTHETIC_SESSION", "SYNTHETIC_SECOND"):
+        assert secret not in persisted
+        assert secret not in output
+    rows = json.loads(persisted)["results"]
+    assert [row["status"] for row in rows] == ["FAIL", "FAIL"]
+    assert rows[0]["data"]["status"] == "400"
+    assert rows[0]["data"]["message"] == "HSCL0001 refused"
+    assert "<REDACTED-SECRET>" in persisted
+    if isinstance(body, str) and body.startswith(("<RequestHeaders/>", "<Cookie />")):
+        assert "HSCL0001 refused" in rows[0]["data"]["nested"][0]["body"]
+        assert "HSCL0001 refused" in rows[1]["data"]
+
+    if isinstance(body, str) and " denied" in body:
+        assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.parametrize("value", ["", '""', "''"])
+def test_session_redaction_keeps_empty_quoted_diagnostics(value):
+    message = 'empty quoted diagnostic: "" and ' + "''"
+    data = {"X-API-Session": value, "message": message}
+    assert runner._redact_failure_data(data)["message"] == message
+
+
+@pytest.mark.asyncio
 async def test_main_rejects_unknown_numeric_workflow(monkeypatch, tmp_path):
     _isolate_runner(monkeypatch)
     results_path = tmp_path / "unknown.json"
