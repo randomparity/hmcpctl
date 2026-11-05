@@ -389,7 +389,8 @@ def _redact_failure_data(data: Any) -> Any:
     remaining_nodes = 4096
     prepared_chars = 0
 
-    def prepare(value: Any, depth: int = 0) -> Any:
+    # None is outside a named source; False learns exact values, True also parses cookies.
+    def prepare(value: Any, depth: int = 0, cookie: bool | None = None) -> Any:
         nonlocal remaining_chars, remaining_nodes, prepared_chars
         remaining_nodes -= 1
         if depth > 32 or remaining_nodes < 0:
@@ -400,24 +401,27 @@ def _redact_failure_data(data: Any) -> Any:
                 remaining_chars -= len(str(key))
                 if remaining_chars < 0:
                     raise _FailureRedactionLimit
-                safe_child = prepare(child, depth + 1)
-                if _SESSION_FIELD_RE.fullmatch(str(key)):
-                    if str(key).lower() != "requestheaders" and isinstance(child, str):
-                        _remember_session(
-                            child,
-                            secrets,
-                            cookie=str(key).lower() in {"cookie", "set-cookie"},
-                        )
+                named = bool(_SESSION_FIELD_RE.fullmatch(str(key)))
+                child_cookie = cookie
+                if named and str(key).lower() != "requestheaders":
+                    child_cookie = bool(cookie) or str(key).lower() in {
+                        "cookie",
+                        "set-cookie",
+                    }
+                safe_child = prepare(child, depth + 1, child_cookie)
+                if named:
                     safe_child = "<REDACTED-SECRET>"
                     prepared_chars += len(safe_child)
                 prepared[key] = safe_child
             return prepared
         if isinstance(value, list):
-            return [prepare(child, depth + 1) for child in value]
+            return [prepare(child, depth + 1, cookie) for child in value]
         text = str(value)
         remaining_chars -= len(text)
         if remaining_chars < 0:
             raise _FailureRedactionLimit
+        if cookie is not None and isinstance(value, str):
+            _remember_session(value, secrets, cookie=cookie)
         fragments = [text]
         cursor = 0
         for token in _SESSION_XML_TOKEN_RE.finditer(text):

@@ -6099,6 +6099,71 @@ async def test_raw_cookie_and_truncated_attribute_echoes(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field", ["Cookie", "Set-Cookie", "sessionCookie", "X-API-Session"]
+)
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("shape", ["list", "nested", "nested_named"])
+async def test_named_container_credentials_reach_both_failure_sinks(
+    monkeypatch, tmp_path, capsys, field, nested, shape
+):
+    _isolate_runner(monkeypatch)
+    values = (
+        ["first=SYN_A", 'second="SYN_B"']
+        if field in {"Cookie", "Set-Cookie"}
+        else ["SYN_A", "SYN_B"]
+    )
+    value = values if shape == "list" else [{"ordinary": [values[0]]}, [values[1]]]
+    if shape == "nested_named":
+        value = [{"X-API-Session": [values[0]]}, {"RequestHeaders": [values[1]]}]
+    headers = {field: value}
+    source = {"RequestHeaders": [headers]} if nested else headers
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            {"message": "SYN_A SYN_B denied", "status": 400, **source},
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for secret in ("SYN_A", "SYN_B"):
+        assert secret not in json.dumps(rows)
+        assert secret not in output
+    assert rows[0]["data"]["message"] == "<REDACTED-SECRET> <REDACTED-SECRET> denied"
+    assert rows[0]["data"]["status"] == "400"
+
+
+def test_named_container_collection_keeps_whole_object_limit():
+    data = {
+        "message": "unvisited echo",
+        "X-API-Session": [f"SYN_{i}" for i in range(300)],
+    }
+    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
+
+
+def test_ordinary_containers_do_not_identify_session_values():
+    data = {
+        "message": "ordinary denied",
+        "nested": ["ordinary"],
+        "RequestHeaders": ["ordinary"],
+    }
+    result = runner._redact_failure_data(data)
+    assert result["message"] == "ordinary denied"
+    assert result["nested"] == ["ordinary"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("closed", [False, True])
 @pytest.mark.parametrize("limit", ["depth", "size", "values", "pattern", "matching"])
 async def test_failure_redaction_resource_exhaustion_fails_closed(
