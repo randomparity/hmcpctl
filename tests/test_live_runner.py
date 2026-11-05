@@ -5690,6 +5690,685 @@ async def test_main_redacts_direct_failure_before_persisting(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Cookie: sessionCookie=SYNTHETIC_SESSION; other=SYNTHETIC_SECOND",
+        "set-cookie: sessionCookie=SYNTHETIC_SESSION; Path=/",
+        "sessionCookie=SYNTHETIC_SESSION",
+        "'X-API-Session': 'SYNTHETIC_SESSION with spaces'",
+        "x-api-session: SYNTHETIC_SESSION\n\tSYNTHETIC_SECOND",
+        '<n:X-API-Session xmlns:n="urn:test">SYNTHETIC_SESSION</n:X-API-Session>',
+        "<sessionCookie>SYNTHETIC_SESSION</sessionCookie>",
+        "<Cookie>SYNTHETIC_SESSION</Cookie><X-API-Session>SYNTHETIC_SECOND</X-API-Session>",
+        '<RequestHeaders id="test">\n<opaque>SYNTHETIC_SESSION</opaque>\n</RequestHeaders>',
+        "<RequestHeaders>SYNTHETIC_SESSION",
+        "<X-API-Session>SYNTHETIC_SESSION",
+        "<RequestHeaders><![CDATA[Cookie: first</RequestHeaders>SYNTHETIC_SESSION]]></RequestHeaders>",
+        "<RequestHeaders><!-- </RequestHeaders> -->SYNTHETIC_SESSION</RequestHeaders>",
+        "<RequestHeaders><RequestHeaders/>SYNTHETIC_SESSION</RequestHeaders>",
+        '<RequestHeaders attr=">">SYNTHETIC_SESSION</RequestHeaders>',
+        '<RequestHeaders attr="SYNTHETIC_SESSION',
+        "<RequestHeaders/><Message>HSCL0001 refused</Message>",
+        "<Cookie /><Message>HSCL0001 refused</Message>",
+        "<RequestHeaders>Cookie: sessionCookie=SYNTHETIC_SESSION</RequestHeaders><Message>SYNTHETIC_SESSION denied</Message>",
+        "<X-API-Session><![CDATA[SYNTHETIC_SESSION]]></X-API-Session><Message>SYNTHETIC_SESSION denied</Message>",
+        "X-API-Session: 'SYNTHETIC_SESSION with spaces'\nSYNTHETIC_SESSION with spaces denied",
+        "<RequestHeaders>{cookie=sessionCookie=SYNTHETIC_SESSION, x-api-session=SYNTHETIC_SECOND}</RequestHeaders><Message>SYNTHETIC_SESSION SYNTHETIC_SECOND denied</Message>",
+        {
+            "RequestHeaders": {"Cookie": "sessionCookie=SYNTHETIC_SESSION"},
+            "message": "SYNTHETIC_SESSION denied",
+        },
+        {
+            "message": "SYNTHETIC_SESSION denied",
+            "nested": [{"X-API-Session": "SYNTHETIC_SESSION"}],
+        },
+        {
+            "Cookie": 'opaque="SYNTHETIC_SESSION with spaces"',
+            "message": "SYNTHETIC_SESSION with spaces denied",
+        },
+    ],
+)
+async def test_main_scrubs_session_failure_data(monkeypatch, tmp_path, capsys, body):
+    _isolate_runner(monkeypatch)
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            {
+                "status": 400,
+                "message": "HSCL0001 refused",
+                "nested": [
+                    {
+                        "body": body,
+                        "X-API-Session": "SYNTHETIC_SECOND",
+                        "RequestHeaders": {"opaque": "SYNTHETIC_SESSION"},
+                    }
+                ],
+            },
+        )
+        state.record(
+            0, "fake", "FAIL", observation.classify_failure(RuntimeError(body))
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    results_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(results_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    persisted = results_path.read_text()
+    output = capsys.readouterr().out
+    for secret in ("SYNTHETIC_SESSION", "SYNTHETIC_SECOND"):
+        assert secret not in persisted
+        assert secret not in output
+    rows = json.loads(persisted)["results"]
+    assert [row["status"] for row in rows] == ["FAIL", "FAIL"]
+    assert rows[0]["data"]["status"] == "400"
+    assert rows[0]["data"]["message"] == "HSCL0001 refused"
+    assert "<REDACTED-SECRET>" in persisted
+    if isinstance(body, str) and body.startswith(("<RequestHeaders/>", "<Cookie />")):
+        assert "HSCL0001 refused" in rows[0]["data"]["nested"][0]["body"]
+        assert "HSCL0001 refused" in rows[1]["data"]
+
+    if isinstance(body, str) and " denied" in body:
+        assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.parametrize("value", ["", '""', "''"])
+def test_session_redaction_keeps_empty_quoted_diagnostics(value):
+    message = 'empty quoted diagnostic: "" and ' + "''"
+    data = {"X-API-Session": value, "message": message}
+    assert runner._redact_failure_data(data)["message"] == message
+
+
+@pytest.mark.parametrize(
+    ("field", "source", "decoded"),
+    [
+        ("X-API-Session", "&amp;quot;SYN_A&amp;quot;", "&quot;SYN_A&quot;"),
+        ("Cookie", "opaque=&amp;quot;SYN_A&amp;quot;", "opaque=&quot;SYN_A&quot;"),
+    ],
+)
+def test_session_redaction_decodes_named_entities_once(field, source, decoded):
+    result = runner._redact_failure_data(
+        {
+            field: source,
+            "message": "SYN_A diagnostic",
+            "raw_echo": source,
+            "decoded_echo": decoded,
+        }
+    )
+    assert result["message"] == "SYN_A diagnostic"
+    assert result["raw_echo"] == "<REDACTED-SECRET>"
+    assert result["decoded_echo"] == "<REDACTED-SECRET>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["X-API-Session", "Cookie"])
+@pytest.mark.parametrize(
+    "form",
+    [
+        "plain",
+        "encoded_delimiter",
+        "encoded_name",
+        "encoded_quotes",
+        "numeric",
+        "semicolonless",
+        "nonentity_amp",
+        "multiple",
+        "discarded_numeric",
+    ],
+)
+async def test_header_entity_decoding_preserves_unrelated_diagnostics(
+    monkeypatch, tmp_path, capsys, field, form
+):
+    _isolate_runner(monkeypatch)
+    prefix = "opaque=" if field == "Cookie" else ""
+    encoded_value = "&amp;quot;SYN_A&amp;quot;"
+    decoded_value = "&quot;SYN_A&quot;"
+    if form == "numeric":
+        encoded_value = "&#38;quot;SYN_A&#38;quot;"
+    elif form == "semicolonless":
+        encoded_value = "&ampquot;SYN_A&ampquot;"
+    elif form == "nonentity_amp":
+        encoded_value += "&noise"
+        decoded_value += "&noise"
+    elif form == "discarded_numeric":
+        encoded_value = "&#x7f;" + encoded_value + "&#127;"
+    raw, decoded = prefix + encoded_value, prefix + decoded_value
+    label = field
+    if form == "encoded_name":
+        label = field.replace("o", "&#111;").replace("-", "&#45;")
+    elif form == "encoded_quotes":
+        label = "&quot;" + field + "&quot;"
+    body = label + (": " if form == "plain" else "&#58; ") + raw
+    if form == "multiple":
+        body = "ordinary &noise &amp; context\n" + body + "\nX-API-Session: SYN_OTHER"
+    message = "SYN_A diagnostic"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            {
+                "message": message,
+                "raw_echo": raw,
+                "decoded_echo": decoded,
+                "body": body,
+            },
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(
+                RuntimeError(message + "\n" + raw + "\n" + decoded + "\n" + body)
+            ),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    assert rows[0]["data"]["message"] == message
+    assert rows[0]["data"]["raw_echo"] == "<REDACTED-SECRET>"
+    assert rows[0]["data"]["decoded_echo"] == "<REDACTED-SECRET>"
+    assert message in rows[1]["data"]
+    assert message in output
+    assert "SYN_OTHER" not in json.dumps(rows)
+    assert "SYN_OTHER" not in output
+    for echo in (raw, decoded):
+        assert echo not in json.dumps(rows)
+        assert echo not in output
+
+
+@pytest.mark.parametrize(
+    "header", ["X-API-Session&#58; SYN_A", "Cookie&#58; sid=SYN_A"]
+)
+def test_encoded_header_recognition_keeps_source_values(header):
+    result = runner._redact_failure_data({"message": "SYN_A denied", "body": header})
+    assert result["message"] == "<REDACTED-SECRET> denied"
+    assert "SYN_A" not in result["body"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("header", "secrets"),
+    [
+        ("Cookie: first=SYN_A; second=SYN_B", ("SYN_A", "SYN_B")),
+        ('Cookie: opaque="SYN_A with spaces"', ("SYN_A with spaces",)),
+        (
+            "<RequestHeaders>Cookie: first=SYN_A; second=SYN_B</RequestHeaders>",
+            ("SYN_A", "SYN_B"),
+        ),
+        ("Cookie: first=SYN_A;\n second=SYN_B", ("SYN_A", "SYN_B")),
+        ("X-API-Session: SYN&amp;B", ("SYN&amp;B", "SYN&B")),
+        ("'X-API-Session': 'SYN_A with spaces'", ("SYN_A with spaces",)),
+        ('X-API-Session: "SYN\\"QUOTED"', ('SYN\\"QUOTED', 'SYN"QUOTED')),
+        ('X-API-Session: "SYN\\u0041"', ("SYN\\u0041", "SYNA")),
+        ("Cookie: opaque=SYN&amp;B", ("SYN&amp;B", "SYN&B")),
+        ("Cookie: opaque=SYN&#38;B", ("SYN&#38;B", "SYN&B")),
+        ("Cookie: opaque=SYN%26&amp;B", ("SYN%26&amp;B", "SYN%26&B")),
+        (
+            '<Header name="X-API-Session"><Header></Header>SYN_A</Header>',
+            ("SYN_A",),
+        ),
+        (
+            (
+                '<RequestHeaders><Header name="X-API-Session">'
+                "<Header></Header>SYN_A</Header></RequestHeaders>"
+            ),
+            ("SYN_A",),
+        ),
+        ("X-API-Session: SYN_A\n SYN_B", ("SYN_A\n SYN_B",)),
+        ("X-API-Session:\nHSCL0001 refused", ()),
+        (
+            (
+                "HTTP status <500 diagnostic: <X-API-Session>SYN_A</X-API-Session>"
+                "<Message>HSCL0001 refused</Message>"
+            ),
+            ("SYN_A",),
+        ),
+        (
+            (
+                '<Error detail="<500 diagnostic"><X-API-Session>SYN_A</X-API-Session>'
+                "<Message>HSCL0001 refused</Message></Error>"
+            ),
+            ("SYN_A",),
+        ),
+        ("sessionCookie: SYN_A\r\n\tSYN_B", ("SYN_A\r\n\tSYN_B",)),
+        (
+            (
+                "<Error><Message>fixture-session denied</Message><RequestHeaders>"
+                '<Header name="X-API-Session" value="fixture-session"/>'
+                "</RequestHeaders></Error>"
+            ),
+            ("fixture-session",),
+        ),
+        (
+            (
+                "<RequestHeaders><h:Header h:value='SYN&amp;B' "
+                "h:name='X-API-Session'/></RequestHeaders>"
+            ),
+            ("SYN&amp;B", "SYN&B"),
+        ),
+        (
+            (
+                '<RequestHeaders><Header name="X-API-Session">'
+                "SYN_A</Header></RequestHeaders>"
+            ),
+            ("SYN_A",),
+        ),
+        (
+            (
+                '<RequestHeaders><Header name="Cookie" value="SID=SYN_A; next=SYN_B"/>'
+                "</RequestHeaders>"
+            ),
+            ("SYN_A", "SYN_B"),
+        ),
+        (
+            (
+                '<RequestHeaders><Header name="X-API-Session"><![CDATA[SYN_A]]>'
+                "</Header></RequestHeaders>"
+            ),
+            ("SYN_A",),
+        ),
+        (
+            '<RequestHeaders><Header name="X-API-Session">SYN_A',
+            ("SYN_A",),
+        ),
+    ],
+)
+async def test_session_header_echoes_are_redacted_at_both_sinks(
+    monkeypatch, tmp_path, capsys, header, secrets
+):
+    _isolate_runner(monkeypatch)
+    message = " ".join(secrets) + " denied"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0, "fake", "FAIL", {"body": header, "message": message, "status": 400}
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(header + "\n" + message)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for secret in secrets:
+        assert secret not in output
+        assert secret not in rows[0]["data"]["body"]
+        assert secret not in rows[0]["data"]["message"]
+        assert secret not in rows[1]["data"]
+    assert rows[0]["data"]["status"] == "400"
+    assert "denied" in rows[0]["data"]["message"]
+    if "SYN_B" in header:
+        assert "SYN_B" not in output
+        assert "SYN_B" not in json.dumps(rows)
+    if not header.endswith('name="X-API-Session">SYN_A'):
+        # With a truncated credential element, the following line is still inside it.
+        assert "denied" in rows[1]["data"]
+    if "HSCL0001 refused" in header:
+        assert "HSCL0001 refused" in rows[0]["data"]["body"]
+        assert "HSCL0001 refused" in rows[1]["data"]
+    if "<Message>" in header and "denied" in header:
+        assert "denied" in rows[0]["data"]["body"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["Cookie", "Set-Cookie", 'Header name="Cookie"'])
+@pytest.mark.parametrize("closed", [False, True])
+@pytest.mark.parametrize("cdata", [False, True])
+async def test_xml_cookie_echoes_before_complete_or_truncated_source(
+    monkeypatch, tmp_path, capsys, field, closed, cdata
+):
+    _isolate_runner(monkeypatch)
+    content = "first=SYN_A; second=SYN_B"
+    if cdata:
+        content = "<![CDATA[" + content + "]]>"
+    body = "<" + field + ">" + content
+    if closed:
+        body += "</" + field.split()[0] + ">"
+    message = "SYN_A SYN_B denied"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0, "fake", "FAIL", {"message": message, "nested": [{"body": body}]}
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(message + "\n" + body)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for secret in ("SYN_A", "SYN_B"):
+        assert secret not in output
+        assert secret not in json.dumps(rows)
+    assert "denied" in rows[0]["data"]["message"]
+    assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "echoes"),
+    [
+        ('<Header name="Cookie" name="X-API-Session" value="sid=SYN_A"/>', ("SYN_A",)),
+        ('<Header name="X-API-Session" name="Cookie" value="sid=SYN_A"/>', ("SYN_A",)),
+        ('<Header name="RequestHeaders" name="Cookie" value="sid=SYN_A"/>', ("SYN_A",)),
+        ('<Header name="Cookie" name="RequestHeaders" value="sid=SYN_A"/>', ("SYN_A",)),
+        (
+            '<Header name="RequestHeaders" name="X-API-Session">SYN_A</Header>',
+            ("SYN_A",),
+        ),
+        (
+            '<Header name="X-API-Session" name="RequestHeaders">SYN_A</Header>',
+            ("SYN_A",),
+        ),
+        (
+            '<Header name="X-API-Session" value="SYN_A" value="SYN_B"/>',
+            ("SYN_A", "SYN_B"),
+        ),
+        ('<Header name="X-API-Session" name="other" value="SYN_A"/>', ("SYN_A",)),
+        (
+            '<Cookie>sid=SYN_A<Header name="Cookie">sid=SYN_B</Header></Cookie>',
+            ("SYN_A", "SYN_B"),
+        ),
+        (
+            '<Cookie>sid=SYN_A</Cookie><Header name="Cookie">sid=SYN_B</Header>',
+            ("SYN_A", "SYN_B"),
+        ),
+        ("<!--X-API-Session: SYN_A--><Error/>", ("SYN_A",)),
+        ("<!--Cookie: sid=SYN_A--><Error/>", ("SYN_A",)),
+        ("<?diag X-API-Session: SYN_A?><Error/>", ("SYN_A",)),
+        ("<?diag Cookie: sid=SYN_A?><Error/>", ("SYN_A",)),
+        ("<!-- X-API-Session: SYN_A --><Error/>", ("SYN_A",)),
+        ("<?diag X-API-Session: SYN_A ?><Error/>", ("SYN_A",)),
+        ('<Error detail="broken\n<X-API-Session>SYN_A</X-API-Session>', ("SYN_A",)),
+        (
+            "<Error detail='broken\n<Cookie>first=SYN_A; second=SYN_B</Cookie>",
+            ("SYN_A", "SYN_B"),
+        ),
+        ('<Error detail="<broken>"><X-API-Session>SYN_A</X-API-Session>', ("SYN_A",)),
+        (
+            "<Error detail='<broken>'><Cookie>first=SYN_A; second=SYN_B</Cookie>",
+            ("SYN_A", "SYN_B"),
+        ),
+        (
+            "<Cookie>opaque=&quot;SYN_A&quot;</Cookie>",
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            '<Header name="Cookie" value="opaque=&quot;SYN_A&quot;"/>',
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            "<X-API-Session>&quot;SYN_A&quot;</X-API-Session>",
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            '<Header name="X-API-Session" value="&quot;SYN_A&quot;"/>',
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            "<Cookie>opaque=&quot;SYN%26&amp;B&quot;</Cookie>",
+            ("SYN%26&amp;B", "SYN%26&B"),
+        ),
+        ('Cookie: opaque="SYN\\"QUOTED"', ('SYN\\"QUOTED', 'SYN"QUOTED')),
+        ('<Cookie>opaque="SYN\\"QUOTED"</Cookie>', ('SYN\\"QUOTED', 'SYN"QUOTED')),
+        ('<Header name="X-API-Session" value="SYN_A', ("SYN_A",)),
+        ("<Header name='X-API-Session' value='SYN&amp;B", ("SYN&amp;B", "SYN&B")),
+        ('<Header name="X-API-Session" value="SYN_A"/>', ("SYN_A",)),
+        ("<Header name='X-API-Session' value='SYN&amp;B'/>", ("SYN&amp;B", "SYN&B")),
+    ],
+)
+async def test_raw_cookie_and_truncated_attribute_echoes(
+    monkeypatch, tmp_path, capsys, source, echoes
+):
+    _isolate_runner(monkeypatch)
+    message = " ".join(echoes) + " denied"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0, "fake", "FAIL", {"message": message, "body": source, "status": 400}
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(message + "\n" + source)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for value in (rows[0]["data"]["message"], rows[0]["data"]["body"], rows[1]["data"]):
+        for echo in echoes:
+            assert echo not in value
+    assert "QUOTED" not in output
+    assert "SYN_A" not in output
+    assert "SYN&amp;B" not in output
+    assert "SYN&B" not in output
+    assert rows[0]["data"]["status"] == "400"
+    assert "denied" in rows[0]["data"]["message"]
+    assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field", ["Cookie", "Set-Cookie", "sessionCookie", "X-API-Session"]
+)
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("shape", ["list", "nested", "nested_named"])
+async def test_named_container_credentials_reach_both_failure_sinks(
+    monkeypatch, tmp_path, capsys, field, nested, shape
+):
+    _isolate_runner(monkeypatch)
+    values = (
+        ["first=SYN_A", 'second="SYN_B"']
+        if field in {"Cookie", "Set-Cookie"}
+        else ["SYN_A", "SYN_B"]
+    )
+    value = values if shape == "list" else [{"ordinary": [values[0]]}, [values[1]]]
+    if shape == "nested_named":
+        value = [{"X-API-Session": [values[0]]}, {"RequestHeaders": [values[1]]}]
+    headers = {field: value}
+    source = {"RequestHeaders": [headers]} if nested else headers
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            {"message": "SYN_A SYN_B denied", "status": 400, **source},
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for secret in ("SYN_A", "SYN_B"):
+        assert secret not in json.dumps(rows)
+        assert secret not in output
+    assert rows[0]["data"]["message"] == "<REDACTED-SECRET> <REDACTED-SECRET> denied"
+    assert rows[0]["data"]["status"] == "400"
+
+
+def test_named_container_collection_keeps_whole_object_limit():
+    data = {
+        "message": "unvisited echo",
+        "X-API-Session": [f"SYN_{i}" for i in range(300)],
+    }
+    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
+
+
+def test_ordinary_containers_do_not_identify_session_values():
+    data = {
+        "message": "ordinary denied",
+        "nested": ["ordinary"],
+        "RequestHeaders": ["ordinary"],
+    }
+    result = runner._redact_failure_data(data)
+    assert result["message"] == "ordinary denied"
+    assert result["nested"] == ["ordinary"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed", [False, True])
+@pytest.mark.parametrize(
+    "limit", ["depth", "size", "values", "pattern", "matching", "source_mapping"]
+)
+async def test_failure_redaction_resource_exhaustion_fails_closed(
+    monkeypatch, tmp_path, capsys, closed, limit
+):
+    _isolate_runner(monkeypatch)
+    if limit == "source_mapping":
+        source = "\n".join(f"X-API-Session&#58; SYN_{i}" for i in range(140))
+    elif limit == "pattern":
+        source = 'X-API-Session: "' + "x" * 40_000 + '"'
+    elif limit == "matching":
+        source = "\n".join(f"X-API-Session: SYN_{i}" for i in range(100))
+        source += "\n" + "diagnostic" * 1200
+    elif limit == "values":
+        source = "\n".join(f"X-API-Session: SYN_{i}" for i in range(300))
+    else:
+        depth = 40 if limit == "depth" else 1
+        content = "SYN_A" + "x" * (70_000 if limit == "size" else 1000)
+        field = "RequestHeaders" if limit == "depth" else "Cookie"
+        source = f"<{field}>" * depth + "sid=" + content
+        if closed:
+            source += f"</{field}>" * depth
+    message = "SYN_A uncollected echo"
+
+    async def failing_subtask(_client, state):
+        state.record(0, "fake", "FAIL", {"message": message, "body": source})
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(message + "\n" + source)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    for row in rows:
+        assert row["status"] == "FAIL"
+        assert row["data"] == "<REDACTED-FAILURE-DATA>"
+    assert "SYN_A" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("closed", [False, True])
+@pytest.mark.parametrize("depth", [8, 16, 32])
+def test_failure_redaction_scans_nested_interiors_once(monkeypatch, closed, depth):
+    pattern = runner._SESSION_XML_TOKEN_RE
+    scanned = 0
+
+    class CountingPattern:
+        finditer = pattern.finditer
+
+        def sub(self, replacement, text):
+            nonlocal scanned
+            scanned += len(text)
+            return pattern.sub(replacement, text)
+
+    monkeypatch.setattr(runner, "_SESSION_XML_TOKEN_RE", CountingPattern())
+    body = "<Cookie>" * depth + "sid=SYN_A"
+    if closed:
+        body += "</Cookie>" * depth
+    result = runner._redact_failure_data({"message": "SYN_A denied", "body": body})
+    assert result == {
+        "message": "<REDACTED-SECRET> denied",
+        "body": "<REDACTED-SECRET>",
+    }
+    assert scanned <= len(body)
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_failure_redaction_retains_bounded_diagnostics(closed):
+    body = "<Cookie><Cookie>sid=SYN_A"
+    if closed:
+        body += "</Cookie></Cookie>"
+    data = runner._redact_failure_data(
+        {"message": "SYN_A denied HSCL0001", "body": body}
+    )
+    assert data == {
+        "message": "<REDACTED-SECRET> denied HSCL0001",
+        "body": "<REDACTED-SECRET>",
+    }
+
+
+@pytest.mark.parametrize("wrapper", ["<!--{}-->", "<?diag {}?>", "<![CDATA[{}]]>"])
+def test_failure_redaction_keeps_literal_markup_in_xml_trivia(wrapper):
+    source = wrapper.format("<Cookie>literal</Cookie>")
+    result = runner._redact_failure_data(source)
+    assert "<Cookie>literal" in result
+    assert "<REDACTED-SECRET>" not in result
+
+
+@pytest.mark.parametrize("kind", ["depth", "nodes"])
+def test_failure_redaction_bounds_nested_objects(kind):
+    data = "SYN_A"
+    if kind == "depth":
+        for _ in range(40):
+            data = [data]
+    else:
+        data = [data] * 5000
+    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
+
+
+@pytest.mark.asyncio
 async def test_main_rejects_unknown_numeric_workflow(monkeypatch, tmp_path):
     _isolate_runner(monkeypatch)
     results_path = tmp_path / "unknown.json"
