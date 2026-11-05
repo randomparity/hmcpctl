@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass
 
 from ...call_context import HOLD_EXEMPT_TOOLS, current_call
-from ...resource_identity import PartitionGuard
+from ...resource_identity import PartitionGuard, is_uuid
 from . import store
 from .store import OperationRefused
 
@@ -272,6 +272,37 @@ def enforce_hold(partition_uuid: str) -> None:
     )
 
 
+def enforce_system_hold(system_uuid: str) -> None:
+    """Refuse marked system writes while a partition on that system is held (ADR 0339)."""
+    call = current_call()
+    if call is None or not call.system_partition_write:
+        return
+    if not is_uuid(system_uuid):
+        raise HoldRefused(
+            "system_hold_unverified",
+            "managed-system identity is not a UUID; retry after inventory recovers",
+        )
+    if not _locatable():
+        return
+    with store.read_session() as conn:
+        row = (
+            None
+            if conn is None
+            else conn.execute(
+                "SELECT partition_uuid FROM holds WHERE system_uuid = ? ORDER BY partition_uuid LIMIT 1",
+                (system_uuid.lower(),),
+            ).fetchone()
+        )
+    if row is not None:
+        raise HoldRefused(
+            "system_held",
+            f"system {system_uuid} has a hold on partition {row['partition_uuid']}; "
+            "use hmcpctl holds list and hmcpctl holds release to release its holds before retrying",
+        )
+
+
 HOLD_GUARD = PartitionGuard(
-    check=enforce_hold, names_need_resolution=_names_need_resolution
+    check=enforce_hold,
+    names_need_resolution=_names_need_resolution,
+    check_system=enforce_system_hold,
 )

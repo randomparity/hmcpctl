@@ -27,17 +27,19 @@ class PartitionGuard:
 
     *check* refuses a partition UUID's resolution by raising. *names_need_resolution* says
     whether a partition the caller named only by name must be resolved so *check* can see it.
+    *check_system* optionally checks resolved system UUIDs for system-wide writes (ADR 0339).
     """
 
     check: Callable[[str], None]
     names_need_resolution: Callable[[], bool]
+    check_system: Callable[[str], None] | None = None
 
 
 _PARTITION_GUARD: PartitionGuard | None = None
 
 
 def install_partition_guard(guard: PartitionGuard | None) -> None:
-    """Install *guard* for every later partition resolution in this process, or remove it."""
+    """Install *guard* for later partition/system resolution in this process, or remove it."""
     global _PARTITION_GUARD
     _PARTITION_GUARD = guard
 
@@ -108,17 +110,19 @@ def summary_matching(summaries: list[Any], value: str) -> dict[str, Any] | None:
 
 async def resolve_system_uuid(hmc: HMCClient, value: str) -> str:
     """Resolve a managed-system name or pass through its UUID."""
-    if is_uuid(value):
-        return value
-    summary = summary_matching(await hmc.list_system_summaries(), value)
-    if summary is None:
-        raise ResourceNotFoundError(
-            "managed system",
-            value,
-            f"No managed system named {value!r} found. "
-            "Use hmc_list_systems to list available systems.",
-        )
-    return str(summary["UUID"])
+    if not is_uuid(value):
+        summary = summary_matching(await hmc.list_system_summaries(), value)
+        if summary is None:
+            raise ResourceNotFoundError(
+                "managed system",
+                value,
+                f"No managed system named {value!r} found. "
+                "Use hmc_list_systems to list available systems.",
+            )
+        value = str(summary["UUID"])
+    if _PARTITION_GUARD is not None and _PARTITION_GUARD.check_system is not None:
+        _PARTITION_GUARD.check_system(value)
+    return value
 
 
 def _named(name: object) -> str | None:
