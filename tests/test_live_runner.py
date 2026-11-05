@@ -5990,6 +5990,37 @@ async def test_xml_cookie_echoes_before_complete_or_truncated_source(
 @pytest.mark.parametrize(
     ("source", "echoes"),
     [
+        ('<Header name="Cookie" name="X-API-Session" value="sid=SYN_A"/>', ("SYN_A",)),
+        ('<Header name="X-API-Session" name="Cookie" value="sid=SYN_A"/>', ("SYN_A",)),
+        ('<Header name="RequestHeaders" name="Cookie" value="sid=SYN_A"/>', ("SYN_A",)),
+        ('<Header name="Cookie" name="RequestHeaders" value="sid=SYN_A"/>', ("SYN_A",)),
+        (
+            '<Header name="RequestHeaders" name="X-API-Session">SYN_A</Header>',
+            ("SYN_A",),
+        ),
+        (
+            '<Header name="X-API-Session" name="RequestHeaders">SYN_A</Header>',
+            ("SYN_A",),
+        ),
+        (
+            '<Header name="X-API-Session" value="SYN_A" value="SYN_B"/>',
+            ("SYN_A", "SYN_B"),
+        ),
+        ('<Header name="X-API-Session" name="other" value="SYN_A"/>', ("SYN_A",)),
+        (
+            '<Cookie>sid=SYN_A<Header name="Cookie">sid=SYN_B</Header></Cookie>',
+            ("SYN_A", "SYN_B"),
+        ),
+        (
+            '<Cookie>sid=SYN_A</Cookie><Header name="Cookie">sid=SYN_B</Header>',
+            ("SYN_A", "SYN_B"),
+        ),
+        ("<!--X-API-Session: SYN_A--><Error/>", ("SYN_A",)),
+        ("<!--Cookie: sid=SYN_A--><Error/>", ("SYN_A",)),
+        ("<?diag X-API-Session: SYN_A?><Error/>", ("SYN_A",)),
+        ("<?diag Cookie: sid=SYN_A?><Error/>", ("SYN_A",)),
+        ("<!-- X-API-Session: SYN_A --><Error/>", ("SYN_A",)),
+        ("<?diag X-API-Session: SYN_A ?><Error/>", ("SYN_A",)),
         ('<Error detail="broken\n<X-API-Session>SYN_A</X-API-Session>', ("SYN_A",)),
         (
             "<Error detail='broken\n<Cookie>first=SYN_A; second=SYN_B</Cookie>",
@@ -6065,6 +6096,112 @@ async def test_raw_cookie_and_truncated_attribute_echoes(
     assert rows[0]["data"]["status"] == "400"
     assert "denied" in rows[0]["data"]["message"]
     assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed", [False, True])
+@pytest.mark.parametrize("limit", ["depth", "size", "values", "pattern", "matching"])
+async def test_failure_redaction_resource_exhaustion_fails_closed(
+    monkeypatch, tmp_path, capsys, closed, limit
+):
+    _isolate_runner(monkeypatch)
+    if limit == "pattern":
+        source = 'X-API-Session: "' + "x" * 40_000 + '"'
+    elif limit == "matching":
+        source = "\n".join(f"X-API-Session: SYN_{i}" for i in range(100))
+        source += "\n" + "diagnostic" * 1200
+    elif limit == "values":
+        source = "\n".join(f"X-API-Session: SYN_{i}" for i in range(300))
+    else:
+        depth = 40 if limit == "depth" else 1
+        content = "SYN_A" + "x" * (70_000 if limit == "size" else 1000)
+        field = "RequestHeaders" if limit == "depth" else "Cookie"
+        source = f"<{field}>" * depth + "sid=" + content
+        if closed:
+            source += f"</{field}>" * depth
+    message = "SYN_A uncollected echo"
+
+    async def failing_subtask(_client, state):
+        state.record(0, "fake", "FAIL", {"message": message, "body": source})
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(message + "\n" + source)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    for row in rows:
+        assert row["status"] == "FAIL"
+        assert row["data"] == "<REDACTED-FAILURE-DATA>"
+    assert "SYN_A" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("closed", [False, True])
+@pytest.mark.parametrize("depth", [8, 16, 32])
+def test_failure_redaction_scans_nested_interiors_once(monkeypatch, closed, depth):
+    pattern = runner._SESSION_XML_TOKEN_RE
+    scanned = 0
+
+    class CountingPattern:
+        finditer = pattern.finditer
+
+        def sub(self, replacement, text):
+            nonlocal scanned
+            scanned += len(text)
+            return pattern.sub(replacement, text)
+
+    monkeypatch.setattr(runner, "_SESSION_XML_TOKEN_RE", CountingPattern())
+    body = "<Cookie>" * depth + "sid=SYN_A"
+    if closed:
+        body += "</Cookie>" * depth
+    result = runner._redact_failure_data({"message": "SYN_A denied", "body": body})
+    assert result == {
+        "message": "<REDACTED-SECRET> denied",
+        "body": "<REDACTED-SECRET>",
+    }
+    assert scanned <= len(body)
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_failure_redaction_retains_bounded_diagnostics(closed):
+    body = "<Cookie><Cookie>sid=SYN_A"
+    if closed:
+        body += "</Cookie></Cookie>"
+    data = runner._redact_failure_data(
+        {"message": "SYN_A denied HSCL0001", "body": body}
+    )
+    assert data == {
+        "message": "<REDACTED-SECRET> denied HSCL0001",
+        "body": "<REDACTED-SECRET>",
+    }
+
+
+@pytest.mark.parametrize("wrapper", ["<!--{}-->", "<?diag {}?>", "<![CDATA[{}]]>"])
+def test_failure_redaction_keeps_literal_markup_in_xml_trivia(wrapper):
+    source = wrapper.format("<Cookie>literal</Cookie>")
+    result = runner._redact_failure_data(source)
+    assert "<Cookie>literal" in result
+    assert "<REDACTED-SECRET>" not in result
+
+
+@pytest.mark.parametrize("kind", ["depth", "nodes"])
+def test_failure_redaction_bounds_nested_objects(kind):
+    data = "SYN_A"
+    if kind == "depth":
+        for _ in range(40):
+            data = [data]
+    else:
+        data = [data] * 5000
+    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
 
 
 @pytest.mark.asyncio

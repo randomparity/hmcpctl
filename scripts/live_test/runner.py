@@ -171,7 +171,7 @@ _SESSION_FIELD_RE = re.compile(
     r"(?i)(?:RequestHeaders|Cookie|Set-Cookie|sessionCookie|X-API-Session)"
 )
 _SESSION_XML_TOKEN_RE = re.compile(
-    r"(?s)<!\[CDATA\[.*?(?:\]\]>|\Z)|<!--.*?(?:-->|\Z)|"
+    r"(?s)<!\[CDATA\[.*?(?:\]\]>|\Z)|<!--.*?(?:-->|\Z)|<\?.*?(?:\?>|\Z)|"
     r"<(?P<closing>/)?(?P<tag>[\w.:-]+)(?=[\s/>])"
     r"(?:[^'\"><]|'[^']*'|\"[^\"]*\"|'[^'<]*\Z|\"[^\"<]*\Z)*(?:>|\Z)"
 )
@@ -234,6 +234,10 @@ def _redact_hostname(match: re.Match[str]) -> str:
     return "<REDACTED-HOST>"
 
 
+class _FailureRedactionLimit(Exception):
+    """Stop collection before its bounded diagnostic work can be exceeded."""
+
+
 def _remember_session(value: str, secrets: set[str], *, cookie: bool) -> None:
     def retain(value: str, *, encoded_quotes: bool) -> str:
         raw = value.strip()
@@ -262,6 +266,8 @@ def _remember_session(value: str, secrets: set[str], *, cookie: bool) -> None:
                 value = re.sub(r"\\(.)", r"\1", inner)
         if value:
             secrets.update((raw, inner, value))
+            if len(secrets) > 256:
+                raise _FailureRedactionLimit
         return value
 
     raw_value = retain(value, encoded_quotes=True)
@@ -296,6 +302,17 @@ def _redact_session_xml(value: str, secrets: set[str]) -> str:
     parts: list[str] = []
     stack: list[tuple[str, int, str]] = []
     cursor = 0
+
+    def remember_region(start: int, end: int, field: str) -> None:
+        if (
+            start < 0
+            or field == "requestheaders"
+            or not _SESSION_FIELD_RE.fullmatch(field)
+        ):
+            return
+        content = _SESSION_XML_TOKEN_RE.sub(_session_xml_text, value[start:end])
+        _remember_session(content, secrets, cookie=field in {"cookie", "set-cookie"})
+
     for match in _SESSION_XML_TOKEN_RE.finditer(value):
         tag = match["tag"]
         if tag is None:
@@ -303,66 +320,87 @@ def _redact_session_xml(value: str, secrets: set[str]) -> str:
         tag = tag.lower()
         field = tag.rsplit(":", 1)[-1]
         if field == "header":
-            attrs = {
-                name.rsplit(":", 1)[-1].lower(): double or single
+            attrs = [
+                (name.rsplit(":", 1)[-1].lower(), double or single)
                 for name, double, single in _SESSION_XML_ATTR_RE.findall(match.group())
+            ]
+            fields = {
+                html.unescape(value).lower()
+                for name, value in attrs
+                if name == "name" and _SESSION_FIELD_RE.fullmatch(html.unescape(value))
             }
-            field = html.unescape(attrs.get("name", "")).lower()
+            cookie = bool(fields & {"cookie", "set-cookie"})
+            field = (
+                "cookie"
+                if cookie
+                else next(
+                    iter(sorted(fields - {"requestheaders"})),
+                    "requestheaders" if fields else "",
+                )
+            )
             if match["closing"] and stack and stack[-1][0] == tag:
                 field = stack[-1][2]
-            if _SESSION_FIELD_RE.fullmatch(field) and "value" in attrs:
-                _remember_session(
-                    attrs["value"], secrets, cookie=field in {"cookie", "set-cookie"}
-                )
-        # Ordinary nested Header elements must balance before the sensitive outer close.
-        if not _SESSION_FIELD_RE.fullmatch(field) and not (
-            tag.rsplit(":", 1)[-1] == "header" and stack
-        ):
+            if fields:
+                for name, attribute in attrs:
+                    if name == "value":
+                        _remember_session(attribute, secrets, cookie=cookie)
+        # Ordinary nested Header elements balance without splitting the outer value.
+        sensitive = bool(_SESSION_FIELD_RE.fullmatch(field))
+        if not sensitive and not (tag.rsplit(":", 1)[-1] == "header" and stack):
             continue
         if match["closing"]:
             if not stack or stack[-1][0] != tag:
                 continue
             _, start, field = stack.pop()
-            if field != "requestheaders" and _SESSION_FIELD_RE.fullmatch(field):
-                content = value[start : match.start()]
-                content = _SESSION_XML_TOKEN_RE.sub(
-                    _session_xml_text,
-                    content,
-                )
-                _remember_session(
-                    content,
-                    secrets,
-                    cookie=field in {"cookie", "set-cookie"},
-                )
+            remember_region(start, match.start(), field)
         else:
             if not stack:
                 parts.append(value[cursor : match.start()])
+            if sensitive:
+                for index in range(len(stack) - 1, -1, -1):
+                    parent, start, parent_field = stack[index]
+                    if _SESSION_FIELD_RE.fullmatch(parent_field):
+                        remember_region(start, match.start(), parent_field)
+                        stack[index] = (parent, -1, parent_field)
+                        break
             if not match.group().endswith("/>"):
+                if len(stack) >= 32:
+                    raise _FailureRedactionLimit
                 stack.append((tag, match.end(), field))
+                continue
+        if sensitive:
+            for index in range(len(stack) - 1, -1, -1):
+                parent, start, parent_field = stack[index]
+                if _SESSION_FIELD_RE.fullmatch(parent_field):
+                    stack[index] = (parent, match.end(), parent_field)
+                    break
         if not stack:
             parts.append("<REDACTED-SECRET>")
             cursor = match.end()
-    for tag, start, field in stack:
-        if field != "requestheaders" and _SESSION_FIELD_RE.fullmatch(field):
-            content = _SESSION_XML_TOKEN_RE.sub(
-                _session_xml_text,
-                value[start:],
-            )
-            _remember_session(
-                content, secrets, cookie=field in {"cookie", "set-cookie"}
-            )
+    for _, start, field in stack:
+        remember_region(start, len(value), field)
     parts.append("<REDACTED-SECRET>" if stack else value[cursor:])
     return "".join(parts)
 
 
 def _redact_failure_data(data: Any) -> Any:
     secrets: set[str] = set()
+    remaining_chars = 65_536
+    remaining_nodes = 4096
+    prepared_chars = 0
 
-    def prepare(value: Any) -> Any:
+    def prepare(value: Any, depth: int = 0) -> Any:
+        nonlocal remaining_chars, remaining_nodes, prepared_chars
+        remaining_nodes -= 1
+        if depth > 32 or remaining_nodes < 0:
+            raise _FailureRedactionLimit
         if isinstance(value, dict):
             prepared = {}
             for key, child in value.items():
-                safe_child = prepare(child)
+                remaining_chars -= len(str(key))
+                if remaining_chars < 0:
+                    raise _FailureRedactionLimit
+                safe_child = prepare(child, depth + 1)
                 if _SESSION_FIELD_RE.fullmatch(str(key)):
                     if str(key).lower() != "requestheaders" and isinstance(child, str):
                         _remember_session(
@@ -371,17 +409,25 @@ def _redact_failure_data(data: Any) -> Any:
                             cookie=str(key).lower() in {"cookie", "set-cookie"},
                         )
                     safe_child = "<REDACTED-SECRET>"
+                    prepared_chars += len(safe_child)
                 prepared[key] = safe_child
             return prepared
         if isinstance(value, list):
-            return [prepare(child) for child in value]
+            return [prepare(child, depth + 1) for child in value]
         text = str(value)
+        remaining_chars -= len(text)
+        if remaining_chars < 0:
+            raise _FailureRedactionLimit
         fragments = [text]
         cursor = 0
         for token in _SESSION_XML_TOKEN_RE.finditer(text):
             fragments.append(text[cursor : token.start()])
             if token.group().startswith("<![CDATA["):
                 fragments.append(_session_xml_text(token))
+            elif token.group().startswith("<!--"):
+                fragments.append(token.group()[4:].removesuffix("-->"))
+            elif token.group().startswith("<?"):
+                fragments.append(token.group()[2:].removesuffix("?>"))
             cursor = token.end()
         fragments.append(text[cursor:])
         for fragment in fragments:
@@ -394,9 +440,17 @@ def _redact_failure_data(data: Any) -> Any:
                             cookie=match["name"].lower() in {"cookie", "set-cookie"},
                         )
         text = _redact_session_xml(text, secrets)
-        return _SESSION_HEADER_RE.sub("<REDACTED-SECRET>", text)
+        text = _SESSION_HEADER_RE.sub("<REDACTED-SECRET>", text)
+        prepared_chars += len(text)
+        return text
 
-    prepared = prepare(data)
+    try:
+        prepared = prepare(data)
+        if sum(map(len, secrets)) > 65_536 or len(secrets) * prepared_chars > 1_000_000:
+            raise _FailureRedactionLimit
+    except _FailureRedactionLimit:
+        # Discard the complete object: an uncollected value may have earlier echoes.
+        return "<REDACTED-FAILURE-DATA>"
     pattern = re.compile(
         "|".join(re.escape(s) for s in sorted(secrets, key=len, reverse=True))
         or r"(?!)"
