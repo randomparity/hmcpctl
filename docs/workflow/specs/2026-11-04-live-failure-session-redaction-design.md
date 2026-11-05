@@ -3,7 +3,7 @@
 ## Scope and design
 Issue #1896, frozen comment6645350743/token q1896-f2aadcc8, requires the shared
 runner FAIL boundary independently of #1884. Extend `_redact_failure_text` and
-`_redact_failure_data`; retain their callers and JSON row shape. ADR0337 records why.
+`_redact_failure_data`; retain their callers and JSON row shape. ADR0345 records why.
 
 Before generic redaction, scan XML lexical tokens with stdlib regex: tags with
 quoted attributes, CDATA and comments. Track nested named sensitive elements

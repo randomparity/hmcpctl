@@ -1,4 +1,4 @@
-# ADR 0337: Live failure session redaction
+# ADR 0345: Live failure session redaction
 
 ## Status
 Proposed for #1896.
