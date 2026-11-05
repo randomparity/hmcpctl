@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed for issue #1890; operator approved the provenance-preserving rule on 2026-11-04.
+Accepted for issue #1890; operator approved the provenance-preserving rule on 2026-11-04.
 Supersedes ADR0323 Decision4's retained/partition-row lifetime only; its physical cleanup,
-effect vocabulary and retain mode remain unchanged. Design review completed; scope audit pending.
+effect vocabulary and retain mode remain unchanged. Design review and scope audit completed.
 
 ## Context
 
