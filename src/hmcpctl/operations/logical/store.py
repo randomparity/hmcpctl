@@ -575,6 +575,12 @@ def set_state(
 ) -> None:
     _require_vocabulary(state, get_args(OperationState), "state")
     _require_vocabulary(outcome, (*get_args(OperationOutcome), None), "outcome")
+    if (
+        state == "terminal"
+        and outcome in ("completed", "failed")
+        and result_json is not None
+    ):
+        _reclaim_decommission_ledger(conn, operation_id, result_json)
     now = _clock()
     conn.execute(
         "UPDATE operations SET state = ?, outcome = ?, warnings_json = ?,"
@@ -589,6 +595,104 @@ def set_state(
             now if state == "terminal" else None,
             operation_id,
         ),
+    )
+
+
+def _retained_identity(kind: str, identity: Mapping[str, Any]) -> dict[str, Any] | None:
+    """ADR0323's readable projection; unreadable rows require lossless ADR0336 evidence."""
+    name_field = "disk_name" if kind == "virtual_disk" else "media_name"
+    fields = (
+        ("vios_uuid", "vg_uuid", name_field)
+        if kind == "virtual_disk"
+        else ("vios_uuid", name_field)
+    )
+    if (
+        not all(isinstance(identity.get(key), str) for key in fields)
+        or not identity[name_field]
+    ):
+        return None
+    return {
+        key: identity[key].lower() if key.endswith("_uuid") else identity[key]
+        for key in fields
+    }
+
+
+def _retained_row(row: sqlite3.Row, retained: list[Any]) -> bool:
+    kind, identity = row["kind"], json.loads(row["identity_json"])
+    projected = _retained_identity(kind, identity)
+    for entry in retained:
+        if (
+            not isinstance(entry, dict)
+            or entry.get("kind") != kind
+            or not entry.get("reason")
+        ):
+            continue
+        if projected is not None:
+            if _retained_identity(kind, entry) == projected:
+                return True
+        elif entry.get("reason") == "unreadable_record" and json.dumps(
+            entry.get("ledger_identity"), sort_keys=True
+        ) == json.dumps(identity, sort_keys=True):
+            return True
+    return False
+
+
+def _reclaim_decommission_ledger(
+    conn: sqlite3.Connection, operation_id: str, result_json: str
+) -> None:
+    """Reclaim only newly terminal, proven decommission rows with fresh provenance."""
+    row = get_operation(conn, operation_id)
+    arguments = json.loads(row["request_json"])["arguments"]
+    if (
+        row["state"] == "terminal"
+        or row["tool"] != "hmc_decommission_lpar"
+        or arguments.get("storage_cleanup") != "delete_owned"
+        or arguments.get("dry_run")
+        or not row["system_uuid"]
+        or not row["partition_uuid"]
+        or len(result_json.encode("utf-8")) > MAX_RESULT_BYTES
+    ):
+        return
+    partition = row["partition_uuid"].lower()
+    effects = load_effects(conn, operation_id)
+    deleted = effects.get("delete_lpar")
+    if (
+        deleted is None
+        or deleted.kind != "lpar.delete"
+        or deleted.status != "applied"
+        or deleted.target.lower() != f"lpar:{partition}"
+        or str((deleted.identity or {}).get("lpar_uuid", "")).lower() != partition
+        or any(e.status in ("intended", "uncertain") for e in effects.values())
+    ):
+        return
+    result = json.loads(result_json)
+    storage = result.get("storage") if isinstance(result, dict) else None
+    if (
+        not isinstance(storage, dict)
+        or not all(
+            isinstance(storage.get(key), list)
+            for key in ("deleted", "retained", "pending")
+        )
+        or storage["pending"]
+    ):
+        return
+    rows = conn.execute(
+        "SELECT operation_id, key, kind, identity_json FROM ledger"
+        " WHERE lower(system_uuid) = ? AND lower(partition_uuid) = ?"
+        " AND kind IN ('partition', 'virtual_disk', 'installer_media')",
+        (row["system_uuid"].lower(), partition),
+    ).fetchall()
+    if not all(
+        r["kind"] == "partition" or _retained_row(r, storage["retained"]) for r in rows
+    ):
+        return
+    if not conn.in_transaction:
+        raise RuntimeError(
+            "terminal decommission reclamation requires a write transaction"
+        )
+    conn.executemany(
+        "DELETE FROM ledger WHERE operation_id = ? AND key = ?",
+        [(r["operation_id"], r["key"]) for r in rows],
     )
 
 
