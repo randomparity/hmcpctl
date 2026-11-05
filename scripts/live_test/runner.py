@@ -181,12 +181,12 @@ _SESSION_HEADER_RE = re.compile(
     r"(?:\r?\n[ \t]+[^\r\n]*)*"
 )
 _SESSION_ENTITY_RE = re.compile(r"(?i)&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);")
-_SESSION_COOKIE_VALUE_RE = re.compile(
-    r"(?i)(?<![\w-])(?P<name>Cookie|Set-Cookie)['\"]?\s*[:=]\s*"
+_SESSION_HEADER_VALUE_RE = re.compile(
+    r"(?i)(?<![\w-])(?P<name>Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][ \t]*"
     r"(?P<value>[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)"
 )
 _SESSION_VALUE_RE = re.compile(
-    r"(?i)(?=(?<![\w-])(?P<name>Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=]\s*"
+    r"(?i)(?=(?<![\w-])(?P<name>Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][ \t]*"
     r"""(?P<value>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:&(?:\#\d+|\#x[0-9a-f]+|[a-z][a-z0-9]+);|[^\s,;{}])+))"""
 )
 
@@ -290,13 +290,16 @@ def _redact_session_xml(value: str, secrets: set[str]) -> str:
                 _remember_session(
                     attrs["value"], secrets, cookie=field in {"cookie", "set-cookie"}
                 )
-        if not _SESSION_FIELD_RE.fullmatch(field):
+        # Ordinary nested Header elements must balance before the sensitive outer close.
+        if not _SESSION_FIELD_RE.fullmatch(field) and not (
+            tag.rsplit(":", 1)[-1] == "header" and stack
+        ):
             continue
         if match["closing"]:
             if not stack or stack[-1][0] != tag:
                 continue
             _, start, field = stack.pop()
-            if field != "requestheaders":
+            if field != "requestheaders" and _SESSION_FIELD_RE.fullmatch(field):
                 content = value[start : match.start()]
                 content = _SESSION_XML_TOKEN_RE.sub(
                     _session_xml_text,
@@ -316,7 +319,7 @@ def _redact_session_xml(value: str, secrets: set[str]) -> str:
             parts.append("<REDACTED-SECRET>")
             cursor = match.end()
     for tag, start, field in stack:
-        if field != "requestheaders":
+        if field != "requestheaders" and _SESSION_FIELD_RE.fullmatch(field):
             content = _SESSION_XML_TOKEN_RE.sub(
                 _session_xml_text,
                 value[start:],
@@ -359,7 +362,7 @@ def _redact_failure_data(data: Any) -> Any:
         fragments.append(text[cursor:])
         for fragment in fragments:
             for source in {fragment, html.unescape(fragment)}:
-                for matcher in (_SESSION_VALUE_RE, _SESSION_COOKIE_VALUE_RE):
+                for matcher in (_SESSION_VALUE_RE, _SESSION_HEADER_VALUE_RE):
                     for match in matcher.finditer(source):
                         _remember_session(
                             match["value"],
