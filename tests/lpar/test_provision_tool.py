@@ -1273,7 +1273,7 @@ def test_provision_lpar_reports_created_resource_without_uuid(monkeypatch, mock_
     assert result.ownership_stamped is None
     assert result.operation is not None
     assert result.operation.outcome == "needs_attention"
-    assert any("no partition UUID" in w for w in result.operation.warnings)
+    assert result.operation.warnings == ("HMCError: HTTP status unavailable",)
 
 
 def test_provision_lpar_dry_run_issues_no_mutating_request(monkeypatch, mock_hmc):

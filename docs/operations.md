@@ -73,6 +73,17 @@ mutation has been dispatched, a command or reconciliation failure raises a struc
 error carrying the same result evidence; there is no rollback promise. An empty inventory with
 its matching read-succeeded flag set means verified absence.
 
+`hmc_update_vnic_policy` (`hmcpctl network update-vnic-policy`) changes one policy field of an
+existing vNIC selected by `slot_num`, offering only the modes qualified natively (ADR 0332): set
+`pvid_priority` or `auto_priority_failover`; set `port_vlan_id` from 0 while allowed VLAN IDs are
+`none`; or add members to a finite allowed VLAN or OS MAC list. Replacing or removing list
+members, `all`/`none`, and combined changes are refused before any effect, and a change already in
+place returns without dispatch. Every update also submits the current `auto_priority_failover`,
+because the HMC resets an omitted value to 1. It submits once and returns `submission`
+(`not_submitted`, `completed`, `rejected`, `unknown`), a selected-policy `readback`, and a
+`preservation` check over every other cell of the partition's vNIC rows; anything short of
+completed, verified and unchanged raises the same structured partial error.
+
 | vNIC capability | Admitted | Notes |
 |-----------------|----------|-------|
 | One SR-IOV backing on POWER9 8375-42A / HMC V10R3 M1060 | Yes | Exact family and HMC level only |
@@ -81,6 +92,7 @@ its matching read-succeeded flag set means verified absence.
 | Priority or maximum-capacity inputs | No | HMC defaults remain in effect |
 | Other server families or HMC levels | No | Capability checks fail before mutation |
 | Rollback after a dispatched mutation | No | Partial errors retain observed before/after evidence |
+| Policy update: replace, remove, `all`/`none`, combined changes | No | Refused natively or not qualified (ADR 0332) |
 
 > **PCM notes**: metrics are stored as *JSON*, reached via an Atom feed of
 > links. The `*_metric_links` tools return the link list, while the `*_metrics`

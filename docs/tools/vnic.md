@@ -2,7 +2,7 @@
 
 # `vnic` tools
 
-3 tools in the `vnic` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+4 tools in the `vnic` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -11,3 +11,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_add_vnic` | `mutate` | `vnic.add` | `lpar` | `partial` | `unevidenced` | `existing-runtime-guards` | Add and verify one SR-IOV-backed vNIC with optional creation policies. |
 | `hmc_list_vnics` | `read` | `vnic.list` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | List vNICs (SR-IOV-backed Virtual NICs) on an LPAR via the HMC CLI. |
 | `hmc_remove_vnic` | `destructive` | `vnic.remove` | `lpar` | `partial` | `unevidenced` | `existing-runtime-guards` | Remove a vNIC from an LPAR via the HMC CLI. |
+| `hmc_update_vnic_policy` | `mutate` | `vnic.update_policy` | `lpar` | `partial` | `unevidenced` | `existing-runtime-guards` | Apply one natively qualified policy change to an existing vNIC. |
