@@ -20,6 +20,7 @@ from ...operations.virtualization.vnic import (
     list_sea_adapters,
     list_vnics,
     remove_vnic,
+    update_vnic_policy,
 )
 from ...tool_registry import tool_module
 
@@ -234,6 +235,69 @@ def hmc_remove_vnic(
                 slot_num,
                 ownership_override=ownership_override,
                 system_name_or_uuid=system_name_or_uuid,
+            )
+        except VnicPartialError as exc:
+            evidence = json.dumps(serialize_tool_result(exc.result), default=str)
+            raise VnicPartialError(f"{exc}; result={evidence}", exc.result) from exc
+        return serialize_tool_result(result)
+
+    return with_client(_go, profile=profile)
+
+
+@tool(effect="mutate", operation="vnic.update_policy", target_kind="lpar")
+def hmc_update_vnic_policy(
+    system_name_or_uuid: str,
+    lpar_name_or_uuid: str,
+    slot_num: str,
+    ownership_override: bool = False,
+    profile: str | None = None,
+    *,
+    port_vlan_id: StrictInt | None = None,
+    pvid_priority: StrictInt | None = None,
+    auto_priority_failover: StrictBool | None = None,
+    add_allowed_vlan_ids: list[StrictInt] | None = None,
+    add_allowed_os_mac_addrs: list[str] | None = None,
+) -> dict[str, Any]:
+    """Apply one natively qualified policy change to an existing vNIC.
+
+    Give exactly one change. Only modes qualified on real hardware are offered:
+    set ``pvid_priority`` or ``auto_priority_failover``; set ``port_vlan_id``
+    from 0 while allowed VLAN IDs are ``none``; or add members to a finite
+    allowed VLAN or OS MAC list. Replacing or removing list members, ``all`` and
+    ``none``, and combined changes are refused before any effect. A change
+    already in place returns without dispatch. Every update also submits the
+    current ``auto_priority_failover``, because the HMC resets an omitted value.
+
+    Submits once, with no retry or rollback, and returns separate submission,
+    selected-policy readback and preservation results. Readback proves
+    configuration only, not traffic or failover behavior.
+
+    Args:
+        system_name_or_uuid: System name or UUID from ``hmc_list_systems``.
+        lpar_name_or_uuid: Partition name or UUID from ``hmc_list_lpars``.
+        slot_num: vNIC slot number returned by ``hmc_list_vnics``.
+        ownership_override: Bypass ownership rejection only after operator approval.
+        profile: TOML profile name, or the environment-default HMC when omitted.
+        port_vlan_id: New port VLAN ID, 1 through 4094, from a current value of 0.
+        pvid_priority: Untagged traffic priority, integer 0 through 7.
+        auto_priority_failover: Enable or disable automatic priority failover.
+        add_allowed_vlan_ids: Unique VLAN integers 1 through 4094 to allow.
+        add_allowed_os_mac_addrs: Unique 12-hex MAC addresses to allow.
+    """
+
+    async def _go(hmc):
+        try:
+            result = await update_vnic_policy(
+                hmc,
+                lpar_name_or_uuid,
+                slot_num,
+                system_name_or_uuid=system_name_or_uuid,
+                ownership_override=ownership_override,
+                port_vlan_id=port_vlan_id,
+                pvid_priority=pvid_priority,
+                auto_priority_failover=auto_priority_failover,
+                add_allowed_vlan_ids=add_allowed_vlan_ids,
+                add_allowed_os_mac_addrs=add_allowed_os_mac_addrs,
             )
         except VnicPartialError as exc:
             evidence = json.dumps(serialize_tool_result(exc.result), default=str)
