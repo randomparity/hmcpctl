@@ -123,3 +123,24 @@ def test_cli_reads_of_a_held_partition_pass(hmc):
     _place()
     result = RUNNER.invoke(app, ["lpars", "show", LPAR, "--system", SYS])
     assert "partition_held" not in result.output
+
+
+@pytest.mark.parametrize(
+    "command,extra",
+    [
+        ("power-on", ["--yes"]),
+        ("power-off", ["--yes"]),
+        ("profile-activate", ["profile-a", "--action", "validate"]),
+    ],
+)
+def test_system_cli_mirrors_refuse_held_system(hmc, command, extra):
+    from conftest import assert_no_mutating_requests
+
+    from hmcpctl.call_context import current_call
+
+    _place()
+    result = RUNNER.invoke(app, ["systems", command, "sys-R1", *extra])
+    assert result.exit_code == 1, result.output
+    assert "system_held" in result.output
+    assert current_call() is None
+    assert_no_mutating_requests(hmc)

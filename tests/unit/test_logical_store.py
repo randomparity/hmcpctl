@@ -731,3 +731,229 @@ def test_write_transaction_rolls_back_body_failure():
         assert caught.value is primary
         assert not conn.in_transaction
         assert conn.execute("SELECT * FROM example").fetchall() == []
+
+
+def _decommission_ledger(conn):
+    operation = _oid(80)
+    _seed(conn, operation)
+    identity = {"vios_uuid": "A", "vg_uuid": "B", "disk_name": "data"}
+    result = {
+        "storage": {
+            "deleted": [],
+            "pending": [],
+            "retained": [
+                {
+                    "kind": "virtual_disk",
+                    "vios_uuid": "a",
+                    "vg_uuid": "b",
+                    "disk_name": "data",
+                    "reason": "referenced",
+                }
+            ],
+        }
+    }
+    with store.write_transaction(conn):
+        conn.execute(
+            "UPDATE operations SET tool = ?, request_json = ? WHERE operation_id = ?",
+            (
+                "hmc_decommission_lpar",
+                json.dumps({"arguments": {"storage_cleanup": "delete_owned"}}),
+                operation,
+            ),
+        )
+        store.set_partition(conn, operation, "sys", "part")
+        store.record_intent(conn, operation, "delete_lpar", "lpar.delete", "lpar:part")
+        store.record_outcome(
+            conn, operation, "delete_lpar", "applied", {"lpar_uuid": "part"}
+        )
+        for key, kind, system, partition in (
+            ("p", "partition", "sys", "part"),
+            ("d", "virtual_disk", "SYS", "PART"),
+            ("duplicate", "virtual_disk", "sys", "part"),
+            ("other", "virtual_disk", "sys", "other"),
+            ("system", "virtual_disk", "other", "part"),
+            ("future", "unknown", "sys", "part"),
+        ):
+            store.add_ledger(
+                conn,
+                "pruned-producer",
+                key=key,
+                kind=kind,
+                system_uuid=system,
+                partition_uuid=partition,
+                identity=identity,
+            )
+    return operation, json.dumps(result)
+
+
+@pytest.mark.parametrize("outcome", ["completed", "failed"])
+def test_terminal_decommission_reclaims_scoped_rows(outcome, monkeypatch):
+    with store.session() as conn:
+        operation, result = _decommission_ledger(conn)
+        with store.write_transaction(conn):
+            store.set_state(conn, operation, "terminal", outcome, result_json=result)
+        assert {r[0] for r in conn.execute("SELECT key FROM ledger")} == {
+            "other",
+            "system",
+            "future",
+        }
+        assert store.read_record(conn, operation).result == json.loads(result)
+        monkeypatch.setattr(store, "STORE_CAPACITY", 4)
+        _seed(conn, _oid(81))  # capacity freed; the three unrelated rows remain
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "terminal",
+        "retain",
+        "tool",
+        "no_partition",
+        "missing",
+        "kind",
+        "target",
+        "identity",
+        "uncertain",
+        "open",
+        "absent_result",
+        "stale",
+        "oversized",
+        "coverage",
+        "pending",
+        "malformed",
+        "abandoned",
+        "paused",
+        "dry_run",
+    ],
+)
+def test_ineligible_decommission_preserves_ledger(change):
+    with store.session() as conn:
+        operation, result = _decommission_ledger(conn)
+        state, outcome = "terminal", "completed"
+        if change in {"terminal", "retain", "tool", "no_partition", "dry_run"}:
+            updates = {
+                "terminal": ("state", "terminal"),
+                "retain": ("request_json", '{"arguments":{}}'),
+                "tool": ("tool", "other"),
+                "no_partition": ("partition_uuid", None),
+                "dry_run": (
+                    "request_json",
+                    '{"arguments":{"storage_cleanup":"delete_owned","dry_run":true}}',
+                ),
+            }
+            field, value = updates[change]
+            conn.execute(
+                f"UPDATE operations SET {field} = ? WHERE operation_id = ?",
+                (value, operation),
+            )
+        elif change in {"kind", "target", "identity", "uncertain"}:
+            field, value = {
+                "kind": ("kind", "wrong"),
+                "target": ("target", "lpar:other"),
+                "identity": ("identity_json", '{"lpar_uuid":"other"}'),
+                "uncertain": ("status", "uncertain"),
+            }[change]
+            conn.execute(f"UPDATE effects SET {field} = ?", (value,))
+        elif change == "missing":
+            conn.execute("DELETE FROM effects")
+        elif change == "open":
+            store.record_intent(conn, operation, "other", "write", "target")
+        elif change in {"absent_result", "stale"}:
+            if change == "stale":
+                conn.execute("UPDATE operations SET result_json = ?", (result,))
+            result = None
+        elif change == "oversized":
+            result = json.dumps(
+                {"padding": "x" * store.MAX_RESULT_BYTES, **json.loads(result)}
+            )
+        elif change in {"coverage", "pending", "malformed"}:
+            payload = json.loads(result)
+            payload["storage"]["retained"] = (
+                [] if change == "coverage" else payload["storage"]["retained"]
+            )
+            if change == "pending":
+                payload["storage"]["pending"] = [{"kind": "virtual_disk"}]
+            if change == "malformed":
+                payload["storage"] = None
+            result = json.dumps(payload)
+        elif change == "abandoned":
+            outcome = "abandoned"
+        elif change == "paused":
+            state, outcome = "paused", "needs_attention"
+        before = list(conn.execute("SELECT * FROM ledger"))
+        with store.write_transaction(conn):
+            store.set_state(conn, operation, state, outcome, result_json=result)
+        assert list(conn.execute("SELECT * FROM ledger")) == before
+
+
+def test_terminal_reclamation_rolls_back_with_state_result():
+    with store.session() as conn, store.session() as reader:
+        operation, result = _decommission_ledger(conn)
+        conn.execute(
+            "CREATE TRIGGER reject_reclaim BEFORE DELETE ON ledger BEGIN SELECT RAISE(ABORT, 'fault'); END"
+        )
+        with (
+            pytest.raises(sqlite3.IntegrityError, match="fault"),
+            store.write_transaction(conn),
+        ):
+            store.set_state(
+                conn, operation, "terminal", "completed", result_json=result
+            )
+        assert store.read_record(reader, operation).state == "running"
+        assert store.read_record(reader, operation).result is None
+        assert reader.execute("SELECT count(*) FROM ledger").fetchone()[0] == 6
+        conn.execute("DROP TRIGGER reject_reclaim")
+        with store.write_transaction(conn):
+            store.set_state(
+                conn, operation, "terminal", "completed", result_json=result
+            )
+            assert store.read_record(reader, operation).state == "running"
+            assert reader.execute("SELECT count(*) FROM ledger").fetchone()[0] == 6
+        assert store.read_record(reader, operation).state == "terminal"
+        assert store.read_record(reader, operation).result == json.loads(result)
+        assert reader.execute("SELECT count(*) FROM ledger").fetchone()[0] == 3
+
+
+@pytest.mark.parametrize("covered", [True, False])
+def test_terminal_reclamation_requires_media_and_unreadable_provenance(covered):
+    with store.session() as conn:
+        operation, result = _decommission_ledger(conn)
+        malformed = {"media_name": "partial", "raw": [None, False, {"n": 5}]}
+        media = {"vios_uuid": "V", "media_name": "image"}
+        for key, identity in (("bad", malformed), ("media", media)):
+            store.add_ledger(
+                conn,
+                "expired",
+                key=key,
+                kind="installer_media",
+                system_uuid="sys",
+                partition_uuid="part",
+                identity=identity,
+            )
+        payload = json.loads(result)
+        payload["storage"]["retained"].extend(
+            [
+                {
+                    "kind": "installer_media",
+                    "vios_uuid": "v",
+                    "media_name": "image",
+                    "reason": "referenced",
+                },
+                {
+                    "kind": "installer_media",
+                    "reason": "unreadable_record",
+                    "ledger_identity": malformed if covered else {},
+                },
+            ]
+        )
+        with store.write_transaction(conn):
+            store.set_state(
+                conn,
+                operation,
+                "terminal",
+                "completed",
+                result_json=json.dumps(payload),
+            )
+        assert conn.execute("SELECT count(*) FROM ledger").fetchone()[0] == (
+            3 if covered else 8
+        )

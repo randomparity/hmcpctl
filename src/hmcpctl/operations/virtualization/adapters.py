@@ -760,7 +760,10 @@ def _network_integer(value: object, low: int, high: int) -> int | None:
 
 
 def _network_observed_value(name: str, resource: dict[str, Any]) -> object:
-    raw = resource.get(_NETWORK_CREATION_ELEMENTS[name])
+    element = _NETWORK_CREATION_ELEMENTS[name]
+    if name == "addl_vlan_ids" and element not in resource:
+        return []
+    raw = resource.get(element)
     if name == "qos_priority":
         enabled = _network_leaf(resource.get("QualityOfServicePriorityEnabled"))
         if enabled in ("false", "0"):

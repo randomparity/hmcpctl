@@ -193,7 +193,12 @@ def hmc_vios_upgrade(
     )
 
 
-@tool(effect="destructive", operation="update.firmware", target_kind="managed_system")
+@tool(
+    effect="destructive",
+    operation="update.firmware",
+    system_partition_write=True,
+    target_kind="managed_system",
+)
 def hmc_update_firmware(
     system_name_or_uuid: str,
     platform_update: PlatformUpdateParameter,

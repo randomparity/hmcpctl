@@ -1430,15 +1430,99 @@ async def test_no_trunked_switch_skips_the_vlan_round_trip(monkeypatch, knobs, r
 
 
 @pytest.mark.asyncio
-async def test_a_failed_adapter_add_deletes_the_runs_network(monkeypatch):
+@pytest.mark.parametrize("inventory", ["unchanged", "case", "empty"])
+async def test_a_failed_adapter_add_deletes_the_runs_network(monkeypatch, inventory):
     hmc = FakeHMC(adapter_add_status="FAIL", adapter_add_takes_effect=False)
+    if inventory == "empty":
+        hmc.adapters["ClientNetworkAdapter"] = {}
+    elif inventory == "case":
+        original = hmc._hmc_add_network_adapter
+
+        def add(kwargs):
+            hmc.adapters["ClientNetworkAdapter"] = {
+                key.lower(): value
+                for key, value in hmc.adapters["ClientNetworkAdapter"].items()
+            }
+            return original(kwargs)
+
+        hmc._hmc_add_network_adapter = add
 
     state = await _run(monkeypatch, hmc)
 
     assert hmc.networks == EXISTING
     assert _results(state)["network.delete_network"] == "passed"
     assert "hmc_add_vscsi_adapter" not in hmc.mutations()
-    assert not any("networks named" in text for text in _manual(state))
+    assert not _manual(state)
+    mutations = hmc.mutations()
+    assert mutations[mutations.index("hmc_add_network_adapter") + 1 :] == [
+        "hmc_delete_virtual_network"
+    ]
+    assert any(
+        row["tool"] == "hmc_add_network_adapter (test VLAN)" and row["status"] == "FAIL"
+        for row in state.results
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "inventory", ["unreadable", "malformed", "duplicate", "missing"]
+)
+async def test_a_failed_adapter_add_with_unknown_inventory_keeps_manual(
+    monkeypatch, inventory
+):
+    hmc = FakeHMC(adapter_add_status="FAIL", adapter_add_takes_effect=False)
+    original = hmc._hmc_list_adapters
+
+    def read(kwargs):
+        result = original(kwargs)
+        if kwargs["adapter_type"] != "ClientNetworkAdapter" or not any(
+            tool == "hmc_add_network_adapter" for tool, _ in hmc.calls
+        ):
+            return result
+        if inventory == "unreadable":
+            return "FAIL", "inventory unavailable"
+        if inventory == "missing":
+            return "PASS", []
+        if inventory == "malformed":
+            return "PASS", [{"UUID": "invalid", "Resource": {}}]
+        entry = result[1][0]
+        return "PASS", [entry, {**entry, "UUID": entry["UUID"].lower()}]
+
+    hmc._hmc_list_adapters = read
+    state = await _run(monkeypatch, hmc)
+    assert any("N1 creation identity is unverified" in text for text in _manual(state))
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+    assert "hmc_delete_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+async def test_a_pass_without_an_adapter_fixture_keeps_manual(monkeypatch):
+    hmc = FakeHMC(adapter_add_takes_effect=False)
+    state = await _run(monkeypatch, hmc)
+    assert _manual(state)
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restored", [False, True])
+async def test_failed_add_preserves_vlan_cleanup_recovery(monkeypatch, restored):
+    hmc = FakeHMC(
+        adapter_add_status="FAIL",
+        adapter_add_takes_effect=False,
+        network_delete_fails=True,
+    )
+    if restored:
+
+        def delete(kwargs):
+            hmc.networks.pop(kwargs["network_uuid"])
+            return "FAIL", "failed after applying"
+
+        hmc._hmc_delete_virtual_network = delete
+    state = await _run(monkeypatch, hmc)
+    assert _results(state)["network.delete_network"] == "failed"
+    assert bool(_manual(state)) is not restored
+    assert not any("N1 creation identity" in text for text in _manual(state))
+    assert "hmc_add_vscsi_adapter" not in hmc.mutations()
 
 
 @pytest.mark.asyncio

@@ -96,18 +96,32 @@ COLUMNS = (
 # Utilizations beyond CPU and memory, each a capacity_pairs key with a *_util_pct column.
 _UTILIZATIONS = ("disk", "slots", "sriov")
 _UNKNOWN = "unknown"
-# An exported value would override every profile's own, sending one HMC's host,
-# credentials or TLS setting to all of them (load_profile's env-over-TOML precedence).
-_PROFILE_OVERRIDES = (
-    "HMC_HOST",
-    "HMC_USER",
-    "HMC_PASSWORD",
-    "HMC_PORT",
-    "HMC_VERIFY_SSL",
-    "HMC_CERT_FINGERPRINT",
-    "HMC_CA_BUNDLE",
-    "HMC_TRUST_SYSTEM_STORE",
+# Report-only policy: exported per-profile settings must not cross profile boundaries.
+_PROFILE_FIELDS = frozenset(
+    (
+        "host",
+        "port",
+        "user",
+        "password",
+        "ssh_key_file",
+        "ssh_verify_host_key",
+        "verify_ssl",
+        "ca_bundle",
+        "cert_fingerprint",
+        "trust_system_store",
+        "upload_timeout",
+        "max_response_bytes",
+        "ssh_timeout",
+        "audit_memento",
+        "agent_id",
+        "authorize_power_operations",
+        "iso_url_allowlist",
+        "iso_build_entry",
+        "iso_build_arguments",
+    )
 )
+_GLOBAL_FIELDS = frozenset(("timeout", "schema_version"))
+_PROFILE_OVERRIDES = tuple(f"HMC_{field.upper()}" for field in sorted(_PROFILE_FIELDS))
 # Columns holding HMC- or operator-supplied text, which a spreadsheet would evaluate
 # when it starts with a formula character.
 _TEXT_COLUMNS = (
@@ -401,10 +415,14 @@ def report_utilization(
             "report utilization logs on to each profile's own host with that profile's "
             f"credentials and TLS setting; unset {', '.join(exported)}"
         )
-    if current_options().command_line_options:
+    command_line_options = current_options().command_line_options
+    if command_line_options:
+        options = ", ".join(
+            f"--{name.replace('_', '-')}" for name in sorted(command_line_options)
+        )
         usage_error(
             "report utilization connects to each profile's own host; drop the global "
-            "--host, --user, --password, --verify-ssl and --profile options"
+            f"{options} options"
         )
     try:
         selected = _selected_profiles(profiles)

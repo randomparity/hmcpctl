@@ -94,6 +94,11 @@ def effective_arguments(
                 "not_found",
                 f"no operation has request_id {request_id}; omit continuation to start one",
             )
+        if any(key in given and given[key] != recorded.get(key) for key in _REQUIRED):
+            raise OperationRefused(
+                "request_conflict",
+                "continuation selectors must match the recorded operation",
+            )
         return {**recorded, **given}, True
     return new_arguments(given), recorded is not None
 
@@ -374,7 +379,11 @@ def _storage(
     deleted = deleted_from_effects(record.effects)
     gone = {same_item(item) for item in deleted}
     earlier = (latest or {}).get("retained", ())
-    retained = [i for i in earlier if same_item(i) not in gone]
+    retained = [
+        i
+        for i in earlier
+        if i.get("reason") == "unreadable_record" or same_item(i) not in gone
+    ]
     return {
         "deleted": deleted,
         "retained": tuple(retained),

@@ -1,8 +1,8 @@
 """Run logical operations against the durable store (ADR 0190, ADR 0195).
 
-A warning keeps at most 512 characters of an exception's text or a classifier's reason, and
-``hmc_operation_status`` returns it to the agent: a body, effect write or classifier must
-raise messages that carry no request arguments.
+A warning keeps at most 512 characters and ``hmc_operation_status`` returns it to the
+agent. HMCError warnings contain only type and HTTP status; other exception messages and
+classifier reasons must carry no request arguments.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ...errors import HMCError
 from . import store
 from .holds import HoldRefused
 from .models import (
@@ -405,6 +406,13 @@ def _warning(detail: str, prefix: str = "", suffix: str = "") -> str:
 
 
 def _failure(exc: BaseException) -> str:
+    if isinstance(exc, HMCError):
+        status = (
+            f"HTTP {exc.status_code}"
+            if exc.status_code is not None
+            else "HTTP status unavailable"
+        )
+        return f"{type(exc).__name__}: {status}"
     return f"{type(exc).__name__}: {exc}"
 
 

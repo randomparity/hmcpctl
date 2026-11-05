@@ -1,7 +1,8 @@
 """The front-end call a partition resolution belongs to (ADR 0193 Decision 2, ADR 0327).
 
 The MCP tool wrapper and each CLI command record which registry tool is running, whether it
-is a read, and any presented ``hold_id``. The hold hook reads it; nothing else does. A
+is a read, any presented ``hold_id``, and the system-wide partition-write marker (ADR 0339).
+The hold hook reads it; nothing else does. A
 resolution with no call context is treated as a mutation presenting no ``hold_id``.
 """
 
@@ -23,6 +24,7 @@ class CallContext:
     tool: str | None
     read: bool
     hold_id: str | None
+    system_partition_write: bool = False
 
 
 _CURRENT: ContextVar[CallContext | None] = ContextVar("hmcpctl_call", default=None)

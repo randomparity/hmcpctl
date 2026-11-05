@@ -188,6 +188,7 @@ def hmc_delete_system_profile(
 @tool(
     effect="destructive",
     operation="system_profile.activate",
+    system_partition_write=True,
     target_kind="managed_system",
     exhaustive_targets=False,
 )
