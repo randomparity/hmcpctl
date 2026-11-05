@@ -5952,6 +5952,57 @@ async def test_xml_cookie_echoes_before_complete_or_truncated_source(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "echoes"),
+    [
+        ('Cookie: opaque="SYN\\"QUOTED"', ('SYN\\"QUOTED', 'SYN"QUOTED')),
+        ('<Cookie>opaque="SYN\\"QUOTED"</Cookie>', ('SYN\\"QUOTED', 'SYN"QUOTED')),
+        ('<Header name="X-API-Session" value="SYN_A', ("SYN_A",)),
+        ("<Header name='X-API-Session' value='SYN&amp;B", ("SYN&amp;B", "SYN&B")),
+        ('<Header name="X-API-Session" value="SYN_A"/>', ("SYN_A",)),
+        ("<Header name='X-API-Session' value='SYN&amp;B'/>", ("SYN&amp;B", "SYN&B")),
+    ],
+)
+async def test_raw_cookie_and_truncated_attribute_echoes(
+    monkeypatch, tmp_path, capsys, source, echoes
+):
+    _isolate_runner(monkeypatch)
+    message = " ".join(echoes) + " denied"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0, "fake", "FAIL", {"message": message, "body": source, "status": 400}
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(message + "\n" + source)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for value in (rows[0]["data"]["message"], rows[0]["data"]["body"], rows[1]["data"]):
+        for echo in echoes:
+            assert echo not in value
+    assert "QUOTED" not in output
+    assert "SYN_A" not in output
+    assert "SYN&amp;B" not in output
+    assert "SYN&B" not in output
+    assert rows[0]["data"]["status"] == "400"
+    assert "denied" in rows[0]["data"]["message"]
+    assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.asyncio
 async def test_main_rejects_unknown_numeric_workflow(monkeypatch, tmp_path):
     _isolate_runner(monkeypatch)
     results_path = tmp_path / "unknown.json"

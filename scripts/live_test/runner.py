@@ -175,7 +175,9 @@ _SESSION_XML_TOKEN_RE = re.compile(
     r"<(?P<closing>/)?(?P<tag>[\w.:-]+)(?=[\s/>])"
     r"(?:[^'\">]|'[^']*(?:'|\Z)|\"[^\"]*(?:\"|\Z))*(?:>|\Z)"
 )
-_SESSION_XML_ATTR_RE = re.compile(r"""([\w.:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_SESSION_XML_ATTR_RE = re.compile(
+    r"""([\w.:-]+)\s*=\s*(?:"([^"]*)(?:"|\Z)|'([^']*)(?:'|\Z))"""
+)
 _SESSION_HEADER_RE = re.compile(
     r"(?i)(?<![\w-])(?:Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][^\r\n]*"
     r"(?:\r?\n[ \t]+[^\r\n]*)*"
@@ -259,6 +261,7 @@ def _remember_session(value: str, secrets: set[str], *, cookie: bool) -> None:
             if item.value:
                 raw_cookie = unquote(item.value)
                 secrets.update((raw_cookie, html.unescape(raw_cookie)))
+                _remember_session(unquote(item.coded_value), secrets, cookie=False)
 
 
 def _session_xml_text(match: re.Match[str]) -> str:
