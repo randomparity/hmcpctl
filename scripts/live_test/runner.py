@@ -232,7 +232,7 @@ def _redact_hostname(match: re.Match[str]) -> str:
     return "<REDACTED-HOST>"
 
 
-def _remember_session(value: str, secrets: set[str], *, cookie: bool = False) -> None:
+def _remember_session(value: str, secrets: set[str], *, cookie: bool) -> None:
     raw = value.strip()
     value = raw
     quoted = len(value) > 1 and value[0] == value[-1] and value[0] in "\"'"
@@ -321,7 +321,9 @@ def _redact_session_xml(value: str, secrets: set[str]) -> str:
                 _session_xml_text,
                 value[start:],
             )
-            _remember_session(content, secrets)
+            _remember_session(
+                content, secrets, cookie=field in {"cookie", "set-cookie"}
+            )
     parts.append("<REDACTED-SECRET>" if stack else value[cursor:])
     return "".join(parts)
 

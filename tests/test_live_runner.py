@@ -5888,6 +5888,50 @@ async def test_session_header_echoes_are_redacted_at_both_sinks(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["Cookie", "Set-Cookie", 'Header name="Cookie"'])
+@pytest.mark.parametrize("closed", [False, True])
+@pytest.mark.parametrize("cdata", [False, True])
+async def test_xml_cookie_echoes_before_complete_or_truncated_source(
+    monkeypatch, tmp_path, capsys, field, closed, cdata
+):
+    _isolate_runner(monkeypatch)
+    content = "first=SYN_A; second=SYN_B"
+    if cdata:
+        content = "<![CDATA[" + content + "]]>"
+    body = "<" + field + ">" + content
+    if closed:
+        body += "</" + field.split()[0] + ">"
+    message = "SYN_A SYN_B denied"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0, "fake", "FAIL", {"message": message, "nested": [{"body": body}]}
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(message + "\n" + body)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for secret in ("SYN_A", "SYN_B"):
+        assert secret not in output
+        assert secret not in json.dumps(rows)
+    assert "denied" in rows[0]["data"]["message"]
+    assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.asyncio
 async def test_main_rejects_unknown_numeric_workflow(monkeypatch, tmp_path):
     _isolate_runner(monkeypatch)
     results_path = tmp_path / "unknown.json"
