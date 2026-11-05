@@ -175,6 +175,7 @@ _SESSION_XML_TOKEN_RE = re.compile(
     r"<(?P<closing>/)?(?P<tag>[\w.:-]+)(?=[\s/>])"
     r"(?:[^'\">]|'[^']*(?:'|\Z)|\"[^\"]*(?:\"|\Z))*(?:>|\Z)"
 )
+_SESSION_XML_ATTR_RE = re.compile(r"""([\w.:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 _SESSION_HEADER_RE = re.compile(
     r"(?i)(?<![\w-])(?:Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][^\r\n]*"
     r"(?:\r?\n[ \t]+[^\r\n]*)*"
@@ -269,18 +270,33 @@ def _session_xml_text(match: re.Match[str]) -> str:
 
 def _redact_session_xml(value: str, secrets: set[str]) -> str:
     parts: list[str] = []
-    stack: list[tuple[str, int]] = []
+    stack: list[tuple[str, int, str]] = []
     cursor = 0
     for match in _SESSION_XML_TOKEN_RE.finditer(value):
         tag = match["tag"]
-        if tag is None or not _SESSION_FIELD_RE.fullmatch(tag.rsplit(":", 1)[-1]):
+        if tag is None:
             continue
         tag = tag.lower()
+        field = tag.rsplit(":", 1)[-1]
+        if field == "header":
+            attrs = {
+                name.rsplit(":", 1)[-1].lower(): double or single
+                for name, double, single in _SESSION_XML_ATTR_RE.findall(match.group())
+            }
+            field = html.unescape(attrs.get("name", "")).lower()
+            if match["closing"] and stack and stack[-1][0] == tag:
+                field = stack[-1][2]
+            if _SESSION_FIELD_RE.fullmatch(field) and "value" in attrs:
+                _remember_session(
+                    attrs["value"], secrets, cookie=field in {"cookie", "set-cookie"}
+                )
+        if not _SESSION_FIELD_RE.fullmatch(field):
+            continue
         if match["closing"]:
             if not stack or stack[-1][0] != tag:
                 continue
-            _, start = stack.pop()
-            if tag.rsplit(":", 1)[-1] != "requestheaders":
+            _, start, field = stack.pop()
+            if field != "requestheaders":
                 content = value[start : match.start()]
                 content = _SESSION_XML_TOKEN_RE.sub(
                     _session_xml_text,
@@ -289,18 +305,18 @@ def _redact_session_xml(value: str, secrets: set[str]) -> str:
                 _remember_session(
                     content,
                     secrets,
-                    cookie=tag.rsplit(":", 1)[-1] in {"cookie", "set-cookie"},
+                    cookie=field in {"cookie", "set-cookie"},
                 )
         else:
             if not stack:
                 parts.append(value[cursor : match.start()])
             if not match.group().endswith("/>"):
-                stack.append((tag, match.end()))
+                stack.append((tag, match.end(), field))
         if not stack:
             parts.append("<REDACTED-SECRET>")
             cursor = match.end()
-    for tag, start in stack:
-        if tag.rsplit(":", 1)[-1] != "requestheaders":
+    for tag, start, field in stack:
+        if field != "requestheaders":
             content = _SESSION_XML_TOKEN_RE.sub(
                 _session_xml_text,
                 value[start:],

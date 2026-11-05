@@ -5804,6 +5804,46 @@ def test_session_redaction_keeps_empty_quoted_diagnostics(value):
         ("Cookie: opaque=SYN&amp;B", ("SYN&amp;B", "SYN&B")),
         ("Cookie: opaque=SYN&#38;B", ("SYN&#38;B", "SYN&B")),
         ("Cookie: opaque=SYN%26&amp;B", ("SYN%26&amp;B", "SYN%26&B")),
+        (
+            (
+                "<Error><Message>fixture-session denied</Message><RequestHeaders>"
+                '<Header name="X-API-Session" value="fixture-session"/>'
+                "</RequestHeaders></Error>"
+            ),
+            ("fixture-session",),
+        ),
+        (
+            (
+                "<RequestHeaders><h:Header h:value='SYN&amp;B' "
+                "h:name='X-API-Session'/></RequestHeaders>"
+            ),
+            ("SYN&amp;B", "SYN&B"),
+        ),
+        (
+            (
+                '<RequestHeaders><Header name="X-API-Session">'
+                "SYN_A</Header></RequestHeaders>"
+            ),
+            ("SYN_A",),
+        ),
+        (
+            (
+                '<RequestHeaders><Header name="Cookie" value="SID=SYN_A; next=SYN_B"/>'
+                "</RequestHeaders>"
+            ),
+            ("SYN_A", "SYN_B"),
+        ),
+        (
+            (
+                '<RequestHeaders><Header name="X-API-Session"><![CDATA[SYN_A]]>'
+                "</Header></RequestHeaders>"
+            ),
+            ("SYN_A",),
+        ),
+        (
+            '<RequestHeaders><Header name="X-API-Session">SYN_A',
+            ("SYN_A",),
+        ),
     ],
 )
 async def test_session_header_echoes_are_redacted_at_both_sinks(
@@ -5840,7 +5880,11 @@ async def test_session_header_echoes_are_redacted_at_both_sinks(
         assert secret not in rows[1]["data"]
     assert rows[0]["data"]["status"] == "400"
     assert "denied" in rows[0]["data"]["message"]
-    assert "denied" in rows[1]["data"]
+    if not header.endswith('name="X-API-Session">SYN_A'):
+        # With a truncated credential element, the following line is still inside it.
+        assert "denied" in rows[1]["data"]
+    if "<Message>" in header:
+        assert "denied" in rows[0]["data"]["body"]
 
 
 @pytest.mark.asyncio
