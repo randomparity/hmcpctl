@@ -70,7 +70,15 @@ class CLICommand(TyperCommand):
         tool = _mirrored_tool(ctx)
         hold_id = ctx.params.pop(_HOLD_ID_OPTION, None)
         read = tool is not None and TOOL_SECURITY[tool].effect == "read"
-        with calling(CallContext(tool=tool, read=read, hold_id=hold_id)):
+        with calling(
+            CallContext(
+                tool=tool,
+                read=read,
+                hold_id=hold_id,
+                system_partition_write=tool is not None
+                and TOOL_SECURITY[tool].system_partition_write,
+            )
+        ):
             return super().invoke(ctx)
 
     def parse_args(self, ctx: _click.Context, args: list[str]) -> list[str]:

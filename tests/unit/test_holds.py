@@ -326,3 +326,50 @@ def test_a_misconfigured_state_directory_refuses(monkeypatch, override):
     assert _reason(
         _enforce, CallContext("hmc_power_lpar", read=False, hold_id=None)
     ) == ("state_dir_unresolved")
+
+
+def test_system_hold_requires_last_release_even_with_matching_token():
+    placed = _place()
+    holds.place_hold(
+        SYS, OTHER, consumer_label="second", agent_id="agent-a", connection="c"
+    )
+    context = CallContext(
+        "system-write", False, placed.hold_id, system_partition_write=True
+    )
+    with calling(context):
+        holds.enforce_system_hold(OTHER)
+        for partition in (LPAR, OTHER):
+            with pytest.raises(HoldRefused, match="system_held") as error:
+                holds.enforce_system_hold(SYS.upper())
+            assert placed.hold_id not in str(error.value)
+            assert "hmcpctl holds list" in str(error.value)
+            holds.operator_release(partition)
+        holds.enforce_system_hold(SYS)
+    assert current_call() is None
+
+
+def test_system_check_ignores_unmarked_calls_and_does_not_create_store():
+    holds.enforce_system_hold(SYS)
+    with calling(CallContext("system-write", False, None, system_partition_write=True)):
+        holds.enforce_system_hold(SYS)
+        with pytest.raises(HoldRefused, match="system_hold_unverified"):
+            holds.enforce_system_hold("invalid")
+    assert not store.state_dir().exists()
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "lost", "relative"])
+def test_system_write_refuses_unknown_store_but_reads_pass(damage, monkeypatch):
+    _place()
+    if damage == "corrupt":
+        (store.state_dir() / store.DB_NAME).write_bytes(b"garbage" * 200)
+    elif damage == "lost":
+        (store.state_dir() / store.DB_NAME).unlink()
+    else:
+        monkeypatch.setenv(store.STATE_DIR_ENV, "relative/state")
+    with calling(CallContext("read", True, None)):
+        holds.enforce_system_hold(SYS)
+    with (
+        calling(CallContext("system-write", False, None, system_partition_write=True)),
+        pytest.raises(OperationRefused),
+    ):
+        holds.enforce_system_hold(SYS)

@@ -149,6 +149,7 @@ def hmc_backup_lpar_profiles(
 @tool(
     effect="destructive",
     operation="lpar_profile.restore",
+    system_partition_write=True,
     target_kind="managed_system",
     exhaustive_targets=False,
 )

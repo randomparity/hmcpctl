@@ -292,7 +292,12 @@ def hmc_get_system(
     )
 
 
-@tool(effect="mutate", operation="system.modify", target_kind="managed_system")
+@tool(
+    effect="mutate",
+    operation="system.modify",
+    system_partition_write=True,
+    target_kind="managed_system",
+)
 def hmc_modify_system(
     system_name_or_uuid: str,
     new_name: str | None = None,
@@ -333,7 +338,12 @@ def hmc_modify_system(
     )
 
 
-@tool(effect="mutate", operation="system.power_on", target_kind="managed_system")
+@tool(
+    effect="mutate",
+    operation="system.power_on",
+    system_partition_write=True,
+    target_kind="managed_system",
+)
 def hmc_power_on_system(
     system_name_or_uuid: str,
     wait: bool = False,
@@ -367,7 +377,12 @@ def hmc_power_on_system(
     )
 
 
-@tool(effect="destructive", operation="system.power_off", target_kind="managed_system")
+@tool(
+    effect="destructive",
+    operation="system.power_off",
+    system_partition_write=True,
+    target_kind="managed_system",
+)
 def hmc_power_off_system(
     system_name_or_uuid: str,
     immediate: bool = False,

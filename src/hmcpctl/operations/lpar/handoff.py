@@ -38,7 +38,7 @@ UNVERIFIED = (
     "ssh_reachability",
     "host_identity",
 )
-# ADR 0193 Decision 6 and ADR 0327 Decision 5: what a hold does not fence.
+# ADR 0193 Decision 6 and ADR 0339: what the partition/system hold checks do not fence.
 UNFENCED = (
     "the hmcpctl library API, which kdive calls",
     "hmcpctl on other hosts",
@@ -47,7 +47,7 @@ UNFENCED = (
     "hmcpctl raw",
     (
         "every non-read hmcpctl tool the hold hook does not check, listed in "
-        "unchecked_tools (ADR 0327 Decision 5); hmc_invoke_tool is checked as the tool "
+        "unchecked_tools (ADR 0327 Decision 5, ADR 0339); hmc_invoke_tool is checked as the tool "
         "it dispatches"
     ),
     (

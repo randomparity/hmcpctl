@@ -55,7 +55,7 @@ PERMITTED = (*REQUIRED, "hmc_get_vios_storage_detail")
 
 
 def unchecked_tools(tool_security: Mapping[str, ToolSecurity]) -> list[str]:
-    """The non-read tools the hold hook never checks (ADR 0327 Decision 5).
+    """The non-read tools the hold hook never checks (ADR 0327 Decision 5, ADR 0339).
 
     The exempt tools are named on their own in the document, and ``hmc_invoke_tool`` is
     left out because the tool it dispatches is checked as if called directly.
@@ -65,6 +65,7 @@ def unchecked_tools(tool_security: Mapping[str, ToolSecurity]) -> list[str]:
         for name, security in tool_security.items()
         if security.effect != "read"
         and not hold_guarded(name, security)
+        and not security.system_partition_write
         and name not in HOLD_EXEMPT_TOOLS
         and name != INVOKE_TOOL_NAME
     )

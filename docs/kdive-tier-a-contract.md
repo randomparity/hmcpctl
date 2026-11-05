@@ -122,6 +122,12 @@ declared, and what kdive's doctor/adopt still has to check
   with `partition_held` unless the call presents the matching `hold_id`, whatever
   `authorize_power_operations` is set to. Console capture (`hmc_capture_lpar_console`) and
   reads are not checked.
+- **System-wide partition writes require release first.** System modification, power on/off,
+  system-profile activation, profile restore and firmware update refuse `system_held` while
+  any partition on that system is held ([ADR 0339](adr/0339-system-write-hold-fence.md)).
+  These whole-tool checks have no token or ownership override, including validate-only
+  activation and rename-only modification. Existing CLI mirrors enforce the same rule.
+  Coordinate handoff with already-admitted system operations; this check does not lock a job.
 - **Library calls are not checked.** The hold binds the MCP server and CLI on the host that
   placed it. The library operations above, hmcpctl on other hosts, the HMC GUI and direct
   HMC commands are not fenced, nor is any tool the hold hook does not check; the document's
