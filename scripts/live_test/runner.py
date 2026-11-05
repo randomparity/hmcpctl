@@ -67,6 +67,7 @@ from datetime import UTC, datetime
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote
 
 import check_capability_inventory
 from fastmcp import Client
@@ -178,9 +179,14 @@ _SESSION_HEADER_RE = re.compile(
     r"(?i)(?<![\w-])(?:Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][^\r\n]*"
     r"(?:\r?\n[ \t]+[^\r\n]*)*"
 )
+_SESSION_ENTITY_RE = re.compile(r"(?i)&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);")
+_SESSION_COOKIE_VALUE_RE = re.compile(
+    r"(?i)(?<![\w-])(?P<name>Cookie|Set-Cookie)['\"]?\s*[:=]\s*"
+    r"(?P<value>[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)"
+)
 _SESSION_VALUE_RE = re.compile(
     r"(?i)(?=(?<![\w-])(?P<name>Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=]\s*"
-    r"""(?P<value>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;{}]+))"""
+    r"""(?P<value>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:&(?:\#\d+|\#x[0-9a-f]+|[a-z][a-z0-9]+);|[^\s,;{}])+))"""
 )
 
 
@@ -228,18 +234,30 @@ def _redact_hostname(match: re.Match[str]) -> str:
 def _remember_session(value: str, secrets: set[str], *, cookie: bool = False) -> None:
     raw = value.strip()
     value = raw
-    if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":
-        value = re.sub(r"\\(.)", r"\1", value[1:-1])
+    quoted = len(value) > 1 and value[0] == value[-1] and value[0] in "\"'"
+    inner = value[1:-1] if quoted else value
+    if quoted:
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            value = re.sub(r"\\(.)", r"\1", inner)
     if not value:
         return
-    secrets.update((raw, html.unescape(value)))
+    secrets.update((raw, inner, value, html.unescape(value)))
     if cookie:
         parsed = SimpleCookie()
         try:
-            parsed.load(value)
+            # Entity semicolons are value data; preserve literal percent bytes too.
+            protected = _SESSION_ENTITY_RE.sub(
+                lambda match: quote(match.group(), safe=""), value.replace("%", "%25")
+            )
+            parsed.load(protected)
         except CookieError:
             return  # The raw named value still protects exact echoes of malformed cookies.
-        secrets.update(item.value for item in parsed.values() if item.value)
+        for item in parsed.values():
+            if item.value:
+                raw_cookie = unquote(item.value)
+                secrets.update((raw_cookie, html.unescape(raw_cookie)))
 
 
 def _session_xml_text(match: re.Match[str]) -> str:
@@ -322,12 +340,14 @@ def _redact_failure_data(data: Any) -> Any:
             cursor = token.end()
         fragments.append(text[cursor:])
         for fragment in fragments:
-            for match in _SESSION_VALUE_RE.finditer(html.unescape(fragment)):
-                _remember_session(
-                    match["value"],
-                    secrets,
-                    cookie=match["name"].lower() in {"cookie", "set-cookie"},
-                )
+            for source in {fragment, html.unescape(fragment)}:
+                for matcher in (_SESSION_VALUE_RE, _SESSION_COOKIE_VALUE_RE):
+                    for match in matcher.finditer(source):
+                        _remember_session(
+                            match["value"],
+                            secrets,
+                            cookie=match["name"].lower() in {"cookie", "set-cookie"},
+                        )
         text = _redact_session_xml(text, secrets)
         return _SESSION_HEADER_RE.sub("<REDACTED-SECRET>", text)
 

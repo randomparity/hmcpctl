@@ -5787,6 +5787,63 @@ def test_session_redaction_keeps_empty_quoted_diagnostics(value):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("header", "secrets"),
+    [
+        ("Cookie: first=SYN_A; second=SYN_B", ("SYN_A", "SYN_B")),
+        ('Cookie: opaque="SYN_A with spaces"', ("SYN_A with spaces",)),
+        (
+            "<RequestHeaders>Cookie: first=SYN_A; second=SYN_B</RequestHeaders>",
+            ("SYN_A", "SYN_B"),
+        ),
+        ("Cookie: first=SYN_A;\n second=SYN_B", ("SYN_A", "SYN_B")),
+        ("X-API-Session: SYN&amp;B", ("SYN&amp;B", "SYN&B")),
+        ("'X-API-Session': 'SYN_A with spaces'", ("SYN_A with spaces",)),
+        ('X-API-Session: "SYN\\"QUOTED"', ('SYN\\"QUOTED', 'SYN"QUOTED')),
+        ('X-API-Session: "SYN\\u0041"', ("SYN\\u0041", "SYNA")),
+        ("Cookie: opaque=SYN&amp;B", ("SYN&amp;B", "SYN&B")),
+        ("Cookie: opaque=SYN&#38;B", ("SYN&#38;B", "SYN&B")),
+        ("Cookie: opaque=SYN%26&amp;B", ("SYN%26&amp;B", "SYN%26&B")),
+    ],
+)
+async def test_session_header_echoes_are_redacted_at_both_sinks(
+    monkeypatch, tmp_path, capsys, header, secrets
+):
+    _isolate_runner(monkeypatch)
+    message = " ".join(secrets) + " denied"
+
+    async def failing_subtask(_client, state):
+        state.record(
+            0, "fake", "FAIL", {"body": header, "message": message, "status": 400}
+        )
+        state.record(
+            0,
+            "fake",
+            "FAIL",
+            observation.classify_failure(RuntimeError(header + "\n" + message)),
+        )
+
+    monkeypatch.setattr(runner, "SUBTASKS", {0: failing_subtask})
+    result_path = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            results_path=str(result_path), config=live_config.LiveTestConfig()
+        )
+        == 1
+    )
+    rows = json.loads(result_path.read_text())["results"]
+    output = capsys.readouterr().out
+    for secret in secrets:
+        assert secret not in output
+        assert secret not in rows[0]["data"]["body"]
+        assert secret not in rows[0]["data"]["message"]
+        assert secret not in rows[1]["data"]
+    assert rows[0]["data"]["status"] == "400"
+    assert "denied" in rows[0]["data"]["message"]
+    assert "denied" in rows[1]["data"]
+
+
+@pytest.mark.asyncio
 async def test_main_rejects_unknown_numeric_workflow(monkeypatch, tmp_path):
     _isolate_runner(monkeypatch)
     results_path = tmp_path / "unknown.json"
