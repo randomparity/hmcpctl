@@ -5969,6 +5969,16 @@ async def test_xml_cookie_echoes_before_complete_or_truncated_source(
 @pytest.mark.parametrize(
     ("source", "echoes"),
     [
+        ('<Error detail="broken\n<X-API-Session>SYN_A</X-API-Session>', ("SYN_A",)),
+        (
+            "<Error detail='broken\n<Cookie>first=SYN_A; second=SYN_B</Cookie>",
+            ("SYN_A", "SYN_B"),
+        ),
+        ('<Error detail="<broken>"><X-API-Session>SYN_A</X-API-Session>', ("SYN_A",)),
+        (
+            "<Error detail='<broken>'><Cookie>first=SYN_A; second=SYN_B</Cookie>",
+            ("SYN_A", "SYN_B"),
+        ),
         ('Cookie: opaque="SYN\\"QUOTED"', ('SYN\\"QUOTED', 'SYN"QUOTED')),
         ('<Cookie>opaque="SYN\\"QUOTED"</Cookie>', ('SYN\\"QUOTED', 'SYN"QUOTED')),
         ('<Header name="X-API-Session" value="SYN_A', ("SYN_A",)),
