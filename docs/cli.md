@@ -620,8 +620,12 @@ The command classifies every `HMCConfig` field for this report:
 Unset the per-profile exports and configure those settings in individual TOML profiles.
 An exported setting would otherwise override every profile's own credentials, trust,
 attribution or limits. The refusal also covers settings this read-only report does not use.
-The command also refuses global connection options
-(`--host`, `--user`, `--password`, `--verify-ssl`, `--profile`), which would be ignored.
+The command also refuses global connection options, which would be ignored:
+`--host`, `--user` (`-u`), `--password` (`-p`), `--verify-ssl`/`--no-verify-ssl`,
+`--trust-system-store`/`--no-trust-system-store`, `--ca-bundle`, `--cert-fingerprint`
+and `--profile`. The error names only the supplied options using their canonical long
+names. A global `--profile` before `report` is refused; `--profile` after
+`report utilization` selects profiles for the survey.
 
 When profiles fail, the `fleet` row's `notes` says how many and which: a system that only a
 failed profile manages is missing from the fleet totals. It also says how many systems
