@@ -235,33 +235,54 @@ def _redact_hostname(match: re.Match[str]) -> str:
 
 
 def _remember_session(value: str, secrets: set[str], *, cookie: bool) -> None:
-    raw = value.strip()
-    value = raw
-    quoted = len(value) > 1 and value[0] == value[-1] and value[0] in "\"'"
-    inner = value[1:-1] if quoted else value
-    if quoted:
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            value = re.sub(r"\\(.)", r"\1", inner)
-    if not value:
+    def retain(value: str, *, encoded_quotes: bool) -> str:
+        raw = value.strip()
+        inner = raw
+        quote_char = raw[:1]
+        if len(raw) > 1 and quote_char in {'"', "'"} and raw[-1] == quote_char:
+            inner = raw[1:-1]
+        else:
+            first = _SESSION_ENTITY_RE.match(raw) if encoded_quotes else None
+            last = raw.rfind("&")
+            quote_char = html.unescape(first.group()) if first else ""
+            if (
+                first
+                and last >= first.end()
+                and quote_char in {'"', "'"}
+                and html.unescape(raw[last:]) == quote_char
+            ):
+                inner = raw[first.end() : last]
+            else:
+                quote_char = ""
+        value = raw
+        if quote_char:
+            try:
+                value = json.loads(quote_char + inner + quote_char)
+            except json.JSONDecodeError:
+                value = re.sub(r"\\(.)", r"\1", inner)
+        if value:
+            secrets.update((raw, inner, value))
+        return value
+
+    raw_value = retain(value, encoded_quotes=True)
+    decoded_value = retain(html.unescape(raw_value), encoded_quotes=False)
+    if not cookie:
         return
-    secrets.update((raw, inner, value, html.unescape(value)))
-    if cookie:
+    # Decode named source entities once, without decoding its component values again.
+    for source, encoded_quotes in {raw_value: True, decoded_value: False}.items():
         parsed = SimpleCookie()
         try:
             # Entity semicolons are value data; preserve literal percent bytes too.
             protected = _SESSION_ENTITY_RE.sub(
-                lambda match: quote(match.group(), safe=""), value.replace("%", "%25")
+                lambda match: quote(match.group(), safe=""), source.replace("%", "%25")
             )
             parsed.load(protected)
         except CookieError:
-            return  # The raw named value still protects exact echoes of malformed cookies.
+            continue  # Raw named values still protect exact echoes of malformed cookies.
         for item in parsed.values():
             if item.value:
-                raw_cookie = unquote(item.value)
-                secrets.update((raw_cookie, html.unescape(raw_cookie)))
-                _remember_session(unquote(item.coded_value), secrets, cookie=False)
+                retain(unquote(item.value), encoded_quotes=encoded_quotes)
+                retain(unquote(item.coded_value), encoded_quotes=encoded_quotes)
 
 
 def _session_xml_text(match: re.Match[str]) -> str:

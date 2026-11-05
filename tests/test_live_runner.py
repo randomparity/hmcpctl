@@ -5786,6 +5786,27 @@ def test_session_redaction_keeps_empty_quoted_diagnostics(value):
     assert runner._redact_failure_data(data)["message"] == message
 
 
+@pytest.mark.parametrize(
+    ("field", "source", "decoded"),
+    [
+        ("X-API-Session", "&amp;quot;SYN_A&amp;quot;", "&quot;SYN_A&quot;"),
+        ("Cookie", "opaque=&amp;quot;SYN_A&amp;quot;", "opaque=&quot;SYN_A&quot;"),
+    ],
+)
+def test_session_redaction_decodes_named_entities_once(field, source, decoded):
+    result = runner._redact_failure_data(
+        {
+            field: source,
+            "message": "SYN_A diagnostic",
+            "raw_echo": source,
+            "decoded_echo": decoded,
+        }
+    )
+    assert result["message"] == "SYN_A diagnostic"
+    assert result["raw_echo"] == "<REDACTED-SECRET>"
+    assert result["decoded_echo"] == "<REDACTED-SECRET>"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("header", "secrets"),
@@ -5978,6 +5999,26 @@ async def test_xml_cookie_echoes_before_complete_or_truncated_source(
         (
             "<Error detail='<broken>'><Cookie>first=SYN_A; second=SYN_B</Cookie>",
             ("SYN_A", "SYN_B"),
+        ),
+        (
+            "<Cookie>opaque=&quot;SYN_A&quot;</Cookie>",
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            '<Header name="Cookie" value="opaque=&quot;SYN_A&quot;"/>',
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            "<X-API-Session>&quot;SYN_A&quot;</X-API-Session>",
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            '<Header name="X-API-Session" value="&quot;SYN_A&quot;"/>',
+            ("SYN_A", "&quot;SYN_A&quot;", '"SYN_A"'),
+        ),
+        (
+            "<Cookie>opaque=&quot;SYN%26&amp;B&quot;</Cookie>",
+            ("SYN%26&amp;B", "SYN%26&B"),
         ),
         ('Cookie: opaque="SYN\\"QUOTED"', ('SYN\\"QUOTED', 'SYN"QUOTED')),
         ('<Cookie>opaque="SYN\\"QUOTED"</Cookie>', ('SYN\\"QUOTED', 'SYN"QUOTED')),
