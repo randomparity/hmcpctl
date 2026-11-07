@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 from hmcpctl.client.client_resolution import summary_for
 
@@ -28,11 +28,13 @@ class PartitionGuard:
     *check* refuses a partition UUID's resolution by raising. *names_need_resolution* says
     whether a partition the caller named only by name must be resolved so *check* can see it.
     *check_system* optionally checks resolved system UUIDs for system-wide writes (ADR 0339).
+    *unresolved_name* supplies a guard-specific refusal when a name cannot be identified.
     """
 
     check: Callable[[str], None]
     names_need_resolution: Callable[[], bool]
     check_system: Callable[[str], None] | None = None
+    unresolved_name: Callable[[str, Exception], None] | None = None
 
 
 _PARTITION_GUARD: PartitionGuard | None = None
@@ -53,6 +55,13 @@ def guard_partition(partition_uuid: str) -> None:
 def partition_names_need_resolution() -> bool:
     """Whether a name-only partition selector must be resolved for the installed guard."""
     return _PARTITION_GUARD is not None and _PARTITION_GUARD.names_need_resolution()
+
+
+def guard_unresolved_partition_name(name: str, error: Exception) -> NoReturn:
+    """Delegate an unresolved-name refusal, always failing closed if the hook returns."""
+    if _PARTITION_GUARD is not None and _PARTITION_GUARD.unresolved_name is not None:
+        _PARTITION_GUARD.unresolved_name(name, error)
+    raise error
 
 
 class ResourceNotFoundError(ValueError):

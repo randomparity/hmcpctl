@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from typing import Any, Self
 
 import pytest
@@ -22,6 +24,22 @@ SYS = "0b3f9a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
 LPAR = "7d1e2f3a-4b5c-4d6e-8f70-819a2b3c4d5e"
 NAME = "lpar-a"
 MUTATION = CallContext("hmc_modify_lpar", read=False, hold_id=None)
+
+
+def test_ssh_selectors_do_not_import_the_logical_store():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import hmcpctl.ssh.selectors; "
+                "assert 'hmcpctl.operations.logical.holds' not in sys.modules; "
+                "assert 'hmcpctl.operations.logical.store' not in sys.modules"
+            ),
+        ],
+        check=True,
+        timeout=20,
+    )
 
 
 class FakeHMC:
@@ -94,6 +112,37 @@ def test_no_installed_guard_checks_nothing():
     _held()
     with calling(MUTATION):
         assert asyncio.run(resource_identity.resolve_lpar_uuid(FakeHMC(), LPAR)) == LPAR
+
+
+def test_unresolved_guard_callback_cannot_allow_an_unidentified_name():
+    seen = []
+    guard = PartitionGuard(
+        lambda _uuid: None,
+        lambda: True,
+        unresolved_name=lambda name, error: seen.append((name, error)),
+    )
+    install_partition_guard(guard)
+    try:
+        with pytest.raises(resource_identity.ResourceNotFoundError) as info:
+            asyncio.run(selectors.resolve_ssh_names(FakeHMC(), "sys-R1", "unknown"))
+        assert seen == [("unknown", info.value)]
+    finally:
+        install_partition_guard(None)
+
+
+def test_unresolved_hold_guard_preserves_store_refusals(hold_guard, monkeypatch):
+    from hmcpctl.operations.logical.store import OperationRefused
+
+    _held()
+    refusal = OperationRefused("store_unavailable", "inspect the operation store")
+
+    async def resolve(*args, **kwargs):
+        raise refusal
+
+    monkeypatch.setattr(selectors, "resolve_lpar_uuid", resolve)
+    with calling(MUTATION), pytest.raises(OperationRefused) as info:
+        asyncio.run(selectors.resolve_ssh_names(FakeHMC(), "sys-R1", NAME))
+    assert info.value is refusal
 
 
 def test_decommission_target_resolution_runs_the_guard(spy):
