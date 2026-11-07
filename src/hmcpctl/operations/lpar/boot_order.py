@@ -11,7 +11,7 @@ from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutatio
 from ...client.client_lpars import _exact_partition_path
 from ...documents.boot import select_boot_string
 from ...documents.partition_profile import N
-from ...errors import HMCError, LparUpdateError
+from ...errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from ...resource_identity import optional_system_selector, resolve_lpar_uuid
 from .errors import translate_lpar_write_error
 
@@ -56,6 +56,8 @@ async def read_lpar_boot_order(
     )
     try:
         lpar = await hmc.get_uom("LogicalPartition", lpar_uuid, group="Advanced")
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as error:
         raise HMCError(
             "Pending boot observation unavailable; inspect before retrying",
@@ -69,6 +71,8 @@ async def read_lpar_boot_order(
 
     try:
         document, _ = await hmc.read_logical_partition_document(lpar_uuid)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as error:
         raise HMCError(
             "Pending boot observation unavailable; inspect before retrying",

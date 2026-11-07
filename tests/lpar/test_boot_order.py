@@ -15,7 +15,7 @@ from defusedxml import ElementTree as DET
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.boot import join_boot_device_paths
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.boot_order import (
     clear_lpar_boot_order,
     read_lpar_boot_order,
@@ -703,3 +703,27 @@ async def test_boot_write_retains_submission_certainty_without_provider_body(
     assert exc.value.submission == submission
     assert "private-provider" not in str(exc.value) and exc.value.body is None
     assert hmc.set_pending_boot_string.await_count == 1
+
+
+@pytest.mark.parametrize("stage", ["advanced", "document"])
+@pytest.mark.asyncio
+async def test_boot_read_preserves_pin_mismatch(stage):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = AsyncMock()
+    hmc.get_uom.return_value = _parsed(_entry())
+    hmc.read_logical_partition_document.return_value = (_lpar(_entry()), None)
+    failing = (
+        hmc.get_uom if stage == "advanced" else hmc.read_logical_partition_document
+    )
+    failing.side_effect = failure
+    with (
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        pytest.raises(HMCTLSFingerprintError) as caught,
+    ):
+        await read_lpar_boot_order(hmc, LPAR, system_name_or_uuid="system-a")
+    assert caught.value is failure
+    if stage == "advanced":
+        hmc.read_logical_partition_document.assert_not_awaited()
