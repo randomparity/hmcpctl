@@ -14,7 +14,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import check_capability_inventory as inventory
 import live_test_preflight as preflight
@@ -59,7 +61,7 @@ class WindowError(ValueError):
     """A safe operator-facing refusal, with no raw child or configuration output."""
 
 
-def git(root, *arguments):
+def git(root: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(root), *arguments],
         capture_output=True,
@@ -71,8 +73,8 @@ def git(root, *arguments):
     return result.stdout.strip()
 
 
-def read_json(path, limit):
-    def unique(pairs):
+def read_json(path: Path, limit: int) -> Any:
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result = dict(pairs)
         if len(result) != len(pairs):
             raise WindowError("duplicate JSON keys are not allowed")
@@ -85,7 +87,7 @@ def read_json(path, limit):
     return json.loads(content, object_pairs_hook=unique)
 
 
-def prepare(args):
+def prepare(args: argparse.Namespace) -> dict[str, Any]:
     root = Path.cwd().resolve()
     if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
         raise WindowError("run from the candidate checkout root")
@@ -186,7 +188,9 @@ def prepare(args):
     }
 
 
-def cli_coverage(operations, documents, candidate):
+def cli_coverage(
+    operations: Iterable[str], documents: Iterable[Mapping[str, Any]], candidate: str
+) -> dict[str, str]:
     coverage = dict.fromkeys(operations, "gap: CLI not verified in this window")
     for document in documents:
         run = document.get("run", {})
@@ -218,7 +222,7 @@ def cli_coverage(operations, documents, candidate):
     return coverage
 
 
-def authorize(plan, path):
+def authorize(plan: Mapping[str, Any], path: Path | None) -> None:
     if path is None:
         raise WindowError(
             "explicit authorization file required; inspect --dry-run first"
@@ -239,7 +243,7 @@ def authorize(plan, path):
         )
 
 
-def private_directory(path, root):
+def private_directory(path: Path, root: Path) -> Path:
     if (
         path.is_symlink()
         or not path.is_dir()
@@ -256,23 +260,30 @@ def private_directory(path, root):
 class Execution:
     """Sequential subprocess ownership, bounded private output, and signal handling."""
 
-    def __init__(self, root, output):
+    def __init__(self, root: Path, output: Path) -> None:
         self.root, self.output = root, output
         self.cancelled = False
         self.safe = True
-        self.phases = []
+        self.phases: list[dict[str, Any]] = []
 
-    def interrupt(self, *_):
+    def interrupt(self, *_: object) -> None:
         self.cancelled = True
 
     @staticmethod
-    def stop(process, sig):
+    def stop(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
         try:
             os.killpg(process.pid, sig)
         except ProcessLookupError:
             pass
 
-    def run(self, label, arguments, *, recovery=False, markdown=False):
+    def run(
+        self,
+        label: str,
+        arguments: Sequence[str | Path],
+        *,
+        recovery: bool = False,
+        markdown: bool = False,
+    ) -> bool:
         if self.cancelled and not recovery:
             return False
         path = self.output / (label + (".md" if markdown else ".log"))
@@ -370,7 +381,9 @@ class Execution:
         return passed
 
 
-def capture(execution, index, system, when, ids=()):
+def capture(
+    execution: Execution, index: int, system: str, when: str, ids: Iterable[int] = ()
+) -> Path:
     path = execution.output / f"baseline-{index}-{when}.json"
     argv = [
         "scripts/live_test_baseline.py",
@@ -389,7 +402,7 @@ def capture(execution, index, system, when, ids=()):
     return path
 
 
-def run_window(plan, execution):
+def run_window(plan: dict[str, Any], execution: Execution) -> bool:
     arms = plan["authorization"]["arms"]
     captures = []
     for index, system in enumerate(plan["systems"]):
@@ -472,7 +485,7 @@ def run_window(plan, execution):
     )
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claims", type=Path, required=True)
     parser.add_argument("--branch", required=True)
