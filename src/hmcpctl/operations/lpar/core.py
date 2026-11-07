@@ -436,6 +436,16 @@ async def create_and_stamp_lpar(
         )
     validate_keylock(creation.keylock)
     role_requested = roles_requested(creation.settings)
+    verify_before_apply = (
+        policy_requested
+        or hardware_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
+        or start_requested
+        or affinity_requested
+        or role_requested
+    )
     if preflight_assignments is not None:
         if not isinstance(preflight_assignments, LparPcieAssignments):
             raise TypeError("preflight_assignments must be LparPcieAssignments")
@@ -720,16 +730,7 @@ async def create_and_stamp_lpar(
     apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
 
     if created_lpar is None:
-        if (
-            policy_requested
-            or hardware_requested
-            or layout_requested
-            or affinity_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or role_requested
-        ) and creation.stamp_policy == "required":
+        if verify_before_apply and creation.stamp_policy == "required":
             raise HMCError(
                 f"{'Creation memory' if memory_requested else 'Affinity group' if affinity_requested else 'Serial' if serial_requested else 'Memory layout' if layout_requested else 'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
                 "unavailable and ownership was not stamped. Inspect the contained "
@@ -751,16 +752,7 @@ async def create_and_stamp_lpar(
                 "retrying; a created partition can be re-stamped with "
                 "set_lpar_ownership_description."
             )
-        if (
-            policy_requested
-            or hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-            or role_requested
-        ):
+        if verify_before_apply:
             skipped = "created identity readback unavailable; inspect the contained partition before retrying"
         elif readback_error is None:
             skipped = "create returned no LPAR body"
@@ -840,16 +832,7 @@ async def create_and_stamp_lpar(
                 else None
             ),
         )
-    if (
-        policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
-    ) and (
+    if verify_before_apply and (
         not isinstance(created_lpar, dict)
         or not isinstance(created_lpar.get("UUID"), str)
         or not is_uuid(created_lpar["UUID"])
@@ -985,53 +968,23 @@ async def create_and_stamp_lpar(
             controller_mode=controller_mode,
             start_admission=start_admission,
         )
-        if policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
+        if verify_before_apply
         else None
     )
     reporting_step = (
         await _created_reporting_step(hmc, system_name, creation)
-        if policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
+        if verify_before_apply
         else None
     )
     vtpm_step = (
         await _created_vtpm_step(hmc, system_name, creation)
-        if policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
+        if verify_before_apply
         else None
     )
     policy_step = await _created_security_policy_step(
         hmc, system_uuid, creation, created_lpar
     )
-    if (
-        policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
-    ) and creation.apply_profile is not None:
+    if verify_before_apply and creation.apply_profile is not None:
         required = [
             (creation.settings.pairs() or start_requested, settings_step),
             (creation.reporting_settings.pairs(), reporting_step),
@@ -1103,22 +1056,8 @@ async def create_and_stamp_lpar(
         or role_requested
     ):
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
-    result = LparCreationResult(
-        True,
-        created_lpar,
-        ownership_stamped,
-        (*apply_warnings, *warnings),
-        apply_step,
-        settings_step
-        if policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
-        else await _created_settings_step(
+    if not verify_before_apply:
+        settings_step = await _created_settings_step(
             hmc,
             system_uuid,
             system_name,
@@ -1126,28 +1065,19 @@ async def create_and_stamp_lpar(
             created_lpar,
             controller_mode=controller_mode,
             start_admission=start_admission,
-        ),
+        )
+        reporting_step = await _created_reporting_step(hmc, system_name, creation)
+        vtpm_step = await _created_vtpm_step(hmc, system_name, creation)
+    result = LparCreationResult(
+        True,
+        created_lpar,
+        ownership_stamped,
+        (*apply_warnings, *warnings),
+        apply_step,
+        settings_step,
         io_step,
-        reporting_step
-        if policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
-        else await _created_reporting_step(hmc, system_name, creation),
-        vtpm_step
-        if policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
-        else await _created_vtpm_step(hmc, system_name, creation),
+        reporting_step,
+        vtpm_step,
         policy_step,
         hardware_step,
         memory_layout_step=layout_step,
