@@ -31,6 +31,7 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_recovery as recovery  # noqa: E402
 from live_test import storage_lifecycle  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
+from live_test.recovery import memory as memory_recovery  # noqa: E402
 from live_test.storage import scsi_adapter_listing  # noqa: E402
 
 _MARKER = "pcie-deadbeef"
@@ -2832,7 +2833,9 @@ async def test_creation_memory_recovery_all_phases_are_read_only(
     inputs = recovery.creation_memory_layout_inputs_from_document(document, [58])
     from hmcpctl.config import HMCConfig
 
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+    monkeypatch.setattr(
+        memory_recovery, "HMCConfig", lambda: HMCConfig.from_mapping({})
+    )
     seen = []
 
     async def call(tool, **arguments):
@@ -2888,7 +2891,9 @@ async def test_creation_memory_recovery_compares_canonical_observed_uuid(
     journal["system_uuid"] = system
     journal["baseline"]["vios"] = [{"uuid": vios, "name": "existing"}]
     inputs = recovery.creation_memory_layout_inputs_from_document(document, [58])
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+    monkeypatch.setattr(
+        memory_recovery, "HMCConfig", lambda: HMCConfig.from_mapping({})
+    )
 
     async def call(tool, **arguments):
         recovery.guard_read_only(tool, arguments)
@@ -3528,7 +3533,7 @@ async def test_c07_recovery_all_phases_are_read_only_and_never_resume(
     j = document["artifacts"]["creation_memory"]
     inputs = recovery.creation_memory_inputs_from_document(document, [65])
     monkeypatch.setattr(
-        recovery,
+        memory_recovery,
         "HMCConfig",
         lambda: HMCConfig.from_mapping(
             {"host": "foreign.test" if fault == "hmc" else "hmc.test", "user": "test"}
