@@ -32,7 +32,10 @@ import live_test_recovery as recovery  # noqa: E402
 from live_test import storage_lifecycle  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
 from live_test.recovery import backup as backup_recovery  # noqa: E402
+from live_test.recovery import baseline as baseline_recovery  # noqa: E402
 from live_test.recovery import memory as memory_recovery  # noqa: E402
+from live_test.recovery import partition as partition_recovery  # noqa: E402
+from live_test.recovery import pcie as pcie_recovery  # noqa: E402
 from live_test.recovery import storage as storage_recovery  # noqa: E402
 from live_test.storage import scsi_adapter_listing  # noqa: E402
 
@@ -262,7 +265,7 @@ def _stamped(token: str) -> str:
     )
 
 
-_INPUTS = recovery.RecoveryInputs(
+_INPUTS = pcie_recovery.RecoveryInputs(
     system_name=_SYSTEM,
     run_marker=_MARKER,
     fixture_lpar=_LPAR,
@@ -322,7 +325,7 @@ def _responses(**overrides) -> dict:
 
 @pytest.mark.asyncio
 async def test_a_clean_system_yields_no_findings():
-    assert await recovery.check(_caller(_responses()), _INPUTS) == []
+    assert await pcie_recovery.check(_caller(_responses()), _INPUTS) == []
 
 
 @pytest.mark.asyncio
@@ -333,7 +336,7 @@ async def test_a_surviving_marked_partition_is_reported(state):
         hmc_get_lpar_description=_stamped(_MARKER), hmc_get_lpar_state=state
     )
 
-    findings = await recovery.check(_caller(responses), _INPUTS)
+    findings = await pcie_recovery.check(_caller(responses), _INPUTS)
 
     assert [f.what for f in findings] == ["surviving partition"]
     assert _LPAR in findings[0].detail
@@ -348,7 +351,7 @@ async def test_a_running_surviving_partition_needs_a_shutdown_first():
         hmc_get_lpar_description=_stamped(_MARKER), hmc_get_lpar_state="Running"
     )
 
-    findings = await recovery.check(_caller(responses), _INPUTS)
+    findings = await pcie_recovery.check(_caller(responses), _INPUTS)
 
     assert [f.what for f in findings] == ["surviving partition"]
     remedy = findings[0].remedy
@@ -365,7 +368,7 @@ async def test_an_unreadable_state_on_a_surviving_partition_is_not_clean():
     )
 
     with pytest.raises(recovery.StateUnreadable, match="could not read the state"):
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
 
 @pytest.mark.asyncio
@@ -373,7 +376,7 @@ async def test_a_partition_of_the_same_name_from_another_run_is_not_claimed():
     """The marker is the ownership proof; a name collision is not this run's."""
     responses = _responses(hmc_get_lpar_description=_stamped("pcie-someoneelse"))
 
-    assert await recovery.check(_caller(responses), _INPUTS) == []
+    assert await pcie_recovery.check(_caller(responses), _INPUTS) == []
 
 
 @pytest.mark.asyncio
@@ -386,7 +389,7 @@ async def test_this_runs_marker_in_a_stamp_this_checkout_cannot_read_is_not_clea
     responses = _responses(hmc_get_lpar_description=old_stamp)
 
     with pytest.raises(recovery.StateUnreadable, match="tested commit"):
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
 
 @pytest.mark.asyncio
@@ -397,7 +400,7 @@ async def test_a_stranded_slot_is_reported():
         }
     )
 
-    findings = await recovery.check(_caller(responses), _INPUTS)
+    findings = await pcie_recovery.check(_caller(responses), _INPUTS)
 
     assert [f.what for f in findings] == ["stranded slot"]
     assert _DRC in findings[0].detail
@@ -413,7 +416,7 @@ async def test_a_slot_owned_by_the_literal_string_null_reads_as_unowned():
         }
     )
 
-    assert await recovery.check(_caller(responses), _INPUTS) == []
+    assert await pcie_recovery.check(_caller(responses), _INPUTS) == []
 
 
 @pytest.mark.asyncio
@@ -424,7 +427,7 @@ async def test_profile_drift_from_the_baseline_is_reported():
         hmc_run_command=_readback(f"{_DRC}/none/0"),
     )
 
-    findings = await recovery.check(_caller(responses), _INPUTS)
+    findings = await pcie_recovery.check(_caller(responses), _INPUTS)
 
     drift = [f for f in findings if f.what == "profile drift"]
     assert len(drift) == 1
@@ -440,7 +443,7 @@ async def test_profile_drift_to_an_unrelated_value_is_still_reported():
         hmc_run_command=_readback("21030030/none/0"),
     )
 
-    findings = await recovery.check(_caller(responses), _INPUTS)
+    findings = await pcie_recovery.check(_caller(responses), _INPUTS)
 
     drift = [f for f in findings if f.what == "profile drift"]
     assert len(drift) == 1
@@ -456,7 +459,7 @@ async def test_a_deleted_fixture_is_not_asked_for_its_profile():
     """
     seen: list[str] = []
 
-    findings = await recovery.check(_caller(_responses(), seen), _INPUTS)
+    findings = await pcie_recovery.check(_caller(_responses(), seen), _INPUTS)
 
     assert findings == []
     assert "hmc_run_command" not in seen
@@ -472,7 +475,7 @@ async def test_every_condition_at_once_is_reported_together():
         hmc_run_command=_readback(f"{_DRC}/none/0"),
     )
 
-    findings = await recovery.check(_caller(responses), _INPUTS)
+    findings = await pcie_recovery.check(_caller(responses), _INPUTS)
 
     assert [f.what for f in findings] == [
         "surviving partition",
@@ -489,7 +492,7 @@ async def test_an_unreadable_profile_is_not_clean():
     )
 
     with pytest.raises(recovery.StateUnreadable, match="could not read profile"):
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
 
 @pytest.mark.parametrize(
@@ -516,7 +519,7 @@ async def test_a_profile_answer_outside_the_admitted_form_is_unreadable(answer, 
     )
 
     with pytest.raises(recovery.StateUnreadable, match=reason):
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
 
 @pytest.mark.asyncio
@@ -527,7 +530,7 @@ async def test_an_unreadable_system_carries_the_findings_already_confirmed():
     )
 
     with pytest.raises(recovery.StateUnreadable) as raised:
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
     assert [f.what for f in raised.value.findings] == ["surviving partition"]
 
@@ -543,7 +546,7 @@ async def test_a_partition_lookup_failing_for_another_reason_is_not_clean():
     responses = _responses(hmc_get_lpar_description=lost)
 
     with pytest.raises(recovery.StateUnreadable, match="could not look up"):
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
 
 @pytest.mark.asyncio
@@ -557,7 +560,7 @@ async def test_an_unreadable_partition_lookup_keeps_the_stranded_slot():
     )
 
     with pytest.raises(recovery.StateUnreadable) as raised:
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
     assert [f.what for f in raised.value.findings] == ["stranded slot"]
 
@@ -567,7 +570,7 @@ async def test_a_partition_lookup_answering_no_description_is_not_clean():
     responses = _responses(hmc_get_lpar_description={"unexpected": "shape"})
 
     with pytest.raises(recovery.StateUnreadable, match="could not look up"):
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
 
 @pytest.mark.asyncio
@@ -576,15 +579,17 @@ async def test_an_unlistable_system_is_not_clean():
     responses = _responses(hmc_list_dedicated_pcie_slots=None)
 
     with pytest.raises(recovery.StateUnreadable, match="could not list"):
-        await recovery.check(_caller(responses), _INPUTS)
+        await pcie_recovery.check(_caller(responses), _INPUTS)
 
 
 @pytest.mark.asyncio
 async def test_a_run_with_no_drc_index_still_probes_then_checks_the_partition():
-    inputs = recovery.RecoveryInputs(_SYSTEM, _MARKER, _LPAR, None, None, "default")
+    inputs = pcie_recovery.RecoveryInputs(
+        _SYSTEM, _MARKER, _LPAR, None, None, "default"
+    )
     seen: list[str] = []
 
-    await recovery.check(_caller(_responses(), seen), inputs)
+    await pcie_recovery.check(_caller(_responses(), seen), inputs)
 
     assert seen == ["hmc_list_dedicated_pcie_slots", "hmc_get_lpar_description"]
 
@@ -598,7 +603,7 @@ async def test_a_run_with_no_drc_index_still_probes_then_checks_the_partition():
 async def test_every_tool_the_checks_call_is_on_the_read_only_allowlist():
     seen: list[str] = []
 
-    await recovery.check(_caller(_responses(), seen), _INPUTS)
+    await pcie_recovery.check(_caller(_responses(), seen), _INPUTS)
 
     assert set(seen) <= recovery._READ_ONLY_TOOLS
     assert seen  # the checks did run
@@ -660,11 +665,11 @@ async def test_the_profile_read_is_the_admitted_form_selected_by_profile_name():
             return "PASS", _readback(_BASELINE, profile="fixture-profile")
         return "PASS", _CLEAN[tool]
 
-    inputs = recovery.RecoveryInputs(
+    inputs = pcie_recovery.RecoveryInputs(
         _SYSTEM, _MARKER, _LPAR, _DRC, _BASELINE, "fixture-profile"
     )
 
-    assert await recovery._profile_drift(call, inputs) is None
+    assert await pcie_recovery._profile_drift(call, inputs) is None
     assert sent == [_PROFILE_READ]
 
 
@@ -673,10 +678,12 @@ def test_recovery_reads_the_profile_with_the_arms_own_builders():
     from live_test import dedicated_pcie
 
     assert (
-        recovery.profile_io_slot_rows_command
+        pcie_recovery.profile_io_slot_rows_command
         is dedicated_pcie.profile_io_slot_rows_command
     )
-    assert recovery.select_profile_io_slots is dedicated_pcie.select_profile_io_slots
+    assert (
+        pcie_recovery.select_profile_io_slots is dedicated_pcie.select_profile_io_slots
+    )
 
 
 def test_an_unset_profile_name_falls_back_to_the_arms_default():
@@ -690,7 +697,7 @@ def test_an_unset_profile_name_falls_back_to_the_arms_default():
     document = _document()
     document["config"]["dedicated_pcie_profile_name"] = ""
 
-    inputs = recovery.inputs_from_document(document)
+    inputs = pcie_recovery.inputs_from_document(document)
 
     assert inputs.profile_name == dedicated_pcie._DEFAULT_DEDICATED_PROFILE
 
@@ -734,7 +741,7 @@ async def test_the_checks_run_through_the_live_runs_served_client(monkeypatch):
     )
     monkeypatch.setattr(recovery, "check_run", no_findings)
 
-    assert await recovery._run_checks(((recovery.check, _INPUTS),)) == []
+    assert await recovery._run_checks(((pcie_recovery.check, _INPUTS),)) == []
     assert seen == [served]
 
 
@@ -761,26 +768,26 @@ def _document(**artifact_overrides) -> dict:
 
 
 def test_inputs_are_read_from_the_documents_artifact_fields():
-    inputs = recovery.inputs_from_document(_document())
+    inputs = pcie_recovery.inputs_from_document(_document())
 
     assert inputs == _INPUTS
 
 
 def test_a_document_recording_no_fixture_yields_no_inputs():
     """A run that never reached ST29 created nothing to look for."""
-    assert recovery.inputs_from_document(_document(pcie_run_marker=None)) is None
+    assert pcie_recovery.inputs_from_document(_document(pcie_run_marker=None)) is None
 
 
 @pytest.mark.parametrize(
     "document", ["not a dict", {}, {"artifacts": {}}, {"config": {}}, []]
 )
 def test_a_malformed_document_yields_no_inputs(document):
-    assert recovery.inputs_from_document(document) is None
+    assert pcie_recovery.inputs_from_document(document) is None
 
 
 def test_a_run_that_stopped_before_the_baseline_still_yields_inputs():
     """The ST29 fields alone are enough to look for a surviving partition."""
-    inputs = recovery.inputs_from_document(_document(pcie_baseline_io_slots=None))
+    inputs = pcie_recovery.inputs_from_document(_document(pcie_baseline_io_slots=None))
 
     assert inputs is not None
     assert inputs.run_marker == _MARKER
@@ -1345,7 +1352,7 @@ async def test_pcie_findings_survive_an_unreadable_partition_class():
         await recovery.check_run(
             _lpar_caller(responses),
             (
-                (recovery.check, _INPUTS),
+                (pcie_recovery.check, _INPUTS),
                 (storage_recovery.check_test_partition, _ALL),
             ),
         )
@@ -1363,9 +1370,9 @@ def _main(tmp_path, monkeypatch, document, findings=None, raises=None):
     contacted = []
 
     async def run_checks(checks, *, users=False):
-        pcie = dict(checks).get(recovery.check)
+        pcie = dict(checks).get(pcie_recovery.check)
         partition = dict(checks).get(storage_recovery.check_test_partition)
-        lpar_config = dict(checks).get(recovery.check_lpar_config)
+        lpar_config = dict(checks).get(partition_recovery.check_lpar_config)
         contacted.append((pcie, partition, users, lpar_config))
         if raises is not None:
             raise raises
@@ -1456,7 +1463,7 @@ async def test_an_unreadable_pcie_check_still_reads_the_test_partition():
         await recovery.check_run(
             _lpar_caller(responses),
             (
-                (recovery.check, _INPUTS),
+                (pcie_recovery.check, _INPUTS),
                 (storage_recovery.check_test_partition, _ALL),
             ),
         )
@@ -1713,7 +1720,7 @@ def test_a_pre_632_round2_document_still_runs_its_partition_checks(
 # The lpar-config arm (ST39, #1345)
 # ---------------------------------------------------------------------------
 
-_LPAR_CONFIG = recovery.LparConfigInputs(_SYSTEM)
+_LPAR_CONFIG = partition_recovery.LparConfigInputs(_SYSTEM)
 _LISTING_CMD = f"lssyscfg -r lpar -m {_SYSTEM} -F name,state"
 
 
@@ -1737,7 +1744,7 @@ async def test_lpar_config_scratch_partition_is_reported():
 
     findings = await recovery.check_run(
         _lpar_config_caller(listing, seen),
-        ((recovery.check_lpar_config, _LPAR_CONFIG),),
+        ((partition_recovery.check_lpar_config, _LPAR_CONFIG),),
     )
 
     assert seen == [_LISTING_CMD]
@@ -1759,7 +1766,9 @@ async def test_lpar_config_clean_system_has_no_finding():
     call = _lpar_config_caller("lpar-A,Running\n", [])
 
     assert (
-        await recovery.check_run(call, ((recovery.check_lpar_config, _LPAR_CONFIG),))
+        await recovery.check_run(
+            call, ((partition_recovery.check_lpar_config, _LPAR_CONFIG),)
+        )
         == []
     )
 
@@ -1768,7 +1777,8 @@ async def test_lpar_config_clean_system_has_no_finding():
 async def test_lpar_config_unreadable_listing_is_not_clean():
     with pytest.raises(recovery.StateUnreadable, match="partitions of"):
         await recovery.check_run(
-            _lpar_config_caller(None, []), ((recovery.check_lpar_config, _LPAR_CONFIG),)
+            _lpar_config_caller(None, []),
+            ((partition_recovery.check_lpar_config, _LPAR_CONFIG),),
         )
 
 
@@ -1793,7 +1803,7 @@ def test_lpar_config_run_is_witnessed(tmp_path, monkeypatch, capsys, subtask, gr
     seen = []
 
     async def run_checks(checks, *, users=False):
-        lpar_config = dict(checks).get(recovery.check_lpar_config)
+        lpar_config = dict(checks).get(partition_recovery.check_lpar_config)
         seen.append(lpar_config)
         return []
 
@@ -1803,7 +1813,7 @@ def test_lpar_config_run_is_witnessed(tmp_path, monkeypatch, capsys, subtask, gr
     path.write_text(json.dumps(document), encoding="utf-8")
 
     assert recovery.main(["--results", str(path)]) == 0
-    assert seen == [recovery.LparConfigInputs(_SYSTEM)]
+    assert seen == [partition_recovery.LparConfigInputs(_SYSTEM)]
     assert "CLEAN" in capsys.readouterr().out
 
 
@@ -1811,7 +1821,7 @@ def test_lpar_config_run_is_witnessed(tmp_path, monkeypatch, capsys, subtask, gr
 # The lpar-power arm (ST41, #1346)
 # ---------------------------------------------------------------------------
 
-_LPAR_POWER = recovery.LparPowerInputs(_SYSTEM, "datavg")
+_LPAR_POWER = partition_recovery.LparPowerInputs(_SYSTEM, "datavg")
 _LSVG = f"viosvrcmd -m {_SYSTEM} --id 2 -c 'lsvg -lv datavg'"
 
 
@@ -1855,7 +1865,7 @@ async def test_lpar_power_residue_is_reported_with_its_commands():
 
     findings = await recovery.check_run(
         _lpar_power_caller(listing, mappings, adapters, volumes),
-        ((recovery.check_lpar_power, _LPAR_POWER),),
+        ((partition_recovery.check_lpar_power, _LPAR_POWER),),
     )
 
     assert [f.what for f in findings] == [
@@ -1886,7 +1896,9 @@ async def test_lpar_power_clean_system_has_no_finding():
     )
 
     assert (
-        await recovery.check_run(call, ((recovery.check_lpar_power, _LPAR_POWER),))
+        await recovery.check_run(
+            call, ((partition_recovery.check_lpar_power, _LPAR_POWER),)
+        )
         == []
     )
 
@@ -1897,7 +1909,9 @@ async def test_lpar_power_malformed_pass_volume_inventory_is_unreadable(listing)
     call = _lpar_power_caller("vios-A,Running,vioserver,2\n", [], volumes=listing)
 
     with pytest.raises(recovery.StateUnreadable, match="volumes of"):
-        await recovery.check_run(call, ((recovery.check_lpar_power, _LPAR_POWER),))
+        await recovery.check_run(
+            call, ((partition_recovery.check_lpar_power, _LPAR_POWER),)
+        )
 
 
 @pytest.mark.asyncio
@@ -1905,7 +1919,9 @@ async def test_lpar_power_unreadable_mappings_are_not_clean():
     call = _lpar_power_caller("vios-A,Running,vioserver,2\n", None)
 
     with pytest.raises(recovery.StateUnreadable, match="storage mappings"):
-        await recovery.check_run(call, ((recovery.check_lpar_power, _LPAR_POWER),))
+        await recovery.check_run(
+            call, ((partition_recovery.check_lpar_power, _LPAR_POWER),)
+        )
 
 
 def test_the_guard_admits_only_the_exact_volume_listing():
@@ -1931,7 +1947,7 @@ def test_lpar_power_run_is_witnessed(tmp_path, monkeypatch, capsys, detach_probe
     seen = []
 
     async def run_checks(checks, *, users=False):
-        lpar_power = dict(checks).get(recovery.check_lpar_power)
+        lpar_power = dict(checks).get(partition_recovery.check_lpar_power)
         seen.append(lpar_power)
         return []
 
@@ -1941,7 +1957,7 @@ def test_lpar_power_run_is_witnessed(tmp_path, monkeypatch, capsys, detach_probe
     path.write_text(json.dumps(document), encoding="utf-8")
 
     assert recovery.main(["--results", str(path)]) == 0
-    assert seen == [recovery.LparPowerInputs(_SYSTEM)]
+    assert seen == [partition_recovery.LparPowerInputs(_SYSTEM)]
     assert "CLEAN" in capsys.readouterr().out
 
 
@@ -1959,14 +1975,14 @@ async def test_lpar_reconfigure_disk_residue_is_reported():
         "datavg:\nLV NAME TYPE LPs PPs PVs LV STATE MOUNT POINT\n"
         "lprcf0a1b2c3d jfs2 1 1 1 closed/syncd N/A\n"
     )
-    inputs = recovery.lpar_reconfigure_inputs_from_document(
+    inputs = partition_recovery.lpar_reconfigure_inputs_from_document(
         {"config": {"system_name": _SYSTEM, "vdisk_volume_group_name": "datavg"}},
         [70],
     )
 
     findings = await recovery.check_run(
         _lpar_power_caller(listing, mappings, adapters, volumes),
-        ((recovery.check_lpar_reconfigure_storage, inputs),),
+        ((partition_recovery.check_lpar_reconfigure_storage, inputs),),
     )
 
     assert [f.what for f in findings] == [
@@ -1979,9 +1995,11 @@ async def test_lpar_reconfigure_disk_residue_is_reported():
 
 def test_lpar_reconfigure_inputs_need_its_subtask_and_system():
     document = {"config": {"system_name": _SYSTEM}}
-    assert recovery.lpar_reconfigure_inputs_from_document(document, [39]) is None
-    assert recovery.lpar_reconfigure_inputs_from_document({}, [70]) is None
-    inputs = recovery.lpar_reconfigure_inputs_from_document(document, [70])
+    assert (
+        partition_recovery.lpar_reconfigure_inputs_from_document(document, [39]) is None
+    )
+    assert partition_recovery.lpar_reconfigure_inputs_from_document({}, [70]) is None
+    inputs = partition_recovery.lpar_reconfigure_inputs_from_document(document, [70])
     assert (inputs.system_name, inputs.volume_group, inputs.label) == (
         _SYSTEM,
         "",
@@ -2073,7 +2091,9 @@ def test_a_provision_boot_run_is_witnessed_by_both_checks(
     assert recovery.main(["--results", str(path)]) == 0
     assert seen == [
         {
-            recovery.check_lpar_power: recovery.LparPowerInputs(_SYSTEM),
+            partition_recovery.check_lpar_power: partition_recovery.LparPowerInputs(
+                _SYSTEM
+            ),
             storage_recovery.check_provision_boot_media: _BOOT_MEDIA,
         }
     ]
@@ -2084,9 +2104,9 @@ def test_a_logical_workflow_run_is_witnessed_by_the_lpar_power_check():
     """ST73 reuses lpar-power's names, so its residue is found the same way."""
     document = {"config": {"system_name": _SYSTEM, "vdisk_volume_group_name": "vg"}}
 
-    assert recovery.lpar_power_inputs_from_document(
+    assert partition_recovery.lpar_power_inputs_from_document(
         document, [73]
-    ) == recovery.LparPowerInputs(_SYSTEM, "vg")
+    ) == partition_recovery.LparPowerInputs(_SYSTEM, "vg")
     assert 73 in recovery._WITNESSED_SUBTASKS
 
 
@@ -2224,7 +2244,7 @@ def test_vios_backup_inputs_need_subtask_37_and_its_artifacts():
 
 def test_a_vios_backup_run_is_witnessed(tmp_path, monkeypatch, capsys):
     async def checks(checks, *, users=False):
-        pcie = dict(checks).get(recovery.check)
+        pcie = dict(checks).get(pcie_recovery.check)
         partition = dict(checks).get(storage_recovery.check_test_partition)
         vios = dict(checks).get(recovery.check_vios_backup)
         assert pcie is None and partition is None
@@ -2659,7 +2679,7 @@ async def test_selected_checks_continue_after_unreadable_and_keep_users_distinct
         seen.append("last")
         return [last]
 
-    monkeypatch.setattr(recovery, "_scratch_users_left", users)
+    monkeypatch.setattr(recovery, "check_users", users)
     with pytest.raises(recovery.StateUnreadable) as error:
         await recovery.check_run(
             None,
@@ -2688,13 +2708,13 @@ def test_main_selects_ordered_inputs_once_and_bootstraps_only_when_needed(
         "round2_inputs_from_document",
     )
     checkers = (
-        recovery.check,
+        pcie_recovery.check,
         storage_recovery.check_test_partition,
         recovery.check_vios_backup,
         recovery.check_network,
-        recovery.check_lpar_config,
-        recovery.check_lpar_power,
-        recovery.check_round2,
+        partition_recovery.check_lpar_config,
+        partition_recovery.check_lpar_power,
+        baseline_recovery.check_round2,
     )
     # False-valued decoded objects must survive selection unchanged.
     values = [[] for _ in checkers]
@@ -3053,7 +3073,7 @@ async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
     ):
         del document["config"][key]
     del document["artifacts"]["creation_memory_layout"]
-    inputs = recovery.round2_inputs_from_document(
+    inputs = baseline_recovery.round2_inputs_from_document(
         document, recovery.runner.SUBTASK_GROUPS["round2"]
     )
     assert inputs.snapshot == snapshot
@@ -3065,9 +3085,9 @@ async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
     assert recovery.creation_memory_layout_inputs_from_document(document, [1]) is None
     from unittest.mock import AsyncMock
 
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: hmc)
+    monkeypatch.setattr(baseline_recovery, "HMCConfig", lambda: hmc)
     capture = AsyncMock(return_value=snapshot)
-    monkeypatch.setattr(recovery.independent_baseline, "capture", capture)
+    monkeypatch.setattr(baseline_recovery.independent_baseline, "capture", capture)
 
     async def call(tool, **arguments):
         recovery.guard_read_only(tool, arguments)
@@ -3078,7 +3098,7 @@ async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
             else inputs.compatibility,
         )
 
-    assert await recovery.check_round2(call, inputs) == []
+    assert await baseline_recovery.check_round2(call, inputs) == []
     capture.assert_awaited_once_with(hmc, config.system_name, [1])
 
 
@@ -3115,7 +3135,7 @@ async def test_sharing_recovery_selects_prefix_for_every_phase(phase):
         "config": {"system_name": _SYSTEM},
         "results": [],
     }
-    inputs = recovery.lpar_config_inputs_from_document(document, [59])
+    inputs = partition_recovery.lpar_config_inputs_from_document(document, [59])
     assert inputs is not None, (
         "ST59 header must select the scratch prefix before any UUID is known"
     )
@@ -3130,7 +3150,7 @@ async def test_sharing_recovery_selects_prefix_for_every_phase(phase):
             "hmcpctl-live-lpar-11111111,not activated\nhmcpctl-live-lpar-22222222,not activated\nforeign,not activated",
         )
 
-    findings = await recovery.check_lpar_config(call, inputs)
+    findings = await partition_recovery.check_lpar_config(call, inputs)
     assert len(findings) == 2
     assert len(seen) == 1
     assert all("hmcpctl-live-lpar-" in finding.what for finding in findings)
@@ -3146,7 +3166,7 @@ def test_sharing_recovery_refuses_unreadable_system_before_bootstrap(
         "results": [],
     }
     with pytest.raises(ValueError, match="system_name"):
-        recovery.lpar_config_inputs_from_document(document, [59])
+        partition_recovery.lpar_config_inputs_from_document(document, [59])
     path = tmp_path / "results.json"
     path.write_text(json.dumps(document))
 
@@ -3160,11 +3180,11 @@ def test_sharing_recovery_refuses_unreadable_system_before_bootstrap(
 
 def test_sharing_recovery_keeps_legacy_decoder():
     for subtask in (39, 47, 48, 49, 50, 51, 52, 53, 55, 56, 58, 59):
-        inputs = recovery.lpar_config_inputs_from_document(
+        inputs = partition_recovery.lpar_config_inputs_from_document(
             {"config": {"system_name": _SYSTEM}}, [subtask]
         )
         assert inputs is not None and inputs.system_name == _SYSTEM
-    assert recovery.lpar_config_inputs_from_document({}, [39]) is None
+    assert partition_recovery.lpar_config_inputs_from_document({}, [39]) is None
 
 
 @pytest.mark.parametrize(

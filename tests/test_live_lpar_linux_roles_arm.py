@@ -358,7 +358,7 @@ async def exercise(b, *, group=arm.GROUP):
 
 
 async def recovery_findings():
-    import live_test_recovery as recovery
+    from live_test.recovery import partition
 
     state = runner.RunState()
     async with runner.served_client() as client:
@@ -366,8 +366,8 @@ async def recovery_findings():
         async def call(tool, **kwargs):
             return await state.call(client, tool, **kwargs)
 
-        return await recovery.check_lpar_config(
-            call, recovery.LparConfigInputs("sys-R1")
+        return await partition.check_lpar_config(
+            call, partition.LparConfigInputs("sys-R1")
         )
 
 

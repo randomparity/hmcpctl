@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import Any
@@ -55,3 +56,12 @@ def recorded_calls(
         and row.get("status") != "SKIP"
         and str(row.get("tool", "")).split(" ", 1)[0] in tools
     ]
+
+
+#: The one VIOS command admitted: a volume group's `lsvg -lv` listing, read by the
+#: storage and lpar-power arms' checks. A `viosvrcmd` prefix would admit any VIOS
+#: command (`rmlv` included), so the whole shape must match, built from a closed
+#: character set.
+VOLUME_LISTING = re.compile(
+    r"viosvrcmd -m [A-Za-z0-9_.-]+ --id [0-9]+ -c 'lsvg -lv [A-Za-z0-9_.-]+'"
+)

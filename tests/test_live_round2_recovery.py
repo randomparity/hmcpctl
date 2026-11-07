@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_recovery as recovery
 from live_test import baseline, inventory, provisioning, runner
 from live_test import config as live_config
+from live_test.recovery import baseline as baseline_recovery
 
 from hmcpctl.config import HMCConfig
 
@@ -300,6 +301,7 @@ def test_actual_round2_recovery_has_independent_witness(
     monkeypatch.setattr(runner, "served_client", served)
     monkeypatch.setattr(runner.RunState, "call", call)
     monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG, raising=False)
+    monkeypatch.setattr(baseline_recovery, "HMCConfig", lambda: CONFIG)
     path = tmp_path / "results.json"
     path.write_text(json.dumps(document))
     expected = (
@@ -398,14 +400,14 @@ async def test_fixture_admission_and_cleanup_fail_closed(state, monkeypatch, fau
 
 @pytest.mark.asyncio
 async def test_round2_property_reader_enforces_readonly(state, monkeypatch):
-    inputs = recovery.Round2Inputs(
+    inputs = baseline_recovery.Round2Inputs(
         snapshot(state),
         runner._hmc_identity(CONFIG),
         state.config.lp3_name,
         "original",
         {"profile": "default", "profile_mode": "default"},
     )
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(baseline_recovery, "HMCConfig", lambda: CONFIG)
 
     async def capture(*args):
         return snapshot(state)
@@ -419,7 +421,7 @@ async def test_round2_property_reader_enforces_readonly(state, monkeypatch):
 
     monkeypatch.setattr(runner.RunState, "call", remote)
     guarded = recovery._read_only_caller(None, state)
-    assert await recovery.check_round2(guarded, inputs) == []
+    assert await baseline_recovery.check_round2(guarded, inputs) == []
     assert calls == ["hmc_get_lpar_description", "hmc_get_lpar_proc_compat"]
     with pytest.raises(recovery.MutatingCallRefused):
         await guarded("hmc_set_lpar_description", description="changed")
@@ -531,6 +533,7 @@ def test_producer_to_recovery_composes_real_baseline_parsers(
     monkeypatch.setattr(runner, "served_client", served)
     monkeypatch.setattr(runner, "_bootstrap_config", lambda: True)
     monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(baseline_recovery, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 0
     assert len(transport_reads) >= 16
 
