@@ -15,9 +15,11 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 import pytest_asyncio
 
+from hmcpctl.client import core
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCTransportError
@@ -35,6 +37,7 @@ class _IdleClosingHMC:
     def __init__(self) -> None:
         self.received: list[int] = []
         self.drop_reused = False
+        self.idle_close_seconds: float | None = None
         self._connections = 0
 
     async def handle(
@@ -50,7 +53,11 @@ class _IdleClosingHMC:
                 self.received.append(connection)
                 idle = None if last_response is None else loop.time() - last_response
                 if idle is not None and (
-                    self.drop_reused or idle >= _HMC_IDLE_CLOSE_SECONDS
+                    self.drop_reused
+                    or (
+                        self.idle_close_seconds is not None
+                        and idle >= self.idle_close_seconds
+                    )
                 ):
                     return
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
@@ -107,13 +114,28 @@ def tls_files(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
 
 @pytest_asyncio.fixture
 async def hmc(
-    tls_files: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    tls_files: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> AsyncIterator[tuple[_IdleClosingHMC, HMCClient]]:
     certfile, keyfile = tls_files
     monkeypatch.setenv("SSL_CERT_FILE", str(certfile))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=certfile, keyfile=keyfile)
     fake = _IdleClosingHMC()
+    if getattr(request, "param", False):
+        fake.idle_close_seconds = _HMC_IDLE_CLOSE_SECONDS
+    else:
+        # Reuse and dropped-request assertions must not race either idle timer.
+        monkeypatch.setattr(
+            core,
+            "_HTTP_LIMITS",
+            httpx.Limits(
+                max_connections=core._HTTP_LIMITS.max_connections,
+                max_keepalive_connections=core._HTTP_LIMITS.max_keepalive_connections,
+                keepalive_expiry=None,
+            ),
+        )
     server = await asyncio.start_server(fake.handle, "127.0.0.1", 0, ssl=context)
     port = server.sockets[0].getsockname()[1]
     config = HMCConfig.from_mapping(
@@ -135,6 +157,7 @@ async def hmc(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hmc", [True], indirect=True)
 async def test_request_after_idle_gap_opens_fresh_connection(hmc) -> None:
     fake, client = hmc
     await client._request("GET", _PATH)
@@ -150,7 +173,6 @@ async def test_request_after_idle_gap_opens_fresh_connection(hmc) -> None:
 async def test_back_to_back_requests_reuse_one_connection(hmc) -> None:
     fake, client = hmc
     await client._request("GET", _PATH)
-    await asyncio.sleep(0.1)
     await client._request("GET", _PATH)
 
     assert fake.received == [1, 1]
@@ -169,6 +191,7 @@ async def test_dropped_request_is_sent_once(hmc) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hmc", [True], indirect=True)
 async def test_pool_keeps_httpx_default_caps(hmc) -> None:
     _fake, client = hmc
     pool = client._http._transport._pool  # type: ignore[attr-defined]
