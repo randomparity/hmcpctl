@@ -114,6 +114,111 @@ def test_no_installed_guard_checks_nothing():
         assert asyncio.run(resource_identity.resolve_lpar_uuid(FakeHMC(), LPAR)) == LPAR
 
 
+def test_composing_application_preserves_explicit_library_guard(spy):
+    from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
+    from hmcpctl.server import TOOL_SECURITY, create_mcp
+
+    policy = compile_legacy_policy(
+        TOOL_SECURITY, ("<default>",), include_arbitrary_command=False
+    )
+    create_mcp(policy)
+    resource_identity.guard_partition(LPAR)
+    assert spy == [LPAR]
+
+
+def test_cli_invocation_preserves_explicit_library_guard(spy):
+    from typer.testing import CliRunner
+
+    from hmcpctl.cli import app
+
+    result = CliRunner().invoke(app, ["lpars", "--help"])
+    assert result.exit_code == 0, result.output
+    resource_identity.guard_partition(LPAR)
+    assert spy == [LPAR]
+
+
+def test_partition_guard_scope_restores_after_failure(spy):
+    inner = []
+    with (
+        pytest.raises(RuntimeError, match="scope failed"),
+        resource_identity.guarding_partitions(
+            PartitionGuard(inner.append, lambda: False)
+        ),
+    ):
+        resource_identity.guard_partition(LPAR)
+        raise RuntimeError("scope failed")
+    resource_identity.guard_partition(LPAR)
+    assert inner == [LPAR]
+    assert spy == [LPAR]
+
+
+def test_concurrent_partition_guard_scopes_are_independent(spy):
+    left, right = [], []
+
+    async def run():
+        entered = [asyncio.Event(), asyncio.Event()]
+
+        async def check(index, seen):
+            with resource_identity.guarding_partitions(
+                PartitionGuard(seen.append, lambda: False)
+            ):
+                entered[index].set()
+                await entered[1 - index].wait()
+                resource_identity.guard_partition(LPAR)
+
+        await asyncio.gather(check(0, left), check(1, right))
+        resource_identity.guard_partition(LPAR)
+
+    asyncio.run(run())
+    assert left == right == spy == [LPAR]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("failure", ["authorization", "handler"])
+def test_authorized_call_scopes_guard_through_authorization_and_failure(
+    spy, monkeypatch, asynchronous, failure
+):
+    from hmcpctl.tool_registry import ToolSecurity, authorized
+
+    front = []
+    monkeypatch.setattr(
+        holds, "HOLD_GUARD", PartitionGuard(front.append, lambda: False)
+    )
+
+    def authorize(*args):
+        resource_identity.guard_partition(LPAR)
+        if failure == "authorization":
+            raise PermissionError("authorization failed")
+
+    def handler(lpar_name_or_uuid: str):
+        resource_identity.guard_partition(lpar_name_or_uuid)
+        raise RuntimeError("handler failed")
+
+    async def async_handler(lpar_name_or_uuid: str):
+        handler(lpar_name_or_uuid)
+
+    wrapped = authorized(
+        "hmc_test",
+        ToolSecurity(effect="mutate", operation="lpar.modify", target_kind="lpar"),
+        async_handler if asynchronous else handler,
+        authorize,
+    )
+
+    async def run():
+        error = PermissionError if failure == "authorization" else RuntimeError
+        with pytest.raises(error, match=f"{failure} failed"):
+            if asynchronous:
+                await wrapped(LPAR)
+            else:
+                wrapped(LPAR)
+        resource_identity.guard_partition(LPAR)
+        assert current_call() is None
+
+    asyncio.run(run())
+    assert front == [LPAR] * (1 if failure == "authorization" else 2)
+    assert spy == [LPAR]
+
+
 def test_unresolved_guard_callback_cannot_allow_an_unidentified_name():
     seen = []
     guard = PartitionGuard(

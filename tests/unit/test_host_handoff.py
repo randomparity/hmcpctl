@@ -23,7 +23,6 @@ from hmcpctl.operations.lpar.handoff import (
     prepare_handoff,
     release_handoff,
 )
-from hmcpctl.resource_identity import install_partition_guard
 
 SYS = "0000000a-0000-4000-8000-000000000000"
 LPAR = "0000000a-0000-4000-8000-0000000000aa"
@@ -88,8 +87,6 @@ def _system(monkeypatch: pytest.MonkeyPatch) -> None:
         return SYS.upper()
 
     monkeypatch.setattr(handoff, "resolve_system_uuid", resolve_system)
-    # The library leaves the hold guard unset; another module's create_mcp may have set it.
-    install_partition_guard(None)
 
 
 class _Admit:

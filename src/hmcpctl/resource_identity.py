@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
@@ -37,30 +39,44 @@ class PartitionGuard:
     unresolved_name: Callable[[str, Exception], None] | None = None
 
 
-_PARTITION_GUARD: PartitionGuard | None = None
+_PARTITION_GUARD: ContextVar[PartitionGuard | None] = ContextVar(
+    "hmcpctl_partition_guard", default=None
+)
 
 
 def install_partition_guard(guard: PartitionGuard | None) -> None:
-    """Install *guard* for later partition/system resolution in this process, or remove it."""
-    global _PARTITION_GUARD
-    _PARTITION_GUARD = guard
+    """Install *guard* for partition/system resolution in this context, or remove it."""
+    _PARTITION_GUARD.set(guard)
+
+
+@contextmanager
+def guarding_partitions(guard: PartitionGuard | None) -> Generator[None]:
+    """Use *guard* for this scope and restore the enclosing guard on every exit."""
+    token = _PARTITION_GUARD.set(guard)
+    try:
+        yield
+    finally:
+        _PARTITION_GUARD.reset(token)
 
 
 def guard_partition(partition_uuid: str) -> None:
     """Run the installed guard on a resolved partition UUID; nothing when none is installed."""
-    if _PARTITION_GUARD is not None:
-        _PARTITION_GUARD.check(partition_uuid)
+    guard = _PARTITION_GUARD.get()
+    if guard is not None:
+        guard.check(partition_uuid)
 
 
 def partition_names_need_resolution() -> bool:
     """Whether a name-only partition selector must be resolved for the installed guard."""
-    return _PARTITION_GUARD is not None and _PARTITION_GUARD.names_need_resolution()
+    guard = _PARTITION_GUARD.get()
+    return guard is not None and guard.names_need_resolution()
 
 
 def guard_unresolved_partition_name(name: str, error: Exception) -> NoReturn:
     """Delegate an unresolved-name refusal, always failing closed if the hook returns."""
-    if _PARTITION_GUARD is not None and _PARTITION_GUARD.unresolved_name is not None:
-        _PARTITION_GUARD.unresolved_name(name, error)
+    guard = _PARTITION_GUARD.get()
+    if guard is not None and guard.unresolved_name is not None:
+        guard.unresolved_name(name, error)
     raise error
 
 
@@ -129,8 +145,9 @@ async def resolve_system_uuid(hmc: HMCClient, value: str) -> str:
                 "Use hmc_list_systems to list available systems.",
             )
         value = str(summary["UUID"])
-    if _PARTITION_GUARD is not None and _PARTITION_GUARD.check_system is not None:
-        _PARTITION_GUARD.check_system(value)
+    guard = _PARTITION_GUARD.get()
+    if guard is not None and guard.check_system is not None:
+        guard.check_system(value)
     return value
 
 

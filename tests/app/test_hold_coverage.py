@@ -29,7 +29,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.logical import holds, store
 from hmcpctl.operations.logical.holds import HoldRefused
 from hmcpctl.operations.storage import resources as storage_resources
-from hmcpctl.resource_identity import PartitionGuard, install_partition_guard
+from hmcpctl.resource_identity import PartitionGuard
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.ssh import transport
 from hmcpctl.tool_registry import RUNTIME_PARTITION_TOOLS, hold_guarded
@@ -183,16 +183,24 @@ def environment(monkeypatch, mock_hmc):  # noqa: F811 - the conftest fixture
 
 
 @pytest.fixture
-def app(environment) -> tuple[FastMCP, Spy, Any]:
+def app(environment, monkeypatch) -> tuple[FastMCP, Spy, Any]:
+    spy = Spy()
+    guard = holds.HOLD_GUARD
+    monkeypatch.setattr(
+        holds,
+        "HOLD_GUARD",
+        PartitionGuard(
+            spy.check,
+            guard.names_need_resolution,
+            check_system=guard.check_system,
+            unresolved_name=guard.unresolved_name,
+        ),
+    )
     application = create_mcp(
         compile_legacy_policy(
             TOOL_SECURITY, ("<default>",), include_arbitrary_command=False
         ),
         catalog="registered",
-    )
-    spy = Spy()
-    install_partition_guard(
-        PartitionGuard(spy.check, holds.HOLD_GUARD.names_need_resolution)
     )
     return application, spy, environment
 

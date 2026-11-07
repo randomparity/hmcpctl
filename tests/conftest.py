@@ -137,7 +137,7 @@ def no_ambient_hmc_settings(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def uninstall_partition_guard():
-    """Leave no ADR 0193 hold hook behind: create_mcp and the CLI install it process-wide."""
+    """Clear explicit test-installed ADR 0193 guards after each case."""
     yield
     from hmcpctl.resource_identity import install_partition_guard
 

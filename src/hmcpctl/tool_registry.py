@@ -34,6 +34,8 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from .call_context import HOLD_EXEMPT_TOOLS, CallContext, calling
+from .operations.logical import holds
+from .resource_identity import guarding_partitions
 
 Effect = Literal["read", "mutate", "destructive", "arbitrary-command"]
 
@@ -410,27 +412,29 @@ def authorized(
 
         @functools.wraps(handler)
         async def guarded(*args: Any, **kwargs: Any) -> Any:
-            presented = kwargs.pop(HOLD_ID, None) if injected else None
-            arguments = _authorize_call(
-                signature, name, security, authorize, args, kwargs
-            )
-            hold_id = presented if injected else arguments.get(HOLD_ID)
-            context = _call_context(name, security, hold_id)
-            with calling(context):
-                return await handler(*args, **kwargs)
+            with guarding_partitions(holds.HOLD_GUARD):
+                presented = kwargs.pop(HOLD_ID, None) if injected else None
+                arguments = _authorize_call(
+                    signature, name, security, authorize, args, kwargs
+                )
+                hold_id = presented if injected else arguments.get(HOLD_ID)
+                context = _call_context(name, security, hold_id)
+                with calling(context):
+                    return await handler(*args, **kwargs)
 
     else:
 
         @functools.wraps(handler)
         def guarded(*args: Any, **kwargs: Any) -> Any:
-            presented = kwargs.pop(HOLD_ID, None) if injected else None
-            arguments = _authorize_call(
-                signature, name, security, authorize, args, kwargs
-            )
-            hold_id = presented if injected else arguments.get(HOLD_ID)
-            context = _call_context(name, security, hold_id)
-            with calling(context):
-                return handler(*args, **kwargs)
+            with guarding_partitions(holds.HOLD_GUARD):
+                presented = kwargs.pop(HOLD_ID, None) if injected else None
+                arguments = _authorize_call(
+                    signature, name, security, authorize, args, kwargs
+                )
+                hold_id = presented if injected else arguments.get(HOLD_ID)
+                context = _call_context(name, security, hold_id)
+                with calling(context):
+                    return handler(*args, **kwargs)
 
     if injected:
         _add_hold_id(guarded)
