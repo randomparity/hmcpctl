@@ -57,6 +57,7 @@ from live_test import (  # noqa: E402
     observation,
     profiles,
     provisioning,
+    redaction,
     results,
     scenario_validation,
     sriov,
@@ -3312,7 +3313,7 @@ def test_failure_redaction_keeps_a_named_file_readable(filename):
     """#914: `config.toml: no default_profile set` printed as `<REDACTED-HOST>: …`."""
     message = f"{filename}: no default_profile set"
 
-    assert runner._redact_failure_text(message) == message
+    assert redaction.redact_failure_text(message) == message
 
 
 @pytest.mark.parametrize(
@@ -3337,7 +3338,7 @@ def test_failure_redaction_still_hides_a_hostname(hostname):
     `.md` are country-code TLDs, and any multi-label name stays a hostname.
     An underscore or hyphen in a label must not leave a leading label readable (#927).
     """
-    redacted = runner._redact_failure_text(f"connect to {hostname} failed")
+    redacted = redaction.redact_failure_text(f"connect to {hostname} failed")
 
     assert redacted == "connect to <REDACTED-HOST> failed"
 
@@ -5783,7 +5784,7 @@ async def test_main_scrubs_session_failure_data(monkeypatch, tmp_path, capsys, b
 def test_session_redaction_keeps_empty_quoted_diagnostics(value):
     message = 'empty quoted diagnostic: "" and ' + "''"
     data = {"X-API-Session": value, "message": message}
-    assert runner._redact_failure_data(data)["message"] == message
+    assert redaction.redact_failure_data(data)["message"] == message
 
 
 @pytest.mark.parametrize(
@@ -5794,7 +5795,7 @@ def test_session_redaction_keeps_empty_quoted_diagnostics(value):
     ],
 )
 def test_session_redaction_decodes_named_entities_once(field, source, decoded):
-    result = runner._redact_failure_data(
+    result = redaction.redact_failure_data(
         {
             field: source,
             "message": "SYN_A diagnostic",
@@ -5897,7 +5898,7 @@ async def test_header_entity_decoding_preserves_unrelated_diagnostics(
     "header", ["X-API-Session&#58; SYN_A", "Cookie&#58; sid=SYN_A"]
 )
 def test_encoded_header_recognition_keeps_source_values(header):
-    result = runner._redact_failure_data({"message": "SYN_A denied", "body": header})
+    result = redaction.redact_failure_data({"message": "SYN_A denied", "body": header})
     assert result["message"] == "<REDACTED-SECRET> denied"
     assert "SYN_A" not in result["body"]
 
@@ -6244,7 +6245,7 @@ def test_named_container_collection_keeps_whole_object_limit():
         "message": "unvisited echo",
         "X-API-Session": [f"SYN_{i}" for i in range(300)],
     }
-    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
+    assert redaction.redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
 
 
 def test_ordinary_containers_do_not_identify_session_values():
@@ -6253,7 +6254,7 @@ def test_ordinary_containers_do_not_identify_session_values():
         "nested": ["ordinary"],
         "RequestHeaders": ["ordinary"],
     }
-    result = runner._redact_failure_data(data)
+    result = redaction.redact_failure_data(data)
     assert result["message"] == "ordinary denied"
     assert result["nested"] == ["ordinary"]
 
@@ -6312,7 +6313,7 @@ async def test_failure_redaction_resource_exhaustion_fails_closed(
 @pytest.mark.parametrize("closed", [False, True])
 @pytest.mark.parametrize("depth", [8, 16, 32])
 def test_failure_redaction_scans_nested_interiors_once(monkeypatch, closed, depth):
-    pattern = runner._SESSION_XML_TOKEN_RE
+    pattern = redaction._SESSION_XML_TOKEN_RE
     scanned = 0
 
     class CountingPattern:
@@ -6323,11 +6324,11 @@ def test_failure_redaction_scans_nested_interiors_once(monkeypatch, closed, dept
             scanned += len(text)
             return pattern.sub(replacement, text)
 
-    monkeypatch.setattr(runner, "_SESSION_XML_TOKEN_RE", CountingPattern())
+    monkeypatch.setattr(redaction, "_SESSION_XML_TOKEN_RE", CountingPattern())
     body = "<Cookie>" * depth + "sid=SYN_A"
     if closed:
         body += "</Cookie>" * depth
-    result = runner._redact_failure_data({"message": "SYN_A denied", "body": body})
+    result = redaction.redact_failure_data({"message": "SYN_A denied", "body": body})
     assert result == {
         "message": "<REDACTED-SECRET> denied",
         "body": "<REDACTED-SECRET>",
@@ -6340,7 +6341,7 @@ def test_failure_redaction_retains_bounded_diagnostics(closed):
     body = "<Cookie><Cookie>sid=SYN_A"
     if closed:
         body += "</Cookie></Cookie>"
-    data = runner._redact_failure_data(
+    data = redaction.redact_failure_data(
         {"message": "SYN_A denied HSCL0001", "body": body}
     )
     assert data == {
@@ -6352,7 +6353,7 @@ def test_failure_redaction_retains_bounded_diagnostics(closed):
 @pytest.mark.parametrize("wrapper", ["<!--{}-->", "<?diag {}?>", "<![CDATA[{}]]>"])
 def test_failure_redaction_keeps_literal_markup_in_xml_trivia(wrapper):
     source = wrapper.format("<Cookie>literal</Cookie>")
-    result = runner._redact_failure_data(source)
+    result = redaction.redact_failure_data(source)
     assert "<Cookie>literal" in result
     assert "<REDACTED-SECRET>" not in result
 
@@ -6365,7 +6366,7 @@ def test_failure_redaction_bounds_nested_objects(kind):
             data = [data]
     else:
         data = [data] * 5000
-    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
+    assert redaction.redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
 
 
 @pytest.mark.asyncio
