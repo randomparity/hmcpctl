@@ -15,6 +15,7 @@ import pytest
 from hmcpctl.audit import records as audit
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.config import AGENT_ID_FORBIDDEN, validate_agent_id
+from hmcpctl.errors import HMCTLSFingerprintError
 from hmcpctl.operations.lpar import core as operations_lpar
 from hmcpctl.operations.lpar import ownership as lpar_ownership
 from hmcpctl.operations.lpar.ownership import (
@@ -1507,3 +1508,65 @@ def test_ownership_output_limit_override_keeps_audit(caplog):
         )
     run.assert_not_awaited()
     assert "ownership-override" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_system_name_pin_mismatch_never_falls_back_to_ssh(monkeypatch):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    ssh = AsyncMock(return_value="system")
+    monkeypatch.setattr(
+        lpar_ownership, "system_name_from_uuid", AsyncMock(side_effect=failure)
+    )
+    monkeypatch.setattr(lpar_ownership, "resolve_system_cli_name", ssh)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._resolve_system_name(
+            AsyncMock(), "system-uuid", "fallback"
+        )
+    assert caught.value is failure
+    ssh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fleet_pin_mismatch_never_reads_the_next_system():
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = AsyncMock()
+    hmc.list_system_summaries.return_value = [
+        {"UUID": "11111111-1111-4111-8111-111111111111", "SystemName": "first"},
+        {"UUID": "22222222-2222-4222-8222-222222222222", "SystemName": "second"},
+    ]
+    hmc.list_logical_partitions.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._search_fleet_for_partition(
+            hmc, "partition-uuid", "partition", lpar_ownership._SkippedFrames()
+        )
+    assert caught.value is failure
+    assert hmc.list_logical_partitions.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fleet_inventory_preserves_pin_mismatch_identity():
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = AsyncMock()
+    hmc.list_system_summaries.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._fleet_inventory(hmc, "partition")
+    assert caught.value is failure
+
+
+@pytest.mark.asyncio
+async def test_profile_restore_inventory_preserves_pin_mismatch(monkeypatch):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    monkeypatch.setattr(
+        lpar_ownership, "resolve_system_uuid", AsyncMock(return_value="system-uuid")
+    )
+    monkeypatch.setattr(
+        lpar_ownership, "_resolve_system_name", AsyncMock(return_value="system")
+    )
+    monkeypatch.setattr(
+        lpar_ownership, "list_lpar_ownership", AsyncMock(side_effect=failure)
+    )
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._authorize_system_lpar_profile_restore(
+            AsyncMock(), "system"
+        )
+    assert caught.value is failure

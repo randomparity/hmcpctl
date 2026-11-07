@@ -15,7 +15,7 @@ from hmcpctl.discovery_limits import (
     MAX_PARENT_DISCOVERY_SYSTEMS,
     PARENT_DISCOVERY_TIMEOUT_SECONDS,
 )
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.systems.fleet import FleetListing, read_fleet
 from hmcpctl.resource_identity import (
     _hosts_partition,
@@ -102,6 +102,8 @@ async def _fleet_inventory(hmc: HMCClient, lpar_label: str) -> list[Any]:
     """
     try:
         return await hmc.list_system_summaries()
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         raise ValueError(
             f"Cannot identify the managed system owning LPAR {lpar_label!r}: "
@@ -124,6 +126,8 @@ async def _search_fleet_for_partition(
         system_uuid, system_name = candidate
         try:
             partitions = await hmc.list_logical_partitions(system_uuid)
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             _logger.warning(
                 "Owning-system discovery could not read managed system %s: %s",
@@ -442,6 +446,8 @@ async def _authorize_system_lpar_profile_restore(
 
     try:
         rows = (await list_lpar_ownership(hmc, system_uuid)).entries
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         raise ValueError(
             "LPAR ownership inventory is unavailable; retry after the managed-system "
@@ -570,6 +576,8 @@ async def _resolve_system_name(hmc: HMCClient, system_uuid: str, fallback: str) 
         name = await system_name_from_uuid(hmc, system_uuid)
         if name is not None:
             return name
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         _logger.debug(
             "REST system-name lookup failed for %s: %s",

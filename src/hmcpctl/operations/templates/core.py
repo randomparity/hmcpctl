@@ -8,7 +8,7 @@ from typing import Any
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import stamp_created_lpar_ownership
 
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...jobs import (
     DEFAULT_JOB_POLL_INTERVAL,
     DEFAULT_JOB_TIMEOUT_SECONDS,
@@ -112,6 +112,8 @@ async def deploy_partition_template(
     if wait:
         try:
             baseline = await hmc.list_logical_partitions(target_system_uuid)
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             _logger.warning(
                 "Cannot capture template-deployment LPAR baseline for system %s "
@@ -161,6 +163,8 @@ async def deploy_partition_template(
 
     try:
         after = await hmc.list_logical_partitions(target_system_uuid)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         _logger.warning(
             "Cannot capture post-deployment LPAR snapshot for system %s "
