@@ -21,7 +21,7 @@ from .assignments import (
     assignment_step_names,
     prevalidate_lpar_pcie_assignments,
 )
-from .core import LparCreation, create_and_stamp_lpar
+from .core import LparCreation, create_and_stamp_lpar, creation_followup
 from .errors import translate_lpar_write_error
 from .linux_roles import roles_requested
 from .workflow_contract import WorkflowStep
@@ -124,110 +124,8 @@ async def create_lpar(
         if translated is exc:
             raise
         raise translated from exc
-    steps = [WorkflowStep("create", "ok", created.lpar)]
-    if created.physical_io_step is not None:
-        steps.append(created.physical_io_step)
-    policy_requested = bool(creation.security_policy.pairs())
-    if created.apply_step is not None and not (
-        policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-    ):
-        steps.append(created.apply_step)
-    if created.settings_step is not None:
-        steps.append(created.settings_step)
-    if created.reporting_step is not None:
-        steps.append(created.reporting_step)
-    if created.vtpm_step is not None:
-        steps.append(created.vtpm_step)
-    if created.security_policy_step is not None:
-        steps.append(created.security_policy_step)
-    if created.affinity_group_step is not None:
-        steps.append(created.affinity_group_step)
-    if created.hardware_memory_step is not None:
-        steps.append(created.hardware_memory_step)
-    if created.memory_layout_step is not None:
-        steps.append(created.memory_layout_step)
-    if created.serial_step is not None:
-        steps.append(created.serial_step)
-    if created.creation_memory_step is not None:
-        steps.append(created.creation_memory_step)
-    if created.apply_step is not None and (
-        policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-    ):
-        steps.append(created.apply_step)
-    verification_failed = (
-        policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-    ) and (
-        created.ownership_stamped is not True
-        or any(
-            requested and (step is None or step.status != "ok")
-            for requested, step in (
-                (policy_requested, created.security_policy_step),
-                (hardware_requested, created.hardware_memory_step),
-                (layout_requested, created.memory_layout_step),
-                (serial_requested, created.serial_step),
-                (memory_requested, created.creation_memory_step),
-                (affinity_requested, created.affinity_group_step),
-                (creation.settings.pairs() or start_requested, created.settings_step),
-                (creation.reporting_settings.pairs(), created.reporting_step),
-                (creation.vtpm_settings.pairs(), created.vtpm_step),
-                (creation.physical_io.requested, created.physical_io_step),
-            )
-        )
-    )
-    vtpm_failed = bool(creation.vtpm_settings.pairs()) and (
-        created.vtpm_step is None or created.vtpm_step.status != "ok"
-    )
-    reporting_failed = (
-        created.reporting_step is not None and created.reporting_step.status == "error"
-    )
-    io_failed = (
-        created.physical_io_step is not None and created.physical_io_step.status != "ok"
-    )
-    settings_failed = (
-        created.settings_step is not None and created.settings_step.status == "error"
-    )
-    # A failed apply, or a create that returns no partition body to apply against,
-    # stops the ordered workflow; the partition (if created) stays created.
-    apply_failed = (
-        created.apply_step is not None and created.apply_step.status == "error"
-    ) or (
-        (
-            roles_requested(creation.settings)
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        )
-        and creation.apply_profile is True
-        and (created.apply_step is None or created.apply_step.status != "ok")
-    )
-    assignments_skipped = (
-        created.lpar is None
-        or apply_failed
-        or settings_failed
-        or reporting_failed
-        or io_failed
-        or vtpm_failed
-        or verification_failed
-    )
-    if assignments_skipped:
+    steps, assignments_allowed = creation_followup(creation, created)
+    if not assignments_allowed:
         steps.extend(
             WorkflowStep(name, "skipped") for name in assignment_step_names(assignments)
         )

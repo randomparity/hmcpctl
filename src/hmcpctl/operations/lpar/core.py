@@ -984,23 +984,25 @@ async def create_and_stamp_lpar(
     policy_step = await _created_security_policy_step(
         hmc, system_uuid, creation, created_lpar
     )
+    result = LparCreationResult(
+        True,
+        created_lpar,
+        ownership_stamped,
+        (*apply_warnings, *warnings),
+        apply_step,
+        settings_step,
+        io_step,
+        reporting_step,
+        vtpm_step,
+        policy_step,
+        hardware_step,
+        memory_layout_step=layout_step,
+        serial_step=serial_step,
+        creation_memory_step=memory_step,
+        affinity_group_step=affinity_step,
+    )
     if verify_before_apply and creation.apply_profile is not None:
-        required = [
-            (creation.settings.pairs() or start_requested, settings_step),
-            (creation.reporting_settings.pairs(), reporting_step),
-            (creation.vtpm_settings.pairs(), vtpm_step),
-            (creation.physical_io.requested, io_step),
-            (policy_requested, policy_step),
-            (hardware_requested, hardware_step),
-            (layout_requested, layout_step),
-            (serial_requested, serial_step),
-            (memory_requested, memory_step),
-            (affinity_requested, affinity_step),
-        ]
-        verified = ownership_stamped is True and all(
-            not requested or (step is not None and step.status == "ok")
-            for requested, step in required
-        )
+        verified = _creation_steps_verified(creation, result)
         apply_step = (
             await _apply_created_profile(
                 hmc, system_name or system_name_or_uuid, creation
@@ -1068,22 +1070,14 @@ async def create_and_stamp_lpar(
         )
         reporting_step = await _created_reporting_step(hmc, system_name, creation)
         vtpm_step = await _created_vtpm_step(hmc, system_name, creation)
-    result = LparCreationResult(
-        True,
-        created_lpar,
-        ownership_stamped,
-        (*apply_warnings, *warnings),
-        apply_step,
-        settings_step,
-        io_step,
-        reporting_step,
-        vtpm_step,
-        policy_step,
-        hardware_step,
-        memory_layout_step=layout_step,
-        serial_step=serial_step,
+    result = replace(
+        result,
+        warnings=(*apply_warnings, *warnings),
+        apply_step=apply_step,
+        settings_step=settings_step,
+        reporting_step=reporting_step,
+        vtpm_step=vtpm_step,
         creation_memory_step=memory_step,
-        affinity_group_step=affinity_step,
     )
     if (
         role_requested
@@ -1122,6 +1116,112 @@ async def create_and_stamp_lpar(
                 )
         result = replace(result, **safe_steps)
     return result
+
+
+def _creation_steps_verified(
+    creation: LparCreation, result: LparCreationResult
+) -> bool:
+    required = (
+        (
+            creation.settings.pairs() or creation.start_settings.requested(),
+            result.settings_step,
+        ),
+        (creation.reporting_settings.pairs(), result.reporting_step),
+        (creation.vtpm_settings.pairs(), result.vtpm_step),
+        (creation.physical_io.requested, result.physical_io_step),
+        (creation.security_policy.pairs(), result.security_policy_step),
+        (
+            hardware_memory_pairs(
+                creation.hardware_mem_encryption, creation.hardware_mem_expansion
+            ),
+            result.hardware_memory_step,
+        ),
+        (creation.memory_layout.pairs(), result.memory_layout_step),
+        (creation.virtual_serial_adapters, result.serial_step),
+        (creation.creation_memory.pairs(), result.creation_memory_step),
+        (creation.affinity_group_id is not None, result.affinity_group_step),
+    )
+    return result.ownership_stamped is True and all(
+        not requested or (step is not None and step.status == "ok")
+        for requested, step in required
+    )
+
+
+def creation_followup(
+    creation: LparCreation, created: LparCreationResult
+) -> tuple[list[WorkflowStep], bool]:
+    """Return ordered creation evidence and whether PCIe assignments may proceed."""
+    memory_requested = bool(creation.creation_memory.pairs())
+    start_requested = creation.start_settings.requested()
+    affinity_requested = creation.affinity_group_id is not None
+    defer_apply = bool(
+        creation.security_policy.pairs()
+        or hardware_memory_pairs(
+            creation.hardware_mem_encryption, creation.hardware_mem_expansion
+        )
+        or creation.memory_layout.pairs()
+        or creation.virtual_serial_adapters
+        or memory_requested
+        or start_requested
+        or affinity_requested
+    )
+    # Role-only creation keeps its established apply-first presentation order.
+    ordered = [created.physical_io_step]
+    if not defer_apply:
+        ordered.append(created.apply_step)
+    ordered.extend(
+        (
+            created.settings_step,
+            created.reporting_step,
+            created.vtpm_step,
+            created.security_policy_step,
+            created.affinity_group_step,
+            created.hardware_memory_step,
+            created.memory_layout_step,
+            created.serial_step,
+            created.creation_memory_step,
+        )
+    )
+    if defer_apply:
+        ordered.append(created.apply_step)
+    steps = [WorkflowStep("create", "ok", created.lpar)]
+    steps.extend(step for step in ordered if step is not None)
+    verification_failed = defer_apply and not _creation_steps_verified(
+        creation, created
+    )
+    vtpm_failed = bool(creation.vtpm_settings.pairs()) and (
+        created.vtpm_step is None or created.vtpm_step.status != "ok"
+    )
+    reporting_failed = (
+        created.reporting_step is not None and created.reporting_step.status == "error"
+    )
+    io_failed = (
+        created.physical_io_step is not None and created.physical_io_step.status != "ok"
+    )
+    settings_failed = (
+        created.settings_step is not None and created.settings_step.status == "error"
+    )
+    apply_failed = (
+        created.apply_step is not None and created.apply_step.status == "error"
+    ) or (
+        (
+            roles_requested(creation.settings)
+            or memory_requested
+            or start_requested
+            or affinity_requested
+        )
+        and creation.apply_profile is True
+        and (created.apply_step is None or created.apply_step.status != "ok")
+    )
+    allowed = created.lpar is not None and not (
+        apply_failed
+        or settings_failed
+        or reporting_failed
+        or io_failed
+        or vtpm_failed
+        or verification_failed
+    )
+    return steps, allowed
 
 
 async def _raise_layout_create_failure(
