@@ -37,6 +37,17 @@ def test_metric_links_parse_error_tags_context():
     assert isinstance(exc_info.value.__cause__, DET.ParseError)
 
 
+@pytest.mark.parametrize(
+    "link", ["", "<link/>", '<link href=""/>', '<link href="  "/>']
+)
+def test_metric_links_missing_href_tags_context(link):
+    feed = f'<feed xmlns="http://www.w3.org/2005/Atom"><entry>{link}</entry></feed>'
+    with pytest.raises(HMCError, match="Failed to parse PCM feed response") as exc_info:
+        _metric_links(feed, "PCM feed")
+    assert isinstance(exc_info.value.__cause__, ValueError)
+    assert "nonblank href" in str(exc_info.value)
+
+
 def test_find_text_entity_error_tags_context():
     body = (
         "<!DOCTYPE feed [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><feed>&xxe;</feed>"

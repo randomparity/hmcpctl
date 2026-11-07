@@ -7,7 +7,6 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from defusedxml import ElementTree as DET
-from defusedxml.common import DefusedXmlException
 
 from ..errors import HMCError
 from ..xmlutil import find_text, localname, parse_feed
@@ -17,7 +16,7 @@ _T = TypeVar("_T")
 
 
 def _tag_parse_errors(fn: Callable[..., _T]) -> Callable[..., _T]:
-    """Wrap an XML parse callable so a ParseError becomes an HMCError.
+    """Tag XML syntax, security and response-shape failures as HMCError.
 
     The wrapper takes the same arguments as *fn* with a *context* string
     inserted second; on a parse failure it raises ``HMCError(f"Failed to
@@ -29,7 +28,7 @@ def _tag_parse_errors(fn: Callable[..., _T]) -> Callable[..., _T]:
     def wrapper(xml_text: str, context: str, *args: Any) -> _T:
         try:
             return fn(xml_text, *args)
-        except (DET.ParseError, DefusedXmlException) as exc:
+        except (DET.ParseError, ValueError) as exc:
             raise HMCError(
                 f"Failed to parse {context} response: {str(exc)[:500]}"
             ) from exc
