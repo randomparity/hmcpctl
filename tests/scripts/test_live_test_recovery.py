@@ -33,6 +33,7 @@ from live_test import storage_lifecycle  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
 from live_test.recovery import backup as backup_recovery  # noqa: E402
 from live_test.recovery import memory as memory_recovery  # noqa: E402
+from live_test.recovery import storage as storage_recovery  # noqa: E402
 from live_test.storage import scsi_adapter_listing  # noqa: E402
 
 _MARKER = "pcie-deadbeef"
@@ -898,7 +899,7 @@ def test_every_mutating_vmedia_call_has_a_trigger():
     mutating = {tool for tool in named if TOOL_SECURITY[tool].effect != "read"}
 
     assert mutating
-    assert mutating <= recovery._VMEDIA_MUTATIONS
+    assert mutating <= storage_recovery.MEDIA_MUTATIONS
 
 
 # ---------------------------------------------------------------------------
@@ -943,7 +944,7 @@ _VMEDIA_ROWS = (
 
 
 def _inputs(document):
-    return recovery.lpar_inputs_from_document(
+    return storage_recovery.lpar_inputs_from_document(
         document, recovery.dispatched_subtasks(document)
     )
 
@@ -1102,7 +1103,10 @@ async def test_a_clean_test_partition_yields_no_findings():
     seen: list = []
 
     assert (
-        await recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN, seen), _ALL) == []
+        await storage_recovery.check_test_partition(
+            _lpar_caller(_LPAR_CLEAN, seen), _ALL
+        )
+        == []
     )
     assert {tool for tool, _ in seen} == set(_LPAR_CLEAN)
 
@@ -1111,7 +1115,7 @@ async def test_a_clean_test_partition_yields_no_findings():
 async def test_the_adapter_listing_is_the_1237_command_by_vios_id():
     seen: list = []
 
-    await recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN, seen), _ALL)
+    await storage_recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN, seen), _ALL)
 
     assert ("hmc_run_command", {"cmd": _LISTING}) in seen
 
@@ -1158,7 +1162,7 @@ async def test_the_adapter_listing_is_the_1237_command_by_vios_id():
 )
 @pytest.mark.asyncio
 async def test_each_stranded_class_is_reported_with_its_remedy(overrides, what, remedy):
-    findings = await recovery.check_test_partition(
+    findings = await storage_recovery.check_test_partition(
         _lpar_caller(_lpar_responses(**overrides)), _ALL
     )
 
@@ -1183,7 +1187,9 @@ async def test_no_listed_adapter_reads_as_zero():
         hmc_run_command="No results were found.", hmc_list_storage_mappings=[]
     )
 
-    assert await recovery.check_test_partition(_lpar_caller(responses), _ALL) == []
+    assert (
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL) == []
+    )
 
 
 @pytest.mark.asyncio
@@ -1206,7 +1212,9 @@ async def test_the_captured_unmapped_adapter_is_reported_by_slot():
     )
     inputs = dataclasses.replace(_ALL, lpar_name="sys-R1-lp3")
 
-    findings = await recovery.check_test_partition(_lpar_caller(responses), inputs)
+    findings = await storage_recovery.check_test_partition(
+        _lpar_caller(responses), inputs
+    )
 
     assert [(finding.what, finding.detail) for finding in findings] == [
         (
@@ -1224,7 +1232,7 @@ async def test_a_class_whose_trigger_is_absent_makes_no_call():
     seen: list = []
     inputs = _inputs(_lpar_document(range(16), [_row(14, "hmc_provision_lpar (live)")]))
 
-    await recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN, seen), inputs)
+    await storage_recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN, seen), inputs)
 
     assert {tool for tool, _ in seen} == {
         "hmc_run_command",
@@ -1249,7 +1257,7 @@ async def test_each_failed_read_is_unreadable(tool):
     responses = {key: value for key, value in _LPAR_CLEAN.items() if key != tool}
 
     with pytest.raises(recovery.StateUnreadable):
-        await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL)
 
 
 @pytest.mark.parametrize(
@@ -1265,7 +1273,7 @@ async def test_a_missing_document_field_is_unreadable(artifact, value, message):
     inputs = _inputs(_lpar_document(range(16, 23), _VMEDIA_ROWS, **{artifact: value}))
 
     with pytest.raises(recovery.StateUnreadable, match=message):
-        await recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN), inputs)
+        await storage_recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN), inputs)
 
 
 @pytest.mark.asyncio
@@ -1275,7 +1283,7 @@ async def test_a_boot_write_with_no_baseline_is_unreadable():
     )
 
     with pytest.raises(recovery.StateUnreadable, match="baseline"):
-        await recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN), inputs)
+        await storage_recovery.check_test_partition(_lpar_caller(_LPAR_CLEAN), inputs)
 
 
 @pytest.mark.asyncio
@@ -1283,7 +1291,7 @@ async def test_a_mapping_without_an_adapter_id_is_unreadable_and_names_the_slots
     responses = _lpar_responses(hmc_list_storage_mappings=[{"id": None}])
 
     with pytest.raises(recovery.StateUnreadable, match="slots 5"):
-        await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL)
 
 
 @pytest.mark.parametrize("listing", ["5", "x,lt-lpar", "5;lt-lpar"])
@@ -1292,7 +1300,7 @@ async def test_a_malformed_adapter_listing_is_unreadable(listing):
     responses = _lpar_responses(hmc_run_command=listing)
 
     with pytest.raises(recovery.StateUnreadable, match="server adapter"):
-        await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL)
 
 
 @pytest.mark.asyncio
@@ -1300,7 +1308,7 @@ async def test_an_optical_entry_it_cannot_read_is_unreadable():
     responses = _lpar_responses(hmc_list_optical_mappings=[{"Storage": {}}])
 
     with pytest.raises(recovery.StateUnreadable, match="optical"):
-        await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL)
 
 
 @pytest.mark.asyncio
@@ -1311,7 +1319,7 @@ async def test_an_unreadable_class_does_not_stop_the_others():
     del responses["hmc_list_optical_mappings"]
 
     with pytest.raises(recovery.StateUnreadable) as raised:
-        await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL)
 
     assert [finding.what for finding in raised.value.findings] == [
         "media repository left"
@@ -1338,7 +1346,7 @@ async def test_pcie_findings_survive_an_unreadable_partition_class():
             _lpar_caller(responses),
             (
                 (recovery.check, _INPUTS),
-                (recovery.check_test_partition, _ALL),
+                (storage_recovery.check_test_partition, _ALL),
             ),
         )
 
@@ -1356,7 +1364,7 @@ def _main(tmp_path, monkeypatch, document, findings=None, raises=None):
 
     async def run_checks(checks, *, users=False):
         pcie = dict(checks).get(recovery.check)
-        partition = dict(checks).get(recovery.check_test_partition)
+        partition = dict(checks).get(storage_recovery.check_test_partition)
         lpar_config = dict(checks).get(recovery.check_lpar_config)
         contacted.append((pcie, partition, users, lpar_config))
         if raises is not None:
@@ -1449,7 +1457,7 @@ async def test_an_unreadable_pcie_check_still_reads_the_test_partition():
             _lpar_caller(responses),
             (
                 (recovery.check, _INPUTS),
-                (recovery.check_test_partition, _ALL),
+                (storage_recovery.check_test_partition, _ALL),
             ),
         )
 
@@ -1466,7 +1474,7 @@ async def test_more_mapped_adapters_than_listed_ones_is_unreadable():
     )
 
     with pytest.raises(recovery.StateUnreadable, match="2 mapped"):
-        await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL)
 
 
 def test_a_media_change_document_reads_its_media_and_power_on():
@@ -1506,7 +1514,7 @@ async def test_an_empty_optical_target_after_st70_is_reported():
         hmc_run_command=f"5,{_TEST_LPAR},3\n7,{_TEST_LPAR},4\n",
     )
 
-    findings = await recovery.check_test_partition(
+    findings = await storage_recovery.check_test_partition(
         _lpar_caller(responses), _MEDIA_CHANGE
     )
 
@@ -1524,7 +1532,7 @@ async def test_an_empty_optical_device_st70_never_named_is_not_reported():
         hmc_run_command=f"5,{_TEST_LPAR},3\n7,{_TEST_LPAR},4\n",
     )
 
-    findings = await recovery.check_test_partition(
+    findings = await storage_recovery.check_test_partition(
         _lpar_caller(responses), _MEDIA_CHANGE
     )
 
@@ -1538,7 +1546,9 @@ async def test_an_empty_optical_target_is_not_read_unless_st70_ran():
         hmc_run_command=f"5,{_TEST_LPAR},3\n7,{_TEST_LPAR},4\n",
     )
 
-    findings = await recovery.check_test_partition(_lpar_caller(responses), _ALL)
+    findings = await storage_recovery.check_test_partition(
+        _lpar_caller(responses), _ALL
+    )
 
     assert "empty optical target left" not in [f.what for f in findings]
 
@@ -1549,7 +1559,9 @@ async def test_a_powered_off_test_partition_reads_clean_in_either_spelling(state
     """REST answers lower case; the CLI answers title case."""
     responses = _lpar_responses(hmc_get_lpar_state=state)
 
-    assert await recovery.check_test_partition(_lpar_caller(responses), _ALL) == []
+    assert (
+        await storage_recovery.check_test_partition(_lpar_caller(responses), _ALL) == []
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1982,7 +1994,9 @@ def test_lpar_reconfigure_inputs_need_its_subtask_and_system():
 # ---------------------------------------------------------------------------
 
 _MEDIUM = "hmcpctl_0a1b2c3d4e5f.iso"
-_BOOT_MEDIA = recovery.ProvisionBootMediaInputs(_SYSTEM, "vios-uuid", "repo", _MEDIUM)
+_BOOT_MEDIA = storage_recovery.ProvisionBootMediaInputs(
+    _SYSTEM, "vios-uuid", "repo", _MEDIUM
+)
 
 
 def _media_caller(names: list[str] | None):
@@ -2000,7 +2014,7 @@ def _media_caller(names: list[str] | None):
 async def test_a_provision_boot_medium_left_is_reported_with_its_command():
     findings = await recovery.check_run(
         _media_caller(["other.iso", _MEDIUM]),
-        ((recovery.check_provision_boot_media, _BOOT_MEDIA),),
+        ((storage_recovery.check_provision_boot_media, _BOOT_MEDIA),),
     )
 
     assert [f.what for f in findings] == [f"medium {_MEDIUM}"]
@@ -2009,20 +2023,24 @@ async def test_a_provision_boot_medium_left_is_reported_with_its_command():
 
 @pytest.mark.asyncio
 async def test_a_deleted_provision_boot_medium_is_clean():
-    checks = ((recovery.check_provision_boot_media, _BOOT_MEDIA),)
+    checks = ((storage_recovery.check_provision_boot_media, _BOOT_MEDIA),)
 
     assert await recovery.check_run(_media_caller(["other.iso"]), checks) == []
 
 
 @pytest.mark.parametrize(
     "inputs",
-    [_BOOT_MEDIA, recovery.ProvisionBootMediaInputs(_SYSTEM, "vios-uuid", None, None)],
+    [
+        _BOOT_MEDIA,
+        storage_recovery.ProvisionBootMediaInputs(_SYSTEM, "vios-uuid", None, None),
+    ],
 )
 @pytest.mark.asyncio
 async def test_an_unread_or_unreported_medium_is_not_clean(inputs):
     with pytest.raises(recovery.StateUnreadable):
         await recovery.check_run(
-            _media_caller(None), ((recovery.check_provision_boot_media, inputs),)
+            _media_caller(None),
+            ((storage_recovery.check_provision_boot_media, inputs),),
         )
 
 
@@ -2056,7 +2074,7 @@ def test_a_provision_boot_run_is_witnessed_by_both_checks(
     assert seen == [
         {
             recovery.check_lpar_power: recovery.LparPowerInputs(_SYSTEM),
-            recovery.check_provision_boot_media: _BOOT_MEDIA,
+            storage_recovery.check_provision_boot_media: _BOOT_MEDIA,
         }
     ]
     assert "CLEAN" in capsys.readouterr().out
@@ -2075,7 +2093,10 @@ def test_a_logical_workflow_run_is_witnessed_by_the_lpar_power_check():
 def test_a_provision_boot_run_refused_before_its_call_reads_no_medium():
     document = {"config": {"system_name": _SYSTEM}, "artifacts": {}}
 
-    assert recovery.provision_boot_media_inputs_from_document(document, [72]) is None
+    assert (
+        storage_recovery.provision_boot_media_inputs_from_document(document, [72])
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2204,7 +2225,7 @@ def test_vios_backup_inputs_need_subtask_37_and_its_artifacts():
 def test_a_vios_backup_run_is_witnessed(tmp_path, monkeypatch, capsys):
     async def checks(checks, *, users=False):
         pcie = dict(checks).get(recovery.check)
-        partition = dict(checks).get(recovery.check_test_partition)
+        partition = dict(checks).get(storage_recovery.check_test_partition)
         vios = dict(checks).get(recovery.check_vios_backup)
         assert pcie is None and partition is None
         return await recovery.check_vios_backup(
@@ -2477,7 +2498,10 @@ async def test_a_clean_storage_run_reads_volumes_mappings_and_adapters():
     seen: list = []
     call = _storage_caller(_VOLUMES, _STORAGE_MAPPINGS, seen)
 
-    assert await recovery.check_test_partition(call, _inputs(_storage_document())) == []
+    assert (
+        await storage_recovery.check_test_partition(call, _inputs(_storage_document()))
+        == []
+    )
     assert (
         "hmc_run_command",
         {"cmd": storage_lifecycle.volume_listing(_TEST_SYSTEM, _VIOS_ID, _GROUP)},
@@ -2493,7 +2517,9 @@ async def test_a_run_disk_and_its_mapping_left_are_reported_by_prefix():
         adapters=f"5,{_TEST_LPAR},3\n6,{_TEST_LPAR},4\n",
     )
 
-    findings = await recovery.check_test_partition(call, _inputs(_storage_document()))
+    findings = await storage_recovery.check_test_partition(
+        call, _inputs(_storage_document())
+    )
 
     assert [finding.what for finding in findings] == [
         "run disk mapping left",
@@ -2509,7 +2535,10 @@ async def test_an_operator_volume_is_never_the_runs():
         _VOLUMES + "hpctl-operator  jfs2  2  2  1  open/syncd  N/A\n", _STORAGE_MAPPINGS
     )
 
-    assert await recovery.check_test_partition(call, _inputs(_storage_document())) == []
+    assert (
+        await storage_recovery.check_test_partition(call, _inputs(_storage_document()))
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -2517,7 +2546,7 @@ async def test_an_unparsable_volume_listing_is_unreadable():
     call = _storage_caller("Cluster does not exist.", _STORAGE_MAPPINGS)
 
     with pytest.raises(recovery.StateUnreadable, match="volumes in datavg"):
-        await recovery.check_test_partition(call, _inputs(_storage_document()))
+        await storage_recovery.check_test_partition(call, _inputs(_storage_document()))
 
 
 @pytest.mark.asyncio
@@ -2526,7 +2555,7 @@ async def test_a_group_name_the_guard_cannot_carry_is_unreadable_not_refused():
     document["config"]["vdisk_volume_group_name"] = "data vg"
 
     with pytest.raises(recovery.StateUnreadable, match="cannot carry"):
-        await recovery.check_test_partition(
+        await storage_recovery.check_test_partition(
             _storage_caller(_VOLUMES, _STORAGE_MAPPINGS), _inputs(document)
         )
 
@@ -2563,7 +2592,7 @@ def test_a_clean_storage_run_exits_zero(tmp_path, monkeypatch, capsys):
 @pytest.mark.parametrize("subtasks,pending", [([42], None), ([0, 3], "hpvg1234abcd")])
 def test_st42_or_pending_group_applies_to_recovery(subtasks, pending):
     document = _lpar_document(subtasks, storage_volume_group_name=pending)
-    inputs = recovery.lpar_inputs_from_document(document, subtasks)
+    inputs = storage_recovery.lpar_inputs_from_document(document, subtasks)
     assert inputs is not None and inputs.applies and inputs.scratch_vg_ran
     assert inputs.scratch_vg_pending == pending
 
@@ -2581,9 +2610,9 @@ async def test_scratch_recovery_is_read_only_and_keeps_uncertainty(
     pending, names, expected
 ):
     document = _lpar_document([42], storage_volume_group_name=pending)
-    inputs = recovery.lpar_inputs_from_document(document, [42])
+    inputs = storage_recovery.lpar_inputs_from_document(document, [42])
     seen = []
-    finding = await recovery._run_volume_group_left(
+    finding = await storage_recovery._run_volume_group_left(
         _caller({"hmc_list_volume_groups": names}, seen), inputs
     )
     assert (finding.what if finding else None) == expected
@@ -2594,9 +2623,9 @@ async def test_scratch_recovery_is_read_only_and_keeps_uncertainty(
 @pytest.mark.asyncio
 async def test_scratch_recovery_refuses_invalid_or_unreadable_state(pending, data):
     document = _lpar_document([42], storage_volume_group_name=pending)
-    inputs = recovery.lpar_inputs_from_document(document, [42])
+    inputs = storage_recovery.lpar_inputs_from_document(document, [42])
     with pytest.raises(recovery.StateUnreadable):
-        await recovery._run_volume_group_left(
+        await storage_recovery._run_volume_group_left(
             _caller({"hmc_list_volume_groups": data}), inputs
         )
 
@@ -2660,7 +2689,7 @@ def test_main_selects_ordered_inputs_once_and_bootstraps_only_when_needed(
     )
     checkers = (
         recovery.check,
-        recovery.check_test_partition,
+        storage_recovery.check_test_partition,
         recovery.check_vios_backup,
         recovery.check_network,
         recovery.check_lpar_config,
