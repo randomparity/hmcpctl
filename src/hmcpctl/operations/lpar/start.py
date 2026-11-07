@@ -9,6 +9,7 @@ from ...documents.lpar_start import LparStartSettings
 from ...resource_identity import is_uuid
 from ...xmlutil import leaf_text
 from .ownership import authorize_lpar_ownership_description
+from .workflow_contract import WorkflowStep
 
 PartitionKind = Literal["LogicalPartition", "VirtualIOServer"]
 
@@ -211,11 +212,10 @@ async def created_start_step(
     environment: str,
     *,
     controller_mode: bool = False,
-):
+) -> WorkflowStep:
     """Observe each requested field on exactly its approved required planes."""
     from ...errors import HMCError
     from .profiles import read_partition_profile
-    from .workflow_contract import WorkflowStep
 
     observed: dict[str, object] = {}
     status = "unavailable"
