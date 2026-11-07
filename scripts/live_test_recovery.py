@@ -65,6 +65,7 @@ from collections.abc import Awaitable, Callable
 from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
@@ -2462,7 +2463,7 @@ def _statistics_recovery(path: Path) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def _recovery_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -2493,7 +2494,12 @@ def main(argv: list[str] | None = None) -> int:
     source_packets.add_argument("--vnic-creation-policy-packet", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--packet-sha256")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def _delegate_procedure_recovery(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int | None:
     if args.ethernet_update_procedure:
         from live_test import ethernet_update
 
@@ -2512,104 +2518,68 @@ def main(argv: list[str] | None = None) -> int:
         if args.output or args.packet_sha256:
             parser.error("ST67 recovery uses retained results only")
         return _statistics_recovery(args.results)
-    if args.vnic_creation_policy_packet:
-        from live_test import vnic_creation_policy
+    for selected, module_name, refusal in (
+        (
+            args.boot_start_procedure,
+            "lpar_boot_start",
+            "ST68 recovery derives its binding from original private results only",
+        ),
+        (
+            args.serial_procedure,
+            "lpar_serial_adapter",
+            "ST63 recovery uses retained results only",
+        ),
+    ):
+        if selected:
+            module = import_module(f"live_test.{module_name}")
+            if args.output or args.packet_sha256:
+                parser.error(refusal)
+            return module.main(["recover", "--results", str(args.results)])
+    return None
 
-        if not args.packet_sha256 or not args.output:
-            parser.error(
-                "vNIC policy recovery requires packet digest and private output"
+
+def _delegate_packet_recovery(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int | None:
+    for packet, module_name, refusal in (
+        (
+            args.vnic_creation_policy_packet,
+            "vnic_creation_policy",
+            "vNIC policy recovery requires packet digest and private output",
+        ),
+        (
+            args.vios_ame_source_packet,
+            "vios_ame_source",
+            "VIOS AME source recovery requires packet digest and private output",
+        ),
+        (
+            args.vios_boot_source_packet,
+            "vios_boot_source",
+            "VIOS boot source recovery requires packet digest and private output",
+        ),
+        (
+            args.activation_source_packet,
+            "system_profile_activation_source",
+            "activation source recovery requires packet digest and private output",
+        ),
+    ):
+        if packet:
+            module = import_module(f"live_test.{module_name}")
+            if not args.packet_sha256 or not args.output:
+                parser.error(refusal)
+            return module.main(
+                [
+                    "recover",
+                    "--packet",
+                    str(packet),
+                    "--packet-sha256",
+                    args.packet_sha256,
+                    "--results",
+                    str(args.results),
+                    "--output",
+                    str(args.output),
+                ]
             )
-        return vnic_creation_policy.main(
-            [
-                "recover",
-                "--packet",
-                str(args.vnic_creation_policy_packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--results",
-                str(args.results),
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.vios_ame_source_packet:
-        from live_test import vios_ame_source
-
-        if not args.packet_sha256 or not args.output:
-            parser.error(
-                "VIOS AME source recovery requires packet digest and private output"
-            )
-        return vios_ame_source.main(
-            [
-                "recover",
-                "--packet",
-                str(args.vios_ame_source_packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--results",
-                str(args.results),
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.vios_boot_source_packet:
-        from live_test import vios_boot_source
-
-        if not args.packet_sha256 or not args.output:
-            parser.error(
-                "VIOS boot source recovery requires packet digest and private output"
-            )
-        return vios_boot_source.main(
-            [
-                "recover",
-                "--packet",
-                str(args.vios_boot_source_packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--results",
-                str(args.results),
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.boot_start_procedure:
-        from live_test import lpar_boot_start
-
-        if args.output or args.packet_sha256:
-            parser.error(
-                "ST68 recovery derives its binding from original private results only"
-            )
-        return lpar_boot_start.main(["recover", "--results", str(args.results)])
-
-    if args.serial_procedure:
-        from live_test import lpar_serial_adapter
-
-        if args.output or args.packet_sha256:
-            parser.error("ST63 recovery uses retained results only")
-        return lpar_serial_adapter.main(["recover", "--results", str(args.results)])
-    if args.activation_source_packet:
-        from live_test import system_profile_activation_source
-
-        if not args.packet_sha256 or not args.output:
-            parser.error(
-                "activation source recovery requires packet digest and private output"
-            )
-        return system_profile_activation_source.main(
-            [
-                "recover",
-                "--packet",
-                str(args.activation_source_packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--results",
-                str(args.results),
-                "--output",
-                str(args.output),
-            ]
-        )
     if args.output:
         parser.error("--output requires --activation-source-packet")
     if args.source_packet:
@@ -2630,175 +2600,79 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.packet_sha256:
         parser.error("--packet-sha256 requires --source-packet")
+    return None
 
-    try:
-        document = json.loads(args.results.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        print(f"ERROR: cannot read {args.results}: {error}", file=sys.stderr)
-        return 2
 
-    if document.get("group") == "client-ethernet-update":
-        parser.error(
-            "ST69 requires --ethernet-update-procedure and --output; generic recovery cannot handle it"
-        )
-
-    if (
-        isinstance(document, dict)
-        and isinstance(document.get("run"), dict)
-        and document["run"].get("group") == "partition-profiles"
-    ):
-        from live_test import partition_profiles
-
-        if not runner._bootstrap_config():
-            print(
-                "partition-profiles recovery unreadable: credentials unavailable",
-                file=sys.stderr,
-            )
-            return 2
-        try:
-            asyncio.run(partition_profiles.recover_document(HMCConfig(), document))
-        except Exception as exc:  # noqa: BLE001 — incomplete evidence must refuse CLEAN
-            print(
-                f"partition-profiles recovery unconfirmed: {type(exc).__name__}",
-                file=sys.stderr,
-            )
-            return 2
-        print(
-            "CLEAN: partition-profile original baseline and terminal sequence confirmed"
-        )
-        return 0
-
-    if (
-        isinstance(document, dict)
-        and isinstance(document.get("run"), dict)
-        and document["run"].get("group") == "partition-profile-contract"
-    ):
-        from live_test.partition_profile_contract import recover_document
-
-        if not runner._bootstrap_config():
-            print("profile contract recovery: credentials unavailable", file=sys.stderr)
-            return 2
-        try:
-            asyncio.run(recover_document(HMCConfig(), document))
-        except Exception as error:  # noqa: BLE001 — incomplete evidence never attests CLEAN
-            print(
-                f"profile contract recovery unconfirmed: {type(error).__name__}",
-                file=sys.stderr,
-            )
-            return 2
-        print("CLEAN: independent original baseline and fixture absence confirmed")
-        return 0
-
-    if (
-        isinstance(document, dict)
-        and isinstance(document.get("run"), dict)
-        and document["run"].get("group") == "system-profiles"
-    ):
-        from live_test import system_profiles
-
-        if not runner._bootstrap_config():
-            print(
-                "system-profiles recovery unreadable: credentials unavailable",
-                file=sys.stderr,
-            )
-            return 2
-        try:
-            asyncio.run(system_profiles.recover_document(HMCConfig(), document))
-        except Exception as exc:  # noqa: BLE001 — any unreadable/partial evidence must refuse CLEAN
-            print(
-                f"system-profiles recovery unconfirmed: {type(exc).__name__}",
-                file=sys.stderr,
-            )
-            return 2
-        print(
-            "CLEAN: system-profile original baseline and finite terminal sequence confirmed"
-        )
-        return 0
-
-    if (
-        isinstance(document, dict)
-        and isinstance(document.get("run"), dict)
-        and document["run"].get("group") == "lpar-memory-statistics"
-    ):
+def _recover_document_group(document: dict[str, Any]) -> int | None:
+    run = document.get("run")
+    group = run.get("group") if isinstance(run, dict) else None
+    if group == "lpar-memory-statistics":
         print(
             "statistics recovery requires --memory-statistics for bounded raw admission",
             file=sys.stderr,
         )
         return 2
+    protocols = {
+        "partition-profiles": (
+            "partition_profiles",
+            "partition-profiles recovery unreadable",
+            "partition-profiles recovery",
+            "CLEAN: partition-profile original baseline and terminal sequence confirmed",
+        ),
+        "partition-profile-contract": (
+            "partition_profile_contract",
+            "profile contract recovery",
+            "profile contract recovery",
+            "CLEAN: independent original baseline and fixture absence confirmed",
+        ),
+        "system-profiles": (
+            "system_profiles",
+            "system-profiles recovery unreadable",
+            "system-profiles recovery",
+            "CLEAN: system-profile original baseline and finite terminal sequence confirmed",
+        ),
+        "lpar-memory-move": (
+            "memory_move",
+            "memory-move recovery",
+            "memory-move recovery",
+            "CLEAN: finite memory-move success and both original baselines confirmed; no writes",
+        ),
+        "lpar-accelerator-qos": (
+            "accelerator_qos",
+            "accelerator-qos recovery",
+            "accelerator-qos recovery",
+            "CLEAN: finite accelerator-qos proof and original baselines confirmed; no writes",
+        ),
+        "lpar-processor-move": (
+            "processor_move",
+            "processor-move recovery",
+            "processor-move recovery",
+            "CLEAN: finite processor-move success and both original baselines confirmed; no writes",
+        ),
+    }
+    # Unknown or malformed group values must continue to generic witness admission.
+    protocol = protocols.get(group) if isinstance(group, str) else None
+    if protocol is None:
+        return None
+    module_name, credentials_label, error_label, success = protocol
+    module = import_module(f"live_test.{module_name}")
+    if not runner._bootstrap_config():
+        print(f"{credentials_label}: credentials unavailable", file=sys.stderr)
+        return 2
+    try:
+        asyncio.run(module.recover_document(HMCConfig(), document))
+    except Exception as error:  # noqa: BLE001 — incomplete evidence never attests CLEAN
+        print(f"{error_label} unconfirmed: {type(error).__name__}", file=sys.stderr)
+        return 2
+    print(success)
+    return 0
 
-    if (
-        isinstance(document, dict)
-        and isinstance(document.get("run"), dict)
-        and document["run"].get("group") == "lpar-memory-move"
-    ):
-        from live_test import memory_move
 
-        if not runner._bootstrap_config():
-            print("memory-move recovery: credentials unavailable", file=sys.stderr)
-            return 2
-        try:
-            asyncio.run(memory_move.recover_document(HMCConfig(), document))
-        except Exception as error:  # noqa: BLE001 — unreadable state never attests CLEAN
-            print(
-                f"memory-move recovery unconfirmed: {type(error).__name__}",
-                file=sys.stderr,
-            )
-            return 2
-        print(
-            "CLEAN: finite memory-move success and both original baselines confirmed; no writes"
-        )
-        return 0
-
-    if (
-        isinstance(document, dict)
-        and isinstance(document.get("run"), dict)
-        and document["run"].get("group") == "lpar-accelerator-qos"
-    ):
-        from live_test import accelerator_qos
-
-        if not runner._bootstrap_config():
-            print("accelerator-qos recovery: credentials unavailable", file=sys.stderr)
-            return 2
-        try:
-            asyncio.run(accelerator_qos.recover_document(HMCConfig(), document))
-        except Exception as error:  # noqa: BLE001 — malformed or partial evidence never attests CLEAN
-            print(
-                f"accelerator-qos recovery unconfirmed: {type(error).__name__}",
-                file=sys.stderr,
-            )
-            return 2
-        print(
-            "CLEAN: finite accelerator-qos proof and original baselines confirmed; no writes"
-        )
-        return 0
-
-    if (
-        isinstance(document, dict)
-        and isinstance(document.get("run"), dict)
-        and document["run"].get("group") == "lpar-processor-move"
-    ):
-        from live_test import processor_move
-
-        if not runner._bootstrap_config():
-            print("processor-move recovery: credentials unavailable", file=sys.stderr)
-            return 2
-        try:
-            asyncio.run(processor_move.recover_document(HMCConfig(), document))
-        except Exception as error:  # noqa: BLE001 — unreadable state never attests CLEAN
-            print(
-                f"processor-move recovery unconfirmed: {type(error).__name__}",
-                file=sys.stderr,
-            )
-            return 2
-        print(
-            "CLEAN: finite processor-move success and both original baselines confirmed; no writes"
-        )
-        return 0
-
+def _recover_generic_document(document: dict[str, Any], results_path: Path) -> int:
     subtasks = dispatched_subtasks(document)
     if subtasks is None:
         print(
-            f"ERROR: {args.results} records no run.subtasks, so what the run "
+            f"ERROR: {results_path} records no run.subtasks, so what the run "
             "changed is unknown; check the system by hand",
             file=sys.stderr,
         )
@@ -2909,6 +2783,30 @@ def main(argv: list[str] | None = None) -> int:
         print("The system was NOT confirmed clean.", file=sys.stderr)
         return 2
     return 1 if findings else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _recovery_parser()
+    args = parser.parse_args(argv)
+    for delegate in (_delegate_procedure_recovery, _delegate_packet_recovery):
+        result = delegate(args, parser)
+        if result is not None:
+            return result
+    try:
+        document = json.loads(args.results.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        print(f"ERROR: cannot read {args.results}: {error}", file=sys.stderr)
+        return 2
+    if document.get("group") == "client-ethernet-update":
+        parser.error(
+            "ST69 requires --ethernet-update-procedure and --output; generic recovery cannot handle it"
+        )
+    result = _recover_document_group(document)
+    return (
+        result
+        if result is not None
+        else _recover_generic_document(document, args.results)
+    )
 
 
 if __name__ == "__main__":
