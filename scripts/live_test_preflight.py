@@ -40,6 +40,7 @@ import functools
 import io
 import sys
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1179,6 +1180,38 @@ def _print_arms(
             print(f"    provision VLAN: {provision_vlan}")
 
 
+_PACKET_PREFLIGHTS = {
+    "vnic-creation-policy": (
+        "vnic_creation_policy",
+        "vNIC policy preflight requires packet, digest, private output and read-only hardware checks",
+    ),
+    "vios-ame-source": (
+        "vios_ame_source",
+        "VIOS AME source preflight requires packet, digest, private output and live read-only checks",
+    ),
+    "vios-boot-source": (
+        "vios_boot_source",
+        "VIOS boot source preflight requires packet, digest, private output and live read-only checks",
+    ),
+    "client-ethernet-update": (
+        "ethernet_update",
+        "ST69 requires exact packet, digest and private output",
+    ),
+    "lpar-boot-start": (
+        "lpar_boot_start",
+        "ST68 requires exact packet, digest, private output and read-only admission",
+    ),
+    "lpar-serial-adapter": (
+        "lpar_serial_adapter",
+        "ST63 requires packet, digest, fresh private output and read-only hardware checks",
+    ),
+    "system-profile-activation-source": (
+        "system_profile_activation_source",
+        "activation source preflight requires packet, digest, private output and live read-only checks",
+    ),
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1216,9 +1249,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.group and len(args.group) != 1:
         parser.error("exactly one preflight group may be selected")
     args.group = args.group[0] if args.group else None
-    if args.group == "vnic-creation-policy":
-        from live_test import vnic_creation_policy
-
+    if args.group in _PACKET_PREFLIGHTS:
+        module_name, refusal = _PACKET_PREFLIGHTS[args.group]
+        module = import_module(f"live_test.{module_name}")
         if (
             not args.packet
             or not args.packet_sha256
@@ -1226,157 +1259,8 @@ def main(argv: list[str] | None = None) -> int:
             or args.skip_hardware
             or args.detach_probe
         ):
-            parser.error(
-                "vNIC policy preflight requires packet, digest, private output and read-only hardware checks"
-            )
-        return vnic_creation_policy.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.group == "vios-ame-source":
-        from live_test import vios_ame_source
-
-        if (
-            not args.packet
-            or not args.packet_sha256
-            or not args.output
-            or args.skip_hardware
-            or args.detach_probe
-        ):
-            parser.error(
-                "VIOS AME source preflight requires packet, digest, private output and live read-only checks"
-            )
-        return vios_ame_source.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.group == "vios-boot-source":
-        from live_test import vios_boot_source
-
-        if (
-            not args.packet
-            or not args.packet_sha256
-            or not args.output
-            or args.skip_hardware
-            or args.detach_probe
-        ):
-            parser.error(
-                "VIOS boot source preflight requires packet, digest, private output and live read-only checks"
-            )
-        return vios_boot_source.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.group == "client-ethernet-update":
-        from live_test import ethernet_update
-
-        if (
-            not args.packet
-            or not args.packet_sha256
-            or not args.output
-            or args.skip_hardware
-            or args.detach_probe
-        ):
-            parser.error("ST69 requires exact packet, digest and private output")
-        return ethernet_update.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.group == "lpar-boot-start":
-        from live_test import lpar_boot_start
-
-        if (
-            not args.packet
-            or not args.packet_sha256
-            or not args.output
-            or args.skip_hardware
-            or args.detach_probe
-        ):
-            parser.error(
-                "ST68 requires exact packet, digest, private output and read-only admission"
-            )
-        return lpar_boot_start.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--output",
-                str(args.output),
-            ]
-        )
-
-    if args.group == "lpar-serial-adapter":
-        from live_test import lpar_serial_adapter
-
-        if (
-            not args.packet
-            or not args.packet_sha256
-            or not args.output
-            or args.skip_hardware
-            or args.detach_probe
-        ):
-            parser.error(
-                "ST63 requires packet, digest, fresh private output and read-only hardware checks"
-            )
-        return lpar_serial_adapter.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--output",
-                str(args.output),
-            ]
-        )
-    if args.group == "system-profile-activation-source":
-        from live_test import system_profile_activation_source
-
-        if (
-            not args.packet
-            or not args.packet_sha256
-            or not args.output
-            or args.skip_hardware
-            or args.detach_probe
-        ):
-            parser.error(
-                "activation source preflight requires packet, digest, private output and live read-only checks"
-            )
-        return system_profile_activation_source.main(
+            parser.error(refusal)
+        return module.main(
             [
                 "preflight",
                 "--packet",
