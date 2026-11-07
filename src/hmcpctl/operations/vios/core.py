@@ -200,6 +200,15 @@ async def create_vios(
     if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
     vtpm_requested = vtpm_settings is not None and bool(vtpm_settings.pairs())
+    native_features_requested = (
+        hardware_requested
+        or layout_requested
+        or serial_requested
+        or memory_requested
+        or start_requested
+        or affinity_requested
+    )
+    strict_identity_required = policy_requested or native_features_requested
     if (
         vtpm_requested
         or policy_requested
@@ -216,16 +225,7 @@ async def create_vios(
             )
         resources = completed
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    if not (
-        vtpm_requested
-        or policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-    ):
+    if not (vtpm_requested or strict_identity_required):
         return await hmc.create_vios(
             system_uuid,
             build_vios_document(
@@ -344,14 +344,7 @@ async def create_vios(
             and not isinstance(error, HMCError)
         ):
             raise
-        if (
-            hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        ):
+        if native_features_requested:
             native_failed = True
         elif not policy_requested:
             raise
@@ -368,14 +361,7 @@ async def create_vios(
         try:
             entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
         except Exception:
-            if not (
-                hardware_requested
-                or layout_requested
-                or serial_requested
-                or memory_requested
-                or start_requested
-                or affinity_requested
-            ):
+            if not native_features_requested:
                 raise
             # Native creation succeeded; discard unavailable lookup diagnostics.
             entry = None
@@ -385,15 +371,7 @@ async def create_vios(
             or not entry.get("UUID")
         ):
             raise ValueError("Created VIOS identity was not confirmed")
-        if (
-            policy_requested
-            or hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        ) and (
+        if strict_identity_required and (
             not isinstance(entry.get("UUID"), str)
             or not is_uuid(entry["UUID"])
             or not isinstance(entry.get("Resource"), dict)
@@ -457,14 +435,7 @@ async def create_vios(
             and not isinstance(error, (HMCError, ValueError, PermissionError))
         ):
             raise
-        if (
-            hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        ):
+        if native_features_requested:
             verification_failed = True
         elif policy_requested:
             raise HMCError(
