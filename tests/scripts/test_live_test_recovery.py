@@ -31,6 +31,7 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_recovery as recovery  # noqa: E402
 from live_test import storage_lifecycle  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
+from live_test.recovery import backup as backup_recovery  # noqa: E402
 from live_test.recovery import memory as memory_recovery  # noqa: E402
 from live_test.storage import scsi_adapter_listing  # noqa: E402
 
@@ -2081,7 +2082,7 @@ def test_a_provision_boot_run_refused_before_its_call_reads_no_medium():
 # The vios-backup arm (ST37, #1349)
 # ---------------------------------------------------------------------------
 
-_VIOS_INPUTS = recovery.VIOSBackupInputs(
+_VIOS_INPUTS = backup_recovery.VIOSBackupInputs(
     system_name=_SYSTEM,
     lpar_name="sys-R1-lp3",
     vios="vios-A",
@@ -2179,7 +2180,7 @@ async def test_an_unreadable_vios_listing_is_not_clean(responses):
 
 @pytest.mark.asyncio
 async def test_a_mapping_name_that_is_not_a_device_name_is_not_used():
-    inputs = recovery.VIOSBackupInputs(
+    inputs = backup_recovery.VIOSBackupInputs(
         **{**vars(_VIOS_INPUTS), "mapping_id": "vhost0/x;rmdev"}
     )
 
@@ -2234,7 +2235,9 @@ def test_a_vios_backup_run_is_witnessed(tmp_path, monkeypatch, capsys):
     ],
 )
 async def test_an_off_baseline_run_is_never_clean(backups, what):
-    inputs = recovery.VIOSBackupInputs(**{**vars(_VIOS_INPUTS), "off_baseline": True})
+    inputs = backup_recovery.VIOSBackupInputs(
+        **{**vars(_VIOS_INPUTS), "off_baseline": True}
+    )
     responses = {"hmc_list_vios_backups": backups, "hmc_list_storage_mappings": _MAPPED}
 
     (finding,) = await recovery.check_vios_backup(_caller(responses), inputs)
