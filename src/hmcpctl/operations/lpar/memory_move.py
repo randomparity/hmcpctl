@@ -21,6 +21,8 @@ from .memory import (
     _admit_state,
     _contained_partition,
     _integer,
+    _MemorySnapshot,
+    _MemoryTargets,
     _postconditions,
     _require_cpu_vector,
     _result,
@@ -31,7 +33,7 @@ from .ownership import authorize_lpar_mutation
 
 async def _read_endpoint(
     hmc: HMCClient, system_uuid: str, selector: str
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, _MemorySnapshot]:
     kind, uuid = await _contained_partition(hmc, system_uuid, selector)
     read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
     snapshot = _snapshot(await read(uuid), uuid)
@@ -64,15 +66,15 @@ async def _system_bounds(hmc: HMCClient, uuid: str, name: str) -> tuple[int, int
 
 
 def _move_targets(
-    source: dict[str, Any],
-    destination: dict[str, Any],
+    source: _MemorySnapshot,
+    destination: _MemorySnapshot,
     move: LparMemoryMove,
     region: int,
     total: int,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[_MemoryTargets, _MemoryTargets]:
     if source["shared"] or destination["shared"]:
         raise ValueError("Memory moves are unsupported for shared-memory partitions")
-    targets = []
+    targets: list[_MemoryTargets] = []
     for before, operation in ((source, "remove"), (destination, "add")):
         change = LparMemoryChange(
             operation=operation, quantity_mib=move.quantity_mib, force=move.force
@@ -116,10 +118,10 @@ def _move_targets(
 
 
 def _endpoint_matched(
-    before: dict[str, Any], after: dict[str, Any], targets: dict[str, Any]
+    before: _MemorySnapshot, after: _MemorySnapshot, targets: _MemoryTargets
 ) -> bool:
     return _postconditions(before, after, targets) and all(
-        before[key] == after[key]
+        before.get(key) == after.get(key)
         for key in ("current_minimum_mib", "current_maximum_mib", "processors")
     )
 
@@ -128,8 +130,8 @@ async def _observe_endpoint(
     hmc: HMCClient,
     system_uuid: str,
     kind: str,
-    before: dict[str, Any],
-    targets: dict[str, Any],
+    before: _MemorySnapshot,
+    targets: _MemoryTargets,
     submission_error: str | None,
     native_rejection: bool,
 ) -> dict[str, Any]:
@@ -139,7 +141,7 @@ async def _observe_endpoint(
         if observed_kind != kind:
             raise ValueError("Memory move readback partition kind changed")
         if any(
-            before[key] != after[key]
+            before.get(key) != after.get(key)
             for key in (
                 "uuid",
                 "name",

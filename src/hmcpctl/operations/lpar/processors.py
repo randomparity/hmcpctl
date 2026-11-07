@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from decimal import Decimal, localcontext
 from typing import Any
 
@@ -86,7 +87,8 @@ def _bounded_memory_snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[st
     )
     for field in fields:
         _number(current.get(field), field, whole="Units" not in field)
-    return memory._snapshot(entry, uuid)
+    snapshot = memory._snapshot(entry, uuid)
+    return {**snapshot, "change_location": asdict(snapshot["change_location"])}
 
 
 def _snapshot(

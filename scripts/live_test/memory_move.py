@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -130,7 +131,11 @@ def expected_oracle(peers):
 async def admit(hmc, system_uuid, system_name, selectors, protected_names):
     peers = []
     for selector in selectors:
-        kind, peer = await _read_endpoint(hmc, system_uuid, selector)
+        kind, snapshot = await _read_endpoint(hmc, system_uuid, selector)
+        peer: dict[str, Any] = {
+            **snapshot,
+            "change_location": asdict(snapshot["change_location"]),
+        }
         if peer["name"] in protected_names:
             raise ValueError(
                 "Arm54 resolved a protected fixture; no effect is authorized"

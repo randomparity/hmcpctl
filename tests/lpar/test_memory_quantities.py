@@ -1,5 +1,6 @@
 """D01 non-pool quantity grammar and guarded effective-memory outcomes."""
 
+import json
 import shlex
 from copy import deepcopy
 from types import SimpleNamespace
@@ -287,6 +288,7 @@ async def test_add_uses_current_not_desired_and_reports_profile_location(
     assert result["after"]["current_memory_mib"] == 1536
     assert result["change_location"]["lives_in"] == "current-configuration"
     assert result["warnings"]
+    assert json.loads(json.dumps(result)) == result
     assert b.command.await_count == 1
     b.authorize.assert_awaited_once()
 

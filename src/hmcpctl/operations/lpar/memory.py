@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 import asyncssh
 
@@ -25,6 +25,7 @@ from hmcpctl.xmlutil import leaf_text
 from .ownership import authorize_lpar_mutation
 from .profile_sync import ChangeLocation, change_location_of
 
+_AIX_TYPES = frozenset({"AIX/Linux", "Virtual IO Server"})
 _MEMORY_FIELDS = {
     "current_memory_mib": "CurrentMemory",
     "current_minimum_mib": "CurrentMinimumMemory",
@@ -34,7 +35,41 @@ _MEMORY_FIELDS = {
     "maximum_memory_mib": "MaximumMemory",
     "runtime_memory_mib": "RuntimeMemory",
 }
-_AIX_TYPES = frozenset({"AIX/Linux", "Virtual IO Server"})
+
+
+class _MemoryQuantities(TypedDict):
+    current_memory_mib: int
+    current_minimum_mib: int
+    current_maximum_mib: int
+    desired_memory_mib: int
+    minimum_memory_mib: int
+    maximum_memory_mib: int
+    runtime_memory_mib: int
+
+
+class _MemorySnapshot(_MemoryQuantities):
+    uuid: str
+    name: Any
+    partition_id: int
+    state: Any
+    partition_type: Any
+    rmc: Any
+    shared: bool
+    entitled_mib: int | Literal["auto"] | None
+    runtime_entitled_mib: int | Literal["auto"] | None
+    automatic_entitlement: bool | None
+    dynamic_memory: Any
+    operation_in_progress: bool
+    processors: dict[str, str | None]
+    change_location: ChangeLocation
+
+
+class _MemoryTargets(TypedDict):
+    quantity_mib: int | None
+    entitled_mib: int | Literal["auto"] | None
+    reset: bool
+    deferred: bool
+    noop: bool
 
 
 def _integer(value: object, label: str) -> int:
@@ -109,7 +144,7 @@ def _require_cpu_vector(vector: dict[str, str | None]) -> list[Decimal]:
     return values
 
 
-def _snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[str, Any]:
+def _snapshot(entry: dict[str, Any] | None, uuid: str) -> _MemorySnapshot:
     if not entry or str(entry.get("UUID", "")).lower() != uuid.lower():
         raise ValueError("Memory readback has missing or different partition identity")
     resource = resource_container(entry, "Resource")
@@ -117,13 +152,23 @@ def _snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[str, Any]:
     partition_id = _integer(resource.get("PartitionID"), "PartitionID")
     if partition_id < 1:
         raise ValueError("Memory change requires positive PartitionID")
-    values = {
-        key: _integer(memory.get(name), name) for key, name in _MEMORY_FIELDS.items()
+    values: _MemoryQuantities = {
+        "current_memory_mib": _integer(memory.get("CurrentMemory"), "CurrentMemory"),
+        "current_minimum_mib": _integer(
+            memory.get("CurrentMinimumMemory"), "CurrentMinimumMemory"
+        ),
+        "current_maximum_mib": _integer(
+            memory.get("CurrentMaximumMemory"), "CurrentMaximumMemory"
+        ),
+        "desired_memory_mib": _integer(memory.get("DesiredMemory"), "DesiredMemory"),
+        "minimum_memory_mib": _integer(memory.get("MinimumMemory"), "MinimumMemory"),
+        "maximum_memory_mib": _integer(memory.get("MaximumMemory"), "MaximumMemory"),
+        "runtime_memory_mib": _integer(memory.get("RuntimeMemory"), "RuntimeMemory"),
     }
     entitled = leaf_text(memory.get("CurrentEntitledMemory"))
     runtime_entitled = leaf_text(memory.get("RuntimeEntitledMemory"))
     shared = _boolean(memory.get("SharedMemoryEnabled"), "SharedMemoryEnabled")
-    state = {
+    state: _MemorySnapshot = {
         **values,
         "uuid": uuid,
         "name": resource.get("PartitionName"),
@@ -134,10 +179,14 @@ def _snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[str, Any]:
         "shared": shared,
         "entitled_mib": _integer(entitled, "CurrentEntitledMemory")
         if entitled not in (None, "auto")
-        else entitled,
+        else "auto"
+        if entitled == "auto"
+        else None,
         "runtime_entitled_mib": _integer(runtime_entitled, "RuntimeEntitledMemory")
         if runtime_entitled not in (None, "auto")
-        else runtime_entitled,
+        else "auto"
+        if runtime_entitled == "auto"
+        else None,
         "automatic_entitlement": _boolean(
             memory["AutoEntitledMemoryEnabled"], "AutoEntitledMemoryEnabled"
         )
@@ -154,20 +203,28 @@ def _snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[str, Any]:
         if "IsOperationInProgress" in resource
         else False,
         "processors": _cpu_vector(resource),
-        "change_location": asdict(change_location_of(entry)),
+        "change_location": change_location_of(entry),
     }
     for minimum, desired, maximum in [
-        ("current_minimum_mib", "current_memory_mib", "current_maximum_mib"),
-        ("minimum_memory_mib", "desired_memory_mib", "maximum_memory_mib"),
+        (
+            values["current_minimum_mib"],
+            values["current_memory_mib"],
+            values["current_maximum_mib"],
+        ),
+        (
+            values["minimum_memory_mib"],
+            values["desired_memory_mib"],
+            values["maximum_memory_mib"],
+        ),
     ]:
-        if not values[minimum] <= values[desired] <= values[maximum]:
+        if not minimum <= desired <= maximum:
             raise ValueError(
                 "Memory readback has contradictory minimum/current/maximum bounds"
             )
     return state
 
 
-def _admit_state(before: dict[str, Any], change: LparMemoryChange) -> bool:
+def _admit_state(before: _MemorySnapshot, change: LparMemoryChange) -> bool:
     if (
         before["state"] not in ("running", "not activated")
         or before["operation_in_progress"]
@@ -205,8 +262,8 @@ def _target(current: int, operation: str, quantity: int) -> int:
 
 
 def _targets(
-    before: dict[str, Any], change: LparMemoryChange, region: int
-) -> dict[str, Any]:
+    before: _MemorySnapshot, change: LparMemoryChange, region: int
+) -> _MemoryTargets:
     deferred = _admit_state(before, change)
     quantity = change.quantity_mib
     noop = change.operation != "set" and quantity == 0 and change.entitled_mib is None
@@ -269,9 +326,9 @@ async def _admit_capacity(
     hmc: HMCClient,
     system_uuid: str,
     system_name: str,
-    before: dict[str, Any],
+    before: _MemorySnapshot,
     change: LparMemoryChange,
-) -> dict[str, Any]:
+) -> _MemoryTargets:
     system = await hmc.get_managed_system(system_uuid)
     if not system or str(system.get("UUID", "")).lower() != system_uuid.lower():
         raise ValueError(
@@ -305,7 +362,7 @@ async def _admit_capacity(
 
 
 async def _admit_pool(
-    hmc: HMCClient, system_uuid: str, before: dict[str, Any], targets: dict[str, Any]
+    hmc: HMCClient, system_uuid: str, before: _MemorySnapshot, targets: _MemoryTargets
 ) -> None:
     pools = await hmc.list_child("ManagedSystem", system_uuid, "SharedMemoryPool")
     if len(pools) != 1:
@@ -333,10 +390,10 @@ async def _admit_pool(
 
 
 def _postconditions(
-    before: dict[str, Any], after: dict[str, Any], targets: dict[str, Any]
+    before: _MemorySnapshot, after: _MemorySnapshot, targets: _MemoryTargets
 ) -> bool:
     if any(
-        before[key] != after[key]
+        before.get(key) != after.get(key)
         for key in ("uuid", "name", "partition_id", "state", "partition_type", "shared")
     ):
         raise ValueError("Memory readback target identity, state or mode changed")
@@ -376,14 +433,14 @@ def _postconditions(
 
 
 def _result(
-    before: dict[str, Any],
-    after: dict[str, Any] | None,
-    targets: dict[str, Any],
+    before: _MemorySnapshot,
+    after: _MemorySnapshot | None,
+    targets: _MemoryTargets,
     outcome: str,
     submission_error: str | None = None,
     read_error: str | None = None,
 ) -> dict[str, Any]:
-    location = ChangeLocation(**(after or before)["change_location"])
+    location = (after or before)["change_location"]
     warnings = (
         []
         if location.lives_in == "current-configuration-and-profile"
@@ -408,8 +465,10 @@ def _result(
         "UUID": before["uuid"],
         "outcome": outcome,
         "workflow_completed": outcome in ("applied", "noop"),
-        "before": before,
-        "after": after,
+        "before": {**before, "change_location": asdict(before["change_location"])},
+        "after": {**after, "change_location": asdict(after["change_location"])}
+        if after is not None
+        else None,
         "expected": targets,
         "submission_error": submission_error,
         "change_location": asdict(location),
