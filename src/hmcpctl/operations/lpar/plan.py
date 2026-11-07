@@ -25,7 +25,7 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.storage import STORAGE_KINDS, StorageKind, validate_virtual_disk
-from ...errors import HMCError, HMCTransportError
+from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
 from ...ssh.affinity import MinimumAffinityPolicy, validate_minimum_affinity_policy
 from ...ssh.lpar import validate_caller_token
@@ -567,6 +567,8 @@ class _Evaluator:
                 _blocker("unavailable", check, self.stalled, target=target, tool=tool)
             )
             raise _Stalled from exc
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             text = f"{tool} failed for {target}: {exc}"
             blockers.append(
@@ -915,6 +917,8 @@ async def _lookup(
             raise HMCError(stalled)
         summary = summary_matching(await hmc.list_system_summaries(), selector)
         entry = await system_entry(hmc, summary) if summary is not None else None
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError) as exc:
         # summary_matching raises ValueError when several systems share a name.
         if isinstance(exc, HMCTransportError):
@@ -974,6 +978,8 @@ async def _enumerate(
             _Candidate(None, summary["UUID"], await system_entry(hmc, summary))
             for summary in summaries[:CANDIDATES_LIMIT]
         ]
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         text = f"managed systems are unavailable: {exc}"
         return [], _blocker("unavailable", "system", text, tool=SYSTEMS_TOOL), False
