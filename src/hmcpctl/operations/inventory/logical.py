@@ -15,7 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ...errors import HMCError, HMCTransportError
+from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
 from ..lpar.ownership import lpar_ownership_entry
 from ..partition_state import PartitionState
@@ -199,6 +199,8 @@ async def _enumerate(hmc: Any, admit: Admit) -> tuple[SourceStatus, list[_Candid
     # no connection (#1501). Each page reads its own systems' entries.
     try:
         summaries = await hmc.list_system_summaries()
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         return _unavailable(SYSTEMS_TOOL, f"managed systems are unavailable: {exc}"), []
     candidates = [
@@ -255,6 +257,8 @@ async def _resolve(
                 _unresolved(selector, _unavailable(PARTITIONS_TOOL, stopped))
             )
             continue
+        except HMCTLSFingerprintError:
+            raise
         except (HMCError, ValueError) as exc:
             text = f"managed system {selector!r} is unavailable: {exc}"
             unresolved.append(
@@ -332,6 +336,8 @@ class _Reader:
         try:
             entry = await system_entry(self.hmc, candidate.summary)
             return _status(CAPACITY_TOOL, None), system_capacity(entry), entry, None
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             text = f"managed system {candidate.uuid} is unavailable: {exc}"
             stop = text if isinstance(exc, HMCTransportError) else None
@@ -357,6 +363,8 @@ class _Reader:
         elif partitions_status.status == "ok":
             try:
                 entries = await self.hmc.list_logical_partitions(candidate.uuid)
+            except HMCTLSFingerprintError:
+                raise
             except HMCError as exc:
                 text = f"partitions of {candidate.uuid} are unavailable: {exc}"
                 partitions_status = _unavailable(PARTITIONS_TOOL, text)

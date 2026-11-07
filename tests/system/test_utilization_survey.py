@@ -15,7 +15,7 @@ import pytest
 from conftest import assert_no_mutating_requests, make_config
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.inventory.utilization import (
     AdapterFigures,
     DiskFigures,
@@ -807,3 +807,12 @@ async def test_rollup_sums_disk_and_adapter_figures() -> None:
     assert total.slots_util_pct == 66.7
     assert total.sriov_util_pct == 95.8
     assert ("adapters", "slots_assigned", 1) in total.unknown
+
+
+@pytest.mark.parametrize("feed", ["lpars", "vios", "profiles"])
+@pytest.mark.asyncio
+async def test_pin_mismatch_aborts_system_survey(feed):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await _read(FakeClient(**{feed: failure}))
+    assert caught.value is failure

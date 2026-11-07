@@ -10,7 +10,7 @@ from typing import Any
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.systems.fleet import operating_system_entry
 
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import resolve_lpar_uuid, resolve_system_uuid
 from ...xmlutil import leaf_text, render_mtms
 from .capacity import system_capacity
@@ -182,6 +182,8 @@ async def _inventory_or_warning(
     """
     try:
         return await read
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         return f"{source} inventory is unavailable: {exc}"[:_MAX_WARNING_LENGTH]
 

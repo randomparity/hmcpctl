@@ -1095,6 +1095,8 @@ class HMCClient(
                 return self._quick_property_names[resource_type]
             try:
                 names, _ = await self.list_quick_properties(resource_type)
+            except HMCTLSFingerprintError:
+                raise
             except HMCError:
                 # Covers HMCTransportError too, which subclasses it. Degrading
                 # is #799's fourth criterion: ADR 0139 records levels where the
@@ -1447,6 +1449,8 @@ class HMCClient(
                 return self._search_parameter_names[resource_type]
             try:
                 names, _ = await self.list_search_parameters(resource_type)
+            except HMCTLSFingerprintError:
+                raise
             except HMCError:
                 # Covers HMCTransportError too, which subclasses it. ADR 0142
                 # degrades rather than raising so a level that does not serve

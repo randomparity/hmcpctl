@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from hmcpctl.errors import HMCTLSFingerprintError
+from hmcpctl.operations.inventory import composite
 from hmcpctl.operations.inventory.composite import (
     _fetch_lpar_data,
     _fetch_system_summary_data,
@@ -75,3 +77,28 @@ async def test_lpar_fetch_returns_parent_and_adapter_inventory():
 async def test_missing_system_is_reported_before_child_fetch():
     with pytest.raises(ValueError, match="Managed system 'system-uuid' not found"):
         await _fetch_system_summary_data(_MissingParentClient(), "system-uuid")
+
+
+@pytest.mark.parametrize("feed", ["lpars", "vios"])
+@pytest.mark.asyncio
+async def test_pin_mismatch_aborts_composite_summary(monkeypatch, feed):
+    failure = HMCTLSFingerprintError("pin mismatch")
+
+    async def parent(*_):
+        return {"UUID": "system-uuid"}
+
+    class Client:
+        async def list_logical_partitions(self, _):
+            if feed == "lpars":
+                raise failure
+            return []
+
+        async def list_vios(self, _):
+            if feed == "vios":
+                raise failure
+            return []
+
+    monkeypatch.setattr(composite, "operating_system_entry", parent)
+    with pytest.raises(ExceptionGroup) as caught:
+        await _fetch_system_summary_data(Client(), "system-uuid")
+    assert caught.value.exceptions == (failure,)

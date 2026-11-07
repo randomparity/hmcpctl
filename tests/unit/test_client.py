@@ -4988,3 +4988,30 @@ async def test_fingerprint_mismatch_skips_legacy_port_fallback(monkeypatch):
     await client._http.aclose()
 
     assert ports == [443]
+
+
+@pytest.mark.parametrize("kind", ["quick", "search"])
+@pytest.mark.asyncio
+async def test_discovery_pin_mismatch_aborts_without_caching(monkeypatch, kind):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    client = HMCClient(make_config())
+    request = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(client, "_request", request)
+    method = (
+        client._defined_quick_property_names
+        if kind == "quick"
+        else client._defined_search_parameter_names
+    )
+    cache = (
+        client._quick_property_names
+        if kind == "quick"
+        else client._search_parameter_names
+    )
+    try:
+        with pytest.raises(HMCTLSFingerprintError) as caught:
+            await method("ManagedSystem")
+        assert caught.value is failure
+        assert cache == {}
+        assert request.await_count == 1
+    finally:
+        await client._http.aclose()
