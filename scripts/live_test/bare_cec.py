@@ -503,6 +503,9 @@ async def _activate_to_sms(
     else:
         await _inspect_job(client, state, job_id)
     if reached in _FIRMWARE_STATES:
+        assert fixture.lpar_uuid is not None, (
+            "CLI observation requires a resolved fixture UUID"
+        )
         await cli.observe_state(state, fixture.lpar_uuid, reached)
     return reached in _FIRMWARE_STATES
 

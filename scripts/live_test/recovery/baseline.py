@@ -18,7 +18,7 @@ from live_test.recovery.common import Finding, StateUnreadable
 class Round2Inputs:
     """Fresh pre-mutation baseline and identity for the complete round2 dispatch."""
 
-    snapshot: dict[str, Any]
+    snapshot: independent_baseline.BaselineSnapshot
     hmc: dict[str, Any]
     lpar: str
     description: str
