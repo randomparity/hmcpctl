@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.lpar import inspect as inspect_module
 from hmcpctl.operations.lpar.inspect import (
     MAX_REFCODES,
@@ -369,3 +369,18 @@ def test_inspection_preserves_enrichment_from_real_reader(monkeypatch):
     assert "operating system" in result.refcodes.codes[0]["definition"].lower()
     assert result.refcodes.codes[0]["refcode"] == "CA00E105 LP=00002"
     assert result.refcodes.codes[1]["definition"] is None
+
+
+@pytest.mark.parametrize("stage", ["vios-list", "vios-detail"])
+def test_pin_mismatch_aborts_inspection_before_other_reads(stage, _seams):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = _HMC()
+    if stage == "vios-list":
+        hmc.vios_error = failure
+    else:
+        hmc.details[VIOS_1] = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        _inspect(hmc, ("resources", "refcodes"))
+    assert caught.value is failure
+    assert f"get_vios_storage_detail {VIOS_2}" not in hmc.calls
+    assert _seams == []

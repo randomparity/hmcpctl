@@ -9,10 +9,11 @@ import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical import holds, store
 from hmcpctl.operations.logical.store import OperationRefused
 from hmcpctl.operations.lpar import handoff
@@ -362,3 +363,18 @@ def test_check_inputs_accepts_the_defined_combinations():
     check_inputs("prepare", True, "kdive", None)
     check_inputs("prepare", False, None, None)
     check_inputs("release", False, None, "x")
+
+
+@pytest.mark.parametrize("stage", ["resources", "adapters"])
+def test_pin_mismatch_prevents_handoff_hold(stage, monkeypatch):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = _HMC()
+    if stage == "resources":
+        monkeypatch.setattr(hmc, "list_vios", AsyncMock(side_effect=failure))
+    else:
+        hmc.adapters = failure
+    assert holds.find_hold(LPAR) is None
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        _prepare(hmc=hmc)
+    assert caught.value is failure
+    assert holds.find_hold(LPAR) is None

@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
-from ...errors import HMCError, HMCTransportError
+from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import resolve_system_uuid
 from ...ssh.refcodes import list_lpar_refcodes
 from ...ssh.selectors import resolve_ssh_names
@@ -141,6 +141,8 @@ async def _read(tool: str, read: Awaitable[_T]) -> tuple[_T | None, SectionSourc
     """Await *read*, reporting an HMC or input failure as ``unavailable``."""
     try:
         return await read, SectionSource("ok", tool)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError) as exc:
         return None, SectionSource("unavailable", tool, _error_text(exc))
 
@@ -207,6 +209,8 @@ async def _vios_reads(
             stalled = True
             reads.append(ViosRead(uuid, "unavailable", _STALLED))
             continue
+        except HMCTLSFingerprintError:
+            raise
         except (HMCError, ValueError) as exc:
             reads.append(ViosRead(uuid, "unavailable", _error_text(exc)))
             continue

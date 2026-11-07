@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import resolve_system_uuid
 from ..inventory.composite import optional_int, optional_text
 from ..logical import holds, store
@@ -201,6 +201,8 @@ async def _adapters(
         )
     try:
         found = await current_adapters(hmc, lpar_uuid)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError) as exc:
         return Adapters(SectionSource("unavailable", ADAPTERS_TOOL, _failure(exc)), [])
     keep = ("mac", "port_vlan_id", "slot")
