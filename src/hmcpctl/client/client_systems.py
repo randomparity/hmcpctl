@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..errors import HMCError
+from ..errors import HMCError, HMCTLSFingerprintError
 from ..jobs import (
     power_off_system_job,
     power_off_vios_job,
@@ -161,6 +161,8 @@ class SystemsMixin:
                 name = names.get(uuid.lower())
                 if name:
                     entry = await self.find_system_by_name(name)
+            except HMCTLSFingerprintError:
+                raise
             except (HMCError, ValueError) as fb_exc:
                 fallback_exc = fb_exc
             if entry is None:

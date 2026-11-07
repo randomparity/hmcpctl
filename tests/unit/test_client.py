@@ -5015,3 +5015,31 @@ async def test_discovery_pin_mismatch_aborts_without_caching(monkeypatch, kind):
         assert request.await_count == 1
     finally:
         await client._http.aclose()
+
+
+@pytest.mark.parametrize("stage", ["summary", "name-search"])
+@pytest.mark.asyncio
+async def test_managed_system_fallback_preserves_pin_mismatch(monkeypatch, stage):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    client = HMCClient(make_config())
+    monkeypatch.setattr(
+        client,
+        "get_uom",
+        AsyncMock(side_effect=HMCError("Nested path contains null property", 500)),
+    )
+    names = (
+        AsyncMock(side_effect=failure)
+        if stage == "summary"
+        else AsyncMock(return_value={"system-uuid": "system"})
+    )
+    search = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(client, "_quick_all_system_names", names)
+    monkeypatch.setattr(client, "find_system_by_name", search)
+    try:
+        with pytest.raises(HMCTLSFingerprintError) as caught:
+            await client.get_managed_system("system-uuid")
+        assert caught.value is failure
+        if stage == "summary":
+            search.assert_not_awaited()
+    finally:
+        await client._http.aclose()
