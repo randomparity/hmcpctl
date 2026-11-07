@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import live_fixture
 
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.systems.fleet import (
     FleetListing,
     UnreadableSystem,
@@ -399,3 +399,30 @@ async def test_bulk_read_refuses_more_than_the_discovery_limit():
     with pytest.raises(ValueError, match="supply managed-system scope"):
         await read_fleet_quick_all(hmc, "LogicalPartition", _reader({}), "LPARs")
     hmc.list_quick_all.assert_not_awaited()
+
+
+@pytest.mark.parametrize("stage", ["bulk", "scoped", "state-reread"])
+@pytest.mark.asyncio
+async def test_pin_mismatch_stops_fleet_without_fallback_requests(stage):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    systems = [
+        _system(R1_UUID, "first", "operating"),
+        _system(E2_UUID, "second", "operating"),
+    ]
+    hmc = _hmc(systems, failure if stage == "state-reread" else systems)
+    hmc.list_quick_all.side_effect = failure
+    read = AsyncMock(
+        side_effect=HMCError("ordinary read failure")
+        if stage == "state-reread"
+        else failure
+    )
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        if stage == "bulk":
+            await read_fleet_quick_all(hmc, "LogicalPartition", read, "LPARs")
+        else:
+            await read_fleet(hmc, read, "LPARs")
+    assert caught.value is failure
+    assert hmc.list_system_summaries.await_count == (
+        2 if stage == "state-reread" else 1
+    )
+    assert read.await_count == (0 if stage == "bulk" else 1)
