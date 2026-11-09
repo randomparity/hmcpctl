@@ -17,7 +17,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.common import UOM_NS
 from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar import core, workflows
 from hmcpctl.operations.lpar.assignments import AssignmentResult, LparPcieAssignments
 from hmcpctl.operations.vios.core import create_vios
@@ -1137,3 +1137,92 @@ async def test_hardware_postcreate_diagnostics_are_bounded(
     b.assign.assert_not_awaited()
     b.hmc.create_logical_partition.assert_not_awaited()
     b.hmc.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault_at", [1, 2])
+async def test_fatal_tls_stops_creation_verification_and_preserves_evidence(
+    target, fault_at
+):
+    b = target
+    original_read = b.hmc._get.side_effect
+    original_command = b.command.side_effect
+    observations = 0
+
+    async def read(path, kind, **kwargs):
+        nonlocal observations
+        if "pin-mismatch" in b.events:
+            b.events.append("read-after-pin")
+        if kind != "ManagedSystem" and "create" in b.events:
+            observations += 1
+            if observations == fault_at:
+                b.events.append("pin-mismatch")
+                raise HMCTLSFingerprintError("pin mismatch")
+        return await original_read(path, kind, **kwargs)
+
+    async def command(*args, **kwargs):
+        if "pin-mismatch" in b.events:
+            b.events.append("command-after-pin")
+        return await original_command(*args, **kwargs)
+
+    async def read_partition(*args, **kwargs):
+        nonlocal observations
+        if "pin-mismatch" in b.events:
+            b.events.append("read-after-pin")
+        if "create" in b.events:
+            observations += 1
+            if observations == fault_at:
+                b.events.append("pin-mismatch")
+                raise HMCTLSFingerprintError("pin mismatch")
+        return b.entry
+
+    b.hmc._get.side_effect = read
+    b.hmc.get_logical_partition.side_effect = read_partition
+    b.command.side_effect = command
+    result = await invoke(
+        b,
+        hardware_mem_encryption=True,
+        security_policy=LparSecurityPolicy(secure_boot=0),
+        apply_profile=True,
+    )
+    assert "pin-mismatch" in b.events
+    assert "read-after-pin" not in b.events
+    assert "command-after-pin" not in b.events
+    assert b.events.count("create") == 1
+    assert b.events.count("stamp") == 1
+    assert "apply" not in b.events
+    assert result.resource_created is True
+    assert result.lpar["UUID"] == PARTITION
+    assert result.ownership_stamped is True
+    assert result.workflow_completed is False
+    assert any("TLS" in warning for warning in result.warnings)
+    b.assign.assert_not_awaited()
+    hardware = next(step for step in result.steps if step.step == "hardware_memory")
+    assert hardware.status == ("error" if fault_at == 1 else "ok")
+    assert (
+        next(step for step in result.steps if step.step == "security_policy").status
+        == "error"
+    )
+
+
+@pytest.mark.asyncio
+async def test_role_readback_preserves_fatal_tls(monkeypatch):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = AsyncMock(spec=HMCClient)
+    hmc.config = HMCConfig.from_mapping({})
+    hmc.get_logical_partition.side_effect = failure
+    monkeypatch.setattr(
+        core,
+        "get_lpar_settings",
+        AsyncMock(return_value=LparSettings(kvm_capable=False)),
+    )
+    requested = creation(settings=LparSettings(kvm_capable=False))
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await core._created_legacy_settings_step(
+            hmc,
+            SYSTEM,
+            "system",
+            requested,
+            {"UUID": PARTITION, "Resource": {"PartitionName": requested.name}},
+        )
+    assert caught.value is failure

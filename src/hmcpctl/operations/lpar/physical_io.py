@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 from ...documents.lpar_io import LparPhysicalIO
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...ssh.io_inventory import list_io_slots
 from ...ssh.lpar import complete_create_resources, resolve_system_cli_name
 from ...ssh.lpar_io import creation_io_record
@@ -319,6 +319,8 @@ async def created_io_step(
         matched = compare_creation_io(
             creation.physical_io, creation.creation_sriov, profile.fields
         )
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError, KeyError, InvalidOperation) as error:
         return WorkflowStep(
             "physical_io",

@@ -15,7 +15,7 @@ from ...client.client_profiles import PartitionKind
 from ...documents.common import UOM_NS
 from ...documents.lpar import LparResources
 from ...documents.lpar_creation_memory import LparCreationMemory
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import is_uuid
 from ...xmlutil import ATOM_NS, leaf_text, parse_feed
 from . import profiles
@@ -591,6 +591,8 @@ async def creation_memory_step(
         observation = _observe(
             hmc, admission, fields, current=current, controller=controller_mode
         )
+    except HMCTLSFingerprintError:
+        raise
     except Exception:  # noqa: BLE001 — post-create read failures retain only bounded observations.
         observation = _observe(
             hmc, admission, {}, current=current, controller=controller_mode

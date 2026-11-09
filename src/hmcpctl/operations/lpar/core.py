@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
@@ -36,7 +37,7 @@ from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import (
     is_uuid,
     resolve_system_uuid,
@@ -690,460 +691,614 @@ async def create_and_stamp_lpar(
                 apply_step = WorkflowStep(
                     "apply_profile", "skipped", _REST_CREATE_CONFIGURED
                 )
-    if created_lpar is not None:
-        identity_ok = True
-        confirmed_lpar = created_lpar
-        if serial_admission is not None:
-            try:
-                confirmed_lpar = await confirm_serial_created(
-                    hmc, serial_admission, created_lpar
-                )
-            except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
-                identity_ok = False
-        if memory_admission is not None:
-            try:
-                confirmed_lpar = await confirm_creation_memory_identity(
-                    hmc, memory_admission, created_lpar
-                )
-            except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
-                identity_ok = False
-        if start_admission is not None:
-            try:
-                confirmed_lpar = await confirm_start_created(
-                    hmc,
-                    start_admission,
-                    created_lpar,
-                    creation.name,
-                    creation.partition_type,
-                )
-            except Exception:  # noqa: BLE001 — unknown identity forbids ownership stamping.
-                identity_ok = False
-        created_lpar = confirmed_lpar if identity_ok else None
-    serial_step = (
-        await serial_creation_step(
-            hmc, serial_admission, created_lpar, controller_mode=controller_mode
-        )
-        if serial_admission is not None and created_lpar is None
-        else None
-    )
-    apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
-    apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
-
-    if created_lpar is None:
-        if verify_before_apply and creation.stamp_policy == "required":
-            raise HMCError(
-                f"{'Creation memory' if memory_requested else 'Affinity group' if affinity_requested else 'Serial' if serial_requested else 'Memory layout' if layout_requested else 'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
-                "unavailable and ownership was not stamped. Inspect the contained "
-                "partition before retrying; no rollback performed."
-            ) from None
-        if creation.stamp_policy == "required" and readback_error is not None:
-            raise HMCError(
-                f"stamp_policy='required': mksyscfg created LPAR {creation.name!r} "
-                f"but its read-back failed ({readback_error}), so it was not "
-                f"stamped.{apply_note} The LPAR still exists — re-stamp it with "
-                "set_lpar_ownership_description or delete it to release its "
-                "resources."
-            ) from readback_error
-        if creation.stamp_policy == "required":
-            raise HMCError(
-                "stamp_policy='required': cannot confirm the created LPAR "
-                f"exists — the create returned no body for {creation.name!r}."
-                f"{apply_note} Verify whether the partition was created before "
-                "retrying; a created partition can be re-stamped with "
-                "set_lpar_ownership_description."
-            )
-        if verify_before_apply:
-            skipped = "created identity readback unavailable; inspect the contained partition before retrying"
-        elif readback_error is None:
-            skipped = "create returned no LPAR body"
-        else:
-            skipped = f"read-back after mksyscfg failed: {readback_error}"
-        return LparCreationResult(
-            resource_created=True,
-            lpar=None,
-            ownership_stamped=None,
-            warnings=(
-                *apply_warnings,
-                f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
-            ),
-            apply_step=apply_step,
-            serial_step=serial_step,
-            creation_memory_step=await creation_memory_step(
-                hmc, memory_admission, None, controller_mode=controller_mode
-            )
-            if memory_admission is not None
-            else None,
-            affinity_group_step=await created_affinity_group_step(
-                hmc,
-                system_uuid,
-                None,
-                creation.name,
-                creation.partition_type,
-                creation.affinity_group_id,
-                controller_mode=controller_mode,
-            ),
-            memory_layout_step=await _created_memory_layout_step(
-                hmc, None, creation, controller_mode=controller_mode
-            ),
-            hardware_memory_step=await created_hardware_memory_step(
-                hmc,
-                system_uuid,
-                created_lpar,
-                creation.name,
-                creation.partition_type,
-                creation.hardware_mem_encryption,
-                creation.hardware_mem_expansion,
-            ),
-            security_policy_step=WorkflowStep(
-                "security_policy",
-                "error",
-                "Created partition identity unavailable; policy unverified",
-            )
-            if policy_requested
-            else None,
-            physical_io_step=WorkflowStep(
-                "physical_io",
-                "error",
-                "Created partition identity unavailable; I/O unverified",
-            )
-            if creation.physical_io.requested
-            else None,
-            settings_step=(
-                WorkflowStep(
-                    "settings",
-                    "error",
-                    "Created partition readback unavailable; settings unverified",
-                )
-                if creation.settings.pairs() or start_requested
-                else None
-            ),
-            vtpm_step=WorkflowStep(
-                "vtpm", "error", "Created identity unavailable; vTPM unverified"
-            )
-            if creation.vtpm_settings.pairs()
-            else None,
-            reporting_step=(
-                WorkflowStep(
-                    "reporting_settings",
-                    "error",
-                    "Created partition readback unavailable; reporting settings unverified",
-                )
-                if creation.reporting_settings.pairs()
-                else None
-            ),
-        )
-    if verify_before_apply and (
-        not isinstance(created_lpar, dict)
-        or not isinstance(created_lpar.get("UUID"), str)
-        or not is_uuid(created_lpar["UUID"])
-        or not isinstance(created_lpar.get("Resource"), dict)
-        or created_lpar["Resource"].get("PartitionName") != creation.name
-    ):
-        if creation.stamp_policy == "required":
-            raise HMCError(
-                "stamp_policy='required': creation may have occurred, but partition "
-                "identity and ownership are unconfirmed. Inspect the contained "
-                "partition before retrying; no rollback performed."
-            )
-        return LparCreationResult(
-            True,
-            None
-            if role_requested
-            or layout_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-            else created_lpar,
-            None,
-            (),
-            settings_step=WorkflowStep(
-                "settings",
-                "error",
-                "Created partition identity unconfirmed; roles unverified",
-            )
-            if role_requested or start_requested
-            else None,
-            memory_layout_step=await _created_memory_layout_step(
-                hmc, None, creation, controller_mode=controller_mode
-            ),
-            security_policy_step=WorkflowStep(
-                "security_policy",
-                "error",
-                "Created partition identity unconfirmed; inspect before retrying",
-            )
-            if policy_requested
-            else None,
-            affinity_group_step=await created_affinity_group_step(
-                hmc,
-                system_uuid,
-                None,
-                creation.name,
-                creation.partition_type,
-                creation.affinity_group_id,
-                controller_mode=controller_mode,
-            ),
-            hardware_memory_step=await created_hardware_memory_step(
-                hmc,
-                system_uuid,
-                created_lpar,
-                creation.name,
-                creation.partition_type,
-                creation.hardware_mem_encryption,
-                creation.hardware_mem_expansion,
-            ),
-            creation_memory_step=await creation_memory_step(
-                hmc, memory_admission, None, controller_mode=controller_mode
-            )
-            if memory_admission is not None
-            else None,
-        )
-    ownership_stamped, warnings = await stamp_created_lpar_ownership(
-        hmc,
-        system_uuid,
-        system_name or system_name_or_uuid,
-        created_lpar,
-        caller_token=creation.caller_token,
-    )
-    if creation.stamp_policy == "required" and ownership_stamped is not True:
-        resource = created_lpar.get("Resource") or {}
-        name = resource.get("PartitionName") or creation.name
-        uuid = created_lpar.get("UUID")
-        identity = f"{name!r} (UUID {uuid!r})" if uuid else f"{name!r} (UUID unknown)"
-        raise HMCError(
-            "stamp_policy='required': ownership stamping did not succeed for "
-            f"LPAR {identity}. {'; '.join((*apply_warnings, *warnings))} The "
-            "LPAR still exists — the create is not rolled back. Re-stamp it "
-            "with set_lpar_ownership_description (issue #376) or delete it to "
-            "release its resources."
-        )
-    serial_step = (
-        await serial_creation_step(
-            hmc, serial_admission, created_lpar, controller_mode=controller_mode
-        )
-        if serial_admission is not None
-        else None
-    )
-    memory_step = (
-        await creation_memory_step(
-            hmc, memory_admission, created_lpar, controller_mode=controller_mode
-        )
-        if memory_admission is not None
-        else None
-    )
-    layout_step = await _created_memory_layout_step(
-        hmc, system_name, creation, controller_mode=controller_mode
-    )
-    affinity_step = await created_affinity_group_step(
-        hmc,
-        system_uuid,
-        created_lpar,
-        creation.name,
-        creation.partition_type,
-        creation.affinity_group_id,
-        controller_mode=controller_mode,
-    )
-    hardware_step = await created_hardware_memory_step(
-        hmc,
-        system_uuid,
-        created_lpar,
-        creation.name,
-        creation.partition_type,
-        creation.hardware_mem_encryption,
-        creation.hardware_mem_expansion,
-    )
-    io_step = await created_io_step(hmc, system_uuid, creation, created_lpar)
-    if io_step is not None and ownership_stamped is not True:
-        io_step = WorkflowStep(
-            "physical_io",
-            "error",
-            "Partition exists but ownership stamp unconfirmed; I/O workflow stopped before apply",
-        )
-    settings_step = (
-        await _created_settings_step(
-            hmc,
-            system_uuid,
-            system_name,
-            creation,
-            created_lpar,
-            controller_mode=controller_mode,
-            start_admission=start_admission,
-        )
-        if verify_before_apply
-        else None
-    )
-    reporting_step = (
-        await _created_reporting_step(hmc, system_name, creation)
-        if verify_before_apply
-        else None
-    )
-    vtpm_step = (
-        await _created_vtpm_step(hmc, system_name, creation)
-        if verify_before_apply
-        else None
-    )
-    policy_step = await _created_security_policy_step(
-        hmc, system_uuid, creation, created_lpar
-    )
     result = LparCreationResult(
         True,
         created_lpar,
-        ownership_stamped,
-        (*apply_warnings, *warnings),
-        apply_step,
-        settings_step,
-        io_step,
-        reporting_step,
-        vtpm_step,
-        policy_step,
-        hardware_step,
-        memory_layout_step=layout_step,
-        serial_step=serial_step,
-        creation_memory_step=memory_step,
-        affinity_group_step=affinity_step,
+        None,
+        _unapplied_profile_warnings(creation.name, apply_step),
+        apply_step=apply_step,
     )
-    if verify_before_apply and creation.apply_profile is not None:
-        verified = _creation_steps_verified(creation, result)
-        apply_step = (
-            await _apply_created_profile(
-                hmc, system_name or system_name_or_uuid, creation
-            )
-            if verified and not controller_mode
-            else WorkflowStep(
-                "apply_profile",
-                "skipped",
-                (
-                    _CONTROLLER_AFFINITY_PROFILELESS
-                    if affinity_requested
-                    else _CONTROLLER_CREATE_CONFIGURED
-                )
-                if controller_mode
-                else "Creation verification incomplete; profile not applied",
-            )
+    active_step: str | None = None
+
+    async def observe(
+        field_name: str,
+        observation: Awaitable[WorkflowStep | None] | WorkflowStep | None,
+    ) -> WorkflowStep | None:
+        nonlocal result, active_step
+        active_step = field_name
+        step = (
+            observation
+            if observation is None or isinstance(observation, WorkflowStep)
+            else await observation
         )
-    elif creation.physical_io.requested and creation.apply_profile is not None:
-        apply_step = (
-            await _apply_created_profile(
-                hmc, system_name or system_name_or_uuid, creation
+        result = replace(result, **{field_name: step})
+        active_step = None
+        return step
+
+    try:
+        if isinstance(readback_error, HMCTLSFingerprintError):
+            raise readback_error
+        if created_lpar is not None:
+            identity_ok = True
+            confirmed_lpar = created_lpar
+            if serial_admission is not None:
+                try:
+                    confirmed_lpar = await confirm_serial_created(
+                        hmc, serial_admission, created_lpar
+                    )
+                    result = replace(result, lpar=confirmed_lpar)
+                except HMCTLSFingerprintError:
+                    raise
+                except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
+                    identity_ok = False
+            if memory_admission is not None:
+                try:
+                    confirmed_lpar = await confirm_creation_memory_identity(
+                        hmc, memory_admission, created_lpar
+                    )
+                    result = replace(result, lpar=confirmed_lpar)
+                except HMCTLSFingerprintError:
+                    raise
+                except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
+                    identity_ok = False
+            if start_admission is not None:
+                try:
+                    confirmed_lpar = await confirm_start_created(
+                        hmc,
+                        start_admission,
+                        created_lpar,
+                        creation.name,
+                        creation.partition_type,
+                    )
+                    result = replace(result, lpar=confirmed_lpar)
+                except HMCTLSFingerprintError:
+                    raise
+                except Exception:  # noqa: BLE001 — unknown identity forbids ownership stamping.
+                    identity_ok = False
+            created_lpar = confirmed_lpar if identity_ok else None
+            result = replace(result, lpar=created_lpar)
+        serial_step = await observe(
+            "serial_step",
+            serial_creation_step(
+                hmc, serial_admission, created_lpar, controller_mode=controller_mode
             )
-            if io_step is not None and io_step.status == "ok"
-            else WorkflowStep(
-                "apply_profile",
-                "skipped",
-                "I/O readback unverified; profile not applied",
-            )
+            if serial_admission is not None and created_lpar is None
+            else None,
         )
-    if (
-        memory_admission is not None
-        and apply_step is not None
-        and apply_step.status == "ok"
-    ):
-        assert memory_step is not None
-        memory_step = await creation_memory_step(
-            hmc,
-            memory_admission,
-            created_lpar,
-            controller_mode=controller_mode,
-            current=True,
-            saved=memory_step.result.saved,
-        )
-    if (
-        creation.physical_io.requested
-        or policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
-    ):
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
-    if not verify_before_apply:
-        settings_step = await _created_settings_step(
+        apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
+
+        if created_lpar is None:
+            if verify_before_apply and creation.stamp_policy == "required":
+                raise HMCError(
+                    f"{'Creation memory' if memory_requested else 'Affinity group' if affinity_requested else 'Serial' if serial_requested else 'Memory layout' if layout_requested else 'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
+                    "unavailable and ownership was not stamped. Inspect the contained "
+                    "partition before retrying; no rollback performed."
+                ) from None
+            if creation.stamp_policy == "required" and readback_error is not None:
+                raise HMCError(
+                    f"stamp_policy='required': mksyscfg created LPAR {creation.name!r} "
+                    f"but its read-back failed ({readback_error}), so it was not "
+                    f"stamped.{apply_note} The LPAR still exists — re-stamp it with "
+                    "set_lpar_ownership_description or delete it to release its "
+                    "resources."
+                ) from readback_error
+            if creation.stamp_policy == "required":
+                raise HMCError(
+                    "stamp_policy='required': cannot confirm the created LPAR "
+                    f"exists — the create returned no body for {creation.name!r}."
+                    f"{apply_note} Verify whether the partition was created before "
+                    "retrying; a created partition can be re-stamped with "
+                    "set_lpar_ownership_description."
+                )
+            if verify_before_apply:
+                skipped = "created identity readback unavailable; inspect the contained partition before retrying"
+            elif readback_error is None:
+                skipped = "create returned no LPAR body"
+            else:
+                skipped = f"read-back after mksyscfg failed: {readback_error}"
+            return LparCreationResult(
+                resource_created=True,
+                lpar=None,
+                ownership_stamped=None,
+                warnings=(
+                    *apply_warnings,
+                    f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
+                ),
+                apply_step=apply_step,
+                serial_step=serial_step,
+                creation_memory_step=await creation_memory_step(
+                    hmc, memory_admission, None, controller_mode=controller_mode
+                )
+                if memory_admission is not None
+                else None,
+                affinity_group_step=await created_affinity_group_step(
+                    hmc,
+                    system_uuid,
+                    None,
+                    creation.name,
+                    creation.partition_type,
+                    creation.affinity_group_id,
+                    controller_mode=controller_mode,
+                ),
+                memory_layout_step=await _created_memory_layout_step(
+                    hmc, None, creation, controller_mode=controller_mode
+                ),
+                hardware_memory_step=await created_hardware_memory_step(
+                    hmc,
+                    system_uuid,
+                    created_lpar,
+                    creation.name,
+                    creation.partition_type,
+                    creation.hardware_mem_encryption,
+                    creation.hardware_mem_expansion,
+                ),
+                security_policy_step=WorkflowStep(
+                    "security_policy",
+                    "error",
+                    "Created partition identity unavailable; policy unverified",
+                )
+                if policy_requested
+                else None,
+                physical_io_step=WorkflowStep(
+                    "physical_io",
+                    "error",
+                    "Created partition identity unavailable; I/O unverified",
+                )
+                if creation.physical_io.requested
+                else None,
+                settings_step=(
+                    WorkflowStep(
+                        "settings",
+                        "error",
+                        "Created partition readback unavailable; settings unverified",
+                    )
+                    if creation.settings.pairs() or start_requested
+                    else None
+                ),
+                vtpm_step=WorkflowStep(
+                    "vtpm", "error", "Created identity unavailable; vTPM unverified"
+                )
+                if creation.vtpm_settings.pairs()
+                else None,
+                reporting_step=(
+                    WorkflowStep(
+                        "reporting_settings",
+                        "error",
+                        "Created partition readback unavailable; reporting settings unverified",
+                    )
+                    if creation.reporting_settings.pairs()
+                    else None
+                ),
+            )
+        if verify_before_apply and (
+            not isinstance(created_lpar, dict)
+            or not isinstance(created_lpar.get("UUID"), str)
+            or not is_uuid(created_lpar["UUID"])
+            or not isinstance(created_lpar.get("Resource"), dict)
+            or created_lpar["Resource"].get("PartitionName") != creation.name
+        ):
+            if creation.stamp_policy == "required":
+                raise HMCError(
+                    "stamp_policy='required': creation may have occurred, but partition "
+                    "identity and ownership are unconfirmed. Inspect the contained "
+                    "partition before retrying; no rollback performed."
+                )
+            return LparCreationResult(
+                True,
+                None
+                if role_requested
+                or layout_requested
+                or memory_requested
+                or start_requested
+                or affinity_requested
+                else created_lpar,
+                None,
+                (),
+                settings_step=WorkflowStep(
+                    "settings",
+                    "error",
+                    "Created partition identity unconfirmed; roles unverified",
+                )
+                if role_requested or start_requested
+                else None,
+                memory_layout_step=await _created_memory_layout_step(
+                    hmc, None, creation, controller_mode=controller_mode
+                ),
+                security_policy_step=WorkflowStep(
+                    "security_policy",
+                    "error",
+                    "Created partition identity unconfirmed; inspect before retrying",
+                )
+                if policy_requested
+                else None,
+                affinity_group_step=await created_affinity_group_step(
+                    hmc,
+                    system_uuid,
+                    None,
+                    creation.name,
+                    creation.partition_type,
+                    creation.affinity_group_id,
+                    controller_mode=controller_mode,
+                ),
+                hardware_memory_step=await created_hardware_memory_step(
+                    hmc,
+                    system_uuid,
+                    created_lpar,
+                    creation.name,
+                    creation.partition_type,
+                    creation.hardware_mem_encryption,
+                    creation.hardware_mem_expansion,
+                ),
+                creation_memory_step=await creation_memory_step(
+                    hmc, memory_admission, None, controller_mode=controller_mode
+                )
+                if memory_admission is not None
+                else None,
+            )
+        ownership_stamped, warnings = await stamp_created_lpar_ownership(
             hmc,
             system_uuid,
-            system_name,
-            creation,
+            system_name or system_name_or_uuid,
             created_lpar,
-            controller_mode=controller_mode,
-            start_admission=start_admission,
+            caller_token=creation.caller_token,
         )
-        reporting_step = await _created_reporting_step(hmc, system_name, creation)
-        vtpm_step = await _created_vtpm_step(hmc, system_name, creation)
-    result = replace(
-        result,
-        warnings=(*apply_warnings, *warnings),
-        apply_step=apply_step,
-        settings_step=settings_step,
-        reporting_step=reporting_step,
-        vtpm_step=vtpm_step,
-        creation_memory_step=memory_step,
-    )
-    if (
-        role_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-    ):
-        safe_steps = {}
-        step_names = ("apply_step", "physical_io_step", "reporting_step", "vtpm_step")
+        result = replace(
+            result,
+            ownership_stamped=ownership_stamped,
+            warnings=(*apply_warnings, *warnings),
+        )
+        if creation.stamp_policy == "required" and ownership_stamped is not True:
+            resource = created_lpar.get("Resource") or {}
+            name = resource.get("PartitionName") or creation.name
+            uuid = created_lpar.get("UUID")
+            identity = (
+                f"{name!r} (UUID {uuid!r})" if uuid else f"{name!r} (UUID unknown)"
+            )
+            raise HMCError(
+                "stamp_policy='required': ownership stamping did not succeed for "
+                f"LPAR {identity}. {'; '.join((*apply_warnings, *warnings))} The "
+                "LPAR still exists — the create is not rolled back. Re-stamp it "
+                "with set_lpar_ownership_description (issue #376) or delete it to "
+                "release its resources."
+            )
+        serial_step = await observe(
+            "serial_step",
+            serial_creation_step(
+                hmc, serial_admission, created_lpar, controller_mode=controller_mode
+            )
+            if serial_admission is not None
+            else None,
+        )
+        memory_step = await observe(
+            "creation_memory_step",
+            creation_memory_step(
+                hmc, memory_admission, created_lpar, controller_mode=controller_mode
+            )
+            if memory_admission is not None
+            else None,
+        )
+        await observe(
+            "memory_layout_step",
+            _created_memory_layout_step(
+                hmc, system_name, creation, controller_mode=controller_mode
+            ),
+        )
+        await observe(
+            "affinity_group_step",
+            created_affinity_group_step(
+                hmc,
+                system_uuid,
+                created_lpar,
+                creation.name,
+                creation.partition_type,
+                creation.affinity_group_id,
+                controller_mode=controller_mode,
+            ),
+        )
+        await observe(
+            "hardware_memory_step",
+            created_hardware_memory_step(
+                hmc,
+                system_uuid,
+                created_lpar,
+                creation.name,
+                creation.partition_type,
+                creation.hardware_mem_encryption,
+                creation.hardware_mem_expansion,
+            ),
+        )
+        io_step = await observe(
+            "physical_io_step",
+            created_io_step(hmc, system_uuid, creation, created_lpar),
+        )
+        if io_step is not None and ownership_stamped is not True:
+            io_step = await observe(
+                "physical_io_step",
+                WorkflowStep(
+                    "physical_io",
+                    "error",
+                    "Partition exists but ownership stamp unconfirmed; I/O workflow stopped before apply",
+                ),
+            )
+        settings_step = await observe(
+            "settings_step",
+            _created_settings_step(
+                hmc,
+                system_uuid,
+                system_name,
+                creation,
+                created_lpar,
+                controller_mode=controller_mode,
+                start_admission=start_admission,
+            )
+            if verify_before_apply
+            else None,
+        )
+        reporting_step = await observe(
+            "reporting_step",
+            _created_reporting_step(hmc, system_name, creation)
+            if verify_before_apply
+            else None,
+        )
+        vtpm_step = await observe(
+            "vtpm_step",
+            _created_vtpm_step(hmc, system_name, creation)
+            if verify_before_apply
+            else None,
+        )
+        await observe(
+            "security_policy_step",
+            _created_security_policy_step(hmc, system_uuid, creation, created_lpar),
+        )
+        result = replace(
+            result,
+            lpar=created_lpar,
+            ownership_stamped=ownership_stamped,
+            warnings=(*apply_warnings, *warnings),
+        )
+        if verify_before_apply and creation.apply_profile is not None:
+            verified = _creation_steps_verified(creation, result)
+            apply_step = await observe(
+                "apply_step",
+                _apply_created_profile(
+                    hmc, system_name or system_name_or_uuid, creation
+                )
+                if verified and (not controller_mode)
+                else WorkflowStep(
+                    "apply_profile",
+                    "skipped",
+                    (
+                        _CONTROLLER_AFFINITY_PROFILELESS
+                        if affinity_requested
+                        else _CONTROLLER_CREATE_CONFIGURED
+                    )
+                    if controller_mode
+                    else "Creation verification incomplete; profile not applied",
+                ),
+            )
+        elif creation.physical_io.requested and creation.apply_profile is not None:
+            apply_step = await observe(
+                "apply_step",
+                _apply_created_profile(
+                    hmc, system_name or system_name_or_uuid, creation
+                )
+                if io_step is not None and io_step.status == "ok"
+                else WorkflowStep(
+                    "apply_profile",
+                    "skipped",
+                    "I/O readback unverified; profile not applied",
+                ),
+            )
         if (
-            hardware_requested
+            memory_admission is not None
+            and apply_step is not None
+            and apply_step.status == "ok"
+        ):
+            assert memory_step is not None
+            memory_step = await observe(
+                "creation_memory_step",
+                creation_memory_step(
+                    hmc,
+                    memory_admission,
+                    created_lpar,
+                    controller_mode=controller_mode,
+                    current=True,
+                    saved=memory_step.result.saved,
+                ),
+            )
+        if (
+            creation.physical_io.requested
+            or policy_requested
+            or hardware_requested
+            or layout_requested
+            or serial_requested
+            or memory_requested
+            or start_requested
+            or affinity_requested
+            or role_requested
+        ):
+            apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
+        if not verify_before_apply:
+            settings_step = await observe(
+                "settings_step",
+                _created_settings_step(
+                    hmc,
+                    system_uuid,
+                    system_name,
+                    creation,
+                    created_lpar,
+                    controller_mode=controller_mode,
+                    start_admission=start_admission,
+                ),
+            )
+            reporting_step = await observe(
+                "reporting_step", _created_reporting_step(hmc, system_name, creation)
+            )
+            vtpm_step = await observe(
+                "vtpm_step", _created_vtpm_step(hmc, system_name, creation)
+            )
+        result = replace(
+            result,
+            warnings=(*apply_warnings, *warnings),
+            apply_step=apply_step,
+            settings_step=settings_step,
+            reporting_step=reporting_step,
+            vtpm_step=vtpm_step,
+            creation_memory_step=memory_step,
+        )
+        if (
+            role_requested
+            or hardware_requested
             or layout_requested
             or serial_requested
             or memory_requested
             or start_requested
             or affinity_requested
         ):
-            step_names += (
-                "settings_step",
-                "security_policy_step",
-                "hardware_memory_step",
+            safe_steps = {}
+            step_names = (
+                "apply_step",
+                "physical_io_step",
+                "reporting_step",
+                "vtpm_step",
             )
-        for name in step_names:
-            step = getattr(result, name)
             if (
-                step is not None
-                and step.status == "error"
-                and isinstance(step.result, str)
+                hardware_requested
+                or layout_requested
+                or serial_requested
+                or memory_requested
+                or start_requested
+                or affinity_requested
             ):
-                safe_steps[name] = replace(
-                    step,
-                    result="Partition exists or may exist; creation step unverified. Inspect before retrying; no rollback performed.",
+                step_names += (
+                    "settings_step",
+                    "security_policy_step",
+                    "hardware_memory_step",
                 )
-        result = replace(result, **safe_steps)
-    return result
+            for name in step_names:
+                step = getattr(result, name)
+                if (
+                    step is not None
+                    and step.status == "error"
+                    and isinstance(step.result, str)
+                ):
+                    safe_steps[name] = replace(
+                        step,
+                        result="Partition exists or may exist; creation step unverified. Inspect before retrying; no rollback performed.",
+                    )
+            result = replace(result, **safe_steps)
+        return result
+    except HMCTLSFingerprintError:
+        return _tls_aborted_creation(creation, result, active_step)
+
+
+_TLS_CREATION_ABORTED = (
+    "TLS certificate identity verification failed after creation. The partition exists or "
+    "may exist; remaining work is unverified. Inspect before retrying; no further remote "
+    "calls or rollback were attempted."
+)
+
+
+def _creation_step_requests(
+    creation: LparCreation,
+) -> tuple[tuple[str, str, bool], ...]:
+    return (
+        (
+            "settings_step",
+            "settings",
+            bool(creation.settings.pairs()) or creation.start_settings.requested(),
+        ),
+        (
+            "reporting_step",
+            "reporting_settings",
+            bool(creation.reporting_settings.pairs()),
+        ),
+        ("vtpm_step", "vtpm", bool(creation.vtpm_settings.pairs())),
+        ("physical_io_step", "physical_io", creation.physical_io.requested),
+        (
+            "security_policy_step",
+            "security_policy",
+            bool(creation.security_policy.pairs()),
+        ),
+        (
+            "hardware_memory_step",
+            "hardware_memory",
+            bool(
+                hardware_memory_pairs(
+                    creation.hardware_mem_encryption, creation.hardware_mem_expansion
+                )
+            ),
+        ),
+        ("memory_layout_step", "memory_layout", bool(creation.memory_layout.pairs())),
+        (
+            "serial_step",
+            "virtual_serial_adapters",
+            bool(creation.virtual_serial_adapters),
+        ),
+        (
+            "creation_memory_step",
+            "creation_memory",
+            bool(creation.creation_memory.pairs()),
+        ),
+        (
+            "affinity_group_step",
+            "affinity_group",
+            creation.affinity_group_id is not None,
+        ),
+    )
+
+
+def _tls_aborted_creation(
+    creation: LparCreation, result: LparCreationResult, active_step: str | None
+) -> LparCreationResult:
+    requests = _creation_step_requests(creation)
+    updates: dict[str, Any] = {}
+    if active_step is not None:
+        previous = getattr(result, active_step)
+        label = next(
+            (label for field_name, label, _ in requests if field_name == active_step),
+            "apply_profile",
+        )
+        updates[active_step] = (
+            replace(previous, status="error")
+            if previous is not None
+            else WorkflowStep(label, "error", _TLS_CREATION_ABORTED)
+        )
+    for field_name, label, requested in requests:
+        if (
+            requested
+            and getattr(result, field_name) is None
+            and field_name not in updates
+        ):
+            updates[field_name] = WorkflowStep(label, "error", _TLS_CREATION_ABORTED)
+    if (
+        creation.apply_profile is not None
+        and result.apply_step is None
+        and "apply_step" not in updates
+    ):
+        updates["apply_step"] = WorkflowStep(
+            "apply_profile", "skipped", _TLS_CREATION_ABORTED
+        )
+    if not any(
+        step is not None and step.status == "error" for step in updates.values()
+    ):
+        # A failed ownership/identity read can precede every requested observation.
+        updates["settings_step"] = WorkflowStep(
+            "settings", "error", _TLS_CREATION_ABORTED
+        )
+    return replace(
+        result, warnings=(*result.warnings, _TLS_CREATION_ABORTED), **updates
+    )
 
 
 def _creation_steps_verified(
     creation: LparCreation, result: LparCreationResult
 ) -> bool:
-    required = (
-        (
-            creation.settings.pairs() or creation.start_settings.requested(),
-            result.settings_step,
-        ),
-        (creation.reporting_settings.pairs(), result.reporting_step),
-        (creation.vtpm_settings.pairs(), result.vtpm_step),
-        (creation.physical_io.requested, result.physical_io_step),
-        (creation.security_policy.pairs(), result.security_policy_step),
-        (
-            hardware_memory_pairs(
-                creation.hardware_mem_encryption, creation.hardware_mem_expansion
-            ),
-            result.hardware_memory_step,
-        ),
-        (creation.memory_layout.pairs(), result.memory_layout_step),
-        (creation.virtual_serial_adapters, result.serial_step),
-        (creation.creation_memory.pairs(), result.creation_memory_step),
-        (creation.affinity_group_id is not None, result.affinity_group_step),
-    )
     return result.ownership_stamped is True and all(
         not requested or (step is not None and step.status == "ok")
-        for requested, step in required
+        for field_name, _, requested in _creation_step_requests(creation)
+        for step in (getattr(result, field_name),)
     )
 
 
@@ -1283,6 +1438,8 @@ async def _created_memory_layout_step(
                 for name in names
                 if getattr(layout, name) is not None
             }
+        except HMCTLSFingerprintError:
+            raise
         except (HMCError, OSError, ValueError, PermissionError):
             warnings = (
                 "Saved memory layout readback unavailable; inspect before retrying",
@@ -1324,6 +1481,8 @@ async def _created_security_policy_step(
             getattr(observed.settings, name) == getattr(creation.security_policy, name)
             for name, _ in creation.security_policy.pairs()
         )
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, PermissionError):
         return WorkflowStep(
             "security_policy",
@@ -1342,6 +1501,8 @@ async def _created_vtpm_step(
         if cli_system is None:
             raise ValueError("Native vTPM creation did not retain its system identity")
         observed = await get_lpar_vtpm_state(hmc.config, cli_system, creation.name)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, PermissionError) as error:
         return WorkflowStep(
             "vtpm", "error", f"Partition exists; vTPM unverified: {error}"
@@ -1370,6 +1531,8 @@ async def _created_reporting_step(
             creation=True,
             require_ibmi=creation.reporting_settings.requires_ibmi(),
         )
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, PermissionError) as error:
         return WorkflowStep(
             "reporting_settings",
@@ -1433,6 +1596,8 @@ async def _created_legacy_settings_step(
                 )
                 if mode != "POWER10":
                     raise ValueError("Created POWER10 companion unverified")
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, PermissionError) as error:
         return WorkflowStep(
             "settings",

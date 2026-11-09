@@ -6,7 +6,7 @@ from typing import Any
 
 from ...client.core import HMCClient
 from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import (
     is_uuid,
     resolve_lpar_uuid,
@@ -83,6 +83,8 @@ async def created_affinity_group_step(
             "Virtual IO Server": "vioserver",
         }[environment]
         identity_confirmed = True
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, OSError, ValueError, TypeError, PermissionError):
         pass
     if identity_confirmed:

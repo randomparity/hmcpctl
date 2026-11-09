@@ -214,7 +214,7 @@ async def created_start_step(
     controller_mode: bool = False,
 ) -> WorkflowStep:
     """Observe each requested field on exactly its approved required planes."""
-    from ...errors import HMCError
+    from ...errors import HMCError, HMCTLSFingerprintError
     from .profiles import read_partition_profile
 
     observed: dict[str, object] = {}
@@ -291,6 +291,8 @@ async def created_start_step(
                 )
                 comparisons.append(actual == set(admission.controllers))
         status = "verified" if all(comparisons) else "mismatch"
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError, KeyError, PermissionError, OSError):
         status = "unavailable"
     return WorkflowStep(

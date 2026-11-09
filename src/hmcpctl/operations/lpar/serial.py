@@ -11,7 +11,7 @@ from ...documents.lpar_serial import (
     serial_name,
     validate_serial_input,
 )
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import is_uuid
 from ...ssh.lpar import resolve_system_cli_name
 from ...ssh.lpar_serial import SerialProfile, read_serial_profile
@@ -387,6 +387,8 @@ async def serial_creation_step(
                     else "unverified"
                 )
             pair["status"] = status
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError, KeyError) as error:
         result["observation_error"] = type(error).__name__
         return WorkflowStep("virtual_serial_adapters", "error", result)

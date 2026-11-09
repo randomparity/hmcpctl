@@ -9,7 +9,7 @@ from defusedxml.common import DefusedXmlException
 from ...client.core import HMCClient
 from ...documents.common import UOM_NS
 from ...documents.lpar_hardware_memory import hardware_memory_pairs
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
 from ...xmlutil import ATOM_NS, leaf_text
 from .workflow_contract import WorkflowStep
@@ -106,6 +106,8 @@ async def admit_hardware_memory(
             for native, capability, _ in _FIELDS
             if native in requested
         )
+    except HMCTLSFingerprintError:
+        raise
     except (
         HMCError,
         OSError,
@@ -171,6 +173,8 @@ async def created_hardware_memory_step(
             raise ValueError("Created partition identity or inactive state unavailable")
         memory = _one(resource, "PartitionMemoryConfiguration")
         observed = {rest: _boolean(_one(memory, rest)) for rest in observed}
+    except HMCTLSFingerprintError:
+        raise
     except (
         HMCError,
         OSError,
