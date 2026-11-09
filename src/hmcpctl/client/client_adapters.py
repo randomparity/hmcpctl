@@ -25,6 +25,17 @@ class AdaptersMixin:
     async def list_adapters(
         self: AdaptersClient, lpar_uuid: str, adapter_type: AdapterType
     ) -> list[dict[str, Any]]:
+        """List one adapter kind, requiring complete network-adapter inventory.
+
+        ClientNetworkAdapter returns [] only for a complete, empty Atom feed.
+        HTTP 204, blank responses, pagination and ambiguous network entries raise
+        HMCError. Other adapter kinds return [] for an empty successful response.
+
+        Raises:
+            ValueError: If adapter_type is unsupported or lpar_uuid is invalid.
+            HMCError: If the request fails, the response is malformed, or network
+                inventory is unavailable or incomplete.
+        """
         validate_adapter_type(adapter_type)
         if adapter_type == "ClientNetworkAdapter":
             return await self._network_adapter_creation_feed(lpar_uuid)

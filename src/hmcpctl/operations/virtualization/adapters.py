@@ -140,10 +140,16 @@ async def list_adapters(
     *,
     system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List one kind of virtual adapter on an LPAR.
+    """List one adapter kind on a resolved LPAR.
+
+    ClientNetworkAdapter requires complete inventory: an empty Atom feed returns
+    [], while HTTP 204, blank responses, pagination and ambiguous entries raise
+    HMCError. Other adapter kinds return [] for an empty successful response.
 
     Raises:
-        ValueError: If ``adapter_type`` is unsupported.
+        ValueError: If ``adapter_type`` is unsupported or selector scope is invalid.
+        HMCError: If lookup or listing fails, the response is malformed, or network
+            inventory is unavailable or incomplete.
     """
     validate_adapter_type(adapter_type)
     lpar_uuid = await resolve_lpar_uuid(
