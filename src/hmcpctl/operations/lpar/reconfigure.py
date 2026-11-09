@@ -21,6 +21,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
+from hmcpctl.operations.lpar.provisioning.core import (
+    PROFILE_JOB_MINIMUM,
+    virtual_disk_names,
+)
+from hmcpctl.operations.lpar.provisioning.operation import (
+    DISK_LEDGER,
+    _ledgered_elsewhere,
+)
+
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources, partition_updates
 from ...documents.partition_profile import ProfilePatch
@@ -45,8 +54,6 @@ from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
 from .power import open_client as _power_client
 from .profiles import read_partition_profile, update_partition_profile
-from .provision import PROFILE_JOB_MINIMUM, virtual_disk_names
-from .provision_operation import DISK_LEDGER, _ledgered_elsewhere
 from .reconfigure_media import (
     BOOT_KEY,
     BOOT_KIND,

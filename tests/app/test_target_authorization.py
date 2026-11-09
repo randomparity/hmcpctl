@@ -31,7 +31,10 @@ from hmcpctl.authorization.connection_scope import ConnectionScopeError
 from hmcpctl.authorization.dispatch_scope import dispatch_authorizer
 from hmcpctl.authorization.target_scope import TargetScopeError
 from hmcpctl.config import config_dir
-from hmcpctl.operations.lpar.provision import ProvisionAdapters, ProvisionStorage
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionAdapters,
+    ProvisionStorage,
+)
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 
 # Two grants that are individually narrow and, combined, would authorize a

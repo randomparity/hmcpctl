@@ -26,7 +26,10 @@ from hmcpctl.operations.lpar.migration import (
     remote_restart_lpar,
 )
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.lpar.provision import ProvisionStorage, attach_disk_to_lpar
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionStorage,
+    attach_disk_to_lpar,
+)
 from hmcpctl.operations.storage.resources import (
     map_storage,
     mount_optical_media,
@@ -94,7 +97,7 @@ CASES: tuple[tuple[str, Operation], ...] = (
         lambda hmc: unmount_optical_media(hmc, VIOS, LPAR, media_name="aix.iso"),
     ),
     (
-        "hmcpctl.operations.lpar.provision.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.lpar.provisioning.core.resolve_and_authorize_lpar_mutation",
         lambda hmc: attach_disk_to_lpar(
             hmc,
             LPAR,

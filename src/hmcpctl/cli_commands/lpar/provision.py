@@ -10,25 +10,26 @@ from typing import Any, cast
 import typer
 from rich.text import Text
 
-from ...client.core import HMCClient
-from ...documents.lpar import PARTITION_TYPES, LparResources, validate_partition_type
-from ...documents.storage import STORAGE_KINDS, StorageKind
-from ...operations.logical import engine, store
-from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
-from ...operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionResult,
     ProvisionStorage,
     preview_provision,
     validate_provision_assignments,
 )
-from ...operations.lpar.provision_operation import (
+from hmcpctl.operations.lpar.provisioning.operation import (
     json_value,
     provision_body,
     provision_classifiers,
     request_from_arguments,
     result_from_record,
 )
+
+from ...client.core import HMCClient
+from ...documents.lpar import PARTITION_TYPES, LparResources, validate_partition_type
+from ...documents.storage import STORAGE_KINDS, StorageKind
+from ...operations.logical import engine, store
+from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
 from ..output import (
     VerbatimTable,
     console,

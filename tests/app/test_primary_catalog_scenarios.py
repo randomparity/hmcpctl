@@ -44,9 +44,13 @@ from hmcpctl.authorization.access_policy import (
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
 from hmcpctl.operations.logical import engine
 from hmcpctl.operations.lpar import inspect as inspect_module
-from hmcpctl.operations.lpar import power, provision_operation
-from hmcpctl.operations.lpar.provision import ProvisionAdapters, ProvisionStorage
-from hmcpctl.operations.lpar.provision_operation import json_value
+from hmcpctl.operations.lpar import power
+from hmcpctl.operations.lpar.provisioning import operation as provision_operation
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionAdapters,
+    ProvisionStorage,
+)
+from hmcpctl.operations.lpar.provisioning.operation import json_value
 from hmcpctl.server import PRIMARY_TOOLS, TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar import provision as provision_tool
 

@@ -90,7 +90,7 @@ SELECTOR_FAMILY = [
     ("hmcpctl.operations.lpar.ownership", "resolve_and_authorize_lpar_mutation", True),
     ("hmcpctl.operations.lpar.ownership", "resolve_and_authorize_lpar_names", False),
     ("hmcpctl.operations.lpar.ownership", "set_lpar_ownership_description", False),
-    ("hmcpctl.operations.lpar.provision", "attach_disk_to_lpar", True),
+    ("hmcpctl.operations.lpar.provisioning.core", "attach_disk_to_lpar", True),
     ("hmcpctl.operations.virtualization.adapters", "list_adapters", True),
     ("hmcpctl.operations.virtualization.adapters", "add_network_adapter", True),
     ("hmcpctl.operations.virtualization.adapters", "add_vscsi_adapter", True),

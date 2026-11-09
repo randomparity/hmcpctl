@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from hmcpctl.operations.lpar.provisioning.core import (
+    AttachDiskResult,
+    ProvisionStorage,
+    attach_disk_to_lpar,
+)
+
 from ..._app import (
     run_limited_collection,
     serialize_tool_result,
@@ -16,11 +22,6 @@ from ...jobs import (
     LuType,
 )
 from ...operations.lpar.profile_sync import resource_with_change_location
-from ...operations.lpar.provision import (
-    AttachDiskResult,
-    ProvisionStorage,
-    attach_disk_to_lpar,
-)
 from ...operations.storage.cluster import (
     create_logical_unit,
     delete_logical_unit,

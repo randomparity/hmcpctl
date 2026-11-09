@@ -205,7 +205,7 @@ wildcard records the operation's actual scope.
 | `add_vfc_adapter` | `operations/virtualization/adapters.py::add_vfc_adapter` | guarded (`operations/virtualization/adapters.py::add_vfc_adapter`) | #372 |
 | `delete_adapter` | `operations/virtualization/adapters.py::delete_adapter` | guarded (`operations/virtualization/adapters.py::delete_adapter`) | #372 |
 | `map_storage` | `operations/storage/resources.py::map_storage` | guarded (`operations/storage/resources.py::map_storage`) | #372 |
-| `attach_disk_to_lpar` | `operations/lpar/provision.py::attach_disk_to_lpar` | guarded (`operations/lpar/provision.py::attach_disk_to_lpar`) | #372 |
+| `attach_disk_to_lpar` | `operations/lpar/provisioning/core.py::attach_disk_to_lpar` | guarded (`operations/lpar/provisioning/core.py::attach_disk_to_lpar`) | #372 |
 | `mount_optical_media` | `operations/storage/resources.py::mount_optical_media` | guarded (`operations/storage/resources.py::mount_optical_media`) | — |
 | `unmount_optical_media` | `operations/storage/resources.py::unmount_optical_media` | guarded (`operations/storage/resources.py::unmount_optical_media`) | — |
 | `load_optical_media` | `operations/storage/resources.py::load_optical_media` | guarded via `operations/storage/resources.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
@@ -282,7 +282,7 @@ LPAR-mutating exemption.
 | Operation | Reason |
 |---|---|
 | `create_and_stamp_lpar` (`operations/lpar/core.py::create_and_stamp_lpar`) | Creates the partition. No prior owner exists to authorize against; it stamps the token instead (ADR 0011). |
-| `provision_body` (`operations/lpar/provision_operation.py::provision_body`) | Composite create-and-stamp (ADR 0313). Its post-create legs act on the partition it just created and owns, inside one operation. |
+| `provision_body` (`operations/lpar/provisioning/operation.py::provision_body`) | Composite create-and-stamp (ADR 0313). Its post-create legs act on the partition it just created and owns, inside one operation. |
 | `deploy_partition_template` (`operations/templates/core.py::deploy_partition_template`) | Creates the partition and stamps it per ADR 0014. |
 | `hmc_capture_lpar_console` (`server_tools/console.py::hmc_capture_lpar_console`) | Holds a console session and releases it. Changes no partition existence, configuration or run state. |
 | `hmc_backup_lpar_profiles` (`server_tools/lpar/profiles.py::hmc_backup_lpar_profiles`) | Reads every profile and writes an HMC-side backup file; it does not mutate a partition or profile. |

@@ -359,7 +359,7 @@ def test_capacity_cli_preserves_connection_overrides():
 
 def test_provision_cli_delegates_to_neutral_operation():
     client = object()
-    from hmcpctl.operations.lpar.provision import ProvisionResult
+    from hmcpctl.operations.lpar.provisioning.core import ProvisionResult
 
     provision = AsyncMock(
         return_value=ProvisionResult(False, False, None, True, None, (), ())

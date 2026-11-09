@@ -1,6 +1,6 @@
 """Presentation-neutral LPAR provisioning: request types, preconditions and legs.
 
-``provision_operation`` runs the legs as one journaled operation (ADR 0313);
+``provisioning.operation`` runs the legs as one journaled operation (ADR 0313);
 ``preview_provision`` is the dry run, which validates preconditions only.
 """
 
@@ -12,50 +12,33 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_location
-
-from ...documents.lpar import (
+from hmcpctl.documents.lpar import (
     LparResources,
     PartitionType,
     reject_update_weight_on_create,
     validate_partition_type,
 )
-from ...documents.lpar_io import LparPhysicalIO
-from ...documents.storage import StorageKind, validate_virtual_disk
-from ...errors import HMCError
-from ...jobs import JobOutcome, job_outcome
-from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
-from ...ssh.affinity import (
-    MinimumAffinityPolicy,
-    require_minimum_affinity_policy_capability,
-    validate_minimum_affinity_policy,
-)
-from ...ssh.lpar import DEFAULT_PROFILE_NAME, validate_caller_token
-from ...ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
-from ...ssh.selectors import resolve_ssh_names
-from ...ssh.transport import HMCCLIError
-from ...xmlutil import console_version, leaf_text
-from ..affinity.rest import (
+from hmcpctl.documents.lpar_io import LparPhysicalIO
+from hmcpctl.documents.storage import StorageKind, validate_virtual_disk
+from hmcpctl.errors import HMCError
+from hmcpctl.jobs import JobOutcome, job_outcome
+from hmcpctl.operations.affinity.rest import (
     ProvisionAffinityAssessment,
     assess_post_activation_affinity,
     validate_affinity_request,
 )
-from ..logical.models import OperationRecord
-from ..storage.resources import (
-    create_virtual_disk,
-    require_allowlisted_iso_url,
-    resolve_volume_group_uuid,
-)
-from ..virtualization.pcie import list_dedicated_slots
-from .activation import submit_power_on_lpar
-from .assignments import (
+from hmcpctl.operations.logical.models import OperationRecord
+from hmcpctl.operations.lpar.activation import submit_power_on_lpar
+from hmcpctl.operations.lpar.assignments import (
     LparPcieAssignments,
     assignment_step_names,
     prevalidate_lpar_pcie_assignments,
 )
-from .core import LparCreation
-from .install_media import (
+from hmcpctl.operations.lpar.core import LparCreation
+from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
+from hmcpctl.operations.lpar.physical_io import admit_creation_io
+from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_location
+from hmcpctl.operations.lpar.provisioning.media import (
     Boot,
     LparInstall,
     bind_prepared,
@@ -64,8 +47,24 @@ from .install_media import (
     check_mac,
     repository_group,
 )
-from .physical_io import admit_creation_io
-from .workflow_contract import WorkflowStep
+from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.operations.storage.resources import (
+    create_virtual_disk,
+    require_allowlisted_iso_url,
+    resolve_volume_group_uuid,
+)
+from hmcpctl.operations.virtualization.pcie import list_dedicated_slots
+from hmcpctl.resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
+from hmcpctl.ssh.affinity import (
+    MinimumAffinityPolicy,
+    require_minimum_affinity_policy_capability,
+    validate_minimum_affinity_policy,
+)
+from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME, validate_caller_token
+from hmcpctl.ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
+from hmcpctl.ssh.selectors import resolve_ssh_names
+from hmcpctl.ssh.transport import HMCCLIError
+from hmcpctl.xmlutil import console_version, leaf_text
 
 
 @dataclass(frozen=True)

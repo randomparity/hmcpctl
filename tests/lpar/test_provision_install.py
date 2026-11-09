@@ -18,17 +18,7 @@ from hmcpctl.errors import HMCError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar import provision_operation, reconfigure_media
-from hmcpctl.operations.lpar.install_media import (
-    UNVERIFIED,
-    InstallMedia,
-    InstallNetwork,
-    InstallRoute,
-    LparInstall,
-    MediaMismatch,
-    media_name_for,
-)
-from hmcpctl.operations.lpar.media_build import BuildFailed
+from hmcpctl.operations.lpar import reconfigure_media
 from hmcpctl.operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,
@@ -38,7 +28,9 @@ from hmcpctl.operations.lpar.plan import (
     _intended_changes,
     check_request,
 )
-from hmcpctl.operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning import operation as provision_operation
+from hmcpctl.operations.lpar.provisioning.build import BuildFailed
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionRequest,
     ProvisionStorage,
@@ -46,7 +38,16 @@ from hmcpctl.operations.lpar.provision import (
     preflight_install,
     validate_provision_install,
 )
-from hmcpctl.operations.lpar.provision_operation import (
+from hmcpctl.operations.lpar.provisioning.media import (
+    UNVERIFIED,
+    InstallMedia,
+    InstallNetwork,
+    InstallRoute,
+    LparInstall,
+    MediaMismatch,
+    media_name_for,
+)
+from hmcpctl.operations.lpar.provisioning.operation import (
     DISK_LEDGER,
     EFFECT_KINDS,
     MEDIA_LEDGER,
@@ -575,7 +576,7 @@ def test_a_pinned_mac_adapter_that_differs_needs_attention():
 def test_the_readback_requires_the_optical_adapter_slot():
     import xml.etree.ElementTree as ET
 
-    from hmcpctl.operations.lpar.provision_operation import _vscsi_in_slot
+    from hmcpctl.operations.lpar.provisioning.operation import _vscsi_in_slot
 
     ns = "{http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/}"
     root = ET.Element(f"{ns}LogicalPartitionProfile")

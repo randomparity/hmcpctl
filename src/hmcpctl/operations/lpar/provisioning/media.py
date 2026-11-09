@@ -3,7 +3,7 @@
 The install input types and their field checks are shared with ``hmc_plan_lpar``.
 ``bind_prepared`` and ``bind_built`` check an iso-chain-loader ``iso-chain-media-v1``
 producer result against the request (ADR 0191 Decision 3, ADR 0324); the media steps
-that use it run in ``provision_operation`` (ADR 0319). Nothing here writes to the HMC, and no message
+that use it run in ``provisioning.operation`` (ADR 0319). Nothing here writes to the HMC, and no message
 echoes a key, URL or producer-result value.
 """
 
@@ -17,10 +17,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from ...client.core import HMCClient
-from ...errors import HMCError
-from ...xmlutil import leaf_text
-from ..storage.resources import require_allowlisted_iso_url
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.storage.resources import require_allowlisted_iso_url
+from hmcpctl.xmlutil import leaf_text
 
 InstallProfile = Literal["ubuntu-26.04.1", "rocky-9.8"]
 INSTALL_PROFILES: tuple[str, ...] = ("ubuntu-26.04.1", "rocky-9.8")

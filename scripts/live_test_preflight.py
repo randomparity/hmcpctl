@@ -76,7 +76,7 @@ from live_test import config as live_config
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, env_var_value
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.provision import check_vlan_exists
+from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists
 from hmcpctl.operations.virtualization.pcie import (
     require_admitted_environment,
 )

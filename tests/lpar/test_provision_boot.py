@@ -25,10 +25,11 @@ from hmcpctl.operations.logical import engine
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
 from hmcpctl.operations.logical.store import OperationRefused
-from hmcpctl.operations.lpar import provision_boot, provision_operation
-from hmcpctl.operations.lpar.install_media import UNVERIFIED, media_name_for
-from hmcpctl.operations.lpar.provision_boot import newer_rows, wait_for_boot
-from hmcpctl.operations.lpar.provision_operation import (
+from hmcpctl.operations.lpar.provisioning import boot as provision_boot
+from hmcpctl.operations.lpar.provisioning import operation as provision_operation
+from hmcpctl.operations.lpar.provisioning.boot import newer_rows, wait_for_boot
+from hmcpctl.operations.lpar.provisioning.media import UNVERIFIED, media_name_for
+from hmcpctl.operations.lpar.provisioning.operation import (
     EFFECT_KINDS,
     provision_body,
     provision_classifiers,

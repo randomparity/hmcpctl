@@ -82,7 +82,7 @@ def test_schema_refuses_coercions_and_unknown_keys(payload):
 )
 def test_provision_cli_preserves_creation_state(capsys, created, expected):
     from hmcpctl.cli_commands.lpar.provision import _render_provision_result
-    from hmcpctl.operations.lpar.provision import ProvisionResult
+    from hmcpctl.operations.lpar.provisioning.core import ProvisionResult
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     guidance = "Inspect the scoped partition and profile before retrying"

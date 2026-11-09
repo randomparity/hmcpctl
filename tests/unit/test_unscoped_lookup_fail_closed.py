@@ -24,7 +24,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
-from hmcpctl.operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionRequest,
     ProvisionStorage,
@@ -207,7 +207,10 @@ async def test_provision_refuses_before_any_write_when_the_target_cannot_be_read
         patch(
             "hmcpctl.operations.lpar.core.create_lpar_via_cli", new=AsyncMock()
         ) as via_cli,
-        patch("hmcpctl.operations.lpar.provision._check_profile_jobs", new=AsyncMock()),
+        patch(
+            "hmcpctl.operations.lpar.provisioning.core._check_profile_jobs",
+            new=AsyncMock(),
+        ),
         pytest.raises(HMCError) as raised,
     ):
         async with HMCClient(make_config()) as hmc:

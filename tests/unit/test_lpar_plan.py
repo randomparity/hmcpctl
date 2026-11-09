@@ -18,12 +18,6 @@ from hmcpctl.operations.lpar.assignments import (
     LparPcieAssignments,
     SriovLogicalPortAssignment,
 )
-from hmcpctl.operations.lpar.install_media import (
-    InstallMedia,
-    InstallNetwork,
-    InstallRoute,
-    LparInstall,
-)
 from hmcpctl.operations.lpar.plan import (
     CAPACITY_TOOL,
     NETWORKS_TOOL,
@@ -46,6 +40,12 @@ from hmcpctl.operations.lpar.plan import (
     plan_digest,
     plan_lpar,
     required_tools,
+)
+from hmcpctl.operations.lpar.provisioning.media import (
+    InstallMedia,
+    InstallNetwork,
+    InstallRoute,
+    LparInstall,
 )
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy
 

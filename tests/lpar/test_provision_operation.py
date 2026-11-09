@@ -15,12 +15,12 @@ from hmcpctl.documents.partition_profile import apply_profile_patch
 from hmcpctl.operations.logical import engine
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionRequest,
     ProvisionStorage,
 )
-from hmcpctl.operations.lpar.provision_operation import (
+from hmcpctl.operations.lpar.provisioning.operation import (
     EFFECT_KINDS,
     expected_profile,
     provision_classifiers,
@@ -409,7 +409,7 @@ def test_installer_media_needs_its_vscsi_adapter_in_the_saved_profile():
 
 def test_a_running_operation_reports_no_step_for_a_write_in_flight():
     from hmcpctl.operations.logical.models import OperationRecord
-    from hmcpctl.operations.lpar.provision_operation import result_from_record
+    from hmcpctl.operations.lpar.provisioning.operation import result_from_record
 
     effects = (
         EffectRecord(
@@ -445,7 +445,7 @@ def test_a_running_operation_reports_no_step_for_a_write_in_flight():
 
 def test_a_paused_result_carries_the_engine_s_reason():
     from hmcpctl.operations.logical.models import OperationRecord
-    from hmcpctl.operations.lpar.provision_operation import result_from_record
+    from hmcpctl.operations.lpar.provisioning.operation import result_from_record
 
     effects = (
         EffectRecord(

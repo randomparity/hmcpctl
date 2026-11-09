@@ -15,60 +15,47 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from ...client.client_storage import mapping_lpar_uuid
-from ...client.core import HMCClient
-from ...documents.lpar import LparResources, validate_partition_type
-from ...documents.partition_profile import ProfilePatch
-from ...errors import HMCError
-from ...jobs import JobOutcome, job_identifier
-from ...resource_identity import resolve_system_uuid
-from ...ssh.affinity import MinimumAffinityPolicy
-from ...ssh.lpar import apply_lpar_profile_via_cli
-from ...ssh.refcodes import list_lpar_refcodes
-from ...ssh.selectors import resolve_ssh_names
-from ...ssh.transport import HMCCLIError
-from ...xmlutil import leaf_text, localname
-from ..affinity.ssh import set_minimum_affinity_policy
-from ..logical import engine, profile_write, store
-from ..logical.engine import (
+from hmcpctl.client.client_storage import mapping_lpar_uuid
+from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.lpar import LparResources, validate_partition_type
+from hmcpctl.documents.partition_profile import ProfilePatch
+from hmcpctl.errors import HMCError
+from hmcpctl.jobs import JobOutcome, job_identifier
+from hmcpctl.operations.affinity.ssh import set_minimum_affinity_policy
+from hmcpctl.operations.logical import engine, profile_write, store
+from hmcpctl.operations.logical.engine import (
     BodyResult,
     Classification,
     EffectNotApplied,
     OperationContext,
     OperationFailed,
 )
-from ..logical.models import EffectRecord, OperationRecord
-from ..storage.resources import mount_optical_media, storage_mapping, upload_iso
-from .activation import ACTIVATED_STATES
-from .assignments import (
+from hmcpctl.operations.logical.models import EffectRecord, OperationRecord
+from hmcpctl.operations.lpar.activation import ACTIVATED_STATES
+from hmcpctl.operations.lpar.assignments import (
     LparPcieAssignments,
     apply_validated_lpar_pcie_assignments,
     assignment_step_names,
 )
-from .boot_order import read_lpar_boot_order, set_lpar_boot_order
-from .core import LparCreation, create_and_stamp_lpar
-from .install_media import (
-    UNVERIFIED,
-    MediaBinding,
-    MediaMismatch,
-    bind_built,
-    bind_prepared,
-    client_slot,
-    device_path,
-    media_name_for,
-    parse_result,
-    repository_group,
-    target_request,
-)
-from .media_build import run_build_entry
-from .ownership import (
+from hmcpctl.operations.lpar.boot_order import read_lpar_boot_order, set_lpar_boot_order
+from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.ownership import (
     lpar_ownership_entry,
     parse_lpar_ownership_caller_token,
     stamp_created_lpar_ownership,
 )
-from .power import open_client
-from .profiles import save_current_partition_profile, set_default_partition_profile
-from .provision import (
+from hmcpctl.operations.lpar.power import open_client
+from hmcpctl.operations.lpar.profiles import (
+    save_current_partition_profile,
+    set_default_partition_profile,
+)
+from hmcpctl.operations.lpar.provisioning.boot import (
+    REFCODE_ROWS,
+    row_identity,
+    wait_for_boot,
+)
+from hmcpctl.operations.lpar.provisioning.build import run_build_entry
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionRequest,
     ProvisionResult,
     _add_network,
@@ -85,8 +72,32 @@ from .provision import (
     validate_provision_storage,
     virtual_disk_names,
 )
-from .provision_boot import REFCODE_ROWS, row_identity, wait_for_boot
-from .workflow_contract import WorkflowStep
+from hmcpctl.operations.lpar.provisioning.media import (
+    UNVERIFIED,
+    MediaBinding,
+    MediaMismatch,
+    bind_built,
+    bind_prepared,
+    client_slot,
+    device_path,
+    media_name_for,
+    parse_result,
+    repository_group,
+    target_request,
+)
+from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.operations.storage.resources import (
+    mount_optical_media,
+    storage_mapping,
+    upload_iso,
+)
+from hmcpctl.resource_identity import resolve_system_uuid
+from hmcpctl.ssh.affinity import MinimumAffinityPolicy
+from hmcpctl.ssh.lpar import apply_lpar_profile_via_cli
+from hmcpctl.ssh.refcodes import list_lpar_refcodes
+from hmcpctl.ssh.selectors import resolve_ssh_names
+from hmcpctl.ssh.transport import HMCCLIError
+from hmcpctl.xmlutil import leaf_text, localname
 
 ClientFactory = Callable[[str], HMCClient]
 # Persisted contract (ADR 0313 Decision 3): never change while an operation can be open.

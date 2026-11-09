@@ -12,6 +12,23 @@ from typing import Any, Literal
 
 from fastmcp import FastMCP
 
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionAdapters,
+    ProvisionRequest,
+    ProvisionResult,
+    ProvisionStorage,
+    preview_provision,
+)
+from hmcpctl.operations.lpar.provisioning.media import Boot, LparInstall
+from hmcpctl.operations.lpar.provisioning.operation import (
+    DEFAULT_ARGUMENTS,
+    json_value,
+    provision_body,
+    provision_classifiers,
+    request_from_arguments,
+    result_from_record,
+)
+
 from ..._app import with_client
 from ...config import build_config
 from ...documents.lpar import LparResources, PartitionType
@@ -21,7 +38,6 @@ from ...operations.logical import engine, store
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.store import OperationRefused, connection_label
 from ...operations.lpar.assignments import LparPcieAssignments
-from ...operations.lpar.install_media import Boot, LparInstall
 from ...operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,
@@ -29,21 +45,6 @@ from ...operations.lpar.plan import (
     check_request,
     plan_lpar,
     required_tools,
-)
-from ...operations.lpar.provision import (
-    ProvisionAdapters,
-    ProvisionRequest,
-    ProvisionResult,
-    ProvisionStorage,
-    preview_provision,
-)
-from ...operations.lpar.provision_operation import (
-    DEFAULT_ARGUMENTS,
-    json_value,
-    provision_body,
-    provision_classifiers,
-    request_from_arguments,
-    result_from_record,
 )
 from ...ssh.affinity import MinimumAffinityPolicy
 from ...tool_registry import (

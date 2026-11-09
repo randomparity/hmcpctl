@@ -372,7 +372,7 @@ def _run_provision_body(request, partitions=()):
     """Run provision's engine body once against a fake HMC; return the record."""
     from hmcpctl.operations.logical import engine
     from hmcpctl.operations.logical.engine import OperationRequest
-    from hmcpctl.operations.lpar.provision_operation import provision_body
+    from hmcpctl.operations.lpar.provisioning.operation import provision_body
 
     class Fake:
         config = SimpleNamespace(agent_id=None)
@@ -394,8 +394,9 @@ def _run_provision_body(request, partitions=()):
 @pytest.mark.asyncio
 async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import provision, provision_operation
     from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.provisioning import core as provision
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     request = provision.ProvisionRequest(
@@ -599,7 +600,8 @@ async def test_provision_unknown_create_preserves_uncertainty_and_stops_legs(
 ):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar import provision, provision_operation
+    from hmcpctl.operations.lpar.provisioning import core as provision
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 
     request = provision.ProvisionRequest(
         "new",

@@ -16,6 +16,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
+from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists
+from hmcpctl.operations.lpar.provisioning.operation import mac_colon_form
+
 from ...client.core import HMCClient
 from ...errors import HMCError
 from ...xmlutil import leaf_text
@@ -28,8 +31,6 @@ from ..logical.engine import (
 )
 from ..logical.models import EffectRecord
 from ..virtualization.adapters import classified_add_refusal
-from .provision import check_vlan_exists
-from .provision_operation import mac_colon_form
 
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 ADD_KIND = "lpar.client_network_adapter"
@@ -46,7 +47,7 @@ Opener = Callable[[str], Any]
 
 
 def _unicast(mac: str) -> str:
-    """*mac* when it is a unicast lower-case colon MAC (``install_media.check_mac``'s rule)."""
+    """*mac* when it is a unicast lower-case colon MAC (``provisioning.media.check_mac``'s rule)."""
     if not _MAC.fullmatch(mac) or int(mac[:2], 16) & 1:
         raise ValueError("a MAC must be a unicast address in lower-case colon form")
     return mac

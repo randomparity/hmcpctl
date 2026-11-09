@@ -7,7 +7,7 @@ from conftest import assert_only_these_client_methods_used
 
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.assignments import WorkflowStep
-from hmcpctl.operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     AttachDiskResult,
     ProvisionStorage,
     attach_disk_to_lpar,
@@ -24,7 +24,7 @@ def _authorize_lpar_mutations(monkeypatch):
         return lpar
 
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.provision.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.lpar.provisioning.core.resolve_and_authorize_lpar_mutation",
         authorize,
     )
 

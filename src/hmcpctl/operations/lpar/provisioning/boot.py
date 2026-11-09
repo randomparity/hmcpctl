@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from ...ssh.transport import HMCCLIError
+from hmcpctl.ssh.transport import HMCCLIError
 
 # Codes that mean the installer boot has started, observed in both native windows
 # (ADR 0328): CA00E105, partition firmware passing control to the boot image. Only

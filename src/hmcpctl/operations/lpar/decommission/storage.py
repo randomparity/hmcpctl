@@ -32,8 +32,8 @@ from hmcpctl.operations.lpar.decommission.core import (
     _vscsi_detach_inventory,
     unmap_key,
 )
-from hmcpctl.operations.lpar.install_media import repository_group
-from hmcpctl.operations.lpar.provision_operation import DISK_LEDGER, MEDIA_LEDGER
+from hmcpctl.operations.lpar.provisioning.media import repository_group
+from hmcpctl.operations.lpar.provisioning.operation import DISK_LEDGER, MEDIA_LEDGER
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.xmlutil import leaf_text
 

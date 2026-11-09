@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 from hmcpctl import cli
 from hmcpctl.cli_commands.storage import resources as storage
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.lpar.provision import AttachDiskResult
+from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.operations.storage.resources import StorageMutationResult
 
@@ -232,7 +232,7 @@ from dataclasses import asdict
 from hmcpctl import cli
 from hmcpctl.cli_commands.storage import resources
 from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.lpar.provision import AttachDiskResult
+from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.operations.storage.resources import StorageMutationResult
 data = {data!r}

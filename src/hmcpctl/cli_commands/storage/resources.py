@@ -14,14 +14,14 @@ import typer
 from typer._click.globals import get_current_context
 
 from hmcpctl.client.core import HMCClient
-
-from ...documents.storage import StorageKind, validate_virtual_disk
-from ...operations.lpar.profile_sync import ChangeLocation
-from ...operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     AttachDiskResult,
     ProvisionStorage,
     attach_disk_to_lpar,
 )
+
+from ...documents.storage import StorageKind, validate_virtual_disk
+from ...operations.lpar.profile_sync import ChangeLocation
 from ...operations.storage.resources import (
     StorageMutationResult,
     create_media_repository,

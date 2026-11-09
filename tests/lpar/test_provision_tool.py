@@ -56,7 +56,7 @@ from hmcpctl.operations.lpar.plan import (
     check_request,
     plan_digest,
 )
-from hmcpctl.operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionAffinityAssessment,
     ProvisionRequest,
@@ -66,7 +66,7 @@ from hmcpctl.operations.lpar.provision import (
     preview_provision,
     validate_provision_assignments,
 )
-from hmcpctl.operations.lpar.provision_operation import mac_colon_form
+from hmcpctl.operations.lpar.provisioning.operation import mac_colon_form
 from hmcpctl.server_tools.catalog import TOOL_SECURITY
 from hmcpctl.server_tools.lpar.provision import delegated_tools, provision_handler
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy
@@ -137,7 +137,7 @@ class Persistence:
 @pytest.fixture(autouse=True)
 def persistence(monkeypatch):
     """Stub the profile primitives: their HMC jobs are #637's and tested there."""
-    from hmcpctl.operations.lpar import provision_operation
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 
     fake = Persistence()
     monkeypatch.setattr(
@@ -570,7 +570,7 @@ def test_provision_affinity_power_on_waits_for_terminal_result():
     terminal_job = {"Resource": {"Status": "COMPLETED_OK"}}
     hmc = object()
     with patch(
-        "hmcpctl.operations.lpar.provision.submit_power_on_lpar",
+        "hmcpctl.operations.lpar.provisioning.core.submit_power_on_lpar",
         new=AsyncMock(return_value=LparPowerResult(LPAR_UUID, terminal_job)),
     ) as power:
         result = asyncio.run(
@@ -596,7 +596,7 @@ def test_provision_affinity_dry_run_never_powers_on_or_assesses(monkeypatch, moc
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     with patch(
-        "hmcpctl.operations.lpar.provision.assess_post_activation_affinity",
+        "hmcpctl.operations.lpar.provisioning.core.assess_post_activation_affinity",
         new=AsyncMock(),
     ) as assess:
         result = hmc_provision_lpar(
@@ -635,11 +635,11 @@ def test_provision_affinity_response_is_explicit(
     _mock_execution_steps(mock_hmc)
     with (
         patch(
-            "hmcpctl.operations.lpar.provision_operation._power_on",
+            "hmcpctl.operations.lpar.provisioning.operation._power_on",
             new=AsyncMock(return_value=_successful_power_outcome()),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision.assess_post_activation_affinity",
+            "hmcpctl.operations.lpar.provisioning.core.assess_post_activation_affinity",
             new=AsyncMock(return_value=_assessment_result(classification)),
         ) as assess,
     ):
@@ -663,11 +663,11 @@ def test_provision_affinity_timeout_never_assesses(monkeypatch, mock_hmc):
     timed_out = JobOutcome("job-1", "RUNNING", True, None, {"Resource": {}}, True, None)
     with (
         patch(
-            "hmcpctl.operations.lpar.provision_operation._power_on",
+            "hmcpctl.operations.lpar.provisioning.operation._power_on",
             new=AsyncMock(return_value=timed_out),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision.assess_post_activation_affinity",
+            "hmcpctl.operations.lpar.provisioning.core.assess_post_activation_affinity",
             new=AsyncMock(),
         ) as assess,
     ):
@@ -693,7 +693,7 @@ def test_provision_keeps_its_result_when_the_power_guard_fails(monkeypatch, mock
     _mock_preconditions(mock_hmc)
     _mock_execution_steps(mock_hmc)
     with patch(
-        "hmcpctl.operations.lpar.provision_operation._power_on",
+        "hmcpctl.operations.lpar.provisioning.operation._power_on",
         new=AsyncMock(side_effect=ValueError("LPAR 'x' has no partition name")),
     ):
         result = hmc_provision_lpar(**_provision_args())
@@ -897,7 +897,7 @@ class SavedApply:
 @pytest.fixture
 def saved_apply(monkeypatch, persistence):
     """Stub the partition reads and the CLI apply; the default follows the save."""
-    from hmcpctl.operations.lpar import provision_operation
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 
     fake = SavedApply()
 
@@ -998,7 +998,7 @@ def test_an_unproven_apply_pauses_the_provision(
 def test_a_partition_without_a_name_is_never_applied(
     monkeypatch, mock_hmc, saved_apply
 ):
-    from hmcpctl.operations.lpar import provision_operation
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 
     async def unnamed(*_args):
         return None, None
@@ -1205,15 +1205,15 @@ def test_policy_provision_network_failure_records_each_step_once(monkeypatch, mo
     ).mock(return_value=httpx.Response(500))
     with (
         patch(
-            "hmcpctl.operations.lpar.provision.resolve_ssh_names",
+            "hmcpctl.operations.lpar.provisioning.core.resolve_ssh_names",
             AsyncMock(return_value=("system", None)),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision.require_minimum_affinity_policy_capability",
+            "hmcpctl.operations.lpar.provisioning.core.require_minimum_affinity_policy_capability",
             AsyncMock(),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision_operation.set_minimum_affinity_policy",
+            "hmcpctl.operations.lpar.provisioning.operation.set_minimum_affinity_policy",
             AsyncMock(return_value="changed"),
         ),
     ):
@@ -1354,11 +1354,11 @@ def test_provision_policy_rejects_unsupported_system_before_mutation(
     )
     with (
         patch(
-            "hmcpctl.operations.lpar.provision.resolve_ssh_names",
+            "hmcpctl.operations.lpar.provisioning.core.resolve_ssh_names",
             AsyncMock(return_value=("system", None)),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision.require_minimum_affinity_policy_capability",
+            "hmcpctl.operations.lpar.provisioning.core.require_minimum_affinity_policy_capability",
             AsyncMock(side_effect=HMCCLIError("POWER11 required")),
         ),
         pytest.raises(HMCCLIError, match="POWER11"),
@@ -1379,15 +1379,15 @@ def test_provision_applies_explicit_fail_policy_before_network(
     setter = AsyncMock(return_value="changed")
     with (
         patch(
-            "hmcpctl.operations.lpar.provision.resolve_ssh_names",
+            "hmcpctl.operations.lpar.provisioning.core.resolve_ssh_names",
             AsyncMock(return_value=("system", None)),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision.require_minimum_affinity_policy_capability",
+            "hmcpctl.operations.lpar.provisioning.core.require_minimum_affinity_policy_capability",
             AsyncMock(),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision_operation.set_minimum_affinity_policy",
+            "hmcpctl.operations.lpar.provisioning.operation.set_minimum_affinity_policy",
             setter,
         ),
     ):
@@ -1543,7 +1543,7 @@ def test_provision_pauses_when_create_returns_no_uuid(monkeypatch, mock_hmc):
     creation = LparCreationResult(True, None, None, (), apply_step)
 
     with patch(
-        "hmcpctl.operations.lpar.provision_operation.create_and_stamp_lpar",
+        "hmcpctl.operations.lpar.provisioning.operation.create_and_stamp_lpar",
         new=AsyncMock(return_value=creation),
     ):
         result = hmc_provision_lpar(**_provision_args())
@@ -1644,15 +1644,15 @@ def _slot_writes(persistence, results):
 def _provision_with(apply, **overrides):
     with (
         patch(
-            "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
+            "hmcpctl.operations.lpar.provisioning.core.prevalidate_lpar_pcie_assignments",
             new=AsyncMock(),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision._check_dedicated_slots_free",
+            "hmcpctl.operations.lpar.provisioning.core._check_dedicated_slots_free",
             new=AsyncMock(),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision_operation"
+            "hmcpctl.operations.lpar.provisioning.operation"
             ".apply_validated_lpar_pcie_assignments",
             new=apply,
         ),
@@ -1760,7 +1760,7 @@ def test_a_raising_slot_write_reports_its_own_step(monkeypatch, mock_hmc, persis
 
 
 def _slot_reads(monkeypatch, owner, io_slots):
-    from hmcpctl.operations.lpar import provision as provision_module
+    from hmcpctl.operations.lpar.provisioning import core as provision_module
 
     async def inventory(_hmc, _system):
         return SimpleNamespace(
@@ -1813,11 +1813,11 @@ def test_a_dry_run_lists_the_slot_after_the_readback(monkeypatch, mock_hmc):
     _mock_preconditions(mock_hmc)
     with (
         patch(
-            "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
+            "hmcpctl.operations.lpar.provisioning.core.prevalidate_lpar_pcie_assignments",
             new=AsyncMock(),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision._check_dedicated_slots_free",
+            "hmcpctl.operations.lpar.provisioning.core._check_dedicated_slots_free",
             new=AsyncMock(),
         ),
     ):
@@ -1919,7 +1919,7 @@ def test_capacity_creates_maps_and_ledgers_the_owned_disk(monkeypatch, mock_hmc)
     create_disk = AsyncMock(return_value={})
 
     with patch(
-        "hmcpctl.operations.lpar.provision_operation._create_disk", new=create_disk
+        "hmcpctl.operations.lpar.provisioning.operation._create_disk", new=create_disk
     ):
         result = hmc_provision_lpar(**_provision_args(storage=storage))
 
@@ -2218,11 +2218,11 @@ def test_an_assignment_error_never_resumes_to_completed(monkeypatch, mock_hmc):
     )
     with (
         patch(
-            "hmcpctl.operations.lpar.provision.prevalidate_lpar_pcie_assignments",
+            "hmcpctl.operations.lpar.provisioning.core.prevalidate_lpar_pcie_assignments",
             new=AsyncMock(),
         ),
         patch(
-            "hmcpctl.operations.lpar.provision_operation"
+            "hmcpctl.operations.lpar.provisioning.operation"
             ".apply_validated_lpar_pcie_assignments",
             new=AsyncMock(return_value=failed),
         ),
@@ -2375,7 +2375,7 @@ def test_a_raised_save_is_decided_by_the_profile_by_name(
             persistence.saved.append(name)
         raise ValueError("refused")
 
-    from hmcpctl.operations.lpar import provision_operation
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 
     monkeypatch.setattr(provision_operation, "save_current_partition_profile", refused)
     result = hmc_provision_lpar(**_provision_args())
@@ -2423,7 +2423,7 @@ def test_an_unconfirmed_default_is_decided_by_the_partition(
     async def partition(_hmc, _lpar):
         return {"DefaultProfileName": "default_profile"}
 
-    from hmcpctl.operations.lpar import provision_operation
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 
     monkeypatch.setattr(provision_operation, "set_default_partition_profile", unknown)
     monkeypatch.setattr(provision_operation, "_partition_resource", partition)

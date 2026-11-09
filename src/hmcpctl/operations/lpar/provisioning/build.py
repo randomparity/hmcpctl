@@ -15,8 +15,8 @@ import signal
 import tempfile
 from collections.abc import Generator
 
-from ...config import BUILD_TARGET
-from .install_media import MAX_PRODUCER_RESULT_BYTES
+from hmcpctl.config import BUILD_TARGET
+from hmcpctl.operations.lpar.provisioning.media import MAX_PRODUCER_RESULT_BYTES
 
 BUILD_TIMEOUT_SECONDS = 3600.0
 _CHUNK = 8192

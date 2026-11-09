@@ -17,6 +17,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
+from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists
+from hmcpctl.operations.lpar.provisioning.media import (
+    Boot,
+    LparInstall,
+    check_built_name,
+    check_install,
+    check_mac,
+)
+
 from ...documents.lpar import (
     LparResources,
     PartitionType,
@@ -40,14 +49,6 @@ from ..storage.resources import (
 )
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
-from .install_media import (
-    Boot,
-    LparInstall,
-    check_built_name,
-    check_install,
-    check_mac,
-)
-from .provision import check_vlan_exists
 
 MAX_SELECTORS = 16
 

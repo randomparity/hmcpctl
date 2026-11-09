@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hmcpctl.operations.lpar.provision_boot import BOOT_STARTED_CODES
+from hmcpctl.operations.lpar.provisioning.boot import BOOT_STARTED_CODES
 from hmcpctl.ssh.commands import build_filter
 
 from . import lpar_config, lpar_power

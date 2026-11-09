@@ -30,7 +30,7 @@ from pydantic import TypeAdapter  # noqa: E402
 from hmcpctl.errors import HMCError  # noqa: E402
 from hmcpctl.operations.logical.models import OperationRecord  # noqa: E402
 from hmcpctl.operations.lpar.assignments import LparPcieAssignments  # noqa: E402
-from hmcpctl.operations.lpar.provision import (  # noqa: E402
+from hmcpctl.operations.lpar.provisioning.core import (  # noqa: E402
     validate_provision_assignments,
 )
 from hmcpctl.ssh.profiles import profile_io_slot_rows_command  # noqa: E402

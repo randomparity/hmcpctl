@@ -11,6 +11,13 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from hmcpctl.operations.lpar.provisioning.media import device_path
+from hmcpctl.operations.lpar.provisioning.operation import (
+    DISK_LEDGER,
+    MEDIA_LEDGER,
+    PARTITION_LEDGER,
+)
+
 from ...client.core import HMCClient
 from ...errors import HMCError, LparUpdateError
 from ...xmlutil import leaf_text
@@ -24,8 +31,6 @@ from ..logical.engine import (
 from ..logical.models import EffectRecord
 from ..storage.resources import storage_mapping, unmount_optical_media
 from .boot_order import read_lpar_boot_order, set_lpar_boot_order
-from .install_media import device_path
-from .provision_operation import DISK_LEDGER, MEDIA_LEDGER, PARTITION_LEDGER
 
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 BOOT_KEY, BOOT_KIND = "boot", "lpar.boot_order"

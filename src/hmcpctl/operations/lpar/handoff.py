@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from hmcpctl.operations.lpar.decommission.core import resolve_target_lpar
+from hmcpctl.operations.lpar.provisioning.operation import PARTITION_LEDGER
 
 from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import resolve_system_uuid
@@ -25,7 +26,6 @@ from ..logical import holds, store
 from ..logical.holds import Hold
 from .inspect import Admit, Resources, SectionSource, read_resources
 from .ownership import lpar_ownership_entry
-from .provision_operation import PARTITION_LEDGER
 from .reconfigure_network import current_adapters
 
 ADAPTERS_TOOL = "hmc_list_adapters"
