@@ -11,12 +11,12 @@ from typing import Any, cast
 import pytest
 
 from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.affinity.rest import ProvisionAffinityAssessment
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
-    SriovLogicalPortAssignment,
 )
 from hmcpctl.operations.lpar.plan import (
     CAPACITY_TOOL,

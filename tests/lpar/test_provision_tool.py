@@ -27,6 +27,7 @@ from conftest import (
 )
 
 from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
 from hmcpctl.jobs import JobOutcome
 from hmcpctl.operations.affinity.rest import (
     AffinityAssessmentResult,
@@ -42,7 +43,6 @@ from hmcpctl.operations.lpar.assignments import (
     AssignmentResult,
     DedicatedPcieAssignment,
     LparPcieAssignments,
-    SriovLogicalPortAssignment,
     WorkflowStep,
 )
 from hmcpctl.operations.lpar.core import LparCreationResult

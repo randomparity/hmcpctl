@@ -8,6 +8,11 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
+from hmcpctl.operations.lpar.assignments import (
+    LparPcieAssignments,
+    prevalidate_lpar_pcie_assignments,
+)
 from hmcpctl.operations.lpar.errors import translate_lpar_write_error
 from hmcpctl.operations.lpar.memory_bound import require_memory_within_system
 from hmcpctl.operations.lpar.ownership import (
@@ -60,11 +65,6 @@ from ...ssh.profiles import get_lpar_proc_compat
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml, leaf_text
 from .affinity_group import created_affinity_group_step
-from .assignments import (
-    LparPcieAssignments,
-    SriovLogicalPortAssignment,
-    prevalidate_lpar_pcie_assignments,
-)
 from .configuration import configure_lpar_settings
 from .creation_memory import (
     CreationMemoryAdmission,

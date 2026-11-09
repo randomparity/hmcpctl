@@ -16,7 +16,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.common import UOM_NS
 from hmcpctl.documents.lpar import LparResources, LparSettings
-from hmcpctl.documents.lpar_io import LparPhysicalIO
+from hmcpctl.documents.lpar_io import LparPhysicalIO, SriovLogicalPortAssignment
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import assignments as assignment_ops
 from hmcpctl.operations.lpar import core, workflows
@@ -24,7 +24,6 @@ from hmcpctl.operations.lpar.assignments import (
     AssignmentResult,
     DedicatedPcieAssignment,
     LparPcieAssignments,
-    SriovLogicalPortAssignment,
     VnicAssignment,
 )
 from hmcpctl.operations.vios.core import create_vios

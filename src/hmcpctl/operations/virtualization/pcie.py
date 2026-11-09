@@ -10,12 +10,13 @@ from typing import Generic, Literal, NoReturn, TypeVar
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
-from hmcpctl.documents.lpar_io import DRC_INDEX_PATTERN, ProfileIoSlot
-from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
-from hmcpctl.operations.virtualization.validation import (
-    require_command_safe_text,
+from hmcpctl.documents.lpar_io import (
+    DRC_INDEX_PATTERN,
+    ProfileIoSlot,
     validate_capacity_percent,
 )
+from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
+from hmcpctl.ssh.commands import require_command_safe_text
 from hmcpctl.ssh.io_inventory import list_dedicated_pcie_slot_rows
 from hmcpctl.ssh.profiles import (
     assign_profile_io_slot,

@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass, field, fields
+from decimal import Decimal
 
 from pydantic import ConfigDict, StrictBool, StrictInt
 
@@ -157,3 +158,26 @@ class LparPhysicalIO:
             or self.tagged()
             or self.virtual_opti_pool_id is not None
         )
+
+
+@dataclass(frozen=True)
+class SriovLogicalPortAssignment:
+    """Direct SR-IOV logical-port assignment request."""
+
+    profile_name: str = field(metadata={"description": "Target HMC profile name."})
+    adapter_id: str = field(metadata={"description": "SR-IOV adapter identifier."})
+    physical_port_id: str = field(metadata={"description": "Physical-port identifier."})
+    logical_port_id: str = field(metadata={"description": "Logical-port identifier."})
+    capacity_percent: Decimal = field(
+        metadata={"description": "Requested decimal capacity percentage."}
+    )
+
+
+def validate_capacity_percent(value: Decimal) -> Decimal:
+    """Require a finite percentage from 1 through 100 with two decimal places."""
+    if not value.is_finite() or value < 1 or value > 100:
+        raise ValueError("capacity_percent must be between 1 and 100")
+    exponent = value.as_tuple().exponent
+    if isinstance(exponent, int) and exponent < -2:
+        raise ValueError("capacity_percent supports at most two decimal places")
+    return value

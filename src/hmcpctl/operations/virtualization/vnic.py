@@ -9,16 +9,14 @@ from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
+from hmcpctl.documents.lpar_io import validate_capacity_percent
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
 from hmcpctl.operations.virtualization.pcie import (
     eth_capacity_granularity,
     require_admitted_environment,
     require_capacity_granularity,
 )
-from hmcpctl.operations.virtualization.validation import (
-    require_command_safe_text,
-    validate_capacity_percent,
-)
+from hmcpctl.ssh.commands import require_command_safe_text
 from hmcpctl.ssh.io_inventory import (
     list_fc_ports as _list_fc_ports,
 )

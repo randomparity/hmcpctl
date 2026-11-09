@@ -822,9 +822,8 @@ async def test_controller_apply_rejected_and_classic_preserved(
 async def test_profile_io_admission_before_effects(creation_boundary, kind):
     from decimal import Decimal
 
-    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_io import LparPhysicalIO, SriovLogicalPortAssignment
     from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
-    from hmcpctl.operations.lpar.assignments import SriovLogicalPortAssignment
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
 
     b = creation_boundary
@@ -853,10 +852,10 @@ async def test_profile_io_admission_before_effects(creation_boundary, kind):
 async def test_profile_assignment_rejected_before_create(creation_boundary, kind):
     from decimal import Decimal
 
+    from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
     from hmcpctl.operations.lpar.assignments import (
         DedicatedPcieAssignment,
         LparPcieAssignments,
-        SriovLogicalPortAssignment,
     )
     from hmcpctl.operations.lpar.workflows import create_lpar
 

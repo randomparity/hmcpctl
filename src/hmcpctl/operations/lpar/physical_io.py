@@ -5,6 +5,12 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
+from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
+from hmcpctl.operations.lpar.assignments import (
+    LparPcieAssignments,
+    prevalidate_lpar_pcie_assignments,
+)
+
 from ...documents.lpar_io import LparPhysicalIO
 from ...errors import HMCError, HMCTLSFingerprintError
 from ...ssh.io_inventory import list_io_slots
@@ -14,11 +20,6 @@ from ...ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
 from ...ssh.sriov import list_sriov_unconfigured_logical_port_rows
 from ...xmlutil import leaf_text
 from ..systems.fleet import read_system_entry
-from .assignments import (
-    LparPcieAssignments,
-    SriovLogicalPortAssignment,
-    prevalidate_lpar_pcie_assignments,
-)
 from .profiles import read_partition_profile
 from .workflow_contract import WorkflowStep
 

@@ -7,6 +7,10 @@ from decimal import Decimal
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.lpar_io import (
+    SriovLogicalPortAssignment,
+    validate_capacity_percent,
+)
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.virtualization.pcie import (
     InventorySelector,
@@ -24,16 +28,13 @@ from hmcpctl.operations.virtualization.pcie import (
     require_dedicated_pcie_environment,
     require_drc_index,
 )
-from hmcpctl.operations.virtualization.validation import (
-    require_command_safe_text,
-    validate_capacity_percent,
-)
 from hmcpctl.operations.virtualization.vnic import (
     VnicBackingSelector,
     VnicCapabilityError,
     VnicPartialError,
     add_vnic,
 )
+from hmcpctl.ssh.commands import require_command_safe_text
 from hmcpctl.ssh.selectors import resolve_ssh_names
 from hmcpctl.ssh.sriov import list_sriov_configured_logical_port_rows
 from hmcpctl.ssh.vnic import (
@@ -50,19 +51,6 @@ class DedicatedPcieAssignment:
 
     profile_name: str = field(metadata={"description": "Target HMC profile name."})
     drc_index: str = field(metadata={"description": "Dedicated-slot DRC index."})
-
-
-@dataclass(frozen=True)
-class SriovLogicalPortAssignment:
-    """Direct SR-IOV logical-port assignment request."""
-
-    profile_name: str = field(metadata={"description": "Target HMC profile name."})
-    adapter_id: str = field(metadata={"description": "SR-IOV adapter identifier."})
-    physical_port_id: str = field(metadata={"description": "Physical-port identifier."})
-    logical_port_id: str = field(metadata={"description": "Logical-port identifier."})
-    capacity_percent: Decimal = field(
-        metadata={"description": "Requested decimal capacity percentage."}
-    )
 
 
 @dataclass(frozen=True)

@@ -316,3 +316,31 @@ def _parse_lshwres_output(text: str) -> list[dict[str, Any]]:
 
 
 # PCI class codes used by lshwres -r io --rsubtype slot.
+
+
+_COMMAND_STRUCTURAL_CHARACTERS = {
+    "/": "slash",
+    ",": "comma",
+    "=": "equals sign",
+    '"': "double quote",
+}
+
+
+def require_nonblank_text(value: str, name: str) -> str:
+    """Require text without imposing the stronger HMC-command protocol."""
+    if not value.strip():
+        raise ValueError(f"{name} must not be blank")
+    return value
+
+
+def require_command_safe_text(value: str, name: str) -> str:
+    """Require text that cannot alter an HMC command's field structure."""
+    require_nonblank_text(value, name)
+    for character, label in _COMMAND_STRUCTURAL_CHARACTERS.items():
+        if character in value:
+            raise ValueError(
+                f"{name} contains {label}; it would alter HMC command structure"
+            )
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError(f"{name} contains a control character")
+    return value

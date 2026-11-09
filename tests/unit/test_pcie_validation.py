@@ -4,11 +4,8 @@ from decimal import Decimal
 
 import pytest
 
-from hmcpctl.operations.virtualization.validation import (
-    require_command_safe_text,
-    require_nonblank_text,
-    validate_capacity_percent,
-)
+from hmcpctl.documents.lpar_io import validate_capacity_percent
+from hmcpctl.ssh.commands import require_command_safe_text, require_nonblank_text
 
 
 def test_nonblank_protocol_is_explicitly_weaker_than_command_safe_text() -> None:

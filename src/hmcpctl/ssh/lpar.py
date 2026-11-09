@@ -20,7 +20,7 @@ from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
 if TYPE_CHECKING:
-    from ..operations.lpar.assignments import SriovLogicalPortAssignment
+    from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
 
 from pydantic import TypeAdapter
 

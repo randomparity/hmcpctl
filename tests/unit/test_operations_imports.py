@@ -124,3 +124,28 @@ importlib.import_module("hmcpctl.operations.lpar.{module}")
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize("module", ["hmcpctl.ssh.lpar_io", "hmcpctl.ssh.lpar"])
+def test_ssh_creation_grammar_imports_without_operations(module):
+    script = f"""
+import importlib
+import importlib.abc
+import sys
+
+class NoOperations(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "hmcpctl.operations" or fullname.startswith("hmcpctl.operations."):
+            raise ModuleNotFoundError("operation dependency forbidden")
+
+sys.meta_path.insert(0, NoOperations())
+importlib.import_module({module!r})
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

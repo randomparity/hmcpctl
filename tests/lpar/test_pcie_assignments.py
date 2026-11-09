@@ -10,10 +10,10 @@ from conftest import live_fixture
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
-    SriovLogicalPortAssignment,
     VnicAssignment,
     _analyze_assignment_requests,
     apply_lpar_pcie_assignments,
