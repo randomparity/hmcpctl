@@ -70,6 +70,8 @@ class HMCCLIError(HMCError):
 #: What a declared secret value reads as in any diagnostic (ADR 0246).
 REDACTED: Final = "<redacted>"
 
+TLS_IDENTITY_FAILURE: Final = "tls-identity-verification-failed"
+
 # Safe post-submission diagnostic: never include untrusted exception details.
 TLS_OBSERVATION_ABORTED: Final = (
     "TLS certificate identity verification failed after submission; remaining "

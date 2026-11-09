@@ -12,7 +12,7 @@ from lpar.test_partition_profiles import A, field, profile
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.partition_profile import N, ProfilePatch, compare_profiles
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.profiles import (
     delete_partition_profile,
     list_partition_profiles,
@@ -858,3 +858,48 @@ async def test_async_patch_with_visible_changes_does_not_claim_completed_applica
     )
     assert result.execution == "unknown" and result.requested_change == "verified"
     assert not result.diagnostics
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["recovery", "job", "readback"])
+async def test_save_fingerprint_failure_retains_known_state_without_more_requests(
+    service, monkeypatch, stage
+):
+    from hmcpctl.operations.lpar import profiles
+
+    failure = HMCTLSFingerprintError("private-pin")
+    inventory = profiles._inventory
+    stopped_calls = None
+
+    async def fail(*args, **kwargs):
+        nonlocal stopped_calls
+        stopped_calls = len(service.calls)
+        raise failure
+
+    async def read_inventory(*args, **kwargs):
+        if service.hmc.submit_job.called:
+            return await fail()
+        return await inventory(*args, **kwargs)
+
+    if stage == "recovery":
+        monkeypatch.setattr(profiles, "write_native_profile", fail)
+    elif stage == "job":
+        monkeypatch.setattr(profiles, "wait_for_submitted_job", fail)
+    else:
+        monkeypatch.setattr(profiles, "_inventory", read_inventory)
+    result = await save_current_partition_profile(
+        service.hmc,
+        S,
+        P,
+        "source",
+        overwrite=True,
+        expected_etag="e1",
+        exclusive_writer_window=True,
+    )
+    assert result.diagnostics == ("tls-identity-verification-failed",)
+    assert "private-pin" not in result.error
+    assert result.recovery_profile is not None
+    assert result.recovery_verified is (stage != "recovery")
+    assert (result.job is not None) is (stage != "recovery")
+    assert result.requested_change == "unverified"
+    assert stopped_calls is not None and len(service.calls) == stopped_calls

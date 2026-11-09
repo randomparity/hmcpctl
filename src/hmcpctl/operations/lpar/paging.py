@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from ...errors import HMCError, HMCTLSFingerprintError
+from ...errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
 from ...resource_identity import guard_partition, is_uuid, resolve_system_uuid
 from ...ssh import memory as native
 from ...ssh.transport import HMCCLIError
@@ -312,7 +312,7 @@ async def switch_lpar_paging_vios(
         after = await observe_paging(hmc, system, system_name, target)
     except HMCTLSFingerprintError:
         after = None
-        diagnostics += ("tls-identity-verification-failed",)
+        diagnostics += (TLS_IDENTITY_FAILURE,)
     except (HMCError, ValueError):
         after = None
     return reduce_paging_attempt(

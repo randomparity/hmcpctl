@@ -21,7 +21,7 @@ from collections.abc import Callable, Collection
 from typing import Any
 
 from ...client.core import HMCClient
-from ...errors import HMCError
+from ...errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
 from ...xmlutil import leaf_text
 from ..logical import engine
 from ..logical.engine import Classification, EffectNotApplied, OperationContext
@@ -151,6 +151,8 @@ async def save_current_over(
     """
     try:
         record = await read_partition_profile(hmc, system_uuid, lpar_uuid, profile_name)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError, LookupError) as exc:
         raise EffectNotApplied(
             f"the profile of LPAR {lpar_uuid} to save over could not be read "
@@ -167,8 +169,17 @@ async def save_current_over(
             expected_etag=record.etag,
             exclusive_writer_window=exclusive_writer_window,
         )
+    except HMCTLSFingerprintError:
+        raise
     except Exception as exc:  # noqa: BLE001 - the readback below decides the outcome
         failure = exc
+    if outcome is not None and TLS_IDENTITY_FAILURE in outcome.diagnostics:
+        recovery = [outcome.recovery_profile.name] if outcome.recovery_profile else []
+        raise SaveUnconfirmed(
+            "TLS certificate identity verification failed; profile readback stopped "
+            f"({_diagnosis(outcome, failure)}); known recovery profiles: {_copies(recovery)}. "
+            "Reconcile profile and job state before retrying."
+        )
     verified = outcome is not None and (
         outcome.execution,
         outcome.requested_change,
@@ -186,6 +197,8 @@ async def save_current_over(
                 removed_slots=removed_slots,
                 require_adapter=require_adapter,
             )
+        except HMCTLSFingerprintError:
+            raise
         except (HMCError, ValueError, TypeError) as exc:
             if verified:
                 return {"profile_name": profile_name, "recovery_profiles": []}

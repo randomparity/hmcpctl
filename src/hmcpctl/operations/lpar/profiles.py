@@ -29,7 +29,7 @@ from ...documents.partition_profile import (
     one,
     profile_name,
 )
-from ...errors import HMCError
+from ...errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
 from ...jobs import (
     JobOutcome,
     build_job_request,
@@ -484,6 +484,15 @@ def _result_values(entry: dict | None) -> dict[str, str]:
     return values
 
 
+def _tls_aborted_outcome(outcome: PartitionProfileOutcome) -> PartitionProfileOutcome:
+    return replace(
+        outcome,
+        diagnostics=(*outcome.diagnostics, TLS_IDENTITY_FAILURE),
+        error="TLS certificate identity verification failed; profile work stopped. "
+        "Reconcile known profile and job state before retrying.",
+    )
+
+
 async def _profile_job(
     hmc: HMCClient,
     target: _Target,
@@ -530,6 +539,8 @@ async def _profile_job(
             if success
             else "profile job did not establish definite CLI success; reconcile before retrying",
         )
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(replace(outcome, job=submitted_outcome))
     except (HMCError, ValueError, TypeError, KeyError, TimeoutError) as error:
         return replace(outcome, job=submitted_outcome, error=str(error)[:2048])
 
@@ -688,6 +699,8 @@ async def _recovery(
             "Do not retry blindly; recovery profile may be retained: " + name
         )
         raise
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(outcome)
     except (HMCError, ValueError, TypeError) as error:
         return replace(
             outcome,
@@ -796,6 +809,8 @@ async def save_current_partition_profile(
                 + outcome.recovery_profile.name
             )
         raise
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(outcome)
     except (HMCError, ValueError, TypeError) as error:
         return replace(outcome, error=str(error)[:2048])
 
