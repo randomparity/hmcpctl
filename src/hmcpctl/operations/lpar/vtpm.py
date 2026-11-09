@@ -16,8 +16,8 @@ from ...ssh.lpar_vtpm import (
     set_lpar_vtpm_settings,
 )
 from ...xmlutil import leaf_text
-from .configuration import _resolve_and_authorize_vios_names
 from .ownership import (
+    _resolve_and_authorize_vios_names,
     _resolve_contained_lpar_names,
     _resolve_system_name,
     resolve_and_authorize_lpar_names,

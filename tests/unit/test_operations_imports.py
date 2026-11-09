@@ -99,3 +99,28 @@ importlib.import_module({module!r})
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize("module", ["security_policy", "vtpm"])
+def test_vios_authorization_consumers_import_without_configuration(module):
+    script = f"""
+import importlib
+import importlib.abc
+import sys
+
+class NoConfiguration(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "hmcpctl.operations.lpar.configuration":
+            raise ModuleNotFoundError("configuration dependency forbidden")
+
+sys.meta_path.insert(0, NoConfiguration())
+importlib.import_module("hmcpctl.operations.lpar.{module}")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

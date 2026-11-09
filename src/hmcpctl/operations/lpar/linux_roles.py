@@ -14,6 +14,7 @@ from ...ssh.lpar import complete_create_resources
 from ...ssh.profiles import get_proc_compat_modes
 from ...ssh.transport import run_hmc_command
 from ...xmlutil import leaf_text
+from .security_policy import parse_security_policy
 
 if TYPE_CHECKING:
     from .core import LparCreation
@@ -210,9 +211,6 @@ def admit_role_update(
         raise ValueError(
             "KVM enablement requires pending POWER10 and configured dedicated never-share CPUs"
         )
-    # The policy owner imports configuration for its existing VIOS operation.
-    from .security_policy import parse_security_policy
-
     if parse_security_policy(resource).settings.keystore_kbytes != 0:
         raise ValueError("KVM enablement requires known-zero platform keystore")
     memory = resource.get("AssociatedPersistentMemoryConfiguration")
