@@ -1,4 +1,4 @@
-"""HMC resource command construction and parsing over the SSH transport.
+"""Pure HMC CLI record construction and response parsing.
 
 HMC CLI reference:
     https://www.ibm.com/docs/en/power10/7063-CR1?topic=hmc-commands
@@ -11,7 +11,7 @@ import re
 from collections.abc import Collection, Sequence
 from typing import Any
 
-from .transport import REDACTED, HMCCLIError
+from ..errors import REDACTED, HMCCLIError
 
 _RECORD_DELIMITERS: dict[str, tuple[str, str]] = {
     ",": ("a comma", "a comma separates one attribute from the next"),
@@ -142,7 +142,7 @@ def build_attribute_record(
 
     The rejection message quotes the offending value back to the caller,
     except for an attribute named in *secret*, whose value reads as
-    :data:`~hmcpctl.ssh.transport.REDACTED`.  Name every credential attribute
+    :data:`~hmcpctl.errors.REDACTED`.  Name every credential attribute
     (``chhmcusr -i "name=…,passwd=…"``) there (ADR 0246).
 
     Raises:

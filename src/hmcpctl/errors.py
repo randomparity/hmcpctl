@@ -1,10 +1,8 @@
-"""Client exceptions shared by the transport core and domain mixins.
-
-The :mod:`hmcpctl.client` package uses these exceptions from its transport
-implementation in :mod:`hmcpctl.client.core` and from its domain mixin modules.
-"""
+"""HMC errors and diagnostic redaction shared by REST, CLI grammar and SSH transport."""
 
 from __future__ import annotations
+
+from typing import Final
 
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
@@ -50,6 +48,27 @@ class HMCError(Exception):
             )
         self.body = body
         super().__init__(detail)
+
+
+class HMCCLIError(HMCError):
+    """An HMC CLI operation failed or was refused before execution."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        body: str | None = None,
+        *,
+        remote_refusal_code: str | None = None,
+        remote_nonzero_completed: bool = False,
+    ) -> None:
+        super().__init__(message, status_code, body)
+        self.remote_refusal_code = remote_refusal_code
+        self.remote_nonzero_completed = remote_nonzero_completed is True
+
+
+#: What a declared secret value reads as in any diagnostic (ADR 0246).
+REDACTED: Final = "<redacted>"
 
 
 class LparUpdateError(HMCError):

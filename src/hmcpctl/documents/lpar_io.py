@@ -1,10 +1,31 @@
 """Typed native partition-create physical and IBM i tagged I/O (ADR 0274)."""
 
+import re
 from dataclasses import dataclass, field, fields
 
-from pydantic import ConfigDict, StrictInt
+from pydantic import ConfigDict, StrictBool, StrictInt
 
-from ..ssh.profiles import DRC_INDEX_PATTERN, ProfileIoSlot
+#: The DRC-index form every captured and documented `io_slots` index takes (ADR 0166).
+DRC_INDEX_PATTERN = re.compile(r"[0-9A-F]{8}")
+
+
+@dataclass(frozen=True)
+class ProfileIoSlot:
+    """One `io_slots` entry in the ADR 0165-admitted read rendering."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    drc_index: str = field(
+        metadata={
+            "description": "Physical slot DRC index: eight uppercase hexadecimal digits."
+        }
+    )
+    pool_id: str | None = field(
+        metadata={"description": "Decimal I/O pool ID, or null for no pool."}
+    )
+    is_required: StrictBool = field(
+        metadata={"description": "Whether the slot is required for profile activation."}
+    )
 
 
 def decimal_id(value: str) -> str:

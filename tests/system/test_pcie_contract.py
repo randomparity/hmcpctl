@@ -10,13 +10,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hmcpctl.config import HMCConfig
+from hmcpctl.documents.lpar_io import ProfileIoSlot
 from hmcpctl.operations.virtualization.pcie import _is_exact_admitted_environment
 from hmcpctl.ssh.commands import (
     HMC_NO_RESULTS,
     parse_hmc_delimited_rows,
     parse_hmc_result_rows,
 )
-from hmcpctl.ssh.profiles import ProfileIoSlot, parse_profile_io_slots
+from hmcpctl.ssh.profiles import parse_profile_io_slots
 from hmcpctl.ssh.sriov import list_sriov_physical_port_rows
 from hmcpctl.ssh.transport import HMCCLIError
 

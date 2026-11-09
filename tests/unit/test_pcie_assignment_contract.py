@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hmcpctl.config import HMCConfig
+from hmcpctl.documents.lpar_io import ProfileIoSlot
 from hmcpctl.operations.virtualization.pcie import (
     PcieAssignmentPartialError,
     PcieAssignmentUnavailableError,
@@ -16,7 +17,6 @@ from hmcpctl.operations.virtualization.pcie import (
 )
 from hmcpctl.server_tools.lpar.profiles import tool_security
 from hmcpctl.ssh.profiles import (
-    ProfileIoSlot,
     assign_profile_io_slot,
     parse_profile_io_slots,
     read_profile_io_slot_rows,

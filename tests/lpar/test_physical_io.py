@@ -8,11 +8,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.documents.lpar_io import LparPhysicalIO
+from hmcpctl.documents.lpar_io import LparPhysicalIO, ProfileIoSlot
 from hmcpctl.operations.lpar.assignments import SriovLogicalPortAssignment
 from hmcpctl.operations.lpar.physical_io import compare_creation_io
 from hmcpctl.ssh.lpar_io import creation_io_record
-from hmcpctl.ssh.profiles import ProfileIoSlot
 
 DRC = "21010010"
 NAMES = (

@@ -72,3 +72,30 @@ def test_power_provider_can_be_reloaded_without_initializing_the_engine():
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize(
+    "module", ["hmcpctl.documents.lpar_io", "hmcpctl.documents.lpar_creation_memory"]
+)
+def test_document_models_import_without_ssh_execution(module):
+    script = f"""
+import importlib
+import importlib.abc
+import sys
+
+class NoSSHExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {{"hmcpctl.ssh.transport", "hmcpctl.ssh.profiles", "asyncssh"}}:
+            raise ModuleNotFoundError(fullname)
+
+sys.meta_path.insert(0, NoSSHExecution())
+importlib.import_module({module!r})
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

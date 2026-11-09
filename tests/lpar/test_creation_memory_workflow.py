@@ -876,9 +876,8 @@ async def test_completed_dedicated_memory_retains_second_lpar_bound(memory_targe
 
 @pytest.mark.parametrize("where", ["initial-slot", "initial-sriov", "later-sriov"])
 async def test_shared_direct_hardware_refuses_before_network(memory_target, where):
-    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_io import LparPhysicalIO, ProfileIoSlot
     from hmcpctl.operations.lpar.assignments import SriovLogicalPortAssignment
-    from hmcpctl.ssh.profiles import ProfileIoSlot
 
     b = memory_target
     sriov = SriovLogicalPortAssignment("default_profile", "1", "0", "1", Decimal(10))

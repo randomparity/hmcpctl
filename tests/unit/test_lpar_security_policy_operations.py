@@ -634,11 +634,10 @@ async def test_creation_policy_composes_once(creation_target, monkeypatch):
         LparResources,
         LparSettings,
     )
-    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_io import LparPhysicalIO, ProfileIoSlot
     from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
     from hmcpctl.operations.lpar import core
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-    from hmcpctl.ssh.profiles import ProfileIoSlot
 
     hmc, _entry, command = creation_target
     monkeypatch.setattr(core, "admit_creation_io", AsyncMock())
@@ -814,7 +813,7 @@ async def test_apply_waits_for_requested_domain_verification(
     apply = AsyncMock(side_effect=lambda *a: events.append("apply"))
     monkeypatch.setattr(core, "apply_lpar_profile_via_cli", apply)
     # The physical-I/O requested property is exercised through its real typed declaration.
-    from hmcpctl.ssh.profiles import ProfileIoSlot
+    from hmcpctl.documents.lpar_io import ProfileIoSlot
 
     creation = core.LparCreation(
         "part-R1",
