@@ -16,7 +16,7 @@ from hmcpctl.errors import HMCTransportError
 from hmcpctl.operations.logical import engine, holds
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.holds import HoldRefused
-from hmcpctl.operations.lpar import decommission
+from hmcpctl.operations.lpar.decommission import core as decommission
 from hmcpctl.resource_identity import PartitionGuard, install_partition_guard
 from hmcpctl.ssh import selectors
 

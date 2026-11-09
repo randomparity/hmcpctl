@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import Client
 
 from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES, job_outcome
-from hmcpctl.operations.lpar.decommission import _vscsi_detach_inventory
+from hmcpctl.operations.lpar.decommission.core import _vscsi_detach_inventory
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 from hmcpctl.operations.storage.resources import storage_mapping
 from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter

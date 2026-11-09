@@ -25,14 +25,14 @@ from hmcpctl.errors import HMCError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord, OperationRecord
-from hmcpctl.operations.lpar import decommission as ops
-from hmcpctl.operations.lpar.decommission import (
+from hmcpctl.operations.lpar.decommission import core as ops
+from hmcpctl.operations.lpar.decommission.core import (
     EFFECT_KINDS,
     adapter_key,
     decommission_lpar,
     unmap_key,
 )
-from hmcpctl.operations.lpar.decommission_operation import (
+from hmcpctl.operations.lpar.decommission.operation import (
     DEFAULT_ARGUMENTS,
     TOOL_NAME,
     decommission_body,

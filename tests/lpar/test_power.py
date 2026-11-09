@@ -25,7 +25,6 @@ from hmcpctl.jobs import (
     power_on_system_job,
     power_on_vios_job,
 )
-from hmcpctl.operations.lpar import decommission
 from hmcpctl.operations.lpar.activation import (
     LparPowerResult,
     _unapplied_activation_clause,
@@ -35,6 +34,7 @@ from hmcpctl.operations.lpar.activation import (
     power_on_outcome,
     submit_power_on_lpar,
 )
+from hmcpctl.operations.lpar.decommission import core as decommission
 from hmcpctl.operations.partition_state import PARTITION_STATES
 
 SYSTEM_UUID = "00000000-0000-0000-0000-000000000001"
@@ -568,7 +568,7 @@ async def test_decommission_power_off_document_is_unchanged(immediate):
     )
 
     with patch(
-        "hmcpctl.operations.lpar.decommission.wait_for_submitted_job",
+        "hmcpctl.operations.lpar.decommission.core.wait_for_submitted_job",
         new=AsyncMock(
             return_value={
                 "UUID": "job-uuid",

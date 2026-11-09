@@ -21,7 +21,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
 from hmcpctl.jobs import job_outcome, power_off_lpar_job
 from hmcpctl.operations.lpar.assignments import WorkflowStep
-from hmcpctl.operations.lpar.decommission import (
+from hmcpctl.operations.lpar.decommission.core import (
     DecommissionAdapterRecord,
     DecommissionBlastRadius,
     DecommissionResult,
@@ -237,7 +237,7 @@ def _client(*, complete: bool = True) -> AsyncMock:
 
 
 def _patch_common(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
-    from hmcpctl.operations.lpar import decommission as ops
+    from hmcpctl.operations.lpar.decommission import core as ops
 
     async def resolve_system_uuid(hmc, value: str) -> str:
         calls.append(f"resolve_system_uuid:{value}")
@@ -310,7 +310,7 @@ def test_hmc_decommission_lpar_delegates_with_one_configured_client() -> None:
             return_value=HMCConfig.from_mapping({"host": "h"}),
         ),
         patch(
-            "hmcpctl.operations.lpar.decommission_operation.decommission_lpar",
+            "hmcpctl.operations.lpar.decommission.operation.decommission_lpar",
             new=AsyncMock(return_value=expected),
         ) as decommission_mock,
     ):
@@ -349,7 +349,7 @@ async def test_decommission_rejects_uuid_outside_selected_system(
     hmc.list_logical_partitions.return_value = [_lpar(uuid="other-uuid")]
     authorize = AsyncMock()
 
-    from hmcpctl.operations.lpar import decommission as ops
+    from hmcpctl.operations.lpar.decommission import core as ops
 
     monkeypatch.setattr(ops, "resolve_system_uuid", AsyncMock(return_value=SYSTEM_UUID))
     monkeypatch.setattr(
@@ -670,7 +670,7 @@ async def test_decommission_enforces_ownership_even_for_dry_run(
 ) -> None:
     hmc = _client()
 
-    from hmcpctl.operations.lpar import decommission as ops
+    from hmcpctl.operations.lpar.decommission import core as ops
 
     monkeypatch.setattr(ops, "resolve_system_uuid", AsyncMock(return_value=SYSTEM_UUID))
     monkeypatch.setattr(
@@ -719,7 +719,7 @@ async def test_decommission_override_reads_and_reports_both_ownership_snapshots(
     hmc = _client()
     hmc.config = HMCConfig(host="hmc.test", user="user", agent_id="alice")
 
-    from hmcpctl.operations.lpar import decommission as ops
+    from hmcpctl.operations.lpar.decommission import core as ops
 
     monkeypatch.setattr(ops, "resolve_system_uuid", AsyncMock(return_value=SYSTEM_UUID))
     monkeypatch.setattr(
@@ -755,7 +755,7 @@ async def test_decommission_revalidates_changed_owner_before_mutation(
     hmc = _client()
     hmc.config = HMCConfig(host="hmc.test", user="user", agent_id="alice")
 
-    from hmcpctl.operations.lpar import decommission as ops
+    from hmcpctl.operations.lpar.decommission import core as ops
 
     monkeypatch.setattr(ops, "resolve_system_uuid", AsyncMock(return_value=SYSTEM_UUID))
     monkeypatch.setattr(
@@ -1516,7 +1516,7 @@ async def test_mapping_client_uuid_is_matched_case_insensitively(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_changed_ownership_after_power_off_denies_mapping_mutation(monkeypatch):
-    from hmcpctl.operations.lpar import decommission as ops
+    from hmcpctl.operations.lpar.decommission import core as ops
 
     hmc = _client()
     _patch_common(monkeypatch, [])
@@ -1789,7 +1789,7 @@ async def test_decommission_refresh_rejects_unverified_inventory(monkeypatch, fa
                 raise PermissionError("ownership changed")
 
         monkeypatch.setattr(
-            "hmcpctl.operations.lpar.decommission.authorize_decommission_lpar_ownership_snapshot",
+            "hmcpctl.operations.lpar.decommission.core.authorize_decommission_lpar_ownership_snapshot",
             authorize,
         )
     if fault == "state":

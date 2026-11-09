@@ -11,18 +11,13 @@ from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 from typing_extensions import TypedDict
 
+from hmcpctl.audit import records as audit
+from hmcpctl.client.client_contracts import AdapterType
 from hmcpctl.client.client_parse import _parse_feed
 from hmcpctl.client.client_storage import mapping_lpar_uuid, storage_mapping_id
 from hmcpctl.client.core import HMCClient
-from hmcpctl.operations.lpar.ownership import (
-    authorize_decommission_lpar_ownership_snapshot,
-    resolve_lpar_ownership_names,
-)
-
-from ...audit import records as audit
-from ...client.client_contracts import AdapterType
-from ...errors import HMCError
-from ...jobs import (
+from hmcpctl.errors import HMCError
+from hmcpctl.jobs import (
     DEFAULT_JOB_POLL_INTERVAL,
     DEFAULT_JOB_TIMEOUT_SECONDS,
     SUCCESSFUL_JOB_STATUSES,
@@ -32,10 +27,14 @@ from ...jobs import (
     validate_wait_timing,
     wait_for_submitted_job,
 )
-from ...resource_identity import guard_partition, is_uuid, resolve_system_uuid
-from ...xmlutil import leaf_text
-from ..logical.models import EffectRecord, OperationRecord
-from .workflow_contract import WorkflowStep
+from hmcpctl.operations.logical.models import EffectRecord, OperationRecord
+from hmcpctl.operations.lpar.ownership import (
+    authorize_decommission_lpar_ownership_snapshot,
+    resolve_lpar_ownership_names,
+)
+from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.resource_identity import guard_partition, is_uuid, resolve_system_uuid
+from hmcpctl.xmlutil import leaf_text
 
 _ADAPTER_ORDER: tuple[AdapterType, ...] = (
     "ClientNetworkAdapter",

@@ -13,9 +13,9 @@ from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord, OperationRecord
-from hmcpctl.operations.lpar import decommission_storage as cleanup
-from hmcpctl.operations.lpar.decommission import EFFECT_KINDS, unmap_key
-from hmcpctl.operations.lpar.decommission_storage import (
+from hmcpctl.operations.lpar.decommission import storage as cleanup
+from hmcpctl.operations.lpar.decommission.core import EFFECT_KINDS, unmap_key
+from hmcpctl.operations.lpar.decommission.storage import (
     OwnedItem,
     clean_storage,
     delete_key,

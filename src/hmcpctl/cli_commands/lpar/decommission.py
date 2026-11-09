@@ -10,11 +10,8 @@ from typing import Any
 
 import typer
 
-from ...operations.logical import engine, store
-from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
-from ...operations.logical.models import OperationRecord
-from ...operations.lpar.decommission import DecommissionResult
-from ...operations.lpar.decommission_operation import (
+from hmcpctl.operations.lpar.decommission.core import DecommissionResult
+from hmcpctl.operations.lpar.decommission.operation import (
     STORAGE_CLEANUP,
     TOOL_NAME,
     decommission_body,
@@ -24,6 +21,10 @@ from ...operations.lpar.decommission_operation import (
     preview_target,
     result_from_record,
 )
+
+from ...operations.logical import engine, store
+from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
+from ...operations.logical.models import OperationRecord
 from ...resource_identity import is_uuid
 from .. import runtime
 from ..output import (

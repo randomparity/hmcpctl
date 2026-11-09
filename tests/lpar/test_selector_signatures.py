@@ -82,7 +82,7 @@ SELECTOR_FAMILY = [
         "configure_lpar_processor_compatibility",
         False,
     ),
-    ("hmcpctl.operations.lpar.decommission", "decommission_lpar", False),
+    ("hmcpctl.operations.lpar.decommission.core", "decommission_lpar", False),
     ("hmcpctl.operations.lpar.dlpar", "modify_lpar", True),
     ("hmcpctl.operations.lpar.dlpar", "set_lpar_processors", True),
     ("hmcpctl.operations.lpar.dlpar", "set_lpar_memory", True),

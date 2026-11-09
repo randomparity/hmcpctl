@@ -14,13 +14,17 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from ...client.core import HMCClient
-from ...errors import HMCError
-from ..logical import engine
-from ..logical.engine import BodyResult, Classification, OperationContext
-from ..logical.models import EffectRecord, OperationRecord
-from ..logical.store import OperationRefused
-from .decommission import (
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.logical import engine
+from hmcpctl.operations.logical.engine import (
+    BodyResult,
+    Classification,
+    OperationContext,
+)
+from hmcpctl.operations.logical.models import EffectRecord, OperationRecord
+from hmcpctl.operations.logical.store import OperationRefused
+from hmcpctl.operations.lpar.decommission.core import (
     DELETE_LPAR_KEY,
     EFFECT_KINDS,
     DecommissionBlastRadius,
@@ -31,7 +35,7 @@ from .decommission import (
     _vscsi_detach_inventory,
     decommission_lpar,
 )
-from .decommission_storage import (
+from hmcpctl.operations.lpar.decommission.storage import (
     INCOMPLETE,
     clean_storage,
     deleted_from_effects,
@@ -41,8 +45,8 @@ from .decommission_storage import (
     same_item,
     storage_classifiers,
 )
-from .power import open_client
-from .workflow_contract import WorkflowStep
+from hmcpctl.operations.lpar.power import open_client
+from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 TOOL_NAME = "hmc_decommission_lpar"
 ClientFactory = Callable[[str], HMCClient]

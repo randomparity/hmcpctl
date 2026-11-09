@@ -13,15 +13,17 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ...client.client_storage import mapping_lpar_uuid, storage_mapping_id
-from ...client.core import HMCClient
-from ...errors import HMCError, HMCTLSFingerprintError
-from ...resource_identity import is_uuid
-from ...xmlutil import leaf_text
-from ..logical import engine, store
-from ..logical.engine import Classification, EffectNotApplied, OperationContext
-from ..logical.models import EffectRecord
-from .decommission import (
+from hmcpctl.client.client_storage import mapping_lpar_uuid, storage_mapping_id
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.logical import engine, store
+from hmcpctl.operations.logical.engine import (
+    Classification,
+    EffectNotApplied,
+    OperationContext,
+)
+from hmcpctl.operations.logical.models import EffectRecord
+from hmcpctl.operations.lpar.decommission.core import (
     EFFECT_KINDS,
     DecommissionStorage,
     Write,
@@ -30,8 +32,10 @@ from .decommission import (
     _vscsi_detach_inventory,
     unmap_key,
 )
-from .install_media import repository_group
-from .provision_operation import DISK_LEDGER, MEDIA_LEDGER
+from hmcpctl.operations.lpar.install_media import repository_group
+from hmcpctl.operations.lpar.provision_operation import DISK_LEDGER, MEDIA_LEDGER
+from hmcpctl.resource_identity import is_uuid
+from hmcpctl.xmlutil import leaf_text
 
 ClientFactory = Callable[[str], Any]
 # Persisted contract (ADR 0323 Decision 3): never change while an operation can be open.

@@ -12,6 +12,11 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
+from hmcpctl.operations.lpar.decommission.core import (
+    collect_storage_records,
+    resolve_target_lpar,
+)
+
 from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import resolve_system_uuid
 from ...ssh.refcodes import list_lpar_refcodes
@@ -23,7 +28,6 @@ from ..inventory.composite import (
     processor_figures,
     resource_container,
 )
-from .decommission import collect_storage_records, resolve_target_lpar
 
 Section = Literal["resources", "rmc", "profile_drift", "refcodes"]
 DEFAULT_INCLUDE: tuple[Section, ...] = ("rmc", "refcodes")
