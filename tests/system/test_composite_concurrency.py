@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from hmcpctl.errors import HMCTLSFingerprintError
@@ -99,6 +101,75 @@ async def test_pin_mismatch_aborts_composite_summary(monkeypatch, feed):
             return []
 
     monkeypatch.setattr(composite, "operating_system_entry", parent)
-    with pytest.raises(ExceptionGroup) as caught:
+    with pytest.raises(HMCTLSFingerprintError) as caught:
         await _fetch_system_summary_data(Client(), "system-uuid")
-    assert caught.value.exceptions == (failure,)
+    assert caught.value is failure
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("feed", ["lpars", "vios"])
+async def test_summary_identity_failure_joins_cancelled_sibling(monkeypatch, feed):
+    started, cancelled = asyncio.Event(), asyncio.Event()
+    failure = HMCTLSFingerprintError("certificate identity differs")
+
+    async def parent(*_):
+        return {"UUID": "system-uuid"}
+
+    async def fail():
+        await started.wait()
+        raise failure
+
+    async def sibling():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    class Client:
+        async def list_logical_partitions(self, _):
+            return await (fail() if feed == "lpars" else sibling())
+
+        async def list_vios(self, _):
+            return await (fail() if feed == "vios" else sibling())
+
+    monkeypatch.setattr(composite, "operating_system_entry", parent)
+    async with asyncio.timeout(2):
+        with pytest.raises(HMCTLSFingerprintError) as caught:
+            await _fetch_system_summary_data(Client(), "system-uuid")
+    assert caught.value is failure
+    assert str(caught.value) == "certificate identity differs"
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identity_failure", [False, True])
+async def test_summary_keeps_other_task_failures_in_the_exception_chain(
+    monkeypatch, identity_failure
+):
+    failure = HMCTLSFingerprintError("certificate identity differs")
+    defect = RuntimeError("unexpected defect")
+
+    async def parent(*_):
+        return {"UUID": "system-uuid"}
+
+    class Client:
+        async def list_logical_partitions(self, _):
+            if identity_failure:
+                raise failure
+            return []
+
+        async def list_vios(self, _):
+            raise defect
+
+    monkeypatch.setattr(composite, "operating_system_entry", parent)
+    with pytest.raises(
+        HMCTLSFingerprintError if identity_failure else ExceptionGroup
+    ) as caught:
+        await _fetch_system_summary_data(Client(), "system-uuid")
+    group = caught.value.__cause__ if identity_failure else caught.value
+    assert isinstance(group, ExceptionGroup)
+    assert defect in group.exceptions
+    if identity_failure:
+        assert caught.value is failure
+        assert failure in group.exceptions

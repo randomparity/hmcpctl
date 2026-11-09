@@ -202,13 +202,23 @@ async def _fetch_system_summary_data(
             f"Managed system {system_uuid!r} not found after resolution. "
             "List managed systems to inspect the available systems."
         )
-    async with asyncio.TaskGroup() as tasks:
-        lpars_task = tasks.create_task(
-            _inventory_or_warning(hmc.list_logical_partitions(system_uuid), "LPAR")
-        )
-        vios_task = tasks.create_task(
-            _inventory_or_warning(hmc.list_vios(system_uuid), "VIOS")
-        )
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            lpars_task = tasks.create_task(
+                _inventory_or_warning(hmc.list_logical_partitions(system_uuid), "LPAR")
+            )
+            vios_task = tasks.create_task(
+                _inventory_or_warning(hmc.list_vios(system_uuid), "VIOS")
+            )
+    except ExceptionGroup as errors:
+        identity_errors = errors.subgroup(HMCTLSFingerprintError)
+        if identity_errors is None:
+            raise
+        # TaskGroup has already joined every sibling; retain all failures as cause.
+        failure: BaseException = identity_errors
+        while isinstance(failure, BaseExceptionGroup):
+            failure = failure.exceptions[0]
+        raise failure from errors
     return system, lpars_task.result(), vios_task.result()
 
 
