@@ -15,7 +15,7 @@ from typing import Any, Protocol
 
 from ...client.client_storage import mapping_lpar_uuid, storage_mapping_id
 from ...client.core import HMCClient
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import is_uuid
 from ...xmlutil import leaf_text
 from ..logical import engine, store
@@ -241,6 +241,8 @@ async def _vios_details(
             if not isinstance(resource, dict):
                 return None
             details[uuid.lower()] = resource
+    except HMCTLSFingerprintError:
+        raise
     except HMCError:
         return None
     return details
@@ -319,6 +321,8 @@ async def assess(
     for item in items:
         try:
             group, count = await _locate(hmc, item)
+        except HMCTLSFingerprintError:
+            raise
         except HMCError:
             return incomplete
         verdict = _verdict(

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord, OperationRecord
@@ -471,3 +471,27 @@ def test_the_journal_reads_applied_deletes_as_deleted_and_open_ones_as_pending()
     assert cleanup.pending_from_effects(effects) == (
         {"kind": "installer_media", "target": "vios:v/vg:g/media:m"},
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method,item",
+    [
+        ("list_vios", DISK_ITEM),
+        ("get_vios_storage_detail", DISK_ITEM),
+        ("get_volume_group", DISK_ITEM),
+        ("list_volume_groups", MEDIA_ITEM),
+        ("list_optical_media", MEDIA_ITEM),
+    ],
+)
+async def test_assessment_preserves_fatal_tls_and_stops_reads(hmc, method, item):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    getattr(hmc, method).side_effect = failure
+
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await cleanup.assess(hmc, SYSTEM, LPAR, (item, DISK_ITEM, MEDIA_ITEM))
+
+    assert caught.value is failure
+    assert hmc.mock_calls[-1][0] == method
+    hmc.delete_virtual_disk.assert_not_awaited()
+    hmc.delete_optical_media.assert_not_awaited()
