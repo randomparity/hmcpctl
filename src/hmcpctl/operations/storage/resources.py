@@ -25,7 +25,7 @@ from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_loc
 from ...audit import records as audit
 from ...config import ISO_URL_ALLOWLIST_HELP
 from ...documents.storage import StorageKind
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...jobs import JobOutcome, job_identifier, job_outcome
 from ...resource_identity import (
     is_uuid,
@@ -1053,15 +1053,35 @@ async def _upload_iso_via_web_file(
     finally:
         primary_error = sys.exception()
         if file_uuid:
-            try:
-                await hmc._web_file_delete(file_uuid)
-            except Exception as exc:
-                if primary_error is None:
-                    exc.add_note(
-                        f"ISO {media_name!r} is in the repository; only the release failed."
+            retained_note = (
+                f"Web File {file_uuid!r} may still need release. Reconcile TLS certificate "
+                "identity and inspect upload state before retrying or releasing it."
+            )
+            if isinstance(primary_error, HMCTLSFingerprintError):
+                primary_error.add_note(retained_note)
+            else:
+                try:
+                    await hmc._web_file_delete(file_uuid)
+                except Exception as exc:
+                    if primary_error is None:
+                        exc.add_note(
+                            f"ISO {media_name!r} is in the repository; only the release failed."
+                        )
+                    fatal_identity = isinstance(exc, HMCTLSFingerprintError)
+                    if (
+                        fatal_identity
+                        and primary_error is not None
+                        and not isinstance(primary_error, Exception)
+                    ):
+                        primary_error.add_note(retained_note)
+                    else:
+                        if fatal_identity:
+                            exc.add_note(retained_note)
+                        if primary_error is None or fatal_identity:
+                            raise
+                    logger.exception(
+                        "web File delete failed for ISO upload %s", file_uuid
                     )
-                    raise
-                logger.exception("web File delete failed for ISO upload %s", file_uuid)
 
 
 async def upload_iso(
@@ -1088,8 +1108,10 @@ async def upload_iso(
     that collides with existing media is refused, all before any transfer begins. The
     ISO is downloaded with explicit timeout and size bounds and without following
     redirects, with SHA-256 and size computed from the download. It is reported
-    uploaded only once the repository lists it. The local temp file and the HMC
-    web File are both released on every outcome.
+    uploaded only once the repository lists it. Local temporary files are cleaned
+    up even when remote requests fail. A TLS certificate identity failure stops
+    further remote cleanup; exception notes identify any known HMC web File for
+    manual reconciliation.
 
     Args:
         hmc: HMC client instance.

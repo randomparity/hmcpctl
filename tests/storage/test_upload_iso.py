@@ -17,7 +17,7 @@ from conftest import make_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import parse_iso_url_allowlist
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.storage.resources import (
     DEFAULT_CHUNK_SIZE,
     UPLOAD_CHUNK_SIZE,
@@ -1651,3 +1651,53 @@ async def test_upload_iso_proceeds_when_the_download_matches_the_bound_digest(
 
     assert result.raw["status"] == "uploaded"
     hmc._web_file_create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["upload", "visibility"])
+async def test_fatal_tls_retains_web_file_without_remote_cleanup(stage_download, fault):
+    download = stage_download()
+    failure = HMCTLSFingerprintError("private-pin")
+    hmc = _web_file_client()
+    if fault == "upload":
+        hmc._web_file_upload.side_effect = failure
+    else:
+        hmc.list_optical_media.side_effect = [[], [], failure]
+
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await upload_iso(
+            hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
+        )
+    assert caught.value is failure
+    hmc._web_file_create.assert_awaited_once()
+    hmc._web_file_delete.assert_not_awaited()
+    assert any(FILE_UUID in note for note in failure.__notes__)
+    staged, _, _ = download.return_value
+    assert not staged.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "primary_type", [HMCError, asyncio.CancelledError, KeyboardInterrupt, SystemExit]
+)
+async def test_cleanup_fatal_tls_is_not_hidden_by_upload_failure(
+    stage_download, primary_type
+):
+    download = stage_download()
+    failure = HMCTLSFingerprintError("private-pin")
+    primary = primary_type("upload failed")
+    control_flow = not isinstance(primary, Exception)
+    hmc = _web_file_client(
+        _web_file_upload=AsyncMock(side_effect=primary),
+        _web_file_delete=AsyncMock(side_effect=failure),
+    )
+    expected = primary_type if control_flow else HMCTLSFingerprintError
+    with pytest.raises(expected) as caught:
+        await upload_iso(
+            hmc, VIOS_UUID, VG_UUID, MEDIA_NAME, ISO_URL, system_name_or_uuid=None
+        )
+    assert caught.value is (primary if control_flow else failure)
+    hmc._web_file_delete.assert_awaited_once_with(FILE_UUID)
+    assert any(FILE_UUID in note for note in caught.value.__notes__)
+    staged, _, _ = download.return_value
+    assert not staged.exists()
