@@ -8,7 +8,7 @@ import asyncssh
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryChange, LparMemoryMove
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.resource_identity import (
     is_uuid,
@@ -153,6 +153,8 @@ async def _observe_endpoint(
         ):
             raise ValueError("Memory move readback identity, state or mode changed")
         matched = _endpoint_matched(before, after, targets)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError) as error:
         return {
             **_result(
@@ -271,10 +273,25 @@ async def move_lpar_memory(
             and exc.__cause__.exit_status > 0
             and exc.__cause__.exit_signal is None
         )
-    results = [
-        await _observe_endpoint(
-            hmc, system_uuid, kind, before, target, error, native_rejection
+    results: list[dict[str, Any]] = []
+    tls_failed = False
+    for (kind, before), target in zip(peers, targets, strict=True):
+        if not tls_failed:
+            try:
+                results.append(
+                    await _observe_endpoint(
+                        hmc, system_uuid, kind, before, target, error, native_rejection
+                    )
+                )
+                continue
+            except HMCTLSFingerprintError:
+                tls_failed = True
+        results.append(
+            {
+                **_result(
+                    before, None, target, "unverified", error, TLS_OBSERVATION_ABORTED
+                ),
+                "read_error": TLS_OBSERVATION_ABORTED,
+            }
         )
-        for (kind, before), target in zip(peers, targets, strict=True)
-    ]
     return _aggregate(move, results[0], results[1], error, native_rejection)

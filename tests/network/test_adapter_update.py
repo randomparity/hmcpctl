@@ -7,7 +7,7 @@ import pytest
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar import ownership
 from hmcpctl.operations.virtualization import adapters
 from hmcpctl.ssh.transport import HMCCLIError
@@ -486,3 +486,55 @@ async def test_control_bearing_native_name_refuses_before_ownership_read(context
         await update(context, qos_priority=0)
     context[5].assert_not_awaited()
     context[4].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["parent", "adapters"])
+async def test_update_observation_propagates_fatal_tls(context, fault):
+    hmc, _, before, _, _, _ = context
+    failure = HMCTLSFingerprintError("private-pin")
+    method = (
+        "get_logical_partition"
+        if fault == "parent"
+        else "_network_adapter_creation_feed"
+    )
+    getattr(hmc, method).side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await adapters._network_update_after(
+            hmc, SYSTEM, LPAR, ("part-R1", 7), before, TARGET, {"qos_priority": 0}
+        )
+    assert caught.value is failure
+    assert hmc.mock_calls[-1][0] == method
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["parent", "adapters"])
+async def test_postwrite_fatal_tls_retains_update_and_stops_reads(context, fault):
+    hmc, partition, before, _, writer, _ = context
+    failure = HMCTLSFingerprintError("private-pin")
+    if fault == "parent":
+
+        async def read(*args, **kwargs):
+            if writer.await_count:
+                raise failure
+            return partition
+
+        hmc.get_logical_partition.side_effect = read
+        method = "get_logical_partition"
+    else:
+        hmc._network_adapter_creation_feed.side_effect = [
+            before,
+            deepcopy(before),
+            failure,
+        ]
+        method = "_network_adapter_creation_feed"
+
+    result = await update(context, qos_priority=0)
+    assert hmc.mock_calls[-1][0] == method
+    writer.assert_awaited_once()
+    hmc.delete_adapter.assert_not_awaited()
+    assert result.mutation_dispatched is True and result.submission == "completed"
+    assert result.lpar_uuid == LPAR and result.adapter_uuid == TARGET
+    assert result.verification.status == result.preservation.status == "unavailable"
+    assert any("TLS" in error for error in result.errors)
+    assert "private-pin" not in repr(result)

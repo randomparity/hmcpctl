@@ -13,7 +13,7 @@ from hmcpctl.documents.adapters import (
     validate_network_adapter_creation_fields,
     validate_network_adapter_update_fields,
 )
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.ownership import (
     authorize_lpar_mutation,
     resolve_and_authorize_lpar_mutation,
@@ -358,15 +358,21 @@ async def update_network_adapter(
     submission, code, errors = await _network_update_submission(
         hmc, system_name, parent[1], slot, attributes
     )
-    verification, preservation, after_errors = await _network_update_after(
-        hmc,
-        system_uuid,
-        lpar_uuid,
-        parent[:2],
-        before,
-        adapter_uuid,
-        expected,
-    )
+    try:
+        verification, preservation, after_errors = await _network_update_after(
+            hmc,
+            system_uuid,
+            lpar_uuid,
+            parent[:2],
+            before,
+            adapter_uuid,
+            expected,
+        )
+    except HMCTLSFingerprintError:
+        verification, preservation = _network_update_observation(
+            before, None, adapter_uuid, expected
+        )
+        after_errors = (TLS_OBSERVATION_ABORTED,)
     return NetworkUpdateResult(
         system_uuid,
         lpar_uuid,
@@ -695,10 +701,14 @@ async def _network_update_after(
     try:
         after_parent = await _network_update_parent(hmc, system, lpar)
         parent_matches = after_parent[:2] == parent
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError):
         parent_matches = False
     try:
         after = await hmc._network_adapter_creation_feed(lpar)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError:
         after = None
         errors += ("adapter readback is unavailable",)

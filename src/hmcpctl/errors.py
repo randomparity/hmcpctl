@@ -70,6 +70,12 @@ class HMCCLIError(HMCError):
 #: What a declared secret value reads as in any diagnostic (ADR 0246).
 REDACTED: Final = "<redacted>"
 
+# Safe post-submission diagnostic: never include untrusted exception details.
+TLS_OBSERVATION_ABORTED: Final = (
+    "TLS certificate identity verification failed after submission; remaining "
+    "observation stopped. Inspect the submitted operation before retrying."
+)
+
 
 class LparUpdateError(HMCError):
     """A validated partition edit failed during or after its single submission."""

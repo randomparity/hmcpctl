@@ -10,7 +10,7 @@ import pytest
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_memory import LparMemoryMove
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.memory_move import move_lpar_memory
 from hmcpctl.ssh.memory import move_lpar_memory_quantity
 
@@ -536,3 +536,47 @@ async def test_profile_locations(boundary):
     assert (
         result["destination"]["change_location"]["lives_in"] == "current-configuration"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uuid", [SOURCE, TARGET])
+async def test_fatal_tls_stops_remaining_move_reads_and_retains_evidence(
+    boundary, uuid
+):
+    b = boundary
+    failure = HMCTLSFingerprintError("private-pin")
+    b.errors[uuid] = failure
+    original = b.hmc.get_logical_partition.side_effect
+    at_failure = None
+
+    async def read(*args, **kwargs):
+        nonlocal at_failure
+        try:
+            return await original(*args, **kwargs)
+        except HMCTLSFingerprintError:
+            at_failure = {
+                name: call.await_count
+                for name, call in vars(b.hmc).items()
+                if isinstance(call, AsyncMock)
+            }
+
+            raise
+
+    b.hmc.get_logical_partition.side_effect = read
+    result = await move(b)
+    assert at_failure is not None
+    assert {
+        name: call.await_count
+        for name, call in vars(b.hmc).items()
+        if isinstance(call, AsyncMock)
+    } == at_failure
+
+    b.command.assert_awaited_once()
+    assert result["outcome"] == "unverified" and not result["workflow_completed"]
+    assert result["source"]["UUID"] == SOURCE
+    assert result["destination"]["UUID"] == TARGET
+    assert (result["source"]["after"] is not None) == (uuid == TARGET)
+    assert result["destination"]["after"] is None
+    pending = ("source", "destination") if uuid == SOURCE else ("destination",)
+    assert all("TLS" in result[endpoint]["read_error"] for endpoint in pending)
+    assert "private-pin" not in repr(result)

@@ -13,7 +13,7 @@ from hmcpctl.documents.lpar_processors import (
     LparProcessorMove,
     bounded_processor_number,
 )
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.resource_identity import (
     is_uuid,
     resolve_system_uuid,
@@ -246,6 +246,8 @@ async def _observe(
         if not _same_identity(peer, fresh):
             raise ValueError("Processor move readback containment or kind changed")
         matched = _postconditions(before, after, expected, capacity)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError) as exc:
         return _endpoint_result(before, after, expected, "unverified", error, str(exc))
     changed = not _same_evidence(peer, (kind, after))
@@ -378,8 +380,29 @@ async def move_lpar_processors(
             and cause.exit_status > 0
             and not cause.exit_signal
         )
-    results = [
-        await _observe(hmc, system_uuid, system_name, p, t, c, error, rejected)
-        for p, t, c in zip(peers, targets, capacities, strict=True)
-    ]
+    results: list[dict[str, Any]] = []
+    tls_failed = False
+    for peer, target, capacity in zip(peers, targets, capacities, strict=True):
+        if not tls_failed:
+            try:
+                results.append(
+                    await _observe(
+                        hmc,
+                        system_uuid,
+                        system_name,
+                        peer,
+                        target,
+                        capacity,
+                        error,
+                        rejected,
+                    )
+                )
+                continue
+            except HMCTLSFingerprintError:
+                tls_failed = True
+        results.append(
+            _endpoint_result(
+                peer[1], None, target, "unverified", error, TLS_OBSERVATION_ABORTED
+            )
+        )
     return _aggregate(move, results, error, rejected)

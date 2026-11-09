@@ -16,7 +16,7 @@ from hmcpctl.client.client_contracts import AdapterType
 from hmcpctl.client.client_parse import _parse_feed
 from hmcpctl.client.client_storage import mapping_lpar_uuid, storage_mapping_id
 from hmcpctl.client.core import HMCClient
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import (
     DEFAULT_JOB_POLL_INTERVAL,
     DEFAULT_JOB_TIMEOUT_SECONDS,
@@ -763,6 +763,8 @@ async def _inventory_storage_mappings(
     partition_id_text = str(partition_id) if partition_id is not None else None
     try:
         sources = await hmc.list_vios(system_uuid)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         source_warnings.append(f"VIOS inventory could not be read: {exc}")
         evidence.append(
@@ -789,6 +791,8 @@ async def _inventory_storage_mappings(
             continue
         try:
             detail = await hmc.get_vios_storage_detail(vios_uuid)
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             source_warnings.append(
                 f"VIOS {vios_uuid!r} storage detail unavailable: {exc}"

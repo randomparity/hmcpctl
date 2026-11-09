@@ -18,7 +18,7 @@ from conftest import assert_only_these_client_methods_used
 
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import job_outcome, power_off_lpar_job
 from hmcpctl.operations.lpar.assignments import WorkflowStep
 from hmcpctl.operations.lpar.decommission.core import (
@@ -2150,3 +2150,22 @@ async def test_evidence_preserves_wrapped_vios_and_fc_identity(monkeypatch):
     assert row["vios_name"] == "known-vios"
     assert row["uuid"] == row["mapping_id"] == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     assert row["backing_device"] == "known-port-pair"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["list_vios", "get_vios_storage_detail"])
+async def test_storage_inventory_preserves_fatal_tls_without_followup_reads(method):
+    from hmcpctl.operations.lpar.decommission import core
+
+    hmc = _client()
+    hmc.list_vios.return_value = [
+        {"UUID": VIOS_UUID},
+        {"UUID": "44444444-4444-4444-4444-444444444444"},
+    ]
+    failure = HMCTLSFingerprintError("private-pin")
+    getattr(hmc, method).side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await core._inventory_storage_mappings(hmc, SYSTEM_UUID, LPAR_UUID, 7)
+    assert caught.value is failure
+    getattr(hmc, method).assert_awaited_once()
+    assert hmc.mock_calls[-1][0] == method

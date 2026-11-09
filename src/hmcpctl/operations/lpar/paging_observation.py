@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from ...client.client_profiles import PartitionKind, read_native_profile
 from ...documents.common import UOM_NS
 from ...documents.partition_profile import one
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import is_uuid
 from ...ssh import memory as native
 from ...xmlutil import leaf_text
@@ -335,6 +335,8 @@ async def observe_paging(
     async def load(label: str, call: Awaitable[T]) -> T | None:
         try:
             return await call
+        except HMCTLSFingerprintError:
+            raise
         except (HMCError, ValueError, TypeError):
             unavailable.append(label)
             return None

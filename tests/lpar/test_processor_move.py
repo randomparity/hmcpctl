@@ -19,7 +19,7 @@ from hmcpctl.documents.lpar_processors import (
     PROCESSOR_NUMERIC_TOKEN_BYTES,
     LparProcessorMove,
 )
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar import processor_move as operation
 from hmcpctl.operations.lpar import processors
 from hmcpctl.ssh import processors as native
@@ -934,3 +934,48 @@ async def test_operation_requires_typed_move(boundary):
 def test_numeric_budget_and_missing_quantities(values):
     with pytest.raises(ValueError):
         LparProcessorMove(**values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uuid", [SOURCE, TARGET])
+async def test_fatal_tls_stops_remaining_move_reads_and_retains_evidence(
+    boundary, uuid
+):
+    b = boundary
+    failure = HMCTLSFingerprintError("private-pin")
+    b.errors[uuid] = failure
+    original = b.hmc.get_logical_partition.side_effect
+    at_failure = None
+    native_at_failure = None
+
+    async def read(*args, **kwargs):
+        nonlocal at_failure, native_at_failure
+        try:
+            return await original(*args, **kwargs)
+        except HMCTLSFingerprintError:
+            at_failure = {
+                name: call.await_count
+                for name, call in vars(b.hmc).items()
+                if isinstance(call, AsyncMock)
+            }
+            native_at_failure = b.native_read.await_count
+            raise
+
+    b.hmc.get_logical_partition.side_effect = read
+    result = await invoke(b)
+    assert at_failure is not None
+    assert {
+        name: call.await_count
+        for name, call in vars(b.hmc).items()
+        if isinstance(call, AsyncMock)
+    } == at_failure
+    assert b.native_read.await_count == native_at_failure
+    b.submit.assert_awaited_once()
+    assert result["outcome"] == "unverified" and not result["workflow_completed"]
+    assert result["source"]["UUID"] == SOURCE
+    assert result["destination"]["UUID"] == TARGET
+    assert (result["source"]["after"] is not None) == (uuid == TARGET)
+    assert result["destination"]["after"] is None
+    pending = ("source", "destination") if uuid == SOURCE else ("destination",)
+    assert all("TLS" in result[endpoint]["read_error"] for endpoint in pending)
+    assert "private-pin" not in repr(result)
