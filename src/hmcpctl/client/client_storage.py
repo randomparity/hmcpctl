@@ -1374,4 +1374,4 @@ class StorageMixin:
             _note,
         )
         entries = _parse_feed(response, path) if response else []
-        return entries[0].get("Resource", entries[0]) if entries else None
+        return entries[0] if entries else None

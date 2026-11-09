@@ -1266,9 +1266,10 @@ async def mount_optical_media(
         system_name_or_uuid=system_name_or_uuid,
     )
     location = await read_change_location(hmc, lpar_uuid)
-    resource = await hmc.create_optical_mapping(
+    entry = await hmc.create_optical_mapping(
         vios_uuid, media_name, lpar_uuid, target_device
     )
+    resource = entry["Resource"] if entry is not None else None
     return StorageMutationResult.from_raw(
         {
             "lpar_uuid": lpar_uuid,
