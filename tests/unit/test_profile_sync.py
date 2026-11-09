@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.profile_sync import (
     ChangeLocation,
     adapters_missing_from_profile,
@@ -389,3 +389,14 @@ async def test_an_empty_adapter_collection_is_no_adapter_not_an_error(mock_hmc):
     async with HMCClient(make_config()) as client:
         assert await adapters_missing_from_profile(client, LPAR_UUID, profile) == []
         assert await profile_adapter_warnings(client, LPAR_UUID, profile) == ()
+
+
+@pytest.mark.asyncio
+async def test_profile_advisory_propagates_fingerprint_failure_without_more_reads():
+    hmc = AsyncMock()
+    failure = HMCTLSFingerprintError("private-pin")
+    hmc.list_child.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await profile_adapter_warnings(hmc, LPAR_UUID, _profile())
+    assert caught.value is failure
+    assert hmc.list_child.await_count == 1

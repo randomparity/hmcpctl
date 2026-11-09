@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
 
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 
 ChangeLivesIn = Literal[
     "current-configuration", "current-configuration-and-profile", "unknown"
@@ -163,11 +163,13 @@ async def profile_adapter_warnings(
 ) -> tuple[str, ...]:
     """Power-on warnings for adapters activating *profile* would remove.
 
-    The check is advisory and never blocks the activation, so a failed adapter
-    feed read becomes a warning of its own rather than an error.
+    Ordinary adapter-feed failures become advisory warnings. A TLS certificate
+    identity failure aborts activation before any PowerOn submission.
     """
     try:
         missing = await adapters_missing_from_profile(hmc, lpar_uuid, profile)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         return (f"Partition profile adapter check not run: {exc}",)
     return tuple(

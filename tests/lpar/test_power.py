@@ -12,7 +12,7 @@ from conftest import JOB_ENTRY, make_config
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import (
     BOOT_MODES,
     POWER_OFF_OPERATIONS,
@@ -1190,3 +1190,22 @@ async def test_shutdown_rejects_activation_options_before_side_effects(kwargs):
         await activation.power_off_lpar(hmc, LPAR_UUID, **kwargs)
     hmc.submit_job.assert_not_awaited()
     hmc.get_quick_property.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_power_on_profile_advisory_fingerprint_failure_prevents_submission():
+    hmc = _profile_power_client([], {})
+    read = hmc.list_child.side_effect
+    failure = HMCTLSFingerprintError("private-pin")
+
+    async def failed_adapter(parent, lpar_uuid, child):
+        if child == "LogicalPartitionProfile":
+            return await read(parent, lpar_uuid, child)
+        raise failure
+
+    hmc.list_child.side_effect = failed_adapter
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await _power_on_with_profile(hmc)
+    assert caught.value is failure
+    hmc.submit_job.assert_not_awaited()
+    assert hmc.list_child.await_count == 2
