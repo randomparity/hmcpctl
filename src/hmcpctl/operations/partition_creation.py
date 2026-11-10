@@ -558,6 +558,67 @@ class _CreationFeatureCoordinator:
             ),
         )
 
+    async def _observe_vios_settings(self) -> None:
+        if self.layout_requested:
+            if self.controller_mode:
+                raise ValueError(
+                    "Controller current ratio mappings unavailable; no named profile was read"
+                )
+            self.attempted_feature = "memory_layout_step"
+            observed_layout = await get_lpar_memory_layout(
+                self.hmc.config, self.system, self.name
+            )
+            mismatch = any(
+                getattr(observed_layout, field) != value
+                for field, value in self.memory_layout.pairs()
+            )
+            await self.observe(
+                "memory_layout_step",
+                WorkflowStep(
+                    "memory_layout", "error" if mismatch else "ok", observed_layout
+                ),
+            )
+            if mismatch:
+                raise ValueError("Created VIOS memory ratios unavailable or mismatched")
+        if self.vtpm_settings is not None and self.vtpm_requested:
+            self.attempted_feature = "vtpm_step"
+            observed = await get_lpar_vtpm_state(
+                self.hmc.config, self.system, self.name, vios=True
+            )
+            mismatch = any(
+                getattr(observed.settings, field) != getattr(self.vtpm_settings, field)
+                for field, _ in self.vtpm_settings.pairs()
+            )
+            await self.observe(
+                "vtpm_step",
+                WorkflowStep("vtpm", "error" if mismatch else "ok", observed),
+            )
+            if mismatch:
+                raise ValueError(
+                    "Created VIOS vTPM readback differs from the requested fields"
+                )
+        if self.security_policy is not None and self.policy_requested:
+            assert self.entry is not None
+            self.attempted_feature = "security_policy_step"
+            policy = await read_lpar_security_policy(
+                self.hmc,
+                self.entry["UUID"],
+                system_name_or_uuid=self.system_uuid,
+                vios=True,
+            )
+            mismatch = any(
+                getattr(policy.settings, field) != getattr(self.security_policy, field)
+                for field, _ in self.security_policy.pairs()
+            )
+            await self.observe(
+                "security_policy_step",
+                WorkflowStep("security_policy", "error" if mismatch else "ok", policy),
+            )
+            if mismatch:
+                raise ValueError(
+                    "Created VIOS policy readback differs from requested fields"
+                )
+
     async def _observe_vios(self) -> None:
         verification_unavailable = "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
         try:
@@ -596,64 +657,7 @@ class _CreationFeatureCoordinator:
                 assert serial_step is not None
                 if serial_step.status != "ok":
                     raise ValueError("Serial creation observation incomplete")
-            if self.layout_requested:
-                if self.controller_mode:
-                    raise ValueError(
-                        "Controller current ratio mappings unavailable; no named profile was read"
-                    )
-                self.attempted_feature = "memory_layout_step"
-                observed_layout = await get_lpar_memory_layout(
-                    self.hmc.config, self.system, self.name
-                )
-                mismatch = any(
-                    getattr(observed_layout, field) != value
-                    for field, value in self.memory_layout.pairs()
-                )
-                self.facts["memory_layout_step"] = WorkflowStep(
-                    "memory_layout", "error" if mismatch else "ok", observed_layout
-                )
-                if mismatch:
-                    raise ValueError(
-                        "Created VIOS memory ratios unavailable or mismatched"
-                    )
-            if self.vtpm_settings is not None and self.vtpm_requested:
-                self.attempted_feature = "vtpm_step"
-                observed = await get_lpar_vtpm_state(
-                    self.hmc.config, self.system, self.name, vios=True
-                )
-                mismatch = any(
-                    getattr(observed.settings, field)
-                    != getattr(self.vtpm_settings, field)
-                    for field, _ in self.vtpm_settings.pairs()
-                )
-                self.facts["vtpm_step"] = WorkflowStep(
-                    "vtpm", "error" if mismatch else "ok", observed
-                )
-                if mismatch:
-                    raise ValueError(
-                        "Created VIOS vTPM readback differs from the requested fields"
-                    )
-            if self.security_policy is not None and self.policy_requested:
-                assert self.entry is not None
-                self.attempted_feature = "security_policy_step"
-                policy = await read_lpar_security_policy(
-                    self.hmc,
-                    self.entry["UUID"],
-                    system_name_or_uuid=self.system_uuid,
-                    vios=True,
-                )
-                mismatch = any(
-                    getattr(policy.settings, field)
-                    != getattr(self.security_policy, field)
-                    for field, _ in self.security_policy.pairs()
-                )
-                self.facts["security_policy_step"] = WorkflowStep(
-                    "security_policy", "error" if mismatch else "ok", policy
-                )
-                if mismatch:
-                    raise ValueError(
-                        "Created VIOS policy readback differs from requested fields"
-                    )
+            await self._observe_vios_settings()
         except HMCTLSFingerprintError as error:
             error.add_note(
                 "VIOS exists or may exist after creation submission. Inspect before "
