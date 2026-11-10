@@ -48,14 +48,13 @@ from hmcpctl.operations.lpar.provisioning.media import (
     media_name_for,
 )
 from hmcpctl.operations.lpar.provisioning.operation import (
-    DISK_LEDGER,
     EFFECT_KINDS,
-    MEDIA_LEDGER,
     provision_body,
     provision_classifiers,
     request_from_arguments,
     result_from_record,
 )
+from hmcpctl.operations.lpar.workflow_contract import DISK_LEDGER, MEDIA_LEDGER
 from hmcpctl.server_tools.catalog import TOOL_SECURITY
 from hmcpctl.server_tools.lpar.provision import delegated_tools, provision_handler
 

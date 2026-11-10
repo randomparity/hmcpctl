@@ -957,3 +957,62 @@ def test_terminal_reclamation_requires_media_and_unreadable_provenance(covered):
         assert conn.execute("SELECT count(*) FROM ledger").fetchone()[0] == (
             3 if covered else 8
         )
+
+
+def test_ledger_ownership_query_does_not_create_missing_store():
+    root = store.state_dir()
+    assert not store.ledgered_elsewhere(
+        "virtual_disk",
+        "system-a",
+        {"disk_name": "disk-a"},
+        exclude_operation_id=_oid(1),
+    )
+    assert not root.exists()
+
+
+@pytest.mark.parametrize(
+    ("excluded", "kind", "system", "match", "expected"),
+    [
+        (1, "virtual_disk", "system-a", {"disk_name": "disk-a"}, False),
+        (2, "virtual_disk", "system-a", {"disk_name": "disk-a"}, True),
+        (2, "installer_media", "system-a", {"disk_name": "disk-a"}, False),
+        (2, "virtual_disk", "system-b", {"disk_name": "disk-a"}, False),
+        (2, "virtual_disk", "system-a", {"disk_name": "disk-b"}, False),
+        (
+            2,
+            "virtual_disk",
+            "system-a",
+            {"disk_name": "disk-a", "vios_uuid": "other"},
+            False,
+        ),
+        (
+            2,
+            "virtual_disk",
+            "system-a",
+            {"disk_name": "disk-a", "vios_uuid": "vios-a"},
+            True,
+        ),
+    ],
+)
+def test_ledger_ownership_query_excludes_self_and_matches_resource_scope(
+    excluded, kind, system, match, expected
+):
+    with store.session() as conn:
+        _seed(conn, _oid(1))
+        _seed(conn, _oid(2))
+        with store.write_transaction(conn):
+            store.add_ledger(
+                conn,
+                _oid(1),
+                key="disk",
+                kind="virtual_disk",
+                system_uuid="system-a",
+                partition_uuid="partition-a",
+                identity={"disk_name": "disk-a", "vios_uuid": "vios-a"},
+            )
+    assert (
+        store.ledgered_elsewhere(
+            kind, system, match, exclude_operation_id=_oid(excluded)
+        )
+        is expected
+    )

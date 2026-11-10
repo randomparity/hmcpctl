@@ -25,10 +25,7 @@ from hmcpctl.operations.lpar.provisioning.core import (
     PROFILE_JOB_MINIMUM,
     virtual_disk_names,
 )
-from hmcpctl.operations.lpar.provisioning.operation import (
-    DISK_LEDGER,
-    _ledgered_elsewhere,
-)
+from hmcpctl.operations.lpar.workflow_contract import DISK_LEDGER
 
 from ...client.client_factory import open_client
 from ...client.core import HMCClient
@@ -1567,7 +1564,12 @@ async def _classify_disk(ctx: OperationContext, effect: EffectRecord) -> Classif
         "vg_uuid": add["vg_uuid"],
         "disk_name": add["name"],
     }
-    if _ledgered_elsewhere(ctx, DISK_LEDGER, plan["system_uuid"], identity):
+    if store.ledgered_elsewhere(
+        DISK_LEDGER,
+        plan["system_uuid"],
+        identity,
+        exclude_operation_id=ctx.operation_id,
+    ):
         return Classification(
             "needs_attention", reason="the disk belongs to another operation"
         )

@@ -63,10 +63,10 @@ from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionStorage,
     _check_vg_exists,
     _power_on,
+    mac_colon_form,
     preview_provision,
     validate_provision_assignments,
 )
-from hmcpctl.operations.lpar.provisioning.operation import mac_colon_form
 from hmcpctl.server_tools.catalog import TOOL_SECURITY
 from hmcpctl.server_tools.lpar.provision import delegated_tools, provision_handler
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy

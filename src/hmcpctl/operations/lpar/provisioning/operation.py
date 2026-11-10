@@ -8,7 +8,6 @@ A leg's step error keeps its exception text, bounded to 512 characters.
 from __future__ import annotations
 
 import dataclasses
-import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
@@ -66,6 +65,7 @@ from hmcpctl.operations.lpar.provisioning.core import (
     _read_change_location,
     _run_affinity_stage,
     _skip_steps,
+    mac_colon_form,
     require_install_url,
     validate_provision_assignments,
     validate_provision_install,
@@ -85,7 +85,12 @@ from hmcpctl.operations.lpar.provisioning.media import (
     repository_group,
     target_request,
 )
-from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.operations.lpar.workflow_contract import (
+    DISK_LEDGER,
+    MEDIA_LEDGER,
+    PARTITION_LEDGER,
+    WorkflowStep,
+)
 from hmcpctl.operations.storage.resources import (
     mount_optical_media,
     storage_mapping,
@@ -144,10 +149,6 @@ STEP_NAMES: Mapping[str, str] = {
     "boot_order": "set_boot_order",
     "refcode_baseline": "refcode_baseline",
 }
-# Ledger kinds (ADR 0313 Decision 6).
-PARTITION_LEDGER = "partition"
-DISK_LEDGER = "virtual_disk"
-MEDIA_LEDGER = "installer_media"
 _RESULT = TypeAdapter(ProvisionResult)
 _REQUEST = TypeAdapter(ProvisionRequest)
 
@@ -171,7 +172,6 @@ DEFAULT_ARGUMENTS: Mapping[str, Any] = {
     "partition_type": "AIX/Linux",
     "power_on": True,
 }
-_HEX12 = re.compile(r"[0-9a-f]{12}")
 # Legs whose result is reported as their per-assignment steps.
 _ASSIGNMENT_KEYS = ("assignments", "dedicated")
 _MEDIA_STEPS = ("bind_media", "upload_media", "mount_media")
@@ -212,17 +212,6 @@ def request_from_arguments(
     validate_provision_storage(request.storage)
     validate_provision_install(request)
     return arguments["system_name_or_uuid"], request
-
-
-def mac_colon_form(value: object) -> str | None:
-    """Return *value* as a lower-case colon MAC, or None when it is not one."""
-    text = leaf_text(value)
-    if not isinstance(text, str):
-        return None
-    digits = text.strip().lower().replace(":", "").replace("-", "")
-    if not _HEX12.fullmatch(digits):
-        return None
-    return ":".join(digits[i : i + 2] for i in range(0, 12, 2))
 
 
 def profile_name_for(operation_id: str) -> str:
@@ -333,19 +322,6 @@ def _named(entries: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
     return [
         e for e in entries if (e.get("Resource") or {}).get("PartitionName") == name
     ]
-
-
-def _ledgered_elsewhere(
-    ctx: OperationContext, kind: str, system_uuid: str, match: Mapping[str, Any]
-) -> bool:
-    """Whether another operation's ledger already owns the resource *match* names."""
-    with store.read_session() as conn:
-        entries = [] if conn is None else store.ledger_entries(conn, kind, system_uuid)
-    return any(
-        operation_id != ctx.operation_id
-        and all(identity.get(key) == value for key, value in match.items())
-        for operation_id, _partition, identity in entries
-    )
 
 
 async def _stamp_state(
@@ -1353,8 +1329,11 @@ def provision_classifiers(
             reason = f"LPAR {lpar_uuid} exists; its physical I/O follow-up cannot be verified"
         elif owner not in (None, agent):
             reason = f"LPAR {lpar_uuid} carries another agent's ownership stamp"
-        elif not lpar_uuid or _ledgered_elsewhere(
-            ctx, PARTITION_LEDGER, system_uuid, {"lpar_uuid": lpar_uuid}
+        elif not lpar_uuid or store.ledgered_elsewhere(
+            PARTITION_LEDGER,
+            system_uuid,
+            {"lpar_uuid": lpar_uuid},
+            exclude_operation_id=ctx.operation_id,
         ):
             reason = f"LPAR {lpar_uuid or '?'} belongs to another operation"
         else:
@@ -1418,8 +1397,8 @@ def provision_classifiers(
             "disk_name": storage.storage_name,
         }
         system_uuid = ctx.partition[0] if ctx.partition else ""
-        if not system_uuid or _ledgered_elsewhere(
-            ctx, DISK_LEDGER, system_uuid, identity
+        if not system_uuid or store.ledgered_elsewhere(
+            DISK_LEDGER, system_uuid, identity, exclude_operation_id=ctx.operation_id
         ):
             return Classification(
                 "needs_attention", reason="the disk belongs to another operation"

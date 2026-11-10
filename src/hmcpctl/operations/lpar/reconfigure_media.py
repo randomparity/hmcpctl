@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from hmcpctl.operations.lpar.provisioning.media import device_path
-from hmcpctl.operations.lpar.provisioning.operation import (
+from hmcpctl.operations.lpar.workflow_contract import (
     DISK_LEDGER,
     MEDIA_LEDGER,
     PARTITION_LEDGER,

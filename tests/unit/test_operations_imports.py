@@ -176,3 +176,27 @@ importlib.import_module("hmcpctl.operations.lpar.{module}")
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_reconfiguration_imports_without_provisioning_workflow():
+    script = """
+import importlib
+import importlib.abc
+import sys
+
+class NoProvisioningWorkflow(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "hmcpctl.operations.lpar.provisioning.operation":
+            raise ModuleNotFoundError("provisioning workflow dependency forbidden")
+
+sys.meta_path.insert(0, NoProvisioningWorkflow())
+importlib.import_module("hmcpctl.operations.lpar.reconfigure")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

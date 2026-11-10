@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
@@ -65,6 +66,19 @@ from hmcpctl.ssh.profiles import parse_profile_io_slots, read_profile_io_slot_ro
 from hmcpctl.ssh.selectors import resolve_ssh_names
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import console_version, leaf_text
+
+_HEX12 = re.compile(r"[0-9a-f]{12}")
+
+
+def mac_colon_form(value: object) -> str | None:
+    """Return *value* as a lower-case colon MAC, or None when it is not one."""
+    text = leaf_text(value)
+    if not isinstance(text, str):
+        return None
+    digits = text.strip().lower().replace(":", "").replace("-", "")
+    if not _HEX12.fullmatch(digits):
+        return None
+    return ":".join(digits[i : i + 2] for i in range(0, 12, 2))
 
 
 @dataclass(frozen=True)

@@ -16,8 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
-from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists
-from hmcpctl.operations.lpar.provisioning.operation import mac_colon_form
+from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists, mac_colon_form
 
 from ...client.core import HMCClient
 from ...errors import HMCError

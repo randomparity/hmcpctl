@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from hmcpctl.operations.lpar.decommission.core import resolve_target_lpar
-from hmcpctl.operations.lpar.provisioning.operation import PARTITION_LEDGER
+from hmcpctl.operations.lpar.workflow_contract import PARTITION_LEDGER
 
 from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import resolve_system_uuid
