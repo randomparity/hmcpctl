@@ -41,6 +41,14 @@ system UUID before invoking remote phases. The coordinator retains facts and the
 active observation for confirmed, absent and unconfirmed identities. Core adapts
 those facts to public results and diagnostics without a second feature-state store.
 
+LPAR core expresses admission, transport submission and post-create completion as
+private functions. Completion names identity, stamping, local I/O, settings,
+verification-gated apply and diagnostic adaptation explicitly; these helpers use
+the same coordinator facts. Settings and reporting share one observer at their
+existing positions: role requests need verification before deferred apply, while
+plain legacy settings retain apply-first behavior. Role-only public follow-up
+presentation still lists apply first, independently of its verification barrier.
+
 ## Consequences
 
 TLS identity rejection stops subsequent reads and writes. LPAR retains earlier

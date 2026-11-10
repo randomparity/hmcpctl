@@ -79,6 +79,13 @@ resolution. The same concrete coordinator supplies feature predicates and retain
 for absent and unconfirmed identities in their existing distinct orders. LPAR result adaptation
 consumes coordinator facts, including after TLS rejection, without a competing active-step tracker.
 
+Within LPAR core, private admission, submission and completion functions make the ordered
+lifecycle visible without another workflow owner. Completion separates identity handling,
+ownership stamping, local I/O, settings/reporting observation, apply eligibility and pure
+diagnostic adaptation. Reuse the settings/reporting observer at the existing pre-apply or
+post-apply position: role verification gates deferred apply, whereas plain legacy settings
+retain apply-first behavior. Keep role-only public presentation's apply-first ordering.
+
 ## Failure model and acceptance
 
 The named deployment is the existing REST/SSH HMC application; offline refactoring proves no
