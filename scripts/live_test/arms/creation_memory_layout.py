@@ -25,6 +25,7 @@ from hmcpctl.resource_identity import (
 from hmcpctl.ssh.commands import parse_hmc_result_rows
 
 from .. import evidence
+from ..config import hmc_identity
 from ..creation_journals import _validate_creation_memory_layout
 from ..observation import Assertion
 from .lpar_config import (
@@ -89,14 +90,12 @@ def _checkpoint(state: RunState, phase: str) -> None:
     journal = state.artifacts.creation_memory_layout
     configured(state.config)
     _validate_creation_memory_layout(journal)
-    from ..runner import _hmc_identity
-
     if (
         state.checkpoint is None
         or state.hmc_config is None
         or journal["invocation_id"] != state.creation_memory_layout_invocation
         or journal["candidate_commit"] != _candidate()
-        or journal["hmc_identity"] != _hmc_identity(state.hmc_config)
+        or journal["hmc_identity"] != hmc_identity(state.hmc_config)
     ):
         raise ValueError("fresh invocation/checkpoint/candidate/HMC identity required")
     journal["phase"] = phase
@@ -501,7 +500,6 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
             or any(row["name"] == vname for row in vios)
         ):
             raise ValueError("fresh-name collision")
-        from ..runner import _hmc_identity
 
         invocation = uuid.uuid4().hex
         state.creation_memory_layout_invocation = invocation
@@ -509,7 +507,7 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
             "invocation_id": invocation,
             "candidate_commit": _candidate(),
             "system_uuid": system_uuid,
-            "hmc_identity": _hmc_identity(state.hmc_config),
+            "hmc_identity": hmc_identity(state.hmc_config),
             "phase": "preflight",
             "lpar_name": run.name,
             "lpar_token": run.token,

@@ -17,7 +17,7 @@ from hmcpctl.documents.partition_profile import (
 )
 from hmcpctl.operations.lpar.profiles import core as domain
 
-from ..config import decode_saved_config
+from ..config import decode_saved_config, hmc_identity
 from ..observation import Assertion
 
 SUBTASK = 46
@@ -345,9 +345,7 @@ async def exercise_partition_profiles(client, state):
 
 
 async def recover_document(hmc_config, document):
-    from ..runner import _hmc_identity
-
-    if document.get("hmc") != _hmc_identity(hmc_config):
+    if document.get("hmc") != hmc_identity(hmc_config):
         raise ValueError("partition-profile recovery HMC identity differs")
     run = document.get("run", {})
     if (

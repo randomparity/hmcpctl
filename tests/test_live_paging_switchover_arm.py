@@ -24,7 +24,10 @@ from lpar.test_paging_switchover import attempt  # noqa: F401 - imported boundar
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import evidence, runner
 from live_test.arms import paging_switchover as arm
-from live_test.config import LiveTestConfig
+from live_test.config import (
+    LiveTestConfig,
+    hmc_identity,
+)
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
@@ -92,7 +95,7 @@ async def exercise(pair):
                     False,
                 ),
                 "config": asdict(state.config),
-                "hmc": runner._hmc_identity(state.hmc_config),
+                "hmc": hmc_identity(state.hmc_config),
                 "artifacts": asdict(state.artifacts),
                 "results": state.results,
             }
@@ -315,7 +318,7 @@ async def test_surviving_cancellation_keeps_original_and_independent_read(
             True,
         ),
         "config": json.loads(json.dumps(asdict(state.config))),
-        "hmc": runner._hmc_identity(state.hmc_config),
+        "hmc": hmc_identity(state.hmc_config),
         "results": json.loads(json.dumps(state.results)),
     }
     result = await arm.recover_document(state.hmc_config, document)

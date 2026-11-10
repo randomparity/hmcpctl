@@ -19,6 +19,7 @@ from live_test import artifacts as live_artifacts
 from live_test import config as live_config
 from live_test import runner
 from live_test.arms import storage_volume_group as vg
+from live_test.config import hmc_identity
 
 PV = "hdisk9"
 PVID = "0000000000000009"
@@ -435,7 +436,7 @@ async def test_registered_runner_native_wire_contract(monkeypatch, tmp_path, fau
         json.dumps(
             {
                 "config": asdict(config),
-                "hmc": runner._hmc_identity(hmc),
+                "hmc": hmc_identity(hmc),
                 "artifacts": asdict(
                     live_artifacts.LiveTestArtifacts(
                         vios_uuid="vios-A", vios_partition_id=1

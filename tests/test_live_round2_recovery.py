@@ -16,6 +16,7 @@ import live_test_recovery as recovery
 from live_test import baseline, inventory, runner
 from live_test import config as live_config
 from live_test.arms import provisioning
+from live_test.config import hmc_identity
 from live_test.observation import plain_data
 from live_test.recovery import baseline as baseline_recovery
 
@@ -260,7 +261,7 @@ def test_actual_round2_recovery_has_independent_witness(
             "partial": False,
         },
         "config": asdict(state.config),
-        "hmc": runner._hmc_identity(CONFIG),
+        "hmc": hmc_identity(CONFIG),
         "artifacts": asdict(state.artifacts),
         "results": [],
     }
@@ -404,7 +405,7 @@ async def test_fixture_admission_and_cleanup_fail_closed(state, monkeypatch, fau
 async def test_round2_property_reader_enforces_readonly(state, monkeypatch):
     inputs = baseline_recovery.Round2Inputs(
         snapshot(state),
-        runner._hmc_identity(CONFIG),
+        hmc_identity(CONFIG),
         state.config.lp3_name,
         "original",
         {"profile": "default", "profile_mode": "default"},
@@ -521,7 +522,7 @@ def test_producer_to_recovery_composes_real_baseline_parsers(
             "partial": False,
         },
         "config": asdict(state.config),
-        "hmc": runner._hmc_identity(CONFIG),
+        "hmc": hmc_identity(CONFIG),
         "artifacts": asdict(state.artifacts),
         "results": state.results,
     }
@@ -573,7 +574,7 @@ def test_restored_context_drops_prior_round2_witnesses(state, tmp_path):
         json.dumps(
             {
                 "config": asdict(state.config),
-                "hmc": runner._hmc_identity(CONFIG),
+                "hmc": hmc_identity(CONFIG),
                 "artifacts": asdict(state.artifacts),
                 "results": [],
             }

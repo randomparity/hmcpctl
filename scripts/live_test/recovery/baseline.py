@@ -10,6 +10,7 @@ from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import runner
 from live_test.arms.profiles import ARTIFACT_PREFIX, backup_artifact_names
+from live_test.config import hmc_identity
 from live_test.recovery.common import Finding, StateUnreadable
 
 
@@ -59,7 +60,7 @@ def round2_inputs_from_document(
 
 async def check_round2(call, inputs: Round2Inputs) -> list[Finding]:
     config = HMCConfig()
-    if runner._hmc_identity(config) != inputs.hmc:
+    if hmc_identity(config) != inputs.hmc:
         raise StateUnreadable("current HMC identity does not match round2 results")
     scope = inputs.snapshot["scope"]
     # This installed capture interface performs only REST GETs and listing SSH commands.

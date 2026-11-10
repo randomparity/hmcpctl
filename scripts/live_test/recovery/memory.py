@@ -11,8 +11,8 @@ from datetime import datetime
 from hmcpctl.config import HMCConfig
 from live_test import artifacts as live_artifacts
 from live_test import config as live_config
-from live_test import runner
 from live_test.arms import creation_memory, creation_memory_layout, lpar_config
+from live_test.config import hmc_identity
 
 from .common import Finding, StateUnreadable
 
@@ -54,7 +54,7 @@ def creation_memory_skip_reason(document: dict, subtasks: list[int]) -> str | No
     ):
         return None
     hmc = document.get("hmc")
-    expected_hmc = runner._hmc_identity(HMCConfig.from_mapping({}))
+    expected_hmc = hmc_identity(HMCConfig.from_mapping({}))
     if (
         not isinstance(hmc, dict)
         or set(hmc) != set(expected_hmc)
@@ -154,7 +154,7 @@ def creation_memory_layout_skip_reason(document, subtasks) -> str | None:
     ):
         return None
     hmc = document.get("hmc")
-    expected_hmc = runner._hmc_identity(HMCConfig.from_mapping({}))
+    expected_hmc = hmc_identity(HMCConfig.from_mapping({}))
     if (
         not isinstance(hmc, dict)
         or set(hmc) != set(expected_hmc)
@@ -211,7 +211,7 @@ async def check_creation_memory(call, inputs: CreationMemoryInputs) -> list[Find
     """Read-only current reconciliation; retained grants never authorize cleanup."""
     j = inputs.journal
     if (
-        runner._hmc_identity(HMCConfig()) != j["hmc_identity"]
+        hmc_identity(HMCConfig()) != j["hmc_identity"]
         or creation_memory._candidate() != j["candidate_commit"]
     ):
         raise StateUnreadable("ST65 current candidate/HMC differs from journal")
@@ -329,7 +329,7 @@ async def check_creation_memory_layout(
 ) -> list[Finding]:
     """Reconcile every phase read-only; intent and saved grants never authorize delete."""
     journal = inputs.journal
-    if runner._hmc_identity(HMCConfig()) != journal["hmc_identity"]:
+    if hmc_identity(HMCConfig()) != journal["hmc_identity"]:
         raise StateUnreadable("ST58 current HMC identity differs from its journal")
     status, entry = await call(
         "hmc_get_system", system_name_or_uuid=journal["system_uuid"]

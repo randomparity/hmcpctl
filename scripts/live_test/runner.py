@@ -146,7 +146,7 @@ from live_test.arms.vmedia import (
 )
 from live_test.arms.vmedia_media_change import vmedia_media_change
 from live_test.artifacts import LiveTestArtifacts, decode_artifacts
-from live_test.config import LiveTestConfig, decode_saved_config
+from live_test.config import LiveTestConfig, decode_saved_config, hmc_identity
 from live_test.http_fixture import IsoHttpServer
 from live_test.inventory import capture_lpar_baseline
 from live_test.observation import (
@@ -976,16 +976,6 @@ def _run_from_arguments(argv: list[str] | None = None) -> int:
     )
 
 
-def _hmc_identity(config: HMCConfig) -> dict[str, str | int | bool]:
-    """Return the non-secret HMC identity bound to a persisted artifact set."""
-    return {
-        "host": config.host,
-        "port": config.port,
-        "user": config.user,
-        "verify_ssl": config.verify_ssl,
-    }
-
-
 def _restore_artifacts_from_results(
     state: RunState,
     hmc_config: HMCConfig,
@@ -1027,7 +1017,7 @@ def _restore_artifacts_from_results(
         if decode_saved_config(saved["config"]) != state.config:
             raise ValueError("results configuration does not match this run")
         saved_hmc = saved["hmc"]
-        current_hmc = _hmc_identity(hmc_config)
+        current_hmc = hmc_identity(hmc_config)
         if not isinstance(saved_hmc, dict) or set(saved_hmc) != set(current_hmc):
             raise TypeError("results hmc identity must contain the expected fields")
         if any(
@@ -1169,7 +1159,7 @@ async def main(
                         detach_probe=detach_probe,
                     ),
                     "config": asdict(state.config),
-                    "hmc": _hmc_identity(hmc_config),
+                    "hmc": hmc_identity(hmc_config),
                     "artifacts": asdict(state.artifacts),
                     "results": state.results,
                 },

@@ -15,6 +15,7 @@ from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_descripti
 from hmcpctl.operations.systems import profiles as domain
 from hmcpctl.resource_identity import resolve_system_uuid
 
+from ..config import hmc_identity
 from ..observation import Assertion
 
 if TYPE_CHECKING:
@@ -378,9 +379,8 @@ async def preflight(hmc_config, config):
 async def recover_document(hmc_config, document):
     from ..artifacts import decode_artifacts
     from ..config import decode_saved_config
-    from ..runner import _hmc_identity
 
-    if document.get("hmc") != _hmc_identity(hmc_config):
+    if document.get("hmc") != hmc_identity(hmc_config):
         raise ValueError(
             "system-profile recovery transport identity differs before authentication"
         )

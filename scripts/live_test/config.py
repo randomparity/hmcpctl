@@ -6,10 +6,14 @@ import math
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.storage import VIRTUAL_DISK_NAME_MAX
+
+if TYPE_CHECKING:
+    from hmcpctl.config import HMCConfig
+
 
 ENV_FILE = Path(".env")
 
@@ -426,6 +430,16 @@ class LiveTestConfig:
             invalid.append("inconsistent resource limits")
         if invalid:
             raise ValueError("invalid live-test configuration: " + ", ".join(invalid))
+
+
+def hmc_identity(config: HMCConfig) -> dict[str, str | int | bool]:
+    """Return the non-secret HMC identity bound to a persisted artifact set."""
+    return {
+        "host": config.host,
+        "port": config.port,
+        "user": config.user,
+        "verify_ssl": config.verify_ssl,
+    }
 
 
 def decode_saved_config(value: Any) -> LiveTestConfig:

@@ -31,6 +31,7 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_recovery as recovery  # noqa: E402
 from live_test.arms import storage_lifecycle  # noqa: E402
 from live_test.arms.storage import scsi_adapter_listing  # noqa: E402
+from live_test.config import hmc_identity  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
 from live_test.recovery import backup as backup_recovery  # noqa: E402
 from live_test.recovery import baseline as baseline_recovery  # noqa: E402
@@ -2814,7 +2815,7 @@ def _creation_memory_document(phase="complete"):
         "invocation_id": "a" * 32,
         "candidate_commit": "b" * 40,
         "system_uuid": system,
-        "hmc_identity": recovery.runner._hmc_identity(HMCConfig.from_mapping({})),
+        "hmc_identity": hmc_identity(HMCConfig.from_mapping({})),
         "phase": phase,
         "lpar_name": "hmcpctl-live-lpar-deadbeef",
         "lpar_token": "lparcfg-deadbeef",
@@ -3067,7 +3068,7 @@ async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
     document = {
         "run": {"group": "round2"},
         "config": json.loads(json.dumps(dataclasses.asdict(config))),
-        "hmc": recovery.runner._hmc_identity(hmc),
+        "hmc": hmc_identity(hmc),
         "artifacts": dataclasses.asdict(artifacts),
         "results": [],
     }
@@ -3459,7 +3460,7 @@ def _c07_document(phase="complete"):
         "invocation_id": "a" * 32,
         "candidate_commit": "b" * 40,
         "system_uuid": config.system_name,
-        "hmc_identity": recovery.runner._hmc_identity(
+        "hmc_identity": hmc_identity(
             HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
         ),
         "case": "ame-zero-vios",

@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test.arms import partition_profile_contract as arm
+from live_test.config import hmc_identity
 
 FIXTURE = (
     Path(__file__).parent / "fixtures/partition_profile_contract/normalized-profile.xml"
@@ -756,7 +757,7 @@ def test_interrupted_arm_has_pre_effect_checkpoint_for_independent_cli_recovery(
                     "tree_clean": True,
                 },
                 "config": asdict(config),
-                "hmc": runner._hmc_identity(hmc),
+                "hmc": hmc_identity(hmc),
                 "artifacts": {},
                 "results": [],
             },

@@ -74,6 +74,7 @@ from live_test.arms import (  # noqa: E402
     vios_backup,
     vmedia,
 )
+from live_test.config import hmc_identity  # noqa: E402
 
 LIVE_WORKFLOW_MODULES = (
     bare_cec,
@@ -4276,7 +4277,7 @@ def _result_document(
 ) -> dict:
     return {
         "config": asdict(config),
-        "hmc": runner._hmc_identity(hmc_config),
+        "hmc": hmc_identity(hmc_config),
         "artifacts": asdict(artifacts or live_artifacts.LiveTestArtifacts()),
         "results": [{"status": "PASS"}],
     }

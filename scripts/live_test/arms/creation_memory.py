@@ -22,6 +22,7 @@ from hmcpctl.operations.lpar.profiles import core as profiles
 from hmcpctl.resource_identity import is_uuid, resolve_system_name, resolve_system_uuid
 from hmcpctl.xmlutil import parse_feed
 
+from ..config import hmc_identity
 from ..creation_journals import _validate_creation_memory
 from ..observation import Assertion, judge_create_result
 from ..results import field as result_field
@@ -194,14 +195,12 @@ async def _baseline(
 def _checkpoint(state: RunState, phase: str) -> None:
     journal = state.artifacts.creation_memory
     kind, memory = configured(state.config)
-    from ..runner import _hmc_identity
-
     if (
         state.checkpoint is None
         or state.hmc_config is None
         or journal["invocation_id"] != state.creation_memory_invocation
         or journal["candidate_commit"] != _candidate()
-        or journal["hmc_identity"] != _hmc_identity(state.hmc_config)
+        or journal["hmc_identity"] != hmc_identity(state.hmc_config)
         or journal["kind"] != kind
         or journal["requested"] != dict(memory.pairs())
     ):
@@ -462,14 +461,13 @@ async def _prepare(
     fixture = (NAME_PREFIX if kind == "LogicalPartition" else VIOS_PREFIX) + suffix
     if fixture in baseline["pools"]["partitions"]:
         raise ValueError("fresh name collision")
-    from ..runner import _hmc_identity
 
     state.creation_memory_invocation = invocation
     state.artifacts.creation_memory = {
         "invocation_id": invocation,
         "candidate_commit": _candidate(),
         "system_uuid": system,
-        "hmc_identity": _hmc_identity(state.hmc_config),
+        "hmc_identity": hmc_identity(state.hmc_config),
         "case": state.config.creation_memory_case,
         "kind": kind,
         "name": fixture,

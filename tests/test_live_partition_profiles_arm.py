@@ -19,6 +19,7 @@ from hmcpctl.operations.lpar.profiles import core as domain
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import runner
 from live_test.arms import partition_profiles as arm
+from live_test.config import hmc_identity
 
 
 def config():
@@ -84,7 +85,7 @@ def document(state):
                     "subtasks": [arm.SUBTASK],
                     "partial": False,
                 },
-                "hmc": runner._hmc_identity(state.hmc_config),
+                "hmc": hmc_identity(state.hmc_config),
                 "config": asdict(state.config),
                 "artifacts": asdict(state.artifacts),
             }
