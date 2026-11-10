@@ -13,13 +13,13 @@ from ...documents.lpar_security_policy import (
     SecurityPolicyResult,
     SecurityPolicyState,
 )
+from ...documents.native_records import build_attribute_record
 from ...errors import HMCError
 from ...resource_identity import (
     resolve_lpar_uuid,
     resolve_system_uuid,
     resolve_vios_uuid,
 )
-from ...ssh.commands import build_attribute_record
 from ...ssh.lpar import set_lpar_security_policy
 from ...ssh.profiles import get_proc_compat_modes
 from ...xmlutil import console_version, leaf_text

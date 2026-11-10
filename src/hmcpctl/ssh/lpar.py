@@ -34,7 +34,7 @@ from ..documents.lpar import (
     shared_units_over_vcpus,
     shared_vcpu_defaults,
 )
-from .commands import build_attribute_record, build_filter
+from ..documents.native_records import build_attribute_record, build_filter
 from .description_validation import validate_lpar_description
 from .profiles import set_lpar_description
 from .transport import HMCCLIError, run_hmc_command

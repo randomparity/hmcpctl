@@ -996,7 +996,7 @@ async def delete_system_profile(
 
 
 async def _facts(hmc, phase, members):
-    from ...ssh.commands import build_filter
+    from ...documents.native_records import build_filter
 
     result = {}
     for member in members:

@@ -6,12 +6,8 @@ import shlex
 from typing import Any, Literal, get_args
 
 from ..config import HMCConfig
-from .commands import (
-    HMC_NO_RESULTS,
-    _parse_lshwres_output,
-    build_filter,
-    parse_hmc_result_rows,
-)
+from ..documents.native_records import build_filter
+from .commands import HMC_NO_RESULTS, _parse_lshwres_output, parse_hmc_result_rows
 from .transport import run_hmc_command
 
 # The default slot listing prints pci_class as four upper-case hex digits (V10R3).

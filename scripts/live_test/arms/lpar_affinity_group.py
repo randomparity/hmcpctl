@@ -8,10 +8,11 @@ import uuid
 from typing import TYPE_CHECKING
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.native_records import build_filter
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.linux_roles import read_creation_authority
 from hmcpctl.resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
-from hmcpctl.ssh.commands import build_filter, parse_hmc_result_rows
+from hmcpctl.ssh.commands import parse_hmc_result_rows
 from hmcpctl.xmlutil import leaf_text
 
 from ..observation import Assertion

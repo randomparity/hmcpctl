@@ -1,1 +1,1 @@
-"""Domain-specific XML request-document builders for the HMC REST API."""
+"""Domain-specific XML and native-record request builders for the HMC."""

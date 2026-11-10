@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .commands import _RECORD_DELIMITERS
+from ..documents.native_records import RECORD_DELIMITERS
 
 
 def validate_lpar_description(description: str) -> None:
@@ -14,7 +14,7 @@ def validate_lpar_description(description: str) -> None:
             "description contains non-ASCII or non-printable characters; "
             "the HMC only accepts printable ASCII partition descriptions (HSCLC63B)"
         )
-    for character, (name, reason) in _RECORD_DELIMITERS.items():
+    for character, (name, reason) in RECORD_DELIMITERS.items():
         if character in description:
             raise ValueError(
                 f"description {description!r} contains {name} ({character!r}); "

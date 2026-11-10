@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+from hmcpctl.documents.native_records import build_filter
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.linux_roles import read_role_capabilities
 from hmcpctl.resource_identity import (
@@ -21,7 +22,7 @@ from hmcpctl.resource_identity import (
     resolve_system_uuid,
     resolve_vios_uuid,
 )
-from hmcpctl.ssh.commands import build_filter, parse_hmc_result_rows
+from hmcpctl.ssh.commands import parse_hmc_result_rows
 
 from .. import evidence
 from ..config import _validate_creation_memory_layout

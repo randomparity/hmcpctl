@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client
 
-from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter
+from hmcpctl.documents.native_records import build_filter
+from hmcpctl.ssh.commands import HMC_NO_RESULTS
 
 from ..observation import Assertion, CallFailure
 from ..results import entries

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 from fastmcp import Client
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.ssh.commands import build_filter
+from hmcpctl.documents.native_records import build_filter
 
 from .results import entries
 from .results import resource as get_resource

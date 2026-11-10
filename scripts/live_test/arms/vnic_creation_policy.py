@@ -24,6 +24,7 @@ from hmcpctl.client.client_profiles import PartitionKind, read_native_profile
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, load_profile
 from hmcpctl.documents.lpar import LparResources, build_lpar_document
+from hmcpctl.documents.native_records import build_attribute_record
 from hmcpctl.documents.partition_profile import _records
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import core as lifecycle_core
@@ -48,7 +49,6 @@ from hmcpctl.operations.virtualization.vnic_policy import (
 )
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh import transport
-from hmcpctl.ssh.commands import build_attribute_record
 from hmcpctl.ssh.lpar import _lpar_resource_pairs
 from hmcpctl.ssh.profiles import get_lpar_description
 from hmcpctl.ssh.sriov import list_sriov_configured_logical_port_rows

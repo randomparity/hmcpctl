@@ -282,7 +282,7 @@ def test_filesystem_session_bound_and_failed_checkpoint(tmp_path, monkeypatch):
 
 def test_attestation_exact_selected_closure(tmp_path, monkeypatch):
     p = packet(tmp_path)
-    assert len(source.SOURCE_PATHS) == 23
+    assert len(source.SOURCE_PATHS) == 24
     assert "scripts/live_test/arms/__init__.py" in source.SOURCE_PATHS
     assert "scripts/live_test/arms/__init__.py" in ame.SOURCE_PATHS
     assert "src/hmcpctl/operations/partition_creation.py" in source.SOURCE_PATHS
@@ -1703,3 +1703,56 @@ async def test_uncertainty_snapshot_checkpoint_failure_stops_native_read(
     assert h.held and "uncertainty" not in h.native_consumed and not w.deletes
     stored = json.loads((out / "results.json").read_text())
     assert len(stored["snapshots"]) == 2 and stored["phase"] == "held"
+
+
+@pytest.mark.parametrize("arm", ["ame", "boot"])
+def test_native_record_source_mutation_invalidates_capture(tmp_path, monkeypatch, arm):
+    from test_live_vios_ame_source_arm import packet as ame_packet
+
+    selected, make_packet = (ame, ame_packet) if arm == "ame" else (source, packet)
+    p = make_packet(tmp_path)
+    root = tmp_path / "checkout"
+    checkout = Path(__file__).resolve().parents[1]
+    codec = "src/hmcpctl/documents/native_records.py"
+    for name in {*selected.SOURCE_PATHS, codec}:
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((checkout / name).read_bytes())
+
+    def fingerprints():
+        return {
+            name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+            for name in selected.SOURCE_PATHS
+        }
+
+    p["imported_source_sha256"] = fingerprints()
+    assert "src/hmcpctl/ssh/commands.py" in p["imported_source_sha256"]
+    selected.validate_packet(p)
+    monkeypatch.setattr(packets, "_root", lambda: root)
+    monkeypatch.setattr(
+        packets.hmcpctl, "__file__", str(root / "src/hmcpctl/__init__.py")
+    )
+    monkeypatch.setattr(packets.sys, "version_info", (3, 11, 15))
+    monkeypatch.setattr(
+        packets,
+        "_git_read",
+        lambda root, args: {
+            ("rev-parse", "HEAD"): p["tested_commit"],
+            ("rev-parse", "HEAD^{tree}"): p["tested_tree"],
+        }.get(args, ""),
+    )
+    selected._attest(p)
+    target = root / codec
+    original = target.read_bytes()
+    changed = original.replace(b"RECORD_DELIMITERS.items()", b"{}.items()")
+    assert original != changed
+    target.write_bytes(changed)
+    assert fingerprints() != p["imported_source_sha256"]
+    with pytest.raises(ame.Held, match="imported source closure changed"):
+        selected._attest(p)
+    p["imported_source_sha256"] = fingerprints()
+    selected._attest(p)
+    # A capture made before the owner move cannot attest the new selected closure.
+    del p["imported_source_sha256"][codec]
+    with pytest.raises(ame.Held):
+        selected.validate_packet(p)

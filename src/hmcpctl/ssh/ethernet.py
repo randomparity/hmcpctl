@@ -6,7 +6,7 @@ import math
 import shlex
 
 from ..config import HMCConfig
-from .commands import build_attribute_record
+from ..documents.native_records import build_attribute_record
 from .transport import run_hmc_command
 
 

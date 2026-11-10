@@ -30,8 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from hmcpctl.documents.native_records import build_filter
 from hmcpctl.operations.lpar.provisioning.boot import BOOT_STARTED_CODES
-from hmcpctl.ssh.commands import build_filter
 
 from ..observation import Assertion
 from ..results import field as result_field

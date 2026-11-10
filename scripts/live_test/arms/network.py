@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 from fastmcp import Client
 
+from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.errors import HMCError
 from hmcpctl.resource_identity import is_uuid
-from hmcpctl.ssh.commands import build_attribute_record, build_filter
 from hmcpctl.xmlutil import leaf_text
 
 from ..observation import Assertion

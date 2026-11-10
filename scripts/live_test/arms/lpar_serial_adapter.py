@@ -25,6 +25,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_profile
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
+from hmcpctl.documents.native_records import build_filter
 from hmcpctl.operations.lpar.creation.serial import (
     admit_serial_creation,
     confirm_serial_created,
@@ -35,7 +36,6 @@ from hmcpctl.operations.lpar.ownership import (
     parse_lpar_ownership_owner,
 )
 from hmcpctl.resource_identity import is_uuid
-from hmcpctl.ssh.commands import build_filter
 from hmcpctl.ssh.lpar import create_lpar_via_cli, stamp_lpar_ownership
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import leaf_text, render_mtms

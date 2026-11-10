@@ -334,7 +334,7 @@ window. No current packet or executable invocation is supplied here.
 
 Local source evidence: `scripts/live_test/arms/vnic_creation_policy.py:77-606`,
 `src/hmcpctl/operations/virtualization/vnic.py:418-848`,
-`vnic_policy.py:35-118`, `src/hmcpctl/ssh/commands.py:112-202`,
+`vnic_policy.py:35-118`, `src/hmcpctl/documents/native_records.py`,
 `src/hmcpctl/client/core.py:622-807`, `client_systems.py:138-200` and
 `client_lpars.py:114-135`. A focused local reference search found the existing-vNIC
 fields and VLAN `+=` nontrailing example at

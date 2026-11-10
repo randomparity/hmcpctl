@@ -34,6 +34,7 @@ from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
+from ...documents.native_records import build_filter
 from ...errors import HMCError
 from ...jobs import (
     DEFAULT_JOB_POLL_INTERVAL,
@@ -47,7 +48,7 @@ from ...resource_identity import (
     resolve_system_uuid,
     resolve_vios_uuid,
 )
-from ...ssh.commands import HMC_NO_RESULTS, build_filter
+from ...ssh.commands import HMC_NO_RESULTS
 from ...ssh.lpar import (
     _CreationMemorySubmissionError,
     complete_create_resources,
