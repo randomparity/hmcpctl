@@ -308,7 +308,7 @@ def config(p):
 
 def test_caps_precharge_errors_and_nested(tmp_path):
     p = packet(tmp_path)
-    b = source.BootSourceBudget("capture", p)
+    b = ame.Budget("capture", p, source.LIMITS["capture"])
     assert b.maximum == (830, 40, 42 * 1024 * 1024, 2600)
     with b.section("test", 1, 0, 1024, 20):
         b.dispatch(0, "GET")
@@ -332,17 +332,17 @@ def test_caps_precharge_errors_and_nested(tmp_path):
 )
 def test_reserve_suffix_and_expiry(tmp_path, cursor, index):
     p = packet(tmp_path)
-    b = source.BootSourceBudget("capture", p)
-    b.reserve(cursor, index)
+    b = ame.Budget("capture", p, source.LIMITS["capture"])
+    source._reserve(b, cursor, index)
     for dimension in range(3):
         b.used = [0, 0, 0]
         b.used[dimension] = b.maximum[dimension]
         with pytest.raises(ValueError):
-            b.reserve(cursor, index)
+            source._reserve(b, cursor, index)
     b.used = [0, 0, 0]
     b.deadline = time.monotonic()
     with pytest.raises(ValueError):
-        b.reserve(cursor, index)
+        source._reserve(b, cursor, index)
 
 
 @pytest.mark.parametrize(
@@ -356,14 +356,18 @@ def test_reserve_suffix_and_expiry(tmp_path, cursor, index):
 )
 def test_reserve_closed_cursor(tmp_path, cursor, index):
     with pytest.raises(ValueError):
-        source.BootSourceBudget("capture", packet(tmp_path)).reserve(cursor, index)
+        source._reserve(
+            ame.Budget("capture", packet(tmp_path), source.LIMITS["capture"]),
+            cursor,
+            index,
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", list(source.LIMITS))
 async def test_cleanup_physical_guard_before_parent(tmp_path, monkeypatch, stage):
     p = packet(tmp_path)
-    h = source.BootSourceHMC(config(p), source.BootSourceBudget(stage, p))
+    h = source.BootSourceHMC(config(p), ame.Budget(stage, p, source.LIMITS[stage]))
     sends = []
 
     async def request(self, method, path, **kwargs):
@@ -385,9 +389,7 @@ async def test_cleanup_physical_guard_before_parent(tmp_path, monkeypatch, stage
 
 def test_reuse_globals_unchanged():
     assert ame.LIMITS["capture"] == (418, 12, 20 * 1024 * 1024, 1130)
-    assert issubclass(source.BootSourceBudget, ame.Budget)
     assert issubclass(source.BootSourceHMC, ame.CountedHMC)
-    assert source.BootSourceBudget.reserve is not ame.Budget.reserve
 
 
 SAVED_RESOURCES = {
@@ -573,11 +575,13 @@ async def rig(tmp_path, monkeypatch):
             base_url="https://hmc.test:443", transport=httpx.MockTransport(wire.request)
         ),
     )
-    h = source.BootSourceHMC(config(p), source.BootSourceBudget("capture", p))
+    h = source.BootSourceHMC(
+        config(p), ame.Budget("capture", p, source.LIMITS["capture"])
+    )
     h.packet_sha = "d" * 64
     before = await ame.snapshot(h, p)
     p["baseline_sha256"] = ame.digest(before["stable"])
-    h.budget = source.BootSourceBudget("capture", p)
+    h.budget = ame.Budget("capture", p, source.LIMITS["capture"])
     h.packet = p
     h.grant_sha = h.packet_sha
     h.exclusive = True
@@ -819,7 +823,7 @@ async def test_maxima_real_snapshot_counts(rig, count, profiles, expected):
         w.profile_ids = lambda ident: (
             original(ident)[:1] if ident.endswith("00000000000a") else original(ident)
         )
-    h.budget = source.BootSourceBudget("capture", p)
+    h.budget = ame.Budget("capture", p, source.LIMITS["capture"])
     await ame.snapshot(h, p)
     assert h.budget.used[:2] == [expected, 1]
 
@@ -905,7 +909,7 @@ async def test_recovery_present_absence_cannot_repair_history(rig, unknown):
         document[unknown]["execution"] = "unknown"
     if unknown != "companion":
         source._save(out, session(p, document=document), "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = ame.Budget("recover", p, source.LIMITS["recover"])
     recovery = out.parent / "recover"
     recovery.mkdir(mode=0o700)
     before = (w.creates, len(w.boots), len(w.deletes))
@@ -921,7 +925,7 @@ async def test_recovery_complete_history_and_current_baseline(rig):
     p, _w, h, out, _ = rig
     document = await run_capture(rig)
     source._save(out, session(p, document=document), "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = ame.Budget("recover", p, source.LIMITS["recover"])
     recovery = out.parent / "recover"
     recovery.mkdir(mode=0o700)
     result = await source.recover(h, p, document, recovery)
@@ -1059,7 +1063,7 @@ async def test_caps_unknown_response_keeps_precharge_and_session_once(rig, monke
         raise TimeoutError("synthetic unknown")
 
     monkeypatch.setattr(ame.HMCClient, "_request", unknown)
-    h.budget = source.BootSourceBudget("capture", rig[0])
+    h.budget = ame.Budget("capture", rig[0], source.LIMITS["capture"])
     with h.budget.section("logon", 1, 0, 1024 * 1024, 20), pytest.raises(TimeoutError):
         await h._request("PUT", "/rest/api/web/Logon")
     assert h.budget.used == [1, 0, 1024 * 1024]
@@ -1388,7 +1392,7 @@ async def test_recovery_renamed_owned_uuid_remains_residue(rig):
         "description": p["fixture"]["description"],
         "factor": "0",
     }
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = ame.Budget("recover", p, source.LIMITS["recover"])
     output = out.parent / "recover"
     output.mkdir(mode=0o700)
     result = await source.recover(h, p, d, output)
@@ -1587,7 +1591,7 @@ async def test_history_rejects_contradictory_physical_trace(rig, fault):
         sum(c["kind"] == k for c in trace["calls"]) for k in ["REST", "SSH"]
     ]
     source._save(out, session(p, document=document), "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = ame.Budget("recover", p, source.LIMITS["recover"])
     output = out.parent / "recover"
     output.mkdir(mode=0o700)
     result = await source.recover(h, p, document, output)
@@ -1616,7 +1620,7 @@ async def test_recovery_session_trace_must_extend_capture(rig, fault):
     else:
         close["transport"]["used"][2] += source.MIB + 1
     source._save(out, close, "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = ame.Budget("recover", p, source.LIMITS["recover"])
     output = out.parent / "recover"
     output.mkdir(mode=0o700)
     result = await source.recover(h, p, document, output)

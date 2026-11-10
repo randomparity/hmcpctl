@@ -257,9 +257,9 @@ def _receipt(p: dict, stage: str, packet_sha: str, output: Path) -> None:
 
 
 class Budget:
-    def __init__(self, stage: str, p: dict):
+    def __init__(self, stage: str, p: dict, limits: tuple[int, int, int, int]):
         self.stage = stage
-        self.maximum = LIMITS[stage]
+        self.maximum = limits
         self.used = [0, 0, 0]
         self.started = time.monotonic()
         self.deadline = self.started + self.maximum[3]
@@ -321,20 +321,21 @@ class Budget:
         self.used[2] -= size
         self.block["used"][2] -= size
 
-    def reserve(self, cases_left: int) -> None:
-        # Normal remaining cases + one observational uncertainty snapshot + logout.
-        wanted = (
-            cases_left * 140 + 69,
-            cases_left * 5 + 1,
-            cases_left * 7 * MIB + 3 * MIB,
-        )
-        if any(self.maximum[i] - self.used[i] < wanted[i] for i in range(3)):
-            raise Held("remaining normal/recovery/close transport reserve unavailable")
-        if (
-            min(self.deadline - time.monotonic(), self.window - time.time())
-            < cases_left * 420 + 150
-        ):
-            raise Held("remaining normal/recovery/close time reserve unavailable")
+
+def _reserve(budget: Budget, cases_left: int) -> None:
+    # Normal remaining cases + one observational uncertainty snapshot + logout.
+    wanted = (
+        cases_left * 140 + 69,
+        cases_left * 5 + 1,
+        cases_left * 7 * MIB + 3 * MIB,
+    )
+    if any(budget.maximum[i] - budget.used[i] < wanted[i] for i in range(3)):
+        raise Held("remaining normal/recovery/close transport reserve unavailable")
+    if (
+        min(budget.deadline - time.monotonic(), budget.window - time.time())
+        < cases_left * 420 + 150
+    ):
+        raise Held("remaining normal/recovery/close time reserve unavailable")
 
 
 def _collection_route(path: str) -> tuple[str, int] | None:
@@ -1205,7 +1206,7 @@ async def capture(
         before = baseline["stable"]
         document["snapshots"].append(baseline)
         for index, case in enumerate(p["cases"]):
-            hmc.budget.reserve(2 - index)
+            _reserve(hmc.budget, 2 - index)
             _admit_capacity(document["snapshots"][-1]["stable"]["system"])
             _grant(
                 hmc,
@@ -1228,7 +1229,7 @@ async def capture(
             document["cases"].append(record)
             _checkpoint(directory, document, "create-pending", hmc)
             with hmc.budget.section("create", 0, 1, 65536, 60):
-                hmc.budget.reserve(2 - index)
+                _reserve(hmc.budget, 2 - index)
                 hmc.create_case = case["name"]
                 try:
                     record["native_output"] = await _ssh(hmc, p, "create", case)
@@ -1451,7 +1452,7 @@ def _predecessor(p: dict, stage: str, packet_sha: str) -> None:
 
 
 async def _run_stage(p: dict, args, stage: str, started: float) -> int:
-    budget = Budget(stage, p)
+    budget = Budget(stage, p, LIMITS[stage])
     budget.started = started
     budget.deadline = started + LIMITS[stage][3]
     config = load_profile(p["configured_profile"])

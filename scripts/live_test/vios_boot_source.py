@@ -264,63 +264,51 @@ def _save(directory: Path, document: dict, name_out: str = "results.json") -> No
     save_packet(directory, document, name_out)
 
 
-class BootSourceBudget(ame.Budget):
-    def __init__(self, stage: str, packet: dict):
-        self.stage = stage
-        self.maximum = LIMITS[stage]
-        self.used = [0, 0, 0]
-        self.started = time.monotonic()
-        self.deadline = self.started + self.maximum[3]
-        self.window = packet["window"]["expires_at"]
-        self.block = None
-        self.calls = []
-
-    # This private subclass is consumed by snapshot only; its finite reserve policy is distinct.
-    def reserve(self, cursor: str, case_index: int = 0) -> None:  # ty: ignore[invalid-method-override]
-        boot = cursor in {"before-boot-observations", "before-boot-write"}
-        if (
-            self.stage != "capture"
-            or type(case_index) is not int
-            or (not boot and case_index != 0)
-            or (boot and not 0 <= case_index < 8)
-        ):
-            raise Held("invalid finite reserve cursor")
-        # Remaining fixed blocks: REST, SSH, retained bytes, seconds, attestations.
-        snapshot = (68, 1, 2 * MIB, 120, 0)
-        detail = (1, 0, MIB, 20, 0)
-        native = (0, 1, 65536, 20, 0)
-        write = (0, 1, 65536, 20, 1)
-        cleanup = (4, 1, 4 * MIB + 65536, 100, 1)
-        close = (1, 0, MIB, 30, 0)
-        uncertainty = (68, 2, 2 * MIB + 65536, 140, 0)
-        case = [detail, native, write, native, snapshot]
-        after = [cleanup, snapshot, uncertainty, close]
-        if cursor == "before-create":
-            blocks = [(0, 1, 65536, 60, 1), snapshot, native] + case * 8 + after
-        elif boot:
-            blocks = (
-                (case if cursor == "before-boot-observations" else case[2:])
-                + case * (7 - case_index)
-                + after
-            )
-        elif cursor == "before-cleanup-observations":
-            blocks = after
-        elif cursor == "before-delete":
-            blocks = [(1, 0, MIB, 20, 1), snapshot, uncertainty, close]
-        else:
-            raise Held("unknown finite reserve cursor")
-        wanted = [sum(b[i] for b in blocks) for i in range(5)]
-        if any(self.maximum[i] - self.used[i] < wanted[i] for i in range(3)):
-            raise Held("remaining suffix/uncertainty/close reserve unavailable")
-        left = min(self.deadline - time.monotonic(), self.window - time.time())
-        if left < wanted[3] + 18 * wanted[4]:
-            raise Held("remaining suffix/attestation/close time unavailable")
+def _reserve(budget: ame.Budget, cursor: str, case_index: int = 0) -> None:
+    boot = cursor in {"before-boot-observations", "before-boot-write"}
+    if (
+        budget.stage != "capture"
+        or type(case_index) is not int
+        or (not boot and case_index != 0)
+        or (boot and not 0 <= case_index < 8)
+    ):
+        raise Held("invalid finite reserve cursor")
+    # Remaining fixed blocks: REST, SSH, retained bytes, seconds, attestations.
+    snapshot = (68, 1, 2 * MIB, 120, 0)
+    detail = (1, 0, MIB, 20, 0)
+    native = (0, 1, 65536, 20, 0)
+    write = (0, 1, 65536, 20, 1)
+    cleanup = (4, 1, 4 * MIB + 65536, 100, 1)
+    close = (1, 0, MIB, 30, 0)
+    uncertainty = (68, 2, 2 * MIB + 65536, 140, 0)
+    case = [detail, native, write, native, snapshot]
+    after = [cleanup, snapshot, uncertainty, close]
+    if cursor == "before-create":
+        blocks = [(0, 1, 65536, 60, 1), snapshot, native] + case * 8 + after
+    elif boot:
+        blocks = (
+            (case if cursor == "before-boot-observations" else case[2:])
+            + case * (7 - case_index)
+            + after
+        )
+    elif cursor == "before-cleanup-observations":
+        blocks = after
+    elif cursor == "before-delete":
+        blocks = [(1, 0, MIB, 20, 1), snapshot, uncertainty, close]
+    else:
+        raise Held("unknown finite reserve cursor")
+    wanted = [sum(b[i] for b in blocks) for i in range(5)]
+    if any(budget.maximum[i] - budget.used[i] < wanted[i] for i in range(3)):
+        raise Held("remaining suffix/uncertainty/close reserve unavailable")
+    left = min(budget.deadline - time.monotonic(), budget.window - time.time())
+    if left < wanted[3] + 18 * wanted[4]:
+        raise Held("remaining suffix/attestation/close time unavailable")
 
 
 class BootSourceHMC(ame.CountedHMC):
-    budget: BootSourceBudget
+    budget: ame.Budget
 
-    def __init__(self, config, budget: BootSourceBudget):
+    def __init__(self, config, budget: ame.Budget):
         super().__init__(config, budget)
         self.packet: dict | None = None
         self.document: dict | None = None
@@ -367,9 +355,9 @@ def _authority(hmc: BootSourceHMC, p: dict, cursor: str, index: int = 0) -> None
         or hmc.config.agent_id != p["grant_binding"]["agent_id"]
     ):
         raise Held("configured connection or agent differs")
-    hmc.budget.reserve(cursor, index)
+    _reserve(hmc.budget, cursor, index)
     _attest(p)
-    hmc.budget.reserve(cursor, index)
+    _reserve(hmc.budget, cursor, index)
 
 
 async def _native(
@@ -670,7 +658,7 @@ async def _cleanup(
     n1: dict,
     pending: str,
 ) -> None:
-    hmc.budget.reserve("before-cleanup-observations")
+    _reserve(hmc.budget, "before-cleanup-observations")
     marker = await _header(hmc, p, ident, "final")
     _native_equal(marker, n1, pending)
     detail = await _detail(hmc, ident, b1)
@@ -774,7 +762,7 @@ async def capture(
         pending = n1["cells"]["pend_boot_string"]
         refused = False
         for index, literal in enumerate(VALUES):
-            hmc.budget.reserve("before-boot-observations", index)
+            _reserve(hmc.budget, "before-boot-observations", index)
             detail = await _detail(hmc, ident, b1)
             before = await _header(hmc, p, ident, f"pre-{index}")
             _native_equal(before, n1, pending)
@@ -1240,7 +1228,7 @@ async def recover(
 
 
 async def _run_stage(p: dict, args, stage: str, started: float) -> int:
-    budget = BootSourceBudget(stage, p)
+    budget = ame.Budget(stage, p, LIMITS[stage])
     budget.started = started
     budget.deadline = started + LIMITS[stage][3]
     config = load_profile(p["configured_profile"])

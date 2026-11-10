@@ -335,12 +335,13 @@ Do not reuse AME packet/cases/grant/history/lifecycle/entrypoint policy or mutat
 Use existing build_attribute_record for creation, build_filter for the numeric native query,
 run_hmc_command for bounded SSH, and delete_vios for scoped inactive deletion.
 
-BootSourceBudget(ame.Budget) owns __init__(stage: str, packet: dict) and
-reserve(cursor: str, case_index: int = 0) -> None. Initialize stage,maximum,used,started,
-deadline,window,block,calls from this diagnostic's table; bind initial entrypoint monotonic
-start before setup. Inherit section/remaining/timeout/dispatch/charge/refund unchanged.
-Snapshot opens its own section; never wrap it in a second section. Other actions each have
-one bounded section. reserve overrides AME's two-case formula with the schedule below.
+Both probes instantiate ame.Budget(stage, packet, limits) with their own stage limit
+tuple. The accounting class owns section/remaining/timeout/dispatch/charge/refund;
+each scenario owns its module-local _reserve calculation. Boot's
+_reserve(budget, cursor, case_index=0) checks the schedule below without inheriting
+AME's two-case policy or mutating its limits. Bind initial entrypoint monotonic
+start before setup. Snapshot opens its own section; never wrap it in a second
+section. Other actions each have one bounded section.
 BootSourceHMC(ame.CountedHMC) retains constructor(config,budget) and overrides
 async _request(method: str, path: str, **kwargs). Before parent resource DELETE it requires
 capture stage, delete-intent, non-held state, one remaining delete slot, armed exact route,

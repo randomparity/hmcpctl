@@ -423,11 +423,13 @@ async def rig(tmp_path, monkeypatch):
             base_url="https://hmc.test:443", transport=httpx.MockTransport(wire.request)
         ),
     )
-    hmc = source.CountedHMC(config, source.Budget("capture", p))
+    hmc = source.CountedHMC(
+        config, source.Budget("capture", p, source.LIMITS["capture"])
+    )
     hmc.packet_sha = "d" * 64
     before = await source.snapshot(hmc, p)
     p["baseline_sha256"] = source.digest(before["stable"])
-    hmc.budget = source.Budget("capture", p)
+    hmc.budget = source.Budget("capture", p, source.LIMITS["capture"])
     wire.http.clear()
     wire.commands.clear()
     wire.collection_hits.clear()
@@ -596,7 +598,7 @@ def test_relative_checkout_window_refused_before_receipt_or_transport(
 
 
 def test_budget_refuses_dispatch_and_keeps_failed_payload_charge(tmp_path):
-    b = source.Budget("capture", packet(tmp_path))
+    b = source.Budget("capture", packet(tmp_path), source.LIMITS["capture"])
     with b.section("one", 1, 0, 8, 20):
         b.dispatch(0, "GET")
         b.charge(8)
@@ -709,7 +711,7 @@ async def test_checkpoint_failure_leaves_intent_without_next_effect(
 @pytest.mark.asyncio
 async def test_all_phase_recovery_observes_but_never_cleans_history(rig, phase):
     p, wire, hmc, output, _before = rig
-    hmc.budget = source.Budget("recover", p)
+    hmc.budget = source.Budget("recover", p, source.LIMITS["recover"])
     document = source._new_document(p, hmc.packet_sha, "capture")
     document["phase"] = phase
     result = await source.recover(hmc, p, document, output)
@@ -1067,7 +1069,7 @@ async def test_recovery_requires_supported_history_and_closed_session(
         supported = False
     wire.http.clear()
     wire.commands.clear()
-    hmc.budget = source.Budget("recover", p)
+    hmc.budget = source.Budget("recover", p, source.LIMITS["recover"])
     result = await source.recover(hmc, p, document, output)
     assert result["baseline_agrees_now"] is True
     assert result["history_complete"] is supported
@@ -1361,8 +1363,8 @@ def test_creation_requires_full_remaining_cleanup_and_uncertainty_reserve(
     tmp_path, bound
 ):
     p = packet(tmp_path)
-    budget = source.Budget("capture", p)
-    budget.reserve(2)
+    budget = source.Budget("capture", p, source.LIMITS["capture"])
+    source._reserve(budget, 2)
     if bound == "time":
         budget.deadline = time.monotonic() + 989
     else:
@@ -1373,7 +1375,7 @@ def test_creation_requires_full_remaining_cleanup_and_uncertainty_reserve(
         }[bound]
         budget.used[index] = budget.maximum[index] - needed + 1
     with pytest.raises(source.Held, match="reserve unavailable"):
-        budget.reserve(2)
+        source._reserve(budget, 2)
 
 
 @pytest.mark.asyncio
@@ -1453,7 +1455,9 @@ async def test_create_rechecks_reserve_after_local_latency(
             "agent_id": "source-test",
         }
     )
-    hmc = source.CountedHMC(config, source.Budget("capture", p))
+    hmc = source.CountedHMC(
+        config, source.Budget("capture", p, source.LIMITS["capture"])
+    )
     hmc.packet_sha = "d" * 64
     output = tmp_path / "capture"
     output.mkdir(mode=0o700)
@@ -1463,7 +1467,7 @@ async def test_create_rechecks_reserve_after_local_latency(
     try:
         before = await source.snapshot(hmc, p)
         p["baseline_sha256"] = source.digest(before["stable"])
-        hmc.budget = source.Budget("capture", p)
+        hmc.budget = source.Budget("capture", p, source.LIMITS["capture"])
         hmc.budget.deadline = time.monotonic() + 991
         with pytest.raises(source.Held, match="time reserve unavailable"):
             await source.capture(
