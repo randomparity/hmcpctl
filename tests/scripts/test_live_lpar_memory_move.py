@@ -33,7 +33,10 @@ def test_wrapper_refuses_bad_custody(monkeypatch, tmp_path, case):
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize("case", ["observations", "repository", "absent-parent"])
+@pytest.mark.parametrize(
+    "case",
+    ["observations", "repository", "absent-parent", "symlink", "observation-symlink"],
+)
 def test_wrapper_refuses_unsafe_destination(monkeypatch, tmp_path, case):
     tmp_path.chmod(0o700)
     path = tmp_path / "result.json"
@@ -41,6 +44,12 @@ def test_wrapper_refuses_unsafe_destination(monkeypatch, tmp_path, case):
         wrapper.runner.evidence.observations_path(str(path)).write_text("old")
     elif case == "repository":
         (tmp_path / ".git").write_text("gitdir: /unavailable")
+    elif case == "symlink":
+        path.symlink_to(tmp_path / "missing-result")
+    elif case == "observation-symlink":
+        wrapper.runner.evidence.observations_path(str(path)).symlink_to(
+            tmp_path / "missing-observations"
+        )
     else:
         path = tmp_path / "absent" / "result.json"
 

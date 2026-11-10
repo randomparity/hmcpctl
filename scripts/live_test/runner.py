@@ -764,6 +764,9 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
 _PRIVATE_RESULT_GROUPS = {
     "lpar-paging-switchover": "Paging switch",
     "lpar-memory-statistics": "Statistics reset",
+    "lpar-memory-move": "Memory move",
+    "lpar-processor-move": "Processor move",
+    "lpar-accelerator-qos": "Accelerator QoS",
 }
 
 
@@ -892,6 +895,30 @@ def _parse_arguments(argv: list[str] | None = None) -> RunnerArguments:
     return RunnerArguments(
         parsed.subtask, parsed.group, results_path, parsed.detach_probe
     )
+
+
+def _run_private_group(
+    group: str, description: str | None, argv: list[str] | None = None
+) -> int:
+    """Run a fixed opt-in group with private result custody and a restored umask."""
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--results-file", required=True)
+    args = parser.parse_args(argv)
+    try:
+        _validate_private_results(
+            _selected_tasks(None, group), group, args.results_file
+        )
+    except (ValueError, OSError, RuntimeError):
+        parser.error(
+            "Use new canonical absolute results in a private mode0700 directory outside repositories"
+        )
+    previous = os.umask(0o077)
+    try:
+        return _run_from_arguments(
+            ["--group", group, "--results-file", args.results_file]
+        )
+    finally:
+        os.umask(previous)
 
 
 def _run_from_arguments(argv: list[str] | None = None) -> int:

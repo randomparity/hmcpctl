@@ -10005,7 +10005,14 @@ async def test_default_run_requires_explicit_task_admission(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "subtask,label", [(66, "Paging switch"), (67, "Statistics reset")]
+    "subtask,label",
+    [
+        (66, "Paging switch"),
+        (67, "Statistics reset"),
+        (54, "Memory move"),
+        (61, "Processor move"),
+        (64, "Accelerator QoS"),
+    ],
 )
 async def test_direct_dispatch_requires_the_private_tasks_named_group(
     monkeypatch, tmp_path, capsys, subtask, label
