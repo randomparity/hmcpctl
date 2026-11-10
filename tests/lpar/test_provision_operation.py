@@ -497,3 +497,10 @@ def test_a_paused_result_carries_the_engine_s_reason():
         "Change location not read",
         "effect network: the VLAN's adapters are ambiguous",
     )
+    stale = replace(
+        record,
+        state="terminal",
+        outcome="failed",
+        result={**body_result, "workflow_completed": True},
+    )
+    assert result_from_record(stale).workflow_completed is False

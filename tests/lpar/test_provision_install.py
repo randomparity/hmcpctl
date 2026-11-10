@@ -14,11 +14,12 @@ import pytest
 
 from hmcpctl.config import parse_iso_url_allowlist
 from hmcpctl.documents.lpar import LparResources
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
 from hmcpctl.operations.lpar import reconfigure_media
+from hmcpctl.operations.lpar.core import LparCreationResult
 from hmcpctl.operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,
@@ -28,6 +29,7 @@ from hmcpctl.operations.lpar.plan import (
     _intended_changes,
     check_request,
 )
+from hmcpctl.operations.lpar.profiles import PartitionProfileOutcome
 from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 from hmcpctl.operations.lpar.provisioning.build import BuildFailed
 from hmcpctl.operations.lpar.provisioning.core import (
@@ -54,7 +56,11 @@ from hmcpctl.operations.lpar.provisioning.operation import (
     request_from_arguments,
     result_from_record,
 )
-from hmcpctl.operations.lpar.workflow_contract import DISK_LEDGER, MEDIA_LEDGER
+from hmcpctl.operations.lpar.workflow_contract import (
+    DISK_LEDGER,
+    MEDIA_LEDGER,
+    WorkflowStep,
+)
 from hmcpctl.server_tools.catalog import TOOL_SECURITY
 from hmcpctl.server_tools.lpar.provision import delegated_tools, provision_handler
 
@@ -201,7 +207,7 @@ class Writes:
         patch(po, "upload_iso", self.upload)
         patch(po, "mount_optical_media", self.mount)
         patch(po, "set_lpar_boot_order", self.set_boot)
-        patch(po, "save_current_partition_profile", self.record("save"))
+        patch(po, "save_current_partition_profile", self.save)
         patch(po, "set_default_partition_profile", self.default)
         patch(po.profile_write, "profile_by_name", self.profile)
         patch(po, "readback_problem", self.problem)
@@ -219,9 +225,7 @@ class Writes:
 
     async def create(self, *_args: Any, **_kwargs: Any) -> Any:
         self.calls.append("create")
-        return SimpleNamespace(
-            lpar={"UUID": LPAR}, physical_io_step=None, apply_step=None
-        )
+        return LparCreationResult(True, {"UUID": LPAR}, True, ())
 
     async def network(self, _hmc: Any, _lpar: str, _vlan: int, mac: str | None) -> dict:
         self.calls.append("network")
@@ -270,9 +274,24 @@ class Writes:
         self.calls.append("boot_order")
         self.boot.append(devices)
 
-    async def default(self, *_args: Any, **_kwargs: Any) -> Any:
+    async def save(self, _hmc, _system, _lpar, name, **_kwargs):
+        self.calls.append("save")
+        return PartitionProfileOutcome(
+            "save", SYSTEM, LPAR, "LogicalPartition", name, None
+        )
+
+    async def default(self, _hmc, _system, _lpar, name, **_kwargs) -> Any:
         self.calls.append("default_profile")
-        return SimpleNamespace(execution="completed", requested_change="verified")
+        return PartitionProfileOutcome(
+            "default",
+            SYSTEM,
+            LPAR,
+            "LogicalPartition",
+            name,
+            None,
+            execution="completed",
+            requested_change="verified",
+        )
 
     async def profile(self, *_args: Any) -> Any:
         return SimpleNamespace(uuid="profile-1", element=None)
@@ -918,3 +937,148 @@ def test_a_built_run_that_stops_early_lists_its_build_step(writes, monkeypatch):
     steps = [step.step for step in result_from_record(record).steps]
     assert steps[steps.index("build_media") + 1] == "bind_media"
     assert "build" not in writes.calls
+
+
+def test_fatal_tls_from_create_does_not_reconcile_or_start_another_leg(
+    writes, monkeypatch
+):
+    failure = HMCTLSFingerprintError("private-provider-detail")
+    create = AsyncMock(side_effect=failure)
+    inventory = AsyncMock(return_value=[])
+    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(writes.hmc, "list_logical_partitions", inventory, raising=False)
+
+    record = _submit(writes)
+    result = result_from_record(record)
+
+    create.assert_awaited_once()
+    inventory.assert_not_awaited()
+    provision_operation._stamp_state.assert_not_awaited()
+    assert writes.calls == []
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert record.effects[0].status == "uncertain"
+    assert result.workflow_completed is False
+    assert "private-provider-detail" not in str(result)
+
+
+def test_tls_aborted_creation_retains_evidence_before_another_leg(writes, monkeypatch):
+    creation = LparCreationResult(
+        True,
+        {"UUID": LPAR},
+        None,
+        ("TLS certificate identity verification failed after creation",),
+        settings_step=WorkflowStep("settings", "error", "TLS aborted"),
+    )
+    create = AsyncMock(return_value=creation)
+    inventory = AsyncMock(return_value=[])
+    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(writes.hmc, "list_logical_partitions", inventory, raising=False)
+
+    record = _submit(writes)
+    result = result_from_record(record)
+
+    create.assert_awaited_once()
+    inventory.assert_not_awaited()
+    provision_operation._stamp_state.assert_not_awaited()
+    assert writes.calls == []
+    assert result.resource_created is True and result.lpar_uuid == LPAR
+    assert result.workflow_completed is False
+    assert result.ownership_stamped is None
+    assert (record.state, record.outcome) == ("terminal", "failed")
+    assert [(step.step, step.status) for step in result.steps] == [
+        ("create", "ok"),
+        ("settings", "error"),
+    ]
+    assert any("TLS" in warning for warning in result.warnings)
+    assert record.result["lpar_uuid"] == LPAR
+    assert record.effects[0].identity["follow_ups"] == [
+        ["settings", "error", "TLS aborted"]
+    ]
+
+
+@pytest.mark.parametrize(
+    "action,raised,verified",
+    [
+        ("save", True, False),
+        ("save", False, False),
+        ("default", True, False),
+        ("default", False, False),
+        ("default", False, True),
+    ],
+)
+def test_profile_tls_failure_stops_provisioning(
+    writes, monkeypatch, action, raised, verified
+):
+    po = provision_operation
+    failure = HMCTLSFingerprintError("private-provider-detail")
+    profile_read = AsyncMock(side_effect=writes.profile)
+    partition_read = AsyncMock(return_value={"DefaultProfileName": "saved"})
+    monkeypatch.setattr(po.profile_write, "profile_by_name", profile_read)
+    monkeypatch.setattr(po, "_partition_resource", partition_read)
+
+    async def outcome(*_args, **_kwargs):
+        writes.calls.append("save" if action == "save" else "default_profile")
+        if raised:
+            raise failure
+        return PartitionProfileOutcome(
+            action,
+            SYSTEM,
+            LPAR,
+            "LogicalPartition",
+            "saved",
+            "profile-1",
+            execution="completed" if verified else "unknown",
+            requested_change="verified" if verified else "unverified",
+            diagnostics=(TLS_IDENTITY_FAILURE,),
+        )
+
+    monkeypatch.setattr(
+        po,
+        "save_current_partition_profile"
+        if action == "save"
+        else "set_default_partition_profile",
+        outcome,
+    )
+    record = _submit(writes)
+    result = result_from_record(record)
+
+    expected = ["create", "network", "disk", "storage", "upload", "mount", "save"]
+    if action == "default":
+        expected.append("default_profile")
+    assert writes.calls == expected
+    partition_read.assert_not_awaited()
+    assert profile_read.await_count == (2 if action == "default" else 0)
+    assert result.workflow_completed is False
+    assert result.resource_created is True and result.lpar_uuid == LPAR
+    assert "private-provider-detail" not in str(result)
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    key = "profile" if action == "save" else "default_profile"
+    assert (
+        next(effect for effect in record.effects if effect.key == key).status
+        == "uncertain"
+    )
+
+
+def test_mount_tls_failure_is_not_classified_as_a_definite_refusal(writes, monkeypatch):
+    writes.mount_error = HMCTLSFingerprintError("REST0269 private-provider-detail")
+    profile_read = AsyncMock()
+    mapping_read = AsyncMock(side_effect=writes.hmc.list_optical_mappings)
+    monkeypatch.setattr(writes.hmc, "list_optical_mappings", mapping_read)
+    monkeypatch.setattr(
+        provision_operation.profile_write, "profile_by_name", profile_read
+    )
+
+    record = _submit(writes)
+    result = result_from_record(record)
+
+    assert writes.calls == ["create", "network", "disk", "storage", "upload", "mount"]
+    profile_read.assert_not_awaited()
+    mapping_read.assert_not_awaited()
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert (
+        next(effect for effect in record.effects if effect.key == "mount").status
+        == "uncertain"
+    )
+    assert result.resource_created is True and result.lpar_uuid == LPAR
+    assert result.workflow_completed is False
+    assert "private-provider-detail" not in str(result)

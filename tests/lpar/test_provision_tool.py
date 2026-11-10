@@ -56,6 +56,7 @@ from hmcpctl.operations.lpar.plan import (
     check_request,
     plan_digest,
 )
+from hmcpctl.operations.lpar.profiles import PartitionProfileOutcome
 from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionAffinityAssessment,
@@ -121,7 +122,9 @@ class Persistence:
     async def save(self, _hmc, _system, _lpar, name, **kwargs):
         assert kwargs == {"exclusive_writer_window": True}
         self.saved.append(name)
-        return SimpleNamespace(execution="unknown", requested_change="unverified")
+        return PartitionProfileOutcome(
+            "save", _system, _lpar, "LogicalPartition", name, None
+        )
 
     async def by_name(self, _hmc, _lpar, _system, name):
         if not (self.saved and self.profile_present):
@@ -131,7 +134,16 @@ class Persistence:
     async def default(self, _hmc, _system, _lpar, name, **kwargs):
         assert kwargs == {"exclusive_writer_window": True}
         self.defaults.append(name)
-        return SimpleNamespace(execution="completed", requested_change="verified")
+        return PartitionProfileOutcome(
+            "default",
+            _system,
+            _lpar,
+            "LogicalPartition",
+            name,
+            None,
+            execution="completed",
+            requested_change="verified",
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -1512,7 +1524,10 @@ def test_provision_apply_error_skips_remaining_legs(monkeypatch, mock_hmc):
     assert result.resource_created is True
     assert result.workflow_completed is False
     assert result.lpar_uuid == LPAR_UUID
-    assert [(s.step, s.status) for s in result.steps] == [("create", "ok")]
+    assert [(s.step, s.status) for s in result.steps] == [
+        ("create", "ok"),
+        ("apply_profile", "error"),
+    ]
     operation = result.operation
     assert operation is not None
     assert (operation.state, operation.outcome) == ("terminal", "failed")
@@ -2409,8 +2424,9 @@ def test_power_on_profile_adapter_warnings_reach_the_result(
     assert "the profile drops adapter X" in result.warnings
 
 
+@pytest.mark.parametrize("landed", [False, True])
 def test_an_unconfirmed_default_is_decided_by_the_partition(
-    monkeypatch, mock_hmc, persistence
+    monkeypatch, mock_hmc, persistence, landed
 ):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
@@ -2418,20 +2434,28 @@ def test_an_unconfirmed_default_is_decided_by_the_partition(
 
     async def unknown(_hmc, _system, _lpar, name, **_kwargs):
         persistence.defaults.append(name)
-        return SimpleNamespace(execution="unknown", requested_change="unverified")
+        return PartitionProfileOutcome(
+            "default", _system, _lpar, "LogicalPartition", name, None
+        )
 
     async def partition(_hmc, _lpar):
-        return {"DefaultProfileName": "default_profile"}
+        return {
+            "DefaultProfileName": persistence.defaults[-1]
+            if landed
+            else "default_profile"
+        }
 
     from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 
     monkeypatch.setattr(provision_operation, "set_default_partition_profile", unknown)
-    monkeypatch.setattr(provision_operation, "_partition_resource", partition)
+    readback = AsyncMock(side_effect=partition)
+    monkeypatch.setattr(provision_operation, "_partition_resource", readback)
     result = hmc_provision_lpar(**_provision_args())
 
     default = next(e for e in result.operation.effects if e.key == "default_profile")
-    assert default.status == "uncertain"
-    assert result.operation.outcome == "needs_attention"
+    readback.assert_awaited_once()
+    assert default.status == ("applied" if landed else "uncertain")
+    assert result.operation.outcome == ("configured" if landed else "needs_attention")
 
 
 def test_an_old_console_is_refused_before_anything_is_recorded(monkeypatch, mock_hmc):

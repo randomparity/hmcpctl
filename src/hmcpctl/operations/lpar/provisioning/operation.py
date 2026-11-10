@@ -19,7 +19,7 @@ from hmcpctl.client.client_storage import mapping_lpar_uuid
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources, validate_partition_type
 from hmcpctl.documents.partition_profile import ProfilePatch
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import JobOutcome, job_identifier
 from hmcpctl.operations.affinity.ssh import set_minimum_affinity_policy
 from hmcpctl.operations.logical import engine, profile_write, store
@@ -38,7 +38,11 @@ from hmcpctl.operations.lpar.assignments import (
     assignment_step_names,
 )
 from hmcpctl.operations.lpar.boot_order import read_lpar_boot_order, set_lpar_boot_order
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.core import (
+    LparCreation,
+    create_and_stamp_lpar,
+    creation_followup,
+)
 from hmcpctl.operations.lpar.ownership import (
     lpar_ownership_entry,
     parse_lpar_ownership_caller_token,
@@ -184,6 +188,10 @@ _REST0269_MOUNT = (
     "slot_num,remote_lpar_name,remote_slot_num` with the VIOS mappings, then decommission"
 )
 _LEG_ERRORS = (HMCError, HMCCLIError, ValueError, LookupError, EffectNotApplied)
+_TLS_PROVISION_ABORTED = (
+    "TLS certificate identity verification failed; provisioning stopped. Inspect "
+    "known partition, profile and job state before retrying."
+)
 _BUILD_INTERRUPTED = (
     "the build entry's run was interrupted and its result is unrecorded; hmcpctl "
     "does not run it twice: abandon, decommission the partition, remove any ISO it "
@@ -538,6 +546,7 @@ class _Run:
         self.assignment_steps: tuple[WorkflowStep, ...] = ()
         self.optical_slot: int | None = None
         self.optical_path = ""
+        self.ownership_stamped: bool | None = None
 
     def _result(
         self, lpar_uuid: str, completed: bool, unverified: tuple[str, ...] = ()
@@ -547,7 +556,7 @@ class _Run:
             workflow_completed=completed,
             lpar_uuid=lpar_uuid,
             dry_run=False,
-            ownership_stamped=True,
+            ownership_stamped=self.ownership_stamped,
             steps=tuple(self.steps),
             warnings=tuple(self.warnings),
             change_location=self.change_location,
@@ -580,6 +589,7 @@ class _Run:
             lambda: self._write_stamp(system_uuid, lpar_uuid),
         )
         self.steps.append(WorkflowStep("stamp", "ok", dict(identity)))
+        self.ownership_stamped = True
         completed = await self._legs(system_uuid, lpar_uuid)
         if completed and self.request.install is not None:
             completed = await self._media(system_uuid, lpar_uuid)
@@ -861,7 +871,8 @@ class _Run:
         if failed:
             raise OperationFailed(
                 f"LPAR {lpar_uuid} was created, but its {', '.join(failed)} step "
-                "reported an error; inspect it, then decommission or repair it"
+                "reported an error; inspect it, then decommission or repair it",
+                result=self._result(lpar_uuid, False),
             )
         if identity.get("resumed"):
             self.warnings.append(
@@ -873,21 +884,24 @@ class _Run:
     async def _write_create(self, system_uuid: str) -> dict[str, Any]:
         request = self.request
         try:
+            creation_request = LparCreation(
+                request.name,
+                request.partition_type,
+                request.resources,
+                caller_token=request.caller_token,
+                apply_profile=True,
+                physical_io=request.physical_io,
+                creation_sriov=request.assignments.sriov
+                if request.physical_io.requested
+                else (),
+            )
             creation = await create_and_stamp_lpar(
                 self.hmc,
                 self.system,
-                LparCreation(
-                    request.name,
-                    request.partition_type,
-                    request.resources,
-                    caller_token=request.caller_token,
-                    apply_profile=True,
-                    physical_io=request.physical_io,
-                    creation_sriov=request.assignments.sriov
-                    if request.physical_io.requested
-                    else (),
-                ),
+                creation_request,
             )
+        except HMCTLSFingerprintError:
+            raise
         except Exception as exc:
             entries = await self.hmc.list_logical_partitions(system_uuid)
             if not _named(entries, request.name):
@@ -899,11 +913,13 @@ class _Run:
         uuid = (creation.lpar or {}).get("UUID")
         if not isinstance(uuid, str) or not uuid:
             raise HMCError("the create returned no partition UUID")
+        self.ownership_stamped = creation.ownership_stamped
+        self.warnings.extend(creation.warnings)
+        steps, _ = creation_followup(creation_request, creation)
         follow_ups = [
             # Text only, bounded: an identity is at most 4 KiB (store.MAX_IDENTITY_BYTES).
             [step.step, step.status, str(step.result)[:256] if step.result else None]
-            for step in (creation.physical_io_step, creation.apply_step)
-            if step is not None
+            for step in steps[1:]
         ]
         return {
             "lpar_uuid": uuid.lower(),
@@ -952,7 +968,11 @@ class _Run:
             # result past store.MAX_RESULT_BYTES.
             self.steps.append(
                 WorkflowStep(
-                    STEP_NAMES[key], "error", f"{type(exc).__name__}: {exc}"[:512]
+                    STEP_NAMES[key],
+                    "error",
+                    _TLS_PROVISION_ABORTED
+                    if isinstance(exc, HMCTLSFingerprintError)
+                    else f"{type(exc).__name__}: {exc}"[:512],
                 )
             )
             return None
@@ -1151,6 +1171,8 @@ class _Run:
                 system_name_or_uuid=self.system,
                 media_name=name,
             )
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             if "REST0269" in f"{exc} {exc.body or ''}":
                 raise EffectNotApplied(_REST0269_MOUNT) from exc
@@ -1211,12 +1233,17 @@ class _Run:
         # #637's helper can misread a landed save (#1867), so the profile itself decides
         # (operator decision D1, 2026-11-03), including after the helper raised.
         failure: Exception | None = None
+        outcome = None
         try:
-            await save_current_partition_profile(
+            outcome = await save_current_partition_profile(
                 self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
             )
+        except HMCTLSFingerprintError:
+            raise
         except Exception as exc:  # noqa: BLE001 - the by-name read below decides it
             failure = exc
+        if outcome is not None and TLS_IDENTITY_FAILURE in outcome.diagnostics:
+            raise HMCTLSFingerprintError(_TLS_PROVISION_ABORTED)
         profile = await profile_write.profile_by_name(
             self.hmc, lpar_uuid, system_uuid, name
         )
@@ -1233,6 +1260,8 @@ class _Run:
         outcome = await set_default_partition_profile(
             self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
         )
+        if TLS_IDENTITY_FAILURE in outcome.diagnostics:
+            raise HMCTLSFingerprintError(_TLS_PROVISION_ABORTED)
         if (outcome.execution, outcome.requested_change) == ("completed", "verified"):
             return {"profile_name": name}
         resource = await _partition_resource(self.hmc, lpar_uuid)
@@ -1561,9 +1590,11 @@ def result_from_record(record: OperationRecord) -> ProvisionResult:
     """The tool result: the body's own result where it agrees with the journal, else
     one rebuilt from the effects (ADR 0313 Decision 2)."""
     finished = ("configured", "ready_to_boot", "boot_started")
-    if record.result and record.outcome in (*finished, "needs_attention"):
+    if record.result and record.outcome in (*finished, "needs_attention", "failed"):
         result = _RESULT.validate_python(record.result)
-        if record.outcome in finished or _agrees(result, record):
+        if (record.outcome in finished or _agrees(result, record)) and (
+            record.outcome != "failed" or not result.workflow_completed
+        ):
             # A pause the engine added (an open effect, a classifier's reason) is why
             # the operation stopped, so it joins the body's own warnings.
             warnings = tuple(dict.fromkeys((*result.warnings, *record.warnings)))
