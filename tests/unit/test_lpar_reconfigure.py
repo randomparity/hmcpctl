@@ -39,21 +39,21 @@ def _view(state="running", rmc="active", sync="disabled", **values):
         "default_profile": "default",
         "last_profile": "default",
         "dedicated": False,
-        "memory": [512, 768, 1024],
-        "processors": [1, 2, 4],
-        "units": [0.05, 0.1, 1.0],
+        "memory": (512, 768, 1024),
+        "processors": (1, 2, 4),
+        "units": (0.05, 0.1, 1.0),
     }
-    return view | values
+    return view | {
+        key: tuple(value)
+        if key in {"memory", "processors", "units"} and value is not None
+        else value
+        for key, value in values.items()
+    }
 
 
 def _saved(**values):
-    saved = {
-        "dedicated": False,
-        "memory": [512, 768, 1024],
-        "processors": [1, 2, 4],
-        "units": [0.05, 0.1, 1.0],
-    }
-    return saved | values
+    view = _view(**values)
+    return {key: view[key] for key in ("dedicated", "memory", "processors", "units")}
 
 
 def _plan(patch, view=None, saved=None, allow_disruption=False):
@@ -956,3 +956,23 @@ def test_holds_compares_a_profile_name_as_text():
 
     assert not profile_write.holds(element, ProfilePatch(name="7"))
     assert profile_write.holds(element, ProfilePatch(name="07"))
+
+
+@pytest.mark.parametrize("state", ["running", "not activated"])
+def test_normalized_resource_triples_preserve_the_persisted_basis(hmc, state):
+    import json
+
+    hmc.state = state
+    view = reconfigure.partition_view(_await(hmc.get_logical_partition(LPAR)))
+    _, profile = _await(reconfigure._read_profile(hmc, SYS, LPAR, "default"))
+    assert view["memory"] == (512, 768, 1024)
+    assert view["processors"] == (1, 2, 4)
+    assert view["units"] == (0.05, 0.1, 1.0)
+    assert profile["memory"] == (512, 768, 1024)
+    assert len(profile["processors"]) == 3
+    assert isinstance(profile["processors"], tuple)
+    assert isinstance(profile["units"], tuple)
+    persisted = reconfigure.basis(view)
+    assert persisted["memory"] == [512, 768, 1024]
+    assert persisted["processors"] == [1, 2, 4]
+    assert json.loads(json.dumps(persisted)) == persisted

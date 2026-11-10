@@ -15,9 +15,9 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from decimal import Decimal
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
@@ -50,7 +50,11 @@ from . import profile_persist
 from . import reconfigure_network as network
 from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
-from .profiles import read_partition_profile, update_partition_profile
+from .profiles import (
+    PartitionProfileRecord,
+    read_partition_profile,
+    update_partition_profile,
+)
 from .reconfigure_media import (
     BOOT_KEY,
     BOOT_KIND,
@@ -66,6 +70,32 @@ from .reconfigure_media import (
     require_detachable,
 )
 
+Resource = Literal["memory", "processors"]
+ResourceTriple = tuple[int, int, int]
+UnitsTriple = tuple[float, float, float]
+_T = TypeVar("_T")
+
+
+class ProfileView(TypedDict):
+    dedicated: bool
+    memory: ResourceTriple
+    processors: ResourceTriple
+    units: UnitsTriple | None
+
+
+class ProcessorLimits(TypedDict, total=False):
+    count_limit: float
+    floor: float
+
+
+class PartitionView(ProfileView, ProcessorLimits):
+    name: str
+    state: str
+    rmc: str
+    sync: str
+    default_profile: str
+    last_profile: str
+
 
 class CurrentResourceWrite(TypedDict, total=False):
     min_memory: int
@@ -79,8 +109,17 @@ class CurrentResourceWrite(TypedDict, total=False):
     max_vcpus: int
 
 
+class PlanBasis(TypedDict):
+    name: str
+    state: str
+    rmc: str
+    sync: str
+    memory: list[int]
+    processors: list[int]
+
+
 class PlannedChanges(TypedDict):
-    basis: dict[str, Any]
+    basis: PlanBasis
     profile_patch: dict[str, int]
     profile_before: dict[str, int]
     current: CurrentResourceWrite | None
@@ -154,7 +193,7 @@ SETTLE_SECONDS = 120
 POLL_SECONDS = 5
 _NOT_ACTIVATED = "not activated"
 _SYNC_OFF = frozenset({"disabled", "suspended"})
-_RESOURCES = ("memory", "processors")
+_RESOURCES: tuple[Resource, Resource] = ("memory", "processors")
 _FIELD = {"memory": "memory_mib", "processors": "processors"}
 _LEVELS = ("min", "desired", "max")
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
@@ -355,7 +394,13 @@ def _dedicated(text: str) -> bool:
     return text == "true"
 
 
-def partition_view(entry: Mapping[str, Any] | None) -> dict[str, Any]:
+def _triple(values: Iterable[_T]) -> tuple[_T, _T, _T]:
+    """The minimum, desired/current and maximum values of one resource."""
+    low, value, high = values
+    return low, value, high
+
+
+def partition_view(entry: Mapping[str, Any] | None) -> PartitionView:
     """The values the plan rests on: current ones if activated, pending ones if not."""
     resource = (entry or {}).get("Resource")
     if not isinstance(resource, Mapping):
@@ -409,13 +454,15 @@ def partition_view(entry: Mapping[str, Any] | None) -> dict[str, Any]:
         "default_profile": _text(resource, "DefaultProfileName"),
         "last_profile": _text(resource, "LastActivatedProfile"),
         "dedicated": dedicated,
-        "memory": [_number(memory, n) for n in names],
-        "processors": [_number(cpu, container, n) for n in procs],
-        "units": None if dedicated else [_units(cpu, container, n) for n in units],
+        "memory": _triple(_number(memory, n) for n in names),
+        "processors": _triple(_number(cpu, container, n) for n in procs),
+        "units": None
+        if dedicated
+        else _triple(_units(cpu, container, n) for n in units),
     }
 
 
-def profile_view(fields: Mapping[str, Any]) -> dict[str, Any]:
+def profile_view(fields: Mapping[str, Any]) -> ProfileView:
     """The saved minimum, desired and maximum values of a profile read."""
     attrs = ("ProcessorAttributes",)
     dedicated = _dedicated(_text(fields, *attrs, "HasDedicatedProcessors").lower())
@@ -428,13 +475,17 @@ def profile_view(fields: Mapping[str, Any]) -> dict[str, Any]:
     levels = ("Minimum", "Desired", "Maximum")
     return {
         "dedicated": dedicated,
-        "memory": [_number(fields, "ProfileMemory", f"{w}Memory") for w in levels],
-        "processors": [
+        "memory": _triple(
+            _number(fields, "ProfileMemory", f"{w}Memory") for w in levels
+        ),
+        "processors": _triple(
             _number(fields, *attrs, container, f"{w}{word}") for w in levels
-        ],
+        ),
         "units": None
         if dedicated
-        else [_units(fields, *attrs, container, f"{w}ProcessingUnits") for w in levels],
+        else _triple(
+            _units(fields, *attrs, container, f"{w}ProcessingUnits") for w in levels
+        ),
     }
 
 
@@ -443,12 +494,12 @@ def profile_view(fields: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _widen(triple: list[int], value: int) -> list[int]:
-    return [min(triple[0], value), value, max(triple[2], value)]
+def _widen(triple: ResourceTriple, value: int) -> ResourceTriple:
+    return min(triple[0], value), value, max(triple[2], value)
 
 
 def _check_units(
-    units: list[float] | None, vcpus: list[int], where: str, floor: float
+    units: UnitsTriple | None, vcpus: ResourceTriple, where: str, floor: float
 ) -> None:
     """Refuse shared units outside ``floor x VPs <= units <= VPs`` at any level."""
     if units is None:
@@ -464,9 +515,9 @@ def _check_units(
 
 
 def _classify(
-    resource: str,
+    resource: Resource,
     value: int,
-    view: dict[str, Any],
+    view: PartitionView,
     widened: bool,
     allow_disruption: bool,
 ) -> tuple[str, str | None]:
@@ -487,7 +538,7 @@ def _classify(
     return ("pending_activation", reason) if reason else ("live", None)
 
 
-def _suffix(resource: str, view: dict[str, Any]) -> str:
+def _suffix(resource: Resource, view: PartitionView) -> str:
     """The ``LparResources`` field suffix that writes *resource* in the partition's mode."""
     if resource == "memory":
         return "memory"
@@ -495,7 +546,7 @@ def _suffix(resource: str, view: dict[str, Any]) -> str:
 
 
 def _profile_patch(
-    resource: str, saved: list[int], new_saved: list[int]
+    resource: Resource, saved: ResourceTriple, new_saved: ResourceTriple
 ) -> tuple[dict[str, int], dict[str, int]]:
     """The profile fields to write for one resource, and their earlier values."""
     if new_saved == saved:
@@ -511,7 +562,7 @@ def _profile_patch(
 
 
 def _current_write(
-    resource: str, value: int, view: dict[str, Any], applied: str
+    resource: Resource, value: int, view: PartitionView, applied: str
 ) -> dict[str, int]:
     """The current-configuration fields to write for one resource, if any."""
     current = view[resource]
@@ -527,23 +578,23 @@ def _current_write(
         }
     if applied == "live" and value != current[1]:
         if resource == "processors":
-            triple = [current[0], value, current[2]]
+            triple = (current[0], value, current[2])
             _check_units(view["units"], triple, "partition's", view.get("floor", 0))
         return {f"desired_{suffix}": value}
     return {}
 
 
 def _resource_plan(
-    resource: str,
+    resource: Resource,
     value: int,
-    view: dict[str, Any],
-    profile: dict[str, Any],
+    view: PartitionView,
+    profile: ProfileView,
     allow_disruption: bool,
 ) -> tuple[dict[str, Any], dict[str, int], dict[str, int], dict[str, int]]:
     """One resource's change, profile patch, profile before-values and current write."""
     saved, current = profile[resource], view[resource]
     new_saved = _widen(saved, value)
-    widened = new_saved != [saved[0], value, saved[2]]
+    widened = new_saved != (saved[0], value, saved[2])
     if view["state"] == _NOT_ACTIVATED:
         pending = _widen(current, value)
         widened = widened or (pending[0], pending[2]) != (current[0], current[2])
@@ -569,8 +620,8 @@ def _resource_plan(
 
 def plan_changes(
     patch: ReconfigurePatch,
-    view: dict[str, Any],
-    profile: dict[str, Any] | None,
+    view: PartitionView,
+    profile: ProfileView | None,
     allow_disruption: bool,
     boot_write: bool = False,
 ) -> PlannedChanges:
@@ -641,16 +692,20 @@ def plan_changes(
     }
 
 
-def basis(view: dict[str, Any]) -> dict[str, Any]:
-    """What a plan rests on; a difference before a write means the plan is stale."""
+def basis(view: PartitionView) -> PlanBasis:
+    """The persisted JSON basis, retaining resource arrays for earlier recorded plans."""
     return {
-        key: view[key]
-        for key in ("name", "state", "rmc", "sync", "memory", "processors")
+        "name": view["name"],
+        "state": view["state"],
+        "rmc": view["rmc"],
+        "sync": view["sync"],
+        "memory": list(view["memory"]),
+        "processors": list(view["processors"]),
     }
 
 
 def require_persistable(
-    view: Mapping[str, Any], profile: Mapping[str, Any], changes: list[dict[str, Any]]
+    view: PartitionView, profile: ProfileView, changes: list[dict[str, Any]]
 ) -> None:
     """Refuse a force-save that would discard pending profile values (ADR 0322 Decision 4).
 
@@ -690,7 +745,7 @@ def _mapping_ids(entries: list[dict[str, Any]], name: str, lpar_uuid: str) -> li
 async def _disk_plan(
     hmc: HMCClient,
     disks: DiskPatch,
-    view: Mapping[str, Any],
+    view: PartitionView,
     system_uuid: str,
     lpar_uuid: str,
     *,
@@ -842,7 +897,7 @@ async def _resolve(hmc: HMCClient, system: str, lpar: str) -> tuple[str, str]:
     return system_uuid, lpar_uuid.lower()
 
 
-async def _read_view(hmc: HMCClient, lpar_uuid: str) -> dict[str, Any]:
+async def _read_view(hmc: HMCClient, lpar_uuid: str) -> PartitionView:
     try:
         return partition_view(await hmc.get_logical_partition(lpar_uuid))
     except (HMCError, ValueError, TypeError) as exc:
@@ -853,7 +908,7 @@ async def _read_view(hmc: HMCClient, lpar_uuid: str) -> dict[str, Any]:
 
 async def _read_profile(
     hmc: HMCClient, system_uuid: str, lpar_uuid: str, name: str
-) -> tuple[Any, dict[str, Any]]:
+) -> tuple[PartitionProfileRecord, ProfileView]:
     try:
         record = await read_partition_profile(hmc, system_uuid, lpar_uuid, name)
         return record, profile_view(record.fields)
@@ -866,7 +921,7 @@ async def _read_profile(
 
 async def _processor_limits(
     hmc: HMCClient, system_uuid: str, dedicated: bool
-) -> dict[str, float]:
+) -> ProcessorLimits:
     """The system's per-partition processor count and units-per-VP floor, when reported.
 
     The fields ``hmc_dlpar_proc`` checks (``operations/lpar/processors.py``); a sparse
@@ -880,14 +935,14 @@ async def _processor_limits(
         ) from exc
     resource = (entry or {}).get("Resource") or {}
     config = resource.get("AssociatedSystemProcessorConfiguration") or {}
-    fields = {
+    fields: dict[Literal["count_limit", "floor"], str] = {
         "count_limit": "CurrentMaximumAllowedProcessorsPerPartition"
         if dedicated
         else "MaximumAllowedVirtualProcessorsPerPartition",
     }
     if not dedicated:
         fields["floor"] = "MinimumProcessorUnitsPerVirtualProcessor"
-    limits = {}
+    limits: ProcessorLimits = {}
     for key, name in fields.items():
         try:
             limits[key] = float(_text(config, name))
@@ -897,8 +952,8 @@ async def _processor_limits(
 
 
 async def _default_profile(
-    hmc: HMCClient, view: dict[str, Any], system_uuid: str, lpar_uuid: str
-) -> tuple[Any, dict[str, Any]]:
+    hmc: HMCClient, view: PartitionView, system_uuid: str, lpar_uuid: str
+) -> tuple[PartitionProfileRecord, ProfileView]:
     """The profile a change must persist in (ADR 0314 Decision 2), and its view."""
     name = view["default_profile"]
     if not name:
@@ -925,7 +980,11 @@ async def _make_plan(
 ) -> ReconfigurationPlan:
     view = await _read_view(hmc, lpar_uuid)
     if patch.processors is not None:
-        view |= await _processor_limits(hmc, system_uuid, view["dedicated"])
+        limits = await _processor_limits(hmc, system_uuid, view["dedicated"])
+        if "count_limit" in limits:
+            view["count_limit"] = limits["count_limit"]
+        if "floor" in limits:
+            view["floor"] = limits["floor"]
     if patch.name is not None:
         escape_xml(patch.name)
         others = await _other_names(hmc, system_uuid, lpar_uuid)
@@ -1004,8 +1063,8 @@ async def _network_plan(
     hmc: HMCClient,
     patch: network.NetworkPatch,
     *,
-    view: dict[str, Any],
-    profile: dict[str, Any],
+    view: PartitionView,
+    profile: ProfileView,
     changes: list[dict[str, Any]],
     system_uuid: str,
     lpar_uuid: str,
@@ -1228,7 +1287,7 @@ def _steps(plan: ReconfigurationPlan) -> list[tuple[str, str, str]]:
 
 
 def _stale(
-    ctx: OperationContext, plan: ReconfigurationPlan, view: dict[str, Any]
+    ctx: OperationContext, plan: ReconfigurationPlan, view: PartitionView
 ) -> bool:
     """Whether the partition differs from the plan's basis in what no applied write moved.
 
@@ -1237,7 +1296,7 @@ def _stale(
     once its ``rename`` is applied, the name is likewise its result (the disk writes and
     the save follow it).
     """
-    observed, expected = basis(view), dict(plan["basis"])
+    observed, expected = dict(basis(view)), dict(plan["basis"])
     moved = {CURRENT_KEY: _RESOURCES, RENAME_KEY: ("name",)}
     for key, fields in moved.items():
         applied = ctx.recorded(key)
@@ -1374,11 +1433,11 @@ def _expected(plan: ReconfigurationPlan) -> tuple[dict[str, int], dict[str, int]
     return profile, current
 
 
-def _observed(view: Mapping[str, Any], keys: Mapping[str, int]) -> dict[str, int]:
+def _observed(view: ProfileView, keys: Mapping[str, int]) -> dict[str, int]:
     observed = {}
     for key in keys:
         resource, level = key.split(":")
-        observed[key] = view[resource][int(level)]
+        observed[key] = view[cast(Resource, resource)][int(level)]
     return observed
 
 
