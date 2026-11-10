@@ -13,7 +13,8 @@ from hmcpctl.operations.lpar.memory.hardware import (
 )
 from hmcpctl.resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
 
-from ..lpar_config import (
+from ..observation import Assertion
+from .lpar_config import (
     NAME_PREFIX,
     RESOURCES,
     TOKEN_PREFIX,
@@ -25,7 +26,6 @@ from ..lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from ..observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client

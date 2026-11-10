@@ -21,7 +21,7 @@ from hmcpctl.ssh.transport import HMCCLIError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import packets
-from live_test import vios_ame_source as source
+from live_test.arms import vios_ame_source as source
 
 SYS = "00000000-0000-4000-8000-000000000001"
 V0 = "00000000-0000-4000-8000-000000000002"

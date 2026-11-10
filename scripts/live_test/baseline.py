@@ -29,7 +29,7 @@ from hmcpctl.ssh.sriov import (
 )
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import ATOM_NS, parse_feed
-from live_test.storage_lifecycle import volume_listing
+from live_test.arms.storage_lifecycle import volume_listing
 
 # Each table has exact fields and a structural identity; row order is immaterial.
 TABLES = {

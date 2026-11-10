@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from live_test.arms.users import profile_rows, scratch_users
 from live_test.recovery.common import Finding, StateUnreadable, recorded_calls
 from live_test.results import entries
-from live_test.users import profile_rows, scratch_users
 
 #: The users arm (#632). Its scratch users are found by their reserved prefix,
 #: not by the document's name, so a run killed before it wrote its document, or

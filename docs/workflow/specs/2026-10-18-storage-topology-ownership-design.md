@@ -3,7 +3,7 @@
 ## Problem
 Disk and power scenarios import generic storage topology helpers from the virtual
 media lifecycle. The operator approved moving these unchanged helpers into the
-existing live_test/storage.py owner and updating consumers.
+existing live_test/arms/storage.py owner and updating consumers.
 
 ## Scope
 Move _mapping_row, storage_rows, scsi_adapter_listing and adapter_rows unchanged

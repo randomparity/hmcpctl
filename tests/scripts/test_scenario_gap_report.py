@@ -409,7 +409,7 @@ def test_system_profiles_dispatch(capsys):
     for operation in ("create", "list", "update", "delete", "activate"):
         assert f"uncovered-operation: system_profile.{operation}" not in lines
     assert not any(
-        line.startswith("unreadable: scripts/live_test/system_profiles.py")
+        line.startswith("unreadable: scripts/live_test/arms/system_profiles.py")
         for line in lines
     )
 

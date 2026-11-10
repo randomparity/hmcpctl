@@ -74,7 +74,9 @@ def test_rejects_script_without_a_test_module(tmp_path: Path, capsys) -> None:
 
 def test_ignores_live_test_package_modules(tmp_path: Path) -> None:
     """Library modules under scripts/live_test/ are outside the convention."""
-    root = _repository(tmp_path, "tests/conftest.py", "scripts/live_test/vmedia.py")
+    root = _repository(
+        tmp_path, "tests/conftest.py", "scripts/live_test/arms/vmedia.py"
+    )
 
     assert check_test_layout.main(["--repo-root", str(root)]) == 0
 

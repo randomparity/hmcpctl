@@ -25,7 +25,8 @@ from hmcpctl.ssh.commands import build_filter, parse_hmc_result_rows
 
 from .. import evidence
 from ..config import _validate_creation_memory_layout
-from ..lpar_config import (
+from ..observation import Assertion
+from .lpar_config import (
     NAME_PREFIX,
     RESOURCES,
     TOKEN_PREFIX,
@@ -38,7 +39,6 @@ from ..lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from ..observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client

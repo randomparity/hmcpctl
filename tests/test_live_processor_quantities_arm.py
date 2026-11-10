@@ -22,7 +22,8 @@ from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.core import LparCreationResult
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import config, lpar_config, runner
+from live_test import config, runner
+from live_test.arms import lpar_config
 from live_test.observation import CallFailure
 
 UUID = "aaaaaaaa-0000-4000-8000-000000000056"
@@ -124,7 +125,7 @@ class ScriptedSystem:
 
 
 async def run_arm(monkeypatch, system, group="lpar-processor-quantities"):
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     @asynccontextmanager
     async def client_context(config):
@@ -229,7 +230,7 @@ async def test_owned_processor_sequence_and_cleanup(monkeypatch):
 async def test_inactive_set_rejection_never_becomes_positive_evidence(
     monkeypatch, expected_units
 ):
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     # The first native arm rejected set0.50 and independently remained at0.40.
     current = (*arm._INITIAL[:4], "0.40", *arm._INITIAL[5:])
@@ -313,7 +314,7 @@ async def test_processor_preconditions_prevent_creation(monkeypatch, fault, grou
 
 
 def test_processor_group_is_named_only():
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     assert runner.SUBTASK_GROUPS[arm.GROUP] == [56]
     assert runner.SUBTASKS[56] is arm.exercise_processor_quantities
@@ -326,7 +327,7 @@ async def test_processor_overmaximum_oracle_through_actual_mcp(
     processor_boundary,  # noqa: F811 -- imported pytest fixture
 ):
     from fastmcp import Client, FastMCP
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
     from lpar.test_processor_quantities import LPAR_UUID, SYSTEM_UUID
 
     from hmcpctl.server_tools.lpar import lifecycle
@@ -380,7 +381,7 @@ async def test_processor_overmaximum_oracle_through_actual_mcp(
     ],
 )
 def test_processor_oracle_rejects_malformed_quantities(value, units):
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     with pytest.raises(ValueError):
         arm._number(value, units=units)
@@ -419,7 +420,7 @@ async def test_processor_arm_is_not_selected_by_default(monkeypatch, tmp_path):
     ],
 )
 def test_processor_oracle_rejects_exact_fractional_tails(precision, value, units):
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     with localcontext() as context:
         context.prec = precision
@@ -444,7 +445,7 @@ def test_processor_oracle_rejects_exact_fractional_tails(precision, value, units
 def test_processor_oracle_preserves_exact_representations(
     precision, value, units, expected
 ):
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     with localcontext() as context:
         context.prec = precision
@@ -453,7 +454,7 @@ def test_processor_oracle_preserves_exact_representations(
 
 @pytest.mark.parametrize("units,digits", [(False, 1055), (True, 1052)])
 def test_processor_oracle_bounds_rendered_numeric_strings(units, digits):
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     expected = "1" + "0" * (digits - 1) + (".00" if units else "")
     assert arm._number(f"1e{digits - 1}", units=units) == expected
@@ -465,7 +466,7 @@ def test_processor_oracle_bounds_rendered_numeric_strings(units, digits):
 @pytest.mark.parametrize("units", [False, True])
 @pytest.mark.parametrize("oversized", ["0" * 1058, "٠" * 529])
 def test_processor_oracle_bounds_input_before_decimal_parse(units, oversized):
-    from live_test import processor_quantities as arm
+    from live_test.arms import processor_quantities as arm
 
     assert arm._number("0" * 1057, units=units) == ("0.00" if units else "0")
     with pytest.raises(ValueError, match="budget"):

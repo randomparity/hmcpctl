@@ -25,7 +25,7 @@ from hmcpctl.ssh import transport
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_evidence as public_evidence
-from live_test import vnic_creation_policy as arm
+from live_test.arms import vnic_creation_policy as arm
 from test_live_vios_ame_source_arm import entry, feed, field
 
 SYS = "00000000-0000-4000-8000-000000000001"

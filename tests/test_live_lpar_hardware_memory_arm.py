@@ -23,7 +23,7 @@ GROUP = "lpar-hardware-memory"
 
 @pytest.fixture
 def target(monkeypatch):
-    from live_test import lpar_config
+    from live_test.arms import lpar_config
     from live_test.arms import lpar_hardware_memory as arm
 
     env = SimpleNamespace(

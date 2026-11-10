@@ -17,7 +17,7 @@ from hmcpctl.config import HMCConfig
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import config as live_config
 from live_test import runner
-from live_test import storage_volume_group as vg
+from live_test.arms import storage_volume_group as vg
 
 PV = "hdisk9"
 PVID = "0000000000000009"

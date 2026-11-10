@@ -21,9 +21,9 @@ from hmcpctl.operations.lpar import processor_move as operation
 from hmcpctl.ssh.processors import _FIELDS
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import processor_move as arm
 from live_test import runner
 from live_test.arms import memory_move
+from live_test.arms import processor_move as arm
 from live_test.config import LiveTestConfig
 
 CONFIG = HMCConfig.from_mapping({})
@@ -107,7 +107,7 @@ def live_boundary(monkeypatch, boundary):  # noqa: F811 — fixture imported abo
     command = AsyncMock(side_effect=cli)
     monkeypatch.setattr(arm, "run_hmc_command", command)
     monkeypatch.setattr(memory_move, "run_hmc_command", command)
-    root = Path(arm.__file__).resolve().parents[2]
+    root = Path(arm.__file__).resolve().parents[3]
 
     def git(repo, *args):
         stdout = (

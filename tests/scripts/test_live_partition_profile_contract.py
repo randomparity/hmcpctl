@@ -7,8 +7,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
 import live_partition_profile_contract as wrapper
-from live_test import partition_profile_contract as arm
 from live_test import runner
+from live_test.arms import partition_profile_contract as arm
 
 
 def test_focused_wrapper_and_dispatch(tmp_path, monkeypatch):

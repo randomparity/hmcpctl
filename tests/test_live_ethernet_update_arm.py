@@ -17,9 +17,9 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 def require_arm():
     global arm
     assert (
-        Path(__file__).parents[1] / "scripts/live_test/ethernet_update.py"
+        Path(__file__).parents[1] / "scripts/live_test/arms/ethernet_update.py"
     ).exists(), "ST69 arm absent"
-    arm = importlib.import_module("live_test.ethernet_update")
+    arm = importlib.import_module("live_test.arms.ethernet_update")
 
 
 UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

@@ -16,7 +16,7 @@ Offline tests of the new steps do not establish hardware verification.
 This recipe brings up one Linux LPAR that uses no VIOS, shared storage, or virtual network. It
 creates the partition, gives it a dedicated physical PCIe slot, activates it to the SMS menu,
 observes it, and tears it down. The steps follow the `bare-cec` live-test arm
-(`scripts/live_test/bare_cec.py`). Every command below mutates only the partition this run
+(`scripts/live_test/arms/bare_cec.py`). Every command below mutates only the partition this run
 creates and the one slot you select.
 
 > **Sensitive data:** command output contains system and partition names, UUIDs, slot DRC

@@ -23,7 +23,10 @@ from hmcpctl.resource_identity import is_uuid, resolve_system_name, resolve_syst
 from hmcpctl.xmlutil import parse_feed
 
 from ..config import _validate_creation_memory
-from ..lpar_config import (
+from ..observation import Assertion, judge_create_result
+from ..results import field as result_field
+from .creation_memory_layout import _candidate
+from .lpar_config import (
     NAME_PREFIX,
     RESOURCES,
     TOKEN_PREFIX,
@@ -32,9 +35,6 @@ from ..lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from ..observation import Assertion, judge_create_result
-from ..results import field as result_field
-from .creation_memory_layout import _candidate
 
 if TYPE_CHECKING:
     from fastmcp import Client

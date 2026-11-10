@@ -34,7 +34,7 @@ ADR 0092 §1's rule that the guard lives in the operations layer.
 3. **Non-VIOS selector.** A selector that misses the system's `VirtualIOServer` feed is
    refused before any SSH command with a `ResourceNotFoundError` naming the missing
    Virtual I/O Server (`lpar_env=vioserver`) on that system and pointing at
-   `hmc_list_vios`; the tool docstring already states `msp` is VIOS-only. The live non-VIOS refusal check (`scripts/live_test/lpar.py`) matches
+   `hmc_list_vios`; the tool docstring already states `msp` is VIOS-only. The live non-VIOS refusal check (`scripts/live_test/arms/lpar.py`) matches
    `vioserver` in the error and keeps passing unchanged. The SSH `lpar_env` probe in
    `ssh/profiles.py::set_lpar_msp` stays as a second line.
 4. **CLI parity.** `hmc lpars set-msp` delegates to `configure_lpar_msp` through

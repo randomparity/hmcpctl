@@ -8,7 +8,7 @@ from typing import Any
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 from hmcpctl.ssh.profiles import profile_io_slot_rows_command
 from hmcpctl.ssh.transport import HMCCLIError
-from live_test.dedicated_pcie import (
+from live_test.arms.dedicated_pcie import (
     _DEFAULT_DEDICATED_PROFILE,
     _io_slots_contains,
     partition_not_found,

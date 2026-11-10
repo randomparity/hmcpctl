@@ -17,7 +17,7 @@ from unit.test_ssh_output_limits import connection
 from hmcpctl.ssh.transport import HMCCLIError, run_hmc_command
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_serial_adapter as arm
+from live_test.arms import lpar_serial_adapter as arm
 
 SYSTEM = "11111111-1111-4111-8111-111111111111"
 LOCAL = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"

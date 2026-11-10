@@ -709,7 +709,10 @@ def _unguarded_i_values(
             _REPO_ROOT / "src/hmcpctl/operations/vios/boot_order.py",
             "set_vios_boot_order",
         ),
-        (_REPO_ROOT / "scripts/live_test/lpar_boot_start.py", "admit_boot_payloads"),
+        (
+            _REPO_ROOT / "scripts/live_test/arms/lpar_boot_start.py",
+            "admit_boot_payloads",
+        ),
     }:
         builder = "_encode_boot_record"
     return _unguarded_payloads_for(func, _is_an_i_record_literal, "-i", builder)
@@ -721,7 +724,7 @@ def _unguarded_a_values(
     """Trace the vNIC preflight helper's returned record through the same builder."""
     builder = BUILDER_NAME
     vnic_source = _REPO_ROOT / "src/hmcpctl/ssh/vnic.py"
-    harness = _REPO_ROOT / "scripts/live_test/vnic_creation_policy.py"
+    harness = _REPO_ROOT / "scripts/live_test/arms/vnic_creation_policy.py"
     helpers = {
         (vnic_source, "add_vnic_backing"): "build_vnic_add_attributes",
         (vnic_source, "update_vnic_slot_policy"): "build_vnic_update_attributes",
@@ -1147,7 +1150,7 @@ def test_vios_csv_encoder_does_not_exempt_hoisted_commands():
 
 
 def test_st68_size_admission_uses_only_the_actual_fixed_encoder_at_exact_site():
-    path = _REPO_ROOT / "scripts/live_test/lpar_boot_start.py"
+    path = _REPO_ROOT / "scripts/live_test/arms/lpar_boot_start.py"
     tree = ast.parse(path.read_text())
     imports = [
         n
@@ -1203,7 +1206,7 @@ def test_nontrailing_opt_in_keeps_default_closed():
 
 @pytest.mark.parametrize("site", [0, 1])
 def test_fixture_record_sites_independently_require_builder(site):
-    path = _REPO_ROOT / "scripts/live_test/vnic_creation_policy.py"
+    path = _REPO_ROOT / "scripts/live_test/arms/vnic_creation_policy.py"
     tree = ast.parse(path.read_text())
     function = next(
         node

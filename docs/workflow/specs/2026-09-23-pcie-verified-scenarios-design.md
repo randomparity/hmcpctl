@@ -11,7 +11,7 @@ probe, which the promotion path cannot take either.
 ## Scope
 
 Harness only: `scripts/live_test/pcie.py`, one helper moved out of
-`scripts/live_test/bare_cec.py`, their tests, and `docs/live-testing.md`. No
+`scripts/live_test/arms/bare_cec.py`, their tests, and `docs/live-testing.md`. No
 `src/` change, no new configuration key, no new runner subtask or group.
 
 **Conversion rule.** Every existing row stays as it is, SKIP, FAIL and

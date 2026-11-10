@@ -21,12 +21,9 @@ import pytest
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_bare_cec as wrapper  # noqa: E402
-from live_test import (  # noqa: E402
-    bare_cec,
-    dedicated_pcie,
-    runner,
-)
 from live_test import config as live_config  # noqa: E402
+from live_test import runner  # noqa: E402
+from live_test.arms import bare_cec, dedicated_pcie  # noqa: E402
 from live_test.observation import CLEANUP, Assertion  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402

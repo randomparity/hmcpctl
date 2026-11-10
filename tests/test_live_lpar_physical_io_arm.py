@@ -12,7 +12,7 @@ from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_physical_io as arm
+from live_test.arms import lpar_physical_io as arm
 
 
 @pytest.mark.asyncio

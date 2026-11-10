@@ -15,8 +15,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_preflight as preflight
 import live_test_recovery as recovery
-from live_test import accelerator_qos as arm
 from live_test import runner
+from live_test.arms import accelerator_qos as arm
 from live_test.config import LiveTestConfig, decode_saved_config
 from live_test.observation import CallFailure
 

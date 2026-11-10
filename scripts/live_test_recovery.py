@@ -67,30 +67,28 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from live_test import config as live_config
-from live_test import (
+from live_test import runner
+from live_test.arms import (
+    creation_memory,
+    creation_memory_layout,
     logical_workflow,
     lpar_affinity_group,
     lpar_config,
+    lpar_hardware_memory,
     lpar_linux_roles,
     lpar_physical_io,
     lpar_power,
     lpar_reconfigure,
     lpar_security_policy,
     lpar_vtpm,
+    memory_quantities,
     network,
     processor_quantities,
     processor_sharing_weight,
     provision_boot,
-    runner,
     storage_lifecycle,
     storage_volume_group,
     vios_backup,
-)
-from live_test.arms import (
-    creation_memory,
-    creation_memory_layout,
-    lpar_hardware_memory,
-    memory_quantities,
 )
 from live_test.recovery.backup import (
     check_vios_backup,
@@ -459,7 +457,7 @@ def _delegate_procedure_recovery(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> int | None:
     if args.ethernet_update_procedure:
-        from live_test import ethernet_update
+        from live_test.arms import ethernet_update
 
         if not args.output or args.packet_sha256:
             parser.error(
@@ -489,7 +487,7 @@ def _delegate_procedure_recovery(
         ),
     ):
         if selected:
-            module = import_module(f"live_test.{module_name}")
+            module = import_module(f"live_test.arms.{module_name}")
             if args.output or args.packet_sha256:
                 parser.error(refusal)
             return module.main(["recover", "--results", str(args.results)])
@@ -522,7 +520,7 @@ def _delegate_packet_recovery(
         ),
     ):
         if packet:
-            module = import_module(f"live_test.{module_name}")
+            module = import_module(f"live_test.arms.{module_name}")
             if not args.packet_sha256 or not args.output:
                 parser.error(refusal)
             return module.main(
@@ -541,7 +539,7 @@ def _delegate_packet_recovery(
     if args.output:
         parser.error("--output requires --activation-source-packet")
     if args.source_packet:
-        from live_test import system_profile_source
+        from live_test.arms import system_profile_source
 
         if not args.packet_sha256:
             parser.error("source recovery requires --packet-sha256")
@@ -590,7 +588,7 @@ def _recover_document_group(document: dict[str, Any]) -> int | None:
             "CLEAN: system-profile original baseline and finite terminal sequence confirmed",
         ),
         "lpar-memory-move": (
-            "arms.memory_move",
+            "memory_move",
             "memory-move recovery",
             "memory-move recovery",
             "CLEAN: finite memory-move success and both original baselines confirmed; no writes",
@@ -613,7 +611,7 @@ def _recover_document_group(document: dict[str, Any]) -> int | None:
     if protocol is None:
         return None
     module_name, credentials_label, error_label, success = protocol
-    module = import_module(f"live_test.{module_name}")
+    module = import_module(f"live_test.arms.{module_name}")
     if not runner._bootstrap_config():
         print(f"{credentials_label}: credentials unavailable", file=sys.stderr)
         return 2

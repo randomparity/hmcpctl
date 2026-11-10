@@ -52,7 +52,7 @@ repositories, shared or foreign media, name-prefix deletion, a policy for pre-st
   continuation (which accepts `--exclusive-writer-window`); the confirmation prompts and the
   text renderer name the deletion and print `storage`. The CLI has no access policy, so no
   delegated check.
-- Live arm `scripts/live_test/lpar_power.py`: partition P is provisioned with an owned disk
+- Live arm `scripts/live_test/arms/lpar_power.py`: partition P is provisioned with an owned disk
   (`storage.capacity_mib` in the arm's volume group) instead of mapping a pre-created volume, and
   decommissioned with `delete_owned`; the judged assertion `backing-volume-retained` becomes
   `owned-disk-deleted`, and the existing foreign-mapping comparison is joined by

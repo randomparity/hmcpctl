@@ -6,7 +6,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any
 
-from live_test import network
+from live_test.arms import network
 
 from .common import Finding, StateUnreadable
 

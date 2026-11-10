@@ -76,7 +76,7 @@ invented field argument. Use existing build_filter for the numeric filter, then 
 
 ## Closed interfaces
 
-New module scripts/live_test/vios_boot_source.py exports:
+New module scripts/live_test/arms/vios_boot_source.py exports:
 - validate_packet(packet: dict) -> None
 - encode_boot_record(partition_id: int, case_index: int) -> str
 - parse_native_header(raw: str, identity: dict) -> dict[str, str]
@@ -121,7 +121,7 @@ Window is bounded to3200–7200 seconds, absolute UTC bounds; expiry stops resou
 A new window does not reset consumed effects. Root must separately disposition any retry.
 
 Selected boundary-owner source hashes are a closed exact path set: the existing AME
-SOURCE_PATHS minus scripts/live_vios_ame_source.py, plus scripts/live_test/vios_boot_source.py
+SOURCE_PATHS minus scripts/live_vios_ame_source.py, plus scripts/live_test/arms/vios_boot_source.py
 and scripts/live_vios_boot_source.py. This expands to20 paths at this baseline and is
 enumerated explicitly below; no caller-selected extra or missing path. It is a
 selected execution-boundary attestation, not a claim to hash all transitive Python imports.
@@ -447,7 +447,7 @@ A partial journal, unknown token or failed fsync remains held; do not fabricate 
 This is the20-path execution-boundary witness, not transitive-import closure. Packet hashes
 must cover these exact keys; test/document paths are not executable runtime boundaries.
 
-- scripts/live_test/vios_ame_source.py
+- scripts/live_test/arms/vios_ame_source.py
 - scripts/live_test_preflight.py
 - scripts/live_test_recovery.py
 - scripts/live_test_evidence.py
@@ -465,5 +465,5 @@ must cover these exact keys; test/document paths are not executable runtime boun
 - src/hmcpctl/ssh/description_validation.py
 - src/hmcpctl/ssh/transport.py
 - src/hmcpctl/xmlutil.py
-- scripts/live_test/vios_boot_source.py
+- scripts/live_test/arms/vios_boot_source.py
 - scripts/live_vios_boot_source.py

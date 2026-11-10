@@ -669,7 +669,7 @@ def test_confirmed_gap_matches_fresh_producer_result():
 
 
 def producer_states():
-    from live_test import bare_cec, dedicated_pcie
+    from live_test.arms import bare_cec, dedicated_pcie
 
     dedicated = runner.RunState()
     dedicated_pcie.record_dedicated_listing(
@@ -901,7 +901,7 @@ def test_reject_st31_relabelled_as_st36_before_branch_creation(producer_candidat
 
 
 def test_accept_actual_st36_and_reject_relabelled_st31():
-    from live_test import dedicated_pcie
+    from live_test.arms import dedicated_pcie
 
     state = runner.RunState()
     dedicated_pcie._record_dedicated_additions(

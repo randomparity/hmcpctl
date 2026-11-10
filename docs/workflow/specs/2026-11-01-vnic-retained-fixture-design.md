@@ -38,7 +38,7 @@ invocations; root admits each hardware window. No publication authority is added
 
 ## Owner and interface
 
-Extend `scripts/live_test/vnic_creation_policy.py`. Existing preflight, standalone
+Extend `scripts/live_test/arms/vnic_creation_policy.py`. Existing preflight, standalone
 capture wrapper and recovery dispatcher remain the only entrypoints. A separately
 validated version-3 packet with purpose `vnic-source-fixture` selects `prepare` or
 `cleanup`; the capture entrypoint dispatches that explicit packet action. Existing

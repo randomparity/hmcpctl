@@ -18,7 +18,8 @@ from hmcpctl.errors import HMCError
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_recovery as recovery
 from live_test import config as live_config
-from live_test import runner, vmedia_media_change
+from live_test import runner
+from live_test.arms import vmedia_media_change
 from test_live_vmedia_arm import (
     LPAR,
     LPAR_UUID,

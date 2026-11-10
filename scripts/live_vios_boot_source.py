@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from live_test import vios_boot_source
+from live_test.arms import vios_boot_source
 
 
 def main(argv: list[str] | None = None) -> int:

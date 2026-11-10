@@ -45,34 +45,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from live_test import (
+from live_test import config as live_config
+from live_test import runner
+from live_test.arms import (
     accelerator_qos,
     bare_cec,
+    creation_memory,
+    creation_memory_layout,
     dedicated_pcie,
     logical_workflow,
     lpar_config,
     lpar_power,
     lpar_reconfigure,
+    memory_move,
+    memory_statistics,
+    paging_switchover,
     partition_profile_contract,
     partition_profiles,
     processor_move,
     profiles,
     provision_boot,
-    runner,
     storage_lifecycle,
     storage_volume_group,
     system_profiles,
     users,
     vios_backup,
     vmedia,
-)
-from live_test import config as live_config
-from live_test.arms import (
-    creation_memory,
-    creation_memory_layout,
-    memory_move,
-    memory_statistics,
-    paging_switchover,
 )
 
 from hmcpctl.client.core import HMCClient
@@ -1253,7 +1251,7 @@ def main(argv: list[str] | None = None) -> int:
     args.group = args.group[0] if args.group else None
     if args.group in _PACKET_PREFLIGHTS:
         module_name, refusal = _PACKET_PREFLIGHTS[args.group]
-        module = import_module(f"live_test.{module_name}")
+        module = import_module(f"live_test.arms.{module_name}")
         if (
             not args.packet
             or not args.packet_sha256
@@ -1276,7 +1274,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.output:
         parser.error("--output requires --group system-profile-activation-source")
     if args.group == "system-profile-source":
-        from live_test import system_profile_source
+        from live_test.arms import system_profile_source
 
         if (
             not args.packet
@@ -1331,7 +1329,7 @@ def main(argv: list[str] | None = None) -> int:
                 "configuration only; native profile-contract admission NOT established"
             )
             return 0
-        from live_test.profile_contract_run import preflight
+        from live_test.arms.profile_contract_run import preflight
 
         try:
             asyncio.run(preflight(HMCConfig(), config))

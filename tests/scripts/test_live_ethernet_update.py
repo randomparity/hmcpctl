@@ -18,7 +18,7 @@ def require_arm():
         "ST69 wrapper absent"
     )
     live_ethernet_update = importlib.import_module("live_ethernet_update")
-    ethernet_update = importlib.import_module("live_test.ethernet_update")
+    ethernet_update = importlib.import_module("live_test.arms.ethernet_update")
 
 
 def test_named_entry_has_only_run_route(monkeypatch):

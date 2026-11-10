@@ -13,7 +13,8 @@ from hmcpctl.operations.systems.fleet import FleetListing
 
 LIVE_TEST_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(LIVE_TEST_ROOT))
-from live_test import inventory, network, storage  # noqa: E402
+from live_test import inventory  # noqa: E402
+from live_test.arms import network, storage  # noqa: E402
 from live_test.observation import plain_data  # noqa: E402
 
 

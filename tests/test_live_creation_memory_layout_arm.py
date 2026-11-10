@@ -24,7 +24,8 @@ from hmcpctl.operations.lpar import core
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import config as settings
-from live_test import lpar_config, runner
+from live_test import runner
+from live_test.arms import lpar_config
 
 SYSTEM = "aaaaaaaa-0000-0000-0000-000000000001"
 LPAR = "bbbbbbbb-0000-0000-0000-000000000002"

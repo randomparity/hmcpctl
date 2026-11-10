@@ -5,7 +5,7 @@ Issue #1344, a split of #626 (epic #620, entry V2). No new decision record. This
 
 ## Problem
 
-ST1 (`scripts/live_test/connectivity.py`) dispatches `system.list`, `capacity.report` and
+ST1 (`scripts/live_test/arms/connectivity.py`) dispatches `system.list`, `capacity.report` and
 `placement.find`. It records them through `record_with_expected`, which never promotes and
 never fails an observation. It also repeats `hmc_get_system` through `state.record`. Six more
 read operations in this slice have no live scenario: `lpar.list_ownership`, `lpar.inspect`,

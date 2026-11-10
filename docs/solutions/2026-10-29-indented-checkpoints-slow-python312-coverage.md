@@ -2,7 +2,7 @@
 title: Indented checkpoint JSON makes Python 3.12 source-arm tests slow under coverage
 date: 2026-10-29
 tags: [performance, checkpoint, json, python, python312, pytest, coverage, cprofile]
-components: [scripts/live_test/system_profile_source.py, scripts/live_test/system_profile_activation_source.py, tests/scripts/test_live_system_profile_source.py, src/hmcpctl/tool_registry.py]
+components: [scripts/live_test/arms/system_profile_source.py, scripts/live_test/arms/system_profile_activation_source.py, tests/scripts/test_live_system_profile_source.py, src/hmcpctl/tool_registry.py]
 ---
 
 ## Problem
@@ -37,7 +37,7 @@ this file alone caused the earlier whole-suite timeout or job cancellation.
 
 ## Solution
 
-Remove `indent=2` in `scripts/live_test/system_profile_source.py:210`.
+Remove `indent=2` in `scripts/live_test/arms/system_profile_source.py:210`.
 Keep the ordinary JSON defaults, encoded five-MiB ceiling, private temporary
 file, flush/fsync, atomic replacement and failed-write cleanup unchanged.
 Canonical digests still encode parsed values separately; old pretty journals

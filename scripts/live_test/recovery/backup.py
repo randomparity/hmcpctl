@@ -6,7 +6,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any
 
-from live_test import vios_backup
+from live_test.arms import vios_backup
 
 from .common import Finding, StateUnreadable
 

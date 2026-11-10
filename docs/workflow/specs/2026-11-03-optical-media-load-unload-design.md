@@ -64,7 +64,7 @@ operations, with `load_`/`unload_` added to `_MUTATOR_PREFIXES` in
 mapping is listed only by `hmc_list_storage_mappings` and must be loaded again before unmount
 can remove it.
 
-Live arm: ST71 (`scripts/live_test/vmedia_media_change.py`) replaces its raw `viosvrcmd`
+Live arm: ST71 (`scripts/live_test/arms/vmedia_media_change.py`) replaces its raw `viosvrcmd`
 `unloadopt`/`loadopt` calls (Q2, Q3 and the cleanup reload) with the two tools. After the immediate
 power-off, Q3 runs unload, load with `release=True`, unload with `release=True`, then load, each
 followed by the existing `lsvopt` read. Each tool step is a PASS row only when the tool succeeded

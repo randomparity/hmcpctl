@@ -15,7 +15,8 @@ import live_profile_artifacts as wrapper
 import live_test_preflight as preflight
 import live_test_recovery as recovery
 from live_test import config as live_config
-from live_test import profiles, runner
+from live_test import runner
+from live_test.arms import profiles
 
 
 def listing(*names, status="COMPLETED_OK"):
