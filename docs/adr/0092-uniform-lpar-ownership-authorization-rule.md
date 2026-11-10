@@ -237,7 +237,7 @@ The remaining direct entry points and their guard state are:
 
 | Entry point | Location | Status | Tracking |
 |---|---|---|---|
-| `configure_lpar_msp` | `operations/lpar/configuration.py::configure_lpar_msp` | guarded (`operations/lpar/configuration.py::configure_lpar_msp`, via `operations/lpar/configuration.py::_resolve_and_authorize_vios_names`); targets a VIOS (§1) | #1318 |
+| `configure_lpar_msp` | `operations/lpar/configuration.py::configure_lpar_msp` | guarded (`operations/lpar/configuration.py::configure_lpar_msp`, via `operations/lpar/ownership.py::_resolve_and_authorize_vios_names`); targets a VIOS (§1) | #1318 |
 | `configure_lpar_processor_compatibility` | `operations/lpar/configuration.py::configure_lpar_processor_compatibility` | guarded (`operations/lpar/configuration.py::configure_lpar_processor_compatibility`) | — |
 | `hmc_modify_lpar` | `server_tools/lpar/lifecycle.py::hmc_modify_lpar` | guarded by `operations/lpar/dlpar.py::modify_lpar` before any write | — |
 | `hmc lpar modify` (CLI) | `cli_commands/lpar/modify.py::lpars_modify` | guarded by `operations/lpar/dlpar.py::modify_lpar` before any write | — |
