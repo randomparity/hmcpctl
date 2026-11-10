@@ -20,12 +20,8 @@ from hmcpctl import cli
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
-from live_test import (  # noqa: E402
-    http_fixture,
-    observation,
-    runner,
-    vmedia,
-)
+from live_test import http_fixture, observation, runner  # noqa: E402
+from live_test.arms import vmedia  # noqa: E402
 
 SYSTEM = "sys-A"
 LPAR = "sys-A-lp3"

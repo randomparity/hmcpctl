@@ -13,8 +13,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_recovery as recovery
-from live_test import baseline, inventory, provisioning, runner
+from live_test import baseline, inventory, runner
 from live_test import config as live_config
+from live_test.arms import provisioning
 from live_test.observation import plain_data
 from live_test.recovery import baseline as baseline_recovery
 

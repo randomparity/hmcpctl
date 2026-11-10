@@ -22,7 +22,7 @@ or its effect class, so no grant can admit the stop and withhold the crash.
   signature), `docs/capabilities/maturity.json` (the `dump-restart` variant moves to
   `lpar.dump_restart`, with no evidence), `src/hmcpctl/_operation_maturity.json`
   (`just capability-metadata`), and `docs/tools/` (`just tool-docs`).
-- `scripts/live_test/bare_cec.py`: the opt-in dump step dispatches `hmc_dump_restart_lpar`.
+- `scripts/live_test/arms/bare_cec.py`: the opt-in dump step dispatches `hmc_dump_restart_lpar`.
   Its row label becomes `hmc_dump_restart_lpar`. No other step changes.
 - Prose: `docs/authorization-audit.md`, `docs/mcp-server.md`, `docs/kdive-tier-a-contract.md`,
   a Status banner on ADR 0164, and `CHANGELOG.md`.

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
-from live_test import system_profile_activation_source as arm
+from live_test.arms import system_profile_activation_source as arm
 
 from hmcpctl.config import HMCConfig
 

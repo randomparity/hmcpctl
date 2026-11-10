@@ -9,7 +9,7 @@ from hmcpctl.config import HMCConfig
 from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import runner
-from live_test.profiles import ARTIFACT_PREFIX, backup_artifact_names
+from live_test.arms.profiles import ARTIFACT_PREFIX, backup_artifact_names
 from live_test.recovery.common import Finding, StateUnreadable
 
 

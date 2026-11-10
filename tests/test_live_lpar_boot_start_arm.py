@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_boot_start as arm
+from live_test.arms import lpar_boot_start as arm
 
 from hmcpctl.config import HMCConfig
 

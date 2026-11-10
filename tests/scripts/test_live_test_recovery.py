@@ -29,7 +29,8 @@ from hmcpctl.client.client_storage import mapping_lpar_uuid, storage_mapping_id
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_recovery as recovery  # noqa: E402
-from live_test import storage_lifecycle  # noqa: E402
+from live_test.arms import storage_lifecycle  # noqa: E402
+from live_test.arms.storage import scsi_adapter_listing  # noqa: E402
 from live_test.observation import CallFailure  # noqa: E402
 from live_test.recovery import backup as backup_recovery  # noqa: E402
 from live_test.recovery import baseline as baseline_recovery  # noqa: E402
@@ -37,7 +38,6 @@ from live_test.recovery import memory as memory_recovery  # noqa: E402
 from live_test.recovery import partition as partition_recovery  # noqa: E402
 from live_test.recovery import pcie as pcie_recovery  # noqa: E402
 from live_test.recovery import storage as storage_recovery  # noqa: E402
-from live_test.storage import scsi_adapter_listing  # noqa: E402
 
 _MARKER = "pcie-deadbeef"
 _SYSTEM = "sys-R1"
@@ -52,7 +52,7 @@ _PROFILE_READ = f"lssyscfg -r prof -m {_SYSTEM} -F lpar_name,name,io_slots --hea
 def unarmed_creation_results(monkeypatch, tmp_path, request):
     """Use the real ST58 arm and runner writer; replace only the MCP boundary."""
     from live_test import config as settings
-    from live_test import creation_memory_layout as arm
+    from live_test.arms import creation_memory_layout as arm
 
     from hmcpctl.config import HMCConfig
 
@@ -675,7 +675,7 @@ async def test_the_profile_read_is_the_admitted_form_selected_by_profile_name():
 
 def test_recovery_reads_the_profile_with_the_arms_own_builders():
     """One definition of the admitted read, so the two cannot drift apart."""
-    from live_test import dedicated_pcie
+    from live_test.arms import dedicated_pcie
 
     assert (
         pcie_recovery.profile_io_slot_rows_command
@@ -692,7 +692,7 @@ def test_an_unset_profile_name_falls_back_to_the_arms_default():
     A second spelling would query, and tell the operator to repair, a profile
     the arm never touched.
     """
-    from live_test import dedicated_pcie
+    from live_test.arms import dedicated_pcie
 
     document = _document()
     document["config"]["dedicated_pcie_profile_name"] = ""
@@ -893,7 +893,7 @@ def test_every_mutating_vmedia_call_has_a_trigger():
     from hmcpctl.server import TOOL_SECURITY
 
     source = "".join(
-        (SCRIPTS_ROOT / "live_test" / name).read_text(encoding="utf-8")
+        (SCRIPTS_ROOT / "live_test" / "arms" / name).read_text(encoding="utf-8")
         for name in ("vmedia.py", "vmedia_media_change.py")
     )
     # Every tool-name literal, not only `state.call(client, ...)`: ST19 calls
@@ -2784,7 +2784,7 @@ async def test_selected_checker_uses_actual_read_only_wrapper(monkeypatch):
 def test_system_profiles_recovery(tmp_path, monkeypatch, capsys):
     from unittest.mock import AsyncMock
 
-    from live_test import system_profiles
+    from live_test.arms import system_profiles
 
     path = tmp_path / "results.json"
     path.write_text(
@@ -3215,7 +3215,7 @@ def test_sharing_recovery_incomplete_never_claims_clean(
 
 
 def test_serial_procedure_exact_read_only_dispatch(monkeypatch):
-    from live_test import lpar_serial_adapter
+    from live_test.arms import lpar_serial_adapter
 
     dispatch = Mock(return_value=2)
     monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
@@ -3232,7 +3232,7 @@ def test_serial_procedure_exact_read_only_dispatch(monkeypatch):
     ],
 )
 def test_serial_recovery_rejects_other_authority_or_output(monkeypatch, extra):
-    from live_test import lpar_serial_adapter
+    from live_test.arms import lpar_serial_adapter
 
     dispatch = Mock()
     monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
@@ -3268,7 +3268,7 @@ def test_processor_move_route_refuses_unarmed_proof(
 
 
 def test_vios_source_recovery_exact_route(monkeypatch):
-    from live_test import vios_ame_source
+    from live_test.arms import vios_ame_source
 
     route = Mock(return_value=2)
     monkeypatch.setattr(vios_ame_source, "main", route)
@@ -3304,7 +3304,7 @@ def test_vios_source_recovery_exact_route(monkeypatch):
 
 @pytest.mark.parametrize("other", ["--source-packet", "--activation-source-packet"])
 def test_vios_source_recovery_packets_are_exclusive(monkeypatch, other):
-    from live_test import vios_ame_source
+    from live_test.arms import vios_ame_source
 
     route = Mock()
     monkeypatch.setattr(vios_ame_source, "main", route)
@@ -3327,7 +3327,7 @@ def test_vios_source_recovery_packets_are_exclusive(monkeypatch, other):
 
 @pytest.mark.parametrize("missing", ["--packet-sha256", "--output"])
 def test_vios_source_recovery_requires_each_binding(monkeypatch, missing):
-    from live_test import vios_ame_source
+    from live_test.arms import vios_ame_source
 
     route = Mock()
     monkeypatch.setattr(vios_ame_source, "main", route)
@@ -3345,7 +3345,7 @@ def test_vios_source_recovery_requires_each_binding(monkeypatch, missing):
 def test_statistics_recovery_routes_without_clean_claim(
     tmp_path, monkeypatch, capsys, failure
 ):
-    from live_test import memory_statistics
+    from live_test.arms import memory_statistics
 
     document = {"run": {"group": "lpar-memory-statistics"}}
     path = tmp_path / "results.json"
@@ -3366,7 +3366,7 @@ def test_statistics_recovery_routes_without_clean_claim(
 
 
 def test_vios_boot_source_recovery_exact_route(monkeypatch):
-    from live_test import vios_boot_source
+    from live_test.arms import vios_boot_source
 
     route = Mock(return_value=2)
     monkeypatch.setattr(vios_boot_source, "main", route)
@@ -3402,7 +3402,7 @@ def test_vios_boot_source_recovery_exact_route(monkeypatch):
 
 @pytest.mark.parametrize("other", ["--source-packet", "--activation-source-packet"])
 def test_vios_boot_source_recovery_packets_are_exclusive(monkeypatch, other):
-    from live_test import vios_boot_source
+    from live_test.arms import vios_boot_source
 
     route = Mock()
     monkeypatch.setattr(vios_boot_source, "main", route)
@@ -3425,7 +3425,7 @@ def test_vios_boot_source_recovery_packets_are_exclusive(monkeypatch, other):
 
 @pytest.mark.parametrize("missing", ["--packet-sha256", "--output"])
 def test_vios_boot_source_recovery_requires_each_binding(monkeypatch, missing):
-    from live_test import vios_boot_source
+    from live_test.arms import vios_boot_source
 
     route = Mock()
     monkeypatch.setattr(vios_boot_source, "main", route)
@@ -3577,7 +3577,7 @@ def test_c07_inputs_refuse_unbound_or_missing_journal(fault):
 async def test_c07_recovery_all_phases_are_read_only_and_never_resume(
     monkeypatch, phase, fault
 ):
-    from live_test import creation_memory
+    from live_test.arms import creation_memory
 
     from hmcpctl.config import HMCConfig
 
@@ -3648,7 +3648,7 @@ def test_c07_real_unarmed_writer_recovery_route_and_forgery(
     tmp_path, monkeypatch, capsys
 ):
     from live_test import config as settings
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     from hmcpctl.config import HMCConfig
 
@@ -3732,7 +3732,7 @@ def test_statistics_raw_recovery_refuses_nonregular_without_bootstrap(
 def test_boot_start_recovery_uses_original_results_without_effect_grant(monkeypatch):
     from unittest.mock import Mock
 
-    from live_test import lpar_boot_start
+    from live_test.arms import lpar_boot_start
 
     route = Mock(return_value=2)
     monkeypatch.setattr(lpar_boot_start, "main", route)
@@ -3744,7 +3744,7 @@ def test_boot_start_recovery_uses_original_results_without_effect_grant(monkeypa
 def test_paging_recovery_routes_before_generic_partial_gate(
     tmp_path, monkeypatch, capsys, status, code
 ):
-    from live_test import paging_switchover
+    from live_test.arms import paging_switchover
 
     document = {"run": {"group": "lpar-paging-switchover", "partial": True}}
     path = tmp_path / "results.json"
@@ -3759,7 +3759,7 @@ def test_paging_recovery_routes_before_generic_partial_gate(
 
 @pytest.mark.parametrize("raw", ['{"run":{},"run":{}}', "x" * (1024 * 1024 + 1)])
 def test_paging_recovery_bounds_raw_input(tmp_path, monkeypatch, raw):
-    from live_test import paging_switchover
+    from live_test.arms import paging_switchover
 
     path = tmp_path / "results.json"
     path.write_text(raw)
@@ -3795,7 +3795,7 @@ def test_simultaneous_st66_st68_recovery_refuses_before_credentials(
 
 
 def test_vnic_creation_policy_recovery_route(monkeypatch):
-    from live_test import vnic_creation_policy
+    from live_test.arms import vnic_creation_policy
 
     route = Mock(return_value=2)
     monkeypatch.setattr(vnic_creation_policy, "main", route)
@@ -3813,7 +3813,7 @@ def test_vnic_creation_policy_recovery_route(monkeypatch):
 
 @pytest.mark.parametrize("missing", ["--packet-sha256", "--output"])
 def test_vnic_creation_policy_recovery_requires_binding(monkeypatch, missing):
-    from live_test import vnic_creation_policy
+    from live_test.arms import vnic_creation_policy
 
     route = Mock()
     monkeypatch.setattr(vnic_creation_policy, "main", route)

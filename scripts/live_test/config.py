@@ -957,7 +957,7 @@ def _validate_creation_memory(value: Any) -> None:
     if not isinstance(request, dict):
         raise TypeError("creation memory requested must be an object")
     # Reconstruct only the known saved decimal. Public numeric strings remain forbidden.
-    from .creation_memory import configured
+    from .arms.creation_memory import configured
 
     primary = request.get("primary_paging_vios_name", "")
     secondary = request.get("secondary_paging_vios_name", "")

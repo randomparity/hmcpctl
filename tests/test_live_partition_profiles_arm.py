@@ -17,8 +17,8 @@ from hmcpctl.documents.partition_profile import ProfilePatch
 from hmcpctl.operations.lpar.profiles import core as domain
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import partition_profiles as arm
 from live_test import runner
+from live_test.arms import partition_profiles as arm
 
 
 def config():

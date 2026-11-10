@@ -75,50 +75,84 @@ from hmcpctl.server import TOOL_SECURITY, _gates, create_mcp
 from hmcpctl.server_tools.command import configure_arbitrary_command_tool
 from live_test import config as live_config
 from live_test import evidence, scenario_validation
-from live_test.accelerator_qos import exercise_accelerator_qos
-from live_test.bare_cec import exercise_bare_cec
+from live_test.arms.accelerator_qos import exercise_accelerator_qos
+from live_test.arms.bare_cec import exercise_bare_cec
+from live_test.arms.connectivity import inventory_connectivity
+from live_test.arms.creation_memory import exercise_creation_memory
+from live_test.arms.creation_memory_layout import exercise_creation_memory_layout
+from live_test.arms.dedicated_pcie import exercise_dedicated_pcie_assignment
+from live_test.arms.detach_probe import exercise_detach_probe
+from live_test.arms.escape_hatch import exercise_cli_escape_hatch
+from live_test.arms.logical_workflow import exercise_logical_workflow
+from live_test.arms.lpar import (
+    exercise_lpar_lifecycle,
+    mutate_lpar_properties,
+    restore_lpar_baseline,
+)
+from live_test.arms.lpar_affinity_group import exercise_lpar_affinity_group
+from live_test.arms.lpar_config import (
+    exercise_lpar_config,
+    exercise_lpar_reporting,
+    exercise_lpar_settings,
+)
+from live_test.arms.lpar_hardware_memory import exercise_lpar_hardware_memory
+from live_test.arms.lpar_linux_roles import exercise_lpar_linux_roles
+from live_test.arms.lpar_physical_io import exercise_lpar_physical_io
+from live_test.arms.lpar_power import exercise_lpar_power
+from live_test.arms.lpar_reconfigure import exercise_lpar_reconfigure
+from live_test.arms.lpar_security_policy import exercise_lpar_security_policy
+from live_test.arms.lpar_vtpm import exercise_lpar_vtpm
+from live_test.arms.memory_move import exercise_memory_move
+from live_test.arms.memory_quantities import exercise_memory_quantities
+from live_test.arms.memory_statistics import (
+    exercise_memory_statistics,
+    private_destination,
+)
+from live_test.arms.metrics import (
+    exercise_pcm_preferences,
+    inspect_metrics_jobs,
+    inspect_metrics_templates,
+)
+from live_test.arms.network import inventory_network, mutate_virtual_networking
+from live_test.arms.paging_switchover import exercise_paging_switchover
+from live_test.arms.partition_profile_contract import (
+    exercise as exercise_profile_contract,
+)
+from live_test.arms.partition_profiles import exercise_partition_profiles
+from live_test.arms.processor_move import exercise_processor_move
+from live_test.arms.processor_quantities import exercise_processor_quantities
+from live_test.arms.processor_sharing_weight import exercise_processor_sharing_weight
+from live_test.arms.profiles import exercise_backup_artifacts, inventory_lpar_profiles
+from live_test.arms.provision_boot import exercise_provision_boot
+from live_test.arms.provisioning import (
+    exercise_storage_provisioning,
+    validate_provisioning_dry_run,
+)
+from live_test.arms.sriov import exercise_sriov_assignment
+from live_test.arms.storage import inventory_storage
+from live_test.arms.storage_lifecycle import exercise_disk_lifecycle
+from live_test.arms.storage_volume_group import exercise_volume_group
+from live_test.arms.system_profiles import exercise_system_profiles
+from live_test.arms.users import exercise_users, inventory_users
+from live_test.arms.vios_backup import exercise_vios_backup
+from live_test.arms.vmedia import (
+    vmedia_boot_verification,
+    vmedia_bootstrap_and_create_repo,
+    vmedia_mapping_crossvalidation,
+    vmedia_mount_unmount,
+    vmedia_short_repo_lifecycle,
+    vmedia_teardown,
+    vmedia_upload_iso,
+)
+from live_test.arms.vmedia_media_change import vmedia_media_change
 from live_test.config import (
     LiveTestArtifacts,
     LiveTestConfig,
     decode_artifacts,
     decode_saved_config,
 )
-from live_test.connectivity import inventory_connectivity
-from live_test.creation_memory import exercise_creation_memory
-from live_test.creation_memory_layout import exercise_creation_memory_layout
-from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
-from live_test.detach_probe import exercise_detach_probe
-from live_test.escape_hatch import exercise_cli_escape_hatch
 from live_test.http_fixture import IsoHttpServer
 from live_test.inventory import capture_lpar_baseline
-from live_test.logical_workflow import exercise_logical_workflow
-from live_test.lpar import (
-    exercise_lpar_lifecycle,
-    mutate_lpar_properties,
-    restore_lpar_baseline,
-)
-from live_test.lpar_affinity_group import exercise_lpar_affinity_group
-from live_test.lpar_config import (
-    exercise_lpar_config,
-    exercise_lpar_reporting,
-    exercise_lpar_settings,
-)
-from live_test.lpar_hardware_memory import exercise_lpar_hardware_memory
-from live_test.lpar_linux_roles import exercise_lpar_linux_roles
-from live_test.lpar_physical_io import exercise_lpar_physical_io
-from live_test.lpar_power import exercise_lpar_power
-from live_test.lpar_reconfigure import exercise_lpar_reconfigure
-from live_test.lpar_security_policy import exercise_lpar_security_policy
-from live_test.lpar_vtpm import exercise_lpar_vtpm
-from live_test.memory_move import exercise_memory_move
-from live_test.memory_quantities import exercise_memory_quantities
-from live_test.memory_statistics import exercise_memory_statistics, private_destination
-from live_test.metrics import (
-    exercise_pcm_preferences,
-    inspect_metrics_jobs,
-    inspect_metrics_templates,
-)
-from live_test.network import inventory_network, mutate_virtual_networking
 from live_test.observation import (
     SCENARIO_ID,
     Assertion,
@@ -129,36 +163,7 @@ from live_test.observation import (
     grade_assertions,
     plain_data,
 )
-from live_test.paging_switchover import exercise_paging_switchover
-from live_test.partition_profile_contract import exercise as exercise_profile_contract
-from live_test.partition_profiles import exercise_partition_profiles
-from live_test.processor_move import exercise_processor_move
-from live_test.processor_quantities import exercise_processor_quantities
-from live_test.processor_sharing_weight import exercise_processor_sharing_weight
-from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
-from live_test.provision_boot import exercise_provision_boot
-from live_test.provisioning import (
-    exercise_storage_provisioning,
-    validate_provisioning_dry_run,
-)
 from live_test.redaction import redact_failure_data, redact_failure_text
-from live_test.sriov import exercise_sriov_assignment
-from live_test.storage import inventory_storage
-from live_test.storage_lifecycle import exercise_disk_lifecycle
-from live_test.storage_volume_group import exercise_volume_group
-from live_test.system_profiles import exercise_system_profiles
-from live_test.users import exercise_users, inventory_users
-from live_test.vios_backup import exercise_vios_backup
-from live_test.vmedia import (
-    vmedia_boot_verification,
-    vmedia_bootstrap_and_create_repo,
-    vmedia_mapping_crossvalidation,
-    vmedia_mount_unmount,
-    vmedia_short_repo_lifecycle,
-    vmedia_teardown,
-    vmedia_upload_iso,
-)
-from live_test.vmedia_media_change import vmedia_media_change
 
 # ---------------------------------------------------------------------------
 # Pre-run guard: HMC credentials must resolve before the first dispatch

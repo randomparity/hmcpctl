@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import partition_profile_contract as arm
+from live_test.arms import partition_profile_contract as arm
 
 FIXTURE = (
     Path(__file__).parent / "fixtures/partition_profile_contract/normalized-profile.xml"
@@ -140,7 +140,7 @@ def experiment(tmp_path, monkeypatch, fault=None, originals=3):
     from types import SimpleNamespace
 
     import httpx
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
     from live_test.config import LiveTestConfig
 
     from hmcpctl.config import HMCConfig
@@ -559,7 +559,7 @@ def test_real_revision_check_rejects_other_commit_before_authentication():
 
 
 def test_strict_read_only_exempts_outer_published_text():
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     original = FIXTURE.read_text()
     before = {"xml": original, "etag": "same"}
@@ -716,7 +716,7 @@ async def test_expired_finalization_closes_locally_without_sending_logout(monkey
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     api = SimpleNamespace(
         _session_token="synthetic-session",
@@ -831,7 +831,7 @@ async def test_failed_recovery_checkpoint_prevents_execute(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, Mock
 
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     execute = AsyncMock()
     monkeypatch.setattr(flow, "execute", execute)
@@ -1042,7 +1042,7 @@ async def test_cleanup_budget_refuses_before_observation_or_delete_and_logs_out(
 def test_pre_effect_reserve_includes_optional_cleanup_lookup():
     from types import SimpleNamespace
 
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     # The old post-preread allowance cannot also fund the next stage
     # snapshot and its two initial profile reads.

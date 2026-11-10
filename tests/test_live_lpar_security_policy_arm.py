@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_security_policy as arm
+from live_test.arms import lpar_security_policy as arm
 
 
 @pytest.fixture
@@ -383,7 +383,7 @@ async def test_real_served_typed_policy_results(setup_arm, variant):
 async def test_real_guarded_cleanup_exact_token_and_inactive_only(
     monkeypatch, foreign, active
 ):
-    from live_test import lpar_config
+    from live_test.arms import lpar_config
 
     run = lpar_config._Run(
         "system",

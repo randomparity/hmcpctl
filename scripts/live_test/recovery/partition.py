@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from hmcpctl.ssh.commands import HMC_NO_RESULTS
-from live_test import (
+from live_test.arms import (
     creation_memory_layout,
     logical_workflow,
     lpar_affinity_group,
@@ -25,8 +25,8 @@ from live_test import (
     provision_boot,
     storage_lifecycle,
 )
+from live_test.arms.storage import scsi_adapter_listing
 from live_test.recovery.common import NOT_ACTIVATED, Finding, StateUnreadable
-from live_test.storage import scsi_adapter_listing
 
 from .common import VOLUME_LISTING
 

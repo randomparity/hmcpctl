@@ -7,15 +7,19 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from hmcpctl.ssh.commands import HMC_NO_RESULTS
-from live_test import (
+from live_test.arms import (
     provision_boot,
     storage_lifecycle,
     storage_volume_group,
     vmedia_media_change,
 )
+from live_test.arms.storage import scsi_adapter_listing
+from live_test.arms.vmedia import (
+    _BOOT_BASELINE_STEP,
+    _mapping_identity,
+    is_run_media_name,
+)
 from live_test.recovery.common import Finding, StateUnreadable
-from live_test.storage import scsi_adapter_listing
-from live_test.vmedia import _BOOT_BASELINE_STEP, _mapping_identity, is_run_media_name
 
 from .common import NOT_ACTIVATED, recorded_calls
 

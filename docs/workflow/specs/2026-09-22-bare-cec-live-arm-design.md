@@ -14,7 +14,7 @@ only under subtask 12 on an arbitrary sampled job.
 ## Scope
 
 A `bare-cec` group dispatching subtask 25, entry point `scripts/live_bare_cec.py`, scenario
-`scripts/live_test/bare_cec.py`. Nothing under `src/` changes.
+`scripts/live_test/arms/bare_cec.py`. Nothing under `src/` changes.
 
 **Configuration.** The arm reuses the dedicated arm's `LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME`,
 `_LPAR_PREFIX`, `_PROFILE_NAME`, `_DRC_INDEX` through `pcie._dedicated_config`, so the

@@ -18,7 +18,8 @@ from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import ownership
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import config, lpar_config, runner
+from live_test import config, runner
+from live_test.arms import lpar_config
 from live_test.observation import CallFailure
 
 SYSTEM = "aaaaaaaa-0000-4000-8000-000000000001"
@@ -34,9 +35,11 @@ MODES = {
 
 
 def arm_module():
-    path = Path(__file__).parents[1] / "scripts/live_test/processor_sharing_weight.py"
+    path = (
+        Path(__file__).parents[1] / "scripts/live_test/arms/processor_sharing_weight.py"
+    )
     assert path.is_file(), "ST59 independent sharing arm must be installed"
-    return importlib.import_module("live_test.processor_sharing_weight")
+    return importlib.import_module("live_test.arms.processor_sharing_weight")
 
 
 @pytest.fixture

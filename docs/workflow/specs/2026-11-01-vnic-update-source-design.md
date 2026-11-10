@@ -47,7 +47,7 @@ PR, merge or support promotion.
 
 ## Owner and interfaces
 
-Extend `scripts/live_test/vnic_creation_policy.py`; keep `validate_packet(packet)`,
+Extend `scripts/live_test/arms/vnic_creation_policy.py`; keep `validate_packet(packet)`,
 `preflight(hmc, packet, output)`, `capture(hmc, packet, output)` and
 `recover(hmc, packet, journal)` signatures. Existing dispatchers remain
 `live_test_preflight.py --group vnic-creation-policy`, `live_vnic_creation_policy.py`
@@ -332,7 +332,7 @@ from offline success. Before hardware, root approves exact prepared identity/sta
 selector/values, implemented clean commit/import, proven caps, expiry and effect
 window. No current packet or executable invocation is supplied here.
 
-Local source evidence: `scripts/live_test/vnic_creation_policy.py:77-606`,
+Local source evidence: `scripts/live_test/arms/vnic_creation_policy.py:77-606`,
 `src/hmcpctl/operations/virtualization/vnic.py:418-848`,
 `vnic_policy.py:35-118`, `src/hmcpctl/ssh/commands.py:112-202`,
 `src/hmcpctl/client/core.py:622-807`, `client_systems.py:138-200` and

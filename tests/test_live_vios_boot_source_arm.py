@@ -22,8 +22,8 @@ from hmcpctl.ssh.transport import HMCCLIError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import packets
-from live_test import vios_ame_source as ame
-from live_test import vios_boot_source as source
+from live_test.arms import vios_ame_source as ame
+from live_test.arms import vios_boot_source as source
 from test_live_vios_ame_source_arm import SYS, V0, Wire, field
 
 VALUES = [
@@ -282,10 +282,16 @@ def test_filesystem_session_bound_and_failed_checkpoint(tmp_path, monkeypatch):
 
 def test_attestation_exact_selected_closure(tmp_path, monkeypatch):
     p = packet(tmp_path)
-    assert len(source.SOURCE_PATHS) == 22
+    assert len(source.SOURCE_PATHS) == 23
+    assert "scripts/live_test/arms/__init__.py" in source.SOURCE_PATHS
+    assert "scripts/live_test/arms/__init__.py" in ame.SOURCE_PATHS
+    assert "src/hmcpctl/operations/partition_creation.py" in source.SOURCE_PATHS
     assert set(source.SOURCE_PATHS) == (
         set(ame.SOURCE_PATHS) - {"scripts/live_vios_ame_source.py"}
-        | {"scripts/live_test/vios_boot_source.py", "scripts/live_vios_boot_source.py"}
+        | {
+            "scripts/live_test/arms/vios_boot_source.py",
+            "scripts/live_vios_boot_source.py",
+        }
     )
     monkeypatch.setattr(
         packets,

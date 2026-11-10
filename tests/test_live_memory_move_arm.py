@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import memory_move as arm
 from live_test import runner
+from live_test.arms import memory_move as arm
 from live_test.config import LiveTestConfig
 from live_test.observation import plain_data
 from lpar.test_memory_move import (
@@ -91,7 +91,7 @@ def live_boundary(monkeypatch, boundary):  # noqa: F811 — pytest injects the i
         return "0,256"
 
     monkeypatch.setattr(arm, "run_hmc_command", AsyncMock(side_effect=cli))
-    root = Path(arm.__file__).resolve().parents[2]
+    root = Path(arm.__file__).resolve().parents[3]
 
     def git(repo, *args):
         stdout = (

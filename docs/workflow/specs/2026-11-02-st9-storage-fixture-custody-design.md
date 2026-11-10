@@ -7,7 +7,7 @@ Lane: full-spec. Complexity: M. Fixed design denominator: 250.
 
 ## Problem
 
-ST9's vSCSI and vFC client round trips (`scripts/live_test/network.py`) clean up with
+ST9's vSCSI and vFC client round trips (`scripts/live_test/arms/network.py`) clean up with
 `remove_new_adapters`, which deletes every adapter UUID absent from the baseline. A foreign
 adapter that another actor adds to the test partition during the run is therefore deleted as
 if it were the run's own. The slot-collision probe relies on the same delta cleanup to remove
@@ -27,7 +27,7 @@ the response lacks identity. No new live capture is needed before implementation
 ## Scope
 
 In: the vSCSI and vFC client round trip and its slot-collision probe,
-and `placement_drift`'s advice text, in `scripts/live_test/network.py`;
+and `placement_drift`'s advice text, in `scripts/live_test/arms/network.py`;
 `tests/test_live_network_arm.py`; the ST9 vSCSI/vFC bullet of `docs/live-testing.md`; the module
 docstring. Out (operator-approved exclusions): #638 capability accounting; new adapter types or
 arms; the client network adapter (Ethernet) cleanup path; VIOS mapping management.

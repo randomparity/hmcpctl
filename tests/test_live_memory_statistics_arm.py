@@ -16,7 +16,7 @@ from lpar.test_memory_statistics_reset import reset_boundary  # noqa: F401 — b
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import evidence, runner
-from live_test import memory_statistics as arm
+from live_test.arms import memory_statistics as arm
 from live_test.config import LiveTestConfig
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN

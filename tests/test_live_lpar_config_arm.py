@@ -19,11 +19,8 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
-from live_test import (  # noqa: E402
-    evidence,
-    lpar_config,
-    runner,
-)
+from live_test import evidence, runner  # noqa: E402
+from live_test.arms import lpar_config  # noqa: E402
 from live_test.observation import CallFailure, plain_data  # noqa: E402
 
 SYSTEM = "sys-A"

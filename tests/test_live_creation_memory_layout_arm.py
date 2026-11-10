@@ -24,7 +24,8 @@ from hmcpctl.operations.lpar import core
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import config as settings
-from live_test import lpar_config, runner
+from live_test import runner
+from live_test.arms import lpar_config
 
 SYSTEM = "aaaaaaaa-0000-0000-0000-000000000001"
 LPAR = "bbbbbbbb-0000-0000-0000-000000000002"
@@ -43,7 +44,7 @@ SIX = {
 
 @pytest.fixture
 def target(monkeypatch):
-    from live_test import creation_memory_layout as arm
+    from live_test.arms import creation_memory_layout as arm
 
     env = SimpleNamespace(
         arm=arm,
@@ -413,7 +414,7 @@ async def test_uuid_ingest_is_canonical_before_journal_and_comparison(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("uppercase", [False, True])
 async def test_vios_baseline_accepts_actual_client_parsed_uuid_case(uppercase):
-    from live_test import creation_memory_layout as arm
+    from live_test.arms import creation_memory_layout as arm
 
     from hmcpctl.client.core import HMCClient
 
@@ -448,7 +449,7 @@ async def test_vios_baseline_accepts_actual_client_parsed_uuid_case(uppercase):
     ],
 )
 async def test_vios_baseline_keeps_malformed_and_ambiguous_refusals(rows):
-    from live_test import creation_memory_layout as arm
+    from live_test.arms import creation_memory_layout as arm
 
     with pytest.raises(ValueError, match="VIOS feed identity"):
         await arm._vios_baseline(

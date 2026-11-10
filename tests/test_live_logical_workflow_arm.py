@@ -17,7 +17,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import test_live_lpar_power_arm as arm
 from live_test import config as live_config
-from live_test import logical_workflow, runner
+from live_test import runner
+from live_test.arms import logical_workflow
 from test_live_lpar_power_arm import GROUP, SYSTEM, VLAN, FakeClient, World
 
 from hmcpctl.operations.logical.models import OperationRecord

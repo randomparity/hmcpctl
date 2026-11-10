@@ -46,7 +46,7 @@ and removal, and `exclusive_writer_window` (#1848).
   arguments and renders with the recorded selectors; waits for the worker
   (`engine.join(..., None)`), renders as today plus the operation id/state/outcome, and exits 1
   unless `completed` (or `abandoned` after `abandon`).
-- Live scripts (`scripts/live_test/lpar_power.py`, `scripts/live_test/provisioning.py`) pass a
+- Live scripts (`scripts/live_test/arms/lpar_power.py`, `scripts/live_test/arms/provisioning.py`) pass a
   run-unique `request_id` and `wait_seconds=600`. `lpar_power`, whose PowerOff timeout is 900 s,
   polls `hmc_operation_status` until the operation is terminal or paused and repeats the call for
   its result; it registers its decommission request and its teardown abandons it with

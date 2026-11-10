@@ -20,7 +20,8 @@ from hmcpctl.operations.lpar.core import LparCreationResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import config, lpar_config, memory_quantities, runner
+from live_test import config, runner
+from live_test.arms import lpar_config, memory_quantities
 from live_test.observation import CallFailure
 
 UUID = "aaaaaaaa-0000-4000-8000-000000000050"

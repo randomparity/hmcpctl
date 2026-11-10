@@ -10,7 +10,8 @@ from datetime import datetime
 
 from hmcpctl.config import HMCConfig
 from live_test import config as live_config
-from live_test import creation_memory, creation_memory_layout, lpar_config, runner
+from live_test import runner
+from live_test.arms import creation_memory, creation_memory_layout, lpar_config
 
 from .common import Finding, StateUnreadable
 

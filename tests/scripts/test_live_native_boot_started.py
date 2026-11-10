@@ -10,7 +10,8 @@ import pytest
 SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_native_boot_started as wrapper  # noqa: E402
-from live_test import provision_boot, runner  # noqa: E402
+from live_test import runner  # noqa: E402
+from live_test.arms import provision_boot  # noqa: E402
 
 
 @pytest.mark.parametrize(

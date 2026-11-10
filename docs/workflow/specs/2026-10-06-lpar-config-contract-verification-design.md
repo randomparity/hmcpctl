@@ -38,7 +38,7 @@ and cleanup. SR-IOV/vNIC live writes remain named prerequisite gaps.
 ## Design
 
 1. **Arm `lpar-config`, subtask 39** (orchestrator-assigned). `SUBTASKS[39]` dispatches
-   `exercise_lpar_config` in a new module `scripts/live_test/lpar_config.py`;
+   `exercise_lpar_config` in a new module `scripts/live_test/arms/lpar_config.py`;
    `SUBTASK_GROUPS["lpar-config"] = [39]`, not in `all`; the subtask SKIPs unless
    `state.group == "lpar-config"`. Wrapper `scripts/live_lpar_config.py`, tested by
    `tests/scripts/test_live_lpar_config.py`. Preflight lists what it mutates.

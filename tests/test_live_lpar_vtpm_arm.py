@@ -10,7 +10,7 @@ import pytest
 from hmcpctl.operations.lpar.vtpm import VtpmCapabilities
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_vtpm as arm
+from live_test.arms import lpar_vtpm as arm
 
 
 @pytest.fixture(autouse=True)

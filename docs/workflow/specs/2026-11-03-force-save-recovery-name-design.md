@@ -25,7 +25,7 @@ say that no overwrite was submitted.
 
 1. Generate the recovery name as `"hmcprec-" + secrets.token_hex(8)`: 24 characters, 64
    random bits. The `hmcprec-` prefix is unchanged, so the live arm's namespace check
-   (`scripts/live_test/partition_profiles.py`) still matches it.
+   (`scripts/live_test/arms/partition_profiles.py`) still matches it.
 2. `write_native_profile` passes only the HMC's `<Message>` text (or nothing) to `HMCError`,
    never the raw body: that body echoes the session cookie and `X-API-Session` in
    `<RequestHeaders>`, and `HMCError` would otherwise keep 4096 bytes of it in `.body` and fall

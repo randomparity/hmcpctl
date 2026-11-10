@@ -23,7 +23,7 @@ from lpar.test_paging_switchover import attempt  # noqa: F401 - imported boundar
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import evidence, runner
-from live_test import paging_switchover as arm
+from live_test.arms import paging_switchover as arm
 from live_test.config import LiveTestConfig
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN

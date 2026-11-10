@@ -21,6 +21,7 @@ import json
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from importlib.util import resolve_name
 from pathlib import Path
 from typing import Any
 
@@ -116,56 +117,67 @@ def _references(
         elif isinstance(node, ast.Name) and node.id in imported:
             found.add(imported[node.id])
         elif isinstance(node, ast.Attribute):
+            parts = []
             holder = node.value
-            if isinstance(holder, ast.Name) and holder.id in packages:
-                found.add((packages[holder.id], node.attr))
-            elif (  # `import live_test.m` then `live_test.m.f`
-                isinstance(holder, ast.Attribute)
-                and isinstance(holder.value, ast.Name)
-                and holder.value.id == _PACKAGE
-            ):
-                found.add((holder.attr, node.attr))
+            while isinstance(holder, ast.Attribute):
+                parts.append(holder.attr)
+                holder = holder.value
+            if isinstance(holder, ast.Name):
+                owner = ".".join([holder.id, *reversed(parts)])
+                if owner in packages:
+                    found.add((packages[owner], node.attr))
     return frozenset(found)
 
 
-def _import_origin(node: ast.ImportFrom) -> str | None:
-    """The package module a `from` import reads, `""` for the package, else None."""
-    origin = node.module or ""
-    if node.level == 1:
+def _import_origin(node: ast.ImportFrom, containing_package: str) -> str | None:
+    """Resolve a from-import to its absolute origin inside the scenario package."""
+    try:
+        origin = resolve_name(
+            "." * node.level + (node.module or ""), containing_package
+        )
+    except ImportError:
+        return None
+    if origin == _PACKAGE or origin.startswith(f"{_PACKAGE}."):
         return origin
-    if node.level == 0 and origin == _PACKAGE:
-        return ""
-    if node.level == 0 and origin.startswith(f"{_PACKAGE}."):
-        return origin.removeprefix(f"{_PACKAGE}.")
+    return None
+
+
+def _module_id(origin: str) -> str | None:
+    """The basename graph ID of an immediate root or arms module."""
+    parts = origin.split(".")
+    if len(parts) == 2 and parts[0] == _PACKAGE and parts[1] != "arms":
+        return parts[-1]
+    if len(parts) == 3 and parts[:2] == [_PACKAGE, "arms"]:
+        return parts[-1]
     return None
 
 
 def _package_imports(
     tree: ast.Module,
+    containing_package: str,
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """Names bound to package functions, and names bound to package modules.
-
-    Imports anywhere in the module count, relative or absolute through `live_test`:
-    a function-local import still names a package function.
-    """
+    """Names bound to scenario functions or modules, including local imports."""
     imported: dict[str, tuple[str, str]] = {}
     packages: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.asname and alias.name.startswith(f"{_PACKAGE}."):
-                    packages[alias.asname] = alias.name.removeprefix(f"{_PACKAGE}.")
+                module = _module_id(alias.name)
+                if module is not None:
+                    packages[alias.asname or alias.name] = module
             continue
         if not isinstance(node, ast.ImportFrom):
             continue
-        origin = _import_origin(node)
+        origin = _import_origin(node, containing_package)
         if origin is None:
             continue
         for alias in node.names:
-            if origin:
-                imported[alias.asname or alias.name] = (origin, alias.name)
-            else:
-                packages[alias.asname or alias.name] = alias.name
+            if origin in {_PACKAGE, f"{_PACKAGE}.arms"}:
+                module = _module_id(f"{origin}.{alias.name}")
+                if module is not None:
+                    packages[alias.asname or alias.name] = module
+            elif (module := _module_id(origin)) is not None:
+                imported[alias.asname or alias.name] = (module, alias.name)
     return imported, packages
 
 
@@ -213,10 +225,16 @@ def dispatch_sites(tree: ast.Module) -> list[DispatchSite]:
     ]
 
 
-def scan_source(source: str, label: str, module: str) -> Scan:
+def scan_source(
+    source: str,
+    label: str,
+    module: str,
+    *,
+    containing_package: str = _PACKAGE,
+) -> Scan:
     """Read every dispatch, ``record_verified`` operation and reference in a module."""
     tree = ast.parse(source, filename=label)
-    imported, packages = _package_imports(tree)
+    imported, packages = _package_imports(tree, containing_package)
     definitions = [node for node in tree.body if isinstance(node, _DEFINITIONS)]
     # A module-level `alias = _impl` is a name a scenario can reach `_impl` through.
     aliases = {
@@ -426,8 +444,16 @@ def scenario_scans() -> list[Scan]:
             path.read_text(encoding="utf-8"),
             str(path.relative_to(_REPO_ROOT)),
             path.stem,
+            containing_package=f"{_PACKAGE}.arms"
+            if path.parent.name == "arms"
+            else _PACKAGE,
         )
-        for path in sorted(_SCENARIO_PACKAGE.glob("*.py"))
+        for path in sorted(
+            [
+                *_SCENARIO_PACKAGE.glob("*.py"),
+                *(_SCENARIO_PACKAGE / "arms").glob("*.py"),
+            ]
+        )
     ]
 
 

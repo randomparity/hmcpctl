@@ -17,7 +17,8 @@ SCRIPTS_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 import live_test_preflight as preflight  # noqa: E402
 from live_test import config as live_config  # noqa: E402
-from live_test import provision_boot, runner  # noqa: E402
+from live_test import runner  # noqa: E402
+from live_test.arms import provision_boot  # noqa: E402
 
 
 def _env_text(**overrides: str) -> str:
@@ -838,7 +839,7 @@ def test_system_profiles_preflight(monkeypatch):
     import json
     from unittest.mock import AsyncMock
 
-    from live_test import system_profiles
+    from live_test.arms import system_profiles
 
     config = live_config.LiveTestConfig(
         system_profile_members_json=json.dumps(
@@ -981,7 +982,7 @@ GROUP_SHARING = "processor-sharing-weight"
 def test_serial_procedure_exact_preflight_dispatch(monkeypatch):
     from unittest.mock import Mock
 
-    from live_test import lpar_serial_adapter
+    from live_test.arms import lpar_serial_adapter
 
     dispatch = Mock(return_value=2)
     monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
@@ -1017,7 +1018,7 @@ def test_serial_procedure_exact_preflight_dispatch(monkeypatch):
 def test_serial_preflight_requires_complete_exact_inputs(monkeypatch, missing):
     from unittest.mock import Mock
 
-    from live_test import lpar_serial_adapter
+    from live_test.arms import lpar_serial_adapter
 
     dispatch = Mock()
     monkeypatch.setattr(lpar_serial_adapter, "main", dispatch)
@@ -1060,7 +1061,7 @@ def test_processor_move_preflight_uses_named_fixture_admission(
 def test_vios_source_preflight_exact_route(monkeypatch):
     from unittest.mock import Mock
 
-    from live_test import vios_ame_source
+    from live_test.arms import vios_ame_source
 
     route = Mock(return_value=2)
     monkeypatch.setattr(vios_ame_source, "main", route)
@@ -1096,7 +1097,7 @@ def test_vios_source_preflight_exact_route(monkeypatch):
 def test_vios_source_preflight_refuses_incomplete_or_bypass(monkeypatch, extra):
     from unittest.mock import Mock
 
-    from live_test import vios_ame_source
+    from live_test.arms import vios_ame_source
 
     route = Mock()
     monkeypatch.setattr(vios_ame_source, "main", route)
@@ -1113,7 +1114,7 @@ def test_vios_source_preflight_refuses_incomplete_or_bypass(monkeypatch, extra):
 def test_vios_source_preflight_requires_each_binding(monkeypatch, missing):
     from unittest.mock import Mock
 
-    from live_test import vios_ame_source
+    from live_test.arms import vios_ame_source
 
     route = Mock()
     monkeypatch.setattr(vios_ame_source, "main", route)
@@ -1139,7 +1140,7 @@ def test_vios_source_preflight_requires_each_binding(monkeypatch, missing):
 def test_vios_source_preflight_rejects_effect_assertions(monkeypatch, flag):
     from unittest.mock import Mock
 
-    from live_test import vios_ame_source
+    from live_test.arms import vios_ame_source
 
     route = Mock()
     monkeypatch.setattr(vios_ame_source, "main", route)
@@ -1179,7 +1180,7 @@ def test_statistics_preflight_requires_existing_fixture(monkeypatch, capsys):
 def test_vios_boot_source_preflight_exact_route(monkeypatch):
     from unittest.mock import Mock
 
-    from live_test import vios_boot_source
+    from live_test.arms import vios_boot_source
 
     route = Mock(return_value=2)
     monkeypatch.setattr(vios_boot_source, "main", route)
@@ -1215,7 +1216,7 @@ def test_vios_boot_source_preflight_exact_route(monkeypatch):
 def test_vios_boot_source_preflight_refuses_incomplete_or_bypass(monkeypatch, extra):
     from unittest.mock import Mock
 
-    from live_test import vios_boot_source
+    from live_test.arms import vios_boot_source
 
     route = Mock()
     monkeypatch.setattr(vios_boot_source, "main", route)
@@ -1232,7 +1233,7 @@ def test_vios_boot_source_preflight_refuses_incomplete_or_bypass(monkeypatch, ex
 def test_vios_boot_source_preflight_requires_each_binding(monkeypatch, missing):
     from unittest.mock import Mock
 
-    from live_test import vios_boot_source
+    from live_test.arms import vios_boot_source
 
     route = Mock()
     monkeypatch.setattr(vios_boot_source, "main", route)
@@ -1258,7 +1259,7 @@ def test_vios_boot_source_preflight_requires_each_binding(monkeypatch, missing):
 def test_vios_boot_source_preflight_rejects_effect_assertions(monkeypatch, flag):
     from unittest.mock import Mock
 
-    from live_test import vios_boot_source
+    from live_test.arms import vios_boot_source
 
     route = Mock()
     monkeypatch.setattr(vios_boot_source, "main", route)
@@ -1324,7 +1325,7 @@ def test_c07_preflight_unarmed_without_current_permission():
 def test_boot_start_exact_named_preflight_route(monkeypatch):
     from unittest.mock import Mock
 
-    from live_test import lpar_boot_start
+    from live_test.arms import lpar_boot_start
 
     route = Mock(return_value=2)
     monkeypatch.setattr(lpar_boot_start, "main", route)
@@ -1352,7 +1353,7 @@ def test_boot_start_exact_named_preflight_route(monkeypatch):
 def test_boot_start_preflight_cannot_bypass_read_only_admission(monkeypatch, extra):
     from unittest.mock import Mock
 
-    from live_test import lpar_boot_start
+    from live_test.arms import lpar_boot_start
 
     route = Mock()
     monkeypatch.setattr(lpar_boot_start, "main", route)
@@ -1429,7 +1430,7 @@ def test_simultaneous_st66_st68_preflight_refuses_before_credentials(
 def test_vnic_creation_policy_preflight_route(monkeypatch):
     from unittest.mock import Mock
 
-    from live_test import vnic_creation_policy
+    from live_test.arms import vnic_creation_policy
 
     route = Mock(return_value=2)
     monkeypatch.setattr(vnic_creation_policy, "main", route)
@@ -1442,7 +1443,7 @@ def test_vnic_creation_policy_preflight_route(monkeypatch):
 def test_vnic_creation_preflight_refuses_bypass(monkeypatch, extra):
     from unittest.mock import Mock
 
-    from live_test import vnic_creation_policy
+    from live_test.arms import vnic_creation_policy
 
     route = Mock()
     monkeypatch.setattr(vnic_creation_policy, "main", route)

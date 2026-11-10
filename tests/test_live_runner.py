@@ -42,25 +42,28 @@ from hmcpctl.xmlutil import parse_feed
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 import scenario_gap_report  # noqa: E402
+from live_test import config as live_config  # noqa: E402
 from live_test import (  # noqa: E402
+    evidence,
+    http_fixture,
+    inventory,
+    observation,
+    redaction,
+    results,
+    scenario_validation,
+)
+from live_test.arms import (  # noqa: E402
     bare_cec,
     connectivity,
     dedicated_pcie,
     escape_hatch,
-    evidence,
-    http_fixture,
-    inventory,
     lpar,
     lpar_config,
     lpar_power,
     metrics,
     network,
-    observation,
     profiles,
     provisioning,
-    redaction,
-    results,
-    scenario_validation,
     sriov,
     storage,
     storage_lifecycle,
@@ -68,7 +71,6 @@ from live_test import (  # noqa: E402
     vios_backup,
     vmedia,
 )
-from live_test import config as live_config  # noqa: E402
 
 LIVE_WORKFLOW_MODULES = (
     bare_cec,
@@ -1558,7 +1560,7 @@ def test_vios_backup_group_is_subtask_37_and_outside_all() -> None:
     """The ST37 restore needs its own authorization, so `all` never reaches it."""
     assert runner.SUBTASK_GROUPS["vios-backup"] == [37]
     assert 37 not in runner.SUBTASK_GROUPS["all"]
-    assert runner.SUBTASKS[37].__module__ == "live_test.vios_backup"
+    assert runner.SUBTASKS[37].__module__ == "live_test.arms.vios_backup"
 
 
 @pytest.mark.asyncio
@@ -9271,7 +9273,7 @@ def test_live_grading_contract(caller, cleanup, holds):
 async def test_job_get_consumers_grade_normalized_outcomes_strictly(
     monkeypatch, served_model, invalid
 ):
-    from live_test import bare_cec
+    from live_test.arms import bare_cec
 
     application = FastMCP("job-inspection-probe")
 
@@ -9810,7 +9812,7 @@ def test_creation_memory_optional_defaults_and_registration():
     from dataclasses import asdict
 
     from live_test import config as settings
-    from live_test import creation_memory
+    from live_test.arms import creation_memory
 
     saved = asdict(settings.LiveTestConfig())
     saved["protected_lpar_names"] = list(saved["protected_lpar_names"])

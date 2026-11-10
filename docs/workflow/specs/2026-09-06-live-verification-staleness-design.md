@@ -49,7 +49,7 @@ keywords, over `LIVE_WORKFLOW_MODULES` and the runner; a non-literal tool name o
 splat fails the guard. Enforced at runtime in `RunState.call` before dispatch: a violation
 records `failed` with reason `invalid-arguments` and never reaches the client. FastMCP would
 reject the call anyway; the runtime check exists so the failure carries a stable reason
-rather than a pydantic rendering. `scripts/live_test/provisioning.py:163` is rewritten to
+rather than a pydantic rendering. `scripts/live_test/arms/provisioning.py:163` is rewritten to
 name its arguments.
 
 ## Failure classification and expected outcomes
@@ -98,7 +98,7 @@ the closing class rejects a trailing hyphen, which a `{2,63}` tail admitted; `op
 `operations.json` (guard test); `scenario` matches `st\d+-[a-z0-9-]+`.
 
 Converted now, so the path is exercised. Both job scenarios in
-`scripts/live_test/metrics.py` assert the same three ids over a
+`scripts/live_test/arms/metrics.py` assert the same three ids over a
 `hmc_mcp.jobs.JobOutcome`: `job-found` (`found`), `job-identity-matches` (`job_id` equals
 the identifier passed), and `job-status-successful` (`status` in
 `hmc_mcp.jobs.SUCCESSFUL_JOB_STATUSES`). `hmc_wait_for_job` is annotated `-> JobOutcome`, so
@@ -109,7 +109,7 @@ rather than by `isinstance(data, dict)`, which would silently fail every real ru
 `hmc_get_job` returns the raw HMC entry (or `null`) as a plain dict, which the scenario
 normalizes with `hmc_mcp.jobs.job_outcome(job_id, data)` — the module's own reader, which
 finds `Status` under the nested `Resource` and treats `None` as `found=False`. No scenario
-reads a status key by hand. `hmc_get_console_info` in `scripts/live_test/connectivity.py`
+reads a status key by hand. `hmc_get_console_info` in `scripts/live_test/arms/connectivity.py`
 asserts `console-uuid-present`: `data.get("uuid") or data.get("UUID")` is a non-empty
 string — the expression the runner already uses to capture `console_uuid` at
 `connectivity.py:24`.
