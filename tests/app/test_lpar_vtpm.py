@@ -42,11 +42,15 @@ def test_mcp_target_specific_update_and_read_forward_strict_consent(monkeypatch,
     getter = (
         hmc_get_vios_vtpm_settings if kind == "vios" else hmc_get_lpar_vtpm_settings
     )
-    assert setter("sys-R1", "target-R1", SETTINGS, acknowledge_data_loss=True) == RESULT
+    selectors = {
+        "system_name_or_uuid": "sys-R1",
+        f"{kind}_name_or_uuid": "target-R1",
+    }
+    assert setter(settings=SETTINGS, acknowledge_data_loss=True, **selectors) == RESULT
     assert update.await_args.kwargs["acknowledge_data_loss"] is True
     assert update.await_args.kwargs["ownership_override"] is False
     assert update.await_args.kwargs.get("vios", False) is (kind == "vios")
-    getter("sys-R1", "target-R1")
+    getter(**selectors)
     assert read.await_args.kwargs.get("vios", False) is (kind == "vios")
 
 

@@ -57,11 +57,12 @@ async def test_strict_typed_schema():
         settings = schema["properties"]["settings"]
         assert settings["additionalProperties"] is False
         assert set(settings["properties"]) == set(asdict(LparSecurityPolicy()))
-        assert schema["required"] == [
-            "system_name_or_uuid",
-            name.split("_")[2] + "_name_or_uuid",
-            "settings",
-        ]
+        kind = name.split("_")[2]
+        assert schema["required"] == (
+            ["lpar_name_or_uuid", "settings", "system_name_or_uuid"]
+            if kind == "lpar"
+            else ["system_name_or_uuid", "vios_name_or_uuid", "settings"]
+        )
         assert "acknowledge_security_change" not in schema["properties"]
         assert "intended_linux_guest" not in schema["properties"]
         assert tools[name].annotations.destructive_hint is True
@@ -86,7 +87,12 @@ async def test_confirmation_and_target_grants(monkeypatch, kind):
     setter = getattr(module, f"hmc_configure_{kind}_security_policy")
     # Direct adapter call proves existing connection and ownership selectors.
     result = await asyncio.to_thread(
-        setter, "sys-R1", "target-R1", SETTINGS, True, "connection-R1"
+        setter,
+        system_name_or_uuid="sys-R1",
+        settings=SETTINGS,
+        ownership_override=True,
+        profile="connection-R1",
+        **{f"{kind}_name_or_uuid": "target-R1"},
     )
     assert result == RESULT
     assert profiles == [{"profile": "connection-R1"}]
@@ -327,7 +333,10 @@ def test_read_presenters_preserve_pending_current(monkeypatch, kind):
             module, "with_client", lambda f, **kw: asyncio.run(f("hmc"))
         )
     assert (
-        getattr(modules[0], f"hmc_get_{kind}_security_policy")("sys-R1", "p") == STATE
+        getattr(modules[0], f"hmc_get_{kind}_security_policy")(
+            system_name_or_uuid="sys-R1", **{f"{kind}_name_or_uuid": "p"}
+        )
+        == STATE
     )
     result = CliRunner().invoke(
         app,
