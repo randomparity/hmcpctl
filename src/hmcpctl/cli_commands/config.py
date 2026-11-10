@@ -187,8 +187,8 @@ def _write_exclusive(target: Path, text: str) -> None:
     truncated file here is worse than elsewhere: it exists, so this command's own
     no-overwrite rule refuses to regenerate over it, and it does not compile, so
     ``serve`` refuses too. So the descriptor's contents are the unit of work: if
-    anything after the create fails, the destination is unlinked before the error is
-    reported.
+    anything after the create fails, removal is attempted before reporting the original
+    error. If removal fails too, a note identifies the retained partial file.
 
     The contents are ``fsync``-ed before the descriptor closes. Closing alone flushes
     only to the page cache, and on a delayed-allocation filesystem the metadata — the
@@ -212,8 +212,13 @@ def _write_exclusive(target: Path, text: str) -> None:
                 handle.write(text)
                 handle.flush()
                 os.fsync(handle.fileno())
-        except BaseException:
-            target.unlink(missing_ok=True)
+        except BaseException as exc:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                exc.add_note(
+                    f"Could not remove partial configuration file {target}: {cleanup_error}"
+                )
             raise
     else:
         # Windows: os.open mode bits are no-ops; 'x' gives the same O_EXCL semantics,
@@ -223,8 +228,13 @@ def _write_exclusive(target: Path, text: str) -> None:
                 handle.write(text)
         except FileExistsError:
             raise
-        except BaseException:
-            target.unlink(missing_ok=True)
+        except BaseException as exc:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                exc.add_note(
+                    f"Could not remove partial configuration file {target}: {cleanup_error}"
+                )
             raise
 
 

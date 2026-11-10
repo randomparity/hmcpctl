@@ -745,6 +745,37 @@ def test_a_write_failure_after_the_create_leaves_no_partial_file(tmp_path, monke
     assert not (tmp_path / "hmcpctl" / "access-policy.toml").exists()
 
 
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_exclusive_writer_preserves_write_failure(
+    tmp_path, monkeypatch, platform, cleanup_fails
+):
+    from types import SimpleNamespace
+
+    from hmcpctl.cli_commands import config as cli_config
+
+    target = tmp_path / "partial.toml"
+    text = "invalid UTF-8: \ud800"
+    monkeypatch.setattr(cli_config, "sys", SimpleNamespace(platform=platform))
+    if cleanup_fails:
+
+        def refuse_unlink(path, **kwargs):
+            assert path == target
+            raise PermissionError("cleanup denied")
+
+        monkeypatch.setattr(Path, "unlink", refuse_unlink)
+
+    with pytest.raises(UnicodeEncodeError) as caught:
+        cli_config._write_exclusive(target, text)
+
+    assert caught.value.object == text
+    assert target.exists() is cleanup_fails
+    if cleanup_fails:
+        assert len(caught.value.__notes__) == 1
+        assert str(target) in caught.value.__notes__[0]
+        assert "cleanup denied" in caught.value.__notes__[0]
+
+
 def test_every_spec_numbered_test_named_in_the_header_still_exists():
     """A header naming a deleted test is worse than no header (see #224)."""
     import re
