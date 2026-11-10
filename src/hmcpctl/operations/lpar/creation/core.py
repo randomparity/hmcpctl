@@ -568,6 +568,10 @@ async def _submit_native_creation(
 ) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
     """Preserve feature-specific ambiguous-submission diagnostics and causes."""
     role_requested = roles_requested(creation.settings)
+    diagnostic = (
+        "Native {feature} creation outcome is unknown; the partition may exist. "
+        "Inspect its {inspection} before retrying; no rollback performed."
+    )
     try:
         return await _create_via_cli(
             hmc,
@@ -597,20 +601,28 @@ async def _submit_native_creation(
         ):
             raise
         else:
+            if role_requested:
+                feature = "role"
+            elif features.policy_requested:
+                feature = "policy"
+            else:
+                feature = "I/O"
+            inspection = "scoped identity"
+            if not role_requested:
+                inspection += " and profile"
             raise HMCError(
-                "Native role creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
-                if role_requested
-                else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                if features.policy_requested
-                else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                diagnostic.format(feature=feature, inspection=inspection)
             ) from (None if role_requested else error)
     # Keep hardware/affinity errors outside the handler: their prior diagnostic
     # deliberately retained neither the provider cause nor its context.
-    raise HMCError(
-        f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
-        if features.controller_mode
-        else f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-    )
+    if features.affinity_requested:
+        feature = "affinity group"
+    else:
+        feature = "hardware memory"
+    inspection = "scoped identity"
+    if not features.controller_mode:
+        inspection += " and profile"
+    raise HMCError(diagnostic.format(feature=feature, inspection=inspection))
 
 
 async def _complete_lpar_creation(
