@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from hmcpctl.client.client_factory import open_client
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.logical import engine
@@ -45,7 +46,6 @@ from hmcpctl.operations.lpar.decommission.storage import (
     same_item,
     storage_classifiers,
 )
-from hmcpctl.operations.lpar.power import open_client
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 TOOL_NAME = "hmc_decommission_lpar"

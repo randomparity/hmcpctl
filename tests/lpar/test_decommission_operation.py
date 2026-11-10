@@ -382,7 +382,7 @@ def served(hmc, monkeypatch):
         yield hmc
 
     monkeypatch.setattr("hmcpctl._app.client_from_env", opened)
-    monkeypatch.setattr("hmcpctl.operations.lpar.power.client_from_env", opened)
+    monkeypatch.setattr("hmcpctl.client.client_factory.client_from_env", opened)
     return hmc
 
 

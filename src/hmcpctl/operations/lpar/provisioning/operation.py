@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from hmcpctl.client.client_factory import open_client
 from hmcpctl.client.client_storage import mapping_lpar_uuid
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources, validate_partition_type
@@ -44,7 +45,6 @@ from hmcpctl.operations.lpar.ownership import (
     parse_lpar_ownership_caller_token,
     stamp_created_lpar_ownership,
 )
-from hmcpctl.operations.lpar.power import open_client
 from hmcpctl.operations.lpar.profiles import (
     save_current_partition_profile,
     set_default_partition_profile,

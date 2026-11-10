@@ -30,6 +30,7 @@ from hmcpctl.operations.lpar.provisioning.operation import (
     _ledgered_elsewhere,
 )
 
+from ...client.client_factory import open_client
 from ...client.core import HMCClient
 from ...documents.lpar import LparResources, partition_updates
 from ...documents.partition_profile import ProfilePatch
@@ -52,7 +53,6 @@ from . import profile_persist
 from . import reconfigure_network as network
 from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
-from .power import open_client as _power_client
 from .profiles import read_partition_profile, update_partition_profile
 from .reconfigure_media import (
     BOOT_KEY,
@@ -266,11 +266,6 @@ def disk_vios_uuids(patch: ReconfigurePatch, tool: str) -> tuple[str, ...]:
         else []
     )
     return tuple(dict.fromkeys(item.vios_uuid.lower() for item in items))
-
-
-def open_client(connection: str) -> HMCClient:
-    """A client for the operation's recorded connection; a seam for tests."""
-    return _power_client(connection)
 
 
 # ---------------------------------------------------------------------------

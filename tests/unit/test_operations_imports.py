@@ -149,3 +149,30 @@ importlib.import_module({module!r})
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize(
+    "module", ["provisioning.operation", "decommission.operation", "reconfigure"]
+)
+def test_lifecycle_connection_factory_does_not_import_power_workflow(module):
+    script = f"""
+import importlib
+import importlib.abc
+import sys
+
+class NoPowerWorkflow(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "hmcpctl.operations.lpar.power":
+            raise ModuleNotFoundError("power workflow dependency forbidden")
+
+sys.meta_path.insert(0, NoPowerWorkflow())
+importlib.import_module("hmcpctl.operations.lpar.{module}")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

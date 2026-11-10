@@ -12,7 +12,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from ...client.client_factory import client_from_env
+from ...client.client_factory import open_client
 from ...client.core import HMCClient
 from ...errors import HMCError
 from ...jobs import (
@@ -30,7 +30,6 @@ from ..logical.engine import (
     OperationFailed,
 )
 from ..logical.models import EffectRecord
-from ..logical.store import DEFAULT_CONNECTION
 from .activation import ACTIVATED_STATES, submit_power_off
 from .ownership import resolve_and_authorize_lpar_mutation
 
@@ -65,11 +64,6 @@ def check_inputs(action: str, mode: str) -> None:
         raise ValueError(f"mode must be one of {', '.join(MODES)}")
     if action == "start" and mode == "immediate":
         raise ValueError("mode applies to stop and restart only; omit it for start")
-
-
-def open_client(connection: str) -> HMCClient:
-    """A client for the operation's recorded connection (``<default>`` is the environment)."""
-    return client_from_env(None if connection == DEFAULT_CONNECTION else connection)
 
 
 def _norm(value: Any) -> str:
