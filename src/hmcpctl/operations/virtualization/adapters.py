@@ -181,7 +181,9 @@ async def add_network_adapter(
     Raises:
         ValueError: Invalid selectors, PVID or selected policy values.
         PermissionError: Partition ownership authorization rejects the mutation.
-        HMCError: Baseline identity is unavailable or the native submission fails.
+        HMCError: Baseline identity is unavailable, submission fails, or TLS identity
+            verification aborts readback. Post-submission TLS errors retain acknowledged
+            adapter and partition identities in an exception note.
     """
     require_vlan_id("port_vlan_id", port_vlan_id)
     fields: dict[str, Any] = {
@@ -230,11 +232,18 @@ async def add_network_adapter(
         if refusal is None:
             raise
         raise refusal from error
-    verification = (
-        await _verify_network_creation(hmc, lpar_uuid, baseline, resource, selected)
-        if selected
-        else None
-    )
+    try:
+        verification = (
+            await _verify_network_creation(hmc, lpar_uuid, baseline, resource, selected)
+            if selected
+            else None
+        )
+    except HMCTLSFingerprintError as error:
+        error.add_note(
+            f"{TLS_OBSERVATION_ABORTED} Acknowledged adapter UUID: "
+            f"{_network_identity(resource)}; partition UUID: {lpar_uuid}."
+        )
+        raise
     return AdapterResult(lpar_uuid, resource, location, verification)
 
 
@@ -822,6 +831,8 @@ async def _verify_network_creation(
     try:
         after = await hmc._network_adapter_creation_feed(lpar_uuid)
         identities = _network_inventory_identities(after)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError:
         return result
     if identity not in identities:

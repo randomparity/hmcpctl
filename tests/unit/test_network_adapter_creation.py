@@ -8,7 +8,7 @@ from conftest import live_fixture
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.lpar import ownership
 from hmcpctl.operations.virtualization.adapters import add_network_adapter
 
@@ -517,3 +517,24 @@ async def test_baseline_read_failure_propagates_before_submission(hmc):
         await create(hmc, qos_priority=0)
     assert error.value is failure
     hmc.add_network_adapter.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("submitted", [False, True])
+async def test_creation_identity_failure_stops_with_known_submission_state(
+    hmc, submitted
+):
+    failure = HMCTLSFingerprintError("certificate identity differs")
+    hmc._network_adapter_creation_feed.side_effect = (
+        [[], failure] if submitted else [failure]
+    )
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await create(hmc, qos_priority=0)
+    assert caught.value is failure
+    assert hmc.add_network_adapter.await_count == int(submitted)
+    assert hmc._network_adapter_creation_feed.await_count == (2 if submitted else 1)
+    hmc.delete_adapter.assert_not_awaited()
+    if submitted:
+        note = " ".join(caught.value.__notes__)
+        assert CREATED in note and LPAR in note
+        assert "after submission" in note
