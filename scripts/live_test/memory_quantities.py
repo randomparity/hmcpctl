@@ -12,7 +12,6 @@ from fastmcp import Client
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
 from hmcpctl.ssh.lpar import apply_lpar_profile_via_cli
 from hmcpctl.xmlutil import leaf_text
@@ -203,30 +202,10 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
     try:
         run.create_attempted = True
         async with HMCClient(state.hmc_config) as hmc:
-            created = await create_and_stamp_lpar(
-                hmc,
-                run.system,
-                LparCreation(
-                    run.name,
-                    "AIX/Linux",
-                    LparResources(**fixture.RESOURCES),
-                    caller_token=run.token,
-                    stamp_policy="required",
-                    apply_profile=False,
-                ),
+            created = await fixture._create_inactive_fixture(
+                hmc, run, LparResources(**fixture.RESOURCES)
             )
-        run.uuid = fixture._uuid_of(created.lpar) if created.lpar is not None else None
-        if (
-            not created.resource_created
-            or created.ownership_stamped is not True
-            or run.uuid is None
-            or (
-                created.apply_step is not None
-                and created.apply_step.status not in {"ok", "skipped"}
-            )
-        ):
-            raise ValueError("Memory fixture creation/ownership was not confirmed")
-        run.created = True
+        fixture._accept_inactive_fixture(run, created, label="Memory")
         state.record(
             SUBTASK, "owning core create (no profile apply)", "PASS", asdict(created)
         )

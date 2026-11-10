@@ -23,7 +23,11 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparReportingSettings, LparResources, LparSettings
 from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.core import (
+    LparCreation,
+    LparCreationResult,
+    create_and_stamp_lpar,
+)
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 from hmcpctl.operations.virtualization.pcie import (
     _is_exact_admitted_environment,
@@ -1123,6 +1127,42 @@ async def _activated_cases(client: Client, state: RunState, run: _Run) -> None:
 # ---------------------------------------------------------------------------
 # Create, teardown, observations
 # ---------------------------------------------------------------------------
+
+
+async def _create_inactive_fixture(
+    hmc: HMCClient, run: _Run, resources: LparResources
+) -> LparCreationResult:
+    """Submit through the caller's admitted client without applying a profile."""
+    return await create_and_stamp_lpar(
+        hmc,
+        run.system,
+        LparCreation(
+            run.name,
+            "AIX/Linux",
+            resources,
+            caller_token=run.token,
+            stamp_policy="required",
+            apply_profile=False,
+        ),
+    )
+
+
+def _accept_inactive_fixture(
+    run: _Run, created: LparCreationResult, *, label: str
+) -> None:
+    """Confirm after the caller closes its session, preserving cleanup ordering."""
+    run.uuid = _uuid_of(created.lpar) if created.lpar is not None else None
+    if (
+        not created.resource_created
+        or created.ownership_stamped is not True
+        or run.uuid is None
+        or (
+            created.apply_step is not None
+            and created.apply_step.status not in {"ok", "skipped"}
+        )
+    ):
+        raise ValueError(f"{label} fixture creation/ownership was not confirmed")
+    run.created = True
 
 
 async def _create(client: Client, state: RunState, run: _Run) -> bool:

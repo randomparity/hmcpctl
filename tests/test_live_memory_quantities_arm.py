@@ -199,7 +199,7 @@ async def run_arm(monkeypatch, system, group="lpar-memory-quantities"):
         return system.answer(tool, kwargs)
 
     monkeypatch.setattr(memory_quantities, "HMCClient", client_context)
-    monkeypatch.setattr(memory_quantities, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(lpar_config, "create_and_stamp_lpar", create)
     monkeypatch.setattr(runner.RunState, "call", call)
     monkeypatch.setattr(lpar_config, "_ABSENCE_REREAD_DELAY_S", 0)
     monkeypatch.setattr(lpar_config, "_COMPARE_REREAD_DELAY_S", 0)

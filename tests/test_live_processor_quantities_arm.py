@@ -180,12 +180,12 @@ async def run_arm(monkeypatch, system, group="lpar-processor-quantities"):
 
     for name, value in {
         "HMCClient": client_context,
-        "create_and_stamp_lpar": create,
         "resolve_and_authorize_lpar_names": authorize,
         "apply_lpar_profile_via_cli": apply,
         "read_lpar_processor_quantities": native,
     }.items():
         monkeypatch.setattr(arm, name, value)
+    monkeypatch.setattr(lpar_config, "create_and_stamp_lpar", create)
     monkeypatch.setattr(runner.RunState, "call", call)
     monkeypatch.setattr(lpar_config, "_ABSENCE_REREAD_DELAY_S", 0)
     monkeypatch.setattr(lpar_config, "_COMPARE_REREAD_DELAY_S", 0)
