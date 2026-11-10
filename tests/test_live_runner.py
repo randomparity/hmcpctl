@@ -48,6 +48,7 @@ from live_test import (  # noqa: E402
     dedicated_pcie,
     escape_hatch,
     evidence,
+    http_fixture,
     inventory,
     lpar,
     lpar_config,
@@ -2946,14 +2947,14 @@ def test_the_iso_allowlist_merge_reaches_the_field_and_is_idempotent(monkeypatch
     monkeypatch.setenv("hmc_iso_url_allowlist", "variant.example.com")
 
     config = live_config.LiveTestConfig()
-    vmedia._allow_iso_host(config)
+    http_fixture._allow_iso_host(config)
 
     merged = os.environ[name]
     assert [k for k in os.environ if k.lower() == name.lower()] == [name]
     assert merged.split(",") == ["variant.example.com", config.iso_host]
     assert HMCConfig(host="h", user="u", password="p").iso_url_allowlist == merged
 
-    vmedia._allow_iso_host(config)
+    http_fixture._allow_iso_host(config)
     assert os.environ[name] == merged
 
 
@@ -2972,7 +2973,7 @@ def test_the_iso_allowlist_merge_keeps_a_variant_only_operator_entry(monkeypatch
     monkeypatch.setenv("hmc_iso_url_allowlist", "operator.example.com")
 
     config = live_config.LiveTestConfig()
-    vmedia._allow_iso_host(config)
+    http_fixture._allow_iso_host(config)
 
     assert os.environ[name].split(",") == ["operator.example.com", config.iso_host]
 

@@ -89,6 +89,7 @@ from live_test.creation_memory_layout import exercise_creation_memory_layout
 from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
 from live_test.detach_probe import exercise_detach_probe
 from live_test.escape_hatch import exercise_cli_escape_hatch
+from live_test.http_fixture import IsoHttpServer
 from live_test.inventory import capture_lpar_baseline
 from live_test.logical_workflow import exercise_logical_workflow
 from live_test.lpar import (
@@ -149,7 +150,6 @@ from live_test.system_profiles import exercise_system_profiles
 from live_test.users import exercise_users, inventory_users
 from live_test.vios_backup import exercise_vios_backup
 from live_test.vmedia import (
-    IsoHttpServer,
     vmedia_boot_verification,
     vmedia_bootstrap_and_create_repo,
     vmedia_mapping_crossvalidation,
