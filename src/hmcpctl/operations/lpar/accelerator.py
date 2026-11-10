@@ -11,7 +11,6 @@ from ...client.core import HMCClient
 from ...documents.lpar_accelerator import LparAcceleratorQos
 from ...errors import HMCError
 from ...resource_identity import (
-    guard_partition,
     is_uuid,
     resolve_system_uuid,
     system_name_from_uuid,
@@ -20,6 +19,7 @@ from ...ssh.accelerator import read_accelerator_qos, set_accelerator_qos
 from ...xmlutil import leaf_text
 from ..partition_state import PARTITION_STATES
 from ..resource_reading import resource_container
+from .observation import contained_partition
 from .ownership import authorize_lpar_mutation
 
 
@@ -31,34 +31,6 @@ def _integer(value: object, name: str) -> int:
         return int(text)
     except ValueError:
         raise ValueError(f"Accelerator QoS cannot read decimal {name}") from None
-
-
-async def _contained(
-    hmc: HMCClient, system_uuid: str, selector: str
-) -> tuple[str, str]:
-    matches = []
-    for kind, entries in (
-        ("LogicalPartition", await hmc.list_logical_partitions(system_uuid)),
-        ("VirtualIOServer", await hmc.list_vios(system_uuid)),
-    ):
-        for entry in entries:
-            uuid = entry.get("UUID")
-            name = leaf_text(resource_container(entry, "Resource").get("PartitionName"))
-            if (
-                is_uuid(selector)
-                and isinstance(uuid, str)
-                and uuid.casefold() == selector.casefold()
-            ) or (not is_uuid(selector) and name == selector):
-                if not isinstance(uuid, str) or not is_uuid(uuid):
-                    raise ValueError("Accelerator target has missing or malformed UUID")
-                matches.append((kind, uuid))
-    if len(matches) != 1:
-        raise ValueError(
-            "Accelerator target is missing, ambiguous or outside selected system"
-        )
-    if matches[0][0] == "LogicalPartition":
-        guard_partition(matches[0][1])
-    return matches[0]
 
 
 async def _partition(hmc: HMCClient, kind: str, uuid: str) -> dict[str, Any]:
@@ -202,7 +174,7 @@ async def _observe(
 ) -> tuple[dict[str, Any] | None, str | None]:
     uuid = before["uuid"]
     try:
-        current_kind, current_uuid = await _contained(hmc, system_uuid, uuid)
+        current_kind, current_uuid = await contained_partition(hmc, system_uuid, uuid)
         if (current_kind, current_uuid.casefold()) != (kind, uuid.casefold()):
             raise ValueError("Accelerator readback containment or kind changed")
         after = await _partition(hmc, kind, uuid)
@@ -307,7 +279,7 @@ async def set_lpar_accelerator_qos(
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     if not isinstance(system_uuid, str) or not is_uuid(system_uuid):
         raise ValueError("Accelerator QoS requires a valid selected-system UUID")
-    kind, uuid = await _contained(hmc, system_uuid, lpar_name_or_uuid)
+    kind, uuid = await contained_partition(hmc, system_uuid, lpar_name_or_uuid)
     before = await _partition(hmc, kind, uuid)
     if not is_uuid(lpar_name_or_uuid) and before["name"] != lpar_name_or_uuid:
         raise ValueError("Accelerator target name changed after containment resolution")
@@ -327,7 +299,7 @@ async def set_lpar_accelerator_qos(
         ownership_override=ownership_override,
         max_output_bytes=65536,
     )
-    fresh_kind, fresh_uuid = await _contained(hmc, system_uuid, uuid)
+    fresh_kind, fresh_uuid = await contained_partition(hmc, system_uuid, uuid)
     fresh = await _partition(hmc, kind, uuid)
     fresh_system = await _system(
         hmc, system_uuid, system_name, ibmi=before["partition_type"] == "OS400"

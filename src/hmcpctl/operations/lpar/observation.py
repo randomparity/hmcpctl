@@ -1,4 +1,4 @@
-"""Shared contained partition observations for memory and processor operations."""
+"""Shared contained partition observations for partition operations."""
 
 from __future__ import annotations
 
@@ -189,6 +189,7 @@ def partition_snapshot(entry: dict[str, Any] | None, uuid: str) -> PartitionSnap
 async def contained_partition(
     hmc: HMCClient, system_uuid: str, selector: str
 ) -> tuple[str, str]:
+    by_uuid = is_uuid(selector)
     matches = []
     for kind, entries in (
         ("LogicalPartition", await hmc.list_logical_partitions(system_uuid)),
@@ -196,20 +197,16 @@ async def contained_partition(
     ):
         for entry in entries:
             uuid = entry.get("UUID")
-            name = resource_container(entry, "Resource").get("PartitionName")
+            name = leaf_text(resource_container(entry, "Resource").get("PartitionName"))
             if (
-                is_uuid(selector)
-                and isinstance(uuid, str)
-                and uuid.lower() == selector.lower()
-            ) or (not is_uuid(selector) and name == selector):
+                by_uuid and isinstance(uuid, str) and uuid.lower() == selector.lower()
+            ) or (not by_uuid and name == selector):
                 if not isinstance(uuid, str) or not is_uuid(uuid):
-                    raise ValueError(
-                        "Memory target has missing or malformed partition UUID"
-                    )
+                    raise ValueError("Partition target has missing or malformed UUID")
                 matches.append((kind, uuid))
     if len(matches) != 1:
         raise ValueError(
-            "Memory target is missing, ambiguous or outside the selected system"
+            "Partition target is missing, ambiguous or outside the selected system"
         )
     if matches[0][0] == "LogicalPartition":
         guard_partition(matches[0][1])

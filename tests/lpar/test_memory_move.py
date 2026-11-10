@@ -580,3 +580,19 @@ async def test_fatal_tls_stops_remaining_move_reads_and_retains_evidence(
     pending = ("source", "destination") if uuid == SOURCE else ("destination",)
     assert all("TLS" in result[endpoint]["read_error"] for endpoint in pending)
     assert "private-pin" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_contained_partition_accepts_attributed_xml_name():
+    from hmcpctl.operations.lpar.observation import contained_partition
+
+    partition = entry(SOURCE, {"@attrs": {"ksv": "V1_0"}, "text": "source-R1"}, 7)
+    hmc = SimpleNamespace(
+        list_logical_partitions=AsyncMock(return_value=[partition]),
+        list_vios=AsyncMock(return_value=[]),
+    )
+
+    assert await contained_partition(hmc, SYSTEM, "source-R1") == (
+        "LogicalPartition",
+        SOURCE,
+    )
