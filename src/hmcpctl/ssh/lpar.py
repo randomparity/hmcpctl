@@ -281,6 +281,9 @@ async def create_lpar_via_cli(
             quoted=("power_ctrl_lpar_ids",),
         )
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
+    # Specialized failures retain only a refusal code for reconciliation. Translate
+    # after leaving the handler so private provider bodies and exception chains
+    # cannot reappear in a formatted traceback (creation-memory/layout contracts).
     layout_error = None
     code = None
     try:
