@@ -362,7 +362,7 @@ class StorageClient(Protocol):
 
     async def _get_vg_raw_xml(
         self, vios_uuid: str, vg_uuid: str
-    ) -> tuple[str | None, Element]: ...
+    ) -> tuple[str | None, Element, str]: ...
 
     async def _post_vg_xml(
         self,

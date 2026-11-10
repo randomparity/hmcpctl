@@ -136,8 +136,10 @@ async def test_create_media_repository_returns_matching_existing_repository(mock
             7168,
         )
 
-    assert result == {
-        "Resource": {"RepositoryName": "VMLibrary", "RepositorySize": "7"}
+    assert result["UUID"] == "22222222-2222-2222-2222-222222222222"
+    assert result["Resource"]["MediaRepositories"]["VirtualMediaRepository"] == {
+        "RepositoryName": "VMLibrary",
+        "RepositorySize": "7",
     }
     assert not post_route.called
 
@@ -157,10 +159,40 @@ async def test_create_media_repository_compares_sizes_numerically_in_gib(mock_hm
             7168,
         )
 
-    assert result == {
-        "Resource": {"RepositoryName": "VMLibrary", "RepositorySize": "7.0"}
+    assert result["UUID"] == "22222222-2222-2222-2222-222222222222"
+    assert result["Resource"]["MediaRepositories"]["VirtualMediaRepository"] == {
+        "RepositoryName": "VMLibrary",
+        "RepositorySize": "7.0",
     }
     assert not post_route.called
+
+
+@pytest.mark.asyncio
+async def test_create_media_repository_returns_same_volume_group_on_repeat(mock_hmc):
+    """Create and repeat expose the same repository nesting and Atom identity."""
+    vios = "11111111-1111-1111-1111-111111111111"
+    group = "22222222-2222-2222-2222-222222222222"
+    path = f"/rest/api/uom/VirtualIOServer/{vios}/VolumeGroup/{group}"
+    existing = _VG_FEED_WITH_VMLIB.replace(
+        "<entry>", '<entry><title>clientvg1</title><link href="/group"/>'
+    )
+    mock_hmc.get(path).mock(
+        side_effect=[
+            httpx.Response(200, text=_VG_FEED_BARE, headers={"ETag": '"first"'}),
+            httpx.Response(200, text=existing),
+        ]
+    )
+    post = mock_hmc.post(path).mock(return_value=httpx.Response(200, text=existing))
+    async with HMCClient(make_config()) as hmc:
+        created = await hmc.create_media_repository(vios, group, 7168)
+        repeated = await hmc.create_media_repository(vios, group, 7168)
+    assert repeated == created
+    assert repeated["UUID"] == group
+    assert repeated["title"] == "clientvg1"
+    assert repeated["link"] == "/group"
+    repository = repeated["Resource"]["MediaRepositories"]["VirtualMediaRepository"]
+    assert repository == {"RepositoryName": "VMLibrary", "RepositorySize": "7"}
+    assert post.call_count == 1
 
 
 @pytest.mark.asyncio

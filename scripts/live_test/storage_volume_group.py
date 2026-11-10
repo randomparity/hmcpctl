@@ -107,7 +107,7 @@ async def if_match_probe(config: HMCConfig, vios: str, group: str) -> dict[str, 
         ]
         if len(listed) != 1 or not isinstance(listed[0], str):
             return {"status": None, "reason": f"{group} is not listed exactly once"}
-        _, element = await hmc._get_vg_raw_xml(vios, listed[0])
+        _, element, _raw = await hmc._get_vg_raw_xml(vios, listed[0])
         try:
             await hmc._post_vg_xml(
                 vios, listed[0], element, operation="if_match_probe", etag=stale

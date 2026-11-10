@@ -645,7 +645,7 @@ class StorageMixin:
             if not _UUID_PATTERN.fullmatch(value):
                 raise ValueError(f"{argument} must be a UUID")
         element = DET.fromstring(build_virtual_disk_element(disk_name, capacity_mib))
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
         etag = _required_etag(etag)
         disks = _virtual_disks(vg_elem)
         if _disks_named(disks, disk_name):
@@ -675,7 +675,7 @@ class StorageMixin:
         serialize writers to the same VolumeGroup.
         """
 
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
         etag = _required_etag(etag)
         collections = _children_named(vg_elem, "VirtualDisks")
         matches = _disks_named(collections[0], disk_name) if collections else []
@@ -829,8 +829,8 @@ class StorageMixin:
 
     async def _get_vg_raw_xml(
         self: StorageClient, vios_uuid: str, vg_uuid: str
-    ) -> tuple[str | None, ET.Element]:
-        """GET the full VolumeGroup XML and return (ETag, VolumeGroup element).
+    ) -> tuple[str | None, ET.Element, str]:
+        """GET the VolumeGroup and return (ETag, VolumeGroup element, raw document).
 
         Parses the Atom feed to extract the single VolumeGroup element.
         The returned ET.Element is a copy with namespace prefixes re-registered
@@ -873,7 +873,7 @@ class StorageMixin:
                 200,
                 raw[:500],
             )
-        return resp.headers.get("ETag"), vg_elem
+        return resp.headers.get("ETag"), vg_elem, raw
 
     async def _post_vg_xml(
         self: StorageClient,
@@ -1029,23 +1029,17 @@ class StorageMixin:
         serialize writers to the same VolumeGroup.
         """
         size_gib = _whole_gib(size_mib)
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         existing = self._find_vmlib(vg_elem)
         if existing is not None:
-            name = existing.findtext(
-                f"{{{_UOM_NS}}}RepositoryName"
-            ) or existing.findtext("RepositoryName")
             size = existing.findtext(
                 f"{{{_UOM_NS}}}RepositorySize"
             ) or existing.findtext("RepositorySize")
             if _same_gib(size, size_gib):
-                return {
-                    "Resource": {
-                        "RepositoryName": name or "VMLibrary",
-                        "RepositorySize": size,
-                    }
-                }
+                return _parse_feed(
+                    _raw, "create_media_repository VolumeGroup readback"
+                )[0]
             observed = f"{size} GiB" if size else "an unknown size"
             raise HMCError(
                 "Virtual media repository already exists with size "
@@ -1088,7 +1082,7 @@ class StorageMixin:
         serialize writers to the same VolumeGroup.
         """
         size_gib = _whole_gib(size_mib)
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         vmlib = self._find_vmlib(vg_elem)
         if vmlib is None:
@@ -1160,7 +1154,7 @@ class StorageMixin:
         whole-group write can silently lose a concurrent change. Callers must
         serialize writers to the same VolumeGroup.
         """
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         mr_tag = f"{{{_UOM_NS}}}MediaRepositories"
         mr = vg_elem.find(f".//{mr_tag}")
@@ -1197,7 +1191,7 @@ class StorageMixin:
         whole-group write can silently lose a concurrent change. Callers must
         serialize writers to the same VolumeGroup.
         """
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         vmlib = self._find_vmlib(vg_elem)
         if vmlib is None:

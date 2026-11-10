@@ -557,7 +557,7 @@ class FakeHMC:
         ]
 
     async def _get_vg_raw_xml(self, vios, vg_uuid):
-        return '"current"', ("element", vg_uuid)
+        return '"current"', ("element", vg_uuid), "unused raw document"
 
     async def _post_vg_xml(self, vios, vg_uuid, element, *, operation, etag):
         self.posts.append((vg_uuid, element, etag))
