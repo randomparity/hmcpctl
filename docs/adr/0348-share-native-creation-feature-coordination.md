@@ -34,9 +34,12 @@ LPAR stamping, profile application, local I/O and settings remain in their owner
 Native submission, REST creation and its narrow refusal fallback remain there as
 well. VIOS adapts coordinator facts to its existing public result keys. There is
 no configurable pipeline, registry, callback orchestration or compatibility wrapper.
-Public creation/result models remain in LPAR core; the layout helper imports its
-existing result model only when called, after module initialization, avoiding a
-runtime import cycle.
+Public creation/result models remain in LPAR core. The layout observation owner
+also defines `MemoryLayoutVerification`; it has no runtime import from LPAR core.
+LPAR uses coordinator feature predicates after local validation and resolves the
+system UUID before invoking remote phases. The coordinator retains facts and the
+active observation for confirmed, absent and unconfirmed identities. Core adapts
+those facts to public results and diagnostics without a second feature-state store.
 
 ## Consequences
 

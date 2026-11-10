@@ -73,6 +73,11 @@ Pure result adaptation stays in the existing LPAR/VIOS owners. Move feature-only
 helpers out of LPAR `core.py` when the coordinator needs them; use direct imports without wrappers.
 Check runtime import cycles before choosing each helper's final owner. Native command construction,
 public request/result models, SQLite state, authorization and source-only live scenarios do not change.
+`MemoryLayoutVerification` belongs to the layout observation owner rather than its LPAR caller;
+its fields and values remain unchanged. Local request and assignment validation precede UUID
+resolution. The same concrete coordinator supplies feature predicates and retains observations
+for absent and unconfirmed identities in their existing distinct orders. LPAR result adaptation
+consumes coordinator facts, including after TLS rejection, without a competing active-step tracker.
 
 ## Failure model and acceptance
 

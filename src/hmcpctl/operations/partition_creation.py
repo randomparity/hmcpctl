@@ -61,6 +61,17 @@ if TYPE_CHECKING:
     from hmcpctl.operations.lpar.core import LparCreation
 
 
+@dataclass(frozen=True)
+class MemoryLayoutVerification:
+    """Requested creation values and an honest saved-configuration observation."""
+
+    status: Literal["verified", "mismatch", "unavailable"]
+    requested: LparMemoryLayout
+    observed: dict[str, object]
+    unavailable: tuple[str, ...]
+    warnings: tuple[str, ...]
+
+
 @dataclass
 class _CreationFeatureCoordinator:
     hmc: HMCClient
@@ -126,19 +137,26 @@ class _CreationFeatureCoordinator:
         return bool(self.security_policy.pairs())
 
     @property
-    def native_features_requested(self) -> bool:
-        return (
-            bool(
-                hardware_memory_pairs(
-                    self.hardware_mem_encryption, self.hardware_mem_expansion
-                )
+    def hardware_requested(self) -> bool:
+        return bool(
+            hardware_memory_pairs(
+                self.hardware_mem_encryption, self.hardware_mem_expansion
             )
-            or self.layout_requested
+        )
+
+    @property
+    def profile_features_requested(self) -> bool:
+        return (
+            self.layout_requested
             or self.serial_requested
             or self.memory_requested
             or self.start_requested
             or self.affinity_requested
         )
+
+    @property
+    def native_features_requested(self) -> bool:
+        return self.hardware_requested or self.profile_features_requested
 
     async def observe(
         self,
@@ -240,11 +258,7 @@ class _CreationFeatureCoordinator:
             if (
                 (
                     self.policy_requested
-                    or bool(
-                        hardware_memory_pairs(
-                            self.hardware_mem_encryption, self.hardware_mem_expansion
-                        )
-                    )
+                    or self.hardware_requested
                     or self.layout_requested
                     or self.serial_requested
                     or self.memory_requested
@@ -361,6 +375,114 @@ class _CreationFeatureCoordinator:
             self.entry = confirmed_lpar if identity_ok else None
         else:
             self.entry = None
+        if not self.vios:
+            await self.observe(
+                "serial_step",
+                serial_creation_step(
+                    self.hmc,
+                    self.serial_admission,
+                    self.entry,
+                    controller_mode=self.controller_mode,
+                )
+                if self.serial_admission is not None and self.entry is None
+                else None,
+            )
+
+    async def observe_unavailable_identity(
+        self, creation: LparCreation, *, missing: bool
+    ) -> None:
+        """Retain the existing distinct absent and unconfirmed observation orders."""
+        if missing:
+            await self.observe(
+                "creation_memory_step",
+                creation_memory_step(
+                    self.hmc,
+                    self.memory_admission,
+                    None,
+                    controller_mode=self.controller_mode,
+                )
+                if self.memory_admission is not None
+                else None,
+            )
+        else:
+            await self.observe(
+                "memory_layout_step",
+                _created_memory_layout_step(
+                    self.hmc, None, creation, controller_mode=self.controller_mode
+                ),
+            )
+            await self.observe(
+                "security_policy_step",
+                WorkflowStep(
+                    "security_policy",
+                    "error",
+                    "Created partition identity unconfirmed; inspect before retrying",
+                )
+                if self.policy_requested
+                else None,
+            )
+        await self.observe(
+            "affinity_group_step",
+            created_affinity_group_step(
+                self.hmc,
+                self.system_uuid,
+                None,
+                self.name,
+                self.environment,
+                self.affinity_group_id,
+                controller_mode=self.controller_mode,
+            ),
+        )
+        if missing:
+            await self.observe(
+                "memory_layout_step",
+                _created_memory_layout_step(
+                    self.hmc, None, creation, controller_mode=self.controller_mode
+                ),
+            )
+        await self.observe(
+            "hardware_memory_step",
+            created_hardware_memory_step(
+                self.hmc,
+                self.system_uuid,
+                self.entry,
+                self.name,
+                self.environment,
+                self.hardware_mem_encryption,
+                self.hardware_mem_expansion,
+            ),
+        )
+        if missing:
+            await self.observe(
+                "security_policy_step",
+                WorkflowStep(
+                    "security_policy",
+                    "error",
+                    "Created partition identity unavailable; policy unverified",
+                )
+                if self.policy_requested
+                else None,
+            )
+            await self.observe(
+                "vtpm_step",
+                WorkflowStep(
+                    "vtpm", "error", "Created identity unavailable; vTPM unverified"
+                )
+                if self.vtpm_requested
+                else None,
+            )
+        else:
+            await self.observe(
+                "creation_memory_step",
+                creation_memory_step(
+                    self.hmc,
+                    self.memory_admission,
+                    None,
+                    controller_mode=self.controller_mode,
+                )
+                if self.memory_admission is not None
+                else None,
+            )
 
     async def observe_before_followup(
         self, creation: LparCreation | None = None, cli_system: str | None = None
@@ -621,18 +743,21 @@ class _CreationFeatureCoordinator:
         *,
         verify_before_apply: bool,
     ) -> None:
-        await self.observe(
-            "vtpm_step",
-            _created_vtpm_step(self.hmc, cli_system, creation)
-            if verify_before_apply
-            else None,
-        )
+        if verify_before_apply:
+            await self.observe_vtpm(creation, cli_system)
         assert self.entry is not None
         await self.observe(
             "security_policy_step",
             _created_security_policy_step(
                 self.hmc, self.system_uuid, creation, self.entry
             ),
+        )
+
+    async def observe_vtpm(
+        self, creation: LparCreation, cli_system: str | None
+    ) -> None:
+        await self.observe(
+            "vtpm_step", _created_vtpm_step(self.hmc, cli_system, creation)
         )
 
     async def observe_after_apply(self, apply_step: WorkflowStep | None) -> None:
@@ -663,8 +788,6 @@ async def _created_memory_layout_step(
     *,
     controller_mode: bool = False,
 ) -> WorkflowStep | None:
-    from hmcpctl.operations.lpar.core import MemoryLayoutVerification
-
     requested = creation.memory_layout
     names = tuple(name for name, _ in requested.pairs())
     if not names:
