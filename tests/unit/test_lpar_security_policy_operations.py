@@ -611,7 +611,7 @@ async def test_fixed_native_record_refuses_delimiters(policy_target, delimiter):
 
 @pytest.fixture
 def creation_target(policy_target, monkeypatch):
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, entry, command = policy_target
     hmc.find_partition_by_name.side_effect = [None, entry]
@@ -637,7 +637,7 @@ async def test_creation_policy_composes_once(creation_target, monkeypatch):
     )
     from hmcpctl.documents.lpar_io import LparPhysicalIO, ProfileIoSlot
     from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     hmc, _entry, command = creation_target
@@ -694,7 +694,7 @@ async def test_creation_policy_composes_once(creation_target, monkeypatch):
 @pytest.mark.asyncio
 async def test_lpar_policy_cpu_only_default_capacity(creation_target, monkeypatch):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
     from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
 
     hmc, _, command = creation_target
@@ -729,7 +729,7 @@ async def test_created_policy_wrong_uuid_stops_followups(
     from copy import deepcopy
 
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, entry, command = creation_target
     if failure == "missing":
@@ -780,7 +780,7 @@ async def test_apply_waits_for_requested_domain_verification(
     )
     from hmcpctl.documents.lpar_io import LparPhysicalIO
     from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     hmc, _, _ = creation_target
@@ -847,7 +847,7 @@ async def test_apply_waits_for_requested_domain_verification(
 @pytest.mark.parametrize("native", [False, True])
 async def test_empty_policy_preserves_each_route(creation_target, native):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, entry, command = creation_target
     hmc.create_logical_partition.return_value = entry
@@ -879,7 +879,7 @@ async def test_creation_policy_invalid_context_refuses_before_create(
     creation_target, policy
 ):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, _, command = creation_target
     with pytest.raises(ValueError):
@@ -947,7 +947,7 @@ async def test_vios_creation_uses_contained_immutable_policy_readback(
 @pytest.mark.asyncio
 async def test_creation_policy_keylock_is_not_silently_lost(creation_target):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, _, command = creation_target
     with pytest.raises(ValueError, match="cannot represent keylock"):
@@ -972,7 +972,7 @@ async def test_policy_early_creation_readback_error_is_private(
 ):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, _entry, command = creation_target
     marker = "sensitive-remote-body-marker"
@@ -1002,7 +1002,7 @@ async def test_policy_malformed_identity_retains_required_stamp_contract(
     creation_target, monkeypatch, stamp_policy, identity_failure
 ):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, entry, command = creation_target
     marker = "sensitive-identity-marker"
@@ -1045,7 +1045,7 @@ async def test_creation_refuses_srr_with_nonzero_keystore_before_effects(
     creation_target, monkeypatch
 ):
     from hmcpctl.documents.lpar import LparResources, LparSettings
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc, _, command = creation_target
     assign = AsyncMock()
@@ -1077,7 +1077,7 @@ async def test_creation_preserves_standalone_srr_and_keystore(
     import shlex
 
     from hmcpctl.documents.lpar import LparResources, LparSettings
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     hmc, entry, command = creation_target

@@ -20,7 +20,8 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_profile
 from hmcpctl.documents.boot import select_boot_string, validate_raw_boot_string
 from hmcpctl.documents.lpar_start import LparStartSettings
-from hmcpctl.operations.lpar import boot_order, core, linux_roles, ownership
+from hmcpctl.operations.lpar import boot_order, linux_roles, ownership
+from hmcpctl.operations.lpar.creation import core
 from hmcpctl.operations.vios import boot_order as vios_boot
 from hmcpctl.operations.vios import core as vios_core
 from hmcpctl.operations.vios.boot_order import _encode_boot_record
@@ -1295,7 +1296,7 @@ def dispatch(args):
 
 def verify_start_snapshot(hmc, p, current, entry):
     """Apply the approved finite matrix to the fresh complete snapshot, without new transport."""
-    from hmcpctl.operations.lpar.start import (
+    from hmcpctl.operations.lpar.creation.start import (
         StartAdmission,
         StartController,
         _observed_bool,

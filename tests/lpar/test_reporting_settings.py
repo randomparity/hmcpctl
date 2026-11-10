@@ -242,7 +242,10 @@ async def test_refusals_precede_effects(boundary):
 )
 async def test_create_conflicts_refuse_before_resolution(settings, keylock, ptype):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreation,
+        create_and_stamp_lpar,
+    )
 
     hmc = SimpleNamespace(config=CONFIG)
     with pytest.raises(ValueError):
@@ -305,12 +308,15 @@ async def test_create_transport_passes_four_fields_and_preserves_c01_and_io(
 @pytest.mark.parametrize("readback", ["ok", "mismatch", "unavailable"])
 async def test_creation_separate_readback_step(monkeypatch, readback):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreation,
+        create_and_stamp_lpar,
+    )
 
     settings = LparReportingSettings(
         work_group_id="none", redundant_err_path_reporting=False
     )
-    module = "hmcpctl.operations.lpar.core."
+    module = "hmcpctl.operations.lpar.creation.core."
     hmc = SimpleNamespace(
         config=CONFIG,
         find_partition_by_name=AsyncMock(side_effect=[None, {"UUID": "created"}]),
@@ -354,11 +360,11 @@ async def test_creation_separate_readback_step(monkeypatch, readback):
 async def test_reporting_failure_stops_assignments(monkeypatch):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-    from hmcpctl.operations.lpar.workflows import create_lpar
 
-    module = "hmcpctl.operations.lpar.workflows."
+    module = "hmcpctl.operations.lpar.creation.workflow."
     monkeypatch.setattr(module + "prevalidate_lpar_pcie_assignments", AsyncMock())
     step = WorkflowStep("reporting_settings", "error", "unverified")
     monkeypatch.setattr(

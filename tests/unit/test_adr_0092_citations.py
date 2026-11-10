@@ -74,6 +74,7 @@ _INVENTORY_PATHS = tuple(
         "operations/lpar/configuration.py",
         "operations/lpar/vtpm.py",
         "operations/lpar/core.py",
+        "operations/lpar/creation/core.py",
         "operations/lpar/decommission/core.py",
         "operations/lpar/dlpar.py",
         "operations/lpar/processors.py",

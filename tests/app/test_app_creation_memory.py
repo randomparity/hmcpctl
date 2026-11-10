@@ -19,11 +19,11 @@ from hmcpctl.cli_commands.lpar import create
 from hmcpctl.cli_commands.vios import core as vios_cli
 from hmcpctl.documents.lpar_creation_memory import LparCreationMemory
 from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
+from hmcpctl.operations.lpar.creation.workflow import create_lpar
 from hmcpctl.operations.lpar.memory.creation import (
     CreationMemoryObservation,
     CreationMemoryVerification,
 )
-from hmcpctl.operations.lpar.workflows import create_lpar
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar import lifecycle_create

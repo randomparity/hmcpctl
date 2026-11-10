@@ -56,10 +56,8 @@ from ...ssh.lpar import (
 )
 from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
+from ..lpar.creation.start import recheck_start_controllers
 from ..lpar.ownership import _resolve_system_name
-from ..lpar.start import (
-    recheck_start_controllers,
-)
 
 
 async def list_vios(

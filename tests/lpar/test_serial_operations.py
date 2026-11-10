@@ -11,7 +11,7 @@ import pytest
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter as Adapter
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import serial
+from hmcpctl.operations.lpar.creation import serial
 from hmcpctl.ssh import lpar_serial
 
 SYS = "11111111-1111-4111-8111-111111111111"

@@ -17,7 +17,7 @@ from ...xmlutil import leaf_text
 from .security_policy import parse_security_policy
 
 if TYPE_CHECKING:
-    from .core import LparCreation
+    from .creation.core import LparCreation
 
 ROLE_FIELDS = {
     "powervm_mgmt_capable": "PowerVMManagementCapable",

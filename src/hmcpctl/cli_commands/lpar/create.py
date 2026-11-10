@@ -23,8 +23,8 @@ from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
-from ...operations.lpar.core import LparCreation
-from ...operations.lpar.workflows import create_lpar
+from ...operations.lpar.creation.core import LparCreation
+from ...operations.lpar.creation.workflow import create_lpar
 from ...ssh.lpar import validate_caller_token
 from ..output import console, err_console, print_json, terminal_field, usage_error
 from ..runtime import with_client

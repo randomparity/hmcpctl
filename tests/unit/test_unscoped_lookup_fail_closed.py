@@ -23,7 +23,7 @@ from conftest import (
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.creation.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionRequest,
@@ -181,7 +181,7 @@ async def test_create_refuses_before_any_write_when_the_target_cannot_be_read(
     )
 
     with (
-        patch("hmcpctl.operations.lpar.core.create_lpar_via_cli") as via_cli,
+        patch("hmcpctl.operations.lpar.creation.core.create_lpar_via_cli") as via_cli,
         pytest.raises(HMCError) as raised,
     ):
         async with HMCClient(make_config()) as hmc:
@@ -205,7 +205,7 @@ async def test_provision_refuses_before_any_write_when_the_target_cannot_be_read
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.create_lpar_via_cli", new=AsyncMock()
+            "hmcpctl.operations.lpar.creation.core.create_lpar_via_cli", new=AsyncMock()
         ) as via_cli,
         patch(
             "hmcpctl.operations.lpar.provisioning.core._check_profile_jobs",
@@ -249,7 +249,7 @@ async def test_a_same_named_partition_on_another_system_does_not_block_create(
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.require_memory_within_system",
+            "hmcpctl.operations.lpar.creation.core.require_memory_within_system",
             new=AsyncMock(),
         ),
         patch(

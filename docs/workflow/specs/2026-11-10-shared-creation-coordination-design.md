@@ -7,7 +7,7 @@ Trigger: operator approved recommendation 5, "Design first", during the desloppi
 
 ## Problem and evidence
 
-`operations/lpar/core.py` and `operations/vios/core.py` coordinate the same native
+`operations/lpar/creation/core.py` and `operations/vios/core.py` coordinate the same native
 creation capabilities through independently maintained admission and observation sequences.
 The feature implementations are already shared. The remaining duplication concerns ordering,
 partial evidence, and the relationship between selected features and follow-up eligibility.

@@ -4,12 +4,12 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-from ...client.core import HMCClient
-from ...documents.lpar_start import LparStartSettings
-from ...resource_identity import is_uuid
-from ...xmlutil import leaf_text
-from .ownership import authorize_lpar_ownership_description
-from .workflow_contract import WorkflowStep
+from ....client.core import HMCClient
+from ....documents.lpar_start import LparStartSettings
+from ....resource_identity import is_uuid
+from ....xmlutil import leaf_text
+from ..ownership import authorize_lpar_ownership_description
+from ..workflow_contract import WorkflowStep
 
 PartitionKind = Literal["LogicalPartition", "VirtualIOServer"]
 
@@ -216,7 +216,7 @@ async def created_start_step(
     """Observe each requested field on exactly its approved required planes."""
     from hmcpctl.operations.lpar.profiles.core import read_partition_profile
 
-    from ...errors import HMCError, HMCTLSFingerprintError
+    from ....errors import HMCError, HMCTLSFingerprintError
 
     observed: dict[str, object] = {}
     status = "unavailable"

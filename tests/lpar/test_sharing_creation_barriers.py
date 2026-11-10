@@ -13,7 +13,7 @@ from hmcpctl.documents.lpar import (
 )
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.creation.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionRequest,

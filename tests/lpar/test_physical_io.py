@@ -13,7 +13,7 @@ from hmcpctl.documents.lpar_io import (
     ProfileIoSlot,
     SriovLogicalPortAssignment,
 )
-from hmcpctl.operations.lpar.physical_io import compare_creation_io
+from hmcpctl.operations.lpar.creation.physical_io import compare_creation_io
 from hmcpctl.ssh.lpar_io import creation_io_record
 
 DRC = "21010010"
@@ -141,7 +141,7 @@ def test_unknown_pool_or_required_slot_does_not_compare_equal():
 
 @pytest.fixture
 def admission(monkeypatch):
-    from hmcpctl.operations.lpar import physical_io as module
+    from hmcpctl.operations.lpar.creation import physical_io as module
 
     hmc = SimpleNamespace(config=object())
     slots = AsyncMock(
@@ -209,7 +209,7 @@ def admission(monkeypatch):
 )
 async def test_reject_relationship_before_create(admission, problem):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     b = admission
     slot = b.slots.return_value[0]
@@ -256,7 +256,7 @@ async def test_reject_relationship_before_create(admission, problem):
 @pytest.mark.asyncio
 async def test_console_only_checks_capability_without_allocating_slots(admission):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     b = admission
     creation = LparCreation(
@@ -278,11 +278,11 @@ async def test_workflow_io_gate_consumes_sriov_once(monkeypatch, status):
         AssignmentResult,
         LparPcieAssignments,
     )
-    from hmcpctl.operations.lpar.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-    from hmcpctl.operations.lpar.workflows import create_lpar
 
-    module = "hmcpctl.operations.lpar.workflows."
+    module = "hmcpctl.operations.lpar.creation.workflow."
     monkeypatch.setattr(module + "prevalidate_lpar_pcie_assignments", AsyncMock())
     port = SriovLogicalPortAssignment(
         "default_profile", "1", "0", "27004002", Decimal(2)
@@ -326,8 +326,11 @@ async def test_workflow_io_gate_consumes_sriov_once(monkeypatch, status):
 @pytest.mark.parametrize("matched", [True, False])
 async def test_core_io_verification_precedes_profile_application(monkeypatch, matched):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import core
-    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation import core
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreation,
+        create_and_stamp_lpar,
+    )
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     events = []
@@ -397,7 +400,7 @@ def _run_provision_body(request, partitions=()):
 @pytest.mark.asyncio
 async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
     from hmcpctl.operations.lpar.provisioning import core as provision
     from hmcpctl.operations.lpar.provisioning import operation as provision_operation
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
@@ -435,7 +438,7 @@ async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch
 @pytest.mark.asyncio
 async def test_physical_tag_requires_fresh_device_role_capability(admission):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     creation = LparCreation(
         "new",
@@ -457,7 +460,7 @@ async def test_physical_tag_requires_fresh_device_role_capability(admission):
 @pytest.mark.asyncio
 async def test_admitted_physical_relationship_roundtrip(admission):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     io = LparPhysicalIO(
         io_slots=(ProfileIoSlot(DRC, "3", True),),
@@ -523,8 +526,8 @@ def test_direct_sriov_profile_postconditions(mode):
 async def test_created_step_never_confirms_unverified_profile(monkeypatch, mode):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar import physical_io
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation import physical_io
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     read = AsyncMock(return_value=SimpleNamespace(fields={}))
     if mode == "unavailable":
@@ -569,7 +572,7 @@ def test_bounded_identity_and_collection_inputs(args):
 async def test_native_dispatch_failure_reports_unknown_without_retry(monkeypatch):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc = SimpleNamespace(
         config=object(), find_partition_by_name=AsyncMock(return_value=None)
@@ -641,8 +644,9 @@ async def test_combined_creation_and_vnic_capacity_rejects_before_create(
     monkeypatch, explicit_creation
 ):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar import assignments, workflows
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar import assignments
+    from hmcpctl.operations.lpar.creation import workflow as workflows
+    from hmcpctl.operations.lpar.creation.core import LparCreation
     from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
 
     direct = SriovLogicalPortAssignment(
@@ -719,7 +723,8 @@ async def test_combined_creation_and_vnic_capacity_rejects_before_create(
 
 @pytest.fixture
 def sriov_creation_inventory(admission, monkeypatch):
-    from hmcpctl.operations.lpar import assignments, core
+    from hmcpctl.operations.lpar import assignments
+    from hmcpctl.operations.lpar.creation import core
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
     from hmcpctl.operations.virtualization import pcie
 
@@ -809,7 +814,7 @@ async def test_sriov_creation_identity_admission_precedes_native_dispatch(
     sriov_creation_inventory, problem
 ):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     b = sriov_creation_inventory
     if problem == "missing":

@@ -45,7 +45,7 @@ from hmcpctl.operations.lpar.assignments import (
     LparPcieAssignments,
     WorkflowStep,
 )
-from hmcpctl.operations.lpar.core import LparCreationResult
+from hmcpctl.operations.lpar.creation.core import LparCreationResult
 from hmcpctl.operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,
@@ -1465,14 +1465,17 @@ def _provision_via_406(
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_system_cli_name",
+            "hmcpctl.operations.lpar.creation.core.resolve_system_cli_name",
             new=AsyncMock(return_value="sys1"),
         ),
         patch(
-            "hmcpctl.operations.lpar.core.create_lpar_via_cli",
+            "hmcpctl.operations.lpar.creation.core.create_lpar_via_cli",
             new=AsyncMock(side_effect=_mksyscfg),
         ),
-        patch("hmcpctl.operations.lpar.core.apply_lpar_profile_via_cli", new=apply),
+        patch(
+            "hmcpctl.operations.lpar.creation.core.apply_lpar_profile_via_cli",
+            new=apply,
+        ),
     ):
         result = hmc_provision_lpar(**_provision_args())
     return result, network
@@ -1549,7 +1552,9 @@ def test_provision_rest_create_reports_skipped_apply_step(monkeypatch, mock_hmc)
     _mock_execution_steps(mock_hmc)
     apply = AsyncMock()
 
-    with patch("hmcpctl.operations.lpar.core.apply_lpar_profile_via_cli", new=apply):
+    with patch(
+        "hmcpctl.operations.lpar.creation.core.apply_lpar_profile_via_cli", new=apply
+    ):
         result = hmc_provision_lpar(**_provision_args())
 
     apply.assert_not_awaited()

@@ -12,7 +12,7 @@ from fastmcp import Client
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources, sharing_observation
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.creation.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.resource_identity import resolve_system_uuid
 
 from ..observation import Assertion, CallFailure

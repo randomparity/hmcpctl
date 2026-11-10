@@ -186,14 +186,17 @@ async def test_settings_creation_preserves_requested_resources_and_options(
 ):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.configuration import LparSettingsResult
-    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreation,
+        create_and_stamp_lpar,
+    )
 
     hmc = SimpleNamespace(
         config=CONFIG,
         find_partition_by_name=AsyncMock(side_effect=[None, {"UUID": "created"}]),
         create_logical_partition=AsyncMock(return_value={"UUID": "created"}),
     )
-    module = "hmcpctl.operations.lpar.core."
+    module = "hmcpctl.operations.lpar.creation.core."
     monkeypatch.setattr(
         module + "resolve_system_uuid", AsyncMock(return_value="system-uuid")
     )
@@ -246,11 +249,11 @@ async def test_settings_creation_preserves_requested_resources_and_options(
 async def test_settings_failure_stops_creation_assignments(monkeypatch):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-    from hmcpctl.operations.lpar.workflows import create_lpar
 
-    module = "hmcpctl.operations.lpar.workflows."
+    module = "hmcpctl.operations.lpar.creation.workflow."
     monkeypatch.setattr(module + "prevalidate_lpar_pcie_assignments", AsyncMock())
     step = WorkflowStep("settings", "error", "readback-unavailable")
     monkeypatch.setattr(

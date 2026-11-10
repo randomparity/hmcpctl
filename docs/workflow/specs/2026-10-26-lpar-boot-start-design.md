@@ -337,7 +337,7 @@ Prove bounded-stream overflow refuses, stricter cap preserved and no authenticat
 4. **Covered elsewhere**
    - Profile CRUD/preservation: #1724 and operations/lpar/profiles/core.py.
    - Immediate activation: operations/lpar/activation.py; transport/session auth: existing HMC client.
-   - C11 serial eligibility/reciprocal semantics: operations/lpar/serial.py; C09 preserves its barriers.
+   - C11 serial eligibility/reciprocal semantics: operations/lpar/creation/serial.py; C09 preserves its barriers.
 
 ## Threat model
 

@@ -17,7 +17,7 @@ from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations import partition_creation
-from hmcpctl.operations.lpar import serial
+from hmcpctl.operations.lpar.creation import serial
 from hmcpctl.operations.vios.core import create_vios
 
 pytestmark = pytest.mark.asyncio
