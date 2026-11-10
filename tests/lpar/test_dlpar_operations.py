@@ -1005,8 +1005,8 @@ async def test_native_mode_does_not_replace_absolute_setter(mock_hmc, monkeypatc
         async with HMCClient(make_config()) as hmc:
             monkeypatch.setattr(lifecycle, "with_client", lambda fn, **kwargs: fn(hmc))
             await lifecycle.hmc_dlpar_proc(
-                LPAR_UUID,
-                LparResources(desired_procs=1.5, desired_vcpus=3),
+                lpar_name_or_uuid=LPAR_UUID,
+                resources=LparResources(desired_procs=1.5, desired_vcpus=3),
                 system_name_or_uuid=SYSTEM_UUID,
             )
     request = route.calls.last.request

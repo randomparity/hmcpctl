@@ -68,9 +68,7 @@ tool, register_tools, tool_security = tool_module()
 
 @tool(effect="read", operation="lpar.get_minimum_affinity_policy", target_kind="lpar")
 def hmc_get_minimum_affinity_policy(
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
-    profile: str | None = None,
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> MinimumAffinityPolicyResult:
     """Return an LPAR's minimum-affinity policy when supported.
 
@@ -90,10 +88,11 @@ def hmc_get_minimum_affinity_policy(
 
 @tool(effect="mutate", operation="lpar.set_minimum_affinity_policy", target_kind="lpar")
 def hmc_set_minimum_affinity_policy(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     policy: MinimumAffinityPolicy,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> str:
     """Set an LPAR's POWER11 minimum-affinity policy after authorization.
@@ -123,7 +122,7 @@ def hmc_set_minimum_affinity_policy(
 
 @tool(effect="read", operation="lpar.get_memopt_score", target_kind="lpar")
 def hmc_get_lpar_memopt_score(
-    system_name_or_uuid: str, lpar_name_or_uuid: str, profile: str | None = None
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> dict[str, object]:
     """Return an LPAR's current memory-optimization affinity score.
 
@@ -143,8 +142,9 @@ def hmc_get_lpar_memopt_score(
 
 @tool(effect="read", operation="lpar.list_memopt_scores", target_kind="managed_system")
 def hmc_list_lpar_memopt_scores(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> list[dict[str, object]]:
     """List current memory-optimization affinity scores for a system's LPARs.
@@ -284,7 +284,7 @@ def hmc_plan_resource_group_memopt_scores(
 
 @tool(effect="read", operation="lpar.get_description", target_kind="lpar")
 def hmc_get_lpar_description(
-    system_name_or_uuid: str, lpar_name_or_uuid: str, profile: str | None = None
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> str:
     """Return an LPAR's CLI-only description, resolving names or UUIDs.
 
@@ -305,10 +305,11 @@ def hmc_get_lpar_description(
 
 @tool(effect="mutate", operation="lpar.set_description", target_kind="lpar")
 def hmc_set_lpar_description(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     description: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> str:
     """Set an LPAR's CLI-only description after validating printable ASCII.
@@ -358,7 +359,7 @@ def hmc_set_lpar_description(
 
 @tool(effect="read", operation="lpar.get_msp", target_kind="lpar")
 def hmc_get_lpar_msp(
-    system_name_or_uuid: str, lpar_name_or_uuid: str, profile: str | None = None
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> bool:
     """Return an LPAR's CLI-only Migratable Service Partition flag.
 
@@ -379,10 +380,11 @@ def hmc_get_lpar_msp(
 
 @tool(effect="mutate", operation="lpar.set_msp", target_kind="lpar")
 def hmc_set_lpar_msp(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     enabled: bool,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> str:
     """Set a VIOS partition's Migratable Service Partition flag.
@@ -412,9 +414,10 @@ def hmc_set_lpar_msp(
 
 @tool(effect="read", operation="lpar.get_proc_compat", target_kind="lpar")
 def hmc_get_lpar_proc_compat(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str | None = None,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> dict[str, str]:
     """Return an LPAR's processor compatibility modes and a profile's mode.
@@ -441,11 +444,12 @@ def hmc_get_lpar_proc_compat(
 
 @tool(effect="mutate", operation="lpar.set_proc_compat", target_kind="lpar")
 def hmc_set_lpar_proc_compat(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     mode: ProcessorCompatibilityMode,
     ownership_override: bool = False,
     profile_name: str | None = None,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> str:
     """Set the processor compatibility mode on an LPAR's partition profile.
@@ -482,10 +486,11 @@ def hmc_set_lpar_proc_compat(
 
 @tool(effect="mutate", operation="lpar.configure", target_kind="lpar")
 def hmc_configure_lpar(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     settings: LparSettings,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> LparSettingsResult:
     """Configure partition settings and verify preserved/supplied values.
@@ -523,9 +528,7 @@ def hmc_configure_lpar(
 
 @tool(effect="read", operation="lpar.get_settings", target_kind="lpar")
 def hmc_get_lpar_settings(
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
-    profile: str | None = None,
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> LparSettings:
     """Read the five C01 partition settings after proving system containment.
 
@@ -544,10 +547,11 @@ def hmc_get_lpar_settings(
 
 @tool(effect="mutate", operation="lpar.configure_reporting", target_kind="lpar")
 def hmc_configure_lpar_reporting(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     settings: LparReportingSettings,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> LparReportingSettingsResult:
     """Configure partition reporting once and verify applicable readback.
@@ -578,9 +582,7 @@ def hmc_configure_lpar_reporting(
 
 @tool(effect="read", operation="lpar.get_reporting_settings", target_kind="lpar")
 def hmc_get_lpar_reporting_settings(
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
-    profile: str | None = None,
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> LparReportingSettings:
     """Read applicable C02 update settings after proving partition containment.
 
@@ -602,7 +604,7 @@ def hmc_get_lpar_reporting_settings(
 
 @tool(effect="read", operation="lpar.get_vtpm_settings", target_kind="lpar")
 def hmc_get_lpar_vtpm_settings(
-    system_name_or_uuid: str, lpar_name_or_uuid: str, profile: str | None = None
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> VtpmState:
     """Read one contained AIX/Linux partition's vTPM configuration.
 
@@ -621,11 +623,12 @@ def hmc_get_lpar_vtpm_settings(
 
 @tool(effect="destructive", operation="lpar.configure_vtpm", target_kind="lpar")
 def hmc_configure_lpar_vtpm(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     settings: LparVtpmSettings,
     acknowledge_data_loss: StrictBool = False,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> VtpmResult:
     """Configure an inactive AIX/Linux partition's advertised vTPM settings.
@@ -657,9 +660,7 @@ def hmc_configure_lpar_vtpm(
 
 @tool(effect="read", operation="lpar.get_security_policy", target_kind="lpar")
 def hmc_get_lpar_security_policy(
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
-    profile: str | None = None,
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> SecurityPolicyState:
     """Read contained partition pending policy and separate current secure boot.
 
@@ -682,10 +683,11 @@ def hmc_get_lpar_security_policy(
     effect="destructive", operation="lpar.configure_security_policy", target_kind="lpar"
 )
 def hmc_configure_lpar_security_policy(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     settings: LparSecurityPolicy,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> SecurityPolicyResult:
     """Configure security policy once; verify pending policy separately from current boot.
@@ -719,10 +721,11 @@ def hmc_configure_lpar_security_policy(
 @tool(effect="mutate", operation="lpar.set_accelerator_qos", target_kind="lpar")
 def hmc_set_lpar_accelerator_qos(
     lpar_name_or_uuid: str,
-    system_name_or_uuid: str,
     change: LparAcceleratorQos,
-    profile: str | None = None,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Set native GZIP accelerator QoS once and independently observe the result.
 

@@ -355,7 +355,7 @@ def test_lpars_lpar_uuid_gets_one(monkeypatch, mock_hmc):
             200, text=_feed(LPAR_UUID, "LogicalPartition", PartitionState="running")
         )
     )
-    result = hmc_get_lpar(LPAR_UUID)
+    result = hmc_get_lpar(lpar_name_or_uuid=LPAR_UUID)
     assert result["Resource"]["PartitionState"] == "running"
 
 
@@ -367,7 +367,7 @@ def test_lpars_name_finds_by_name(monkeypatch, mock_hmc):
             200, text=LPAR_SEARCH_FEED.format(uuid=LPAR_UUID, name="aixprod")
         )
     )
-    result = hmc_get_lpar("aixprod")
+    result = hmc_get_lpar(lpar_name_or_uuid="aixprod")
     assert result["UUID"] == LPAR_UUID
     assert result["Resource"]["PartitionName"] == "aixprod"
 
@@ -379,7 +379,7 @@ def test_lpars_name_not_found_returns_none(monkeypatch, mock_hmc):
         return_value=httpx.Response(200, text=EMPTY_FEED)
     )
     mock_system_summaries(mock_hmc, (SYSTEM_UUID, "sys-E2", "operating"))
-    assert hmc_get_lpar("ghost") is None
+    assert hmc_get_lpar(lpar_name_or_uuid="ghost") is None
 
 
 def test_get_lpar_state_returns_string(monkeypatch, mock_hmc):
@@ -388,7 +388,7 @@ def test_get_lpar_state_returns_string(monkeypatch, mock_hmc):
     route = mock_hmc.get(
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/quick/PartitionState"
     ).mock(return_value=httpx.Response(200, text='"running"'))
-    result = hmc_get_lpar_state(LPAR_UUID)
+    result = hmc_get_lpar_state(lpar_name_or_uuid=LPAR_UUID)
     assert route.called
     assert result == "running"
 

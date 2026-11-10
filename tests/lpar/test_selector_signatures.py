@@ -144,3 +144,32 @@ async def test_required_family_scope_precedes_client_access(module, name, option
     with pytest.raises(TypeError, match="system_name_or_uuid"):
         await operation(*args, **keywords)
     assert hmc.mock_calls == []
+
+
+MCP_SELECTOR_MODULES = [
+    "hmcpctl.server_tools.lpar." + name
+    for name in (
+        "configuration",
+        "lifecycle",
+        "lifecycle_boot",
+        "migration",
+        "profiles",
+    )
+] + ["hmcpctl.server_tools.systems.core"]
+MCP_SELECTOR_TOOLS = [
+    handler
+    for module in MCP_SELECTOR_MODULES
+    for name, handler in vars(import_module(module)).items()
+    if name.startswith("hmc_")
+    and callable(handler)
+    and "lpar_name_or_uuid" in inspect.signature(handler).parameters
+]
+
+
+@pytest.mark.parametrize("handler", MCP_SELECTOR_TOOLS, ids=lambda fn: fn.__name__)
+def test_mcp_partition_selector_contract(handler):
+    parameters = inspect.signature(handler).parameters
+    assert next(iter(parameters)) == "lpar_name_or_uuid"
+    for name in ("system_name_or_uuid", "connection", "profile"):
+        if name in parameters:
+            assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY

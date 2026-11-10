@@ -19,6 +19,14 @@ From a source checkout, run `just setup` to install the locked development envir
 and repository hooks. Use `uv run --no-sync` before CLI commands in this environment.
 See [Contributing](../CONTRIBUTING.md) for the full change and verification workflow.
 
+## Internal tool handlers
+
+LPAR tool handlers take the partition selector first. Pass system, connection and HMC
+profile selectors by keyword, for example
+`hmc_get_lpar("partition", system_name_or_uuid="system", profile="configured-profile")`.
+A required system selector remains required. These Python handlers are pre-release module APIs;
+`hmcpctl.api` is the stable library facade.
+
 ## Testing
 
 ### 1. Unit tests (no HMC needed)

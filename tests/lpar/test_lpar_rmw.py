@@ -1966,7 +1966,10 @@ async def test_mcp_mixed_resources_keep_configured_rmw(
     async with HMCClient(make_config()) as hmc:
         monkeypatch.setattr(lifecycle, "with_client", lambda fn, **kwargs: fn(hmc))
         result = await lifecycle.hmc_dlpar_proc(
-            LPAR, LparResources(desired_procs=0.5, desired_vcpus=3, uncapped_weight=0)
+            lpar_name_or_uuid=LPAR,
+            resources=LparResources(
+                desired_procs=0.5, desired_vcpus=3, uncapped_weight=0
+            ),
         )
     assert post.call_count == 1
     assert post.calls.last.request.headers["If-Match"] == ETAG

@@ -120,13 +120,15 @@ def test_mcp_typed_change_delegates_without_changing_legacy_resources(monkeypatc
     )
     request = LparMemoryChange(operation="set", quantity_mib=1024)
     assert lifecycle.hmc_dlpar_mem(
-        "lpar-R1", system_name_or_uuid="sys-R1", change=request
+        lpar_name_or_uuid="lpar-R1", system_name_or_uuid="sys-R1", change=request
     ) == {"outcome": "applied"}
     native.assert_awaited_once_with(
         hmc, "lpar-R1", request, system_name_or_uuid="sys-R1", ownership_override=False
     )
     resources = LparResources(desired_memory=1024)
-    assert lifecycle.hmc_dlpar_mem("lpar-R1", resources) == {"legacy": True}
+    assert lifecycle.hmc_dlpar_mem(
+        lpar_name_or_uuid="lpar-R1", resources=resources
+    ) == {"legacy": True}
     absolute.assert_awaited_once_with(
         hmc, "lpar-R1", resources, system_name_or_uuid=None, ownership_override=False
     )
@@ -145,7 +147,7 @@ def test_mcp_conflicting_resources_or_missing_system_refuse_before_client(monkey
         },
     ]:
         with pytest.raises(ValueError):
-            lifecycle.hmc_dlpar_mem("lpar-R1", **kwargs)
+            lifecycle.hmc_dlpar_mem(lpar_name_or_uuid="lpar-R1", **kwargs)
     client.assert_not_called()
 
 

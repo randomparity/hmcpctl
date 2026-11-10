@@ -261,7 +261,7 @@ def test_mcp_resource_modify_rejects_foreign_owner_before_hmc_write() -> None:
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
         server_lifecycle.hmc_modify_lpar(
-            LPAR,
+            lpar_name_or_uuid=LPAR,
             resources=LparResources(desired_memory=8192),
             system_name_or_uuid=SYSTEM_UUID,
         )
@@ -322,7 +322,7 @@ def test_resource_modify_override_skips_ownership_read_and_writes() -> None:
         ),
     ):
         server_lifecycle.hmc_modify_lpar(
-            LPAR,
+            lpar_name_or_uuid=LPAR,
             resources=LparResources(desired_memory=8192),
             ownership_override=True,
         )
@@ -494,22 +494,30 @@ async def test_configure_lpar_msp_refuses_non_vios_before_any_ssh(
         (
             server_configuration.hmc_set_lpar_msp,
             "configure_lpar_msp",
-            (SYSTEM_UUID, LPAR, True),
+            {
+                "system_name_or_uuid": SYSTEM_UUID,
+                "lpar_name_or_uuid": LPAR,
+                "enabled": True,
+            },
         ),
         (
             server_configuration.hmc_set_lpar_proc_compat,
             "configure_lpar_processor_compatibility",
-            (SYSTEM_UUID, LPAR, "POWER9"),
+            {
+                "system_name_or_uuid": SYSTEM_UUID,
+                "lpar_name_or_uuid": LPAR,
+                "mode": "POWER9",
+            },
         ),
         (
             server_profiles.hmc_sync_lpar_profile,
             "synchronize_lpar_profile",
-            (SYSTEM_UUID, LPAR),
+            {"system_name_or_uuid": SYSTEM_UUID, "lpar_name_or_uuid": LPAR},
         ),
     ],
 )
 def test_mcp_config_tools_forward_ownership_override(
-    monkeypatch: pytest.MonkeyPatch, tool, operation: str, args: tuple[object, ...]
+    monkeypatch: pytest.MonkeyPatch, tool, operation: str, args: dict[str, object]
 ) -> None:
     """MCP wrappers expose and forward the explicit ownership override."""
     target_module = (
@@ -526,7 +534,7 @@ def test_mcp_config_tools_forward_ownership_override(
     monkeypatch.setattr(
         target_module, "with_client", lambda fn, **kwargs: asyncio.run(invoke(fn))
     )
-    result = tool(*args, ownership_override=True)
+    result = tool(**args, ownership_override=True)
 
     assert result == "ok"
     delegated.assert_awaited_once()

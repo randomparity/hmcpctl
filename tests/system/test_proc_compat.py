@@ -104,7 +104,9 @@ def test_get_lpar_proc_compat_reads_lpar_and_default_profile(monkeypatch, mock_h
     )
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_proc_compat(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_get_lpar_proc_compat(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     assert _commands(conn_mock) == [
         (
@@ -135,7 +137,9 @@ def test_get_lpar_proc_compat_reads_the_named_profile(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
         result = hmc_get_lpar_proc_compat(
-            SYSTEM_UUID, LPAR_UUID, profile_name="test_profile"
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            profile_name="test_profile",
         )
 
     assert "profile_names=test_profile" in _commands(conn_mock)[1]
@@ -154,7 +158,9 @@ def test_get_lpar_proc_compat_reports_unknown_partition(monkeypatch, mock_hmc):
         patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock),
         pytest.raises(HMCCLIError, match="HSCL8012"),
     ):
-        hmc_get_lpar_proc_compat(SYSTEM_UUID, LPAR_UUID)
+        hmc_get_lpar_proc_compat(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     conn_mock.run.assert_awaited_once()
 
@@ -172,7 +178,9 @@ def test_set_lpar_proc_compat_writes_the_default_profile(monkeypatch, mock_hmc, 
     conn_mock = _make_scripted_ssh_mock("", "default_profile\n", "")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_set_lpar_proc_compat(SYSTEM_UUID, LPAR_UUID, mode)
+        result = hmc_set_lpar_proc_compat(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID, mode=mode
+        )
 
     assert _commands(conn_mock)[1:] == [
         (
@@ -197,7 +205,10 @@ def test_set_lpar_proc_compat_writes_the_named_profile(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
         result = hmc_set_lpar_proc_compat(
-            SYSTEM_UUID, LPAR_UUID, "POWER9", profile_name="test_profile"
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            mode="POWER9",
+            profile_name="test_profile",
         )
 
     assert _commands(conn_mock)[1:] == [
@@ -221,6 +232,8 @@ def test_set_lpar_proc_compat_refuses_a_partition_without_a_default_profile(
         patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock),
         pytest.raises(HMCCLIError, match="no default profile"),
     ):
-        hmc_set_lpar_proc_compat(SYSTEM_UUID, LPAR_UUID, "POWER9")
+        hmc_set_lpar_proc_compat(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID, mode="POWER9"
+        )
 
     assert conn_mock.run.await_count == 2  # ownership read, default lookup; no write

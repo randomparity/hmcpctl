@@ -709,7 +709,11 @@ def test_delete_lpar_refuses_when_active(monkeypatch, mock_hmc):
         ) as guard,
         pytest.raises(HMCError) as exc_info,
     ):
-        hmc_delete_lpar(SYSTEM_UUID, LPAR_UUID, ownership_override=True)
+        hmc_delete_lpar(
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            ownership_override=True,
+        )
 
     assert exc_info.value.status_code == 409
     assert "not activated" in str(exc_info.value)
@@ -728,7 +732,11 @@ def test_delete_lpar_succeeds_when_powered_off(monkeypatch, mock_hmc):
         "hmcpctl.operations.lpar.core.resolve_and_authorize_lpar_mutation",
         new=AsyncMock(return_value=LPAR_UUID),
     ) as guard:
-        result = hmc_delete_lpar(SYSTEM_UUID, LPAR_UUID, ownership_override=True)
+        result = hmc_delete_lpar(
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            ownership_override=True,
+        )
 
     assert result == f"Deleted LPAR {LPAR_UUID}"
     assert guard.await_args.kwargs == {
@@ -836,7 +844,7 @@ def test_power_on_lpar_already_activated_returns_message(monkeypatch, mock_hmc, 
     _hmc_env(monkeypatch)
     power_on_route = _mock_power_on_guard(mock_hmc, state)
 
-    result = hmc_power_on_lpar(LPAR_UUID)
+    result = hmc_power_on_lpar(lpar_name_or_uuid=LPAR_UUID)
 
     assert not power_on_route.called
     assert set(asdict(result)) == {
@@ -863,7 +871,7 @@ def test_power_on_lpar_not_activated_submits_job(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     power_on_route = _mock_power_on_guard(mock_hmc, "not activated")
 
-    result = hmc_power_on_lpar(LPAR_UUID)
+    result = hmc_power_on_lpar(lpar_name_or_uuid=LPAR_UUID)
 
     assert power_on_route.called
     assert set(asdict(result)) == {
@@ -943,7 +951,7 @@ def test_power_on_lpar_force_skips_guard(monkeypatch, mock_hmc):
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn"
     ).mock(return_value=httpx.Response(202, text=POWER_ON_JOB_ENTRY))
 
-    result = hmc_power_on_lpar(LPAR_UUID, force=True)
+    result = hmc_power_on_lpar(lpar_name_or_uuid=LPAR_UUID, force=True)
 
     assert power_on_route.called
     assert result.already_activated is False
@@ -964,7 +972,7 @@ def test_power_on_lpar_non_waiting_assessment_does_not_measure(monkeypatch, mock
     )
 
     result = hmc_power_on_lpar(
-        LPAR_UUID,
+        lpar_name_or_uuid=LPAR_UUID,
         system_name_or_uuid=SYSTEM_UUID,
         affinity_assessment=_affinity_request(),
     )
@@ -990,7 +998,7 @@ def test_power_on_lpar_already_running_assessment_does_not_measure(
     )
 
     result = hmc_power_on_lpar(
-        LPAR_UUID,
+        lpar_name_or_uuid=LPAR_UUID,
         wait=True,
         system_name_or_uuid=SYSTEM_UUID,
         affinity_assessment=_affinity_request(),

@@ -76,10 +76,10 @@ def test_mcp_move(monkeypatch, profile, override):
     monkeypatch.setattr(lifecycle, "with_client", client)
     move = LparMemoryMove(quantity_mib=256, force=override)
     assert lifecycle.hmc_move_lpar_memory(
-        "source-R1",
-        "target-R2",
-        "sys-R1",
-        move,
+        lpar_name_or_uuid="source-R1",
+        target_lpar_name_or_uuid="target-R2",
+        system_name_or_uuid="sys-R1",
+        move=move,
         profile=profile,
         ownership_override=override,
     )["workflow_completed"]
@@ -170,7 +170,12 @@ def test_mcp_move_rejects_blank_selector(monkeypatch, selector):
     with pytest.raises(
         ValueError, match="requires source, destination and managed system"
     ):
-        lifecycle.hmc_move_lpar_memory(*selectors, LparMemoryMove(quantity_mib=256))
+        lifecycle.hmc_move_lpar_memory(
+            selectors[0],
+            selectors[1],
+            LparMemoryMove(quantity_mib=256),
+            system_name_or_uuid=selectors[2],
+        )
     client.assert_not_called()
 
 

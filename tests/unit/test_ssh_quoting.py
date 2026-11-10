@@ -144,7 +144,10 @@ def test_set_lpar_description_quotes_hostile_description(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn):
         hmc_set_lpar_description(
-            SYSTEM_UUID, LPAR_UUID, HOSTILE, ownership_override=True
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            description=HOSTILE,
+            ownership_override=True,
         )
 
     payload = f"name={LPAR_NAME},description={HOSTILE}"

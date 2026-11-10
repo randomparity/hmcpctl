@@ -145,8 +145,8 @@ def test_dlpar_proc_posts_proc_document(monkeypatch, mock_hmc):
     )
     with _unowned_partition():
         result = hmc_dlpar_proc(
-            LPAR_UUID,
-            LparResources(desired_procs=1.5, desired_vcpus=3),
+            lpar_name_or_uuid=LPAR_UUID,
+            resources=LparResources(desired_procs=1.5, desired_vcpus=3),
             system_name_or_uuid=SYSTEM_UUID,
         )
     body = route.calls.last.request.content.decode()
@@ -165,8 +165,10 @@ def test_dlpar_mem_posts_mem_document(monkeypatch, mock_hmc):
     )
     with _unowned_partition():
         result = hmc_dlpar_mem(
-            LPAR_UUID,
-            LparResources(desired_memory=8192, min_memory=1024, max_memory=16384),
+            lpar_name_or_uuid=LPAR_UUID,
+            resources=LparResources(
+                desired_memory=8192, min_memory=1024, max_memory=16384
+            ),
             system_name_or_uuid=SYSTEM_UUID,
         )
     body = route.calls.last.request.content.decode()
@@ -186,8 +188,8 @@ def test_dlpar_proc_error_propagates(monkeypatch, mock_hmc):
     )
     with _unowned_partition(), pytest.raises(HMCError) as exc_info:
         hmc_dlpar_proc(
-            LPAR_UUID,
-            LparResources(desired_procs=1.0),
+            lpar_name_or_uuid=LPAR_UUID,
+            resources=LparResources(desired_procs=1.0),
             system_name_or_uuid=SYSTEM_UUID,
         )
     assert exc_info.value.status_code == 500
@@ -289,8 +291,8 @@ def test_dlpar_proc_refuses_a_foreign_owned_partition(monkeypatch, mock_hmc):
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
         hmc_dlpar_proc(
-            LPAR_UUID,
-            LparResources(desired_procs=1.0),
+            lpar_name_or_uuid=LPAR_UUID,
+            resources=LparResources(desired_procs=1.0),
             system_name_or_uuid=SYSTEM_UUID,
         )
     assert not route.called
@@ -307,8 +309,8 @@ def test_dlpar_mem_ownership_override_reaches_the_write(monkeypatch, mock_hmc):
     read = AsyncMock(return_value="[hmcpctl owner:bob created:2026-08-14]")
     with patch("hmcpctl.operations.lpar.ownership.get_lpar_description", new=read):
         hmc_dlpar_mem(
-            LPAR_UUID,
-            LparResources(desired_memory=4096),
+            lpar_name_or_uuid=LPAR_UUID,
+            resources=LparResources(desired_memory=4096),
             system_name_or_uuid=SYSTEM_UUID,
             ownership_override=True,
         )

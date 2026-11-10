@@ -141,6 +141,7 @@ def hmc_list_lpars(
 @tool(effect="read", operation="lpar.get", target_kind="lpar")
 def hmc_get_lpar(
     lpar_name_or_uuid: str,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
@@ -166,6 +167,7 @@ def hmc_get_lpar(
 @tool(effect="read", operation="lpar.get_state", target_kind="lpar")
 def hmc_get_lpar_state(
     lpar_name_or_uuid: str,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> str | None:

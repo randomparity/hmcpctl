@@ -283,7 +283,7 @@ def test_lpars_by_name(monkeypatch, mock_hmc):
     mock_hmc.get("/rest/api/uom/LogicalPartition/search/(PartitionName==aixprod)").mock(
         return_value=httpx.Response(200, text=LPAR_FEED.format(name="aixprod"))
     )
-    result = hmc_get_lpar("aixprod")
+    result = hmc_get_lpar(lpar_name_or_uuid="aixprod")
     assert result["UUID"] == LPAR_UUID
     assert result["Resource"]["PartitionName"] == "aixprod"
 
@@ -295,7 +295,7 @@ def test_lpars_name_not_found_returns_none(monkeypatch, mock_hmc):
         return_value=httpx.Response(200, text=EMPTY_FEED)
     )
     mock_system_summaries(mock_hmc, (SYSTEM_UUID, "sys-E2", "operating"))
-    assert hmc_get_lpar("ghost") is None
+    assert hmc_get_lpar(lpar_name_or_uuid="ghost") is None
 
 
 # ---------------------------------------------------------------------- #
@@ -313,7 +313,7 @@ def test_power_on_lpar_submits_job(monkeypatch, mock_hmc):
     route = mock_hmc.put(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn").mock(
         return_value=httpx.Response(202, text=JOB_ENTRY)
     )
-    result = hmc_power_on_lpar(LPAR_UUID)
+    result = hmc_power_on_lpar(lpar_name_or_uuid=LPAR_UUID)
     assert route.called
     body = route.calls.last.request.content.decode()
     assert "PowerOn</OperationName>" in body
@@ -356,7 +356,7 @@ def test_power_on_lpar_tool_forwards_activation_parameters(monkeypatch, mock_hmc
     )
 
     outcome = hmc_power_on_lpar(
-        LPAR_UUID,
+        lpar_name_or_uuid=LPAR_UUID,
         boot_mode="sms",
         partition_profile_uuid=PARTITION_PROFILE_UUID,
         operation_type="activate",
@@ -390,7 +390,7 @@ def test_power_off_lpar_submits_job(monkeypatch, mock_hmc):
     route = mock_hmc.put(
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOff"
     ).mock(return_value=httpx.Response(202, text=JOB_ENTRY))
-    hmc_power_off_lpar(LPAR_UUID, immediate=True)
+    hmc_power_off_lpar(lpar_name_or_uuid=LPAR_UUID, immediate=True)
     body = route.calls.last.request.content.decode()
     assert "PowerOff</OperationName>" in body
     assert '<ParameterName kb="ROR" kxe="false">immediate</ParameterName>' in body
@@ -404,7 +404,9 @@ def test_power_off_lpar_tool_forwards_shutdown_parameters(monkeypatch, mock_hmc)
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOff"
     ).mock(return_value=httpx.Response(202, text=JOB_ENTRY))
 
-    hmc_power_off_lpar(LPAR_UUID, restart=True, operation="osshutdown")
+    hmc_power_off_lpar(
+        lpar_name_or_uuid=LPAR_UUID, restart=True, operation="osshutdown"
+    )
 
     body = route.calls.last.request.content.decode()
     assert '<ParameterName kb="ROR" kxe="false">restart</ParameterName>' in body
@@ -422,7 +424,7 @@ def test_power_off_lpar_tool_cannot_send_dumprestart(monkeypatch, mock_hmc):
 
     assert "allow_dump_restart" not in inspect.signature(hmc_power_off_lpar).parameters
     with pytest.raises(ValueError, match="allow_dump_restart"):
-        hmc_power_off_lpar(LPAR_UUID, operation="dumprestart")
+        hmc_power_off_lpar(lpar_name_or_uuid=LPAR_UUID, operation="dumprestart")
     assert route.called is False
 
 
@@ -433,7 +435,7 @@ def test_dump_restart_lpar_tool_submits_dumprestart(monkeypatch, mock_hmc):
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOff"
     ).mock(return_value=httpx.Response(202, text=JOB_ENTRY))
 
-    hmc_dump_restart_lpar(LPAR_UUID, allow_dump_restart=True)
+    hmc_dump_restart_lpar(lpar_name_or_uuid=LPAR_UUID, allow_dump_restart=True)
 
     body = route.calls.last.request.content.decode()
     assert '<ParameterName kb="ROR" kxe="false">operation</ParameterName>' in body
@@ -449,7 +451,7 @@ def test_dump_restart_lpar_tool_refuses_without_opt_in(monkeypatch, mock_hmc):
     ).mock(return_value=httpx.Response(202, text=JOB_ENTRY))
 
     with pytest.raises(ValueError, match="allow_dump_restart"):
-        hmc_dump_restart_lpar(LPAR_UUID)
+        hmc_dump_restart_lpar(lpar_name_or_uuid=LPAR_UUID)
 
     assert route.called is False
 
@@ -568,7 +570,7 @@ def test_modify_lpar_builds_resource_xml(monkeypatch, mock_hmc):
         new=AsyncMock(return_value=LPAR_UUID),
     ):
         result = hmc_modify_lpar(
-            LPAR_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
             resources=LparResources(desired_memory=8192),
         )
     body = route.calls.last.request.content.decode()
@@ -591,9 +593,9 @@ def test_rename_lpar_authorizes_and_writes_name(monkeypatch, mock_hmc):
         new=guard,
     ):
         result = hmc_rename_lpar(
-            SYSTEM_UUID,
-            LPAR_UUID,
-            "renamed",
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            new_name="renamed",
             ownership_override=True,
         )
 
@@ -618,7 +620,11 @@ def test_foreign_owned_rename_issues_no_write(monkeypatch, mock_hmc):
         ),
         pytest.raises(PermissionError, match="foreign owner"),
     ):
-        hmc_rename_lpar(SYSTEM_UUID, LPAR_UUID, "renamed")
+        hmc_rename_lpar(
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            new_name="renamed",
+        )
     assert not write.called
 
 
@@ -635,7 +641,7 @@ def test_foreign_owned_delete_issues_no_write(monkeypatch, mock_hmc):
         ),
         pytest.raises(PermissionError, match="foreign owner"),
     ):
-        hmc_delete_lpar(SYSTEM_UUID, LPAR_UUID)
+        hmc_delete_lpar(system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID)
     assert not write.called
 
 
@@ -1378,7 +1384,7 @@ def test_power_on_with_wait_polls_the_submission_jobid(monkeypatch, mock_hmc):
     )
     entry_uuid_path, refused = live_response("rest-job-entry-uuid-refused")
     entry_uuid_route = mock_hmc.get(entry_uuid_path).mock(return_value=refused)
-    result = hmc_power_on_lpar(LPAR_UUID, wait=True, poll_interval=1)
+    result = hmc_power_on_lpar(lpar_name_or_uuid=LPAR_UUID, wait=True, poll_interval=1)
     assert poll_route.called
     assert not entry_uuid_route.called
     assert result.already_activated is False

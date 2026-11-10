@@ -79,12 +79,17 @@ def _authorize_lpar_mutations(monkeypatch, mock_hmc):
 
 
 LPM_RECOVERY_TOOL_CASES = [
-    (hmc_migrate_abort_lpar, "MigrateAbort", (LPAR_UUID,)),
-    (hmc_migrate_recover_lpar, "MigrateRecover", (LPAR_UUID,)),
+    (hmc_migrate_abort_lpar, "MigrateAbort", {"lpar_name_or_uuid": LPAR_UUID}),
+    (hmc_migrate_recover_lpar, "MigrateRecover", {"lpar_name_or_uuid": LPAR_UUID}),
     (
         hmc_remote_restart_lpar,
         "RemoteRestart",
-        (LPAR_UUID, "restart", "source-system", "vrml12-fsp"),
+        {
+            "lpar_name_or_uuid": LPAR_UUID,
+            "operation": "restart",
+            "system_name_or_uuid": "source-system",
+            "target_system_name_or_uuid": "vrml12-fsp",
+        },
     ),
 ]
 LPM_RECOVERY_OPERATION_CASES = [
@@ -116,8 +121,8 @@ def test_migrate_lpar_submits_job(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     route = _job_route(mock_hmc, "Migrate")
     result = hmc_migrate_lpar(
-        LPAR_UUID,
-        "vrml12-fsp",
+        lpar_name_or_uuid=LPAR_UUID,
+        target_system_name_or_uuid="vrml12-fsp",
         target_profile_name="prof1",
         wait_time=60,
         validate_first=False,
@@ -136,7 +141,11 @@ def test_migrate_lpar_resolves_target_system_uuid(monkeypatch, mock_hmc):
     resolver = AsyncMock(return_value="vrml12-fsp")
 
     with patch("hmcpctl.operations.lpar.migration.resolve_system_name", new=resolver):
-        hmc_migrate_lpar(LPAR_UUID, TARGET_SYSTEM_UUID, validate_first=False)
+        hmc_migrate_lpar(
+            lpar_name_or_uuid=LPAR_UUID,
+            target_system_name_or_uuid=TARGET_SYSTEM_UUID,
+            validate_first=False,
+        )
 
     resolver.assert_awaited_once_with(ANY, TARGET_SYSTEM_UUID)
     body = route.calls.last.request.content.decode()
@@ -147,7 +156,9 @@ def test_migrate_validate_lpar_submits_job(monkeypatch, mock_hmc):
     """hmc_migrate_validate_lpar PUTs a MigrateValidate job."""
     _hmc_env(monkeypatch)
     route = _job_route(mock_hmc, "MigrateValidate")
-    hmc_migrate_validate_lpar(LPAR_UUID, "vrml12-fsp")
+    hmc_migrate_validate_lpar(
+        lpar_name_or_uuid=LPAR_UUID, target_system_name_or_uuid="vrml12-fsp"
+    )
     body = route.calls.last.request.content.decode()
     assert "MigrateValidate</OperationName>" in body
     assert "vrml12-fsp" in body
@@ -157,7 +168,7 @@ def test_migrate_abort_lpar_submits_job(monkeypatch, mock_hmc):
     """hmc_migrate_abort_lpar PUTs a MigrateAbort job."""
     _hmc_env(monkeypatch)
     route = _job_route(mock_hmc, "MigrateAbort")
-    hmc_migrate_abort_lpar(LPAR_UUID)
+    hmc_migrate_abort_lpar(lpar_name_or_uuid=LPAR_UUID)
     assert "MigrateAbort</OperationName>" in route.calls.last.request.content.decode()
 
 
@@ -165,7 +176,7 @@ def test_migrate_recover_lpar_submits_job(monkeypatch, mock_hmc):
     """hmc_migrate_recover_lpar PUTs a MigrateRecover job."""
     _hmc_env(monkeypatch)
     route = _job_route(mock_hmc, "MigrateRecover")
-    hmc_migrate_recover_lpar(LPAR_UUID)
+    hmc_migrate_recover_lpar(lpar_name_or_uuid=LPAR_UUID)
     assert "MigrateRecover</OperationName>" in route.calls.last.request.content.decode()
 
 
@@ -173,7 +184,12 @@ def test_remote_restart_lpar_submits_job(monkeypatch, mock_hmc):
     """hmc_remote_restart_lpar PUTs a RemoteRestart job with the target."""
     _hmc_env(monkeypatch)
     route = _job_route(mock_hmc, "RemoteRestart")
-    hmc_remote_restart_lpar(LPAR_UUID, "restart", "source-system", "vrml12-fsp")
+    hmc_remote_restart_lpar(
+        lpar_name_or_uuid=LPAR_UUID,
+        operation="restart",
+        system_name_or_uuid="source-system",
+        target_system_name_or_uuid="vrml12-fsp",
+    )
     body = route.calls.last.request.content.decode()
     assert "RemoteRestart</OperationName>" in body
     assert "restart" in body
@@ -195,7 +211,7 @@ def test_lpm_recovery_tools_wait_for_terminal_outcome(
         return_value=httpx.Response(200, text=COMPLETED_JOB_ENTRY)
     )
 
-    result = tool_fn(*args, wait=True, timeout_seconds=60, poll_interval=1)
+    result = tool_fn(**args, wait=True, timeout_seconds=60, poll_interval=1)
 
     assert poll_route.called
     assert set(asdict(result)) == JOB_OUTCOME_KEYS
@@ -221,7 +237,7 @@ def test_lpm_recovery_tools_return_explicit_timeout(
         return_value=httpx.Response(200, text=RUNNING_JOB_ENTRY)
     )
 
-    result = tool_fn(*args, wait=True, timeout_seconds=0, poll_interval=1)
+    result = tool_fn(**args, wait=True, timeout_seconds=0, poll_interval=1)
 
     assert set(asdict(result)) == JOB_OUTCOME_KEYS
     assert result.status == "RUNNING"
@@ -350,7 +366,11 @@ def test_migrate_lpar_error_propagates(monkeypatch, mock_hmc):
         return_value=httpx.Response(500)
     )
     with pytest.raises(HMCError) as exc_info:
-        hmc_migrate_lpar(LPAR_UUID, "vrml12-fsp", validate_first=False)
+        hmc_migrate_lpar(
+            lpar_name_or_uuid=LPAR_UUID,
+            target_system_name_or_uuid="vrml12-fsp",
+            validate_first=False,
+        )
     assert exc_info.value.status_code == 500
     assert "do/Migrate" in str(exc_info.value)
 
@@ -368,8 +388,8 @@ def test_migrate_lpar_wait_true_polls_to_completion(monkeypatch, mock_hmc):
         return_value=httpx.Response(200, text=COMPLETED_JOB_ENTRY)
     )
     result = hmc_migrate_lpar(
-        LPAR_UUID,
-        "vrml12-fsp",
+        lpar_name_or_uuid=LPAR_UUID,
+        target_system_name_or_uuid="vrml12-fsp",
         wait=True,
         timeout_seconds=60,
         poll_interval=1,
@@ -387,7 +407,12 @@ def test_migrate_lpar_wait_false_returns_submitted_job(monkeypatch, mock_hmc):
     poll_route = mock_hmc.get(f"/rest/api/uom/jobs/{JOB_ID}").mock(
         return_value=httpx.Response(200, text=COMPLETED_JOB_ENTRY)
     )
-    result = hmc_migrate_lpar(LPAR_UUID, "vrml12-fsp", wait=False, validate_first=False)
+    result = hmc_migrate_lpar(
+        lpar_name_or_uuid=LPAR_UUID,
+        target_system_name_or_uuid="vrml12-fsp",
+        wait=False,
+        validate_first=False,
+    )
     assert submit_route.called
     assert not poll_route.called
     assert result.job_id == JOB_ID
@@ -401,7 +426,11 @@ def test_migrate_validate_wait_true_polls_to_completion(monkeypatch, mock_hmc):
     )
 
     result = hmc_migrate_validate_lpar(
-        LPAR_UUID, "vrml12-fsp", wait=True, timeout_seconds=60, poll_interval=1
+        lpar_name_or_uuid=LPAR_UUID,
+        target_system_name_or_uuid="vrml12-fsp",
+        wait=True,
+        timeout_seconds=60,
+        poll_interval=1,
     )
 
     assert submit_route.called
@@ -419,7 +448,10 @@ def test_remote_restart_keeps_source_and_destination_uuid_distinct(
     destination_uuid = "00000000-0000-0000-0000-000000000003"
 
     result = hmc_remote_restart_lpar(
-        LPAR_UUID, "restart", TARGET_SYSTEM_UUID, destination_uuid
+        lpar_name_or_uuid=LPAR_UUID,
+        operation="restart",
+        system_name_or_uuid=TARGET_SYSTEM_UUID,
+        target_system_name_or_uuid=destination_uuid,
     )
 
     request = route.calls.last.request

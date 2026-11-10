@@ -227,11 +227,12 @@ def hmc_restore_lpar_profiles(
 
 @tool(effect="destructive", operation="lpar_profile.sync", target_kind="lpar")
 def hmc_sync_lpar_profile(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     ownership_override: bool = False,
-    profile: str | None = None,
     mode: ProfileSyncMode = "enable",
+    *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
 ) -> str:
     """Set an LPAR's profile-synchronization setting (``sync_curr_profile``).
 
@@ -280,11 +281,12 @@ def hmc_sync_lpar_profile(
 
 @tool(effect="mutate", operation="pcie.assign_dedicated_slot", target_kind="lpar")
 def hmc_assign_dedicated_pcie_slot(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str,
     drc_index: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> None:
     """Assign a dedicated PCIe slot when safe profile readback is available.
@@ -321,11 +323,12 @@ def hmc_assign_dedicated_pcie_slot(
 
 @tool(effect="mutate", operation="pcie.unassign_dedicated_slot", target_kind="lpar")
 def hmc_unassign_dedicated_pcie_slot(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str,
     drc_index: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> None:
     """Unassign a dedicated PCIe slot when safe profile readback is available.
@@ -363,9 +366,7 @@ def hmc_unassign_dedicated_pcie_slot(
 # Saved-profile lifecycle; VIOS tools retain their own policy target kind.
 @tool(effect="read", operation="lpar_profile.list", target_kind="lpar")
 def hmc_list_partition_profiles(
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
-    profile: str | None = None,
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> PartitionProfileInventory:
     """List bounded saved profiles and their contained names,fields and opaque ETags.
 
@@ -387,9 +388,10 @@ def hmc_list_partition_profiles(
 
 @tool(effect="read", operation="lpar_profile.read", target_kind="lpar")
 def hmc_read_partition_profile(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PartitionProfileRecord:
     """Read one exact saved-profile name or UUID within its owning partition.
@@ -414,13 +416,14 @@ def hmc_read_partition_profile(
 
 @tool(effect="mutate", operation="lpar_profile.update", target_kind="lpar")
 def hmc_update_partition_profile(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
     expected_etag: str,
     patch: ProfilePatch,
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PartitionProfileOutcome:
     """Patch typed saved fields with If-Match while preserving the complete fetched document.
@@ -456,7 +459,6 @@ def hmc_update_partition_profile(
 
 @tool(effect="destructive", operation="lpar_profile.save_current", target_kind="lpar")
 def hmc_save_current_partition_profile(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     name: str,
     overwrite: bool = False,
@@ -466,6 +468,8 @@ def hmc_save_current_partition_profile(
     ownership_override: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PartitionProfileOutcome:
     """Save current configuration to a new profile,or force-save after a retained recovery copy verifies.
@@ -507,13 +511,14 @@ def hmc_save_current_partition_profile(
 
 @tool(effect="mutate", operation="lpar_profile.set_default", target_kind="lpar")
 def hmc_set_default_partition_profile(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PartitionProfileOutcome:
     """Select a contained default profile with strict native job results and fresh readback.
@@ -548,12 +553,13 @@ def hmc_set_default_partition_profile(
 
 @tool(effect="destructive", operation="lpar_profile.delete", target_kind="lpar")
 def hmc_delete_partition_profile(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
     expected_etag: str,
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PartitionProfileOutcome:
     """Delete only an unprotected saved profile after an empty unfiltered system-profile inventory.

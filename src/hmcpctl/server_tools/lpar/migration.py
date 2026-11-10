@@ -33,9 +33,10 @@ def hmc_migrate_lpar(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
     validate_first: bool = True,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> JobOutcome:
     """Live-migrate (LPM) an LPAR to another managed system.
 
@@ -98,9 +99,10 @@ def hmc_migrate_lpar_with_affinity_preflight(
     wait: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> LpmAffinityMigrationResult:
     """Run explicit affinity preflight before validation-first LPM.
 
@@ -149,6 +151,7 @@ def hmc_migrate_validate_lpar(
     wait: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> JobOutcome:
@@ -199,9 +202,10 @@ def hmc_migrate_abort_lpar(
     wait: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> JobOutcome:
     """Abort an in-progress LPM migration of an LPAR.
 
@@ -246,8 +250,9 @@ def hmc_migrate_recover_lpar(
     wait: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
-    profile: str | None = None,
     ownership_override: bool = False,
+    *,
+    profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> JobOutcome:
     """Recover an LPAR after a failed LPM migration.
@@ -291,15 +296,16 @@ def hmc_migrate_recover_lpar(
 def hmc_remote_restart_lpar(
     lpar_name_or_uuid: str,
     operation: RemoteRestartOperation,
-    system_name_or_uuid: str,
     target_system_name_or_uuid: str | None = None,
     use_current_data: bool = False,
     retain_devices: bool = False,
     wait: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
-    profile: str | None = None,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
 ) -> JobOutcome:
     """Remote-restart a failed LPAR on another managed system.
 

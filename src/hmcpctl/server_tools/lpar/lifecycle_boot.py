@@ -24,9 +24,7 @@ tool, register_tools, tool_security = tool_module()
 
 @tool(effect="read", operation="boot_order.read", target_kind="lpar")
 def hmc_read_lpar_boot_order(
-    system_name_or_uuid: str,
-    lpar_name_or_uuid: str,
-    profile: str | None = None,
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> dict[str, Any]:
     """Read current, pending, and last-used boot-device state for an LPAR.
 
@@ -48,9 +46,10 @@ def hmc_read_lpar_boot_order(
 
 @tool(effect="read", operation="lpar.list_refcodes", target_kind="lpar")
 def hmc_read_lpar_refcodes(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     count: int = 1,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> list[dict[str, Any]]:
     """Read recent partition reference codes with offline POWER9 definitions.
@@ -93,10 +92,10 @@ def hmc_read_lpar_refcodes(
 
 @tool(effect="mutate", operation="boot_order.set", target_kind="lpar")
 def hmc_set_lpar_boot_order(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     devices: list[str] | None = None,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
     profile: str | None = None,
     boot_string: str | None = None,
@@ -142,9 +141,9 @@ def hmc_set_lpar_boot_order(
 
 @tool(effect="mutate", operation="boot_order.clear", target_kind="lpar")
 def hmc_clear_lpar_boot_order(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
     profile: str | None = None,
 ) -> dict[str, Any] | None:

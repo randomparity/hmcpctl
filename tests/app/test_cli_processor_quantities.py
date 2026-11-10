@@ -30,7 +30,7 @@ def test_mcp_modes_preserve_profile_scope_and_ownership(monkeypatch):
     monkeypatch.setattr(lifecycle, "with_client", client)
     change = LparProcessorChange(operation="add", processors=1, processing_units="0.10")
     assert lifecycle.hmc_dlpar_proc(
-        "lpar-R1",
+        lpar_name_or_uuid="lpar-R1",
         resources=LparResources(),
         profile="profile-R1",
         system_name_or_uuid="sys-R1",
@@ -42,7 +42,11 @@ def test_mcp_modes_preserve_profile_scope_and_ownership(monkeypatch):
     )
     resources = LparResources(desired_procs=0.5, desired_vcpus=2)
     assert lifecycle.hmc_dlpar_proc(
-        "lpar-R1", resources, "profile-R1", "sys-R1", True
+        lpar_name_or_uuid="lpar-R1",
+        resources=resources,
+        profile="profile-R1",
+        system_name_or_uuid="sys-R1",
+        ownership_override=True,
     ) == {"legacy": True}
     absolute.assert_awaited_once_with(
         hmc, "lpar-R1", resources, system_name_or_uuid="sys-R1", ownership_override=True
@@ -69,7 +73,7 @@ def test_mcp_invalid_mode_refuses_before_client(monkeypatch, system, resources):
     monkeypatch.setattr(lifecycle, "with_client", client)
     with pytest.raises(ValueError):
         lifecycle.hmc_dlpar_proc(
-            "lpar-R1",
+            lpar_name_or_uuid="lpar-R1",
             resources=resources,
             system_name_or_uuid=system,
             change=LparProcessorChange(operation="add", processors=1),

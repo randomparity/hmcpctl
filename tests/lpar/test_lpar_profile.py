@@ -216,7 +216,9 @@ def test_sync_lpar_profile_runs_correct_command(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SYNC_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_sync_lpar_profile(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_sync_lpar_profile(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     expected_cmd = (
         f"chsyscfg -r lpar -m {SYSTEM_NAME} -i name={LPAR_NAME},sync_curr_profile=1"
@@ -233,7 +235,9 @@ def test_sync_lpar_profile_returns_cli_output(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(RAW_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_sync_lpar_profile(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_sync_lpar_profile(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     assert result == RAW_OUTPUT
 
@@ -248,7 +252,9 @@ def test_sync_mode_renders_setting_value(monkeypatch, mock_hmc, mode, value):
     conn_mock = _make_ssh_mock("")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        hmc_sync_lpar_profile(SYSTEM_UUID, LPAR_UUID, mode=mode)
+        hmc_sync_lpar_profile(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID, mode=mode
+        )
 
     expected_cmd = (
         f"chsyscfg -r lpar -m {SYSTEM_NAME} "

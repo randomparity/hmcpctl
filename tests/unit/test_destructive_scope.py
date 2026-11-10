@@ -152,7 +152,9 @@ def test_power_off_lpar_tool_forwards_system_scope(monkeypatch):
     monkeypatch.setattr("hmcpctl._app.client_from_env", _client_factory(hmc))
     monkeypatch.setattr(server_lpars, "power_off_lpar", operation)
 
-    server_lpars.hmc_power_off_lpar("aix1", system_name_or_uuid="system-name")
+    server_lpars.hmc_power_off_lpar(
+        lpar_name_or_uuid="aix1", system_name_or_uuid="system-name"
+    )
 
     assert operation.await_args.kwargs["system_name_or_uuid"] == "system-name"
 

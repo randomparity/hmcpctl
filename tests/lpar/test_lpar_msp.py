@@ -61,7 +61,9 @@ def test_get_lpar_msp_runs_correct_command(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock("1\n")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_msp(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_get_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     expected_cmd = (
         f"lssyscfg -r lpar -m {SYSTEM_NAME} --filter lpar_names={LPAR_NAME} -F msp"
@@ -77,7 +79,9 @@ def test_get_lpar_msp_returns_true_when_enabled(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock("1\n")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_msp(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_get_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     assert result is True
 
@@ -89,7 +93,9 @@ def test_get_lpar_msp_returns_false_when_disabled(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock("0\n")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_msp(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_get_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     assert result is False
 
@@ -104,7 +110,7 @@ def test_get_lpar_msp_rejects_unexpected_output(monkeypatch, mock_hmc, raw):
         patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock),
         pytest.raises(HMCCLIError, match="expected '0' or '1'"),
     ):
-        hmc_get_lpar_msp(SYSTEM_UUID, LPAR_UUID)
+        hmc_get_lpar_msp(system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID)
 
 
 # ---------------------------------------------------------------------- #
@@ -162,7 +168,9 @@ def test_set_lpar_msp_by_vios_name_runs_correct_command(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock_seq("", "vioserver\n", "")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_set_lpar_msp(SYSTEM_UUID, VIOS_NAME, True)
+        result = hmc_set_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=VIOS_NAME, enabled=True
+        )
 
     assert conn_mock.run.call_count == 3
     description_cmd, env_cmd, chsyscfg_cmd = (
@@ -186,7 +194,11 @@ def test_set_lpar_msp_by_vios_uuid_matches_case_insensitively(monkeypatch, mock_
     conn_mock = _make_ssh_mock_seq("", "vioserver\n", "")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        hmc_set_lpar_msp(SYSTEM_UUID, VIOS_UUID.upper(), False)
+        hmc_set_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=VIOS_UUID.upper(),
+            enabled=False,
+        )
 
     chsyscfg_cmd = conn_mock.run.call_args_list[2][0][0]
     assert (
@@ -202,7 +214,9 @@ def test_set_lpar_msp_returns_cli_output(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock_seq("", "vioserver\n", RAW_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_set_lpar_msp(SYSTEM_UUID, VIOS_UUID, True)
+        result = hmc_set_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=VIOS_UUID, enabled=True
+        )
 
     assert result == RAW_OUTPUT
 
@@ -227,7 +241,9 @@ def test_set_lpar_msp_refuses_non_vios_before_ssh(monkeypatch, mock_hmc, selecto
         patch("hmcpctl.ssh.transport.asyncssh.connect", new=connect),
         pytest.raises(ResourceNotFoundError, match="lpar_env=vioserver"),
     ):
-        hmc_set_lpar_msp(SYSTEM_UUID, selector, True)
+        hmc_set_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=selector, enabled=True
+        )
 
     connect.assert_not_called()
 
@@ -245,7 +261,9 @@ def test_set_lpar_msp_keeps_ssh_lpar_env_guard(monkeypatch, mock_hmc):
         patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock),
         pytest.raises(HMCCLIError, match="only valid for a VIOS"),
     ):
-        hmc_set_lpar_msp(SYSTEM_UUID, VIOS_NAME, True)
+        hmc_set_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=VIOS_NAME, enabled=True
+        )
 
     assert conn_mock.run.call_count == 2
 
@@ -269,7 +287,9 @@ def test_set_lpar_msp_rejects_partition_not_found(monkeypatch, mock_hmc):
         patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock),
         pytest.raises(HMCCLIError, match="HSCL8012 The partition named .* not found"),
     ):
-        hmc_set_lpar_msp(SYSTEM_UUID, VIOS_UUID, True)
+        hmc_set_lpar_msp(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=VIOS_UUID, enabled=True
+        )
 
     assert conn_mock.run.call_count == 2
 

@@ -119,7 +119,10 @@ def test_mcp_schema_default_and_forwarding(monkeypatch, override):
     client = Mock(side_effect=lambda fn, **kw: asyncio.run(fn(hmc)))
     monkeypatch.setattr(lifecycle, "with_client", client)
     result = lifecycle.hmc_reset_lpar_memory_statistics(
-        "guest-R1", "sys-R1", profile="lab", ownership_override=override
+        lpar_name_or_uuid="guest-R1",
+        system_name_or_uuid="sys-R1",
+        profile="lab",
+        ownership_override=override,
     )
     assert result["workflow_completed"]
     operation.assert_awaited_once_with(

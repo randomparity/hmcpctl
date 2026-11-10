@@ -191,7 +191,7 @@ def test_completed_activation_runs_and_returns_assessment() -> None:
         ),
     ):
         result = hmc_power_on_lpar(
-            "lpar-1",
+            lpar_name_or_uuid="lpar-1",
             wait=True,
             system_name_or_uuid="system-1",
             affinity_assessment=_request(),
@@ -221,7 +221,7 @@ def test_unconfirmed_activation_never_runs_assessment(status: str) -> None:
         ),
     ):
         result = hmc_power_on_lpar(
-            "lpar-1",
+            lpar_name_or_uuid="lpar-1",
             wait=True,
             system_name_or_uuid="system-1",
             affinity_assessment=_request(),
@@ -255,7 +255,7 @@ def test_malformed_measurement_preserves_job_and_applies_intent(
         ),
     ):
         result = hmc_power_on_lpar(
-            "lpar-1",
+            lpar_name_or_uuid="lpar-1",
             wait=True,
             system_name_or_uuid="system-1",
             affinity_assessment=_request(response),
