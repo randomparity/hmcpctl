@@ -39,6 +39,7 @@ from hmcpctl import documents, jobs
 from hmcpctl.documents.access import build_hmc_user_document
 from hmcpctl.documents.logon import build_logon_request_document
 from hmcpctl.documents.lpar import build_lpar_document
+from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.documents.remote_access import build_remote_access_document
 from hmcpctl.documents.storage import (
     build_vscsi_mapping_document,
@@ -62,6 +63,8 @@ DOCUMENT_MODULES = tuple(
     for info in pkgutil.iter_modules(documents.__path__)
 )
 BUILDER_MODULES = (*DOCUMENT_MODULES, jobs, jobs_requests, update_jobs)
+# These functions build native command records, whose grammar has its own tests.
+_NATIVE_RECORD_BUILDERS = (build_attribute_record, build_filter)
 
 ADR_0042 = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -85,6 +88,7 @@ def _is_builder(name: str, obj: object, module: types.ModuleType) -> bool:
     return (
         inspect.isfunction(obj)
         and not inspect.iscoroutinefunction(obj)
+        and obj not in _NATIVE_RECORD_BUILDERS
         and not name.startswith("_")
         and (name.startswith("build_") or name.endswith("_job"))
         and (
