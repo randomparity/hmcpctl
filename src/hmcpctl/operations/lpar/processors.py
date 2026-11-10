@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from decimal import Decimal, localcontext
-from typing import Any
+from typing import Any, Literal, NotRequired, TypedDict, cast, overload
 
 import asyncssh
 
@@ -39,6 +39,90 @@ _OS = {
 _MEMORY = ("current_minimum_mib", "current_memory_mib", "current_maximum_mib")
 
 
+class _ProcessorSnapshot(memory._MemorySnapshot):
+    processor_mode: Literal["ded", "shared"]
+    dynamic_processor: object
+    current_minimum_processors: int
+    current_processors: int
+    current_maximum_processors: int
+    pending_minimum_processors: int
+    pending_processors: int
+    pending_maximum_processors: int
+    current_minimum_processing_units: NotRequired[Decimal]
+    current_processing_units: NotRequired[Decimal]
+    current_maximum_processing_units: NotRequired[Decimal]
+    pending_minimum_processing_units: NotRequired[Decimal]
+    pending_processing_units: NotRequired[Decimal]
+    pending_maximum_processing_units: NotRequired[Decimal]
+    runtime_processors: int
+    runtime_processing_units: Decimal | None
+
+
+class _ProcessorCapacity(TypedDict):
+    total: Decimal
+    available: Decimal
+    count_limit: int
+    os_limit: int
+    floor: NotRequired[Decimal]
+    uuid: object
+    name: object
+    state: object
+
+
+class _ProcessorQuantities(TypedDict):
+    processors: int | None
+    processing_units: Decimal | None
+
+
+class _ProcessorTargets(_ProcessorQuantities):
+    reset: bool
+    deferred: bool
+    noop: bool
+
+
+class _ProcessorQuantity(TypedDict):
+    minimum: int | Decimal
+    current: int | Decimal
+    maximum: int | Decimal
+    pending_minimum: int | Decimal
+    pending_maximum: int | Decimal
+    runtime: int | Decimal | None
+
+
+def _quantity(
+    snapshot: _ProcessorSnapshot, quantity: Literal["processors", "processing_units"]
+) -> _ProcessorQuantity:
+    if quantity == "processors":
+        return {
+            "minimum": snapshot["current_minimum_processors"],
+            "current": snapshot["current_processors"],
+            "maximum": snapshot["current_maximum_processors"],
+            "pending_minimum": snapshot["pending_minimum_processors"],
+            "pending_maximum": snapshot["pending_maximum_processors"],
+            "runtime": snapshot["runtime_processors"],
+        }
+    return {
+        "minimum": snapshot["current_minimum_processing_units"],
+        "current": snapshot["current_processing_units"],
+        "maximum": snapshot["current_maximum_processing_units"],
+        "pending_minimum": snapshot["pending_minimum_processing_units"],
+        "pending_maximum": snapshot["pending_maximum_processing_units"],
+        "runtime": snapshot["runtime_processing_units"],
+    }
+
+
+@overload
+def _number(value: object, label: str, *, whole: Literal[True]) -> int: ...
+
+
+@overload
+def _number(value: object, label: str, *, whole: Literal[False] = False) -> Decimal: ...
+
+
+@overload
+def _number(value: object, label: str, *, whole: bool) -> Decimal | int: ...
+
+
 def _number(value: object, label: str, *, whole: bool = False) -> Decimal | int:
     try:
         return bounded_processor_number(leaf_text(value), whole=whole)
@@ -46,7 +130,7 @@ def _number(value: object, label: str, *, whole: bool = False) -> Decimal | int:
         raise ValueError(f"Processor change requires valid {label}: {error}") from error
 
 
-def _mode(value: object) -> str:
+def _mode(value: object) -> Literal["ded", "shared"]:
     value = leaf_text(value)
     if value in (True, "true", "1"):
         return "ded"
@@ -55,7 +139,9 @@ def _mode(value: object) -> str:
     raise ValueError("Processor change requires explicit processor mode")
 
 
-def _bounded_memory_snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[str, Any]:
+def _bounded_memory_snapshot(
+    entry: dict[str, Any] | None, uuid: str
+) -> memory._MemorySnapshot:
     resource = resource_container(entry or {}, "Resource")
     _number(resource.get("PartitionID"), "PartitionID", whole=True)
     memory_config = resource_container(resource, "PartitionMemoryConfiguration")
@@ -87,14 +173,13 @@ def _bounded_memory_snapshot(entry: dict[str, Any] | None, uuid: str) -> dict[st
     )
     for field in fields:
         _number(current.get(field), field, whole="Units" not in field)
-    snapshot = memory._snapshot(entry, uuid)
-    return {**snapshot, "change_location": asdict(snapshot["change_location"])}
+    return memory._snapshot(entry, uuid)
 
 
 def _snapshot(
     entry: dict[str, Any] | None, uuid: str, row: dict[str, str]
-) -> dict[str, Any]:
-    before = _bounded_memory_snapshot(entry, uuid)
+) -> _ProcessorSnapshot:
+    before: dict[str, Any] = dict(_bounded_memory_snapshot(entry, uuid))
     resource = resource_container(entry or {}, "Resource")
     progress = leaf_text(resource.get("IsOperationInProgress"))
     if progress not in (True, False, "true", "false", "1", "0"):
@@ -206,10 +291,10 @@ def _snapshot(
         else str(_number(value, name, whole=True))
         for name, value in before["processors"].items()
     }
-    return before
+    return cast(_ProcessorSnapshot, before)
 
 
-def _capacity(system: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
+def _capacity(system: dict[str, Any], before: _ProcessorSnapshot) -> _ProcessorCapacity:
     resource = resource_container(system, "Resource")
     if resource.get("State") != "operating":
         raise ValueError("Processor change requires an operating managed system")
@@ -245,17 +330,20 @@ def _capacity(system: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("System processor capacity or limits are contradictory")
     if not dedicated and not 0 < values["floor"] <= 1:
         raise ValueError("System minimum units per virtual processor is invalid")
-    return {
-        **values,
-        "uuid": system.get("UUID"),
-        "name": resource.get("SystemName"),
-        "state": resource.get("State"),
-    }
+    return cast(
+        _ProcessorCapacity,
+        {
+            **values,
+            "uuid": system.get("UUID"),
+            "name": resource.get("SystemName"),
+            "state": resource.get("State"),
+        },
+    )
 
 
 def _targets(
-    before: dict[str, Any], change: LparProcessorChange, system: dict[str, Any]
-) -> dict[str, Any]:
+    before: _ProcessorSnapshot, change: LparProcessorChange, system: dict[str, Any]
+) -> _ProcessorTargets:
     capacity = _capacity(system, before)
     if (
         before["state"] not in ("running", "not activated")
@@ -303,7 +391,8 @@ def _targets(
         amount = getattr(change, quantity)
         if amount is None:
             continue
-        current = before[f"current_{quantity}"]
+        observed = _quantity(before, quantity)
+        current = observed["current"]
         with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
             target = {
                 "add": current + amount,
@@ -313,15 +402,15 @@ def _targets(
         if target < 0:
             raise ValueError("Processor subtraction exceeds current quantity")
         minimum, maximum = (
-            before[f"current_minimum_{quantity}"],
-            before[f"current_maximum_{quantity}"],
+            observed["minimum"],
+            observed["maximum"],
         )
         if inactive and maximum == 0:
             minimum, maximum = (
-                before[f"pending_minimum_{quantity}"],
-                before[f"pending_maximum_{quantity}"],
+                observed["pending_minimum"],
+                observed["pending_maximum"],
             )
-        if target > min(maximum, before[f"pending_maximum_{quantity}"]):
+        if target > min(maximum, observed["pending_maximum"]):
             raise ValueError("Requested processor target exceeds partition maximum")
         reset = (
             change.operation == "set"
@@ -337,7 +426,8 @@ def _targets(
         targets["reset"] |= reset
     if targets["reset"]:
         if any(
-            targets[key] is not None and targets[key] > before[f"current_{key}"]
+            targets[key] is not None
+            and targets[key] > _quantity(before, key)["current"]
             for key in ("processors", "processing_units")
         ):
             raise ValueError("Processor reset contradicts simultaneous positive growth")
@@ -353,12 +443,13 @@ def _targets(
             raise ValueError(
                 "Processor target exceeds applicable system or OS count limit"
             )
-        with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
-            minimum_units = None if units is None else capacity["floor"] * count
-        if units is not None and not minimum_units <= units <= count:
-            raise ValueError(
-                "Shared processor entitlement violates units per virtual processor bounds"
-            )
+        if units is not None:
+            with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
+                minimum_units = capacity["floor"] * count
+            if not minimum_units <= units <= count:
+                raise ValueError(
+                    "Shared processor entitlement violates units per virtual processor bounds"
+                )
         allocated = count if units is None else units
         previous = (
             before["current_processors"]
@@ -378,11 +469,11 @@ def _targets(
             targets[quantity] = _number(
                 targets[quantity], quantity, whole=quantity == "processors"
             )
-    return targets
+    return cast(_ProcessorTargets, targets)
 
 
 def _postconditions(
-    before: dict[str, Any], after: dict[str, Any], expected: dict[str, Any]
+    before: _ProcessorSnapshot, after: _ProcessorSnapshot, expected: _ProcessorTargets
 ) -> bool:
     if any(
         before[key] != after[key]
@@ -399,25 +490,23 @@ def _postconditions(
         raise ValueError("Processor readback identity, state or mode changed")
     checks = [not after["operation_in_progress"]]
     for key in ("processors", "processing_units"):
-        if expected[key] is None:
+        wanted = expected[key]
+        if wanted is None:
             continue
-        checks.append(after[f"current_{key}"] == expected[key])
+        original, observed = _quantity(before, key), _quantity(after, key)
+        checks.append(observed["current"] == wanted)
         if not expected["deferred"]:
-            checks.append(after[f"runtime_{key}"] == expected[key])
+            checks.append(observed["runtime"] == wanted)
         initializes = (
             before["state"] == "not activated"
             and not expected["reset"]
-            and expected[key] > 0
-            and all(
-                before[f"current_{bound}{key}"] == 0
-                for bound in ("minimum_", "", "maximum_")
-            )
+            and wanted > 0
+            and all(original[bound] == 0 for bound in ("minimum", "current", "maximum"))
         )
-        for bound in ("minimum_", "maximum_"):
-            field = f"current_{bound}{key}"
+        for bound in ("minimum", "maximum"):
             checks.append(
                 initializes
-                or after[field] == (0 if expected["reset"] else before[field])
+                or observed[bound] == (0 if expected["reset"] else original[bound])
             )
     checks.extend(
         after[key] == (0 if expected["reset"] else before[key]) for key in _MEMORY
@@ -426,14 +515,14 @@ def _postconditions(
 
 
 def _result(
-    before: dict[str, Any],
-    after: dict[str, Any] | None,
-    expected: dict[str, Any],
+    before: _ProcessorSnapshot,
+    after: _ProcessorSnapshot | None,
+    expected: _ProcessorTargets,
     outcome: str,
     submission_error: str | None = None,
     read_error: str | None = None,
 ) -> dict[str, Any]:
-    location = ChangeLocation(**(after or before)["change_location"])
+    location = (after or before)["change_location"]
     warnings = (
         []
         if location.lives_in == "current-configuration-and-profile"
@@ -452,12 +541,16 @@ def _result(
     if read_error:
         warnings.append(read_error[:2048])
 
-    def render(values: dict[str, Any] | None) -> dict[str, Any] | None:
+    def render(
+        values: _ProcessorSnapshot | _ProcessorTargets | None,
+    ) -> dict[str, Any] | None:
         return (
             None
             if values is None
             else {
-                key: f"{_number(value, key):.2f}"
+                key: asdict(value)
+                if isinstance(value, ChangeLocation)
+                else f"{_number(value, key):.2f}"
                 if isinstance(value, Decimal)
                 else _number(value, key, whole=True)
                 if type(value) is int
@@ -474,7 +567,7 @@ def _result(
         "after": render(after),
         "expected": render(expected),
         "submission_error": submission_error,
-        "change_location": (after or before)["change_location"],
+        "change_location": asdict((after or before)["change_location"]),
         "warnings": warnings,
     }
 
@@ -523,7 +616,7 @@ async def change_lpar_processors(
         max_output_bytes=65536,
     )
 
-    async def evidence(current_entry: dict[str, Any] | None) -> dict[str, Any]:
+    async def evidence(current_entry: dict[str, Any] | None) -> _ProcessorSnapshot:
         row = await read_lpar_processor_quantities(
             hmc.config, system_name, identity["partition_id"]
         )

@@ -1708,3 +1708,26 @@ def test_independent_zero_envelope_postcondition_guards(processor_boundary, guar
     before = _snapshot(b.before, LPAR_UUID, b.row)
     after = _snapshot(b.after, LPAR_UUID, b.after_row)
     assert not _postconditions(before, after, expected)
+
+
+@pytest.mark.parametrize("dedicated", [False, True])
+def test_location_stays_typed_until_result_serialization(dedicated):
+    import json
+    from dataclasses import asdict
+
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+    from hmcpctl.operations.lpar.processors import _result, _targets
+    from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+
+    before = snapshot(dedicated)
+    location = before["change_location"]
+    assert isinstance(location, ChangeLocation)
+    expected = _targets(
+        before, LparProcessorChange(operation="add", processors=0), processor_system()
+    )
+    result = _result(before, before, expected, "noop")
+    assert result["change_location"] == asdict(location)
+    assert result["before"]["change_location"] == asdict(location)
+    assert result["after"]["change_location"] == asdict(location)
+    assert ("current_processing_units" in before) is not dedicated
+    json.dumps(result, allow_nan=False)

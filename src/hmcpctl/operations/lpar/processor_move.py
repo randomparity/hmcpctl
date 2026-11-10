@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from decimal import ROUND_CEILING, ROUND_FLOOR, localcontext
-from typing import Any
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
+from typing import Any, Literal, cast
 
 import asyncssh
 
@@ -27,10 +27,17 @@ from hmcpctl.ssh.processors import (
 from . import memory, processors
 from .ownership import authorize_lpar_mutation
 
-_QUANTITIES = ("processors", "processing_units")
+_Peer = tuple[str, processors._ProcessorSnapshot]
+
+_QUANTITIES: tuple[Literal["processors", "processing_units"], ...] = (
+    "processors",
+    "processing_units",
+)
 
 
-async def _read_endpoint(hmc, system_uuid, system_name, selector):
+async def _read_endpoint(
+    hmc: HMCClient, system_uuid: str, system_name: str, selector: str
+) -> _Peer:
     if (await resolve_system_uuid(hmc, system_name)).lower() != system_uuid.lower():
         raise ValueError("Processor move CLI system identity changed")
     kind, uuid = await memory._contained_partition(hmc, system_uuid, selector)
@@ -51,11 +58,11 @@ async def _read_endpoint(hmc, system_uuid, system_name, selector):
     return kind, processors._snapshot(entry, uuid, row)
 
 
-def _same_identity(left, right):
+def _same_identity(left: _Peer, right: _Peer) -> bool:
     return left[0] == right[0] and left[1]["uuid"].lower() == right[1]["uuid"].lower()
 
 
-def _same_evidence(left, right):
+def _same_evidence(left: _Peer, right: _Peer) -> bool:
     if not _same_identity(left, right):
         return False
     return {k: v for k, v in left[1].items() if k != "uuid"} == {
@@ -63,7 +70,7 @@ def _same_evidence(left, right):
     }
 
 
-def _deferred(before, force):
+def _deferred(before: processors._ProcessorSnapshot, force: bool) -> bool:
     if (
         before["state"] not in ("running", "not activated")
         or before["operation_in_progress"]
@@ -86,19 +93,22 @@ def _deferred(before, force):
     return False
 
 
-def _interval(before, quantity):
-    low = before[f"current_minimum_{quantity}"]
-    high = before[f"current_maximum_{quantity}"]
+def _interval(
+    before: processors._ProcessorSnapshot,
+    quantity: Literal["processors", "processing_units"],
+) -> tuple[int | Decimal, int | Decimal]:
+    values = processors._quantity(before, quantity)
+    low, high = values["minimum"], values["maximum"]
     if before["state"] == "not activated" and high == 0:
-        low = before[f"pending_minimum_{quantity}"]
-        high = before[f"pending_maximum_{quantity}"]
-    return (
-        max(low, before[f"pending_minimum_{quantity}"]),
-        min(high, before[f"pending_maximum_{quantity}"]),
-    )
+        low, high = values["pending_minimum"], values["pending_maximum"]
+    return max(low, values["pending_minimum"]), min(high, values["pending_maximum"])
 
 
-def _require_feasible(before, expected, capacity):
+def _require_feasible(
+    before: processors._ProcessorSnapshot,
+    expected: processors._ProcessorQuantities,
+    capacity: processors._ProcessorCapacity,
+) -> None:
     low, high = _interval(before, "processors")
     high = min(high, capacity["count_limit"], capacity["os_limit"])
     count, units = expected["processors"], expected["processing_units"]
@@ -127,7 +137,12 @@ def _require_feasible(before, expected, capacity):
         )
 
 
-def _targets(source, destination, move, system):
+def _targets(
+    source: processors._ProcessorSnapshot,
+    destination: processors._ProcessorSnapshot,
+    move: LparProcessorMove,
+    system: dict[str, Any],
+) -> tuple[processors._ProcessorTargets, processors._ProcessorTargets]:
     modes = source["processor_mode"], destination["processor_mode"]
     if modes == ("ded", "ded") and move.processing_units is not None:
         raise ValueError("Dedicated moves require processors, not processing_units")
@@ -146,41 +161,55 @@ def _targets(source, destination, move, system):
         )
     mixed = modes[0] != modes[1]
     noop = all(value in (None, 0) for value in (move.processors, move.processing_units))
-    results = []
+    results: list[processors._ProcessorTargets] = []
     for before, sign in ((source, -1), (destination, 1)):
         shared = before["processor_mode"] == "shared"
         count = before["current_processors"]
         units = before.get("current_processing_units")
         with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
             if mixed:
-                amount = move.processors if modes[0] == "ded" else move.processing_units
+                # Mixed-mode admission above requires the selected quantity.
+                amount = cast(
+                    int | Decimal,
+                    move.processors if modes[0] == "ded" else move.processing_units,
+                )
                 if shared:
-                    units += sign * amount
+                    units = before["current_processing_units"] + sign * amount
                     count = before["current_processors"] if noop else None
                 else:
                     count += sign * int(amount)
             else:
                 count += sign * (move.processors or 0)
                 if shared:
-                    units += sign * (move.processing_units or 0)
-        expected = {
+                    units = before["current_processing_units"] + sign * (
+                        move.processing_units or 0
+                    )
+        expected: processors._ProcessorTargets = {
             "processors": count,
             "processing_units": units,
             "reset": False,
             "deferred": _deferred(before, move.force),
             "noop": noop,
         }
-        for quantity in _QUANTITIES:
-            if expected[quantity] is not None:
-                expected[quantity] = bounded_processor_number(
-                    expected[quantity], whole=quantity == "processors"
-                )
+        if expected["processors"] is not None:
+            expected["processors"] = cast(
+                int, bounded_processor_number(expected["processors"], whole=True)
+            )
+        if expected["processing_units"] is not None:
+            expected["processing_units"] = cast(
+                Decimal, bounded_processor_number(expected["processing_units"])
+            )
         _require_feasible(before, expected, processors._capacity(system, before))
         results.append(expected)
-    return tuple(results)
+    return results[0], results[1]
 
 
-def _postconditions(before, after, expected, capacity):
+def _postconditions(
+    before: processors._ProcessorSnapshot,
+    after: processors._ProcessorSnapshot,
+    expected: processors._ProcessorTargets,
+    capacity: processors._ProcessorCapacity,
+) -> bool:
     for key in (
         "name",
         "partition_id",
@@ -193,35 +222,46 @@ def _postconditions(before, after, expected, capacity):
             raise ValueError("Processor move readback identity, state or mode changed")
     if before["uuid"].lower() != after["uuid"].lower():
         raise ValueError("Processor move readback UUID changed")
-    actual = {key: after.get(f"current_{key}") for key in _QUANTITIES}
+    actual: processors._ProcessorQuantities = {
+        "processors": after.get("current_processors"),
+        "processing_units": after.get("current_processing_units"),
+    }
     _require_feasible(before, actual, capacity)
     _require_feasible(after, actual, capacity)
     checks = [not after["operation_in_progress"]]
     for quantity in _QUANTITIES:
-        if actual[quantity] is None:
+        value = actual[quantity]
+        if value is None:
             continue
+        original = processors._quantity(before, quantity)
+        observed = processors._quantity(after, quantity)
         if expected[quantity] is not None:
-            checks.append(actual[quantity] == expected[quantity])
+            checks.append(value == expected[quantity])
         if not expected["deferred"]:
-            checks.append(after[f"runtime_{quantity}"] == actual[quantity])
+            checks.append(observed["runtime"] == value)
         initialized = before["state"] == "not activated" and all(
-            before[f"current_{bound}{quantity}"] == 0
-            for bound in ("minimum_", "", "maximum_")
+            original[bound] == 0 for bound in ("minimum", "current", "maximum")
         )
-        for bound in ("minimum_", "maximum_"):
-            key = f"current_{bound}{quantity}"
+        for bound in ("minimum", "maximum"):
             checks.append(
-                before[f"pending_minimum_{quantity}"]
-                <= after[key]
-                <= before[f"pending_maximum_{quantity}"]
+                original["pending_minimum"]
+                <= observed[bound]
+                <= original["pending_maximum"]
                 if initialized
-                else after[key] == before[key]
+                else observed[bound] == original[bound]
             )
     checks.extend(before[key] == after[key] for key in processors._MEMORY)
     return all(checks)
 
 
-def _endpoint_result(before, after, expected, outcome, error=None, read_error=None):
+def _endpoint_result(
+    before: processors._ProcessorSnapshot,
+    after: processors._ProcessorSnapshot | None,
+    expected: processors._ProcessorTargets,
+    outcome: str,
+    error: str | None = None,
+    read_error: str | None = None,
+) -> dict[str, Any]:
     result = processors._result(before, after, expected, outcome, error, read_error)
     return {
         **result,
@@ -236,8 +276,15 @@ def _endpoint_result(before, after, expected, outcome, error=None, read_error=No
 
 
 async def _observe(
-    hmc, system_uuid, system_name, peer, expected, capacity, error, rejected
-):
+    hmc: HMCClient,
+    system_uuid: str,
+    system_name: str,
+    peer: _Peer,
+    expected: processors._ProcessorTargets,
+    capacity: processors._ProcessorCapacity,
+    error: str | None,
+    rejected: bool,
+) -> dict[str, Any]:
     kind, before = peer
     after = None
     try:
@@ -263,7 +310,12 @@ async def _observe(
     return _endpoint_result(before, after, expected, outcome, error)
 
 
-def _aggregate(move, results, error, rejected):
+def _aggregate(
+    move: LparProcessorMove,
+    results: list[dict[str, Any]],
+    error: str | None,
+    rejected: bool,
+) -> dict[str, Any]:
     if all(r["outcome"] == "noop" for r in results):
         outcome = "noop"
     elif all(r["outcome"] == "applied" for r in results):

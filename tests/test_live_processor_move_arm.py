@@ -793,3 +793,18 @@ def test_independent_memory_row_refusal(live_boundary, monkeypatch, row):
     monkeypatch.setattr(arm, "run_hmc_command", command)
     observed = asyncio.run(arm.oracle(f.boundary.hmc, "sys-R1", peers))
     assert all(o["error"] and o["memory"] is None for o in observed)
+
+
+@pytest.mark.parametrize("dedicated", [False, True])
+def test_checkpoint_serializes_internal_profile_location(dedicated):
+    from dataclasses import asdict
+
+    from lpar.test_processor_quantities import snapshot
+
+    from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+
+    before = snapshot(dedicated)
+    assert isinstance(before["change_location"], ChangeLocation)
+    checkpoint = arm._encoded(before)
+    assert checkpoint["change_location"] == asdict(before["change_location"])
+    json.dumps(checkpoint, allow_nan=False)
