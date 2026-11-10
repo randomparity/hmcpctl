@@ -472,10 +472,10 @@ async def test_one_fixed_case_independent_oracle_cleanup_and_no_runtime(
         assert deletes[0][1]["vios_name_or_uuid"] == FRESH
     assert len(e.state.observations) == 1
     assert e.state.observations[0]["observation"]["cleanup"] == "passed"
-    import check_capability_inventory as inventory
     import promote_live_observations as promotion
+    from capability_evidence import registry as capability_registry
 
-    sites = inventory.discover_observation_sites()
+    sites = capability_registry.discover_observation_sites()
     assert sites[(operation, row)] == scenario
     assert e.state.results[-1]["subtask"] == row
     assert runner.SUBTASK_GROUPS[e.arm.GROUP] == [65]

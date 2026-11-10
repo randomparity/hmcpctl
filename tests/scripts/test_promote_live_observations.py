@@ -14,8 +14,11 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
-import check_capability_inventory as inventory
 import promote_live_observations as promotion
+from capability_evidence import closure as capability_closure
+from capability_evidence import registry as capability_registry
+from capability_evidence import schema as capability_schema
+from capability_evidence import verification as capability_verification
 from live_test import evidence, runner
 
 ROOT = Path(__file__).parents[2]
@@ -47,6 +50,12 @@ def candidate(tmp_path):
     )
     for name in scripts:
         shutil.copyfile(ROOT / name, root / name)
+    shutil.copytree(
+        ROOT / "scripts/capability_evidence",
+        root / "scripts/capability_evidence",
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     shutil.rmtree(root / "scripts/live_test")
     shutil.copytree(
         ROOT / "scripts/live_test",
@@ -72,6 +81,7 @@ def candidate(tmp_path):
         "add",
         *scripts,
         "scripts/live_test",
+        "scripts/capability_evidence",
         str(claims),
     )
     git(root, "commit", "-qm", "Prepare anonymous offline fixture")
@@ -79,7 +89,11 @@ def candidate(tmp_path):
     head = git(root, "rev-parse", "HEAD")
     now = datetime.now(UTC)
     observed = (now - timedelta(seconds=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    tool = next(x for x in inventory.discover_registry() if x.operation == "system.get")
+    tool = next(
+        x
+        for x in capability_registry.discover_registry()
+        if x.operation == "system.get"
+    )
     observation = {
         "id": "st1-hmc-get-system",
         "channel": "live",
@@ -91,7 +105,7 @@ def candidate(tmp_path):
         "hardware_family": "POWER10",
         "schema_version": "V1_0",
         "cleanup": "not-required",
-        "closure_fingerprint": inventory.closure_fingerprint(
+        "closure_fingerprint": capability_closure.closure_fingerprint(
             root, tool.handler.rsplit(".", 1)[0]
         ),
         "assertions": ["response-validated"],
@@ -180,10 +194,10 @@ def test_promote_completed_window(hostile_git_config, candidate):
     } <= paths
     assert all(p in promotion.ARTIFACTS or p.startswith("docs/tools/") for p in paths)
     assert "DO-NOT-COPY-RAW" not in git(root, "show", "HEAD")
-    catalog = inventory.load_json(root / "docs/capabilities/maturity.json")
+    catalog = capability_schema.load_json(root / "docs/capabilities/maturity.json")
     record = next(x for x in catalog["operations"] if x["operation"] == "system.get")
     assert [x for x in record["evidence"] if x["channel"] == "live"] == [observation]
-    snapshot = inventory.load_release_verification(
+    snapshot = capability_verification.load_release_verification(
         root / "docs/capabilities/release-verification.json"
     )
     assert snapshot["system.get"]["verification"] == "current"
@@ -711,7 +725,9 @@ def test_accept_actual_producer_row_numbers(arm):
         "finished_time": datetime.now(UTC),
     }
     for observation in state.observations:
-        promotion._invocation(observation, run, inventory.discover_observation_sites())
+        promotion._invocation(
+            observation, run, capability_registry.discover_observation_sites()
+        )
 
 
 def test_accept_actual_producer_recording_label():
@@ -726,10 +742,14 @@ def test_accept_actual_producer_recording_label():
         "results": state.results,
         "finished_time": datetime.now(UTC),
     }
-    promotion._invocation(observation, run, inventory.discover_observation_sites())
+    promotion._invocation(
+        observation, run, capability_registry.discover_observation_sites()
+    )
     observation["observation"]["scenario"] = "st1-system-inventory"
     with pytest.raises(promotion.PromotionError, match="invocation"):
-        promotion._invocation(observation, run, inventory.discover_observation_sites())
+        promotion._invocation(
+            observation, run, capability_registry.discover_observation_sites()
+        )
 
 
 @pytest.fixture
@@ -813,7 +833,7 @@ def test_promote_actual_dedicated_and_bare_producer_outputs(producer_candidate, 
     assert promoted != original
     assert git(root, "rev-parse", "fixture-candidate") == original
     assert git(root, "status", "--porcelain") == ""
-    snapshot = inventory.load_release_verification(
+    snapshot = capability_verification.load_release_verification(
         root / "docs/capabilities/release-verification.json"
     )
     assert snapshot["pcie.list_dedicated_slots"]["verification"] == "current"
@@ -920,7 +940,7 @@ def test_accept_actual_st36_and_reject_relabelled_st31():
         "results": state.results,
         "finished_time": datetime.now(UTC),
     }
-    sites = inventory.discover_observation_sites()
+    sites = capability_registry.discover_observation_sites()
     promotion._invocation(observation, run, sites)
     observation["observation"]["scenario"] = "st29-dedicated-pcie"
     with pytest.raises(promotion.PromotionError, match="invocation"):
@@ -936,21 +956,21 @@ def test_accept_actual_st36_and_reject_relabelled_st31():
     ],
 )
 def test_reject_unresolved_source_recording_identity(monkeypatch, source):
-    monkeypatch.setattr(inventory.inspect, "getsource", lambda module: source)
-    with pytest.raises(inventory.InventoryError):
-        inventory._module_observation_sites(ModuleType("fixture"))
+    monkeypatch.setattr(capability_registry.inspect, "getsource", lambda module: source)
+    with pytest.raises(capability_schema.InventoryError):
+        capability_registry._module_observation_sites(ModuleType("fixture"))
 
 
 def test_reject_ambiguous_source_recording_identity(monkeypatch):
     module = ModuleType("fixture")
     monkeypatch.setattr(runner, "_SCENARIO_MODULES", [module])
     monkeypatch.setattr(
-        inventory.inspect,
+        capability_registry.inspect,
         "getsource",
         lambda module: (
             "state.record_verified(31, 'first', operation='command.run', scenario='st31-first')\n"
             "state.record_verified(31, 'second', operation='command.run', scenario='st31-second')\n"
         ),
     )
-    with pytest.raises(inventory.InventoryError, match="ambiguous"):
-        inventory.discover_observation_sites()
+    with pytest.raises(capability_schema.InventoryError, match="ambiguous"):
+        capability_registry.discover_observation_sites()

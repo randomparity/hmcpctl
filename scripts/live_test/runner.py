@@ -65,7 +65,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import check_capability_inventory
+from capability_evidence import schema as capability_schema
 from fastmcp import Client
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
@@ -1132,9 +1132,8 @@ async def main(
     print(f"Starting live integration tests at {datetime.now(UTC).isoformat()}")
     schema_version = env_var_value("HMC_SCHEMA_VERSION") or "(not set)"
     print(f"HMC_SCHEMA_VERSION={schema_version}")
-    if (
-        environment is not None
-        and not check_capability_inventory.SCHEMA_VERSION.fullmatch(schema_version)
+    if environment is not None and not capability_schema.SCHEMA_VERSION.fullmatch(
+        schema_version
     ):
         # A warning, not an exit: a run starts whatever the variable holds (#875),
         # and preflight predicts exactly that. Said here so the operator can stop

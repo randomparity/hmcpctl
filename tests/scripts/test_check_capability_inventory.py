@@ -16,6 +16,12 @@ import pytest
 ROOT = Path(__file__).parents[2]
 MODULE_PATH = ROOT / "scripts" / "check_capability_inventory.py"
 sys.path.insert(0, str(MODULE_PATH.parent))
+# Script imports follow the explicit source-root setup above.
+from capability_evidence import closure as capability_closure  # noqa: E402
+from capability_evidence import registry as capability_registry  # noqa: E402
+from capability_evidence import schema as capability_schema  # noqa: E402
+from capability_evidence import verification as capability_verification  # noqa: E402
+
 SPEC = importlib.util.spec_from_file_location("check_capability_inventory", MODULE_PATH)
 assert SPEC is not None
 assert SPEC.loader is not None
@@ -102,7 +108,7 @@ def _minimal_inventory(root: Path) -> None:
     _write_json(
         root / "maturity.json",
         {
-            "format_version": inventory.MATURITY_FORMAT_VERSION,
+            "format_version": capability_schema.MATURITY_FORMAT_VERSION,
             "admission_policy": "existing-runtime-guards",
             "operations": [],
         },
@@ -187,7 +193,7 @@ def test_confirmed_gap_is_valid_missing_scope_without_evidence():
     record = _operation("system.list", "absent")
     record["implementation"]["missing_scope"] = [_confirmed_gap()]
     errors = []
-    inventory._validate_maturity([record], {"system.list"}, errors)
+    capability_schema.validate_maturity([record], {"system.list"}, errors)
     assert errors == []
     assert record["evidence"] == []
 
@@ -197,7 +203,9 @@ def test_confirmed_gap_never_promotes_verification(tmp_path):
     record = _operation("system.list", "absent")
     record["implementation"]["missing_scope"] = [_confirmed_gap()]
     assert (
-        inventory.derive_states([record], registry, tmp_path, _NOW)["system.list"].state
+        capability_verification.derive_states([record], registry, tmp_path, _NOW)[
+            "system.list"
+        ].state
         == "unevidenced"
     )
 
@@ -220,7 +228,7 @@ def test_gap_confirmation_rejects_invalid_or_promoting_fields(field, value):
     gap["confirmation"][field] = value
     record["implementation"]["missing_scope"] = [gap]
     errors = []
-    inventory._validate_maturity([record], {"system.list"}, errors)
+    capability_schema.validate_maturity([record], {"system.list"}, errors)
     assert errors
 
 
@@ -239,7 +247,7 @@ def test_confirmation_rejects_unsupported_scope_identity(placement, parameters):
     gap["parameters"] = parameters
     record["implementation"][placement] = [gap]
     errors = []
-    inventory._validate_maturity([record], {"system.list"}, errors)
+    capability_schema.validate_maturity([record], {"system.list"}, errors)
     assert errors
 
 
@@ -252,7 +260,9 @@ def test_gap_currency_has_bounded_revalidation_age(days, current):
     confirmation = _confirmed_gap()["confirmation"]
     now = datetime.fromisoformat(confirmation["observed_at"]) + timedelta(days=days)
     assert (
-        inventory.gap_is_current(confirmation, ("V10R3", "POWER10"), "b" * 64, now)
+        capability_verification.gap_is_current(
+            confirmation, ("V10R3", "POWER10"), "b" * 64, now
+        )
         is current
     )
 
@@ -267,7 +277,7 @@ def test_gap_currency_has_bounded_revalidation_age(days, current):
 )
 def test_gap_currency_requires_same_environment_and_closure(environment, fingerprint):
     confirmation = _confirmed_gap()["confirmation"]
-    assert not inventory.gap_is_current(
+    assert not capability_verification.gap_is_current(
         confirmation, environment, fingerprint, datetime(2026, 9, 7, tzinfo=UTC)
     )
 
@@ -300,7 +310,7 @@ def _write_maturity(root: Path, records: list[dict[str, object]]) -> None:
     _write_json(
         root / "maturity.json",
         {
-            "format_version": inventory.MATURITY_FORMAT_VERSION,
+            "format_version": capability_schema.MATURITY_FORMAT_VERSION,
             "admission_policy": "existing-runtime-guards",
             "operations": records,
         },
@@ -308,11 +318,13 @@ def _write_maturity(root: Path, records: list[dict[str, object]]) -> None:
 
 
 @pytest.fixture
-def registered_inventory(tmp_path: Path) -> tuple[inventory.RegistryTool, ...]:
+def registered_inventory(
+    tmp_path: Path,
+) -> tuple[capability_registry.RegistryTool, ...]:
     _minimal_inventory(tmp_path)
     tool = next(
         tool
-        for tool in inventory.discover_registry()
+        for tool in capability_registry.discover_registry()
         if tool.operation == "system.list"
     )
     _write_json(
@@ -341,7 +353,7 @@ def registered_inventory(tmp_path: Path) -> tuple[inventory.RegistryTool, ...]:
 
 def _maturity_report(
     root: Path,
-    registry: tuple[inventory.RegistryTool, ...],
+    registry: tuple[capability_registry.RegistryTool, ...],
     records: list[dict[str, object]],
 ) -> inventory.Report:
     _write_maturity(root, records)
@@ -351,8 +363,10 @@ def _maturity_report(
 def test_load_json_rejects_duplicate_keys(tmp_path: Path) -> None:
     path = tmp_path / "duplicate.json"
     path.write_text('{"format_version":1,"format_version":1}', encoding="utf-8")
-    with pytest.raises(inventory.InventoryError, match="duplicate key.*format_version"):
-        inventory.load_json(path)
+    with pytest.raises(
+        capability_schema.InventoryError, match="duplicate key.*format_version"
+    ):
+        capability_schema.load_json(path)
 
 
 def test_validation_detects_dangling_and_double_accounted_units(tmp_path: Path) -> None:
@@ -403,7 +417,7 @@ def test_registry_evidence_checks_signature_and_paths(tmp_path: Path) -> None:
     }
     _write_json(tmp_path / "operations.json", operations)
     discovered = (
-        inventory.RegistryTool(
+        capability_registry.RegistryTool(
             tool="hmc_alpha",
             operation="alpha.read",
             handler="example.handler",
@@ -594,7 +608,7 @@ def test_sparse_maturity_allows_unknown_operations(tmp_path: Path) -> None:
 
 def test_maturity_rejects_extra_root_keys(tmp_path: Path) -> None:
     _minimal_inventory(tmp_path)
-    maturity = inventory.load_json(tmp_path / "maturity.json")
+    maturity = capability_schema.load_json(tmp_path / "maturity.json")
     maturity["unexpected"] = None
     _write_json(tmp_path / "maturity.json", maturity)
 
@@ -605,7 +619,7 @@ def test_maturity_rejects_extra_root_keys(tmp_path: Path) -> None:
 
 def test_maturity_rejects_boolean_format_version(tmp_path: Path) -> None:
     _minimal_inventory(tmp_path)
-    maturity = inventory.load_json(tmp_path / "maturity.json")
+    maturity = capability_schema.load_json(tmp_path / "maturity.json")
     maturity["format_version"] = True
     _write_json(tmp_path / "maturity.json", maturity)
 
@@ -640,7 +654,7 @@ def test_maturity_rejects_unknown_and_duplicate_operation_ids(tmp_path: Path) ->
 )
 def test_maturity_enforces_implementation_scope(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     state: str,
     implemented: list[dict[str, object]],
     missing: list[dict[str, object]],
@@ -663,7 +677,9 @@ def test_maturity_enforces_implementation_scope(
 
 
 def test_sriov_catalog_separates_confirmation_from_mode_changes() -> None:
-    catalog = inventory.load_json(ROOT / "docs" / "capabilities" / "maturity.json")
+    catalog = capability_schema.load_json(
+        ROOT / "docs" / "capabilities" / "maturity.json"
+    )
     record = next(
         row for row in catalog["operations"] if row["operation"] == "sriov.set_mode"
     )
@@ -682,7 +698,7 @@ def test_sriov_catalog_separates_confirmation_from_mode_changes() -> None:
 @pytest.mark.parametrize("field", ["operation", "state"])
 def test_maturity_reports_invalid_identity_and_state_types(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     field: str,
     value: object,
 ) -> None:
@@ -706,7 +722,7 @@ def test_maturity_reports_invalid_identity_and_state_types(
 
 
 def test_a_colliding_observation_id_is_distinguished_from_a_malformed_one(
-    tmp_path: Path, registered_inventory: tuple[inventory.RegistryTool, ...]
+    tmp_path: Path, registered_inventory: tuple[capability_registry.RegistryTool, ...]
 ) -> None:
     """Two defects, two diagnostics: a mis-cased id is not a collision."""
     record = _operation()
@@ -738,7 +754,7 @@ def test_a_colliding_observation_id_is_distinguished_from_a_malformed_one(
 )
 def test_maturity_reports_invalid_observation_types(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     field: str,
     value: object,
     diagnostic: str,
@@ -761,11 +777,11 @@ def test_maturity_reports_invalid_observation_types(
 
 
 def test_maturity_format_one_is_rejected(
-    tmp_path: Path, registered_inventory: tuple[inventory.RegistryTool, ...]
+    tmp_path: Path, registered_inventory: tuple[capability_registry.RegistryTool, ...]
 ) -> None:
     """ADR 0127 supersedes 0126's evidence model; a format 1 catalog is not read."""
     _write_maturity(tmp_path, [])
-    document = inventory.load_json(tmp_path / "maturity.json")
+    document = capability_schema.load_json(tmp_path / "maturity.json")
     document["format_version"] = 1
     _write_json(tmp_path / "maturity.json", document)
 
@@ -787,7 +803,7 @@ def test_maturity_format_one_is_rejected(
 )
 def test_a_not_run_observation_is_rejected(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     mutation: dict[str, object],
 ) -> None:
     """Format 2 has one observation shape; the `not-run` placeholder is gone."""
@@ -803,7 +819,7 @@ def test_a_not_run_observation_is_rejected(
 )
 def test_observation_key_sets_are_exact(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     mutation: dict[str, object],
 ) -> None:
     observation = {**_observation(), **mutation}
@@ -841,7 +857,7 @@ def test_observation_key_sets_are_exact(
 )
 def test_environment_values_reject_private_identifiers(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     field: str,
     value: str,
     accepted: bool,
@@ -879,7 +895,7 @@ def test_environment_values_reject_private_identifiers(
 )
 def test_schema_version_domain(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     value: object,
     accepted: bool,
 ) -> None:
@@ -919,7 +935,7 @@ def test_schema_version_domain(
 )
 def test_attempted_observation_fields_are_pattern_bound(
     tmp_path: Path,
-    registered_inventory: tuple[inventory.RegistryTool, ...],
+    registered_inventory: tuple[capability_registry.RegistryTool, ...],
     mutation: dict[str, object],
     diagnostic: str,
 ) -> None:
@@ -954,13 +970,13 @@ def test_closure_fingerprint_changes_with_an_imported_module_only(
             "c.py": "other = 2\n",
         },
     )
-    first = inventory.closure_fingerprint(tmp_path, "hmcpctl.a")
+    first = capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a")
 
     (tmp_path / "src" / "hmcpctl" / "c.py").write_text("other = 3\n", encoding="utf-8")
-    assert inventory.closure_fingerprint(tmp_path, "hmcpctl.a") == first
+    assert capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a") == first
 
     (tmp_path / "src" / "hmcpctl" / "b.py").write_text("thing = 2\n", encoding="utf-8")
-    assert inventory.closure_fingerprint(tmp_path, "hmcpctl.a") != first
+    assert capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a") != first
 
 
 @pytest.mark.parametrize(
@@ -986,7 +1002,7 @@ def test_closure_covers_each_import_form(tmp_path: Path, statement: str) -> None
     """
     _package(tmp_path, {"a.py": f"{statement}\n", "b.py": "thing = 1\n"})
 
-    paths = inventory.closure_paths(tmp_path, "hmcpctl.a")
+    paths = capability_closure.closure_paths(tmp_path, "hmcpctl.a")
 
     assert tmp_path / "src" / "hmcpctl" / "b.py" in paths
 
@@ -1001,8 +1017,9 @@ def test_closure_stops_at_a_function_boundary_inside_a_guard(tmp_path: Path) -> 
         },
     )
 
-    assert tmp_path / "src" / "hmcpctl" / "b.py" not in inventory.closure_paths(
-        tmp_path, "hmcpctl.a"
+    assert (
+        tmp_path / "src" / "hmcpctl" / "b.py"
+        not in capability_closure.closure_paths(tmp_path, "hmcpctl.a")
     )
 
 
@@ -1013,7 +1030,7 @@ def test_closure_excludes_function_body_imports() -> None:
     resolution path, so an `ast.walk` implementation yields 179 of 180 files for
     every handler — ADR 0126's repository-wide fingerprint under another name.
     """
-    paths = inventory.closure_paths(ROOT, "hmcpctl.server_tools.permissions")
+    paths = capability_closure.closure_paths(ROOT, "hmcpctl.server_tools.permissions")
 
     assert ROOT / "src" / "hmcpctl" / "cli.py" not in paths
     assert len(paths) < 20
@@ -1026,7 +1043,7 @@ def test_closure_resolves_packages() -> None:
     `SUCCESSFUL_JOB_STATUSES` — the constant the job scenarios assert against —
     would leave their observations reading as current.
     """
-    paths = inventory.closure_paths(ROOT, "hmcpctl.server_tools.jobs")
+    paths = capability_closure.closure_paths(ROOT, "hmcpctl.server_tools.jobs")
 
     assert ROOT / "src" / "hmcpctl" / "jobs" / "__init__.py" in paths
     assert ROOT / "src" / "hmcpctl" / "jobs" / "core.py" in paths
@@ -1034,7 +1051,9 @@ def test_closure_resolves_packages() -> None:
 
 def test_lifecycle_closure_excludes_split_tool_modules() -> None:
     """LPAR tool modules retain ownership instead of re-exporting siblings."""
-    paths = inventory.closure_paths(ROOT, "hmcpctl.server_tools.lpar.lifecycle")
+    paths = capability_closure.closure_paths(
+        ROOT, "hmcpctl.server_tools.lpar.lifecycle"
+    )
     lpar = ROOT / "src" / "hmcpctl" / "server_tools" / "lpar"
 
     assert lpar / "lifecycle_boot.py" not in paths
@@ -1048,7 +1067,7 @@ def test_lpar_get_closure_excludes_the_user_profile_builder() -> None:
     closure; it shared `documents/access.py` with the UserProfile builder, and the
     package initializer re-exported every builder module besides.
     """
-    paths = inventory.closure_paths(ROOT, "hmcpctl.server_tools.systems.core")
+    paths = capability_closure.closure_paths(ROOT, "hmcpctl.server_tools.systems.core")
     documents = ROOT / "src" / "hmcpctl" / "documents"
 
     assert documents / "logon.py" in paths
@@ -1072,7 +1091,7 @@ def test_closure_containment(tmp_path: Path) -> None:
     package = tmp_path / "src" / "hmcpctl"
     (package / "b.py").symlink_to(package / "outside.py")
 
-    paths = inventory.closure_paths(tmp_path, "hmcpctl.a")
+    paths = capability_closure.closure_paths(tmp_path, "hmcpctl.a")
 
     assert package / "b.py" not in paths
     assert paths == [package / "__init__.py", package / "a.py"]
@@ -1083,10 +1102,10 @@ _NOW = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
 
 def _closure_registry(
     tmp_path: Path, operation: str = "system.list"
-) -> tuple[inventory.RegistryTool, ...]:
+) -> tuple[capability_registry.RegistryTool, ...]:
     _package(tmp_path, {"a.py": "thing = 1\n"})
     return (
-        inventory.RegistryTool(
+        capability_registry.RegistryTool(
             tool="hmc_list_systems",
             operation=operation,
             handler="hmcpctl.a.hmc_list_systems",
@@ -1128,7 +1147,7 @@ def test_derived_states(
 ) -> None:
     """Staleness is derived when the catalog is read, never stored."""
     registry = _closure_registry(tmp_path)
-    fingerprint = inventory.closure_fingerprint(tmp_path, "hmcpctl.a")
+    fingerprint = capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a")
     catalog = [
         {
             "operation": "system.list",
@@ -1141,7 +1160,7 @@ def test_derived_states(
         for record in records
     ]
 
-    states = inventory.derive_states(catalog, registry, tmp_path, _NOW)
+    states = capability_verification.derive_states(catalog, registry, tmp_path, _NOW)
 
     assert states["system.list"].state == expected
     assert states["system.list"].reason == reason
@@ -1150,8 +1169,10 @@ def test_derived_states(
 def test_report_line_carries_implementation_state(capsys) -> None:
     """A bare `current` would read as "live-verified" for a partial operation."""
     states = {
-        "sriov.set_mode": inventory.OperationState("current", None, "partial"),
-        "vnic.add": inventory.OperationState("unrecorded"),
+        "sriov.set_mode": capability_verification.OperationState(
+            "current", None, "partial"
+        ),
+        "vnic.add": capability_verification.OperationState("unrecorded"),
     }
 
     assert inventory.verification_report(states, fail_on_stale=False) == 0
@@ -1163,10 +1184,10 @@ def test_report_line_carries_implementation_state(capsys) -> None:
 
 def test_verification_report_summary_and_fail_on_stale(capsys) -> None:
     states = {
-        "system.list": inventory.OperationState(
+        "system.list": capability_verification.OperationState(
             "stale", "closure-changed", "implemented"
         ),
-        "vnic.add": inventory.OperationState("unrecorded"),
+        "vnic.add": capability_verification.OperationState("unrecorded"),
     }
 
     assert inventory.verification_report(states, fail_on_stale=False) == 0
@@ -1178,7 +1199,7 @@ def test_verification_report_summary_and_fail_on_stale(capsys) -> None:
 
 
 def test_a_stale_observation_is_not_an_error(
-    tmp_path: Path, registered_inventory: tuple[inventory.RegistryTool, ...]
+    tmp_path: Path, registered_inventory: tuple[capability_registry.RegistryTool, ...]
 ) -> None:
     """Recording evidence must never turn the build red (ADR 0127)."""
     record = _operation()
@@ -1195,8 +1216,12 @@ def test_verification_report_annotates_a_github_actions_run(
     monkeypatch.setenv("GITHUB_ACTIONS", "1")
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     states = {
-        "system.list": inventory.OperationState("stale", "age-exceeded", "implemented"),
-        "sriov.set_mode": inventory.OperationState("current", None, "partial"),
+        "system.list": capability_verification.OperationState(
+            "stale", "age-exceeded", "implemented"
+        ),
+        "sriov.set_mode": capability_verification.OperationState(
+            "current", None, "partial"
+        ),
     }
 
     assert inventory.verification_report(states, fail_on_stale=False) == 0
@@ -1219,7 +1244,8 @@ def test_verification_report_survives_an_unwritable_step_summary(
 
     assert (
         inventory.verification_report(
-            {"system.list": inventory.OperationState("unrecorded")}, fail_on_stale=False
+            {"system.list": capability_verification.OperationState("unrecorded")},
+            fail_on_stale=False,
         )
         == 0
     )
@@ -1232,7 +1258,9 @@ def test_verification_report_is_quiet_outside_github_actions(
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     states = {
-        "system.list": inventory.OperationState("stale", "age-exceeded", "implemented")
+        "system.list": capability_verification.OperationState(
+            "stale", "age-exceeded", "implemented"
+        )
     }
 
     inventory.verification_report(states, fail_on_stale=False)
@@ -1247,7 +1275,7 @@ def test_closure_refuses_a_relative_import_that_leaves_the_package(
     _package(tmp_path, {"a.py": "from ..outside import thing\n"})
     (tmp_path / "src" / "outside.py").write_text("thing = 1\n", encoding="utf-8")
 
-    paths = inventory.closure_paths(tmp_path, "hmcpctl.a")
+    paths = capability_closure.closure_paths(tmp_path, "hmcpctl.a")
 
     assert tmp_path / "src" / "outside.py" not in paths
     assert paths == [
@@ -1269,7 +1297,7 @@ def test_runtime_projection_renders_only_recorded_operations(tmp_path: Path) -> 
     registry = _closure_registry(tmp_path)
     records = [_operation(), _operation("sriov.set_mode", state="partial")]
 
-    rendered = inventory.render_runtime_projection(records, registry, {})
+    rendered = capability_verification.render_runtime_projection(records, registry, {})
 
     assert rendered.endswith("\n")
     assert json.loads(rendered) == {
@@ -1291,7 +1319,7 @@ def test_runtime_projection_preserves_latest_live_observation_time(
     tmp_path: Path,
 ) -> None:
     registry = _closure_registry(tmp_path)
-    fingerprint = inventory.closure_fingerprint(tmp_path, "hmcpctl.a")
+    fingerprint = capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a")
     record = _operation()
     record["evidence"] = [
         _observation(
@@ -1307,7 +1335,9 @@ def test_runtime_projection_preserves_latest_live_observation_time(
         ),
     ]
 
-    rendered = inventory.render_release_verification([record], registry, tmp_path, _NOW)
+    rendered = capability_verification.render_release_verification(
+        [record], registry, tmp_path, _NOW
+    )
 
     projected = json.loads(rendered)["operations"][0]
     assert projected["verification"] == "failed"
@@ -1318,7 +1348,7 @@ def test_release_snapshot_derivation_does_not_apply_age_expiry(
     tmp_path: Path,
 ) -> None:
     registry = _closure_registry(tmp_path)
-    fingerprint = inventory.closure_fingerprint(tmp_path, "hmcpctl.a")
+    fingerprint = capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a")
     record = _operation()
     record["evidence"] = [
         _observation(
@@ -1327,7 +1357,9 @@ def test_release_snapshot_derivation_does_not_apply_age_expiry(
         )
     ]
 
-    rendered = inventory.render_release_verification([record], registry, tmp_path, _NOW)
+    rendered = capability_verification.render_release_verification(
+        [record], registry, tmp_path, _NOW
+    )
 
     projected = json.loads(rendered)["operations"][0]
     assert projected["verification"] == "current"
@@ -1344,7 +1376,7 @@ def test_write_runtime_projection_is_atomic(tmp_path: Path, monkeypatch) -> None
     monkeypatch.setattr(Path, "replace", fail_replace)
 
     with pytest.raises(OSError, match="replacement failed"):
-        inventory.write_runtime_projection(path, "new\n")
+        capability_verification.write_runtime_projection(path, "new\n")
 
     assert path.read_text(encoding="utf-8") == "old\n"
     assert not list(tmp_path.glob(".projection.json.*.tmp"))
@@ -1360,7 +1392,7 @@ def test_default_gate_rejects_missing_malformed_and_drifted_projection(
     if contents is not None:
         projection.write_text(contents, encoding="utf-8")
     monkeypatch.setattr(inventory, "DEFAULT_RUNTIME_PROJECTION", projection)
-    monkeypatch.setattr(inventory, "discover_registry", tuple)
+    monkeypatch.setattr(capability_registry, "discover_registry", tuple)
 
     assert inventory.main(["--inventory", str(inventory_root)]) == 1
     assert "just capability-metadata" in capsys.readouterr().err
@@ -1372,7 +1404,7 @@ def test_write_runtime_projection_option_generates_requested_path(
     inventory_root = tmp_path / "inventory"
     _minimal_inventory(inventory_root)
     projection = tmp_path / "projection.json"
-    monkeypatch.setattr(inventory, "discover_registry", tuple)
+    monkeypatch.setattr(capability_registry, "discover_registry", tuple)
 
     assert (
         inventory.main(
@@ -1388,7 +1420,7 @@ def test_write_runtime_projection_option_generates_requested_path(
 
     assert projection.read_text(
         encoding="utf-8"
-    ) == inventory.render_runtime_projection([], (), {})
+    ) == capability_verification.render_runtime_projection([], (), {})
 
 
 def test_lpar_modify_binds_assignment_delegate_rows():
@@ -1410,7 +1442,7 @@ def test_lpar_modify_binds_assignment_delegate_rows():
 def shared_evidence(tmp_path):
     registry = _closure_registry(tmp_path)
     registry += (replace(registry[0], tool="hmc_other", operation="system.other"),)
-    fingerprint = inventory.closure_fingerprint(tmp_path, "hmcpctl.a")
+    fingerprint = capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a")
     records = [_operation(tool.operation) for tool in registry]
     for record in records:
         record["evidence"] = [_observation(fingerprint=fingerprint)]
@@ -1419,13 +1451,13 @@ def shared_evidence(tmp_path):
 
 def test_shared_handlers_are_fingerprinted_once(tmp_path, monkeypatch, shared_evidence):
     records, registry = shared_evidence
-    fingerprint = Mock(wraps=inventory.closure_fingerprint)
-    monkeypatch.setattr(inventory, "closure_fingerprint", fingerprint)
+    fingerprint = Mock(wraps=capability_closure.closure_fingerprint)
+    monkeypatch.setattr(capability_closure, "closure_fingerprint", fingerprint)
 
-    states = inventory.derive_states(records, registry, tmp_path, _NOW)
+    states = capability_verification.derive_states(records, registry, tmp_path, _NOW)
 
     assert states == {
-        tool.operation: inventory.OperationState(
+        tool.operation: capability_verification.OperationState(
             "current", None, "implemented", "2026-09-06T12:00:00Z"
         )
         for tool in registry
@@ -1441,11 +1473,13 @@ def test_new_derivation_observes_source_changes(tmp_path, shared_evidence, chang
     if change == "dependency":
         module.write_text("from .b import value\n", encoding="utf-8")
         dependency.write_text("value = 1\n", encoding="utf-8")
-        fingerprint = inventory.closure_fingerprint(tmp_path, "hmcpctl.a")
+        fingerprint = capability_closure.closure_fingerprint(tmp_path, "hmcpctl.a")
         for record in records:
             record["evidence"][0]["closure_fingerprint"] = fingerprint
     assert (
-        inventory.derive_states(records, registry, tmp_path, _NOW)["system.list"].state
+        capability_verification.derive_states(records, registry, tmp_path, _NOW)[
+            "system.list"
+        ].state
         == "current"
     )
 
@@ -1459,10 +1493,10 @@ def test_new_derivation_observes_source_changes(tmp_path, shared_evidence, chang
     else:
         module.unlink()
 
-    states = inventory.derive_states(records, registry, tmp_path, _NOW)
+    states = capability_verification.derive_states(records, registry, tmp_path, _NOW)
     assert {state.reason for state in states.values()} == {"closure-changed"}
     if change == "missing":
-        assert inventory.closure_paths(tmp_path, "hmcpctl.a") == [
+        assert capability_closure.closure_paths(tmp_path, "hmcpctl.a") == [
             tmp_path / "src/hmcpctl/__init__.py"
         ]
 
@@ -1473,13 +1507,13 @@ def test_new_derivation_isolated_by_root(tmp_path, shared_evidence):
     _package(other, {"a.py": "thing = 2\n"})
 
     fingerprints = {}
-    first = inventory.derive_states(
+    first = capability_verification.derive_states(
         records, registry, tmp_path, _NOW, _fingerprints=fingerprints
     )
-    second = inventory.derive_states(
+    second = capability_verification.derive_states(
         records, registry, other, _NOW, _fingerprints=fingerprints
     )
-    again = inventory.derive_states(
+    again = capability_verification.derive_states(
         records, registry, tmp_path, _NOW, _fingerprints=fingerprints
     )
 
@@ -1501,9 +1535,11 @@ def test_derivation_preserves_read_failure(tmp_path, monkeypatch, shared_evidenc
     with monkeypatch.context() as patch:
         patch.setattr(Path, "read_bytes", unreadable)
         with pytest.raises(PermissionError, match="fixture read denied"):
-            inventory.derive_states(records, registry, tmp_path, _NOW)
+            capability_verification.derive_states(records, registry, tmp_path, _NOW)
     assert (
-        inventory.derive_states(records, registry, tmp_path, _NOW)["system.list"].state
+        capability_verification.derive_states(records, registry, tmp_path, _NOW)[
+            "system.list"
+        ].state
         == "current"
     )
 
@@ -1532,7 +1568,7 @@ def test_newest_live_row_by_time_then_id_decides_state(
     failed["closure_fingerprint"] = passed["closure_fingerprint"]
     records[0]["evidence"] = [failed, passed] if reverse else [passed, failed]
 
-    state = inventory.derive_states(records, registry, tmp_path, _NOW)
+    state = capability_verification.derive_states(records, registry, tmp_path, _NOW)
     assert state[records[0]["operation"]].state == expected
 
 
@@ -1544,7 +1580,7 @@ def test_report_reuses_fingerprints_and_preserves_outputs(
     module_name = registry[0].handler.rsplit(".", 1)[0]
     relative_module = module_name.removeprefix("hmcpctl.").replace(".", "/") + ".py"
     _package(tmp_path, {relative_module: "value = 1\n"})
-    fingerprint = inventory.closure_fingerprint(tmp_path, module_name)
+    fingerprint = capability_closure.closure_fingerprint(tmp_path, module_name)
     record = _operation()
     record["evidence"] = [
         _observation(fingerprint=fingerprint, observed_at="2026-01-01T12:00:00Z")
@@ -1553,19 +1589,23 @@ def test_report_reuses_fingerprints_and_preserves_outputs(
     projection = tmp_path / "projection.json"
     snapshot_path = tmp_path / "release-verification.json"
     snapshot_path.write_text(
-        inventory.render_release_verification([record], registry, tmp_path, _NOW)
+        capability_verification.render_release_verification(
+            [record], registry, tmp_path, _NOW
+        )
     )
-    expected = inventory.render_runtime_projection(
-        [record], registry, inventory.load_release_verification(snapshot_path)
+    expected = capability_verification.render_runtime_projection(
+        [record],
+        registry,
+        capability_verification.load_release_verification(snapshot_path),
     )
     projection.write_text(expected, encoding="utf-8")
     monkeypatch.setattr(inventory, "ROOT", tmp_path)
     monkeypatch.setattr(inventory, "DEFAULT_RUNTIME_PROJECTION", projection)
-    monkeypatch.setattr(inventory, "discover_registry", lambda: registry)
+    monkeypatch.setattr(capability_registry, "discover_registry", lambda: registry)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-    counted = Mock(wraps=inventory.closure_fingerprint)
-    monkeypatch.setattr(inventory, "closure_fingerprint", counted)
+    counted = Mock(wraps=capability_closure.closure_fingerprint)
+    monkeypatch.setattr(capability_closure, "closure_fingerprint", counted)
     args = ["--inventory", str(tmp_path), "--verification-report"]
     if fail_on_stale:
         args.append("--fail-on-stale")
@@ -1630,8 +1670,8 @@ def test_release_snapshot_rejects_invalid_schema(tmp_path, mutate):
     document = {"format_version": 1, "operations": [_snapshot_row()]}
     mutate(document)
     _write_json(path, document)
-    with pytest.raises(inventory.InventoryError):
-        inventory.load_release_verification(path)
+    with pytest.raises(capability_schema.InventoryError):
+        capability_verification.load_release_verification(path)
 
 
 @pytest.mark.parametrize(
@@ -1648,13 +1688,13 @@ def test_release_snapshot_rejects_invalid_schema(tmp_path, mutate):
 def test_release_snapshot_rejects_invalid_bytes(tmp_path, content):
     path = tmp_path / "release-verification.json"
     path.write_bytes(content)
-    with pytest.raises(inventory.InventoryError):
-        inventory.load_release_verification(path)
+    with pytest.raises(capability_schema.InventoryError):
+        capability_verification.load_release_verification(path)
 
 
 def test_release_snapshot_missing_file_fails(tmp_path):
-    with pytest.raises(inventory.InventoryError):
-        inventory.load_release_verification(tmp_path / "missing.json")
+    with pytest.raises(capability_schema.InventoryError):
+        capability_verification.load_release_verification(tmp_path / "missing.json")
 
 
 def test_release_snapshot_accepts_frozen_states(tmp_path):
@@ -1667,7 +1707,7 @@ def test_release_snapshot_accepts_frozen_states(tmp_path):
     rows[2]["reason"] = "closure-changed"
     path = tmp_path / "release-verification.json"
     _write_json(path, {"format_version": 1, "operations": rows})
-    assert inventory.load_release_verification(path) == {
+    assert capability_verification.load_release_verification(path) == {
         r["operation"]: r for r in rows
     }
 
@@ -1676,25 +1716,30 @@ def test_projection_freezes_snapshot_fields_and_preserves_catalog_authority(tmp_
     registry = _closure_registry(tmp_path)
     record = _operation()
     snapshot = {"system.list": _snapshot_row()}
-    frozen = inventory.render_runtime_projection([record], registry, snapshot)
+    frozen = capability_verification.render_runtime_projection(
+        [record], registry, snapshot
+    )
     (tmp_path / "src/hmcpctl/a.py").write_text("value = 999\n")
     record["evidence"] = [_observation(result="failed")]
-    assert inventory.render_runtime_projection([record], registry, snapshot) == frozen
+    assert (
+        capability_verification.render_runtime_projection([record], registry, snapshot)
+        == frozen
+    )
     record["implementation"]["state"] = "partial"
     changed = json.loads(
-        inventory.render_runtime_projection([record], registry, snapshot)
+        capability_verification.render_runtime_projection([record], registry, snapshot)
     )
     assert changed["operations"][0]["implementation"] == "partial"
     assert changed["operations"][0]["verification"] == "current"
     assert (
-        json.loads(inventory.render_runtime_projection([], registry, snapshot))[
-            "operations"
-        ]
+        json.loads(
+            capability_verification.render_runtime_projection([], registry, snapshot)
+        )["operations"]
         == []
     )
-    missing = json.loads(inventory.render_runtime_projection([record], registry, {}))[
-        "operations"
-    ][0]
+    missing = json.loads(
+        capability_verification.render_runtime_projection([record], registry, {})
+    )["operations"][0]
     assert (missing["verification"], missing["reason"], missing["observed_at"]) == (
         "unevidenced",
         None,
@@ -1712,25 +1757,29 @@ def test_release_mode_reports_closure_drift_without_changing_ordinary_projection
     record = _operation()
     record["evidence"] = [
         _observation(
-            fingerprint=inventory.closure_fingerprint(tmp_path, module),
+            fingerprint=capability_closure.closure_fingerprint(tmp_path, module),
             observed_at="2026-01-01T12:00:00Z",
         )
     ]
     _write_maturity(tmp_path, [record])
     snapshot = tmp_path / "release-verification.json"
     snapshot.write_text(
-        inventory.render_release_verification([record], registry, tmp_path, _NOW)
+        capability_verification.render_release_verification(
+            [record], registry, tmp_path, _NOW
+        )
     )
     projection = tmp_path / "projection.json"
     projection.write_text(
-        inventory.render_runtime_projection(
-            [record], registry, inventory.load_release_verification(snapshot)
+        capability_verification.render_runtime_projection(
+            [record],
+            registry,
+            capability_verification.load_release_verification(snapshot),
         )
     )
     expected = projection.read_bytes()
     monkeypatch.setattr(inventory, "ROOT", tmp_path)
     monkeypatch.setattr(inventory, "DEFAULT_RUNTIME_PROJECTION", projection)
-    monkeypatch.setattr(inventory, "discover_registry", lambda: registry)
+    monkeypatch.setattr(capability_registry, "discover_registry", lambda: registry)
     args = ["--inventory", str(tmp_path)]
     assert inventory.main([*args, "--release"]) == 0
     (tmp_path / "src/hmcpctl" / relative).write_text("value = 2\n")
@@ -1757,7 +1806,7 @@ def test_missing_snapshot_refuses_regeneration(tmp_path, monkeypatch, capsys):
     (tmp_path / "release-verification.json").unlink()
     projection = tmp_path / "projection.json"
     projection.write_text("previous\n")
-    monkeypatch.setattr(inventory, "discover_registry", tuple)
+    monkeypatch.setattr(capability_registry, "discover_registry", tuple)
     assert (
         inventory.main(
             [
@@ -1790,7 +1839,10 @@ def test_release_claims_accept_known_relationship_without_observations(tmp_path)
     path = tmp_path / "v0.2.0.json"
     document = _release_document()
     _write_json(path, document)
-    assert inventory.load_release_claims(path, {"system.get"}) == document["operations"]
+    assert (
+        capability_registry.load_release_claims(path, {"system.get"})
+        == document["operations"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -1812,8 +1864,8 @@ def test_release_claims_reject_unknown_or_crossed_references(tmp_path, field, va
     document["operations"][0][field] = value
     path = tmp_path / "v0.2.0.json"
     _write_json(path, document)
-    with pytest.raises(inventory.InventoryError):
-        inventory.load_release_claims(path, {"system.get", "lpar.get"})
+    with pytest.raises(capability_schema.InventoryError):
+        capability_registry.load_release_claims(path, {"system.get", "lpar.get"})
 
 
 @pytest.mark.parametrize(
@@ -1832,8 +1884,8 @@ def test_release_claims_reject_unknown_or_crossed_references(tmp_path, field, va
 def test_release_claims_reject_malformed_shape(tmp_path, document):
     path = tmp_path / "v0.2.0.json"
     _write_json(path, document)
-    with pytest.raises(inventory.InventoryError):
-        inventory.load_release_claims(path, {"system.get"})
+    with pytest.raises(capability_schema.InventoryError):
+        capability_registry.load_release_claims(path, {"system.get"})
 
 
 def test_release_claims_reject_duplicate_operations(tmp_path):
@@ -1841,8 +1893,8 @@ def test_release_claims_reject_duplicate_operations(tmp_path):
     document["operations"] *= 2
     path = tmp_path / "v0.2.0.json"
     _write_json(path, document)
-    with pytest.raises(inventory.InventoryError, match="duplicate"):
-        inventory.load_release_claims(path, {"system.get"})
+    with pytest.raises(capability_schema.InventoryError, match="duplicate"):
+        capability_registry.load_release_claims(path, {"system.get"})
 
 
 @pytest.mark.parametrize(
@@ -1851,8 +1903,8 @@ def test_release_claims_reject_duplicate_operations(tmp_path):
 def test_release_claims_reject_invalid_json(tmp_path, text):
     path = tmp_path / "v0.2.0.json"
     path.write_text(text)
-    with pytest.raises(inventory.InventoryError):
-        inventory.load_release_claims(path, set())
+    with pytest.raises(capability_schema.InventoryError):
+        capability_registry.load_release_claims(path, set())
 
 
 def test_inventory_validates_each_retained_release(tmp_path):
@@ -1894,7 +1946,7 @@ def test_initial_release_claims_match_v010_scope():
         "pcie.assign_dedicated_slot": ("dedicated", "st29-dedicated-pcie"),
         "pcie.unassign_dedicated_slot": ("dedicated", "st36-io-slots"),
     }
-    claims = inventory.load_release_claims(
+    claims = capability_registry.load_release_claims(
         ROOT / "docs/capabilities/releases/v0.1.0.json", set(expected)
     )
     assert {
@@ -1907,13 +1959,13 @@ def test_initial_release_claims_match_v010_scope():
 def test_release_claims_reject_invalid_filename(tmp_path, name):
     path = tmp_path / name
     _write_json(path, _release_document())
-    with pytest.raises(inventory.InventoryError, match="filename"):
-        inventory.load_release_claims(path, {"system.get"})
+    with pytest.raises(capability_schema.InventoryError, match="filename"):
+        capability_registry.load_release_claims(path, {"system.get"})
 
 
 def test_release_claims_missing_file_is_inventory_error(tmp_path):
-    with pytest.raises(inventory.InventoryError):
-        inventory.load_release_claims(tmp_path / "v1.0.json", {"system.get"})
+    with pytest.raises(capability_schema.InventoryError):
+        capability_registry.load_release_claims(tmp_path / "v1.0.json", {"system.get"})
 
 
 def test_inventory_requires_release_directory(tmp_path):
@@ -1937,8 +1989,10 @@ def test_release_claims_reject_bare_cec_in_mutually_exclusive_all_arm(tmp_path):
             ],
         },
     )
-    with pytest.raises(inventory.InventoryError, match="unknown release claim route"):
-        inventory.load_release_claims(path, {"job.get"})
+    with pytest.raises(
+        capability_schema.InventoryError, match="unknown release claim route"
+    ):
+        capability_registry.load_release_claims(path, {"job.get"})
 
 
 @pytest.mark.parametrize(
@@ -1946,7 +2000,7 @@ def test_release_claims_reject_bare_cec_in_mutually_exclusive_all_arm(tmp_path):
 )
 def test_claimed_report_states(state, capsys):
     states = {
-        "system.get": inventory.OperationState(
+        "system.get": capability_verification.OperationState(
             state, "closure-changed" if state == "stale" else None
         )
     }
@@ -1963,7 +2017,7 @@ def test_claimed_report_states(state, capsys):
 
 def test_claimed_report_names_every_failure(capsys):
     states = {
-        name: inventory.OperationState("unevidenced")
+        name: capability_verification.OperationState("unevidenced")
         for name in ("system.get", "lpar.get")
     }
     assert (
@@ -1985,7 +2039,7 @@ def claimed_gate(tmp_path, monkeypatch):
     _minimal_inventory(tmp_path)
     registry = tuple(
         tool
-        for tool in inventory.discover_registry()
+        for tool in capability_registry.discover_registry()
         if tool.operation in {"system.get", "system.list"}
     )
     _write_json(
@@ -2023,7 +2077,7 @@ def claimed_gate(tmp_path, monkeypatch):
         record["evidence"] = [
             _observation(
                 identity="st1-" + tool.operation.replace(".", "-"),
-                fingerprint=inventory.closure_fingerprint(
+                fingerprint=capability_closure.closure_fingerprint(
                     tmp_path, tool.handler.rsplit(".", 1)[0]
                 ),
                 observed_at="2026-09-06T12:00:00Z"
@@ -2035,19 +2089,23 @@ def claimed_gate(tmp_path, monkeypatch):
     _write_maturity(tmp_path, records)
     snapshot = tmp_path / "release-verification.json"
     snapshot.write_text(
-        inventory.render_release_verification(records, registry, tmp_path, _NOW)
+        capability_verification.render_release_verification(
+            records, registry, tmp_path, _NOW
+        )
     )
     projection = tmp_path / "projection.json"
     projection.write_text(
-        inventory.render_runtime_projection(
-            records, registry, inventory.load_release_verification(snapshot)
+        capability_verification.render_runtime_projection(
+            records,
+            registry,
+            capability_verification.load_release_verification(snapshot),
         )
     )
     claims = tmp_path / "v0.2.0.json"
     _write_json(claims, _release_document())
     monkeypatch.setattr(inventory, "ROOT", tmp_path)
     monkeypatch.setattr(inventory, "DEFAULT_RUNTIME_PROJECTION", projection)
-    monkeypatch.setattr(inventory, "discover_registry", lambda: registry)
+    monkeypatch.setattr(capability_registry, "discover_registry", lambda: registry)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     return ["--inventory", str(tmp_path), "--require-current", str(claims)]
@@ -2103,7 +2161,7 @@ def test_claimed_gate_main(
     if change == "closure":
         module = next(
             tool.handler.rsplit(".", 1)[0]
-            for tool in inventory.discover_registry()
+            for tool in capability_registry.discover_registry()
             if tool.operation == "system.get"
         )
         source = tmp_path / "src" / Path(*module.split(".")).with_suffix(".py")
@@ -2120,10 +2178,12 @@ def test_claimed_gate_main(
         else:
             records.remove(record)
         _write_maturity(tmp_path, records)
-        projection = inventory.render_runtime_projection(
+        projection = capability_verification.render_runtime_projection(
             records,
-            inventory.discover_registry(),
-            inventory.load_release_verification(tmp_path / "release-verification.json"),
+            capability_registry.discover_registry(),
+            capability_verification.load_release_verification(
+                tmp_path / "release-verification.json"
+            ),
         )
         (tmp_path / "projection.json").write_text(projection)
     elif change == "empty":
@@ -2190,7 +2250,7 @@ def test_registered_operation_requires_maturity_record(registered_inventory, tmp
 def test_maturity_record_validation_accepts_sparse_catalog():
     errors: list[str] = []
 
-    inventory._validate_maturity(
+    capability_schema.validate_maturity(
         [_operation("system.list")], {"system.list", "system.get"}, errors
     )
 
@@ -2200,7 +2260,7 @@ def test_maturity_record_validation_accepts_sparse_catalog():
 def test_registered_operation_requires_automated_test_links(
     registered_inventory, tmp_path
 ):
-    document = inventory.load_json(tmp_path / "operations.json")
+    document = capability_schema.load_json(tmp_path / "operations.json")
     document["operations"][0]["tests"] = []
     errors: list[str] = []
 
@@ -2212,7 +2272,7 @@ def test_registered_operation_requires_automated_test_links(
 
 
 def test_baseline_scope_distinguishes_fixed_serialization_and_carried_assignment():
-    records = inventory.load_json(ROOT / "docs/capabilities/maturity.json")[
+    records = capability_schema.load_json(ROOT / "docs/capabilities/maturity.json")[
         "operations"
     ]
     by_operation = {record["operation"]: record for record in records}
@@ -2233,7 +2293,7 @@ def test_baseline_scope_distinguishes_fixed_serialization_and_carried_assignment
 
 
 def test_configured_host_inventory_has_no_hmc_reference_claim():
-    records = inventory.load_json(ROOT / "docs/capabilities/operations.json")[
+    records = capability_schema.load_json(ROOT / "docs/capabilities/operations.json")[
         "operations"
     ]
     record = next(row for row in records if row["operation"] == "config.list_hosts")
@@ -2247,11 +2307,15 @@ def test_hardware_memory_creation_catalog_contract(operation: str) -> None:
     catalog = ROOT / "docs" / "capabilities"
     record = next(
         row
-        for row in inventory.load_json(catalog / "operations.json")["operations"]
+        for row in capability_schema.load_json(catalog / "operations.json")[
+            "operations"
+        ]
         if row["operation"] == operation
     )
     registered = next(
-        tool for tool in inventory.discover_registry() if tool.operation == operation
+        tool
+        for tool in capability_registry.discover_registry()
+        if tool.operation == operation
     )
     module, name = registered.handler.rsplit(".", 1)
     handler = getattr(importlib.import_module(module), name)
@@ -2266,7 +2330,7 @@ def test_hardware_memory_creation_catalog_contract(operation: str) -> None:
     assert record["signature"] == registered.signature == str(signature)
     maturity = next(
         row
-        for row in inventory.load_json(catalog / "maturity.json")["operations"]
+        for row in capability_schema.load_json(catalog / "maturity.json")["operations"]
         if row["operation"] == operation
     )
     variants = [
@@ -2307,18 +2371,22 @@ def test_c07_creation_memory_catalog_bindings(operation):
     catalog = ROOT / "docs/capabilities"
     record = next(
         row
-        for row in inventory.load_json(catalog / "operations.json")["operations"]
+        for row in capability_schema.load_json(catalog / "operations.json")[
+            "operations"
+        ]
         if row["operation"] == operation
     )
     registered = next(
-        tool for tool in inventory.discover_registry() if tool.operation == operation
+        tool
+        for tool in capability_registry.discover_registry()
+        if tool.operation == operation
     )
     assert record["signature"] == registered.signature
     assert "cli:commands/mksyscfg" in record["row_ids"]
     assert "tests/app/test_app_creation_memory.py" in record["tests"]
     maturity = next(
         row
-        for row in inventory.load_json(catalog / "maturity.json")["operations"]
+        for row in capability_schema.load_json(catalog / "maturity.json")["operations"]
         if row["operation"] == operation
     )
     variants = [
@@ -2345,12 +2413,14 @@ def test_affinity_group_creation_catalog_contract(operation: str) -> None:
     catalog = ROOT / "docs" / "capabilities"
     record = next(
         row
-        for row in inventory.load_json(catalog / "operations.json")["operations"]
+        for row in capability_schema.load_json(catalog / "operations.json")[
+            "operations"
+        ]
         if row["operation"] == operation
     )
     maturity = next(
         row
-        for row in inventory.load_json(catalog / "maturity.json")["operations"]
+        for row in capability_schema.load_json(catalog / "maturity.json")["operations"]
         if row["operation"] == operation
     )
     scope = [
@@ -2371,13 +2441,13 @@ def test_affinity_group_creation_catalog_contract(operation: str) -> None:
         required.add("tests/test_live_lpar_affinity_group_arm.py")
     assert required <= set(record["tests"])
     assert all((ROOT / path).is_file() for path in required)
-    registry = inventory.discover_registry()
+    registry = capability_registry.discover_registry()
     assert record["signature"] == next(
         tool.signature for tool in registry if tool.operation == operation
     )
     # Implemented input scope alone never supplies a hardware verification snapshot.
     projection = json.loads(
-        inventory.render_runtime_projection([maturity], registry, {})
+        capability_verification.render_runtime_projection([maturity], registry, {})
     )["operations"]
     assert projection[0]["implementation"] == maturity["implementation"]["state"]
     assert projection[0]["verification"] == "unevidenced"

@@ -363,11 +363,11 @@ async def test_sharing_arm_accepts_uuid_case_without_changing_requests(
 async def test_sharing_observations_match_source_sites_and_actual_invocation(
     target, monkeypatch
 ):
-    import check_capability_inventory as inventory
     import promote_live_observations as promotion
+    from capability_evidence import registry as capability_registry
 
     state = await exercise(target, monkeypatch)
-    sites = inventory.discover_observation_sites()
+    sites = capability_registry.discover_observation_sites()
     assert sites[("lpar.dlpar_proc", 59)] == "st59-lpar-shared-weight"
     assert sites[("lpar.dlpar_proc", 5901)] == "st59-lpar-dedicated-sharing"
     run = {
