@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
@@ -41,8 +41,28 @@ MAX_NETWORKS = 4
 _NOT_ACTIVATED = "not activated"
 _MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
-PlanOf = Callable[[OperationContext], Mapping[str, Any]]
 Opener = Callable[[str], Any]
+
+
+class NetworkAddPlan(TypedDict):
+    port_vlan_id: int
+    mac: str | None
+    baseline: list[str] | None
+
+
+class NetworkRemovePlan(TypedDict):
+    mac: str
+    adapter_uuid: str
+    port_vlan_id: str | None
+    slot: str
+
+
+class NetworkPlan(TypedDict):
+    add: list[NetworkAddPlan]
+    remove: list[NetworkRemovePlan]
+
+
+PlanOf = Callable[[OperationContext], tuple[str, NetworkPlan | None]]
 
 
 def _unicast(mac: str) -> str:
@@ -159,7 +179,7 @@ async def plan_networks(
     lpar_uuid: str,
     *,
     allow_disruption: bool,
-) -> dict[str, Any]:
+) -> NetworkPlan:
     """The network writes *networks* needs, checked against live state (ADR 0325)."""
     if view["state"] != _NOT_ACTIVATED:
         if (view["state"], view["rmc"]) != ("running", "active"):
@@ -189,7 +209,7 @@ async def plan_networks(
             f"could not be read ({type(exc).__name__})"
         ) from exc
     known = {a["mac"] for a in adapters}
-    adds = []
+    adds: list[NetworkAddPlan] = []
     for index, item in enumerate(networks.add):
         if item.mac is not None and item.mac in known:
             raise OperationFailed(
@@ -206,7 +226,7 @@ async def plan_networks(
                 "baseline": None if item.mac is not None else baseline,
             }
         )
-    removes = []
+    removes: list[NetworkRemovePlan] = []
     for index, item in enumerate(networks.remove):
         hits = [a for a in adapters if a["mac"] == item.mac]
         if len(hits) != 1 or hits[0]["adapter_uuid"] is None:
@@ -220,13 +240,17 @@ async def plan_networks(
                 "virtual slot, so its removal from the profile could not be confirmed"
             )
         removes.append(
-            {"mac": item.mac}
-            | {k: hits[0][k] for k in ("adapter_uuid", "port_vlan_id", "slot")}
+            {
+                "mac": item.mac,
+                "adapter_uuid": hits[0]["adapter_uuid"],
+                "port_vlan_id": hits[0]["port_vlan_id"],
+                "slot": hits[0]["slot"],
+            }
         )
     return {"add": adds, "remove": removes}
 
 
-def network_changes(planned: Mapping[str, Any], active: bool) -> list[dict[str, Any]]:
+def network_changes(planned: NetworkPlan, active: bool) -> list[dict[str, Any]]:
     """The ``changes[]`` entries of the planned adds and removals."""
     applied = "live" if active else "profile"
     changes = [
@@ -252,15 +276,15 @@ def network_changes(planned: Mapping[str, Any], active: bool) -> list[dict[str, 
     return changes
 
 
-def _planned(plan: Mapping[str, Any]) -> Mapping[str, Any]:
+def _planned(networks: NetworkPlan | None) -> NetworkPlan:
     """The plan's network section; a plan recorded before ADR 0325 has none."""
-    return plan.get("networks") or {"add": [], "remove": []}
+    return networks or {"add": [], "remove": []}
 
 
-def steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+def steps(networks: NetworkPlan | None, lpar_uuid: str) -> list[tuple[str, str, str]]:
     """The network writes, adds before removals (ADR 0325 Decision 5)."""
-    target = f"lpar:{plan['lpar_uuid']}"
-    planned = _planned(plan)
+    target = f"lpar:{lpar_uuid}"
+    planned = _planned(networks)
     return [
         (f"network_add:{index}", ADD_KIND, target)
         for index in range(len(planned["add"]))
@@ -270,20 +294,22 @@ def steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     ]
 
 
-def removed_slots(plan: Mapping[str, Any]) -> tuple[str, ...]:
+def removed_slots(networks: NetworkPlan | None) -> tuple[str, ...]:
     """The virtual slots the plan's removals free, for the save's readback."""
-    return tuple(str(item["slot"]) for item in _planned(plan)["remove"] if item["slot"])
+    return tuple(
+        str(item["slot"]) for item in _planned(networks)["remove"] if item["slot"]
+    )
 
 
-def adds(plan: Mapping[str, Any]) -> bool:
-    return bool(_planned(plan)["add"])
+def adds(networks: NetworkPlan | None) -> bool:
+    return bool(_planned(networks)["add"])
 
 
 def _index(key: str) -> int:
     return int(key.rpartition(":")[2])
 
 
-def _matches(add: Mapping[str, Any], adapters: list[dict[str, Any]]) -> list[dict]:
+def _matches(add: NetworkAddPlan, adapters: list[dict[str, Any]]) -> list[dict]:
     """The listed adapters that can be *add*'s: by its MAC, else new on its VLAN."""
     if add["mac"] is not None:
         return [a for a in adapters if a["mac"] == add["mac"]]
@@ -301,7 +327,7 @@ def _identity(adapter: Mapping[str, Any]) -> dict[str, Any] | None:
     return dict(adapter)
 
 
-def _add_write(hmc: HMCClient, lpar_uuid: str, add: Mapping[str, Any]) -> Write:
+def _add_write(hmc: HMCClient, lpar_uuid: str, add: NetworkAddPlan) -> Write:
     async def write() -> Mapping[str, Any]:
         mac = add["mac"]
         try:
@@ -336,7 +362,7 @@ def _add_write(hmc: HMCClient, lpar_uuid: str, add: Mapping[str, Any]) -> Write:
     return write
 
 
-def _remove_write(hmc: HMCClient, lpar_uuid: str, item: Mapping[str, Any]) -> Write:
+def _remove_write(hmc: HMCClient, lpar_uuid: str, item: NetworkRemovePlan) -> Write:
     uuid = item["adapter_uuid"]
     identity = {"adapter_uuid": uuid, "mac": item["mac"], "slot": item["slot"]}
 
@@ -368,9 +394,11 @@ def _listed(adapters: list[dict[str, Any]], uuid: str) -> dict[str, Any] | None:
     return next((a for a in adapters if a["adapter_uuid"] == uuid), None)
 
 
-def write_for(hmc: HMCClient, plan: Mapping[str, Any], key: str) -> Write:
+def write_for(
+    hmc: HMCClient, networks: NetworkPlan | None, lpar_uuid: str, key: str
+) -> Write:
     """The write of the plan's network step *key*."""
-    planned, lpar_uuid = _planned(plan), plan["lpar_uuid"]
+    planned = _planned(networks)
     if key.startswith("network_add:"):
         return _add_write(hmc, lpar_uuid, planned["add"][_index(key)])
     return _remove_write(hmc, lpar_uuid, planned["remove"][_index(key)])
@@ -380,17 +408,17 @@ def add_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
     """``lpar.client_network_adapter`` by the pinned MAC, else new adapters on the VLAN."""
 
     async def classify(ctx: OperationContext, effect: EffectRecord) -> Classification:
-        plan = plan_of(ctx)
-        add = _planned(plan)["add"][_index(effect.key)]
+        lpar_uuid, networks = plan_of(ctx)
+        add = _planned(networks)["add"][_index(effect.key)]
         async with opener(ctx.connection) as hmc:
-            found = _matches(add, await current_adapters(hmc, plan["lpar_uuid"]))
+            found = _matches(add, await current_adapters(hmc, lpar_uuid))
         if not found:
             return Classification("not_applied")
         identity = _identity(found[0]) if len(found) == 1 else None
         if identity is None:
             return Classification(
                 "needs_attention",
-                reason=f"LPAR {plan['lpar_uuid']} has {len(found)} candidate adapters "
+                reason=f"LPAR {lpar_uuid} has {len(found)} candidate adapters "
                 "for this add, or one without a UUID or MAC; inspect it",
             )
         return Classification("applied", identity)
@@ -402,10 +430,10 @@ def remove_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
     """``lpar.client_network_adapter_remove`` by whether the planned UUID is listed."""
 
     async def classify(ctx: OperationContext, effect: EffectRecord) -> Classification:
-        plan = plan_of(ctx)
-        item = _planned(plan)["remove"][_index(effect.key)]
+        lpar_uuid, networks = plan_of(ctx)
+        item = _planned(networks)["remove"][_index(effect.key)]
         async with opener(ctx.connection) as hmc:
-            adapters = await current_adapters(hmc, plan["lpar_uuid"])
+            adapters = await current_adapters(hmc, lpar_uuid)
         listed = _listed(adapters, item["adapter_uuid"])
         if listed is None:
             return Classification(
@@ -420,7 +448,7 @@ def remove_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
             return Classification("not_applied")
         return Classification(
             "needs_attention",
-            reason=f"adapter {item['adapter_uuid']} of LPAR {plan['lpar_uuid']} now "
+            reason=f"adapter {item['adapter_uuid']} of LPAR {lpar_uuid} now "
             "carries another MAC; inspect it",
         )
 
@@ -428,13 +456,13 @@ def remove_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
 
 
 async def observed_networks(
-    ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
+    ctx: OperationContext, hmc: HMCClient, networks: NetworkPlan | None, lpar_uuid: str
 ) -> tuple[bool, dict[str, Any]]:
     """Whether every add is listed and every removal gone, and the MACs read."""
-    planned = _planned(plan)
+    planned = _planned(networks)
     if not planned["add"] and not planned["remove"]:
         return True, {}
-    adapters = await current_adapters(hmc, plan["lpar_uuid"])
+    adapters = await current_adapters(hmc, lpar_uuid)
     uuids = {a["adapter_uuid"] for a in adapters}
     added = []
     for index in range(len(planned["add"])):
@@ -448,9 +476,16 @@ async def observed_networks(
     return done, {"networks": sorted(str(a["mac"]) for a in adapters)}
 
 
-def warnings(ctx: OperationContext, plan: Mapping[str, Any], saved: bool) -> list[str]:
+def warnings(
+    ctx: OperationContext,
+    networks: NetworkPlan | None,
+    lpar_uuid: str,
+    saved: bool,
+    *,
+    save_profile: str | None,
+) -> list[str]:
     """Network warnings: a delete error after removal, and changes left unsaved."""
-    planned = _planned(plan)
+    planned = _planned(networks)
     notes = []
     for index in range(len(planned["remove"])):
         recorded = ctx.recorded(f"network_remove:{index}")
@@ -459,16 +494,16 @@ def warnings(ctx: OperationContext, plan: Mapping[str, Any], saved: bool) -> lis
             notes.append(
                 f"the HMC answered HTTP {status} to the removal of adapter "
                 f"{planned['remove'][index]['adapter_uuid']} after deleting it; inspect "
-                f"LPAR {plan['lpar_uuid']}"
+                f"LPAR {lpar_uuid}"
             )
     touched = any(
         (r := ctx.recorded(key)) is not None and r.status != "not_applied"
-        for key, _, _ in steps(plan)
+        for key, _, _ in steps(networks, lpar_uuid)
     )
     if touched and not saved:
         notes.append(
             "the network changes are in the current configuration only: resume to save "
-            f"them into profile {plan.get('save')}; abandon leaves the profile as it was, "
+            f"them into profile {save_profile}; abandon leaves the profile as it was, "
             "so a profile activation drops the added adapters and restores the removed ones"
         )
     return notes

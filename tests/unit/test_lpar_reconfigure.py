@@ -665,6 +665,45 @@ def test_resume_after_profile_applied_continues(hmc, monkeypatch):
     assert hmc.memory[1] == 1024
 
 
+@pytest.mark.parametrize(
+    "later_keys", [("networks",), ("boot", "media", "disks", "networks", "save")]
+)
+def test_resume_preserves_plans_recorded_before_later_legs(
+    hmc, monkeypatch, later_keys
+):
+    make_plan, resolve = reconfigure._make_plan, reconfigure._resolve
+    calls = 0
+
+    async def older_plan(*args):
+        plan = await make_plan(*args)
+        for key in later_keys:
+            plan.pop(key)
+        return plan
+
+    async def pause_after_profile(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise RuntimeError("process died before current write")
+        return await resolve(*args)
+
+    monkeypatch.setattr(reconfigure, "_make_plan", older_plan)
+    monkeypatch.setattr(reconfigure, "_resolve", pause_after_profile)
+    first = _run({"memory_mib": 1024})
+    assert first.outcome == "needs_attention"
+    original = next(e.identity for e in first.effects if e.key == reconfigure.PLAN_KEY)
+    assert all(key not in original for key in later_keys)
+    resumed = _run({"memory_mib": 1024}, continuation="resume")
+    assert (resumed.state, resumed.outcome) == ("terminal", "completed")
+    recorded = next(
+        e.identity for e in resumed.effects if e.key == reconfigure.PLAN_KEY
+    )
+    assert recorded == original
+    assert hmc.calls.count("profile") == 1
+    assert hmc.calls.count("the current configuration") == 1
+    assert hmc.memory[1] == 1024
+
+
 @pytest.mark.parametrize("state", ["running", "not activated"])
 def test_resume_after_the_current_write_renames(hmc, monkeypatch, state):
     hmc.state = state

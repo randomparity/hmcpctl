@@ -17,7 +17,7 @@ import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
@@ -65,6 +65,62 @@ from .reconfigure_media import (
     plan_media,
     require_detachable,
 )
+
+
+class CurrentResourceWrite(TypedDict, total=False):
+    min_memory: int
+    desired_memory: int
+    max_memory: int
+    min_procs: int
+    desired_procs: int
+    max_procs: int
+    min_vcpus: int
+    desired_vcpus: int
+    max_vcpus: int
+
+
+class PlannedChanges(TypedDict):
+    basis: dict[str, Any]
+    profile_patch: dict[str, int]
+    profile_before: dict[str, int]
+    current: CurrentResourceWrite | None
+    rename: dict[str, str] | None
+    changes: list[dict[str, Any]]
+    activation: str | None
+
+
+class DiskAddPlan(TypedDict):
+    vios_uuid: str
+    vg_uuid: str
+    name: str
+    capacity_mib: int
+
+
+class DiskDetachPlan(TypedDict):
+    vios_uuid: str
+    name: str
+    mapping_id: str
+
+
+class DiskPlan(TypedDict):
+    add: list[DiskAddPlan]
+    detach: list[DiskDetachPlan]
+
+
+class ReconfigurationPlan(PlannedChanges):
+    """The recorded plan; later legs may be absent in records from older releases."""
+
+    system_uuid: str
+    lpar_uuid: str
+    profile_uuid: str | None
+    profile_name: str | None
+    profile_etag: str | None
+    boot: NotRequired[dict[str, Any] | None]
+    media: NotRequired[dict[str, Any] | None]
+    disks: NotRequired[DiskPlan | None]
+    networks: NotRequired[network.NetworkPlan | None]
+    save: NotRequired[str | None]
+
 
 # ADR 0314 Decision 6: the specialists whose authority each patch field uses.
 DELEGATED: Mapping[str, tuple[str, ...]] = {
@@ -517,7 +573,7 @@ def plan_changes(
     profile: dict[str, Any] | None,
     allow_disruption: bool,
     boot_write: bool = False,
-) -> dict[str, Any]:
+) -> PlannedChanges:
     """Every change *patch* makes and where it lands, computed before any write.
 
     *boot_write* says a boot-string write is planned; it is a partition write, so the
@@ -578,7 +634,7 @@ def plan_changes(
         "basis": basis(view),
         "profile_patch": profile_patch,
         "profile_before": profile_before,
-        "current": current_write or None,
+        "current": cast(CurrentResourceWrite, current_write) or None,
         "rename": rename,
         "changes": changes,
         "activation": None,
@@ -639,7 +695,7 @@ async def _disk_plan(
     lpar_uuid: str,
     *,
     allow_disruption: bool,
-) -> dict[str, Any]:
+) -> DiskPlan:
     """The disk writes *disks* needs, checked against live VIOS state (ADR 0322)."""
     active = view["state"] != _NOT_ACTIVATED
     if disks.add and active and (view["state"], view["rmc"]) != ("running", "active"):
@@ -683,7 +739,7 @@ async def _disk_plan(
 
 async def _planned_add(
     hmc: HMCClient, item: DiskAdd, index: int, claimed: dict[str, int]
-) -> dict[str, Any]:
+) -> DiskAddPlan:
     """One add, checked; *claimed* sums the MiB earlier adds take from each group."""
     vios_uuid, vg_uuid = item.vios_uuid.lower(), item.vg_uuid.lower()
     groups = await hmc.list_volume_groups(vios_uuid)
@@ -714,7 +770,7 @@ async def _planned_add(
 
 async def _planned_detach(
     hmc: HMCClient, item: DiskDetach, index: int, lpar_uuid: str
-) -> dict[str, Any]:
+) -> DiskDetachPlan:
     vios_uuid = item.vios_uuid.lower()
     ids = _mapping_ids(await hmc.list_storage_mappings(vios_uuid), item.name, lpar_uuid)
     if len(ids) != 1 or not ids[0]:
@@ -738,7 +794,7 @@ async def _require_profile_jobs(hmc: HMCClient) -> None:
         )
 
 
-def _disk_changes(disks: Mapping[str, Any], active: bool) -> list[dict[str, Any]]:
+def _disk_changes(disks: DiskPlan, active: bool) -> list[dict[str, Any]]:
     applied = "live" if active else "profile"
     changes = [
         {
@@ -866,7 +922,7 @@ async def _make_plan(
     allow_disruption: bool,
     system_uuid: str,
     lpar_uuid: str,
-) -> dict[str, Any]:
+) -> ReconfigurationPlan:
     view = await _read_view(hmc, lpar_uuid)
     if patch.processors is not None:
         view |= await _processor_limits(hmc, system_uuid, view["dedicated"])
@@ -920,13 +976,14 @@ async def _make_plan(
             patch.networks,
             view=view,
             profile=profile,
-            plan=plan,
+            changes=plan["changes"],
             system_uuid=system_uuid,
             lpar_uuid=lpar_uuid,
             allow_disruption=allow_disruption,
         )
     pending = any(c["applied"] == "pending_activation" for c in plan["changes"])
-    plan |= {
+    return {
+        **plan,
         "system_uuid": system_uuid,
         "lpar_uuid": lpar_uuid,
         "profile_uuid": None if record is None else record.uuid,
@@ -941,7 +998,6 @@ async def _make_plan(
         if record is not None and ((disks and disks["add"]) or networks)
         else None,
     }
-    return plan
 
 
 async def _network_plan(
@@ -950,11 +1006,11 @@ async def _network_plan(
     *,
     view: dict[str, Any],
     profile: dict[str, Any],
-    plan: dict[str, Any],
+    changes: list[dict[str, Any]],
     system_uuid: str,
     lpar_uuid: str,
     allow_disruption: bool,
-) -> dict[str, Any]:
+) -> network.NetworkPlan:
     """The network writes, after the persistence guard every network change needs.
 
     Adds and removals alike end in the force-save (ADR 0325 Decision 4), so the guard
@@ -968,9 +1024,9 @@ async def _network_plan(
         lpar_uuid,
         allow_disruption=allow_disruption,
     )
-    require_persistable(view, profile, plan["changes"])
+    require_persistable(view, profile, changes)
     await _require_profile_jobs(hmc)
-    plan["changes"] += network.network_changes(planned, view["state"] != _NOT_ACTIVATED)
+    changes += network.network_changes(planned, view["state"] != _NOT_ACTIVATED)
     return planned
 
 
@@ -988,16 +1044,19 @@ async def _other_names(hmc: HMCClient, system_uuid: str, lpar_uuid: str) -> list
     ]
 
 
-def _profile_write(hmc: HMCClient, plan: Mapping[str, Any]) -> Write:
+def _profile_write(hmc: HMCClient, plan: ReconfigurationPlan) -> Write:
+    profile_uuid = plan["profile_uuid"]
+    assert profile_uuid is not None
+
     async def write() -> Mapping[str, Any]:
         try:
             outcome = await update_partition_profile(
                 hmc,
                 plan["system_uuid"],
                 plan["lpar_uuid"],
-                plan["profile_uuid"],
+                profile_uuid,
                 plan["profile_etag"] or "",
-                ProfilePatch(**plan["profile_patch"]),
+                ProfilePatch.model_validate(plan["profile_patch"]),
                 exclusive_writer_window=True,
             )
         except (HMCError, ValueError, TypeError, LookupError, PermissionError) as exc:
@@ -1120,9 +1179,11 @@ def _map_write(hmc: HMCClient, lpar_uuid: str, add: Mapping[str, Any]) -> Write:
     return write
 
 
-def _ledger(ctx: OperationContext, plan: Mapping[str, Any], index: int) -> None:
+def _ledger(ctx: OperationContext, plan: ReconfigurationPlan, index: int) -> None:
     """Own a disk this operation created (ADR 0322 Decision 2); a replay re-inserts."""
-    add = plan["disks"]["add"][index]
+    disks = plan["disks"]
+    assert disks is not None
+    add = disks["add"][index]
     ctx.ledger_add(
         f"added_disk:{index}",
         DISK_LEDGER,
@@ -1140,11 +1201,12 @@ def _index(key: str) -> int:
     return int(key.rpartition(":")[2])
 
 
-def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+def _steps(plan: ReconfigurationPlan) -> list[tuple[str, str, str]]:
     """The writes the plan needs, in ADR 0314 Decision 4's then ADR 0322's order."""
     lpar_uuid = plan["lpar_uuid"]
     steps = []
     if plan["profile_patch"]:
+        assert plan["profile_uuid"] is not None
         target = profile_write.target(lpar_uuid, plan["profile_uuid"])
         steps.append((PROFILE_KEY, profile_write.KIND, target))
     if plan["current"]:
@@ -1157,7 +1219,7 @@ def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     for index, add in enumerate(disks["add"]):
         steps.append((f"disk:{index}", DISK_KIND, f"vios:{add['vios_uuid']}"))
         steps.append((f"map:{index}", MAP_KIND, f"lpar:{lpar_uuid}"))
-    steps += network.steps(plan)
+    steps += network.steps(plan.get("networks"), plan["lpar_uuid"])
     if plan.get("boot"):
         steps.append((BOOT_KEY, BOOT_KIND, f"lpar:{lpar_uuid}"))
     if plan.get("media"):
@@ -1166,7 +1228,7 @@ def _steps(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
 
 
 def _stale(
-    ctx: OperationContext, plan: Mapping[str, Any], view: dict[str, Any]
+    ctx: OperationContext, plan: ReconfigurationPlan, view: dict[str, Any]
 ) -> bool:
     """Whether the partition differs from the plan's basis in what no applied write moved.
 
@@ -1186,12 +1248,13 @@ def _stale(
     return observed != expected
 
 
-def _write_for(hmc: HMCClient, plan: Mapping[str, Any], key: str, kind: str) -> Write:
+def _write_for(hmc: HMCClient, plan: ReconfigurationPlan, key: str, kind: str) -> Write:
     """The write the plan's step *key* of *kind* performs."""
     lpar_uuid = plan["lpar_uuid"]
     if key == PROFILE_KEY:
         return _profile_write(hmc, plan)
     if key == CURRENT_KEY:
+        assert plan["current"] is not None
         return _partition_write(
             hmc,
             lpar_uuid,
@@ -1199,20 +1262,23 @@ def _write_for(hmc: HMCClient, plan: Mapping[str, Any], key: str, kind: str) -> 
             resources=LparResources(**plan["current"]),
         )
     if key == RENAME_KEY:
+        assert plan["rename"] is not None
         return _partition_write(
             hmc, lpar_uuid, "the partition name", name=plan["rename"]["after"]
         )
-    if kind == UNMAP_KIND:
-        return _unmap_write(hmc, lpar_uuid, plan["disks"]["detach"][_index(key)])
-    if kind == DISK_KIND:
-        return _disk_write(hmc, plan["disks"]["add"][_index(key)])
     if kind in (network.ADD_KIND, network.REMOVE_KIND):
-        return network.write_for(hmc, plan, key)
-    return _map_write(hmc, lpar_uuid, plan["disks"]["add"][_index(key)])
+        return network.write_for(hmc, plan.get("networks"), lpar_uuid, key)
+    disks = plan["disks"]
+    assert disks is not None
+    if kind == UNMAP_KIND:
+        return _unmap_write(hmc, lpar_uuid, disks["detach"][_index(key)])
+    if kind == DISK_KIND:
+        return _disk_write(hmc, disks["add"][_index(key)])
+    return _map_write(hmc, lpar_uuid, disks["add"][_index(key)])
 
 
 async def _apply(
-    ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
+    ctx: OperationContext, hmc: HMCClient, plan: ReconfigurationPlan
 ) -> None:
     lpar_uuid, system_uuid = plan["lpar_uuid"], plan["system_uuid"]
     for key, kind, target in _steps(plan):
@@ -1244,7 +1310,7 @@ async def _apply(
 
 
 async def _persist(
-    ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
+    ctx: OperationContext, hmc: HMCClient, plan: ReconfigurationPlan
 ) -> None:
     """Force-save added disks and network changes into the default profile.
 
@@ -1255,6 +1321,7 @@ async def _persist(
     if recorded is not None and recorded.status == "applied":
         return
     lpar_uuid, system_uuid, name = plan["lpar_uuid"], plan["system_uuid"], plan["save"]
+    assert name is not None
     await _resolve(hmc, system_uuid, lpar_uuid)
     view = await _read_view(hmc, lpar_uuid)
     record, profile = await _default_profile(hmc, view, system_uuid, lpar_uuid)
@@ -1274,25 +1341,25 @@ async def _persist(
             lpar_uuid,
             name,
             exclusive_writer_window=True,
-            removed_slots=network.removed_slots(plan),
+            removed_slots=network.removed_slots(plan.get("networks")),
             require_adapter=_adds_adapter(plan),
         ),
     )
 
 
-def _adds_adapter(plan: Mapping[str, Any]) -> bool:
+def _adds_adapter(plan: ReconfigurationPlan) -> bool:
     """Whether the plan adds a client adapter: a disk add's vSCSI, or a network add."""
     disks = plan.get("disks") or {"add": []}
-    return bool(disks["add"]) or network.adds(plan)
+    return bool(disks["add"]) or network.adds(plan.get("networks"))
 
 
 def _readback_options(ctx: OperationContext) -> tuple[tuple[str, ...], bool]:
     """The save readback's options for the recorded plan (ADR 0325 Decision 4)."""
     plan = _plan_of(ctx)
-    return network.removed_slots(plan), _adds_adapter(plan)
+    return network.removed_slots(plan.get("networks")), _adds_adapter(plan)
 
 
-def _expected(plan: Mapping[str, Any]) -> tuple[dict[str, int], dict[str, int]]:
+def _expected(plan: ReconfigurationPlan) -> tuple[dict[str, int], dict[str, int]]:
     """The (profile, current) values verification must read, by ``min/desired/max``."""
     index = {"min": 0, "desired": 1, "max": 2}
     profile = {
@@ -1300,7 +1367,7 @@ def _expected(plan: Mapping[str, Any]) -> tuple[dict[str, int], dict[str, int]]:
         for key, value in plan["profile_patch"].items()
     }
     current: dict[str, int] = {}
-    for key, value in (plan["current"] or {}).items():
+    for key, value in cast(Mapping[str, int], plan["current"] or {}).items():
         level, kind = key.split("_", 1)
         resource = "memory" if kind == "memory" else "processors"
         current[f"{resource}:{index[level]}"] = value
@@ -1316,7 +1383,7 @@ def _observed(view: Mapping[str, Any], keys: Mapping[str, int]) -> dict[str, int
 
 
 async def _verify(
-    ctx: OperationContext, hmc: HMCClient, plan: Mapping[str, Any]
+    ctx: OperationContext, hmc: HMCClient, plan: ReconfigurationPlan
 ) -> BodyResult:
     """Poll until the profile and partition read what the plan wrote (Decision 7)."""
     want_profile, want_current = _expected(plan)
@@ -1326,6 +1393,7 @@ async def _verify(
         view = await _read_view(hmc, lpar_uuid)
         seen_profile: dict[str, int] = {}
         if want_profile:
+            assert plan["profile_name"] is not None
             _, profile = await _read_profile(
                 hmc, plan["system_uuid"], lpar_uuid, plan["profile_name"]
             )
@@ -1333,7 +1401,9 @@ async def _verify(
         seen_current = _observed(view, want_current)
         renamed = plan["rename"] is None or view["name"] == plan["rename"]["after"]
         legs, seen_legs = await observed(hmc, plan)
-        networked, seen_networks = await network.observed_networks(ctx, hmc, plan)
+        networked, seen_networks = await network.observed_networks(
+            ctx, hmc, plan.get("networks"), lpar_uuid
+        )
         seen_legs |= seen_networks
         done = (
             seen_profile == want_profile
@@ -1355,7 +1425,7 @@ async def _verify(
     return BodyResult("completed" if done else "needs_attention", result)
 
 
-def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
+def _result(ctx: OperationContext, plan: ReconfigurationPlan) -> dict[str, Any]:
     warnings = []
     profile = ctx.recorded(PROFILE_KEY)
     identity = (profile.identity or {}) if profile is not None else {}
@@ -1385,7 +1455,11 @@ def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
     warnings += _disk_warnings(ctx, plan)
     saved = ctx.recorded(SAVE_KEY)
     warnings += network.warnings(
-        ctx, plan, saved is not None and saved.status == "applied"
+        ctx,
+        plan.get("networks"),
+        plan["lpar_uuid"],
+        saved is not None and saved.status == "applied",
+        save_profile=plan.get("save"),
     )
     return {
         "system_uuid": plan["system_uuid"],
@@ -1397,7 +1471,7 @@ def _result(ctx: OperationContext, plan: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _disk_warnings(ctx: OperationContext, plan: Mapping[str, Any]) -> list[str]:
+def _disk_warnings(ctx: OperationContext, plan: ReconfigurationPlan) -> list[str]:
     """Where added disks persist, and the recovery profiles the save kept (ADR 0322)."""
     if not plan.get("save"):
         return []
@@ -1433,7 +1507,7 @@ def reconfigure_body(
         recorded = ctx.recorded(PLAN_KEY)
         async with open_client(ctx.connection) as hmc:
             if recorded is not None and recorded.status == "applied":
-                plan = dict(recorded.identity or {})
+                plan = cast(ReconfigurationPlan, dict(recorded.identity or {}))
             else:
                 ctx.set_phase("validating")
                 system_uuid, lpar_uuid = await _resolve(hmc, system, lpar)
@@ -1451,8 +1525,13 @@ def reconfigure_body(
                 async def record() -> Mapping[str, Any]:
                     return made
 
-                plan = dict(
-                    await ctx.effect(PLAN_KEY, PLAN_KIND, f"lpar:{lpar_uuid}", record)
+                plan = cast(
+                    ReconfigurationPlan,
+                    dict(
+                        await ctx.effect(
+                            PLAN_KEY, PLAN_KIND, f"lpar:{lpar_uuid}", record
+                        )
+                    ),
                 )
             ctx.set_phase("applying")
             try:
@@ -1499,24 +1578,33 @@ def _touched(ctx: OperationContext, key: str) -> bool:
     return recorded is not None and recorded.status != "not_applied"
 
 
-def _plan_of(ctx: OperationContext) -> Mapping[str, Any]:
+def _plan_of(ctx: OperationContext) -> ReconfigurationPlan:
     recorded = ctx.recorded(PLAN_KEY)
     if recorded is None or recorded.status != "applied":
         raise ValueError("the operation has no recorded plan")
-    return recorded.identity or {}
+    # This persisted boundary preserves the original keys, including absent later legs.
+    return cast(ReconfigurationPlan, recorded.identity or {})
+
+
+def _network_plan_of(ctx: OperationContext) -> tuple[str, network.NetworkPlan | None]:
+    plan = _plan_of(ctx)
+    return plan["lpar_uuid"], plan.get("networks")
 
 
 def _profile_values(
     ctx: OperationContext, _effect: EffectRecord
 ) -> tuple[ProfilePatch, ProfilePatch]:
     plan = _plan_of(ctx)
-    return ProfilePatch(**plan["profile_patch"]), ProfilePatch(**plan["profile_before"])
+    return ProfilePatch.model_validate(
+        plan["profile_patch"]
+    ), ProfilePatch.model_validate(plan["profile_before"])
 
 
 async def _classify_rename(
     ctx: OperationContext, effect: EffectRecord
 ) -> Classification:
     rename = _plan_of(ctx)["rename"]
+    assert rename is not None
     _, _, lpar_uuid = effect.target.partition(":")
     async with open_client(ctx.connection) as hmc:
         entry = await hmc.get_logical_partition(lpar_uuid)
@@ -1531,8 +1619,13 @@ async def _classify_rename(
     )
 
 
-def _planned(ctx: OperationContext, effect: EffectRecord, part: str) -> dict[str, Any]:
-    return dict(_plan_of(ctx)["disks"][part][_index(effect.key)])
+def _planned(
+    ctx: OperationContext, effect: EffectRecord, part: Literal["add", "detach"]
+) -> dict[str, Any]:
+    disks = _plan_of(ctx)["disks"]
+    assert disks is not None
+    items = disks["add"] if part == "add" else disks["detach"]
+    return dict(items[_index(effect.key)])
 
 
 async def _classify_unmap(
@@ -1602,10 +1695,10 @@ RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
         lambda connection: open_client(connection), _readback_options
     ),
     network.ADD_KIND: network.add_classifier(
-        _plan_of, lambda connection: open_client(connection)
+        _network_plan_of, lambda connection: open_client(connection)
     ),
     network.REMOVE_KIND: network.remove_classifier(
-        _plan_of, lambda connection: open_client(connection)
+        _network_plan_of, lambda connection: open_client(connection)
     ),
     BOOT_KIND: boot_classifier(_plan_of, lambda connection: open_client(connection)),
     MEDIA_KIND: media_classifier(_plan_of, lambda connection: open_client(connection)),

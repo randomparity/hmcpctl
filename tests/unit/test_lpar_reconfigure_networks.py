@@ -173,9 +173,9 @@ def test_plan_records_removal_identity_and_unpinned_baseline():
             {"mac": MAC_B, "adapter_uuid": "ub", "port_vlan_id": "20", "slot": "3"}
         ],
     }
-    assert net.removed_slots(plan) == ("3",)
-    assert net.adds(plan)
-    assert [s[0] for s in net.steps(plan)] == [
+    assert net.removed_slots(plan.get("networks")) == ("3",)
+    assert net.adds(plan.get("networks"))
+    assert [s[0] for s in net.steps(plan.get("networks"), plan["lpar_uuid"])] == [
         "network_add:0",
         "network_add:1",
         "network_remove:0",
@@ -258,16 +258,16 @@ def test_plan_names_an_unreadable_inventory():
 
 def test_plan_without_networks_key_has_no_steps():
     plan = {"lpar_uuid": LPAR}
-    assert net.steps(plan) == []
-    assert net.removed_slots(plan) == ()
-    assert not net.adds(plan)
+    assert net.steps(plan.get("networks"), plan["lpar_uuid"]) == []
+    assert net.removed_slots(plan.get("networks")) == ()
+    assert not net.adds(plan.get("networks"))
 
 
 # --- writes ------------------------------------------------------------------
 
 
 def _write(fake, plan, key):
-    return _run(net.write_for(fake, plan, key)())
+    return _run(net.write_for(fake, plan.get("networks"), plan["lpar_uuid"], key)())
 
 
 def test_unpinned_add_records_the_created_identity():
@@ -370,8 +370,12 @@ def _classifiers(fake, plan):
         return fake
 
     return (
-        net.add_classifier(lambda _ctx: plan, opener),
-        net.remove_classifier(lambda _ctx: plan, opener),
+        net.add_classifier(
+            lambda _ctx: (plan["lpar_uuid"], plan.get("networks")), opener
+        ),
+        net.remove_classifier(
+            lambda _ctx: (plan["lpar_uuid"], plan.get("networks")), opener
+        ),
     )
 
 
@@ -415,15 +419,19 @@ def test_observed_waits_for_adds_and_removals():
     plan = _plan(fake, {"add": [{"port_vlan_id": 30}], "remove": [{"mac": MAC_A}]})
     added = _write(fake, plan, "network_add:0")
     ctx = _ctx({"network_add:0": _record("applied", added)})
-    done, seen = _run(net.observed_networks(ctx, fake, plan))
+    done, seen = _run(
+        net.observed_networks(ctx, fake, plan.get("networks"), plan["lpar_uuid"])
+    )
     assert not done
     _write(fake, plan, "network_remove:0")
-    done, seen = _run(net.observed_networks(ctx, fake, plan))
+    done, seen = _run(
+        net.observed_networks(ctx, fake, plan.get("networks"), plan["lpar_uuid"])
+    )
     assert done and MAC_A not in seen["networks"]
 
 
 def test_observed_is_trivially_done_without_networks():
-    assert _run(net.observed_networks(_ctx(), NetHMC(), {"lpar_uuid": LPAR})) == (
+    assert _run(net.observed_networks(_ctx(), NetHMC(), None, LPAR)) == (
         True,
         {},
     )
@@ -439,13 +447,35 @@ def test_warnings_name_unsaved_changes_and_delete_errors():
             )
         }
     )
-    notes = net.warnings(ctx, plan, saved=False)
+    notes = net.warnings(
+        ctx,
+        plan.get("networks"),
+        plan["lpar_uuid"],
+        saved=False,
+        save_profile=plan.get("save"),
+    )
     assert any("HTTP 500" in n for n in notes)
     assert any("current configuration only" in n for n in notes)
     assert not any(
-        "current configuration only" in n for n in net.warnings(ctx, plan, True)
+        "current configuration only" in n
+        for n in net.warnings(
+            ctx,
+            plan.get("networks"),
+            plan["lpar_uuid"],
+            True,
+            save_profile=plan.get("save"),
+        )
     )
-    assert net.warnings(_ctx(), plan, saved=False) == []
+    assert (
+        net.warnings(
+            _ctx(),
+            plan.get("networks"),
+            plan["lpar_uuid"],
+            saved=False,
+            save_profile=plan.get("save"),
+        )
+        == []
+    )
 
 
 def test_add_refused_before_submission_is_not_applied():
