@@ -265,12 +265,12 @@ def native_target(monkeypatch):
 
     monkeypatch.setattr("hmcpctl.operations.lpar.linux_roles.run_hmc_command", mode)
 
-    async def inventory(hmc, system, parent, *, partition_type):
-        assert system == SYSTEM and parent == FRESH
+    async def inventory(hmc, lpar_name_or_uuid, *, system_name_or_uuid, partition_type):
+        assert system_name_or_uuid == SYSTEM and lpar_name_or_uuid == FRESH
         selected = SimpleNamespace(uuid=PROFILE, name="default_profile")
         return SimpleNamespace(
-            system_uuid=system,
-            partition_uuid=parent,
+            system_uuid=system_name_or_uuid,
+            partition_uuid=lpar_name_or_uuid,
             partition_type=partition_type,
             profiles=(selected, selected)
             if env.fault == "ambiguous-profile"

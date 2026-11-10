@@ -310,19 +310,33 @@ class FakeHMC:
 
     # Seams for operations.lpar.profiles, monkeypatched into the reconfigure module.
 
-    async def read_partition_profile(self, hmc, system, lpar, name):
-        assert (system, lpar, name) == (SYS, LPAR, "default")
+    async def read_partition_profile(
+        self, hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid
+    ):
+        assert (system_name_or_uuid, lpar_name_or_uuid, profile_selector) == (
+            SYS,
+            LPAR,
+            "default",
+        )
         fields = element_to_dict(self.profile)
         return SimpleNamespace(
             uuid=PROFILE, name="default", etag=f"E{self.etag}", fields=fields
         )
 
     async def update_partition_profile(
-        self, hmc, system, lpar, selector, etag, patch, *, exclusive_writer_window
+        self,
+        hmc,
+        lpar_name_or_uuid,
+        profile_selector,
+        expected_etag,
+        patch,
+        *,
+        system_name_or_uuid,
+        exclusive_writer_window,
     ):
         assert exclusive_writer_window is True
         self.calls.append("profile")
-        if etag != f"E{self.etag}":
+        if expected_etag != f"E{self.etag}":
             raise ValueError("expected_etag must match a fresh contained profile ETag")
         self.profile = apply_profile_patch(self.profile, patch)
         self.etag += 1
@@ -490,8 +504,8 @@ def test_owner_refusal_fails_before_write(hmc):
 def test_stale_profile_fails_without_writing(hmc, monkeypatch):
     real = hmc.read_partition_profile
 
-    async def stale(*args):
-        record = await real(*args)
+    async def stale(*args, **kwargs):
+        record = await real(*args, **kwargs)
         hmc.etag += 1  # another writer changed the profile after this read
         return record
 

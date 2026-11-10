@@ -280,9 +280,9 @@ def _record(profile: NativeProfile) -> PartitionProfileRecord:
 
 async def list_partition_profiles(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     *,
+    system_name_or_uuid: str,
     partition_type: PartitionKind = "LogicalPartition",
 ) -> PartitionProfileInventory:
     """List complete bounded saved profiles, including contained names/opaque ETags."""
@@ -297,10 +297,10 @@ async def list_partition_profiles(
 
 async def read_partition_profile(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
     *,
+    system_name_or_uuid: str,
     partition_type: PartitionKind = "LogicalPartition",
 ) -> PartitionProfileRecord:
     """Resolve one exact profile name/UUID within its owning partition."""
@@ -345,12 +345,12 @@ def _same_identity(before: NativeProfile, after: NativeProfile) -> bool:
 
 async def update_partition_profile(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
     expected_etag: str,
     patch: ProfilePatch,
     *,
+    system_name_or_uuid: str,
     partition_type: PartitionKind = "LogicalPartition",
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
@@ -559,10 +559,10 @@ async def _job_version(hmc: HMCClient, timeout: int, poll: int) -> None:
 
 async def set_default_partition_profile(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
     *,
+    system_name_or_uuid: str,
     partition_type: PartitionKind = "LogicalPartition",
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
@@ -713,10 +713,10 @@ async def _recovery(
 
 async def save_current_partition_profile(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     name: str,
     *,
+    system_name_or_uuid: str,
     partition_type: PartitionKind = "LogicalPartition",
     overwrite: bool = False,
     expected_etag: str | None = None,
@@ -892,11 +892,11 @@ def _delete_eligible(
 
 async def delete_partition_profile(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_selector: str,
     expected_etag: str,
     *,
+    system_name_or_uuid: str,
     partition_type: PartitionKind = "LogicalPartition",
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,

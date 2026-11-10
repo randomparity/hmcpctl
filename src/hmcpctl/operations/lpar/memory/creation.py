@@ -579,10 +579,10 @@ async def creation_memory_step(
             fields = confirmed["Resource"].get("PartitionMemoryConfiguration")
         else:
             record = await profiles.read_partition_profile(
-                hmc,
-                admission.system_uuid,
-                confirmed["UUID"],
-                "default_profile",
+                hmc=hmc,
+                system_name_or_uuid=admission.system_uuid,
+                lpar_name_or_uuid=confirmed["UUID"],
+                profile_selector="default_profile",
                 partition_type=admission.kind,
             )
             fields = record.fields.get("ProfileMemory")

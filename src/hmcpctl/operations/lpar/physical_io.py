@@ -315,7 +315,10 @@ async def created_io_step(
         return None
     try:
         profile = await read_partition_profile(
-            hmc, system_uuid, created["UUID"], "default_profile"
+            hmc=hmc,
+            system_name_or_uuid=system_uuid,
+            lpar_name_or_uuid=created["UUID"],
+            profile_selector="default_profile",
         )
         matched = compare_creation_io(
             creation.physical_io, creation.creation_sriov, profile.fields

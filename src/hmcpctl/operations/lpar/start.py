@@ -228,10 +228,10 @@ async def created_start_step(
             if leaf_text(resource.get("DefaultProfileName")) != "default_profile":
                 raise ValueError("Initial start profile identity unavailable")
             profile = await read_partition_profile(
-                hmc,
-                admission.system_uuid,
-                fresh["UUID"],
-                "default_profile",
+                hmc=hmc,
+                system_name_or_uuid=admission.system_uuid,
+                lpar_name_or_uuid=fresh["UUID"],
+                profile_selector="default_profile",
                 partition_type="VirtualIOServer"
                 if environment == "Virtual IO Server"
                 else "LogicalPartition",

@@ -1236,7 +1236,11 @@ class _Run:
         outcome = None
         try:
             outcome = await save_current_partition_profile(
-                self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
+                hmc=self.hmc,
+                system_name_or_uuid=self.system,
+                lpar_name_or_uuid=lpar_uuid,
+                name=name,
+                exclusive_writer_window=True,
             )
         except HMCTLSFingerprintError:
             raise
@@ -1258,7 +1262,11 @@ class _Run:
 
     async def _write_default(self, lpar_uuid: str, name: str) -> dict[str, Any]:
         outcome = await set_default_partition_profile(
-            self.hmc, self.system, lpar_uuid, name, exclusive_writer_window=True
+            hmc=self.hmc,
+            system_name_or_uuid=self.system,
+            lpar_name_or_uuid=lpar_uuid,
+            profile_selector=name,
+            exclusive_writer_window=True,
         )
         if TLS_IDENTITY_FAILURE in outcome.diagnostics:
             raise HMCTLSFingerprintError(_TLS_PROVISION_ABORTED)

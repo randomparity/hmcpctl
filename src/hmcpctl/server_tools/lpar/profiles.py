@@ -377,9 +377,9 @@ def hmc_list_partition_profiles(
     """
     return with_client(
         lambda hmc: list_partition_profiles(
-            hmc,
-            system_name_or_uuid,
-            lpar_name_or_uuid,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=lpar_name_or_uuid,
             partition_type="LogicalPartition",
         ),
         profile=profile,
@@ -404,10 +404,10 @@ def hmc_read_partition_profile(
     """
     return with_client(
         lambda hmc: read_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            lpar_name_or_uuid,
-            profile_selector,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
             partition_type="LogicalPartition",
         ),
         profile=profile,
@@ -443,12 +443,12 @@ def hmc_update_partition_profile(
     """
     return with_client(
         lambda hmc: update_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            lpar_name_or_uuid,
-            profile_selector,
-            expected_etag,
-            patch,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
+            expected_etag=expected_etag,
+            patch=patch,
             partition_type="LogicalPartition",
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,
@@ -492,10 +492,10 @@ def hmc_save_current_partition_profile(
     """
     return with_client(
         lambda hmc: save_current_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            lpar_name_or_uuid,
-            name,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            name=name,
             partition_type="LogicalPartition",
             overwrite=overwrite,
             expected_etag=expected_etag,
@@ -537,10 +537,10 @@ def hmc_set_default_partition_profile(
     """
     return with_client(
         lambda hmc: set_default_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            lpar_name_or_uuid,
-            profile_selector,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
             partition_type="LogicalPartition",
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,
@@ -578,11 +578,11 @@ def hmc_delete_partition_profile(
     """
     return with_client(
         lambda hmc: delete_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            lpar_name_or_uuid,
-            profile_selector,
-            expected_etag,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
+            expected_etag=expected_etag,
             partition_type="LogicalPartition",
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,
@@ -606,9 +606,9 @@ def hmc_list_vios_partition_profiles(
     """
     return with_client(
         lambda hmc: list_partition_profiles(
-            hmc,
-            system_name_or_uuid,
-            vios_name_or_uuid,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=vios_name_or_uuid,
             partition_type="VirtualIOServer",
         ),
         profile=profile,
@@ -632,10 +632,10 @@ def hmc_read_vios_partition_profile(
     """
     return with_client(
         lambda hmc: read_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            vios_name_or_uuid,
-            profile_selector,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=vios_name_or_uuid,
+            profile_selector=profile_selector,
             partition_type="VirtualIOServer",
         ),
         profile=profile,
@@ -670,12 +670,12 @@ def hmc_update_vios_partition_profile(
     """
     return with_client(
         lambda hmc: update_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            vios_name_or_uuid,
-            profile_selector,
-            expected_etag,
-            patch,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=vios_name_or_uuid,
+            profile_selector=profile_selector,
+            expected_etag=expected_etag,
+            patch=patch,
             partition_type="VirtualIOServer",
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,
@@ -718,10 +718,10 @@ def hmc_save_current_vios_partition_profile(
     """
     return with_client(
         lambda hmc: save_current_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            vios_name_or_uuid,
-            name,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=vios_name_or_uuid,
+            name=name,
             partition_type="VirtualIOServer",
             overwrite=overwrite,
             expected_etag=expected_etag,
@@ -762,10 +762,10 @@ def hmc_set_default_vios_partition_profile(
     """
     return with_client(
         lambda hmc: set_default_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            vios_name_or_uuid,
-            profile_selector,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=vios_name_or_uuid,
+            profile_selector=profile_selector,
             partition_type="VirtualIOServer",
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,
@@ -802,11 +802,11 @@ def hmc_delete_vios_partition_profile(
     """
     return with_client(
         lambda hmc: delete_partition_profile(
-            hmc,
-            system_name_or_uuid,
-            vios_name_or_uuid,
-            profile_selector,
-            expected_etag,
+            hmc=hmc,
+            system_name_or_uuid=system_name_or_uuid,
+            lpar_name_or_uuid=vios_name_or_uuid,
+            profile_selector=profile_selector,
+            expected_etag=expected_etag,
             partition_type="VirtualIOServer",
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,

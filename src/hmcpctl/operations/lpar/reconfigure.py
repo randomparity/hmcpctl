@@ -910,7 +910,12 @@ async def _read_profile(
     hmc: HMCClient, system_uuid: str, lpar_uuid: str, name: str
 ) -> tuple[PartitionProfileRecord, ProfileView]:
     try:
-        record = await read_partition_profile(hmc, system_uuid, lpar_uuid, name)
+        record = await read_partition_profile(
+            hmc=hmc,
+            system_name_or_uuid=system_uuid,
+            lpar_name_or_uuid=lpar_uuid,
+            profile_selector=name,
+        )
         return record, profile_view(record.fields)
     except (HMCError, ValueError, TypeError) as exc:
         raise OperationFailed(
@@ -1110,12 +1115,12 @@ def _profile_write(hmc: HMCClient, plan: ReconfigurationPlan) -> Write:
     async def write() -> Mapping[str, Any]:
         try:
             outcome = await update_partition_profile(
-                hmc,
-                plan["system_uuid"],
-                plan["lpar_uuid"],
-                profile_uuid,
-                plan["profile_etag"] or "",
-                ProfilePatch.model_validate(plan["profile_patch"]),
+                hmc=hmc,
+                system_name_or_uuid=plan["system_uuid"],
+                lpar_name_or_uuid=plan["lpar_uuid"],
+                profile_selector=profile_uuid,
+                expected_etag=plan["profile_etag"] or "",
+                patch=ProfilePatch.model_validate(plan["profile_patch"]),
                 exclusive_writer_window=True,
             )
         except (HMCError, ValueError, TypeError, LookupError, PermissionError) as exc:

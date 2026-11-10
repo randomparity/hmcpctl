@@ -274,20 +274,30 @@ class Writes:
         self.calls.append("boot_order")
         self.boot.append(devices)
 
-    async def save(self, _hmc, _system, _lpar, name, **_kwargs):
+    async def save(
+        self, hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **_kwargs
+    ):
         self.calls.append("save")
         return PartitionProfileOutcome(
             "save", SYSTEM, LPAR, "LogicalPartition", name, None
         )
 
-    async def default(self, _hmc, _system, _lpar, name, **_kwargs) -> Any:
+    async def default(
+        self,
+        hmc,
+        lpar_name_or_uuid,
+        profile_selector,
+        *,
+        system_name_or_uuid,
+        **_kwargs,
+    ) -> Any:
         self.calls.append("default_profile")
         return PartitionProfileOutcome(
             "default",
             SYSTEM,
             LPAR,
             "LogicalPartition",
-            name,
+            profile_selector,
             None,
             execution="completed",
             requested_change="verified",

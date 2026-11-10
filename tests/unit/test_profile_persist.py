@@ -68,11 +68,15 @@ def hmc(monkeypatch):
     fake = FakeHMC()
     fake.saves = []
 
-    async def read(_hmc, system, lpar, name):
-        assert (system, lpar, name) == (SYS, LPAR, "default")
+    async def read(hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid):
+        assert (system_name_or_uuid, lpar_name_or_uuid, profile_selector) == (
+            SYS,
+            LPAR,
+            "default",
+        )
         return SimpleNamespace(etag="E7")
 
-    async def save(_hmc, system, lpar, name, **kwargs):
+    async def save(hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **kwargs):
         fake.saves.append(kwargs)
         if fake.save_lands:
             fake.profiles[0] = _profile("default", *fake.current)

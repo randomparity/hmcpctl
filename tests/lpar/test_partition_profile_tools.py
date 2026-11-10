@@ -79,7 +79,9 @@ def test_profile_tool_delegation_and_security(
     )
     assert result == "bounded-result" and connections == [{"profile": "connection"}]
     call = domain.call_args
-    assert call.args[:3] == (hmc, "system", "partition")
+    assert call.kwargs["hmc"] is hmc
+    assert call.kwargs["system_name_or_uuid"] == "system"
+    assert call.kwargs["lpar_name_or_uuid"] == "partition"
     assert call.kwargs["partition_type"] == (
         "VirtualIOServer" if vios else "LogicalPartition"
     )

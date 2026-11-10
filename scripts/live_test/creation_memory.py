@@ -340,7 +340,10 @@ async def _oracle(hmc, journal: dict, *, controller: bool) -> dict:
         containers = root.findall(".//" + N + "PartitionMemoryConfiguration")
     else:
         inventory = await profiles.list_partition_profiles(
-            hmc, system, identity, partition_type=kind
+            hmc=hmc,
+            system_name_or_uuid=system,
+            lpar_name_or_uuid=identity,
+            partition_type=kind,
         )
         selected = [p for p in inventory.profiles if p.name == "default_profile"]
         if (

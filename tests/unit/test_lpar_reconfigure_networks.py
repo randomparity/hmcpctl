@@ -595,11 +595,15 @@ def body(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
     fake.saves = []
     fake.save_lands = True
 
-    async def read(_hmc, system, lpar, name):
-        assert (system, lpar, name) == (SYS, LPAR, "default")
+    async def read(hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid):
+        assert (system_name_or_uuid, lpar_name_or_uuid, profile_selector) == (
+            SYS,
+            LPAR,
+            "default",
+        )
         return SimpleNamespace(etag="E1")
 
-    async def save(_hmc, system, lpar, name, **kwargs):
+    async def save(hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **kwargs):
         fake.calls.append("save")
         fake.saves.append(kwargs)
         fake.recovery.append(f"hmcprec-{len(fake.recovery):016x}")

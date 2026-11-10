@@ -544,10 +544,10 @@ async def test_created_step_never_confirms_unverified_profile(monkeypatch, mode)
     assert result.status == "error"
     assert "unverified" in str(result.result) or "mismatch" in str(result.result)
     read.assert_awaited_once_with(
-        read.call_args.args[0],
-        "system",
-        "new",
-        "default_profile",
+        hmc=read.call_args.kwargs["hmc"],
+        system_name_or_uuid="system",
+        lpar_name_or_uuid="new",
+        profile_selector="default_profile",
     )
 
 

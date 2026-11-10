@@ -119,11 +119,18 @@ class Persistence:
         self.readback: str | None = None
         self.profile_present = True
 
-    async def save(self, _hmc, _system, _lpar, name, **kwargs):
+    async def save(
+        self, hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **kwargs
+    ):
         assert kwargs == {"exclusive_writer_window": True}
         self.saved.append(name)
         return PartitionProfileOutcome(
-            "save", _system, _lpar, "LogicalPartition", name, None
+            "save",
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            "LogicalPartition",
+            name,
+            None,
         )
 
     async def by_name(self, _hmc, _lpar, _system, name):
@@ -131,15 +138,17 @@ class Persistence:
             return None
         return SimpleNamespace(uuid=PROFILE_UUID, name=name, element=None)
 
-    async def default(self, _hmc, _system, _lpar, name, **kwargs):
+    async def default(
+        self, hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid, **kwargs
+    ):
         assert kwargs == {"exclusive_writer_window": True}
-        self.defaults.append(name)
+        self.defaults.append(profile_selector)
         return PartitionProfileOutcome(
             "default",
-            _system,
-            _lpar,
+            system_name_or_uuid,
+            lpar_name_or_uuid,
             "LogicalPartition",
-            name,
+            profile_selector,
             None,
             execution="completed",
             requested_change="verified",
@@ -2385,7 +2394,7 @@ def test_a_raised_save_is_decided_by_the_profile_by_name(
     _mock_execution_steps(mock_hmc)
     mock_hmc.put(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/do/PowerOn")
 
-    async def refused(_hmc, _system, _lpar, name, **_kwargs):
+    async def refused(hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **_kwargs):
         if landed:
             persistence.saved.append(name)
         raise ValueError("refused")
@@ -2432,10 +2441,17 @@ def test_an_unconfirmed_default_is_decided_by_the_partition(
     _mock_preconditions(mock_hmc)
     _mock_execution_steps(mock_hmc)
 
-    async def unknown(_hmc, _system, _lpar, name, **_kwargs):
-        persistence.defaults.append(name)
+    async def unknown(
+        hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid, **_kwargs
+    ):
+        persistence.defaults.append(profile_selector)
         return PartitionProfileOutcome(
-            "default", _system, _lpar, "LogicalPartition", name, None
+            "default",
+            system_name_or_uuid,
+            lpar_name_or_uuid,
+            "LogicalPartition",
+            profile_selector,
+            None,
         )
 
     async def partition(_hmc, _lpar):

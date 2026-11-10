@@ -26,6 +26,8 @@ profile selectors by keyword, for example
 `hmc_get_lpar("partition", system_name_or_uuid="system", profile="configured-profile")`.
 A required system selector remains required. When the leading partition filter is optional,
 required companion arguments are keyword-only, including logical-operation request IDs.
+Saved-profile operations take the HMC client first, then the partition selector;
+the required system selector is keyword-only.
 These Python handlers are pre-release module APIs; `hmcpctl.api` is the stable library facade.
 
 ## Testing

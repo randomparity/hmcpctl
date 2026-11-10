@@ -157,7 +157,12 @@ async def save_current_over(
     readback (``persisted``).
     """
     try:
-        record = await read_partition_profile(hmc, system_uuid, lpar_uuid, profile_name)
+        record = await read_partition_profile(
+            hmc=hmc,
+            system_name_or_uuid=system_uuid,
+            lpar_name_or_uuid=lpar_uuid,
+            profile_selector=profile_name,
+        )
     except HMCTLSFingerprintError:
         raise
     except (HMCError, ValueError, TypeError, LookupError) as exc:
@@ -168,10 +173,10 @@ async def save_current_over(
     outcome = failure = None
     try:
         outcome = await save_current_partition_profile(
-            hmc,
-            system_uuid,
-            lpar_uuid,
-            profile_name,
+            hmc=hmc,
+            system_name_or_uuid=system_uuid,
+            lpar_name_or_uuid=lpar_uuid,
+            name=profile_name,
             overwrite=True,
             expected_etag=record.etag,
             exclusive_writer_window=exclusive_writer_window,
