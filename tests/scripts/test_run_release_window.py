@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
+
 from live_test import config as live_config
 from live_test import runner
 
@@ -36,6 +37,12 @@ def window(tmp_path):
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     git(root, "switch", "-c", "fixture-window")
+    shutil.copytree(
+        ROOT / "scripts/capability_evidence",
+        root / "scripts/capability_evidence",
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     shutil.rmtree(root / "scripts/live_test")
     shutil.copytree(
         ROOT / "scripts/live_test",
@@ -174,7 +181,8 @@ import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import check_capability_inventory as inventory
+from capability_evidence import registry as capability_registry
+from capability_evidence import closure as capability_closure
 from live_test import baseline
 from live_test import runner
 
@@ -210,8 +218,8 @@ def run(phase):
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
         now = datetime.now(UTC)
         observed = (now - timedelta(seconds=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        tool = next(tool for tool in inventory.discover_registry() if tool.operation == "system.get")
-        observation = {"id": "st1-hmc-get-system", "channel": "live", "result": "passed", "scenario": "st1-system-inventory", "tested_commit": head, "observed_at": observed, "hmc_release": "V10R3", "hardware_family": "POWER10", "schema_version": "V1_0", "cleanup": "not-required", "closure_fingerprint": inventory.closure_fingerprint(root, tool.handler.rsplit(".", 1)[0]), "assertions": ["response-validated"]}
+        tool = next(tool for tool in capability_registry.discover_registry() if tool.operation == "system.get")
+        observation = {"id": "st1-hmc-get-system", "channel": "live", "result": "passed", "scenario": "st1-system-inventory", "tested_commit": head, "observed_at": observed, "hmc_release": "V10R3", "hardware_family": "POWER10", "schema_version": "V1_0", "cleanup": "not-required", "closure_fingerprint": capability_closure.closure_fingerprint(root, tool.handler.rsplit(".", 1)[0]), "assertions": ["response-validated"]}
         result = {"run": {"tested_commit": head, "tree_clean": True, "group": "round2", "subtasks": runner.SUBTASK_GROUPS["round2"], "schema_version": "V1_0", "finished": now.isoformat(), "partial": False}, "config": {"private": "PRIVATE-CHILD-MARKER"}, "results": [{"subtask": 1, "tool": "hmc_get_system", "status": "PASS", "result": "passed", "timestamp": observed, "note": "", "data": {}}]}
         Path("test-results-round2.json").write_text(json.dumps(result))
         Path("test-results-round2-observations.json").write_text(json.dumps([{"operation": "system.get", "observation": observation}]))

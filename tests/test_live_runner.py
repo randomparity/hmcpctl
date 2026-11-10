@@ -42,6 +42,8 @@ from hmcpctl.xmlutil import parse_feed
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 import scenario_gap_report  # noqa: E402
+from capability_evidence import registry as capability_registry  # noqa: E402
+from capability_evidence import schema as capability_schema  # noqa: E402
 from live_test import config as live_config  # noqa: E402
 from live_test import (  # noqa: E402
     evidence,
@@ -3733,7 +3735,7 @@ def test_gap_output_can_be_copied_and_loaded_for_next_run(tmp_path):
     catalog.write_text(
         json.dumps(
             {
-                "format_version": runner.check_capability_inventory.MATURITY_FORMAT_VERSION,
+                "format_version": capability_schema.MATURITY_FORMAT_VERSION,
                 "admission_policy": "existing-runtime-guards",
                 "operations": [
                     {
@@ -3772,9 +3774,7 @@ def test_invalid_gap_catalog_fails_even_without_environment(tmp_path, records):
     catalog.write_text(
         json.dumps(
             {
-                "format_version": (
-                    runner.check_capability_inventory.MATURITY_FORMAT_VERSION
-                ),
+                "format_version": capability_schema.MATURITY_FORMAT_VERSION,
                 "admission_policy": "existing-runtime-guards",
                 "operations": records,
             }
@@ -8035,9 +8035,7 @@ def test_verified_scenarios_name_registered_operations():
     a mistyped id yields an observation nothing can fingerprint. Caught here, in
     the pull request, rather than after an expensive run against real hardware.
     """
-    registered = {
-        tool.operation for tool in runner.check_capability_inventory.discover_registry()
-    }
+    registered = {tool.operation for tool in capability_registry.discover_registry()}
     declared = _recorded_operations()
 
     assert declared, (
@@ -8524,7 +8522,7 @@ def test_a_release_without_its_maintenance_level_is_rejected(tmp_path):
         encoding="utf-8",
     )
 
-    assert runner.check_capability_inventory.HMC_RELEASE.fullmatch("V10R3")
+    assert capability_schema.HMC_RELEASE.fullmatch("V10R3")
     with pytest.raises(ValueError, match=r"expected V<n>R<n>M<n>, e\.g\. V10R3M1060"):
         evidence.read_environment(env_file)
 
@@ -8600,7 +8598,7 @@ def test_emitted_observations_validate_against_the_catalog_shape(
     # exactly as `just capability-inventory` would catch it after a copy-in.
     evidence_ids: set[str] = set()
     for entry in document:
-        runner.check_capability_inventory._validate_observation(
+        capability_schema.validate_observation(
             entry["observation"], entry["operation"], evidence_ids, errors
         )
     assert errors == []
@@ -8914,7 +8912,7 @@ def test_the_two_assertion_id_patterns_agree():
     assert anchored.startswith("\\A") and anchored.endswith("\\Z")
     assert (
         anchored.removeprefix("\\A").removesuffix("\\Z")
-        == runner.check_capability_inventory.ASSERTION_ID.pattern
+        == capability_schema.ASSERTION_ID.pattern
     )
 
 

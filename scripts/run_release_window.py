@@ -18,8 +18,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import check_capability_inventory as inventory
 import live_test_preflight as preflight
+from capability_evidence import registry as capability_registry
+from capability_evidence import schema as capability_schema
 from live_test import baseline, cli, runner
 from live_test import config as live_config
 
@@ -117,8 +118,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     if claims.parent != root / "docs/capabilities/releases" or args.claims.is_symlink():
         raise WindowError("claims must be a committed release file in this checkout")
     git(root, "ls-files", "--error-unmatch", str(claims.relative_to(root)))
-    rows = inventory.load_release_claims(
-        claims, {tool.operation for tool in inventory.discover_registry()}
+    rows = capability_registry.load_release_claims(
+        claims, {tool.operation for tool in capability_registry.discover_registry()}
     )
     selected = {row["arm"] for row in rows}
     if not selected or not selected <= ARMS.keys():
@@ -529,7 +530,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             previous[sig] = signal.signal(sig, execution.interrupt)
         passed = run_window(plan, execution)
         exit_code = 0 if passed else 1
-    except (WindowError, OSError, ValueError, inventory.InventoryError):
+    except (WindowError, OSError, ValueError, capability_schema.InventoryError):
         print(
             "FAIL: release-window authorization, configuration or phase check failed; inspect --dry-run and private phase output",
             file=sys.stderr,
