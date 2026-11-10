@@ -249,6 +249,7 @@ def _run(
             if arguments is None:
                 usage_error(f"no operation has request_id {request_id}")
         system, request = request_from_arguments(arguments)
+        # Workers reuse this admitted config instead of resolving the profile again.
         record = engine.submit(
             OperationRequest(
                 TOOL,
@@ -258,9 +259,11 @@ def _run(
                 request_id,
                 arguments if continuation == "none" else given,
             ),
-            provision_body(system, request, lambda _connection: HMCClient(config)),
+            provision_body(
+                system, request, lambda _connection, _host: HMCClient(config)
+            ),
             classifiers=provision_classifiers(
-                request, lambda _connection: HMCClient(config)
+                request, lambda _connection, _host: HMCClient(config)
             ),
             continuation=continuation,
             wait_seconds=MAX_WAIT_SECONDS,

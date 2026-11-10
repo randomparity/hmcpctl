@@ -38,7 +38,7 @@ MEDIA_ITEM = OwnedItem("installer_media", VIOS, "hmcpctl_0123456789ab.iso")
 
 def _factory(hmc: Any):
     @asynccontextmanager
-    async def opened(_connection: str):
+    async def opened(_connection: str, _host: str):
         yield hmc
 
     return opened

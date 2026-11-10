@@ -422,6 +422,7 @@ async def _classify(kind, effect_key, plan, ctx_partition=(SYS, LPAR)):
     effect = SimpleNamespace(key=effect_key, kind=kind, target="", status="uncertain")
     ctx = SimpleNamespace(
         connection="<default>",
+        host="hmc.test",
         partition=ctx_partition,
         operation_id="op-1",
         recorded=lambda key: SimpleNamespace(status="applied", identity=plan),

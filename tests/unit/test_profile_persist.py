@@ -267,8 +267,8 @@ async def test_a_missing_profile_is_an_error(hmc):
 )
 async def test_classifier_reads_the_profile_back(saved, status):
     fake = FakeHMC(saved=saved)
-    classify = profile_persist.profile_save_classifier(lambda _connection: fake)
-    ctx = SimpleNamespace(connection="<default>")
+    classify = profile_persist.profile_save_classifier(lambda _connection, _host: fake)
+    ctx = SimpleNamespace(host="hmc.test", connection="<default>")
     effect = EffectRecord(
         "profile_save",
         profile_persist.KIND,
@@ -362,10 +362,10 @@ async def test_classifier_applies_the_operations_readback_options():
         "uncertain",
         None,
     )
-    ctx = SimpleNamespace(connection="<default>")
-    plain = profile_persist.profile_save_classifier(lambda _connection: fake)
+    ctx = SimpleNamespace(host="hmc.test", connection="<default>")
+    plain = profile_persist.profile_save_classifier(lambda _connection, _host: fake)
     removal = profile_persist.profile_save_classifier(
-        lambda _connection: fake, lambda _ctx: (("5",), False)
+        lambda _connection, _host: fake, lambda _ctx: (("5",), False)
     )
     assert (await plain(ctx, effect)).status == "applied"
     assert (await removal(ctx, effect)).status == "not_applied"

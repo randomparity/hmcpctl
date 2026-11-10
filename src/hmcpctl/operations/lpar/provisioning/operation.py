@@ -104,7 +104,7 @@ from hmcpctl.ssh.selectors import resolve_ssh_names
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import leaf_text, localname
 
-ClientFactory = Callable[[str], HMCClient]
+ClientFactory = Callable[[str, str], HMCClient]
 # Persisted contract (ADR 0313 Decision 3): never change while an operation can be open.
 EFFECT_KINDS: Mapping[str, str] = {
     "create": "lpar.create",
@@ -1301,7 +1301,7 @@ def provision_body(
     refcodes up to *wait_seconds*, the call's own (ADR 0326 Decision 5)."""
 
     async def body(ctx: OperationContext) -> BodyResult:
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             return await _Run(ctx, hmc, system, request, wait_seconds).execute()
 
     return body
@@ -1314,7 +1314,7 @@ def provision_classifiers(
 
     async def create(ctx: OperationContext, effect: EffectRecord) -> Classification:
         system_uuid = _target_uuid(effect)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             found = _named(await hmc.list_logical_partitions(system_uuid), request.name)
             if not found:
                 return Classification("not_applied")
@@ -1346,7 +1346,7 @@ def provision_classifiers(
     async def stamp(ctx: OperationContext, effect: EffectRecord) -> Classification:
         if ctx.partition is None:
             return Classification("needs_attention", reason="no guarded partition")
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             state = await _stamp_state(
                 hmc, ctx.partition[0], _target_uuid(effect), request.caller_token
             )
@@ -1360,7 +1360,7 @@ def provision_classifiers(
         )
 
     async def network(ctx: OperationContext, effect: EffectRecord) -> Classification:
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             found = await _adapters_on_vlan(
                 hmc, _target_uuid(effect), request.adapters.port_vlan_id
             )
@@ -1382,7 +1382,7 @@ def provision_classifiers(
     async def disk(ctx: OperationContext, effect: EffectRecord) -> Classification:
         storage = request.storage
         vg_uuid = (storage.vg_uuid or "").lower()
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             groups = await hmc.list_volume_groups(_target_uuid(effect))
         group = [g for g in groups if str(g.get("UUID") or "").lower() == vg_uuid]
         if len(group) != 1:
@@ -1409,7 +1409,7 @@ def provision_classifiers(
 
     async def mapping(ctx: OperationContext, effect: EffectRecord) -> Classification:
         storage = request.storage
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             mapped = await _root_mappings(hmc, request, _target_uuid(effect))
         if mapped:
             identity = {
@@ -1420,7 +1420,7 @@ def provision_classifiers(
         return Classification("not_applied")
 
     async def power_on(ctx: OperationContext, effect: EffectRecord) -> Classification:
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             resource = await _partition_resource(hmc, _target_uuid(effect))
         state = _state(resource)
         if state not in ACTIVATED_STATES:
@@ -1441,7 +1441,7 @@ def provision_classifiers(
         ctx: OperationContext, effect: EffectRecord
     ) -> Classification:
         name, lpar_uuid = profile_name_for(ctx.operation_id), _target_uuid(effect)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             resource = await _partition_resource(hmc, lpar_uuid)
             if leaf_text(resource.get("LastActivatedProfile")) == name:
                 problem = await _applied_problem(hmc, request, lpar_uuid, name)
@@ -1463,7 +1463,7 @@ def provision_classifiers(
         ctx: OperationContext, effect: EffectRecord
     ) -> Classification:
         name = profile_name_for(ctx.operation_id)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             resource = await _partition_resource(hmc, _target_uuid(effect))
         if leaf_text(resource.get("DefaultProfileName")) == name:
             return Classification("applied", {"profile_name": name})
@@ -1474,7 +1474,7 @@ def provision_classifiers(
 
     async def upload(ctx: OperationContext, effect: EffectRecord) -> Classification:
         vios, name = request.storage.vios_uuid.lower(), media_name_for(ctx.operation_id)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             try:
                 group = await repository_group(hmc, vios)
             except ValueError:
@@ -1489,7 +1489,7 @@ def provision_classifiers(
 
     async def mount(ctx: OperationContext, effect: EffectRecord) -> Classification:
         vios, name = request.storage.vios_uuid.lower(), media_name_for(ctx.operation_id)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             paths = await _media_paths(hmc, vios, _target_uuid(effect), name)
         if not paths:
             return Classification("not_applied")
@@ -1512,7 +1512,7 @@ def provision_classifiers(
                 "needs_attention", reason="no mounted media is recorded"
             )
         lpar_uuid = _target_uuid(effect)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             devices = await boot_devices(hmc, request, lpar_uuid, str(optical))
             observed = await read_lpar_boot_order(
                 hmc, lpar_uuid, system_name_or_uuid=ctx.partition[0]

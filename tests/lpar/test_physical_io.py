@@ -390,7 +390,7 @@ def _run_provision_body(request, partitions=()):
             return list(partitions)
 
     operation = OperationRequest("hmc_provision_lpar", "a", "<default>", "h", "r1", {})
-    body = provision_body("system", request, lambda _connection: Fake())
+    body = provision_body("system", request, lambda _connection, _host: Fake())
     return engine.submit(operation, body, wait_seconds=10)
 
 

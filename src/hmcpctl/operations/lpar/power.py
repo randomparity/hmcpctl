@@ -267,7 +267,7 @@ def power_body(
 
     async def body(ctx: OperationContext) -> BodyResult:
         recorded = ctx.recorded(EFFECT_KEY)
-        async with open_client(ctx.connection) as hmc:
+        async with open_client(ctx.connection, ctx.host) as hmc:
             replay = recorded is not None and recorded.status == "applied"
             if replay:
                 # Replay after the write: re-resolving could turn a transient read
@@ -313,7 +313,7 @@ def _lpar_uuid(effect: EffectRecord) -> str:
 async def _classify_power_on(
     ctx: OperationContext, effect: EffectRecord
 ) -> Classification:
-    async with open_client(ctx.connection) as hmc:
+    async with open_client(ctx.connection, ctx.host) as hmc:
         state = await _state(hmc, _lpar_uuid(effect))
     if state in ACTIVATED_STATES:
         return Classification("applied", {"job_id": None})
@@ -330,7 +330,7 @@ async def _classify_power_on(
 async def _classify_power_off(
     ctx: OperationContext, effect: EffectRecord
 ) -> Classification:
-    async with open_client(ctx.connection) as hmc:
+    async with open_client(ctx.connection, ctx.host) as hmc:
         state = await _state(hmc, _lpar_uuid(effect))
     if state == _NOT_ACTIVATED:
         return Classification("applied", {"job_id": None})

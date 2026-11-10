@@ -194,10 +194,10 @@ def boot(monkeypatch: pytest.MonkeyPatch) -> Boot:
     )
 
     def bound_body(system: str, request: Any, *, wait_seconds: int = 0) -> Any:
-        return body(system, request, lambda _c: hmc, wait_seconds=wait_seconds)
+        return body(system, request, lambda _c, _host: hmc, wait_seconds=wait_seconds)
 
     def bound_classifiers(request: Any) -> Any:
-        return classifiers(request, lambda _c: hmc)
+        return classifiers(request, lambda _c, _host: hmc)
 
     monkeypatch.setattr(provision_tool, "provision_body", bound_body)
     monkeypatch.setattr(provision_tool, "provision_classifiers", bound_classifiers)
@@ -346,7 +346,9 @@ def test_s5_decommission_retaining_storage_completes(monkeypatch: pytest.MonkeyP
     _patch_common(monkeypatch, calls)
     hmc = _client()
     _serve(monkeypatch, hmc)
-    monkeypatch.setattr(power, "client_from_env", _opened(hmc))
+    monkeypatch.setattr(
+        "hmcpctl.client.client_factory.HMCClient", lambda _config: _opened(hmc)()
+    )
     arguments = {
         "request_id": "s5",
         "system_name_or_uuid": "system-a",
@@ -393,7 +395,7 @@ def test_s7_a_withheld_specialist_denies_its_primary_and_is_invisible(
     monkeypatch: pytest.MonkeyPatch,
 ):
     hmc = PowerHMC()
-    monkeypatch.setattr(power, "open_client", lambda _connection: hmc)
+    monkeypatch.setattr(power, "open_client", lambda _connection, _host: hmc)
     monkeypatch.setattr(power, "POLL_SECONDS", 0)
     app = create_mcp(_policy(_grant(SEARCH, INVOKE, POWER, POWER_OFF)))
     start = {

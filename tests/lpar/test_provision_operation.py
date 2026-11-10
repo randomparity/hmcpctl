@@ -94,9 +94,14 @@ def _partition(description: str | None = None, uuid: str = LPAR) -> dict:
 
 def _classify(hmc: FakeHMC, key: str, target: str, *, request=REQUEST, ctx=None):
     effect = EffectRecord(key, EFFECT_KINDS[key], target, "uncertain", None)
-    classifier = provision_classifiers(request, lambda _connection: hmc)[effect.kind]
+    classifier = provision_classifiers(request, lambda _connection, _host: hmc)[
+        effect.kind
+    ]
     context = ctx or SimpleNamespace(
-        connection="<default>", operation_id=OPERATION, partition=(SYSTEM, LPAR)
+        host="hmc.test",
+        connection="<default>",
+        operation_id=OPERATION,
+        partition=(SYSTEM, LPAR),
     )
     return asyncio.run(classifier(context, effect))
 

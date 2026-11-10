@@ -37,7 +37,7 @@ from hmcpctl.operations.lpar.workflow_contract import DISK_LEDGER, MEDIA_LEDGER
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.xmlutil import leaf_text
 
-ClientFactory = Callable[[str], Any]
+ClientFactory = Callable[[str, str], Any]
 # Persisted contract (ADR 0323 Decision 3): never change while an operation can be open.
 DELETE_KINDS: Mapping[str, str] = {
     DISK_LEDGER: "vios.virtual_disk_delete",
@@ -492,7 +492,7 @@ def storage_classifiers(
         ctx: OperationContext, effect: EffectRecord, kind: str
     ) -> Classification:
         vios, group, name = _parse_target(effect)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             if kind == DISK_LEDGER:
                 entry = await hmc.get_volume_group(vios, group)
                 if entry is None:

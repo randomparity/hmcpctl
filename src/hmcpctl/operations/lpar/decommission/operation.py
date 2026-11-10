@@ -49,7 +49,7 @@ from hmcpctl.operations.lpar.decommission.storage import (
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 TOOL_NAME = "hmc_decommission_lpar"
-ClientFactory = Callable[[str], HMCClient]
+ClientFactory = Callable[[str, str], HMCClient]
 # A new operation's recorded arguments start from these (the tool's former defaults).
 DEFAULT_ARGUMENTS: Mapping[str, Any] = {
     "ownership_override": False,
@@ -228,7 +228,7 @@ def decommission_body(
         if gone and not cleanup:
             # The partition is gone; result_from_record rebuilds from the journal.
             return BodyResult("completed")
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             try:
                 return await run(ctx, hmc, gone)
             except _BODY_ERRORS as exc:
@@ -257,7 +257,7 @@ def decommission_classifiers(
 
     async def power_off(ctx: OperationContext, effect: EffectRecord) -> Classification:
         lpar_uuid, _ = _target(effect)
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             state = await hmc.get_quick_property(
                 "LogicalPartition", lpar_uuid, "PartitionState"
             )
@@ -277,7 +277,7 @@ def decommission_classifiers(
         mapping_id = rest.removeprefix("mapping:")
         if ctx.partition is None or not mapping_id:
             return Classification("needs_attention", reason="no guarded partition")
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             detail = await hmc.get_vios_storage_detail(vios_uuid)
         resource = (detail or {}).get("Resource")
         if not isinstance(resource, dict):
@@ -294,7 +294,7 @@ def decommission_classifiers(
     async def adapter(ctx: OperationContext, effect: EffectRecord) -> Classification:
         lpar_uuid, rest = _target(effect)
         adapter_type, _, adapter_uuid = rest.partition(":")
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             listed = await _inventory_adapters(hmc, lpar_uuid)
         if any(item["uuid"].lower() == adapter_uuid for item in listed):
             return Classification("not_applied")
@@ -304,7 +304,7 @@ def decommission_classifiers(
         lpar_uuid, _ = _target(effect)
         if ctx.partition is None:
             return Classification("needs_attention", reason="no guarded partition")
-        async with client_factory(ctx.connection) as hmc:
+        async with client_factory(ctx.connection, ctx.host) as hmc:
             entries = await hmc.list_logical_partitions(ctx.partition[0])
         if any(str(e.get("UUID") or "").lower() == lpar_uuid for e in entries):
             return Classification("not_applied")

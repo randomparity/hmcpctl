@@ -277,7 +277,7 @@ ReadbackOptions = Callable[[OperationContext], tuple[Collection[str], bool]]
 
 
 def profile_save_classifier(
-    open_client: Callable[[str], HMCClient],
+    open_client: Callable[[str, str], HMCClient],
     options: ReadbackOptions = lambda _ctx: ((), True),
 ) -> engine.Classifier:
     """Classify an open save by the readback the write itself uses.
@@ -289,7 +289,7 @@ def profile_save_classifier(
     async def classify(ctx: OperationContext, effect: EffectRecord) -> Classification:
         lpar_uuid, name = parse_target(effect.target)
         removed, required = options(ctx)
-        async with open_client(ctx.connection) as hmc:
+        async with open_client(ctx.connection, ctx.host) as hmc:
             missing, recovery = await persisted(
                 hmc,
                 lpar_uuid,

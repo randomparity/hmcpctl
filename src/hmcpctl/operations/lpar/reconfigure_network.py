@@ -41,7 +41,7 @@ MAX_NETWORKS = 4
 _NOT_ACTIVATED = "not activated"
 _MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
-Opener = Callable[[str], Any]
+Opener = Callable[[str, str], Any]
 
 
 class NetworkAddPlan(TypedDict):
@@ -410,7 +410,7 @@ def add_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
     async def classify(ctx: OperationContext, effect: EffectRecord) -> Classification:
         lpar_uuid, networks = plan_of(ctx)
         add = _planned(networks)["add"][_index(effect.key)]
-        async with opener(ctx.connection) as hmc:
+        async with opener(ctx.connection, ctx.host) as hmc:
             found = _matches(add, await current_adapters(hmc, lpar_uuid))
         if not found:
             return Classification("not_applied")
@@ -432,7 +432,7 @@ def remove_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
     async def classify(ctx: OperationContext, effect: EffectRecord) -> Classification:
         lpar_uuid, networks = plan_of(ctx)
         item = _planned(networks)["remove"][_index(effect.key)]
-        async with opener(ctx.connection) as hmc:
+        async with opener(ctx.connection, ctx.host) as hmc:
             adapters = await current_adapters(hmc, lpar_uuid)
         listed = _listed(adapters, item["adapter_uuid"])
         if listed is None:

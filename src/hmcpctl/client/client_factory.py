@@ -11,6 +11,12 @@ def client_from_env(profile: str | None = None) -> HMCClient:
     return HMCClient(build_config(profile=profile))
 
 
-def open_client(connection: str) -> HMCClient:
-    """A client for the operation's recorded connection (``<default>`` is the environment)."""
-    return client_from_env(None if connection == "<default>" else connection)
+def open_client(connection: str, admitted_host: str) -> HMCClient:
+    """Rebuild the recorded connection only while it still selects the admitted host."""
+    config = build_config(profile=None if connection == "<default>" else connection)
+    if config.host != admitted_host:
+        raise ValueError(
+            "The recorded connection no longer resolves to the admitted host; "
+            "restore the original connection configuration before resuming this operation"
+        )
+    return HMCClient(config)

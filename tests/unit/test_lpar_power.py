@@ -77,7 +77,7 @@ class FakeHMC:
 @pytest.fixture
 def hmc(monkeypatch):
     fake = FakeHMC()
-    monkeypatch.setattr(power, "open_client", lambda _connection: fake)
+    monkeypatch.setattr(power, "open_client", lambda _connection, _host: fake)
     monkeypatch.setattr(power, "POLL_SECONDS", 0)
     return fake
 
@@ -488,3 +488,30 @@ def test_a_replayed_stop_with_a_transient_job_error_pauses(hmc, monkeypatch):
     hmc.state = "not activated"
     record = _run("stop", "immediate", continuation="resume")
     assert _end(record) == ("paused", "needs_attention")
+
+
+@pytest.mark.parametrize("stage", ["body", "classification"])
+def test_connection_drift_is_refused_before_client_creation(monkeypatch, stage):
+    from unittest.mock import Mock
+
+    from hmcpctl.client import client_factory
+
+    fake = FakeHMC(state="running", after="running")
+    constructed = Mock(return_value=fake)
+    monkeypatch.setattr(power, "open_client", client_factory.open_client)
+    monkeypatch.setattr(client_factory, "HMCClient", constructed)
+    # Admission recorded hmc.test; resolving the connection now selects another host.
+    monkeypatch.setattr(
+        client_factory,
+        "build_config",
+        lambda **_kwargs: HMCConfig.from_mapping({"host": "changed.test"}),
+    )
+    if stage == "classification":
+        _crashed("start")
+    record = _run(
+        "start", continuation="resume" if stage == "classification" else "none"
+    )
+    assert _end(record) == ("paused", "needs_attention")
+    assert any("admitted host" in warning for warning in record.warnings)
+    constructed.assert_not_called()
+    assert fake.listings == 0 and fake.submits == []

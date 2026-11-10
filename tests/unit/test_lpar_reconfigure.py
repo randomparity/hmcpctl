@@ -354,7 +354,7 @@ def hmc(monkeypatch):
         return None
 
     fake.owner_error = None
-    monkeypatch.setattr(reconfigure, "open_client", lambda _connection: fake)
+    monkeypatch.setattr(reconfigure, "open_client", lambda _connection, _host: fake)
     monkeypatch.setattr(reconfigure, "resolve_system_uuid", system_uuid)
     monkeypatch.setattr(reconfigure, "resolve_and_authorize_lpar_mutation", authorize)
     monkeypatch.setattr(reconfigure, "require_memory_within_selected_system", within)
@@ -817,10 +817,12 @@ def _await(coroutine):
 
 
 def _classify(fake, expected, before):
-    ctx = SimpleNamespace(partition=(SYS, LPAR), connection="<default>")
+    ctx = SimpleNamespace(
+        partition=(SYS, LPAR), host="hmc.test", connection="<default>"
+    )
     effect = SimpleNamespace(target=profile_write.target(LPAR, PROFILE))
     classify = profile_write.profile_write_classifier(
-        lambda _ctx, _effect: (expected, before), lambda _connection: fake
+        lambda _ctx, _effect: (expected, before), lambda _connection, _host: fake
     )
     return _await(classify(ctx, effect))
 
@@ -862,6 +864,7 @@ def test_profile_write_target_round_trips():
 def test_rename_classifier(hmc):
     hmc.name = "web2"
     ctx = SimpleNamespace(
+        host="hmc.test",
         connection="<default>",
         recorded=lambda _key: SimpleNamespace(
             status="applied", identity={"rename": {"before": "web1", "after": "web2"}}
@@ -887,11 +890,13 @@ def _classify_named(monkeypatch, found):
         return found
 
     monkeypatch.setattr(profile_write, "profile_by_name", by_name)
-    ctx = SimpleNamespace(partition=(SYS, LPAR), connection="<default>")
+    ctx = SimpleNamespace(
+        partition=(SYS, LPAR), host="hmc.test", connection="<default>"
+    )
     effect = SimpleNamespace(target=profile_write.target_by_name(LPAR, "hmcpctl_abc"))
     classify = profile_write.profile_write_classifier(
         lambda _ctx, _effect: (ProfilePatch(desired_memory=1024),) * 2,
-        lambda _connection: FakeHMC(),
+        lambda _connection, _host: FakeHMC(),
     )
     return _await(classify(ctx, effect))
 

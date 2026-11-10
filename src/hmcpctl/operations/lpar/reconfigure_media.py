@@ -42,7 +42,7 @@ _FIELDS = {
 }
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
 PlanOf = Callable[[OperationContext], Mapping[str, Any]]
-Opener = Callable[[str], Any]
+Opener = Callable[[str, str], Any]
 
 
 def require_detachable(view: Mapping[str, Any], lpar_uuid: str) -> None:
@@ -272,7 +272,7 @@ def boot_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
 
     async def classify(ctx: OperationContext, _effect: EffectRecord) -> Classification:
         plan = plan_of(ctx)
-        async with opener(ctx.connection) as hmc:
+        async with opener(ctx.connection, ctx.host) as hmc:
             pending = await _pending(hmc, plan["lpar_uuid"], plan["system_uuid"])
         if pending == plan["boot"]["after"]:
             return Classification("applied", {"pending_boot_string": pending})
@@ -293,7 +293,7 @@ def media_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
     async def classify(ctx: OperationContext, _effect: EffectRecord) -> Classification:
         plan = plan_of(ctx)
         media = plan["media"]
-        async with opener(ctx.connection) as hmc:
+        async with opener(ctx.connection, ctx.host) as hmc:
             left = await _media_paths(
                 hmc, media["vios_uuid"], plan["lpar_uuid"], media["media_name"]
             )

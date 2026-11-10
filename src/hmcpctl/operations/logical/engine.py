@@ -497,6 +497,7 @@ class OperationContext:
         self.operation_id: str = row["operation_id"]
         self.agent_id: str = row["agent_id"]
         self.connection: str = row["connection"]
+        self.host: str = row["host"]
         self.continuation = continuation
         self.arguments: Mapping[str, Any] = json.loads(row["request_json"])["arguments"]
         # The result an earlier run stored, which a body may extend rather than replace.

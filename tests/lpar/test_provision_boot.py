@@ -138,8 +138,8 @@ def _submit(boot: Boot, request=IMMEDIATE, continuation="none", rid=None):
     hmc = boot.hmc
     record = engine.submit(
         operation,
-        provision_body(SYSTEM, request, lambda _c: hmc),
-        classifiers=provision_classifiers(request, lambda _c: hmc),
+        provision_body(SYSTEM, request, lambda _c, _host: hmc),
+        classifiers=provision_classifiers(request, lambda _c, _host: hmc),
         continuation=continuation,
         wait_seconds=30,
     )
@@ -380,7 +380,9 @@ def test_the_baseline_classifier_always_reads_again():
         "uncertain",
         None,
     )
-    classifier = provision_classifiers(IMMEDIATE, lambda _c: BootHMC())[effect.kind]
+    classifier = provision_classifiers(IMMEDIATE, lambda _c, _host: BootHMC())[
+        effect.kind
+    ]
 
     verdict = asyncio.run(classifier(None, effect))  # type: ignore[arg-type]
 
@@ -491,8 +493,8 @@ def test_the_wait_ends_when_the_calls_own_wait_does(boot, monkeypatch):
     )
     engine.submit(
         operation,
-        provision_body(SYSTEM, IMMEDIATE, lambda _c: hmc, wait_seconds=30),
-        classifiers=provision_classifiers(IMMEDIATE, lambda _c: hmc),
+        provision_body(SYSTEM, IMMEDIATE, lambda _c, _host: hmc, wait_seconds=30),
+        classifiers=provision_classifiers(IMMEDIATE, lambda _c, _host: hmc),
         wait_seconds=30,
     )
 

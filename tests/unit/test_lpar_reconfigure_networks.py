@@ -110,7 +110,7 @@ def _plan(fake, patch, view=STOPPED, allow=False):
 
 def _ctx(records=None):
     records = records or {}
-    return SimpleNamespace(connection="c", recorded=records.get)
+    return SimpleNamespace(host="hmc.test", connection="c", recorded=records.get)
 
 
 def _record(status, identity=None):
@@ -366,7 +366,7 @@ def _classify(classifier, plan, key):
 
 
 def _classifiers(fake, plan):
-    def opener(_connection):
+    def opener(_connection, _host):
         return fake
 
     return (

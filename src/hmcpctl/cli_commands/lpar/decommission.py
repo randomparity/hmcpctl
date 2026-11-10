@@ -277,6 +277,7 @@ def _submit(
             or recorded
             or with_client(lambda hmc: preview_target(hmc, arguments))[1]
         )
+    # Workers reuse this admitted config instead of resolving the profile again.
     record = engine.submit(
         OperationRequest(
             TOOL_NAME,
@@ -288,11 +289,11 @@ def _submit(
         ),
         decommission_body(
             arguments,
-            lambda _connection: runtime.HMCClient(config),
+            lambda _connection, _host: runtime.HMCClient(config),
             authorized_vios=vioses,
         ),
         classifiers=decommission_classifiers(
-            lambda _connection: runtime.HMCClient(config)
+            lambda _connection, _host: runtime.HMCClient(config)
         ),
         continuation=continuation,
         wait_seconds=MAX_WAIT_SECONDS,

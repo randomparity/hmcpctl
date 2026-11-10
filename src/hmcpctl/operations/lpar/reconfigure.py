@@ -1505,7 +1505,7 @@ def reconfigure_body(
 
     async def body(ctx: OperationContext) -> BodyResult:
         recorded = ctx.recorded(PLAN_KEY)
-        async with open_client(ctx.connection) as hmc:
+        async with open_client(ctx.connection, ctx.host) as hmc:
             if recorded is not None and recorded.status == "applied":
                 plan = cast(ReconfigurationPlan, dict(recorded.identity or {}))
             else:
@@ -1606,7 +1606,7 @@ async def _classify_rename(
     rename = _plan_of(ctx)["rename"]
     assert rename is not None
     _, _, lpar_uuid = effect.target.partition(":")
-    async with open_client(ctx.connection) as hmc:
+    async with open_client(ctx.connection, ctx.host) as hmc:
         entry = await hmc.get_logical_partition(lpar_uuid)
     name = _text((entry or {}).get("Resource") or {}, "PartitionName")
     if name == rename["after"]:
@@ -1632,7 +1632,7 @@ async def _classify_unmap(
     ctx: OperationContext, effect: EffectRecord
 ) -> Classification:
     item, lpar_uuid = _planned(ctx, effect, "detach"), _plan_of(ctx)["lpar_uuid"]
-    async with open_client(ctx.connection) as hmc:
+    async with open_client(ctx.connection, ctx.host) as hmc:
         entries = await hmc.list_storage_mappings(item["vios_uuid"])
     if item["mapping_id"] in _mapping_ids(entries, item["name"], lpar_uuid):
         return Classification("not_applied")
@@ -1643,7 +1643,7 @@ async def _classify_unmap(
 
 async def _classify_disk(ctx: OperationContext, effect: EffectRecord) -> Classification:
     add, plan = _planned(ctx, effect, "add"), _plan_of(ctx)
-    async with open_client(ctx.connection) as hmc:
+    async with open_client(ctx.connection, ctx.host) as hmc:
         groups = await hmc.list_volume_groups(add["vios_uuid"])
     group = [g for g in groups if str(g.get("UUID") or "").lower() == add["vg_uuid"]]
     if len(group) != 1:
@@ -1671,7 +1671,7 @@ async def _classify_disk(ctx: OperationContext, effect: EffectRecord) -> Classif
 
 async def _classify_map(ctx: OperationContext, effect: EffectRecord) -> Classification:
     add, lpar_uuid = _planned(ctx, effect, "add"), _plan_of(ctx)["lpar_uuid"]
-    async with open_client(ctx.connection) as hmc:
+    async with open_client(ctx.connection, ctx.host) as hmc:
         entries = await hmc.list_storage_mappings(add["vios_uuid"])
     if _mapping_ids(entries, add["name"], lpar_uuid):
         return Classification(
@@ -1685,21 +1685,25 @@ async def _classify_map(ctx: OperationContext, effect: EffectRecord) -> Classifi
 RECONFIGURE_CLASSIFIERS: Mapping[str, engine.Classifier] = {
     PLAN_KIND: _classify_plan,
     profile_write.KIND: profile_write.profile_write_classifier(
-        _profile_values, lambda connection: open_client(connection)
+        _profile_values, lambda connection, host: open_client(connection, host)
     ),
     RENAME_KIND: _classify_rename,
     UNMAP_KIND: _classify_unmap,
     DISK_KIND: _classify_disk,
     MAP_KIND: _classify_map,
     profile_persist.KIND: profile_persist.profile_save_classifier(
-        lambda connection: open_client(connection), _readback_options
+        lambda connection, host: open_client(connection, host), _readback_options
     ),
     network.ADD_KIND: network.add_classifier(
-        _network_plan_of, lambda connection: open_client(connection)
+        _network_plan_of, lambda connection, host: open_client(connection, host)
     ),
     network.REMOVE_KIND: network.remove_classifier(
-        _network_plan_of, lambda connection: open_client(connection)
+        _network_plan_of, lambda connection, host: open_client(connection, host)
     ),
-    BOOT_KIND: boot_classifier(_plan_of, lambda connection: open_client(connection)),
-    MEDIA_KIND: media_classifier(_plan_of, lambda connection: open_client(connection)),
+    BOOT_KIND: boot_classifier(
+        _plan_of, lambda connection, host: open_client(connection, host)
+    ),
+    MEDIA_KIND: media_classifier(
+        _plan_of, lambda connection, host: open_client(connection, host)
+    ),
 }

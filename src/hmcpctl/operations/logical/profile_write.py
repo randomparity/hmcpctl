@@ -115,7 +115,7 @@ def holds(element: ET.Element, patch: ProfilePatch) -> bool:
 
 def profile_write_classifier(
     values: Values,
-    open_client: Callable[[str], HMCClient],
+    open_client: Callable[[str, str], HMCClient],
 ) -> engine.Classifier:
     """Classify an open profile write by reading the profile back (ADR 0314 Decision 5)."""
 
@@ -129,7 +129,7 @@ def profile_write_classifier(
                 ctx, lpar_uuid, ctx.partition[0], value, expected
             )
         profile_uuid = value
-        async with open_client(ctx.connection) as hmc:
+        async with open_client(ctx.connection, ctx.host) as hmc:
             profile = await read_native_profile(
                 hmc, "LogicalPartition", lpar_uuid, profile_uuid, ctx.partition[0]
             )
@@ -155,7 +155,7 @@ def profile_write_classifier(
         expected: ProfilePatch,
     ) -> Classification:
         """A created profile: absent did not land; the requested values did."""
-        async with open_client(ctx.connection) as hmc:
+        async with open_client(ctx.connection, ctx.host) as hmc:
             profile = await profile_by_name(hmc, lpar_uuid, system_uuid, name)
         if profile is None:
             return Classification("not_applied")

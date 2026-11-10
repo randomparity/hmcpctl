@@ -483,9 +483,9 @@ def test_media_classifier(media, mounted, status):
         "media": {"vios_uuid": VIOS, "media_name": MEDIA},
     }
     classify = reconfigure_media.media_classifier(
-        lambda _ctx: plan, lambda _c: media.fake
+        lambda _ctx: plan, lambda _c, _host: media.fake
     )
-    ctx = type("Ctx", (), {"connection": "<default>"})()
+    ctx = type("Ctx", (), {"connection": "<default>", "host": "hmc.test"})()
     assert asyncio.run(classify(ctx, None)).status == status
 
 
@@ -505,9 +505,9 @@ def test_boot_classifier(media, pending, status):
         "boot": {"before": OPTICAL_PATH, "after": DISK_PATH},
     }
     classify = reconfigure_media.boot_classifier(
-        lambda _ctx: plan, lambda _c: media.fake
+        lambda _ctx: plan, lambda _c, _host: media.fake
     )
-    ctx = type("Ctx", (), {"connection": "<default>"})()
+    ctx = type("Ctx", (), {"connection": "<default>", "host": "hmc.test"})()
     assert asyncio.run(classify(ctx, None)).status == status
 
 

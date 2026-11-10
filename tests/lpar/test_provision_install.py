@@ -297,8 +297,8 @@ def _submit(
     hmc = writes.hmc
     record = engine.submit(
         operation,
-        provision_body(SYSTEM, request, lambda _c: hmc),
-        classifiers=provision_classifiers(request, lambda _c: hmc),
+        provision_body(SYSTEM, request, lambda _c, _host: hmc),
+        classifiers=provision_classifiers(request, lambda _c, _host: hmc),
         continuation=continuation,
         wait_seconds=30,
     )
@@ -482,8 +482,9 @@ def test_a_resume_after_an_uncertain_mount_classifies_by_the_mapping_listing(wri
 
 def _classify(hmc: FakeHMC, key: str, target: str, request=REQUEST, recorded=None):
     effect = EffectRecord(key, EFFECT_KINDS[key], target, "uncertain", None)
-    classifier = provision_classifiers(request, lambda _c: hmc)[effect.kind]
+    classifier = provision_classifiers(request, lambda _c, _host: hmc)[effect.kind]
     ctx = SimpleNamespace(
+        host="hmc.test",
         connection="<default>",
         operation_id="0" * 32,
         partition=(SYSTEM, LPAR),
