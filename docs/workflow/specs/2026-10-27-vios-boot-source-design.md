@@ -120,11 +120,11 @@ preflight; root binds its stable digest before final preflight/capture. No autom
 Window is bounded to3200–7200 seconds, absolute UTC bounds; expiry stops resource effects.
 A new window does not reset consumed effects. Root must separately disposition any retry.
 
-Selected boundary-owner source hashes are a closed exact path set: the existing AME
-SOURCE_PATHS minus scripts/live_vios_ame_source.py, plus scripts/live_test/arms/vios_boot_source.py
-and scripts/live_vios_boot_source.py. This expands to20 paths at this baseline and is
-enumerated explicitly below; no caller-selected extra or missing path. It is a
-selected execution-boundary attestation, not a claim to hash all transitive Python imports.
+Selected boundary-owner source hashes use the closed exact set declared by `SOURCE_PATHS`
+in `scripts/live_test/arms/vios_boot_source.py`. It derives from AME's source set minus
+`scripts/live_vios_ame_source.py`, plus the boot-source arm and wrapper. The runtime constant
+is authoritative; no caller-selected extra or missing path is allowed. This attestation
+covers the selected execution boundaries.
 Budgets is exactly {stages:<the four [REST,SSH,bytes,seconds] table tuples>, rows:{regular:128,
 vios:8,profiles:32,pools:4,with_own_vios:9,with_own_profiles:33}}. Integers are strict, not bool.
 parse_native_header's identity argument is the closed REST-derived record {system_uuid,
@@ -444,26 +444,10 @@ A partial journal, unknown token or failed fsync remains held; do not fabricate 
 
 ## Exact selected source closure
 
-This is the20-path execution-boundary witness, not transitive-import closure. Packet hashes
-must cover these exact keys; test/document paths are not executable runtime boundaries.
-
-- scripts/live_test/arms/vios_ame_source.py
-- scripts/live_test_preflight.py
-- scripts/live_test_recovery.py
-- scripts/live_test_evidence.py
-- src/hmcpctl/config.py
-- src/hmcpctl/client/core.py
-- src/hmcpctl/client/client_systems.py
-- src/hmcpctl/client/client_profiles.py
-- src/hmcpctl/client/client_resolution.py
-- src/hmcpctl/documents/partition_profile.py
-- src/hmcpctl/documents/lpar.py
-- src/hmcpctl/operations/vios/core.py
-- src/hmcpctl/resource_identity.py
-- src/hmcpctl/ssh/lpar.py
-- src/hmcpctl/ssh/commands.py
-- src/hmcpctl/ssh/description_validation.py
-- src/hmcpctl/ssh/transport.py
-- src/hmcpctl/xmlutil.py
-- scripts/live_test/arms/vios_boot_source.py
-- scripts/live_vios_boot_source.py
+The authoritative enumeration is `SOURCE_PATHS` in
+[`scripts/live_test/arms/vios_boot_source.py`](../../../scripts/live_test/arms/vios_boot_source.py).
+Packet `imported_source_sha256` must contain exactly those keys. The set includes the arm
+package initializer, shared packet-validation owner and native partition-creation coordinator.
+Hash the current declared owners when preparing a fresh commit-bound capture; the runtime
+validator rejects either missing or additional keys. Test and document paths are outside
+this selected execution-boundary witness.
