@@ -198,34 +198,6 @@ def _bare_cec_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _profiles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name what the profiles arm (#627) changes, each restored by the arm itself."""
-    return ArmVerdict(
-        "profiles",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            f"partition {config.lp3_name}: description (restored)",
-            (
-                f"partition {config.lp3_name}: sync_curr_profile (restored; only when "
-                "ST0 reads it as 0, 1 or 2 and the partition as Not Activated)"
-            ),
-            (
-                f"partition {config.lp3_name}: default-profile processor compatibility "
-                "mode (restored; skipped when ST0 reads sync_curr_profile as 1)"
-            ),
-            "the first VIOS by name: msp (toggled, then restored)",
-            (
-                "every profile on the system: backed up to hmcpctl-live-st10, then "
-                "type-3 merge-restored"
-            ),
-            "not-activated partitions the restore unconfigures: profile re-applied",
-        ),
-        config.system_name,
-    )
-
-
 def _vios_backup_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the vios-backup arm (#1349) changes and removes again."""
     if HMCConfig().ssh_timeout < vios_backup.MIN_SSH_TIMEOUT:
@@ -259,23 +231,6 @@ def _vios_backup_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _pcm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name the system-wide PCM preferences the pcm arm (#634) toggles and restores."""
-    return ArmVerdict(
-        "pcm",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            (
-                "PCM collection preferences (system-wide): each of the five flags "
-                "toggled, then all five restored to the pre-run read"
-            ),
-        ),
-        config.system_name,
-    )
-
-
 def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the one partition the lpar-config arm (#1345) creates and deletes again."""
     arm = dedicated_pcie._dedicated_config(config)
@@ -302,88 +257,6 @@ def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
                 "no other partition: the system's partition names and free "
                 "processing units and memory are compared with the pre-run read"
             ),
-        ),
-        config.system_name,
-    )
-
-
-def _processor_sharing_weight_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "processor-sharing-weight",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            (
-                "two sequential inactive AIX/Linux fixtures hmcpctl-live-lpar-<8 hex>; "
-                "at most one retained allocation, conditional on confirmed cleanup"
-            ),
-            (
-                "each: memory 1024/2048/4096 MiB min/desired/max; shared: "
-                "0.1/0.5/1.0 processing units and 1/1/2 vCPUs; dedicated: 1 CPU min/desired/max"
-            ),
-            (
-                "12 resource calls: 8 positive and 4 refusal cases; two creates and at most "
-                "two guarded deletions; HMC admission may refuse; no profile apply, no activation"
-            ),
-            (
-                "configured/current context unavailable means SKIP; no RMC or guest/runtime guarantee; "
-                "partition names and free CPU/memory must return to baseline; read-only recovery follows"
-            ),
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_settings_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-settings",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            f"one inactive partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create; nine fixed settings updates; delete and independent absence/resource comparison",
-            "no activation, guest clock, profile mutation or time_ref=True probe; existing scratch prefix must be absent",
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_reporting_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-reporting",
-        True,
-        "configuration validated",
-        (
-            f"one inactive IBM i partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create; explicit console_slot=hmc; eight fixed reporting updates; delete and independent absence/resource comparison",
-            "no activation, guest clock, profile mutation or time_ref=True probe; IBM i eligibility must be established by the operator; existing scratch prefix must be absent",
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_physical_io_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-physical-io",
-        True,
-        "configuration validated",
-        (
-            f"one inactive OS400 partition {lpar_config.NAME_PREFIX}<8 hex>: explicit console_slot=hmc; verify native profile; delete matching-token fixture",
-            "no activation, profile apply, physical/SR-IOV assignment, foreign partition or retry; independent recovery and resource comparison required",
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_linux_roles_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-linux-roles",
-        True,
-        "configuration validated; native is_controller=1 required for management selection; KVM evidence selects the full variant",
-        (
-            f"one owned inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit dedicated never-share, 2 GiB desired memory/one CPU; management-only creation omits KVM and POWER10; full KVM creation adds same-record POWER10",
-            "both variants: native controller=1, explicit apply false and no profile; management-only: two management updates false-to-true-to-false; full KVM: KVM true-to-false then management false-to-true-to-false (three updates)",
-            "independent known roles/compatibility/resource reads, inactive-only matching-token deletion, baseline comparison and mandatory recovery; management-only has no catalog promotion; no activation, guest, key or controller-takeover effects",
         ),
         config.system_name,
     )
@@ -487,34 +360,6 @@ def _processor_move_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _processor_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-processor-quantities",
-        True,
-        "configuration validated",
-        (
-            f"one inactive shared AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create without apply; once-only setup apply requires all-zero CPU AND memory",
-            "remove0.10 entitlement, zero delta, over-maximum refusal; positive add/set unrun; independent REST/native CPU and memory readback; matching-token deletion and recovery",
-            "vCPU1/2/4 and entitlement0.10/0.50/1.00 require admitted system floor/capacity; no activation, force, pool policy or foreign resource mutation",
-        ),
-        config.system_name,
-    )
-
-
-def _memory_quantities_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-memory-quantities",
-        True,
-        "configuration validated",
-        (
-            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create without apply; optional once-only default-profile apply after identity/ownership confirmation",
-            "one native removal hypothesis at or above minimum, zero-delta no-op and over-maximum refusal; matching-token deletion and independent resource comparison",
-            "no activation, force, full removal, AMS or foreign resources; current bounds must be independently positive before quantity calls",
-        ),
-        config.system_name,
-    )
-
-
 def _creation_memory_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     try:
         creation_memory.configured(config)
@@ -535,19 +380,6 @@ def _creation_memory_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _lpar_affinity_group_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-affinity-group",
-        True,
-        "configuration validated; native authority required at dispatch",
-        (
-            f"two serial owned inactive AIX/Linux creations {lpar_config.NAME_PREFIX}<8 hex>, affinity none then 1; at most one fixture at a time",
-            "2 GiB desired memory/0.5 shared units; no profile apply or activation; independent labelled native partition/profile observations",
-            "matching-token inactive-only deletion and baseline equality before the second create; separate read-only recovery after every attempt",
-        ),
-    )
-
-
 def _creation_memory_layout_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     try:
         creation_memory_layout.configured(config)
@@ -563,33 +395,6 @@ def _creation_memory_layout_verdict(config: live_config.LiveTestConfig) -> ArmVe
             "each 2 GiB desired/0.5 shared units; max2 creates/1 LPAR stamp/2 deletes; no apply, activation, roles or hardware selection",
             "separate fresh-VIOS UUID-only conditional deletion grant; no adoption or retry; private checkpoint before every mutation",
             "literal independent configured readback, baseline equality and mandatory read-only recovery; no activation/KVM runtime proof",
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_hardware_memory_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-hardware-memory",
-        True,
-        "configuration validated; selected-system tuple and positive capabilities required at dispatch",
-        (
-            f"one inactive owned AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: true/true hardware memory access create without profile apply",
-            "2 GiB desired memory/0.5 shared units; independent contained access read and matching-token inactive-only deletion",
-            "no activation or runtime proof; baseline comparison and separate read-only recovery required even after apparent success",
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_security_policy_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-security-policy",
-        True,
-        "configuration validated; positive selected-system secure boot capability required at dispatch",
-        (
-            f"one inactive owned AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: secure_boot=0 create, one secure_boot=1 update, matching-token deletion",
-            "2 GiB desired memory/0.5 shared units; no activation/profile/key/keystore/dynamic/bypass effects; independent baseline and recovery required",
         ),
         config.system_name,
     )
@@ -614,81 +419,6 @@ def _lpar_reconfigure_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
                 "(the adapter is reported for manual removal); existing scratch prefix "
                 "must be absent; "
                 "independent recovery/resource comparison required"
-            ),
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_vtpm_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    return ArmVerdict(
-        "lpar-vtpm",
-        True,
-        "configuration validated",
-        (
-            f"one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit disabled vTPM create; one advertised enable; matching-token deletion",
-            "no activation, profile apply, VIOS creation or key management; existing scratch prefix must be absent; independent recovery/resource comparison required",
-        ),
-        config.system_name,
-    )
-
-
-def _lpar_power_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name the partitions and the VIOS volume the lpar-power arm (#1346) creates."""
-    return ArmVerdict(
-        "lpar-power",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            (
-                f"partitions {lpar_power.NAME_PREFIX}<8 hex>[-x|-p] (created; "
-                "activated to SMS and Open Firmware, powered off and restarted, "
-                "including through hmc_power_lpar; then deleted or decommissioned)"
-            ),
-            (
-                f"one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}"
-                f"<8 hex> in volume group {config.vdisk_volume_group_name} on the "
-                "VIOS holding it, mapped to the provisioned partition, detached and "
-                "deleted"
-            ),
-            (
-                "a dedicated PCIe slot only when the dedicated arm is configured "
-                "for this system and the slot is unowned and listed by no profile"
-            ),
-            (
-                "no other partition, volume or mapping: partition names and states, "
-                "free processing units and memory, slot owners, VIOS mappings and "
-                "server adapters are compared with the pre-run read"
-            ),
-        ),
-        config.system_name,
-    )
-
-
-def _provision_boot_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name the partition, volume and media the provision-boot arm (#1849) creates."""
-    return ArmVerdict(
-        "provision-boot",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            (
-                f"one partition {lpar_power.NAME_PREFIX}<8 hex>-p, provisioned with "
-                f"prepared media made from {config.iso_path} (served at "
-                f"{config.iso_url}) and boot immediate: activated once from its saved "
-                "profile with the installer media first, then powered off and deleted"
-            ),
-            (
-                f"one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}"
-                f"<8 hex> in volume group {config.vdisk_volume_group_name}, and one "
-                "medium hmcpctl_<12 hex>.iso in the VIOS's media repository, both "
-                "deleted"
-            ),
-            (
-                "no other partition, volume or mapping: the lpar-power arm's pre-run "
-                "read is compared after teardown"
             ),
         ),
         config.system_name,
@@ -809,118 +539,6 @@ def _vg_if_match_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
-def _network_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name what the network arm (#629) changes, each reversed by the arm itself."""
-    return ArmVerdict(
-        "network",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            (
-                "one virtual network on the first unused VLAN in "
-                f"{config.vlan_range_start}-{config.vlan_range_end} (created, a "
-                "duplicate attempted, then deleted); no existing network is changed"
-            ),
-            (
-                f"partition {config.lp3_name}, only while Not Activated: a client "
-                "network, a vSCSI and a vFC client adapter (each added, then removed; "
-                "each vFC add uses a WWPN pair from the system's pool); each vSCSI "
-                "and vFC add is first tried on the slot the partition's own vSCSI "
-                "client uses, and an unknown adapter UUID is deleted (both expected "
-                "refused; anything accepted is reversed or reported)"
-            ),
-            (
-                f"the one VIOS serving {config.lp3_name}: one FC port's label (set, "
-                "removed, restored; a set on absent port fcs9999 expected refused) "
-                "and a vFC group label (created, a duplicate refused, renamed, "
-                "removed)"
-            ),
-        ),
-        config.system_name,
-    )
-
-
-def _users_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name the HMC user the users arm (#632) creates and deletes again."""
-    return ArmVerdict(
-        "users",
-        True,
-        "configuration validated",
-        (
-            (
-                f"the HMC: one user {users.SCRATCH_PREFIX}<8 hex> with the "
-                f"{users.VIEWER_TASK_ROLE} task role, web and SSH remote access "
-                "disabled (created, modified, then deleted by UUID)"
-            ),
-            "existing users, roles and LDAP/Kerberos settings: read only",
-        ),
-    )
-
-
-def _vmedia_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name what the vmedia arm (#1347) changes, each removed by the arm itself."""
-    return ArmVerdict(
-        "vmedia",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            (
-                "the VIOS's media repository: created, and deleted again, only when "
-                "the VIOS has none; an existing one is never resized or deleted"
-            ),
-            (
-                f"in that repository, one blank 1 GiB medium {vmedia.BLANK_PREFIX}"
-                f"<8 hex>: created, mounted to {config.lp3_name} only while Not "
-                "Activated (the HMC adds a vSCSI adapter pair), a delete while "
-                "mounted expected refused, unmounted, deleted"
-            ),
-            (
-                f"the ISO at {config.iso_path}, only when that file exists: uploaded "
-                "under a per-run name and deleted; then mounted for a boot test that "
-                f"powers {config.lp3_name} on and off and restores its pending boot "
-                "order"
-            ),
-            "no other medium or mapping is unmounted or deleted",
-        ),
-        config.system_name,
-    )
-
-
-def _vmedia_media_change_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
-    """Name what the media change capture (#1284) changes and what may need a hand."""
-    return ArmVerdict(
-        "vmedia-media-change",
-        True,
-        "configuration validated",
-        (
-            f"managed system {config.system_name}",
-            (
-                "the VIOS's media repository: created, and deleted again, only when "
-                "the VIOS has none (ST16/ST22)"
-            ),
-            (
-                f"two blank 1 GiB media {vmedia.BLANK_PREFIX}<8 hex>; one mounted to "
-                f"{config.lp3_name} while Not Activated (the HMC adds a vSCSI adapter "
-                "pair), unmounted and both deleted at the end"
-            ),
-            (
-                "two raw ViosSCSIMapping POSTs: a create naming the mounted VTD "
-                "(expected refused; it may leave a server adapter that needs a manual "
-                "chhwres -o r) and a Storage replacement on that mapping"
-            ),
-            "viosvrcmd help, lsvopt, unloadopt and loadopt on that VTD, with -release",
-            (
-                f"{config.lp3_name} powered on and immediately off once, then on "
-                "again for an unmount while it runs (Q5) and off"
-            ),
-            "every HMC call recorded to a git-ignored hmc-captures/ file",
-        ),
-        config.system_name,
-    )
-
-
 def _storage_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what the storage arm (#1348) changes, each removed by the arm itself."""
     volume = f"{storage_lifecycle.DISK_PREFIX}<8 hex>"
@@ -1023,48 +641,453 @@ def _profile_contract_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+_STATIC_VERDICTS = {
+    "profiles": ArmVerdict(
+        "profiles",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            "partition {config.lp3_name}: description (restored)",
+            (
+                "partition {config.lp3_name}: sync_curr_profile (restored; only when ST0 reads it"
+                " as 0, 1 or 2 and the partition as Not Activated)"
+            ),
+            (
+                "partition {config.lp3_name}: default-profile processor compatibility mode "
+                "(restored; skipped when ST0 reads sync_curr_profile as 1)"
+            ),
+            "the first VIOS by name: msp (toggled, then restored)",
+            (
+                "every profile on the system: backed up to hmcpctl-live-st10, then type-3 "
+                "merge-restored"
+            ),
+            "not-activated partitions the restore unconfigures: profile re-applied",
+        ),
+        "{config.system_name}",
+    ),
+    "pcm": ArmVerdict(
+        "pcm",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "PCM collection preferences (system-wide): each of the five flags toggled, then "
+                "all five restored to the pre-run read"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "processor-sharing-weight": ArmVerdict(
+        "processor-sharing-weight",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "two sequential inactive AIX/Linux fixtures hmcpctl-live-lpar-<8 hex>; at most "
+                "one retained allocation, conditional on confirmed cleanup"
+            ),
+            (
+                "each: memory 1024/2048/4096 MiB min/desired/max; shared: 0.1/0.5/1.0 processing "
+                "units and 1/1/2 vCPUs; dedicated: 1 CPU min/desired/max"
+            ),
+            (
+                "12 resource calls: 8 positive and 4 refusal cases; two creates and at most two "
+                "guarded deletions; HMC admission may refuse; no profile apply, no activation"
+            ),
+            (
+                "configured/current context unavailable means SKIP; no RMC or guest/runtime "
+                "guarantee; partition names and free CPU/memory must return to baseline; "
+                "read-only recovery follows"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-settings": ArmVerdict(
+        "lpar-settings",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "one inactive partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp create; "
+                "nine fixed settings updates; delete and independent absence/resource comparison"
+            ),
+            (
+                "no activation, guest clock, profile mutation or time_ref=True probe; existing "
+                "scratch prefix must be absent"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-reporting": ArmVerdict(
+        "lpar-reporting",
+        True,
+        "configuration validated",
+        (
+            (
+                "one inactive IBM i partition {lpar_config.NAME_PREFIX}<8 hex>: required-stamp "
+                "create; explicit console_slot=hmc; eight fixed reporting updates; delete and "
+                "independent absence/resource comparison"
+            ),
+            (
+                "no activation, guest clock, profile mutation or time_ref=True probe; IBM i "
+                "eligibility must be established by the operator; existing scratch prefix must be"
+                " absent"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-physical-io": ArmVerdict(
+        "lpar-physical-io",
+        True,
+        "configuration validated",
+        (
+            (
+                "one inactive OS400 partition {lpar_config.NAME_PREFIX}<8 hex>: explicit "
+                "console_slot=hmc; verify native profile; delete matching-token fixture"
+            ),
+            (
+                "no activation, profile apply, physical/SR-IOV assignment, foreign partition or "
+                "retry; independent recovery and resource comparison required"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-linux-roles": ArmVerdict(
+        "lpar-linux-roles",
+        True,
+        "configuration validated; native is_controller=1 required for management selection; KVM evidence selects the full variant",
+        (
+            (
+                "one owned inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: "
+                "explicit dedicated never-share, 2 GiB desired memory/one CPU; management-only "
+                "creation omits KVM and POWER10; full KVM creation adds same-record POWER10"
+            ),
+            (
+                "both variants: native controller=1, explicit apply false and no profile; "
+                "management-only: two management updates false-to-true-to-false; full KVM: KVM "
+                "true-to-false then management false-to-true-to-false (three updates)"
+            ),
+            (
+                "independent known roles/compatibility/resource reads, inactive-only "
+                "matching-token deletion, baseline comparison and mandatory recovery; "
+                "management-only has no catalog promotion; no activation, guest, key or "
+                "controller-takeover effects"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-processor-quantities": ArmVerdict(
+        "lpar-processor-quantities",
+        True,
+        "configuration validated",
+        (
+            (
+                "one inactive shared AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: "
+                "required-stamp create without apply; once-only setup apply requires all-zero CPU"
+                " AND memory"
+            ),
+            (
+                "remove0.10 entitlement, zero delta, over-maximum refusal; positive add/set "
+                "unrun; independent REST/native CPU and memory readback; matching-token deletion "
+                "and recovery"
+            ),
+            (
+                "vCPU1/2/4 and entitlement0.10/0.50/1.00 require admitted system floor/capacity; "
+                "no activation, force, pool policy or foreign resource mutation"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-memory-quantities": ArmVerdict(
+        "lpar-memory-quantities",
+        True,
+        "configuration validated",
+        (
+            (
+                "one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: "
+                "required-stamp create without apply; optional once-only default-profile apply "
+                "after identity/ownership confirmation"
+            ),
+            (
+                "one native removal hypothesis at or above minimum, zero-delta no-op and "
+                "over-maximum refusal; matching-token deletion and independent resource "
+                "comparison"
+            ),
+            (
+                "no activation, force, full removal, AMS or foreign resources; current bounds "
+                "must be independently positive before quantity calls"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-affinity-group": ArmVerdict(
+        "lpar-affinity-group",
+        True,
+        "configuration validated; native authority required at dispatch",
+        (
+            (
+                "two serial owned inactive AIX/Linux creations {lpar_config.NAME_PREFIX}<8 hex>, "
+                "affinity none then 1; at most one fixture at a time"
+            ),
+            (
+                "2 GiB desired memory/0.5 shared units; no profile apply or activation; "
+                "independent labelled native partition/profile observations"
+            ),
+            (
+                "matching-token inactive-only deletion and baseline equality before the second "
+                "create; separate read-only recovery after every attempt"
+            ),
+        ),
+    ),
+    "lpar-hardware-memory": ArmVerdict(
+        "lpar-hardware-memory",
+        True,
+        "configuration validated; selected-system tuple and positive capabilities required at dispatch",
+        (
+            (
+                "one inactive owned AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: "
+                "true/true hardware memory access create without profile apply"
+            ),
+            (
+                "2 GiB desired memory/0.5 shared units; independent contained access read and "
+                "matching-token inactive-only deletion"
+            ),
+            (
+                "no activation or runtime proof; baseline comparison and separate read-only "
+                "recovery required even after apparent success"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-security-policy": ArmVerdict(
+        "lpar-security-policy",
+        True,
+        "configuration validated; positive selected-system secure boot capability required at dispatch",
+        (
+            (
+                "one inactive owned AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: "
+                "secure_boot=0 create, one secure_boot=1 update, matching-token deletion"
+            ),
+            (
+                "2 GiB desired memory/0.5 shared units; no "
+                "activation/profile/key/keystore/dynamic/bypass effects; independent baseline and"
+                " recovery required"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-vtpm": ArmVerdict(
+        "lpar-vtpm",
+        True,
+        "configuration validated",
+        (
+            (
+                "one inactive AIX/Linux partition {lpar_config.NAME_PREFIX}<8 hex>: explicit "
+                "disabled vTPM create; one advertised enable; matching-token deletion"
+            ),
+            (
+                "no activation, profile apply, VIOS creation or key management; existing scratch "
+                "prefix must be absent; independent recovery/resource comparison required"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "lpar-power": ArmVerdict(
+        "lpar-power",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "partitions {lpar_power.NAME_PREFIX}<8 hex>[-x|-p] (created; activated to SMS and"
+                " Open Firmware, powered off and restarted, including through hmc_power_lpar; "
+                "then deleted or decommissioned)"
+            ),
+            (
+                "one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}<8 hex> in "
+                "volume group {config.vdisk_volume_group_name} on the VIOS holding it, mapped to "
+                "the provisioned partition, detached and deleted"
+            ),
+            (
+                "a dedicated PCIe slot only when the dedicated arm is configured for this system "
+                "and the slot is unowned and listed by no profile"
+            ),
+            (
+                "no other partition, volume or mapping: partition names and states, free "
+                "processing units and memory, slot owners, VIOS mappings and server adapters are "
+                "compared with the pre-run read"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "provision-boot": ArmVerdict(
+        "provision-boot",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "one partition {lpar_power.NAME_PREFIX}<8 hex>-p, provisioned with prepared media"
+                " made from {config.iso_path} (served at {config.iso_url}) and boot immediate: "
+                "activated once from its saved profile with the installer media first, then "
+                "powered off and deleted"
+            ),
+            (
+                "one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}<8 hex> in "
+                "volume group {config.vdisk_volume_group_name}, and one medium hmcpctl_<12 "
+                "hex>.iso in the VIOS's media repository, both deleted"
+            ),
+            (
+                "no other partition, volume or mapping: the lpar-power arm's pre-run read is "
+                "compared after teardown"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "network": ArmVerdict(
+        "network",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "one virtual network on the first unused VLAN in "
+                "{config.vlan_range_start}-{config.vlan_range_end} (created, a duplicate "
+                "attempted, then deleted); no existing network is changed"
+            ),
+            (
+                "partition {config.lp3_name}, only while Not Activated: a client network, a vSCSI"
+                " and a vFC client adapter (each added, then removed; each vFC add uses a WWPN "
+                "pair from the system's pool); each vSCSI and vFC add is first tried on the slot "
+                "the partition's own vSCSI client uses, and an unknown adapter UUID is deleted "
+                "(both expected refused; anything accepted is reversed or reported)"
+            ),
+            (
+                "the one VIOS serving {config.lp3_name}: one FC port's label (set, removed, "
+                "restored; a set on absent port fcs9999 expected refused) and a vFC group label "
+                "(created, a duplicate refused, renamed, removed)"
+            ),
+        ),
+        "{config.system_name}",
+    ),
+    "users": ArmVerdict(
+        "users",
+        True,
+        "configuration validated",
+        (
+            (
+                "the HMC: one user {users.SCRATCH_PREFIX}<8 hex> with the "
+                "{users.VIEWER_TASK_ROLE} task role, web and SSH remote access disabled (created,"
+                " modified, then deleted by UUID)"
+            ),
+            "existing users, roles and LDAP/Kerberos settings: read only",
+        ),
+    ),
+    "vmedia": ArmVerdict(
+        "vmedia",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "the VIOS's media repository: created, and deleted again, only when the VIOS has "
+                "none; an existing one is never resized or deleted"
+            ),
+            (
+                "in that repository, one blank 1 GiB medium {vmedia.BLANK_PREFIX}<8 hex>: "
+                "created, mounted to {config.lp3_name} only while Not Activated (the HMC adds a "
+                "vSCSI adapter pair), a delete while mounted expected refused, unmounted, deleted"
+            ),
+            (
+                "the ISO at {config.iso_path}, only when that file exists: uploaded under a "
+                "per-run name and deleted; then mounted for a boot test that powers "
+                "{config.lp3_name} on and off and restores its pending boot order"
+            ),
+            "no other medium or mapping is unmounted or deleted",
+        ),
+        "{config.system_name}",
+    ),
+    "vmedia-media-change": ArmVerdict(
+        "vmedia-media-change",
+        True,
+        "configuration validated",
+        (
+            "managed system {config.system_name}",
+            (
+                "the VIOS's media repository: created, and deleted again, only when the VIOS has "
+                "none (ST16/ST22)"
+            ),
+            (
+                "two blank 1 GiB media {vmedia.BLANK_PREFIX}<8 hex>; one mounted to "
+                "{config.lp3_name} while Not Activated (the HMC adds a vSCSI adapter pair), "
+                "unmounted and both deleted at the end"
+            ),
+            (
+                "two raw ViosSCSIMapping POSTs: a create naming the mounted VTD (expected "
+                "refused; it may leave a server adapter that needs a manual chhwres -o r) and a "
+                "Storage replacement on that mapping"
+            ),
+            "viosvrcmd help, lsvopt, unloadopt and loadopt on that VTD, with -release",
+            (
+                "{config.lp3_name} powered on and immediately off once, then on again for an "
+                "unmount while it runs (Q5) and off"
+            ),
+            "every HMC call recorded to a git-ignored hmc-captures/ file",
+        ),
+        "{config.system_name}",
+    ),
+}
+
+
+def _static_verdict(group: str, config: live_config.LiveTestConfig) -> ArmVerdict:
+    """Render a descriptive arm without adding an admission predicate."""
+    template = _STATIC_VERDICTS[group]
+    return ArmVerdict(
+        group,
+        template.runnable,
+        template.reason,
+        tuple(
+            description.format(
+                config=config,
+                lpar_config=lpar_config,
+                lpar_power=lpar_power,
+                users=users,
+                vmedia=vmedia,
+            )
+            for description in template.mutates
+        ),
+        config.system_name if template.system_name is not None else None,
+    )
+
+
 _ARM_VERDICTS = {
+    **{group: functools.partial(_static_verdict, group) for group in _STATIC_VERDICTS},
     "dedicated": _dedicated_verdict,
     "bare-cec": _bare_cec_verdict,
-    "profiles": _profiles_verdict,
     "profile-artifacts": _profile_artifacts_verdict,
     "system-profiles": _system_profiles_verdict,
     "partition-profiles": _partition_profiles_verdict,
     "partition-profile-contract": _profile_contract_verdict,
-    "pcm": _pcm_verdict,
     "vios-backup": _vios_backup_verdict,
-    "network": _network_verdict,
-    "users": _users_verdict,
     "lpar-config": _lpar_config_verdict,
-    "processor-sharing-weight": _processor_sharing_weight_verdict,
-    "lpar-settings": _lpar_settings_verdict,
-    "lpar-reporting": _lpar_reporting_verdict,
-    "lpar-physical-io": _lpar_physical_io_verdict,
-    "lpar-memory-quantities": _memory_quantities_verdict,
     "lpar-memory-move": _memory_move_verdict,
     "lpar-paging-switchover": _paging_switchover_verdict,
     "lpar-memory-statistics": _memory_statistics_verdict,
     "lpar-accelerator-qos": _accelerator_qos_verdict,
     "lpar-processor-move": _processor_move_verdict,
-    "lpar-processor-quantities": _processor_quantities_verdict,
-    "lpar-vtpm": _lpar_vtpm_verdict,
     "lpar-reconfigure": _lpar_reconfigure_verdict,
-    "lpar-security-policy": _lpar_security_policy_verdict,
-    "lpar-hardware-memory": _lpar_hardware_memory_verdict,
     "creation-memory": _creation_memory_verdict,
-    "lpar-affinity-group": _lpar_affinity_group_verdict,
     "creation-memory-layout": _creation_memory_layout_verdict,
-    "lpar-linux-roles": _lpar_linux_roles_verdict,
-    "lpar-power": _lpar_power_verdict,
-    "provision-boot": _provision_boot_verdict,
     logical_workflow.GROUP: _logical_workflow_verdict,
     "vg-if-match": _vg_if_match_verdict,
     **{
         group: functools.partial(_native_boot_verdict, group)
         for group in provision_boot.NATIVE_GROUPS
     },
-    "vmedia": _vmedia_verdict,
-    "vmedia-media-change": _vmedia_media_change_verdict,
     "storage": _storage_verdict,
 }
 
