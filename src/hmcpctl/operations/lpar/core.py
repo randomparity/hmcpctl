@@ -431,12 +431,33 @@ async def create_and_stamp_lpar(
         hardware_mem_expansion=creation.hardware_mem_expansion,
         affinity_group_id=creation.affinity_group_id,
     )
-    role_requested = roles_requested(creation.settings)
-    verify_before_apply = (
-        features.policy_requested
-        or features.native_features_requested
-        or role_requested
+    await _admit_lpar_creation(
+        hmc, system_name_or_uuid, creation, features, preflight_assignments
     )
+    system_name, apply_step, created_lpar, readback_error = await _submit_lpar_creation(
+        hmc, system_name_or_uuid, creation, features
+    )
+    return await _complete_lpar_creation(
+        hmc,
+        system_name_or_uuid,
+        creation,
+        features,
+        system_name,
+        apply_step,
+        created_lpar,
+        readback_error,
+    )
+
+
+async def _admit_lpar_creation(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    preflight_assignments: LparPcieAssignments | None,
+) -> None:
+    """Validate local assignments before resolving or admitting remote resources."""
+    role_requested = roles_requested(creation.settings)
     if preflight_assignments is not None:
         if not isinstance(preflight_assignments, LparPcieAssignments):
             raise TypeError("preflight_assignments must be LparPcieAssignments")
@@ -492,6 +513,16 @@ async def create_and_stamp_lpar(
     if features.creation_memory.mem_mode != "shared":
         await require_memory_within_system(hmc, system_uuid, creation.resources)
     await features.admit_partition_features()
+
+
+async def _submit_lpar_creation(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+) -> tuple[str | None, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
+    """Select native creation or REST with only the established refusal fallback."""
+    system_uuid = features.system_uuid
     system_name: str | None = features.system if features.memory_requested else None
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
@@ -506,82 +537,101 @@ async def create_and_stamp_lpar(
         or (creation.settings.pairs() and creation.keylock is None)
     ):
         # Only mksyscfg's all_resources=1 expresses a create with no resource values.
-        native_failed = False
-        try:
-            (
-                system_name,
-                apply_step,
-                created_lpar,
-                readback_error,
-            ) = await _create_via_cli(
-                hmc,
-                system_uuid,
-                system_name_or_uuid,
-                creation,
-                controller_mode=controller_mode,
-                memory_admission=features.memory_admission,
-                start_admission=features.start_admission,
-            )
-        except HMCError as error:
-            if (
-                features.serial_requested
-                or features.layout_requested
-                or features.memory_requested
-                or features.start_requested
-            ):
-                raise
-            if features.hardware_requested or features.affinity_requested:
-                native_failed = True
-            elif (
-                not creation.physical_io.requested
-                and not features.policy_requested
-                and not role_requested
-            ):
-                raise
-            else:
-                raise HMCError(
-                    "Native role creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
-                    if role_requested
-                    else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                    if features.policy_requested
-                    else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                ) from (None if role_requested else error)
-        if native_failed:
-            raise HMCError(
-                f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
-                if controller_mode
-                else f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-            )
-    else:
-        document = build_lpar_document(
-            name=creation.name,
-            partition_type=creation.partition_type,
-            partition_id=creation.partition_id,
-            resources=resources,
-            keylock=creation.keylock,
-            max_virtual_slots=creation.max_virtual_slots,
+        return await _submit_native_creation(
+            hmc, system_name_or_uuid, creation, features
         )
-        try:
-            created_lpar = await hmc.create_logical_partition(system_uuid, document)
-        except HMCError as exc:
-            if not _rest_create_refused(exc):
-                raise
-            _logger.warning(
-                "REST create of LPAR %r was refused, falling back to mksyscfg: %s",
-                creation.name,
-                exc,
-            )
-            (
-                system_name,
-                apply_step,
-                created_lpar,
-                readback_error,
-            ) = await _create_via_cli(hmc, system_uuid, system_name_or_uuid, creation)
+    document = build_lpar_document(
+        name=creation.name,
+        partition_type=creation.partition_type,
+        partition_id=creation.partition_id,
+        resources=resources,
+        keylock=creation.keylock,
+        max_virtual_slots=creation.max_virtual_slots,
+    )
+    try:
+        created_lpar = await hmc.create_logical_partition(system_uuid, document)
+    except HMCError as exc:
+        if not _rest_create_refused(exc):
+            raise
+        _logger.warning(
+            "REST create of LPAR %r was refused, falling back to mksyscfg: %s",
+            creation.name,
+            exc,
+        )
+        return await _create_via_cli(hmc, system_uuid, system_name_or_uuid, creation)
+    if creation.apply_profile is True:
+        apply_step = WorkflowStep("apply_profile", "skipped", _REST_CREATE_CONFIGURED)
+    return system_name, apply_step, created_lpar, readback_error
+
+
+async def _submit_native_creation(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
+    """Preserve feature-specific ambiguous-submission diagnostics and causes."""
+    role_requested = roles_requested(creation.settings)
+    try:
+        return await _create_via_cli(
+            hmc,
+            features.system_uuid,
+            system_name_or_uuid,
+            creation,
+            controller_mode=features.controller_mode,
+            memory_admission=features.memory_admission,
+            start_admission=features.start_admission,
+        )
+    except HMCError as error:
+        if (
+            features.serial_requested
+            or features.layout_requested
+            or features.memory_requested
+            or features.start_requested
+        ):
+            raise
+        if features.hardware_requested or features.affinity_requested:
+            pass
+        elif (
+            not creation.physical_io.requested
+            and not features.policy_requested
+            and not role_requested
+        ):
+            raise
         else:
-            if creation.apply_profile is True:
-                apply_step = WorkflowStep(
-                    "apply_profile", "skipped", _REST_CREATE_CONFIGURED
-                )
+            raise HMCError(
+                "Native role creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+                if role_requested
+                else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                if features.policy_requested
+                else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+            ) from (None if role_requested else error)
+    # Keep hardware/affinity errors outside the handler: their prior diagnostic
+    # deliberately retained neither the provider cause nor its context.
+    raise HMCError(
+        f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+        if features.controller_mode
+        else f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+    )
+
+
+async def _complete_lpar_creation(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    system_name: str | None,
+    apply_step: WorkflowStep | None,
+    created_lpar: dict[str, Any] | None,
+    readback_error: HMCError | None,
+) -> LparCreationResult:
+    """Confirm, stamp, observe and apply, retaining facts at the TLS cutoff."""
+    role_requested = roles_requested(creation.settings)
+    verify_before_apply = (
+        features.policy_requested
+        or features.native_features_requested
+        or role_requested
+    )
     result = LparCreationResult(
         True,
         created_lpar,
@@ -598,73 +648,9 @@ async def create_and_stamp_lpar(
         created_lpar = features.entry
         result = replace(result, lpar=created_lpar)
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
-        apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
-
         if created_lpar is None:
-            if verify_before_apply and creation.stamp_policy == "required":
-                raise HMCError(
-                    f"{'Creation memory' if features.memory_requested else 'Affinity group' if features.affinity_requested else 'Serial' if features.serial_requested else 'Memory layout' if features.layout_requested else 'Hardware memory' if features.hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
-                    "unavailable and ownership was not stamped. Inspect the contained "
-                    "partition before retrying; no rollback performed."
-                ) from None
-            if creation.stamp_policy == "required" and readback_error is not None:
-                raise HMCError(
-                    f"stamp_policy='required': mksyscfg created LPAR {creation.name!r} "
-                    f"but its read-back failed ({readback_error}), so it was not "
-                    f"stamped.{apply_note} The LPAR still exists — re-stamp it with "
-                    "set_lpar_ownership_description or delete it to release its "
-                    "resources."
-                ) from readback_error
-            if creation.stamp_policy == "required":
-                raise HMCError(
-                    "stamp_policy='required': cannot confirm the created LPAR "
-                    f"exists — the create returned no body for {creation.name!r}."
-                    f"{apply_note} Verify whether the partition was created before "
-                    "retrying; a created partition can be re-stamped with "
-                    "set_lpar_ownership_description."
-                )
-            if verify_before_apply:
-                skipped = "created identity readback unavailable; inspect the contained partition before retrying"
-            elif readback_error is None:
-                skipped = "create returned no LPAR body"
-            else:
-                skipped = f"read-back after mksyscfg failed: {readback_error}"
-            await features.observe_unavailable_identity(creation, missing=True)
-            return LparCreationResult(
-                resource_created=True,
-                lpar=None,
-                ownership_stamped=None,
-                warnings=(
-                    *apply_warnings,
-                    f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
-                ),
-                apply_step=apply_step,
-                physical_io_step=WorkflowStep(
-                    "physical_io",
-                    "error",
-                    "Created partition identity unavailable; I/O unverified",
-                )
-                if creation.physical_io.requested
-                else None,
-                settings_step=(
-                    WorkflowStep(
-                        "settings",
-                        "error",
-                        "Created partition readback unavailable; settings unverified",
-                    )
-                    if creation.settings.pairs() or features.start_requested
-                    else None
-                ),
-                reporting_step=(
-                    WorkflowStep(
-                        "reporting_settings",
-                        "error",
-                        "Created partition readback unavailable; reporting settings unverified",
-                    )
-                    if creation.reporting_settings.pairs()
-                    else None
-                ),
-                **features.facts,
+            return await _missing_created_identity(
+                creation, features, result, readback_error, verify_before_apply
             )
         if verify_before_apply and (
             not isinstance(created_lpar, dict)
@@ -673,148 +659,52 @@ async def create_and_stamp_lpar(
             or not isinstance(created_lpar.get("Resource"), dict)
             or created_lpar["Resource"].get("PartitionName") != creation.name
         ):
-            if creation.stamp_policy == "required":
-                raise HMCError(
-                    "stamp_policy='required': creation may have occurred, but partition "
-                    "identity and ownership are unconfirmed. Inspect the contained "
-                    "partition before retrying; no rollback performed."
-                )
-            await features.observe_unavailable_identity(creation, missing=False)
-            return LparCreationResult(
-                True,
-                None
-                if role_requested
-                or features.layout_requested
-                or features.memory_requested
-                or features.start_requested
-                or features.affinity_requested
-                else created_lpar,
-                None,
-                (),
-                settings_step=WorkflowStep(
-                    "settings",
-                    "error",
-                    "Created partition identity unconfirmed; roles unverified",
-                )
-                if role_requested or features.start_requested
-                else None,
-                **features.facts,
-            )
-        ownership_stamped, warnings = await stamp_created_lpar_ownership(
+            return await _unconfirmed_created_identity(creation, features, created_lpar)
+        ownership_stamped, warnings = await _stamp_lpar_creation(
             hmc,
-            system_uuid,
             system_name or system_name_or_uuid,
+            creation,
+            features,
             created_lpar,
-            caller_token=creation.caller_token,
+            apply_warnings,
         )
         result = replace(
             result,
             ownership_stamped=ownership_stamped,
             warnings=(*apply_warnings, *warnings),
         )
-        if creation.stamp_policy == "required" and ownership_stamped is not True:
-            resource = created_lpar.get("Resource") or {}
-            name = resource.get("PartitionName") or creation.name
-            uuid = created_lpar.get("UUID")
-            identity = (
-                f"{name!r} (UUID {uuid!r})" if uuid else f"{name!r} (UUID unknown)"
-            )
-            raise HMCError(
-                "stamp_policy='required': ownership stamping did not succeed for "
-                f"LPAR {identity}. {'; '.join((*apply_warnings, *warnings))} The "
-                "LPAR still exists — the create is not rolled back. Re-stamp it "
-                "with set_lpar_ownership_description (issue #376) or delete it to "
-                "release its resources."
-            )
         await features.observe_before_followup(creation, system_name)
-        io_step = await features.observe(
-            "physical_io_step",
-            created_io_step(hmc, system_uuid, creation, created_lpar),
+        await _observe_created_io(
+            hmc, creation, features, created_lpar, ownership_stamped
         )
-        if io_step is not None and ownership_stamped is not True:
-            io_step = await features.observe(
-                "physical_io_step",
-                WorkflowStep(
-                    "physical_io",
-                    "error",
-                    "Partition exists but ownership stamp unconfirmed; I/O workflow stopped before apply",
-                ),
-            )
-        await features.observe(
-            "settings_step",
-            _created_settings_step(
-                hmc,
-                system_uuid,
-                system_name,
-                creation,
-                created_lpar,
-                controller_mode=controller_mode,
-                features=features,
-            )
-            if verify_before_apply
-            else None,
-        )
-        await features.observe(
-            "reporting_step",
-            _created_reporting_step(hmc, system_name, creation)
-            if verify_before_apply
-            else None,
+        # Roles must be verified before a deferred apply. Plain legacy settings
+        # retain their apply-first behavior; both positions use the same observer.
+        await _observe_creation_settings(
+            hmc,
+            system_name,
+            creation,
+            features,
+            created_lpar,
+            enabled=verify_before_apply,
         )
         await features.observe_after_followup(
             creation, system_name, verify_before_apply=verify_before_apply
         )
         result = replace(result, **features.facts)
-        if verify_before_apply and creation.apply_profile is not None:
-            verified = _creation_steps_verified(creation, result)
-            apply_step = await features.observe(
-                "apply_step",
-                _apply_created_profile(
-                    hmc, system_name or system_name_or_uuid, creation
-                )
-                if verified and (not controller_mode)
-                else WorkflowStep(
-                    "apply_profile",
-                    "skipped",
-                    (
-                        _CONTROLLER_AFFINITY_PROFILELESS
-                        if features.affinity_requested
-                        else _CONTROLLER_CREATE_CONFIGURED
-                    )
-                    if controller_mode
-                    else "Creation verification incomplete; profile not applied",
-                ),
-            )
-        elif creation.physical_io.requested and creation.apply_profile is not None:
-            apply_step = await features.observe(
-                "apply_step",
-                _apply_created_profile(
-                    hmc, system_name or system_name_or_uuid, creation
-                )
-                if io_step is not None and io_step.status == "ok"
-                else WorkflowStep(
-                    "apply_profile",
-                    "skipped",
-                    "I/O readback unverified; profile not applied",
-                ),
-            )
+        apply_step = await _apply_verified_creation(
+            hmc,
+            system_name or system_name_or_uuid,
+            creation,
+            features,
+            result,
+            verify_before_apply=verify_before_apply,
+        )
         await features.observe_after_apply(apply_step)
         if creation.physical_io.requested or verify_before_apply:
             apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
         if not verify_before_apply:
-            await features.observe(
-                "settings_step",
-                _created_settings_step(
-                    hmc,
-                    system_uuid,
-                    system_name,
-                    creation,
-                    created_lpar,
-                    controller_mode=controller_mode,
-                    features=features,
-                ),
-            )
-            await features.observe(
-                "reporting_step", _created_reporting_step(hmc, system_name, creation)
+            await _observe_creation_settings(
+                hmc, system_name, creation, features, created_lpar
             )
             await features.observe_vtpm(creation, system_name)
         result = replace(
@@ -822,39 +712,279 @@ async def create_and_stamp_lpar(
             warnings=(*apply_warnings, *warnings),
             **features.facts,
         )
-        if role_requested or features.native_features_requested:
-            safe_steps = {}
-            step_names = (
-                "apply_step",
-                "physical_io_step",
-                "reporting_step",
-                "vtpm_step",
-            )
-            if features.native_features_requested:
-                step_names += (
-                    "settings_step",
-                    "security_policy_step",
-                    "hardware_memory_step",
-                )
-            for name in step_names:
-                step = getattr(result, name)
-                if (
-                    step is not None
-                    and step.status == "error"
-                    and isinstance(step.result, str)
-                ):
-                    safe_steps[name] = replace(
-                        step,
-                        result="Partition exists or may exist; creation step unverified. Inspect before retrying; no rollback performed.",
-                    )
-            result = replace(result, **safe_steps)
-        return result
+        return _sanitize_creation_steps(creation, features, result)
     except HMCTLSFingerprintError:
         return _tls_aborted_creation(
             creation,
             replace(result, lpar=features.entry, **features.facts),
             features.active_step,
         )
+
+
+async def _missing_created_identity(
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    result: LparCreationResult,
+    readback_error: HMCError | None,
+    verify_before_apply: bool,
+) -> LparCreationResult:
+    """Preserve required-stamp failures and best-effort absent-identity evidence."""
+    apply_warnings = result.warnings
+    apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
+    if verify_before_apply and creation.stamp_policy == "required":
+        raise HMCError(
+            f"{'Creation memory' if features.memory_requested else 'Affinity group' if features.affinity_requested else 'Serial' if features.serial_requested else 'Memory layout' if features.layout_requested else 'Hardware memory' if features.hardware_requested else 'Role' if roles_requested(creation.settings) else 'Policy'} creation may have succeeded, but created identity readback is "
+            "unavailable and ownership was not stamped. Inspect the contained "
+            "partition before retrying; no rollback performed."
+        ) from None
+    if creation.stamp_policy == "required" and readback_error is not None:
+        raise HMCError(
+            f"stamp_policy='required': mksyscfg created LPAR {creation.name!r} "
+            f"but its read-back failed ({readback_error}), so it was not "
+            f"stamped.{apply_note} The LPAR still exists — re-stamp it with "
+            "set_lpar_ownership_description or delete it to release its "
+            "resources."
+        ) from readback_error
+    if creation.stamp_policy == "required":
+        raise HMCError(
+            "stamp_policy='required': cannot confirm the created LPAR "
+            f"exists — the create returned no body for {creation.name!r}."
+            f"{apply_note} Verify whether the partition was created before "
+            "retrying; a created partition can be re-stamped with "
+            "set_lpar_ownership_description."
+        )
+    if verify_before_apply:
+        skipped = "created identity readback unavailable; inspect the contained partition before retrying"
+    elif readback_error is None:
+        skipped = "create returned no LPAR body"
+    else:
+        skipped = f"read-back after mksyscfg failed: {readback_error}"
+    await features.observe_unavailable_identity(creation, missing=True)
+    return LparCreationResult(
+        resource_created=True,
+        lpar=None,
+        ownership_stamped=None,
+        warnings=(
+            *apply_warnings,
+            f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
+        ),
+        apply_step=result.apply_step,
+        physical_io_step=WorkflowStep(
+            "physical_io",
+            "error",
+            "Created partition identity unavailable; I/O unverified",
+        )
+        if creation.physical_io.requested
+        else None,
+        settings_step=(
+            WorkflowStep(
+                "settings",
+                "error",
+                "Created partition readback unavailable; settings unverified",
+            )
+            if creation.settings.pairs() or features.start_requested
+            else None
+        ),
+        reporting_step=(
+            WorkflowStep(
+                "reporting_settings",
+                "error",
+                "Created partition readback unavailable; reporting settings unverified",
+            )
+            if creation.reporting_settings.pairs()
+            else None
+        ),
+        **features.facts,
+    )
+
+
+async def _unconfirmed_created_identity(
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    created_lpar: dict[str, Any],
+) -> LparCreationResult:
+    """Retain the distinct unconfirmed-identity result and observation order."""
+    if creation.stamp_policy == "required":
+        raise HMCError(
+            "stamp_policy='required': creation may have occurred, but partition "
+            "identity and ownership are unconfirmed. Inspect the contained "
+            "partition before retrying; no rollback performed."
+        )
+    await features.observe_unavailable_identity(creation, missing=False)
+    role_requested = roles_requested(creation.settings)
+    return LparCreationResult(
+        True,
+        None
+        if role_requested
+        or features.layout_requested
+        or features.memory_requested
+        or features.start_requested
+        or features.affinity_requested
+        else created_lpar,
+        None,
+        (),
+        settings_step=WorkflowStep(
+            "settings",
+            "error",
+            "Created partition identity unconfirmed; roles unverified",
+        )
+        if role_requested or features.start_requested
+        else None,
+        **features.facts,
+    )
+
+
+async def _stamp_lpar_creation(
+    hmc: HMCClient,
+    system_name: str,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    created_lpar: dict[str, Any],
+    apply_warnings: tuple[str, ...],
+) -> tuple[bool | None, list[str]]:
+    ownership_stamped, warnings = await stamp_created_lpar_ownership(
+        hmc,
+        features.system_uuid,
+        system_name,
+        created_lpar,
+        caller_token=creation.caller_token,
+    )
+    if creation.stamp_policy == "required" and ownership_stamped is not True:
+        resource = created_lpar.get("Resource") or {}
+        name = resource.get("PartitionName") or creation.name
+        uuid = created_lpar.get("UUID")
+        identity = f"{name!r} (UUID {uuid!r})" if uuid else f"{name!r} (UUID unknown)"
+        raise HMCError(
+            "stamp_policy='required': ownership stamping did not succeed for "
+            f"LPAR {identity}. {'; '.join((*apply_warnings, *warnings))} The "
+            "LPAR still exists — the create is not rolled back. Re-stamp it "
+            "with set_lpar_ownership_description (issue #376) or delete it to "
+            "release its resources."
+        )
+    return ownership_stamped, warnings
+
+
+async def _observe_created_io(
+    hmc: HMCClient,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    created_lpar: dict[str, Any],
+    ownership_stamped: bool | None,
+) -> None:
+    io_step = await features.observe(
+        "physical_io_step",
+        created_io_step(hmc, features.system_uuid, creation, created_lpar),
+    )
+    if io_step is not None and ownership_stamped is not True:
+        await features.observe(
+            "physical_io_step",
+            WorkflowStep(
+                "physical_io",
+                "error",
+                "Partition exists but ownership stamp unconfirmed; I/O workflow stopped before apply",
+            ),
+        )
+
+
+async def _observe_creation_settings(
+    hmc: HMCClient,
+    system_name: str | None,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    created_lpar: dict[str, Any],
+    *,
+    enabled: bool = True,
+) -> None:
+    await features.observe(
+        "settings_step",
+        _created_settings_step(
+            hmc,
+            features.system_uuid,
+            system_name,
+            creation,
+            created_lpar,
+            controller_mode=features.controller_mode,
+            features=features,
+        )
+        if enabled
+        else None,
+    )
+    await features.observe(
+        "reporting_step",
+        _created_reporting_step(hmc, system_name, creation) if enabled else None,
+    )
+
+
+async def _apply_verified_creation(
+    hmc: HMCClient,
+    system_name: str,
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    result: LparCreationResult,
+    *,
+    verify_before_apply: bool,
+) -> WorkflowStep | None:
+    if verify_before_apply and creation.apply_profile is not None:
+        verified = _creation_steps_verified(creation, result)
+        return await features.observe(
+            "apply_step",
+            _apply_created_profile(hmc, system_name, creation)
+            if verified and not features.controller_mode
+            else WorkflowStep(
+                "apply_profile",
+                "skipped",
+                (
+                    _CONTROLLER_AFFINITY_PROFILELESS
+                    if features.affinity_requested
+                    else _CONTROLLER_CREATE_CONFIGURED
+                )
+                if features.controller_mode
+                else "Creation verification incomplete; profile not applied",
+            ),
+        )
+    if creation.physical_io.requested and creation.apply_profile is not None:
+        io_step = result.physical_io_step
+        return await features.observe(
+            "apply_step",
+            _apply_created_profile(hmc, system_name, creation)
+            if io_step is not None and io_step.status == "ok"
+            else WorkflowStep(
+                "apply_profile",
+                "skipped",
+                "I/O readback unverified; profile not applied",
+            ),
+        )
+    return result.apply_step
+
+
+def _sanitize_creation_steps(
+    creation: LparCreation,
+    features: _CreationFeatureCoordinator,
+    result: LparCreationResult,
+) -> LparCreationResult:
+    if not (roles_requested(creation.settings) or features.native_features_requested):
+        return result
+    safe_steps = {}
+    step_names = (
+        "apply_step",
+        "physical_io_step",
+        "reporting_step",
+        "vtpm_step",
+    )
+    if features.native_features_requested:
+        step_names += (
+            "settings_step",
+            "security_policy_step",
+            "hardware_memory_step",
+        )
+    for name in step_names:
+        step = getattr(result, name)
+        if step is not None and step.status == "error" and isinstance(step.result, str):
+            safe_steps[name] = replace(
+                step,
+                result="Partition exists or may exist; creation step unverified. Inspect before retrying; no rollback performed.",
+            )
+    return replace(result, **safe_steps)
 
 
 _TLS_CREATION_ABORTED = (
