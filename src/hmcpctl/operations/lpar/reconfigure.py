@@ -1172,7 +1172,7 @@ def _partition_write(
     return write
 
 
-def _unmap_write(hmc: HMCClient, lpar_uuid: str, item: Mapping[str, Any]) -> Write:
+def _unmap_write(hmc: HMCClient, lpar_uuid: str, item: DiskDetachPlan) -> Write:
     vios_uuid, mapping_id = item["vios_uuid"], item["mapping_id"]
 
     async def write() -> Mapping[str, Any]:
@@ -1202,7 +1202,7 @@ def _unmap_write(hmc: HMCClient, lpar_uuid: str, item: Mapping[str, Any]) -> Wri
     return write
 
 
-def _disk_write(hmc: HMCClient, add: Mapping[str, Any]) -> Write:
+def _disk_write(hmc: HMCClient, add: DiskAddPlan) -> Write:
     async def write() -> Mapping[str, Any]:
         try:
             await hmc.create_virtual_disk(
@@ -1223,7 +1223,7 @@ def _disk_write(hmc: HMCClient, add: Mapping[str, Any]) -> Write:
     return write
 
 
-def _map_write(hmc: HMCClient, lpar_uuid: str, add: Mapping[str, Any]) -> Write:
+def _map_write(hmc: HMCClient, lpar_uuid: str, add: DiskAddPlan) -> Write:
     async def write() -> Mapping[str, Any]:
         try:
             await hmc.map_storage_to_lpar(
