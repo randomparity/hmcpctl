@@ -12,9 +12,9 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_accelerator import LparAcceleratorQos
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
 from hmcpctl.operations.partition_state import PARTITION_STATES
+from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.resource_identity import (
     is_uuid,
     resolve_system_uuid,

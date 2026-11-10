@@ -12,9 +12,9 @@ import asyncssh
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryChange
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation, change_location_of
+from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.resource_identity import (
     guard_partition,
     is_uuid,

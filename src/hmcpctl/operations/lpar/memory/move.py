@@ -9,7 +9,6 @@ import asyncssh
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryChange, LparMemoryMove
 from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
-from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.operations.lpar.memory.current import (
     _admit_state,
     _contained_partition,
@@ -22,6 +21,7 @@ from hmcpctl.operations.lpar.memory.current import (
     _snapshot,
 )
 from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
+from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.resource_identity import (
     is_uuid,
     resolve_system_uuid,

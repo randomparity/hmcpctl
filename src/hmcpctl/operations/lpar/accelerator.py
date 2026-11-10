@@ -18,8 +18,8 @@ from ...resource_identity import (
 )
 from ...ssh.accelerator import read_accelerator_qos, set_accelerator_qos
 from ...xmlutil import leaf_text
-from ..inventory.composite import resource_container
 from ..partition_state import PARTITION_STATES
+from ..resource_reading import resource_container
 from .ownership import authorize_lpar_mutation
 
 

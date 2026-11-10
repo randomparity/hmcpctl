@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.operations.systems.fleet import operating_system_entry
 
 from ...errors import HMCError, HMCTLSFingerprintError
@@ -75,11 +76,6 @@ def optional_float(value: object) -> float | None:
         return float(text) if text is not None else None
     except ValueError:
         return None
-
-
-def resource_container(resource: dict[str, Any], name: str) -> dict[str, Any]:
-    value = resource.get(name)
-    return value if isinstance(value, dict) else {}
 
 
 def processor_figures(resource: dict[str, Any]) -> dict[str, Any]:

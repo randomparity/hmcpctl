@@ -26,8 +26,8 @@ from ..inventory.composite import (
     optional_int,
     optional_text,
     processor_figures,
-    resource_container,
 )
+from ..resource_reading import resource_container
 
 Section = Literal["resources", "rmc", "profile_drift", "refcodes"]
 DEFAULT_INCLUDE: tuple[Section, ...] = ("rmc", "refcodes")

@@ -19,6 +19,7 @@ from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
 from ..lpar.ownership import lpar_ownership_entry
 from ..partition_state import PartitionState
+from ..resource_reading import resource_container
 from ..systems.fleet import sparse_system_entry, system_entry, unreadable_system
 from .capacity import system_capacity
 from .composite import (
@@ -26,7 +27,6 @@ from .composite import (
     optional_int,
     optional_text,
     processor_figures,
-    resource_container,
 )
 
 SYSTEMS_TOOL = "hmc_list_systems"

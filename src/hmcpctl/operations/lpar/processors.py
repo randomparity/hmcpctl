@@ -15,9 +15,9 @@ from hmcpctl.documents.lpar_processors import (
     bounded_processor_number,
 )
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.operations.lpar.memory import current as memory
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.resource_identity import (
     is_uuid,
     resolve_system_uuid,

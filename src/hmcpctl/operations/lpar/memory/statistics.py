@@ -10,9 +10,9 @@ from typing import Any
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.inventory.composite import resource_container
 from hmcpctl.operations.lpar.memory.current import _contained_partition
 from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
+from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.resource_identity import is_uuid, resolve_system_uuid, summary_matching
 from hmcpctl.ssh.memory import (
     read_lpar_memory_statistics,
