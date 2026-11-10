@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from hmcpctl.client.core import HMCClient
@@ -335,42 +336,55 @@ class _CreationFeatureCoordinator:
             self.entry = created_lpar
             identity_ok = True
             confirmed_lpar = created_lpar
+            confirmations: list[
+                tuple[str, Callable[[], Awaitable[dict[str, Any]]]]
+            ] = []
             if self.serial_admission is not None:
-                try:
-                    self.attempted_feature = "serial_identity"
-                    confirmed_lpar = await confirm_serial_created(
-                        self.hmc, self.serial_admission, created_lpar
+                confirmations.append(
+                    (
+                        "serial_identity",
+                        partial(
+                            confirm_serial_created,
+                            self.hmc,
+                            self.serial_admission,
+                            created_lpar,
+                        ),
                     )
-                    self.entry = confirmed_lpar
-                except HMCTLSFingerprintError:
-                    raise
-                except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
-                    identity_ok = False
+                )
             if self.memory_admission is not None:
-                try:
-                    self.attempted_feature = "memory_identity"
-                    confirmed_lpar = await confirm_creation_memory_identity(
-                        self.hmc, self.memory_admission, created_lpar
+                confirmations.append(
+                    (
+                        "memory_identity",
+                        partial(
+                            confirm_creation_memory_identity,
+                            self.hmc,
+                            self.memory_admission,
+                            created_lpar,
+                        ),
                     )
+                )
+            if self.start_admission is not None:
+                confirmations.append(
+                    (
+                        "start_identity",
+                        partial(
+                            confirm_start_created,
+                            self.hmc,
+                            self.start_admission,
+                            created_lpar,
+                            self.name,
+                            self.environment,
+                        ),
+                    )
+                )
+            for feature, confirm in confirmations:
+                self.attempted_feature = feature
+                try:
+                    confirmed_lpar = await confirm()
                     self.entry = confirmed_lpar
                 except HMCTLSFingerprintError:
                     raise
                 except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
-                    identity_ok = False
-            if self.start_admission is not None:
-                try:
-                    self.attempted_feature = "start_identity"
-                    confirmed_lpar = await confirm_start_created(
-                        self.hmc,
-                        self.start_admission,
-                        created_lpar,
-                        self.name,
-                        self.environment,
-                    )
-                    self.entry = confirmed_lpar
-                except HMCTLSFingerprintError:
-                    raise
-                except Exception:  # noqa: BLE001 — unknown identity forbids ownership stamping.
                     identity_ok = False
             self.entry = confirmed_lpar if identity_ok else None
         else:
