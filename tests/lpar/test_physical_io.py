@@ -785,7 +785,11 @@ def sriov_creation_inventory(admission, monkeypatch):
     admission.hmc.find_partition_by_name = AsyncMock(return_value=None)
     monkeypatch.setattr(core, "resolve_system_uuid", AsyncMock(return_value="system"))
     monkeypatch.setattr(core, "require_memory_within_system", AsyncMock())
-    dispatch = AsyncMock(return_value=("system", None, {"UUID": "created"}, None))
+    dispatch = AsyncMock(
+        return_value=core._CreationSubmission(
+            "system", None, {"UUID": "created"}, None, False
+        )
+    )
     monkeypatch.setattr(core, "_create_via_cli", dispatch)
     monkeypatch.setattr(
         core, "stamp_created_lpar_ownership", AsyncMock(return_value=(True, ()))

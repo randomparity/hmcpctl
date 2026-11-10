@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
@@ -156,6 +156,14 @@ _CONTROLLER_AFFINITY_PROFILELESS = (
 )
 
 
+class _CreationSubmission(NamedTuple):
+    system_name: str | None
+    apply_step: WorkflowStep | None
+    partition: dict[str, Any] | None
+    readback_error: HMCError | None
+    profile_already_configured: bool
+
+
 async def _create_via_cli(
     hmc: HMCClient,
     system_uuid: str,
@@ -167,11 +175,10 @@ async def _create_via_cli(
     controller_mode: bool = False,
     memory_admission: CreationMemoryAdmission | None = None,
     start_admission: StartAdmission | None = None,
-) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
+) -> _CreationSubmission:
     """Create with ``mksyscfg``, apply its profile, and read the partition back.
 
-    Returns the CLI system name, the apply step, the created partition (None
-    when the read-back failed) and the read-back error.
+    Retains the apply outcome and whether creation itself configured the profile.
     """
     if creation.keylock is not None:
         raise ValueError(
@@ -243,7 +250,8 @@ async def _create_via_cli(
         if creation.apply_profile is not None and not defer_apply
         else None
     )
-    if controller_mode and creation.apply_profile is False:
+    profile_already_configured = controller_mode and creation.apply_profile is False
+    if profile_already_configured:
         apply_step = WorkflowStep(
             "apply_profile",
             "skipped",
@@ -256,14 +264,20 @@ async def _create_via_cli(
             creation.name, system_uuid=system_uuid
         )
     except HMCError as exc:
-        return system_name, apply_step, None, exc
+        return _CreationSubmission(
+            system_name, apply_step, None, exc, profile_already_configured
+        )
     except Exception:
         if not native_readback:
             raise
         # Native creation succeeded, but the identity lookup is unavailable.
         # Do not retain provider details in the partial result or exception chain.
-        return system_name, apply_step, None, None
-    return system_name, apply_step, created_lpar, None
+        return _CreationSubmission(
+            system_name, apply_step, None, None, profile_already_configured
+        )
+    return _CreationSubmission(
+        system_name, apply_step, created_lpar, None, profile_already_configured
+    )
 
 
 def validate_lpar_creation(creation: LparCreation) -> None:
@@ -408,7 +422,7 @@ async def create_and_stamp_lpar(
     await _admit_lpar_creation(
         hmc, system_name_or_uuid, creation, features, preflight_assignments
     )
-    system_name, apply_step, created_lpar, readback_error = await _submit_lpar_creation(
+    submission = await _submit_lpar_creation(
         hmc, system_name_or_uuid, creation, features
     )
     return await _complete_lpar_creation(
@@ -416,10 +430,7 @@ async def create_and_stamp_lpar(
         system_name_or_uuid,
         creation,
         features,
-        system_name,
-        apply_step,
-        created_lpar,
-        readback_error,
+        submission,
     )
 
 
@@ -494,7 +505,7 @@ async def _submit_lpar_creation(
     system_name_or_uuid: str,
     creation: LparCreation,
     features: _CreationFeatureCoordinator,
-) -> tuple[str | None, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
+) -> _CreationSubmission:
     """Select native creation or REST with only the established refusal fallback."""
     system_uuid = features.system_uuid
     native_readback = features.native_features_requested
@@ -554,7 +565,9 @@ async def _submit_lpar_creation(
         )
     if creation.apply_profile is True:
         apply_step = WorkflowStep("apply_profile", "skipped", _REST_CREATE_CONFIGURED)
-    return system_name, apply_step, created_lpar, readback_error
+    return _CreationSubmission(
+        system_name, apply_step, created_lpar, readback_error, True
+    )
 
 
 async def _submit_native_creation(
@@ -565,7 +578,7 @@ async def _submit_native_creation(
     *,
     defer_apply: bool,
     native_readback: bool,
-) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
+) -> _CreationSubmission:
     """Preserve feature-specific ambiguous-submission diagnostics and causes."""
     role_requested = roles_requested(creation.settings)
     diagnostic = (
@@ -630,12 +643,19 @@ async def _complete_lpar_creation(
     system_name_or_uuid: str,
     creation: LparCreation,
     features: _CreationFeatureCoordinator,
-    system_name: str | None,
-    apply_step: WorkflowStep | None,
-    created_lpar: dict[str, Any] | None,
-    readback_error: HMCError | None,
+    submission: _CreationSubmission,
 ) -> LparCreationResult:
     """Confirm, stamp, observe and apply, retaining facts at the TLS cutoff."""
+    (
+        system_name,
+        apply_step,
+        created_lpar,
+        readback_error,
+        profile_already_configured,
+    ) = submission
+    apply_warnings = _unapplied_profile_warnings(
+        creation.name, apply_step, profile_already_configured=profile_already_configured
+    )
     role_requested = roles_requested(creation.settings)
     verify_before_apply = (
         features.policy_requested
@@ -646,7 +666,7 @@ async def _complete_lpar_creation(
         True,
         created_lpar,
         None,
-        _unapplied_profile_warnings(creation.name, apply_step),
+        apply_warnings,
         apply_step=apply_step,
     )
     features.entry = created_lpar
@@ -657,7 +677,6 @@ async def _complete_lpar_creation(
         await features.confirm_identity(created_lpar)
         created_lpar = features.entry
         result = replace(result, lpar=created_lpar)
-        apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
         if created_lpar is None:
             return await _missing_created_identity(
                 creation, features, result, readback_error, verify_before_apply
@@ -701,17 +720,22 @@ async def _complete_lpar_creation(
             creation, system_name, verify_before_apply=verify_before_apply
         )
         result = replace(result, **features.facts)
-        apply_step = await _apply_verified_creation(
+        apply_step, profile_already_configured = await _apply_verified_creation(
             hmc,
             system_name or system_name_or_uuid,
             creation,
             features,
             result,
             verify_before_apply=verify_before_apply,
+            profile_already_configured=profile_already_configured,
         )
         await features.observe_after_apply(apply_step)
         if creation.physical_io.requested or verify_before_apply:
-            apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
+            apply_warnings = _unapplied_profile_warnings(
+                creation.name,
+                apply_step,
+                profile_already_configured=profile_already_configured,
+            )
         if not verify_before_apply:
             await _observe_creation_settings(
                 hmc, system_name, creation, features, created_lpar
@@ -945,10 +969,11 @@ async def _apply_verified_creation(
     result: LparCreationResult,
     *,
     verify_before_apply: bool,
-) -> WorkflowStep | None:
+    profile_already_configured: bool,
+) -> tuple[WorkflowStep | None, bool]:
     if verify_before_apply and creation.apply_profile is not None:
         verified = _creation_steps_verified(creation, result)
-        return await features.observe(
+        step = await features.observe(
             "apply_step",
             _apply_created_profile(hmc, system_name, creation)
             if verified and not features.controller_mode
@@ -964,9 +989,10 @@ async def _apply_verified_creation(
                 else "Creation verification incomplete; profile not applied",
             ),
         )
+        return step, features.controller_mode
     if creation.physical_io.requested and creation.apply_profile is not None:
         io_step = result.physical_io_step
-        return await features.observe(
+        step = await features.observe(
             "apply_step",
             _apply_created_profile(hmc, system_name, creation)
             if io_step is not None and io_step.status == "ok"
@@ -976,7 +1002,8 @@ async def _apply_verified_creation(
                 "I/O readback unverified; profile not applied",
             ),
         )
-    return result.apply_step
+        return step, False
+    return result.apply_step, profile_already_configured
 
 
 def _sanitize_creation_steps(
@@ -1342,19 +1369,10 @@ async def _apply_created_profile(
 
 
 def _unapplied_profile_warnings(
-    name: str, apply_step: WorkflowStep | None
+    name: str, apply_step: WorkflowStep | None, *, profile_already_configured: bool
 ) -> tuple[str, ...]:
     """Say that a skipped or failed apply left the partition unconfigured."""
-    if (
-        apply_step is None
-        or apply_step.status == "ok"
-        or apply_step.result
-        in (
-            _REST_CREATE_CONFIGURED,
-            _CONTROLLER_CREATE_CONFIGURED,
-            _CONTROLLER_AFFINITY_PROFILELESS,
-        )
-    ):
+    if apply_step is None or apply_step.status == "ok" or profile_already_configured:
         return ()
     warning = (
         f"partition profile {DEFAULT_PROFILE_NAME!r} was not applied: {name!r} has "
