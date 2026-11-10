@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+import typer
 from pydantic import TypeAdapter, ValidationError
 
+from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import SERIAL_INPUT_BYTES, VirtualSerialAdapter
@@ -99,3 +102,44 @@ def load_virtual_serial_adapters(value: str | None) -> tuple[VirtualSerialAdapte
             for item in error.errors()
         )
         usage_error(f"Invalid --virtual-serial-adapters: {details}")
+
+
+def load_creation_memory(
+    *,
+    mem_mode: str | None,
+    desired_io_entitled_mem: str | None,
+    mem_weight: int | None,
+    primary_paging_vios_name: str | None,
+    primary_paging_vios_id: int | None,
+    secondary_paging_vios_name: str | None,
+    secondary_paging_vios_id: str | None,
+    mem_expansion: str | None,
+) -> LparCreationMemory:
+    """Convert the shared creation-memory CLI values and report usage errors."""
+    try:
+        return TypeAdapter(LparCreationMemory).validate_python(
+            {
+                "mem_mode": mem_mode,
+                "desired_io_entitled_mem": None
+                if desired_io_entitled_mem is None
+                else "auto"
+                if desired_io_entitled_mem == "auto"
+                else int(desired_io_entitled_mem),
+                "mem_weight": mem_weight,
+                "primary_paging_vios_name": primary_paging_vios_name,
+                "primary_paging_vios_id": primary_paging_vios_id,
+                "secondary_paging_vios_name": secondary_paging_vios_name,
+                "secondary_paging_vios_id": None
+                if secondary_paging_vios_id is None
+                else "none"
+                if secondary_paging_vios_id == "none"
+                else int(secondary_paging_vios_id),
+                "mem_expansion": None
+                if mem_expansion is None
+                else Decimal(mem_expansion),
+            }
+        )
+    except (ValueError, InvalidOperation) as error:
+        raise typer.BadParameter(
+            terminal_field(error, err=True), param_hint="creation memory"
+        ) from None

@@ -18,7 +18,6 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.lpar_affinity_group import parse_affinity_group_cli
-from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_start import LparStartSettings
@@ -31,6 +30,7 @@ from ..runtime import with_client
 from .assignment_input import (
     SECURITY_POLICY_WARNING,
     SERIAL_INPUT_HELP,
+    load_creation_memory,
     load_pcie_assignments,
     load_physical_io,
     load_security_policy,
@@ -300,33 +300,16 @@ def lpars_create(
     and current configured facts separately; unavailable evidence stops follow-ups.
     Saved AME declares no AIX intent; AIX-only runtime compression is not proven.
     """
-    try:
-        creation_memory = TypeAdapter(LparCreationMemory).validate_python(
-            {
-                "mem_mode": mem_mode,
-                "desired_io_entitled_mem": None
-                if desired_io_entitled_mem is None
-                else "auto"
-                if desired_io_entitled_mem == "auto"
-                else int(desired_io_entitled_mem),
-                "mem_weight": mem_weight,
-                "primary_paging_vios_name": primary_paging_vios_name,
-                "primary_paging_vios_id": primary_paging_vios_id,
-                "secondary_paging_vios_name": secondary_paging_vios_name,
-                "secondary_paging_vios_id": None
-                if secondary_paging_vios_id is None
-                else "none"
-                if secondary_paging_vios_id == "none"
-                else int(secondary_paging_vios_id),
-                "mem_expansion": None
-                if mem_expansion is None
-                else Decimal(mem_expansion),
-            }
-        )
-    except (ValueError, InvalidOperation) as error:
-        raise typer.BadParameter(
-            terminal_field(error, err=True), param_hint="creation memory"
-        ) from None
+    creation_memory = load_creation_memory(
+        mem_mode=mem_mode,
+        desired_io_entitled_mem=desired_io_entitled_mem,
+        mem_weight=mem_weight,
+        primary_paging_vios_name=primary_paging_vios_name,
+        primary_paging_vios_id=primary_paging_vios_id,
+        secondary_paging_vios_name=secondary_paging_vios_name,
+        secondary_paging_vios_id=secondary_paging_vios_id,
+        mem_expansion=mem_expansion,
+    )
     serial = load_virtual_serial_adapters(virtual_serial_adapters)
     try:
         validate_serial_input(serial, max_virtual_slots)
