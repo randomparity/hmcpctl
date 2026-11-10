@@ -88,14 +88,15 @@ def reconfigure_handler(
     """The unwrapped ``hmc_reconfigure_lpar`` handler bound to the served gates."""
 
     def hmc_reconfigure_lpar(
-        request_id: str,
         lpar_name_or_uuid: str | None = None,
-        system_name_or_uuid: str | None = None,
         patch: ReconfigurePatch | None = None,
         allow_disruption: bool | None = None,
         exclusive_writer_window: bool | None = None,
         continuation: Continuation = "none",
         wait_seconds: int = 60,
+        *,
+        request_id: str,
+        system_name_or_uuid: str | None = None,
         profile: str | None = None,
     ) -> OperationRecord:
         """Change an LPAR's processors, memory, name, boot, virtual disks or network

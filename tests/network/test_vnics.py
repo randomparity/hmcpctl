@@ -49,8 +49,8 @@ def test_add_vnic_builds_typed_selector(monkeypatch) -> None:
     monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
 
     result = hmc_add_vnic(
-        "system",
-        "lpar",
+        system_name_or_uuid="system",
+        lpar_name_or_uuid="lpar",
         vios_name="vios1",
         vios_lpar_id="2",
         adapter_id="1",
@@ -80,14 +80,14 @@ def test_add_vnic_forwards_ownership_override(monkeypatch) -> None:
     monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
 
     hmc_add_vnic(
-        "system",
-        "lpar",
-        "vios1",
-        "2",
-        "1",
-        "0",
-        20.25,
-        100,
+        system_name_or_uuid="system",
+        lpar_name_or_uuid="lpar",
+        vios_name="vios1",
+        vios_lpar_id="2",
+        adapter_id="1",
+        physical_port_id="0",
+        capacity_percent=20.25,
+        port_vlan_id=100,
         ownership_override=True,
     )
 
@@ -110,7 +110,16 @@ def test_add_vnic_partial_error_retains_serialized_result(monkeypatch) -> None:
     monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
 
     with pytest.raises(VnicPartialError) as caught:
-        hmc_add_vnic("system", "lpar", "vios1", "2", "1", "0", 20.25, 100)
+        hmc_add_vnic(
+            system_name_or_uuid="system",
+            lpar_name_or_uuid="lpar",
+            vios_name="vios1",
+            vios_lpar_id="2",
+            adapter_id="1",
+            physical_port_id="0",
+            capacity_percent=20.25,
+            port_vlan_id=100,
+        )
 
     assert caught.value.result is partial.result
     assert '"operation": "add"' in str(caught.value)
@@ -130,7 +139,9 @@ def test_remove_vnic_uses_slot_num(monkeypatch) -> None:
     client.__aexit__ = AsyncMock(return_value=False)
     monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
 
-    result = hmc_remove_vnic("system", "lpar", slot_num="4")
+    result = hmc_remove_vnic(
+        system_name_or_uuid="system", lpar_name_or_uuid="lpar", slot_num="4"
+    )
 
     assert operation.await_args.args[1:] == ("lpar", "4")
     assert operation.await_args.kwargs == {
@@ -153,7 +164,12 @@ def test_remove_vnic_forwards_ownership_override(monkeypatch) -> None:
     client.__aexit__ = AsyncMock(return_value=False)
     monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
 
-    hmc_remove_vnic("system", "lpar", slot_num="4", ownership_override=True)
+    hmc_remove_vnic(
+        system_name_or_uuid="system",
+        lpar_name_or_uuid="lpar",
+        slot_num="4",
+        ownership_override=True,
+    )
 
     assert operation.await_args.kwargs == {
         "ownership_override": True,
@@ -174,7 +190,12 @@ def test_update_vnic_policy_forwards_one_change(monkeypatch) -> None:
     client.__aexit__ = AsyncMock(return_value=False)
     monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
 
-    hmc_update_vnic_policy("system", "lpar", "4", add_allowed_vlan_ids=[20])
+    hmc_update_vnic_policy(
+        system_name_or_uuid="system",
+        lpar_name_or_uuid="lpar",
+        slot_num="4",
+        add_allowed_vlan_ids=[20],
+    )
 
     assert operation.await_args.args[1:] == ("lpar", "4")
     assert operation.await_args.kwargs == {
@@ -205,7 +226,12 @@ def test_update_vnic_policy_partial_error_retains_serialized_result(
     monkeypatch.setattr("hmcpctl._app.client_from_env", lambda _profile: client)
 
     with pytest.raises(VnicPartialError) as caught:
-        hmc_update_vnic_policy("system", "lpar", "4", pvid_priority=5)
+        hmc_update_vnic_policy(
+            system_name_or_uuid="system",
+            lpar_name_or_uuid="lpar",
+            slot_num="4",
+            pvid_priority=5,
+        )
 
     assert caught.value.result is partial.result
     assert '"slot_num": "4"' in str(caught.value)

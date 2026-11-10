@@ -57,7 +57,7 @@ def test_list_fc_ports_returns_list(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(FC_DEFAULT_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_fc_ports(SYSTEM_UUID)
+        result = hmc_list_fc_ports(system_name_or_uuid=SYSTEM_UUID)
 
     assert len(result) == len(FC_DEFAULT_OUTPUT.splitlines())
     client, server = result[0], result[2]
@@ -84,7 +84,9 @@ def test_list_fc_ports_filter_by_lpar(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(FC_DEFAULT_OUTPUT.splitlines(keepends=True)[0])
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_fc_ports(SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID)
+        result = hmc_list_fc_ports(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     called_cmd = conn_mock.run.call_args[0][0]
     assert f"--filter lpar_names={LPAR_NAME}" in called_cmd
@@ -98,7 +100,7 @@ def test_list_fc_ports_empty_output(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(FC_EMPTY["stdout"])
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_fc_ports(SYSTEM_UUID)
+        result = hmc_list_fc_ports(system_name_or_uuid=SYSTEM_UUID)
 
     assert result == []
 
@@ -110,7 +112,7 @@ def test_list_fc_ports_correct_command(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(FC_DEFAULT_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        hmc_list_fc_ports(SYSTEM_UUID)
+        hmc_list_fc_ports(system_name_or_uuid=SYSTEM_UUID)
 
     called_cmd = conn_mock.run.call_args[0][0]
     assert "lshwres" in called_cmd
@@ -130,7 +132,7 @@ def test_list_sea_adapters_returns_list(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SEA_LINE_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_sea_adapters(SYSTEM_UUID)
+        result = hmc_list_sea_adapters(system_name_or_uuid=SYSTEM_UUID)
 
     assert isinstance(result, list)
     assert len(result) == 2
@@ -151,7 +153,9 @@ def test_list_sea_adapters_filter_by_lpar(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SEA_LINE_OUTPUT.splitlines(keepends=True)[0])
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_sea_adapters(SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID)
+        result = hmc_list_sea_adapters(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     called_cmd = conn_mock.run.call_args[0][0]
     assert f"--filter lpar_names={LPAR_NAME}" in called_cmd
@@ -165,7 +169,9 @@ def test_list_sea_adapters_empty_output(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SEA_EMPTY["stdout"])
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_sea_adapters(SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID)
+        result = hmc_list_sea_adapters(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     assert result == []
 
@@ -177,7 +183,7 @@ def test_list_sea_adapters_correct_command(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SEA_LINE_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        hmc_list_sea_adapters(SYSTEM_UUID)
+        hmc_list_sea_adapters(system_name_or_uuid=SYSTEM_UUID)
 
     called_cmd = conn_mock.run.call_args[0][0]
     assert "lshwres" in called_cmd

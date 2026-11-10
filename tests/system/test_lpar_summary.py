@@ -202,7 +202,7 @@ def test_lpar_summary_of_captured_inactive_partition_reads_zeros(monkeypatch, mo
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/ClientNetworkAdapter"
     ).mock(return_value=httpx.Response(200, text=EMPTY_ADAPTER_FEED))
 
-    result = hmc_lpar_summary(LPAR_UUID)
+    result = hmc_lpar_summary(lpar_name_or_uuid=LPAR_UUID)
 
     assert result.current_memory_mib == "0"
     assert result.desired_memory_mib == "0"
@@ -257,7 +257,7 @@ def test_lpar_summary_by_uuid_returns_flat_dict(monkeypatch, mock_hmc):
         )
     )
 
-    result = hmc_lpar_summary(LPAR_UUID)
+    result = hmc_lpar_summary(lpar_name_or_uuid=LPAR_UUID)
 
     assert result.uuid == LPAR_UUID
     assert result.name == "aix-prod"
@@ -291,7 +291,7 @@ def test_lpar_summary_no_adapters(monkeypatch, mock_hmc):
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/ClientNetworkAdapter"
     ).mock(return_value=httpx.Response(200, text=EMPTY_ADAPTER_FEED))
 
-    result = hmc_lpar_summary(LPAR_UUID)
+    result = hmc_lpar_summary(lpar_name_or_uuid=LPAR_UUID)
 
     assert result.client_network_adapter_count == 0
     assert result.state == "not activated"
@@ -327,7 +327,7 @@ def test_lpar_summary_by_name_resolves_uuid(monkeypatch, mock_hmc):
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/ClientNetworkAdapter"
     ).mock(return_value=httpx.Response(200, text=EMPTY_ADAPTER_FEED))
 
-    result = hmc_lpar_summary("myname")
+    result = hmc_lpar_summary(lpar_name_or_uuid="myname")
 
     assert result.name == "myname"
     assert result.state == "running"
@@ -345,7 +345,7 @@ def test_lpar_summary_name_not_found_raises(monkeypatch, mock_hmc):
     )
 
     with pytest.raises(ValueError, match="ghost"):
-        hmc_lpar_summary("ghost")
+        hmc_lpar_summary(lpar_name_or_uuid="ghost")
 
 
 def test_lpar_summary_missing_optional_fields(monkeypatch, mock_hmc):
@@ -360,7 +360,7 @@ def test_lpar_summary_missing_optional_fields(monkeypatch, mock_hmc):
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/ClientNetworkAdapter"
     ).mock(return_value=httpx.Response(200, text=EMPTY_ADAPTER_FEED))
 
-    result = hmc_lpar_summary(LPAR_UUID)
+    result = hmc_lpar_summary(lpar_name_or_uuid=LPAR_UUID)
 
     assert result.name == "bare"
     assert result.os_version is None

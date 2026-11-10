@@ -133,9 +133,10 @@ def hmc_attach_disk_to_lpar(
     disk_name: str,
     capacity_mib: int,
     dry_run: bool = False,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> AttachDiskResult:
     """Create and attach a virtual disk; concurrent VolumeGroup changes can be lost.
 
@@ -269,14 +270,15 @@ def hmc_delete_virtual_disk(
 
 @tool(effect="mutate", operation="storage.map", target_kind="vios")
 def hmc_map_storage_to_lpar(
+    lpar_name_or_uuid: str,
     vios_name_or_uuid: str,
     storage_name: str,
-    lpar_name_or_uuid: str,
     storage_kind: StorageKind = "VirtualDisk",
     target_device: str | None = None,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any] | None:
     """Map backing storage to an LPAR via a Virtual SCSI mapping on a VIOS.
 
@@ -540,8 +542,9 @@ def hmc_list_optical_media(
 
 @tool(effect="read", operation="storage.list_mappings", target_kind="vios")
 def hmc_list_storage_mappings(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
+    *,
+    vios_name_or_uuid: str,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -828,10 +831,11 @@ def hmc_upload_iso(
 
 @tool(effect="read", operation="media.list_mappings", target_kind="vios")
 def hmc_list_optical_mappings(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
-    profile: str | None = None,
     limit: int | None = None,
+    *,
+    vios_name_or_uuid: str,
+    profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
     """List VirtualSCSIMappings for optical media on a VIOS, optionally filtered by LPAR.
@@ -864,13 +868,14 @@ def hmc_list_optical_mappings(
 
 @tool(effect="mutate", operation="media.mount", target_kind="vios")
 def hmc_mount_optical_media(
+    lpar_name_or_uuid: str,
     vios_name_or_uuid: str,
     media_name: str,
-    lpar_name_or_uuid: str,
     target_device: str | None = None,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Create a VirtualSCSIMapping for optical media (mount ISO to LPAR).
 
@@ -916,12 +921,13 @@ def hmc_mount_optical_media(
 
 @tool(effect="destructive", operation="media.unmount", target_kind="vios")
 def hmc_unmount_optical_media(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str,
+    vios_name_or_uuid: str,
     media_name: str,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> str:
     """Remove a VirtualSCSIMapping for optical media (unmount).
 
@@ -970,14 +976,15 @@ def hmc_unmount_optical_media(
 
 @tool(effect="destructive", operation="media.load", target_kind="vios")
 def hmc_load_optical_media(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str,
+    vios_name_or_uuid: str,
     media_name: str,
     target_device: str | None = None,
     release: bool = False,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Load a repository medium into an LPAR's existing virtual optical device.
 
@@ -1026,13 +1033,14 @@ def hmc_load_optical_media(
 
 @tool(effect="destructive", operation="media.unload", target_kind="vios")
 def hmc_unload_optical_media(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str,
+    vios_name_or_uuid: str,
     target_device: str | None = None,
     release: bool = False,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Unload the medium from an LPAR's virtual optical device, keeping the mapping.
 

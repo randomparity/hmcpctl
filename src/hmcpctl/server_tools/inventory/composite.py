@@ -17,6 +17,7 @@ tool, register_tools, tool_security = tool_module()
 @tool(effect="read", operation="lpar.summary", target_kind="lpar")
 def hmc_lpar_summary(
     lpar_name_or_uuid: str,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> LparSummary:

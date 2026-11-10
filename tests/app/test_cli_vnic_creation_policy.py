@@ -78,14 +78,14 @@ def test_cli_forwards_both_lists_zero_false_and_mac(operation):
 @pytest.mark.parametrize("sentinel", ["all", "none"])
 def test_mcp_forwards_creation_sentinels(operation, sentinel):
     result = tools.hmc_add_vnic(
-        "system",
-        "client",
-        "vios",
-        "100",
-        "1",
-        "1",
-        2,
-        0,
+        system_name_or_uuid="system",
+        lpar_name_or_uuid="client",
+        vios_name="vios",
+        vios_lpar_id="100",
+        adapter_id="1",
+        physical_port_id="1",
+        capacity_percent=2,
+        port_vlan_id=0,
         pvid_priority=0,
         auto_priority_failover=False,
         allowed_vlan_ids=sentinel,

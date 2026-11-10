@@ -522,7 +522,9 @@ def test_console_adapters_resolve_scoped_identity(monkeypatch, adapter, selector
         assert result.exit_code == 0, result.stderr
         assert result.stdout_bytes == DATA
     else:
-        result = hmc_capture_lpar_console(partition, system)
+        result = hmc_capture_lpar_console(
+            lpar_name_or_uuid=partition, system_name_or_uuid=system
+        )
         assert (result["system"], result["partition"]) == ("system-a", "aix-db")
     assert capture.await_args.args == (hmc, "system-a", "aix-db")
     assert capture.await_args.kwargs["stop_on_cancel"] == (adapter == "cli")

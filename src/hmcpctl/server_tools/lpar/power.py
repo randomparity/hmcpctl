@@ -93,13 +93,14 @@ def power_handler(
     """The unwrapped ``hmc_power_lpar`` handler bound to the served gates."""
 
     def hmc_power_lpar(
-        request_id: str,
         lpar_name_or_uuid: str | None = None,
-        system_name_or_uuid: str | None = None,
         action: PowerAction | None = None,
         mode: PowerMode | None = None,
         continuation: Continuation = "none",
         wait_seconds: int = 60,
+        *,
+        request_id: str,
+        system_name_or_uuid: str | None = None,
         profile: str | None = None,
     ) -> OperationRecord:
         """Start, stop or restart one LPAR, wait a bounded time, and verify its state.

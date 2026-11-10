@@ -65,8 +65,8 @@ COLLECTION_TOOLS = {
         [
             "lpar_name_or_uuid",
             "adapter_type",
-            "profile",
             "limit",
+            "profile",
             "system_name_or_uuid",
         ],
     ),
@@ -210,7 +210,7 @@ def test_limit_is_not_sent_on_root_child_search_or_job_requests(monkeypatch, moc
                 "00000000-0000-0000-0000-000000000002/ClientNetworkAdapter"
             ).mock(return_value=httpx.Response(200, text=EMPTY_FEED)),
             lambda: server_adapters.hmc_list_adapters(
-                "00000000-0000-0000-0000-000000000002", limit=1
+                lpar_name_or_uuid="00000000-0000-0000-0000-000000000002", limit=1
             ),
         ),
         (
@@ -288,7 +288,9 @@ def test_adapter_type_selector_runs_before_results_are_capped():
         ) as list_selected,
     ):
         result = server_adapters.hmc_list_adapters(
-            "lpar-name", "VirtualSCSIClientAdapter", limit=2
+            lpar_name_or_uuid="lpar-name",
+            adapter_type="VirtualSCSIClientAdapter",
+            limit=2,
         )
 
     assert result == entries[:2]

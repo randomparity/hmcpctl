@@ -80,12 +80,13 @@ def handoff_handler(
     unchecked = unchecked_tools(tool_security)
 
     def hmc_prepare_host_handoff(
-        action: Literal["prepare", "release"],
         lpar_name_or_uuid: str,
-        system_name_or_uuid: str,
+        action: Literal["prepare", "release"],
         hold: bool = False,
         consumer_label: str | None = None,
         hold_id: str | None = None,
+        *,
+        system_name_or_uuid: str,
         profile: str | None = None,
     ) -> HandoffResult:
         """Prepare a partition for an external consumer such as kdive, or release it.

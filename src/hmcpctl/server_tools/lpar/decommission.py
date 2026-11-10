@@ -142,8 +142,6 @@ def decommission_handler(
     """The unwrapped ``hmc_decommission_lpar`` handler bound to the served gates."""
 
     def hmc_decommission_lpar(
-        request_id: str,
-        system_name_or_uuid: str | None = None,
         lpar_name_or_uuid: str | None = None,
         dry_run: bool = False,
         ownership_override: bool | None = None,
@@ -154,6 +152,9 @@ def decommission_handler(
         exclusive_writer_window: bool | None = None,
         continuation: Continuation = "none",
         wait_seconds: int = 60,
+        *,
+        request_id: str,
+        system_name_or_uuid: str | None = None,
         profile: str | None = None,
     ) -> DecommissionResult:
         """Inventory, authorize, and optionally decommission one LPAR.

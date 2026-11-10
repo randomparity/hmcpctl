@@ -5,7 +5,10 @@ from importlib import import_module
 from unittest.mock import AsyncMock
 
 import pytest
+from fastmcp.tools.function_tool import FunctionTool
 
+from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
+from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
 from hmcpctl.operations.lpar.activation import (
     power_off_lpar,
     power_on_lpar,
@@ -19,6 +22,7 @@ from hmcpctl.operations.lpar.migration import (
     recover_lpar_migration,
     validate_lpar_migration,
 )
+from hmcpctl.server import TOOL_SECURITY, create_mcp
 
 
 @pytest.mark.parametrize(
@@ -146,30 +150,31 @@ async def test_required_family_scope_precedes_client_access(module, name, option
     assert hmc.mock_calls == []
 
 
-MCP_SELECTOR_MODULES = [
-    "hmcpctl.server_tools.lpar." + name
-    for name in (
-        "configuration",
-        "lifecycle",
-        "lifecycle_boot",
-        "migration",
-        "profiles",
-    )
-] + ["hmcpctl.server_tools.systems.core"]
-MCP_SELECTOR_TOOLS = [
-    handler
-    for module in MCP_SELECTOR_MODULES
-    for name, handler in vars(import_module(module)).items()
-    if name.startswith("hmc_")
-    and callable(handler)
-    and "lpar_name_or_uuid" in inspect.signature(handler).parameters
-]
-
-
-@pytest.mark.parametrize("handler", MCP_SELECTOR_TOOLS, ids=lambda fn: fn.__name__)
-def test_mcp_partition_selector_contract(handler):
-    parameters = inspect.signature(handler).parameters
-    assert next(iter(parameters)) == "lpar_name_or_uuid"
-    for name in ("system_name_or_uuid", "connection", "profile"):
-        if name in parameters:
-            assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
+@pytest.mark.asyncio
+async def test_mcp_partition_selector_contract():
+    policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
+    application = create_mcp(policy, catalog="registered")
+    violations = []
+    selected = []
+    for tool in await application.list_tools():
+        if "lpar_name_or_uuid" not in tool.parameters.get("properties", {}):
+            continue
+        assert isinstance(tool, FunctionTool), tool.name
+        selected.append(tool.name)
+        parameters = inspect.signature(tool.fn).parameters
+        if next(iter(parameters)) != "lpar_name_or_uuid":
+            violations.append((tool.name, "partition selector is not first"))
+        for name in ("system_name_or_uuid", "connection", "profile"):
+            if (
+                name in parameters
+                and parameters[name].kind is not inspect.Parameter.KEYWORD_ONLY
+            ):
+                violations.append((tool.name, name + " is not keyword-only"))
+    expected = {
+        name
+        for name, security in TOOL_SECURITY.items()
+        if any(target.argument == "lpar_name_or_uuid" for target in security.targets)
+    }
+    assert expected, "the registry has no LPAR selector handlers"
+    assert set(selected) == expected
+    assert violations == []

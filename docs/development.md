@@ -24,8 +24,9 @@ See [Contributing](../CONTRIBUTING.md) for the full change and verification work
 LPAR tool handlers take the partition selector first. Pass system, connection and HMC
 profile selectors by keyword, for example
 `hmc_get_lpar("partition", system_name_or_uuid="system", profile="configured-profile")`.
-A required system selector remains required. These Python handlers are pre-release module APIs;
-`hmcpctl.api` is the stable library facade.
+A required system selector remains required. When the leading partition filter is optional,
+required companion arguments are keyword-only, including logical-operation request IDs.
+These Python handlers are pre-release module APIs; `hmcpctl.api` is the stable library facade.
 
 ## Testing
 

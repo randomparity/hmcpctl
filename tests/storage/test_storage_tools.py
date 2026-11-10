@@ -118,7 +118,7 @@ def test_list_adapters_defaults_to_network(monkeypatch, mock_hmc):
             text=_feed(ADAPTER_UUID, "ClientNetworkAdapter", MACAddress="001122334455"),
         )
     )
-    result = hmc_list_adapters(LPAR_UUID)
+    result = hmc_list_adapters(lpar_name_or_uuid=LPAR_UUID)
     assert result[0]["UUID"] == ADAPTER_UUID
     assert result[0]["Resource"]["MACAddress"] == "001122334455"
 
@@ -133,7 +133,9 @@ def test_list_adapters_vscsi_type(monkeypatch, mock_hmc):
             200, text=_feed(ADAPTER_UUID, "VirtualSCSIClientAdapter")
         )
     )
-    hmc_list_adapters(LPAR_UUID, adapter_type="VirtualSCSIClientAdapter")
+    hmc_list_adapters(
+        lpar_name_or_uuid=LPAR_UUID, adapter_type="VirtualSCSIClientAdapter"
+    )
     assert route.called
 
 
@@ -148,14 +150,14 @@ def test_all_adapter_types_reach_the_matching_resource(monkeypatch, mock_hmc):
         route = mock_hmc.get(
             f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/{adapter_type}"
         ).mock(return_value=httpx.Response(200, text=body))
-        hmc_list_adapters(LPAR_UUID, adapter_type=adapter_type)
+        hmc_list_adapters(lpar_name_or_uuid=LPAR_UUID, adapter_type=adapter_type)
         assert route.called
 
 
 def test_invalid_adapter_type_fails_before_resource_request(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     with pytest.raises(ValueError, match="adapter_type"):
-        hmc_list_adapters(LPAR_UUID, adapter_type="UnknownAdapter")
+        hmc_list_adapters(lpar_name_or_uuid=LPAR_UUID, adapter_type="UnknownAdapter")
     assert {call.request.url.path for call in mock_hmc.calls} == {"/rest/api/web/Logon"}
 
 
@@ -276,7 +278,7 @@ def test_add_network_adapter_builds_xml(monkeypatch, mock_hmc):
         )
     )
     result = hmc_add_network_adapter(
-        LPAR_UUID,
+        lpar_name_or_uuid=LPAR_UUID,
         port_vlan_id=42,
         slot_number=3,
         virtual_switch_id=1,
@@ -318,7 +320,7 @@ def test_add_network_adapter_refuses_out_of_range_pvid_before_any_read(
     with pytest.raises(
         Exception, match=r"port_vlan_id .* must be a VLAN id from 1 to 4094"
     ):
-        hmc_add_network_adapter(LPAR_UUID, port_vlan_id=port_vlan_id)
+        hmc_add_network_adapter(lpar_name_or_uuid=LPAR_UUID, port_vlan_id=port_vlan_id)
     assert not route.called
     assert not read.called
 
@@ -335,7 +337,7 @@ def test_add_vscsi_adapter_builds_xml(monkeypatch, mock_hmc):
         )
     )
     result = hmc_add_vscsi_adapter(
-        LPAR_UUID, vios_partition_id=7, vios_slot=11, slot_number=4
+        lpar_name_or_uuid=LPAR_UUID, vios_partition_id=7, vios_slot=11, slot_number=4
     )
     assert result["change_location"]["lives_in"] == "current-configuration"
     body = route.calls.last.request.content.decode()
@@ -359,7 +361,9 @@ def test_add_vfc_adapter_builds_xml(monkeypatch, mock_hmc):
             201, text=_feed(ADAPTER_UUID, "VirtualFibreChannelClientAdapter")
         )
     )
-    result = hmc_add_vfc_adapter(LPAR_UUID, vios_partition_id=7, vios_slot=11)
+    result = hmc_add_vfc_adapter(
+        lpar_name_or_uuid=LPAR_UUID, vios_partition_id=7, vios_slot=11
+    )
     assert result["change_location"]["current_profile_sync"] == "Disabled"
     body = route.calls.last.request.content.decode()
     assert "<VirtualFibreChannelClientAdapter" in body
@@ -379,7 +383,11 @@ def test_delete_adapter_returns_confirmation(monkeypatch, mock_hmc):
     route = mock_hmc.delete(
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/VirtualSCSIClientAdapter/{ADAPTER_UUID}"
     ).mock(return_value=httpx.Response(204))
-    result = hmc_delete_adapter(LPAR_UUID, "VirtualSCSIClientAdapter", ADAPTER_UUID)
+    result = hmc_delete_adapter(
+        lpar_name_or_uuid=LPAR_UUID,
+        adapter_type="VirtualSCSIClientAdapter",
+        adapter_uuid=ADAPTER_UUID,
+    )
     assert route.called
     assert result.startswith(
         f"Deleted VirtualSCSIClientAdapter {ADAPTER_UUID} from {LPAR_UUID}. "
@@ -484,7 +492,9 @@ def test_map_storage_reorders_virtual_disk_default(monkeypatch, mock_hmc):
     """hmc_map_storage_to_lpar maps the default VirtualDisk storage_kind."""
     _hmc_env(monkeypatch)
     _, route = _mapping_routes(mock_hmc)
-    result = hmc_map_storage_to_lpar(VIOS_UUID, "lv_boot", LPAR_UUID)
+    result = hmc_map_storage_to_lpar(
+        vios_name_or_uuid=VIOS_UUID, storage_name="lv_boot", lpar_name_or_uuid=LPAR_UUID
+    )
     assert result["change_location"]["lives_in"] == "current-configuration"
     body = route.calls.last.request.content.decode()
     assert "<VirtualSCSIMapping" in body
@@ -502,9 +512,9 @@ def test_map_storage_physical_volume_with_target_device(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     _, route = _mapping_routes(mock_hmc)
     hmc_map_storage_to_lpar(
-        VIOS_UUID,
-        "hdisk5",
-        LPAR_UUID,
+        vios_name_or_uuid=VIOS_UUID,
+        storage_name="hdisk5",
+        lpar_name_or_uuid=LPAR_UUID,
         storage_kind="PhysicalVolume",
         target_device="vtscsi0",
     )
@@ -525,7 +535,12 @@ def test_map_storage_invalid_kind_raises(monkeypatch, mock_hmc):
     with pytest.raises(
         ValueError, match="storage_kind must be PhysicalVolume or VirtualDisk"
     ):
-        hmc_map_storage_to_lpar(VIOS_UUID, "lv_boot", LPAR_UUID, storage_kind="Bogus")
+        hmc_map_storage_to_lpar(
+            vios_name_or_uuid=VIOS_UUID,
+            storage_name="lv_boot",
+            lpar_name_or_uuid=LPAR_UUID,
+            storage_kind="Bogus",
+        )
     assert not get.called
     assert not post.called
 
@@ -817,7 +832,11 @@ def test_mount_optical_media_keeps_the_mapping_keys_beside_its_location(
         "hmcpctl.server_tools.storage.resources.mount_optical_media", mount
     )
 
-    result = hmc_mount_optical_media(VIOS_UUID, "install.iso", LPAR_UUID)
+    result = hmc_mount_optical_media(
+        vios_name_or_uuid=VIOS_UUID,
+        media_name="install.iso",
+        lpar_name_or_uuid=LPAR_UUID,
+    )
 
     assert result == {
         "UUID": "mapping-1",
@@ -852,7 +871,11 @@ def test_mount_optical_media_without_a_resource_still_reports_its_location(
         ),
     )
 
-    result = hmc_mount_optical_media(VIOS_UUID, "install.iso", LPAR_UUID)
+    result = hmc_mount_optical_media(
+        vios_name_or_uuid=VIOS_UUID,
+        media_name="install.iso",
+        lpar_name_or_uuid=LPAR_UUID,
+    )
 
     assert result == {
         "change_location": {
@@ -880,8 +903,8 @@ def test_optical_load_tools_forward_every_argument_and_return_the_result(
     monkeypatch.setattr(f"hmcpctl.server_tools.storage.resources.{operation}", call)
 
     result = tool(
-        VIOS_UUID,
-        LPAR_UUID,
+        vios_name_or_uuid=VIOS_UUID,
+        lpar_name_or_uuid=LPAR_UUID,
         target_device="vtopt1",
         release=True,
         system_name_or_uuid="sys-R1",

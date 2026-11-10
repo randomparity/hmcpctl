@@ -15,10 +15,11 @@ tool, register_tools, tool_security = tool_module()
 @tool(effect="mutate", operation="lpar.capture_console", target_kind="lpar")
 def hmc_capture_lpar_console(
     lpar_name_or_uuid: str,
-    system_name_or_uuid: str,
     duration_seconds: float = 30.0,
-    max_bytes: int = 65_536,
+    max_bytes: int = 65536,
     idle_timeout_seconds: float = 10.0,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> dict[str, Any]:
     """Capture a bounded snapshot of an LPAR's virtual console (mkvterm).
