@@ -263,7 +263,10 @@ async def create_vios(
     if start_admission is not None:
         await recheck_start_controllers(hmc, start_admission)
         native_options["start_settings"] = start_admission.settings
-    native_failed = False
+    unknown_outcome = (
+        "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. "
+        "No second create or rollback performed"
+    )
     try:
         await create_lpar_via_cli(
             hmc.config,
@@ -289,37 +292,33 @@ async def create_vios(
             and not isinstance(error, HMCError)
         ):
             raise
-        if native_features_requested:
-            native_failed = True
-        elif not policy_requested:
+        if not native_features_requested and not policy_requested:
             raise
-        else:
-            raise HMCError(
-                "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
-            ) from error
-    if native_failed:
-        raise HMCError(
-            "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
-        )
-    await features.observe_before_followup()
-    entry = features.entry
-    assert entry is not None
-    affinity_step = features.facts.get("affinity_group_step")
-    if affinity_step is not None:
-        entry = {**entry, "affinity_verification": affinity_step.result}
-    features.entry = entry
-    await features.observe_start()
-    metadata: dict[str, Any] = {}
-    for admission, field, key in (
-        (start_admission, "start_step", "start_verification"),
-        (serial_admission, "serial_step", "serial_verification"),
-        (memory_admission, "creation_memory_step", "creation_memory_verification"),
-    ):
-        if admission is not None:
-            step = features.facts[field]
-            assert step is not None
-            metadata[key] = step.result
-    return {**entry, **metadata} if metadata else entry
+        if not native_features_requested:
+            raise HMCError(unknown_outcome) from error
+    else:
+        await features.observe_before_followup()
+        entry = features.entry
+        assert entry is not None
+        affinity_step = features.facts.get("affinity_group_step")
+        if affinity_step is not None:
+            entry = {**entry, "affinity_verification": affinity_step.result}
+        features.entry = entry
+        await features.observe_start()
+        metadata: dict[str, Any] = {}
+        for admission, field, key in (
+            (start_admission, "start_step", "start_verification"),
+            (serial_admission, "serial_step", "serial_verification"),
+            (memory_admission, "creation_memory_step", "creation_memory_verification"),
+        ):
+            if admission is not None:
+                step = features.facts[field]
+                assert step is not None
+                metadata[key] = step.result
+        return {**entry, **metadata} if metadata else entry
+
+    # Keep selected native outcomes free of the provider's cause and context.
+    raise HMCError(unknown_outcome)
 
 
 async def delete_vios(

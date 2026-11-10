@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 from urllib.parse import urlsplit
 
 from defusedxml import ElementTree as DET
@@ -612,7 +612,7 @@ async def _raise_creation_memory_failure(
     hmc: HMCClient,
     admission: CreationMemoryAdmission,
     error: _CreationMemorySubmissionError,
-) -> None:
+) -> NoReturn:
     """Reconcile one uncertain submission without stamping, replay or deletion."""
     outcome = "unknown"
     try:
