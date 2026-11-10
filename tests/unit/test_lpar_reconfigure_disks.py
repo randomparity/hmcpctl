@@ -15,9 +15,11 @@ from unit.test_lpar_reconfigure import ARGS, LPAR, OTHER, SYS, FakeHMC, _effects
 from unit.test_lpar_reconfigure import hmc as base_hmc  # noqa: F401 - a fixture
 
 from hmcpctl.errors import HMCError
+from hmcpctl.jobs import job_outcome
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.lpar import profile_persist, reconfigure
+from hmcpctl.operations.lpar.profiles import PartitionProfileOutcome
 from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
 
 VIOS = "0000000c-0000-4000-8000-000000000000"
@@ -134,10 +136,16 @@ def hmc(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
         fake.saves.append(kwargs)
         fake.recovery.append(f"hmcprec-{len(fake.recovery):016x}")
         fake.saved_slots = {slot for _, lpar, _, slot in fake.maps if lpar == LPAR}
-        return SimpleNamespace(
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
             execution="unknown",
             requested_change="unverified",
-            job=object(),
+            job=job_outcome("save-job", {"Resource": {"Status": "RUNNING"}}),
             recovery_verified=True,
             error=None,
         )
@@ -349,7 +357,13 @@ def test_a_failed_save_pauses_with_the_disk_owned_and_warns(hmc, monkeypatch):
     hmc.state = "not activated"
 
     async def refused(*_args, **_kwargs):
-        return SimpleNamespace(
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
             execution="rejected",
             requested_change="unverified",
             job=None,

@@ -17,6 +17,7 @@ from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects
 from unit.test_lpar_reconfigure import hmc as base_hmc  # noqa: F401 - a fixture
 
 from hmcpctl.errors import HMCError
+from hmcpctl.jobs import job_outcome
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import (
     EffectNotApplied,
@@ -25,6 +26,7 @@ from hmcpctl.operations.logical.engine import (
 )
 from hmcpctl.operations.lpar import profile_persist, reconfigure
 from hmcpctl.operations.lpar import reconfigure_network as net
+from hmcpctl.operations.lpar.profiles import PartitionProfileOutcome
 from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
 from hmcpctl.operations.lpar.reconfigure_network import NetworkPatch
 
@@ -560,10 +562,16 @@ def body(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
             fake.saved_slots = {
                 str(a["Resource"]["VirtualSlotNumber"]) for a in fake.adapters
             }
-        return SimpleNamespace(
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
             execution="unknown",
             requested_change="unverified",
-            job=object(),
+            job=job_outcome("save-job", {"Resource": {"Status": "RUNNING"}}),
             recovery_verified=True,
             error=None,
         )
