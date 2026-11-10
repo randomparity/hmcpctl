@@ -654,7 +654,14 @@ async def test_serial_combined_submission_discards_provider_chain(target, option
         **options,
     )
     with pytest.raises(HMCError, match="Serial creation outcome unknown") as raised:
-        await core._create_via_cli(target.hmc, SYSTEM, "system", creation)
+        await core._create_via_cli(
+            target.hmc,
+            SYSTEM,
+            "system",
+            creation,
+            defer_apply=True,
+            native_readback=True,
+        )
     assert PRIVATE not in str(raised.value)
     assert raised.value.__cause__ is None and raised.value.__context__ is None
     assert target.events.count("create") == 1
