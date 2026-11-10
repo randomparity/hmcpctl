@@ -12,7 +12,7 @@ import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 
 from defusedxml import ElementTree as ET
 
@@ -74,7 +74,13 @@ class BaselineSnapshot(TypedDict):
     tables: dict[str, list[dict[str, str]]]
 
 
-def validate_backing(storage: Any, target: Any) -> None:
+class _ResourceEntry(TypedDict):
+    ResourceType: str
+    Resource: dict[str, object]
+    UUID: NotRequired[object]
+
+
+def validate_backing(storage: object, target: object) -> None:
     """A present backing needs one known resource and its local identity."""
     if storage == {} and isinstance(target, dict):
         kinds = {key for key in target if not key.startswith("@")}
@@ -98,7 +104,7 @@ def validate_backing(storage: Any, target: Any) -> None:
         raise ValueError("VIOS mapping backing has no identity")
 
 
-def validate(document: Any) -> BaselineSnapshot:
+def validate(document: object) -> BaselineSnapshot:
     """Reject partial documents before order-only canonicalization."""
     if (
         not isinstance(document, dict)
@@ -126,7 +132,7 @@ def validate(document: Any) -> BaselineSnapshot:
     if not isinstance(tables, dict) or set(tables) != set(TABLES):
         raise ValueError("snapshot tables are incomplete")
     result = _normalize_tables(tables)
-    _validate_relationships(scope, result)
+    _validate_relationships(cast(BaselineScope, scope), result)
     return {
         "version": 1,
         "scope": cast(BaselineScope, dict(scope, vios_ids=sorted(ids))),
@@ -134,7 +140,7 @@ def validate(document: Any) -> BaselineSnapshot:
     }
 
 
-def _normalize_tables(tables: Mapping[str, Any]) -> dict[str, list[dict[str, str]]]:
+def _normalize_tables(tables: Mapping[str, object]) -> dict[str, list[dict[str, str]]]:
     """Validate each row and canonicalize table order without changing the input."""
     result = {}
     for name, (fields, keys) in TABLES.items():
@@ -181,7 +187,7 @@ def _normalize_tables(tables: Mapping[str, Any]) -> dict[str, list[dict[str, str
 
 
 def _validate_relationships(
-    scope: Mapping[str, Any], result: Mapping[str, list[dict[str, str]]]
+    scope: BaselineScope, result: Mapping[str, list[dict[str, str]]]
 ) -> None:
     """Reject incomplete or out-of-scope relationships between normalized tables."""
     ids = scope["vios_ids"]
@@ -250,7 +256,7 @@ def _validate_relationships(
             raise ValueError("VIOS row lies outside the selected scope")
 
 
-async def read_resources(hmc: HMCClient, path: str, kind: str) -> list[dict[str, Any]]:
+async def read_resources(hmc: HMCClient, path: str, kind: str) -> list[_ResourceEntry]:
     """Do not let permissive list projections turn absent evidence into []."""
     raw = await hmc._get(path, kind, include_schema_version=False)
     if not raw.strip():
@@ -287,10 +293,10 @@ async def read_resources(hmc: HMCClient, path: str, kind: str) -> list[dict[str,
         for entry in entries
     ):
         raise ValueError("REST read has incomplete resources")
-    return entries
+    return cast(list[_ResourceEntry], entries)
 
 
-def mapping_rows(resource: Mapping[str, Any], vios_id: str) -> list[dict[str, str]]:
+def mapping_rows(resource: Mapping[str, object], vios_id: str) -> list[dict[str, str]]:
     collection = resource.get("VirtualSCSIMappings")
     if not isinstance(collection, dict):
         raise ValueError("VIOS read has no mapping container")  # noqa: TRY004 — invalid external document
@@ -483,7 +489,7 @@ async def capture(
     )
 
 
-def write_snapshot(path: Path, document: Any) -> None:
+def write_snapshot(path: Path, document: object) -> None:
     data = json.dumps(validate(document), indent=2) + "\n"
     descriptor, temporary = tempfile.mkstemp(prefix=".baseline-", dir=path.parent)
     try:
@@ -496,7 +502,7 @@ def write_snapshot(path: Path, document: Any) -> None:
         Path(temporary).unlink()
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result = dict(pairs)
     if len(result) != len(pairs):
         raise ValueError("duplicate JSON keys")
