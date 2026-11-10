@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import math
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from urllib.parse import urlsplit
 
@@ -322,6 +322,47 @@ def _native_current(
     return found[0]
 
 
+def _reconcile(
+    observation: PagingObservation, device_names: list[str] | None
+) -> PagingObservation:
+    """Compare independent planes without changing their collected evidence."""
+    invalid = list(observation.invalid)
+    if device_names is not None and device_names != sorted(
+        name for _, name in observation.paths
+    ):
+        invalid.append("device-names-disagree")
+
+    if (
+        len(set(observation.providers)) == 2
+        and observation.paths
+        and {uuid for uuid, _ in observation.paths}
+        != {p.uuid for p in observation.providers}
+    ):
+        invalid.append("runtime-pool-pair-disagree")
+
+    if len(set(observation.providers)) == 2 and any(
+        p is not None and p not in observation.providers
+        for p in (observation.current_uom, observation.current_native)
+    ):
+        invalid.append("current-outside-pair")
+
+    if (
+        observation.current_native
+        and observation.current_uom
+        and observation.current_native != observation.current_uom
+    ):
+        invalid.append("current-readers-disagree")
+
+    if (
+        len(set(observation.providers)) == 2
+        and observation.configured
+        and {observation.configured.primary, observation.configured.secondary}
+        != set(observation.providers)
+    ):
+        invalid.append("configured-runtime-pair-disagree")
+    return replace(observation, invalid=tuple(invalid))
+
+
 async def observe_paging(
     hmc: HMCClient, system_uuid: str, system_name: str, target: PartitionIdentity
 ) -> PagingObservation:
@@ -498,8 +539,9 @@ async def observe_paging(
     )
     if native_redundant is False:
         invalid.append("native-not-redundant")
+    device_names = None
     if device and paths:
-        names = fact(
+        device_names = fact(
             "uom-device-names",
             lambda: sorted(
                 (
@@ -508,26 +550,6 @@ async def observe_paging(
                 )
             ),
         )
-        if names is not None and names != sorted(name for _, name in paths):
-            invalid.append("device-names-disagree")
-    if (
-        len(set(providers)) == 2
-        and paths
-        and {uuid for uuid, _ in paths} != {p.uuid for p in providers}
-    ):
-        invalid.append("runtime-pool-pair-disagree")
-    if len(set(providers)) == 2 and any(
-        p is not None and p not in providers for p in (current_uom, current_native)
-    ):
-        invalid.append("current-outside-pair")
-    if current_native and current_uom and current_native != current_uom:
-        invalid.append("current-readers-disagree")
-    if (
-        len(set(providers)) == 2
-        and configured
-        and {configured.primary, configured.secondary} != set(providers)
-    ):
-        invalid.append("configured-runtime-pair-disagree")
     udid = (
         fact("unique-device-id", lambda: _text(device["UniqueDeviceID"]))
         if device and "UniqueDeviceID" in device
@@ -547,28 +569,29 @@ async def observe_paging(
                     else None,
                 )
             )
-    return PagingObservation(
-        system_uuid,
-        system_name,
-        PartitionIdentity(
+    observation = PagingObservation(
+        system_uuid=system_uuid,
+        system_name=system_name,
+        target=PartitionIdentity(
             identity.uuid, identity.name, identity.partition_id, target.kind
         )
         if identity
         else target,
-        pool.get("UUID"),
-        pool_id,
-        providers,
-        configured,
-        paths or (),
-        udid,
-        uom_redundant,
-        native_redundant,
-        current_uom,
-        current_native,
-        state,
-        shared,
-        dedicated,
-        tuple(states),
-        tuple(dict.fromkeys(unavailable)),
-        tuple(invalid),
+        pool_uuid=pool.get("UUID"),
+        pool_id=pool_id,
+        providers=providers,
+        configured=configured,
+        paths=paths or (),
+        unique_device_id=udid,
+        uom_redundant=uom_redundant,
+        native_redundant=native_redundant,
+        current_uom=current_uom,
+        current_native=current_native,
+        state=state,
+        shared=shared,
+        provider_dedicated=dedicated,
+        states=tuple(states),
+        unavailable=tuple(dict.fromkeys(unavailable)),
+        invalid=tuple(invalid),
     )
+    return _reconcile(observation, device_names)
