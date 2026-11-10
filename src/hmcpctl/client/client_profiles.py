@@ -101,7 +101,14 @@ async def read_native_profile(
     )
     if response.status_code != 200:
         raise HMCError("contained profile GET failed", response.status_code)
-    element = parse_profile(response.text)
+    try:
+        element = parse_profile(response.text)
+    except ValueError as exc:
+        # The document parser chains XML failures through ValueError; semantic
+        # profile refusals must keep their separate validation contract.
+        if not isinstance(exc.__cause__, (DET.ParseError, DefusedXmlException)):
+            raise
+        raise HMCError(f"Failed to parse GET {path} response: {exc}") from exc
     entries = _parse_feed(response.text, path)
     observed_uuid = entries[0].get("UUID") if len(entries) == 1 else None
     if (

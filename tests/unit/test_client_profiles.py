@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from conftest import live_fixture
+from defusedxml.common import EntitiesForbidden
 
 from hmcpctl.client.client_profiles import (
     profile_path,
@@ -150,6 +151,29 @@ async def test_foreign_or_malformed_identity_refused(raw):
     hmc = client(response(raw))
     with pytest.raises(ValueError):
         await read_native_profile(hmc, "LogicalPartition", P, F, S)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw,cause_type",
+    [
+        ("<entry", ET.ParseError),
+        (
+            '<!DOCTYPE entry [<!ENTITY unsafe "value">]><entry>&unsafe;</entry>',
+            EntitiesForbidden,
+        ),
+    ],
+)
+async def test_native_profile_xml_failures_name_the_contained_get(raw, cause_type):
+    hmc = client(response(raw))
+    path = f"/rest/api/uom/LogicalPartition/{P}/LogicalPartitionProfile/{F}"
+    with pytest.raises(HMCError) as caught:
+        await read_native_profile(hmc, "LogicalPartition", P, F, S)
+    assert f"GET {path}" in str(caught.value)
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert isinstance(caught.value.__cause__.__cause__, cause_type)
+    assert caught.value.body is None
+    hmc._request_with_uuid_path_arguments.assert_awaited_once()
 
 
 @pytest.mark.asyncio
