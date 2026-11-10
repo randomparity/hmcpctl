@@ -459,6 +459,10 @@ class HMCClient(
     successful responses; HTTP 404 and other statuses outside 200/204 raise
     HMCError. Individual methods document exceptions to this contract.
 
+    Local argument validation raises ValueError when a method rejects an input
+    before submitting its request. HMC response and transport failures raise
+    HMCError or a subclass. Individual methods document their validation rules.
+
     Usage:
         async with HMCClient(config) as hmc:
             systems = await hmc.list_system_summaries()

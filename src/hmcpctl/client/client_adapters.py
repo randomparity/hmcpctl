@@ -47,6 +47,13 @@ class AdaptersMixin:
         adapter_type: AdapterType,
         adapter_uuid: str,
     ) -> None:
+        """Delete one adapter from a logical partition.
+
+        Raises:
+            ValueError: If adapter_type is unsupported, or lpar_uuid or
+                adapter_uuid is invalid.
+            HMCError: If the HMC request fails.
+        """
         validate_adapter_type(adapter_type)
         await self.delete_child(
             "LogicalPartition", lpar_uuid, adapter_type, adapter_uuid
