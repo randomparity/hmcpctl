@@ -22,6 +22,7 @@ from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_creation_memory import LparCreationMemory as Memory
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.errors import HMCError
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.lpar import core, linux_roles, serial, workflows
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
@@ -1091,7 +1092,9 @@ async def test_c06_c11_c07_share_one_writer_and_preserve_refusal(
 
     b = memory_target
     layout = LparMemoryLayout(desired_num_huge_pages=1)
-    monkeypatch.setattr(core, "get_lpar_memory_layout", AsyncMock(return_value=layout))
+    monkeypatch.setattr(
+        partition_creation, "get_lpar_memory_layout", AsyncMock(return_value=layout)
+    )
     if refusal:
         b.fault = "refusal"
         with pytest.raises(HMCError, match="rejected.*HSCL07C1"):
@@ -1360,3 +1363,141 @@ async def test_c07_controller_assignment_preflight_has_one_authority_owner(
     assert b.events == ["authority"]
     b.hmc._get.assert_not_awaited()
     assert not b.created
+
+
+@pytest.mark.parametrize("kind", ["lpar", "vios"])
+async def test_creation_feature_order_and_partial_facts(
+    memory_target, monkeypatch, kind
+):
+    from hmcpctl.documents.lpar_start import LparStartSettings
+    from hmcpctl.operations.vios import core as vios_core
+
+    b = memory_target
+    original_profile = cm.profiles.read_partition_profile
+
+    async def profile(*args, **kwargs):
+        saved = await original_profile(*args, **kwargs)
+        return replace(saved, fields={**saved.fields, "AutoStart": "false"})
+
+    monkeypatch.setattr(cm.profiles, "read_partition_profile", profile)
+    b.hmc.get_uom.side_effect = lambda kind, uuid, **kwargs: deepcopy(
+        next(e for e in b.providers + [b.local] if e["UUID"] == uuid)
+    )
+    owner = partition_creation
+    trace = []
+    for operation in (
+        "admit_hardware_memory",
+        "admit_serial_creation",
+        "admit_creation_memory",
+        "admit_start_creation",
+        "confirm_start_created",
+        "confirm_serial_created",
+        "confirm_creation_memory_identity",
+        "serial_creation_step",
+        "creation_memory_step",
+    ):
+        original = getattr(owner, operation)
+
+        async def record(*args, operation=operation, original=original, **kwargs):
+            trace.append(operation)
+            return await original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, operation, record)
+    options = {
+        "max_virtual_slots": 8,
+        "virtual_serial_adapters": (VirtualSerialAdapter(2, "server", False),),
+        "creation_memory": SHARED,
+        "start_settings": LparStartSettings(auto_start=False),
+    }
+    if kind == "vios":
+        b.local["ResourceType"] = "VirtualIOServer"
+        b.local["Resource"]["PartitionType"] = "Virtual IO Server"
+        b.hmc.get_vios.side_effect = lambda uuid: deepcopy(b.local)
+        result = await vios_core.create_vios(b.hmc, SYSTEM, "new", RESOURCES, **options)
+        assert result["creation_memory_verification"].saved.status == "verified"
+        assert result["serial_verification"]["configuration"] == "verified"
+        assert result["start_verification"]["start_settings"]["status"] == "verified"
+        expected = [
+            "confirm_start_created",
+            "confirm_creation_memory_identity",
+            "creation_memory_step",
+            "confirm_serial_created",
+            "serial_creation_step",
+        ]
+    else:
+        result = await core.create_and_stamp_lpar(
+            b.hmc, SYSTEM, core.LparCreation("new", "AIX/Linux", RESOURCES, **options)
+        )
+        assert result.creation_memory_step.status == "ok"
+        assert result.serial_step.status == "ok"
+        expected = [
+            "confirm_serial_created",
+            "confirm_creation_memory_identity",
+            "confirm_start_created",
+            "serial_creation_step",
+            "creation_memory_step",
+        ]
+    assert trace == [
+        "admit_hardware_memory",
+        "admit_serial_creation",
+        *(
+            ["admit_creation_memory", "admit_start_creation"]
+            if kind == "vios"
+            else ["admit_start_creation", "admit_creation_memory"]
+        ),
+        *expected,
+    ]
+    assert b.events.count("create") == 1
+
+
+@pytest.mark.parametrize("kind", ["lpar", "vios"])
+async def test_creation_later_tls_preserves_facts_and_stops(
+    memory_target, monkeypatch, kind
+):
+    from hmcpctl.errors import HMCTLSFingerprintError
+    from hmcpctl.operations.vios.core import create_vios
+
+    b = memory_target
+    failure = HMCTLSFingerprintError("certificate identity changed")
+    stopped = []
+
+    async def reject(*args, **kwargs):
+        stopped[:] = b.events
+        raise failure
+
+    options = {
+        "max_virtual_slots": 8,
+        "virtual_serial_adapters": (VirtualSerialAdapter(2, "server", False),),
+        "creation_memory": SHARED,
+    }
+    if kind == "vios":
+        b.local["ResourceType"] = "VirtualIOServer"
+        b.local["Resource"]["PartitionType"] = "Virtual IO Server"
+        b.hmc.get_vios.side_effect = lambda uuid: deepcopy(b.local)
+        monkeypatch.setattr(serial, "read_serial_profile", reject)
+        with pytest.raises(HMCTLSFingerprintError) as caught:
+            await create_vios(b.hmc, SYSTEM, "new", RESOURCES, **options)
+        assert caught.value is failure
+        assert "VIOS exists or may exist" in " ".join(failure.__notes__)
+        assert "saved" in b.events  # Memory observation precedes serial observation.
+        assert "stamp" not in b.events
+    else:
+        monkeypatch.setattr(cm.profiles, "read_partition_profile", reject)
+        result = await core.create_and_stamp_lpar(
+            b.hmc,
+            SYSTEM,
+            core.LparCreation(
+                "new", "AIX/Linux", RESOURCES, apply_profile=True, **options
+            ),
+        )
+        assert result.serial_step.status == "ok"
+        assert result.serial_step.result["configuration"] == "verified"
+        assert result.creation_memory_step.status == "error"
+        assert result.apply_step.status == "skipped"
+        assert result.ownership_stamped is True
+        assert "TLS certificate identity" in repr(result.creation_memory_step)
+    assert stopped and b.events == stopped
+    assert b.events.count("create") == 1
+    assert "apply" not in b.events
+    b.hmc.delete_logical_partition.assert_not_called()
+    b.hmc.delete_vios.assert_not_called()

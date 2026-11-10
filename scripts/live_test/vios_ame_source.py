@@ -118,6 +118,7 @@ SOURCE_PATHS = (
     "src/hmcpctl/documents/partition_profile.py",
     "src/hmcpctl/documents/lpar.py",
     "src/hmcpctl/operations/vios/core.py",
+    "src/hmcpctl/operations/partition_creation.py",
     "src/hmcpctl/resource_identity.py",
     "src/hmcpctl/ssh/lpar.py",
     "src/hmcpctl/ssh/commands.py",

@@ -10,6 +10,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.errors import HMCError
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.transport import HMCCLIError
 
@@ -224,14 +225,16 @@ async def test_vios_policy_resource_and_duplicate_admission(
         True, True, True, 4, 64, False, (10, 3, 1060), 950
     )
     monkeypatch.setattr(
-        core, "read_security_policy_capabilities", AsyncMock(return_value=caps)
+        partition_creation,
+        "read_security_policy_capabilities",
+        AsyncMock(return_value=caps),
     )
     reader = AsyncMock(
         return_value=SecurityPolicyState(
             "Virtual IO Server", "not activated", LparSecurityPolicy(secure_boot=0), 0
         )
     )
-    monkeypatch.setattr(core, "read_lpar_security_policy", reader)
+    monkeypatch.setattr(partition_creation, "read_lpar_security_policy", reader)
     if mode == "duplicate":
         b.hmc.find_vios_by_name.side_effect = None
         b.hmc.find_vios_by_name.return_value = b.entry
@@ -297,11 +300,14 @@ async def test_empty_policy_preserves_each_route(boundary, vtpm, empty):
 @pytest.mark.asyncio
 async def test_vios_policy_uncertain_submission_is_bounded(boundary, monkeypatch):
     from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
-    from hmcpctl.operations.vios import core
 
     b = boundary
-    monkeypatch.setattr(core, "read_security_policy_capabilities", AsyncMock())
-    monkeypatch.setattr(core, "admit_security_policy", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        partition_creation, "read_security_policy_capabilities", AsyncMock()
+    )
+    monkeypatch.setattr(
+        partition_creation, "admit_security_policy", lambda *a, **kw: None
+    )
     b.state.write_error = HMCCLIError("secret-host secret-key")
     with pytest.raises(HMCError, match="exists or may exist") as error:
         await create_vios(

@@ -19,6 +19,7 @@ from pydantic import TypeAdapter
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.lpar import core
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
@@ -274,7 +275,7 @@ def target(monkeypatch):
             creation = core.LparCreation(
                 env.name, "AIX/Linux", LparResources(), memory_layout=layout
             )
-            step = await core._created_memory_layout_step(
+            step = await partition_creation._created_memory_layout_step(
                 hmc,
                 "canonical-system",
                 creation,
@@ -716,7 +717,7 @@ async def test_product_getter_false_positive_disagrees_with_raw_oracle(
     getter = AsyncMock(
         return_value=LparMemoryLayout(0, 0, 0, "1:128", "1:256", Decimal(0))
     )
-    monkeypatch.setattr(core, "get_lpar_memory_layout", getter)
+    monkeypatch.setattr(partition_creation, "get_lpar_memory_layout", getter)
     await run(target)
     assert any(row["status"] == "FAIL" for row in target.state.results)
     getter.assert_awaited_once()

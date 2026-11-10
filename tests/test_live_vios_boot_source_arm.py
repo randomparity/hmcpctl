@@ -282,7 +282,7 @@ def test_filesystem_session_bound_and_failed_checkpoint(tmp_path, monkeypatch):
 
 def test_attestation_exact_selected_closure(tmp_path, monkeypatch):
     p = packet(tmp_path)
-    assert len(source.SOURCE_PATHS) == 21
+    assert len(source.SOURCE_PATHS) == 22
     assert set(source.SOURCE_PATHS) == (
         set(ame.SOURCE_PATHS) - {"scripts/live_vios_ame_source.py"}
         | {"scripts/live_test/vios_boot_source.py", "scripts/live_vios_boot_source.py"}

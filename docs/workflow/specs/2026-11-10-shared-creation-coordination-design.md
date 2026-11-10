@@ -1,6 +1,8 @@
 # Proposed shared creation-feature coordination
 
-Status: proposed; design-only authorization. No implementation is authorized yet.
+Status: implementation authorized by the operator on 2026-11-10 ("approve all three").
+The approval covers this coordinator, conservative profile recovery and the separately owned
+live-test arm map. This document governs the coordinator implementation only.
 Trigger: operator approved recommendation 5, "Design first", during the desloppify campaign.
 
 ## Problem and evidence
@@ -90,12 +92,12 @@ Run existing creation-memory, serial, start, hardware, affinity, policy, vTPM, p
 VIOS and presentation suites. Keep the privacy and partial-result assertions intact. Finish with
 `just verify` and `uv run --no-sync prek run --all-files`; do not invoke live hardware testing.
 
-## Alternatives and decision needed
+## Alternatives and decision
 
 A configurable feature pipeline adds policy machinery without removing the kind-specific contracts.
 A single new helper that normalizes all failures would violate the approved diagnostic decision.
 Keeping the current shared feature helpers and independent coordinators remains viable accepted debt
 if the proposed internal state object does not make ownership and evidence retention simpler.
 
-Approve implementation of this concrete owner and preserved phase boundaries only after reviewing
-the design and its tradeoff. The current authorization covers preparation of this design, not code.
+The operator approved implementation of this concrete owner and preserved phase boundaries
+after reviewing the design and its tradeoff. ADR 0348 records the implementation decision.

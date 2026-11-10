@@ -12,6 +12,7 @@ from conftest import make_config
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
 from hmcpctl.errors import HMCError
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.lpar.security_policy import (
     admit_security_policy,
     parse_security_policy,
@@ -652,10 +653,12 @@ async def test_creation_policy_composes_once(creation_target, monkeypatch):
         "_created_vtpm_step",
     ):
         monkeypatch.setattr(
-            core, name, AsyncMock(return_value=WorkflowStep(name, "ok"))
+            partition_creation if name == "_created_vtpm_step" else core,
+            name,
+            AsyncMock(return_value=WorkflowStep(name, "ok")),
         )
-    monkeypatch.setattr(core, "read_vtpm_capabilities", AsyncMock())
-    monkeypatch.setattr(core, "admit_vtpm", lambda *a: None)
+    monkeypatch.setattr(partition_creation, "read_vtpm_capabilities", AsyncMock())
+    monkeypatch.setattr(partition_creation, "admit_vtpm", lambda *a: None)
     creation = core.LparCreation(
         "part-R1",
         "AIX/Linux",
@@ -797,18 +800,25 @@ async def test_apply_waits_for_requested_domain_verification(
         ("policy", "_created_security_policy_step"),
     ]:
 
-        async def read(*args, name=name, controller_mode=False, start_admission=None):
-            assert controller_mode is False and start_admission is None
+        async def read(*args, name=name, controller_mode=False, features=None):
+            assert controller_mode is False
+            assert features is None or features.start_admission is None
             return await verified(name)
 
-        monkeypatch.setattr(core, helper, read)
+        monkeypatch.setattr(
+            partition_creation
+            if helper in {"_created_vtpm_step", "_created_security_policy_step"}
+            else core,
+            helper,
+            read,
+        )
     monkeypatch.setattr(
         core,
         "stamp_created_lpar_ownership",
         AsyncMock(return_value=(domain != "stamp", ())),
     )
-    monkeypatch.setattr(core, "read_vtpm_capabilities", AsyncMock())
-    monkeypatch.setattr(core, "admit_vtpm", lambda *args: None)
+    monkeypatch.setattr(partition_creation, "read_vtpm_capabilities", AsyncMock())
+    monkeypatch.setattr(partition_creation, "admit_vtpm", lambda *args: None)
     monkeypatch.setattr(core, "admit_creation_io", AsyncMock())
     apply = AsyncMock(side_effect=lambda *a: events.append("apply"))
     monkeypatch.setattr(core, "apply_lpar_profile_via_cli", apply)

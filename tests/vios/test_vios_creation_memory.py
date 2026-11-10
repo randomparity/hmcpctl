@@ -16,6 +16,7 @@ from lpar.test_creation_memory_workflow import (
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.lpar import serial
 from hmcpctl.operations.vios.core import create_vios
 
@@ -149,7 +150,6 @@ async def test_vios_single_provider_omitted_secondary_verifies_saved_empty(
 async def test_vios_verification_retains_fingerprint_failure_and_stops(
     memory_target, monkeypatch, stage
 ):
-    from hmcpctl.operations.vios import core
 
     b = memory_target
     vios(b)
@@ -168,7 +168,7 @@ async def test_vios_verification_retains_fingerprint_failure_and_stops(
     if stage == "identity":
         b.hmc.find_vios_by_name.side_effect = find
     else:
-        monkeypatch.setattr(core, "creation_memory_step", fail)
+        monkeypatch.setattr(partition_creation, "creation_memory_step", fail)
     with pytest.raises(HMCTLSFingerprintError) as caught:
         await create_vios(b.hmc, "system", "new", RESOURCES, creation_memory=SHARED)
     assert caught.value is failure

@@ -328,8 +328,9 @@ Preflight/recovery gained additive accelerator-QoS routes; retain them unchanged
 Reuse ame.encode/digest/_json/_keys/_text/_uuid/_private/_git_read/_attest/_save/_receipt,
 snapshot, _admit_capacity, _record_pairs, _candidate, _observed, _foreign/_baseline_foreign
 only within their established signatures and semantics. _attest iterates packet hash keys;
-new validate_packet first proves the exact20-path set. _candidate tolerates absent REST
-Description, so new native marker confirmation and exact observed identity remain required.
+new validate_packet first proves the exact closed set declared by SOURCE_PATHS,
+including the packet-validation and partition-creation coordinator owners.
+_candidate tolerates absent REST Description, so new native marker confirmation and exact observed identity remain required.
 New admission enforces c09v- absence; do not call AME's c07v- admission unchanged.
 Do not reuse AME packet/cases/grant/history/lifecycle/entrypoint policy or mutate AME globals.
 Use existing build_attribute_record for creation, build_filter for the numeric native query,

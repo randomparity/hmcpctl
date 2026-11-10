@@ -14,6 +14,7 @@ import pytest
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.lpar import configuration as operation
 from hmcpctl.operations.lpar import linux_roles as roles
 from hmcpctl.ssh.lpar import (
@@ -724,7 +725,13 @@ def creation_boundary(monkeypatch):
         ("require_memory_within_system", memory),
         ("created_io_step", AsyncMock(return_value=None)),
     ):
-        monkeypatch.setattr(core, name, mock, raising=False)
+        monkeypatch.setattr(
+            partition_creation if name == "read_role_capabilities" else core,
+            name,
+            mock,
+            raising=False,
+        )
+    monkeypatch.setattr(partition_creation, "require_memory_within_system", memory)
     prevalidate = AsyncMock()
     assign = AsyncMock(return_value=SimpleNamespace(workflow_completed=True, steps=()))
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
@@ -1007,7 +1014,7 @@ async def test_no_role_native_creation_error_chain_is_unchanged(
     if domain == "policy":
         creation = replace(creation, security_policy=LparSecurityPolicy(secure_boot=0))
         monkeypatch.setattr(
-            core,
+            partition_creation,
             "read_security_policy_capabilities",
             AsyncMock(
                 return_value=SecurityPolicyCapabilities(
@@ -1187,12 +1194,14 @@ async def test_mixed_creation_remote_errors_are_safe_for_roles(
     elif domain == "vtpm":
         changes["vtpm_settings"] = LparVtpmSettings(False)
         monkeypatch.setattr(
-            core,
+            partition_creation,
             "read_vtpm_capabilities",
             AsyncMock(return_value=VtpmCapabilities(("1.2",), (), False)),
         )
         monkeypatch.setattr(
-            core, "get_lpar_vtpm_state", AsyncMock(side_effect=HMCError(MARKER))
+            partition_creation,
+            "get_lpar_vtpm_state",
+            AsyncMock(side_effect=HMCError(MARKER)),
         )
     elif domain == "physical_io":
         changes["physical_io"] = LparPhysicalIO(console_slot="hmc")

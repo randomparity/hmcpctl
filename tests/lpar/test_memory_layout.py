@@ -7,6 +7,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+from hmcpctl.operations import partition_creation
 
 COUNT_FIELDS = (
     "min_num_huge_pages",
@@ -418,7 +419,7 @@ def layout_creation_target(monkeypatch):
         core, "resolve_system_cli_name", AsyncMock(return_value="sys-R1")
     )
     mode = AsyncMock(return_value=({}, False))
-    monkeypatch.setattr(core, "read_creation_authority", mode)
+    monkeypatch.setattr(partition_creation, "read_creation_authority", mode)
     stamp = AsyncMock(return_value=(True, ()))
     monkeypatch.setattr(core, "stamp_created_lpar_ownership", stamp)
     apply = AsyncMock()
@@ -898,7 +899,6 @@ async def test_layout_role_selection_retains_independent_kvm_admission(
     from unittest.mock import AsyncMock
 
     from hmcpctl.documents.lpar import LparSettings
-    from hmcpctl.operations.lpar import core
     from hmcpctl.operations.lpar.core import create_and_stamp_lpar
     from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
@@ -906,7 +906,7 @@ async def test_layout_role_selection_retains_independent_kvm_admission(
     role_mode = AsyncMock(
         return_value=RoleCapabilities(False, False, None, None, False)
     )
-    monkeypatch.setattr(core, "read_role_capabilities", role_mode)
+    monkeypatch.setattr(partition_creation, "read_role_capabilities", role_mode)
     with pytest.raises(ValueError, match="KVM selection requires"):
         await create_and_stamp_lpar(
             target.hmc,
@@ -1311,12 +1311,12 @@ async def test_layout_ancillary_provider_errors_are_private(
         "vtpm": "get_lpar_vtpm_state",
     }
     monkeypatch.setattr(
-        core,
+        partition_creation if setting == "vtpm" else core,
         getters[setting],
         AsyncMock(side_effect=HMCError("private-provider-marker")),
     )
     monkeypatch.setattr(
-        core,
+        partition_creation,
         "read_vtpm_capabilities",
         AsyncMock(return_value=VtpmCapabilities(("1.2",), ("RSA2048",), False)),
     )
