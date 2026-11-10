@@ -9,21 +9,19 @@ from ...documents.lpar import (
     LparResources,
     LparSettings,
     PartitionType,
-    validate_partition_type,
 )
-from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
+from ...documents.lpar_affinity_group import AffinityGroupID
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_hardware_memory import HardwareMemoryFlag
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
-from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
+from ...documents.lpar_serial import VirtualSerialAdapter
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
-from ...operations.lpar.core import LparCreation
+from ...operations.lpar.core import LparCreation, validate_lpar_creation
 from ...operations.lpar.workflows import create_lpar
-from ...ssh.lpar import validate_caller_token
 from ...tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()
@@ -171,63 +169,46 @@ def hmc_create_lpar(
         profile: Optional HMC connection profile, distinct from a logical-partition
             profile; uses the default when omitted.
     """
-    if caller_token is not None:
-        validate_caller_token(caller_token)
-    validate_partition_type(partition_type)
-    if start_settings is not None:
-        if not isinstance(start_settings, LparStartSettings):
-            raise TypeError("start_settings must be LparStartSettings")
-        start_settings.validate_creation(partition_type)
-    if creation_memory is not None and not isinstance(
-        creation_memory, LparCreationMemory
-    ):
-        raise TypeError("creation_memory must be LparCreationMemory")
-    validate_serial_input(virtual_serial_adapters, max_virtual_slots)
-    if memory_layout is not None:
-        if not isinstance(memory_layout, LparMemoryLayout):
-            raise TypeError("memory_layout must be LparMemoryLayout")
-        memory_layout.validate_creation(partition_type)
-    validate_affinity_group_id(affinity_group_id)
+    creation = LparCreation(
+        name,
+        partition_type,
+        resources,
+        partition_id=partition_id,
+        keylock=keylock,
+        max_virtual_slots=max_virtual_slots,
+        virtual_serial_adapters=virtual_serial_adapters,
+        creation_memory=creation_memory
+        if creation_memory is not None
+        else LparCreationMemory(),
+        caller_token=caller_token,
+        physical_io=physical_io if physical_io is not None else LparPhysicalIO(),
+        apply_profile=apply_partition_profile,
+        hardware_mem_encryption=hardware_mem_encryption,
+        hardware_mem_expansion=hardware_mem_expansion,
+        memory_layout=memory_layout
+        if memory_layout is not None
+        else LparMemoryLayout(),
+        affinity_group_id=affinity_group_id,
+        start_settings=start_settings
+        if start_settings is not None
+        else LparStartSettings(),
+        security_policy=security_policy
+        if security_policy is not None
+        else LparSecurityPolicy(),
+        settings=settings if settings is not None else LparSettings(),
+        vtpm_settings=vtpm_settings
+        if vtpm_settings is not None
+        else LparVtpmSettings(),
+        reporting_settings=reporting_settings
+        if reporting_settings is not None
+        else LparReportingSettings(),
+    )
+    validate_lpar_creation(creation)
     return with_client(
         lambda hmc: create_lpar(
             hmc,
             system_name_or_uuid,
-            LparCreation(
-                name,
-                partition_type,
-                resources,
-                partition_id=partition_id,
-                keylock=keylock,
-                max_virtual_slots=max_virtual_slots,
-                virtual_serial_adapters=virtual_serial_adapters,
-                creation_memory=creation_memory
-                if creation_memory is not None
-                else LparCreationMemory(),
-                caller_token=caller_token,
-                physical_io=physical_io
-                if physical_io is not None
-                else LparPhysicalIO(),
-                apply_profile=apply_partition_profile,
-                hardware_mem_encryption=hardware_mem_encryption,
-                hardware_mem_expansion=hardware_mem_expansion,
-                memory_layout=memory_layout
-                if memory_layout is not None
-                else LparMemoryLayout(),
-                affinity_group_id=affinity_group_id,
-                start_settings=start_settings
-                if start_settings is not None
-                else LparStartSettings(),
-                security_policy=security_policy
-                if security_policy is not None
-                else LparSecurityPolicy(),
-                settings=settings if settings is not None else LparSettings(),
-                vtpm_settings=vtpm_settings
-                if vtpm_settings is not None
-                else LparVtpmSettings(),
-                reporting_settings=reporting_settings
-                if reporting_settings is not None
-                else LparReportingSettings(),
-            ),
+            creation,
             assignments,
         ),
         profile=profile,

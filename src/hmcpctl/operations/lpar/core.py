@@ -319,30 +319,11 @@ async def _create_via_cli(
     return system_name, apply_step, created_lpar, None
 
 
-async def create_and_stamp_lpar(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    creation: LparCreation,
-    *,
-    preflight_assignments: LparPcieAssignments | None = None,
-) -> LparCreationResult:
-    """Validate and create an LPAR with fallback and ownership stamping.
-
-    ``creation.stamp_policy`` selects how an ownership-stamp failure or skip
-    is surfaced (issue #377):
-
-    - ``"best-effort"`` (default, ADR 0011): a failed or skipped stamp never
-      fails the call. The result reports it through ``ownership_stamped``
-      and ``warnings``.
-    - ``"required"``: any outcome other than a confirmed stamp raises
-      :class:`HMCError` *after* the create completes. The exception carries
-      the new LPAR's name and UUID so the caller can find the partition.
-      The LPAR **still exists** when the error is raised — the create is not
-      rolled back — so re-stamp it with
-      :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
-      delete it to release its resources.
-    """
+def validate_lpar_creation(creation: LparCreation) -> None:
+    """Validate creation admission without opening a client or reading HMC state."""
     reject_update_weight_on_create(creation.resources)
+    if not isinstance(creation.physical_io, LparPhysicalIO):
+        raise TypeError("physical_io must be LparPhysicalIO")
     if not isinstance(creation.start_settings, LparStartSettings):
         raise TypeError("start_settings must be LparStartSettings")
     creation.start_settings.validate_creation(creation.partition_type)
@@ -397,14 +378,12 @@ async def create_and_stamp_lpar(
             f"got {creation.stamp_policy!r}"
         )
     if creation.caller_token is not None:
-        # First statement, before find_partition_by_name and outside the
-        # stamp's best-effort catch: no create can precede rejection, and a
-        # malformed token can never discard the ownership stamp (ADR 0064).
+        # Reject before effects and outside the stamp's best-effort catch:
+        # a malformed token must never discard ownership (ADR 0064).
         validate_caller_token(creation.caller_token)
     if not isinstance(creation.security_policy, LparSecurityPolicy):
         raise TypeError("security_policy must be LparSecurityPolicy")
     creation.security_policy.validate_creation(creation.partition_type)
-    policy_requested = bool(creation.security_policy.pairs())
     if not isinstance(creation.vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
     creation.vtpm_settings.validate_creation(creation.partition_type)
@@ -425,8 +404,6 @@ async def create_and_stamp_lpar(
             "Select only one of these features for this creation. "
             "Nothing was created."
         )
-    if not isinstance(creation.physical_io, LparPhysicalIO):
-        raise TypeError("physical_io must be LparPhysicalIO")
     validate_partition_type(creation.partition_type)
     if not isinstance(creation.reporting_settings, LparReportingSettings):
         raise TypeError("reporting_settings must be LparReportingSettings")
@@ -436,6 +413,44 @@ async def create_and_stamp_lpar(
             "Reporting settings cannot be combined with explicit keylock: CLI creation cannot represent keylock. Nothing was created."
         )
     validate_keylock(creation.keylock)
+
+
+async def create_and_stamp_lpar(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    creation: LparCreation,
+    *,
+    preflight_assignments: LparPcieAssignments | None = None,
+) -> LparCreationResult:
+    """Validate and create an LPAR with fallback and ownership stamping.
+
+    ``creation.stamp_policy`` selects how an ownership-stamp failure or skip
+    is surfaced (issue #377):
+
+    - ``"best-effort"`` (default, ADR 0011): a failed or skipped stamp never
+      fails the call. The result reports it through ``ownership_stamped``
+      and ``warnings``.
+    - ``"required"``: any outcome other than a confirmed stamp raises
+      :class:`HMCError` *after* the create completes. The exception carries
+      the new LPAR's name and UUID so the caller can find the partition.
+      The LPAR **still exists** when the error is raised — the create is not
+      rolled back — so re-stamp it with
+      :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
+      delete it to release its resources.
+    """
+    validate_lpar_creation(creation)
+    start_requested = creation.start_settings.requested()
+    memory_requested = bool(creation.creation_memory.pairs())
+    shared_memory = creation.creation_memory.mem_mode == "shared"
+    serial_requested = bool(creation.virtual_serial_adapters)
+    layout_requested = bool(creation.memory_layout.pairs())
+    affinity_requested = creation.affinity_group_id is not None
+    hardware_requested = bool(
+        hardware_memory_pairs(
+            creation.hardware_mem_encryption, creation.hardware_mem_expansion
+        )
+    )
+    policy_requested = bool(creation.security_policy.pairs())
     role_requested = roles_requested(creation.settings)
     verify_before_apply = (
         policy_requested

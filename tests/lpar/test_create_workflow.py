@@ -236,3 +236,25 @@ async def test_policy_workflow_reports_verification_before_apply(monkeypatch):
         "security_policy",
         "apply_profile",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["start_settings", "security_policy"])
+async def test_invalid_creation_is_rejected_before_assignment_preflight(
+    monkeypatch, field
+):
+    from dataclasses import replace
+
+    prevalidate = AsyncMock(
+        side_effect=AssertionError("invalid request reached preflight")
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.workflows.prevalidate_lpar_pcie_assignments",
+        prevalidate,
+    )
+    creation = replace(_creation(), **{field: object()})
+    with pytest.raises(TypeError, match=field):
+        await create_lpar(
+            cast(HMCClient, object()), "sys", creation, LparPcieAssignments()
+        )
+    prevalidate.assert_not_awaited()

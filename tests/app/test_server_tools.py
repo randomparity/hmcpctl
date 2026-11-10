@@ -1384,3 +1384,23 @@ def test_power_on_with_wait_polls_the_submission_jobid(monkeypatch, mock_hmc):
     assert result.already_activated is False
     assert result.job["Resource"]["Status"] == "COMPLETED_OK"
     assert result.message is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "security_policy",
+        "vtpm_settings",
+        "settings",
+        "physical_io",
+        "reporting_settings",
+    ],
+)
+def test_create_rejects_invalid_records_before_opening_a_client(monkeypatch, field):
+    from hmcpctl.server_tools.lpar import lifecycle_create
+
+    connect = MagicMock(side_effect=AssertionError("invalid request opened a client"))
+    monkeypatch.setattr(lifecycle_create, "with_client", connect)
+    with pytest.raises(TypeError, match=field):
+        hmc_create_lpar("system", "new", **{field: object()})
+    connect.assert_not_called()

@@ -6,14 +6,7 @@ from dataclasses import replace
 
 from hmcpctl.client.core import HMCClient
 
-from ...documents.lpar import validate_partition_type
-from ...documents.lpar_affinity_group import validate_affinity_group_id
-from ...documents.lpar_creation_memory import LparCreationMemory
-from ...documents.lpar_hardware_memory import hardware_memory_pairs
-from ...documents.lpar_memory_layout import LparMemoryLayout
-from ...documents.lpar_serial import validate_serial_input
 from ...errors import HMCError
-from ...ssh.lpar import complete_create_resources
 from .assignments import (
     LparPcieAssignments,
     LparPcieWorkflowResult,
@@ -21,7 +14,12 @@ from .assignments import (
     assignment_step_names,
     prevalidate_lpar_pcie_assignments,
 )
-from .core import LparCreation, create_and_stamp_lpar, creation_followup
+from .core import (
+    LparCreation,
+    create_and_stamp_lpar,
+    creation_followup,
+    validate_lpar_creation,
+)
 from .errors import translate_lpar_write_error
 from .linux_roles import roles_requested
 from .workflow_contract import WorkflowStep
@@ -34,55 +32,16 @@ async def create_lpar(
     assignments: LparPcieAssignments,
 ) -> LparPcieWorkflowResult:
     """Validate, create, stamp, and apply ordered PCIe assignments."""
-    creation.start_settings.validate_creation(creation.partition_type)
+    validate_lpar_creation(creation)
     start_requested = creation.start_settings.requested()
-    if start_requested and creation.keylock is not None:
-        raise ValueError("Start settings cannot be combined with native keylock")
-    if not isinstance(creation.creation_memory, LparCreationMemory):
-        raise TypeError("creation_memory must be LparCreationMemory")
     memory_requested = bool(creation.creation_memory.pairs())
-    if memory_requested and creation.keylock is not None:
-        raise ValueError("Creation memory cannot be combined with native keylock")
-    if creation.creation_memory.mem_mode == "shared":
-        resources = complete_create_resources(creation.resources)
-        if resources is None or resources.dedicated is not False:
-            raise ValueError("Shared memory requires known shared processor resources")
-        if (
-            creation.physical_io.io_slots
-            or creation.creation_sriov
-            or assignments.dedicated
-            or assignments.sriov
-        ):
-            raise ValueError("Shared memory cannot use direct physical I/O or SR-IOV")
-    validate_serial_input(creation.virtual_serial_adapters, creation.max_virtual_slots)
     serial_requested = bool(creation.virtual_serial_adapters)
-    if serial_requested and creation.keylock is not None:
-        raise ValueError(
-            "Serial adapters cannot be combined with keylock in native creation"
-        )
-    if not isinstance(creation.memory_layout, LparMemoryLayout):
-        raise TypeError("memory_layout must be LparMemoryLayout")
-    creation.memory_layout.validate_creation(creation.partition_type)
     layout_requested = bool(creation.memory_layout.pairs())
-    if layout_requested and creation.keylock is not None:
-        raise ValueError(
-            "Memory layout cannot be combined with keylock in native creation"
-        )
-    affinity_requested = (
-        validate_affinity_group_id(creation.affinity_group_id) is not None
-    )
-    if affinity_requested and creation.keylock is not None:
-        raise ValueError("Affinity group cannot be combined with explicit keylock")
-    hardware_requested = bool(
-        hardware_memory_pairs(
-            creation.hardware_mem_encryption, creation.hardware_mem_expansion
-        )
-    )
-    if hardware_requested and creation.keylock is not None:
-        raise ValueError(
-            "Hardware memory settings cannot be combined with explicit keylock"
-        )
-    validate_partition_type(creation.partition_type)
+    affinity_requested = creation.affinity_group_id is not None
+    if creation.creation_memory.mem_mode == "shared" and (
+        assignments.dedicated or assignments.sriov
+    ):
+        raise ValueError("Shared memory cannot use direct physical I/O or SR-IOV")
     if creation.physical_io.requested:
         overlap = {s.drc_index for s in creation.physical_io.io_slots} & {
             s.drc_index for s in assignments.dedicated
