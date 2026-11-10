@@ -95,3 +95,26 @@ def test_parse_feed_recursion_error_tags_context():
     assert "Failed to parse test context response" in str(exc_info.value)
     assert "nesting is too deep" in str(exc_info.value)
     assert isinstance(exc_info.value.__cause__, RecursionError)
+
+
+def test_discovery_adapter_forwards_named_parser_arguments():
+    names, present = _discovery_names(
+        "<Names><Name>value</Name></Names>",
+        "discovery",
+        name_tag="Name",
+        container_tag="Names",
+        member_tag="Name",
+    )
+    assert names == ["value"] and present
+
+
+def test_named_parser_arguments_retain_context_and_parse_cause():
+    with pytest.raises(HMCError, match="Failed to parse discovery response") as caught:
+        _discovery_names(
+            "<Names>",
+            "discovery",
+            name_tag="Name",
+            container_tag="Names",
+            member_tag="Name",
+        )
+    assert isinstance(caught.value.__cause__, DET.ParseError)

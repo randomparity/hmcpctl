@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Concatenate, ParamSpec, TypeVar
 
 from defusedxml import ElementTree as DET
 
@@ -13,9 +13,12 @@ from ..xmlutil import find_text, localname, parse_feed
 from .pcm_payloads import metric_links, pcm_preferences_to_dict
 
 _T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
-def _tag_parse_errors(fn: Callable[..., _T]) -> Callable[..., _T]:
+def _tag_parse_errors(
+    fn: Callable[Concatenate[str, _P], _T],
+) -> Callable[Concatenate[str, str, _P], _T]:
     """Tag XML syntax, security and response-shape failures as HMCError.
 
     The wrapper takes the same arguments as *fn* with a *context* string
@@ -25,9 +28,11 @@ def _tag_parse_errors(fn: Callable[..., _T]) -> Callable[..., _T]:
     """
 
     @functools.wraps(fn)
-    def wrapper(xml_text: str, context: str, *args: Any) -> _T:
+    def wrapper(
+        xml_text: str, context: str, /, *args: _P.args, **kwargs: _P.kwargs
+    ) -> _T:
         try:
-            return fn(xml_text, *args)
+            return fn(xml_text, *args, **kwargs)
         except (DET.ParseError, ValueError) as exc:
             raise HMCError(
                 f"Failed to parse {context} response: {str(exc)[:500]}"
