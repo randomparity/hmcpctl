@@ -51,7 +51,7 @@ from .lpar_config import (
     _wait_for_state,
     scratch_partitions,
 )
-from .observation import Assertion, judge_create_result, plain_data
+from .observation import Assertion, judge_create_result
 from .results import entries, resource
 from .results import field as result_field
 from .storage import scsi_adapter_listing
@@ -462,7 +462,7 @@ async def _reconfigure(
         exclusive_writer_window=any(k != "name" for k in patch),
         wait_seconds=600,
     )
-    record = plain_data(data) if st == "PASS" else None
+    record = data if st == "PASS" else None
     done = isinstance(record, Mapping) and record.get("outcome") == "completed"
     state.record(SUBTASK, f"{TOOL} ({label})", "PASS" if done else "FAIL", data)
     return record if isinstance(record, Mapping) else {}
@@ -499,7 +499,7 @@ async def _saved(client: Client, state: RunState, run: _Run) -> dict[str, Any]:
         system_name_or_uuid=run.system,
         lpar_name_or_uuid=run.uuid,
     )
-    profiles = result_field(plain_data(data), "profiles") if st == "PASS" else None
+    profiles = result_field(data, "profiles") if st == "PASS" else None
     if isinstance(profiles, list):
         profiles = [
             p
@@ -660,7 +660,7 @@ async def _abandon_open(client: Client, state: RunState, run: _Run) -> None:
             continuation="abandon",
             wait_seconds=0,
         )
-        outcome = result_field(plain_data(data), "outcome") if st == "PASS" else None
+        outcome = result_field(data, "outcome") if st == "PASS" else None
         if outcome not in {"completed", "abandoned", "failed"}:
             state.record(SUBTASK, f"{TOOL} (abandon {request_id})", "FAIL", data)
 

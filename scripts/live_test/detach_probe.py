@@ -6,7 +6,6 @@ import re
 import shlex
 import uuid
 from collections.abc import Mapping
-from dataclasses import asdict, is_dataclass
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client
@@ -32,8 +31,6 @@ def mapping_rows(data: object) -> frozenset[tuple[Any, ...]]:
         raise _Stop("mapping inventory is not a list")
     rows = []
     for entry in data:
-        if is_dataclass(entry) and (not isinstance(entry, type)):
-            entry = asdict(entry)
         if not isinstance(entry, Mapping) or any(key not in entry for key in _KEYS):
             raise _Stop("mapping inventory has a malformed row")
         row = tuple(entry[key] for key in _KEYS)

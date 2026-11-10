@@ -122,6 +122,20 @@ class _TextBlock:
         self.text = text
 
 
+def _served_model(**values):
+    """A generated record at the mocked tool boundary, with its fields unchanged."""
+    model = dataclasses.make_dataclass(
+        "ServedModel", [(name, object) for name in values]
+    )
+    return model(**values)
+
+
+def _normalized_answer(answer):
+    """Match RunState.call's plain successes and structured failures."""
+    status, data = answer
+    return status, observation.plain_data(data) if status == "PASS" else data
+
+
 class _ScriptedClient:
     def __init__(self, result=None, error=None):
         self.result = result
@@ -152,7 +166,7 @@ class _ScriptedSriovState(runner.RunState):
         self.calls.append((tool, kwargs))
         expected_tool, status, data = next(self._responses)
         assert tool == expected_tool
-        return status, data
+        return _normalized_answer((status, data))
 
 
 def _logical_port_state(
@@ -1521,7 +1535,7 @@ def _answer(answers: dict[str, object]):
     async def scripted_call(_state, _client, tool, **kwargs):
         calls.append((tool, kwargs))
         answer = answers.get(tool, ("PASS", {}))
-        return answer(kwargs) if callable(answer) else answer
+        return _normalized_answer(answer(kwargs) if callable(answer) else answer)
 
     return calls, scripted_call
 
@@ -1603,7 +1617,7 @@ _ST4_ANSWERS: dict[str, object] = {
     ),
     "hmc_get_minimum_affinity_policy": (
         "PASS",
-        SimpleNamespace(
+        _served_model(
             capability="available",
             min_affinity_score=0,
             min_affinity_score_action="none",
@@ -4156,10 +4170,13 @@ def test_result_helpers_filter_malformed_entries_and_resource_shapes():
     assert results.entries({"entries": raw_entries}) == [raw_entries[0], raw_entries[2]]
     assert results.entries({"entries": {"UUID": "not-a-list"}}) == []
     assert results.entries("invalid") == []
-    # FastMCP hands a dataclass result (ADR 0197's FleetListing) to a client as a
-    # generated model rather than a mapping.
-    model = SimpleNamespace(entries=raw_entries, unreadable_systems=[])
-    assert results.entries(model) == [raw_entries[0], raw_entries[2]]
+    # Scenario helpers consume normalized results; arbitrary objects are malformed.
+    assert results.entries(SimpleNamespace(entries=raw_entries)) == []
+    model = _served_model(entries=raw_entries, unreadable_systems=[])
+    assert results.entries(observation.plain_data(model)) == [
+        raw_entries[0],
+        raw_entries[2],
+    ]
     assert results.resource(raw_entries[0]) == {"UUID": "nested"}
     assert results.resource({"UUID": "flat"}) == {"UUID": "flat"}
     assert results.resource({"Resource": "not-a-mapping"}) == {
@@ -6420,12 +6437,12 @@ async def test_connectivity_inventory_forwards_selectors_and_captures_context(
                 }
             ],
             "hmc_get_lpar": {"UUID": "lpar-uuid"},
-            "hmc_list_vios": SimpleNamespace(
+            "hmc_list_vios": _served_model(
                 entries=[{"UUID": "vios-uuid", "Resource": {"PartitionID": "7"}}],
                 unreadable_systems=[],
             ),
         }
-        return "PASS", responses.get(tool, {})
+        return _normalized_answer(("PASS", responses.get(tool, {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     state = runner.RunState()
@@ -6510,8 +6527,8 @@ _ST1_NULL_PROPERTY_500 = (
 )
 
 
-def _st1_capacity_row(**overrides: object) -> SimpleNamespace:
-    """One CapacitySummary as FastMCP delivers it: a generated model, not a mapping."""
+def _st1_capacity_row(**overrides: object) -> Any:
+    """A typed capacity record before the mocked call boundary normalizes it."""
     row = {
         "system_uuid": _ST1_SYSTEM_UUID,
         "system_name": _ST1_SYSTEM,
@@ -6522,37 +6539,35 @@ def _st1_capacity_row(**overrides: object) -> SimpleNamespace:
         "assigned_proc_units": 5.5,
         "free_proc_units": 2.5,
     }
-    return SimpleNamespace(**(row | overrides))
+    return _served_model(**(row | overrides))
 
 
-def _st1_inventory_system(system_id: str, capacity: str = "ok") -> SimpleNamespace:
+def _st1_inventory_system(system_id: str, capacity: str = "ok") -> Any:
     sources = {
-        part: SimpleNamespace(status=status)
+        part: _served_model(status=status)
         for part, status in (
             ("capacity", capacity),
             ("partitions", "ok"),
             ("ownership", "ok"),
         )
     }
-    return SimpleNamespace(
-        id=system_id, name=_ST1_SYSTEM, sources=SimpleNamespace(**sources)
+    return _served_model(
+        id=system_id, name=_ST1_SYSTEM, sources=_served_model(**sources)
     )
 
 
-def _st1_inspection(**statuses: str) -> SimpleNamespace:
+def _st1_inspection(**statuses: str) -> Any:
     status = {"uuid": _ST1_LPAR_UUID, "storage": "ok", "rmc": "ok", "refcodes": "ok"}
     status |= statuses
-    return SimpleNamespace(
+    return _served_model(
         uuid=status["uuid"],
-        resources=SimpleNamespace(
-            storage_source=SimpleNamespace(status=status["storage"])
-        ),
-        rmc=SimpleNamespace(source=SimpleNamespace(status=status["rmc"])),
-        refcodes=SimpleNamespace(source=SimpleNamespace(status=status["refcodes"])),
+        resources=_served_model(storage_source=_served_model(status=status["storage"])),
+        rmc=_served_model(source=_served_model(status=status["rmc"])),
+        refcodes=_served_model(source=_served_model(status=status["refcodes"])),
     )
 
 
-def _st1_ownership(**overrides: object) -> SimpleNamespace:
+def _st1_ownership(**overrides: object) -> Any:
     row = {
         "lpar_name": _ST1_LPAR,
         "description": "[hmcpctl owner:agent-a]",
@@ -6560,17 +6575,17 @@ def _st1_ownership(**overrides: object) -> SimpleNamespace:
         "owner": "agent-a",
         "unparsed": False,
     }
-    return SimpleNamespace(entries=[row | overrides])
+    return _served_model(entries=[row | overrides])
 
 
-def _st1_plan(candidate_uuid: str) -> SimpleNamespace:
-    return SimpleNamespace(
+def _st1_plan(candidate_uuid: str) -> Any:
+    return _served_model(
         plan_digest="digest",
-        selected=SimpleNamespace(system=SimpleNamespace(uuid=candidate_uuid)),
+        selected=_served_model(system=_served_model(uuid=candidate_uuid)),
         blockers=[],
         candidates=[
-            SimpleNamespace(
-                targets=SimpleNamespace(system=SimpleNamespace(uuid=candidate_uuid))
+            _served_model(
+                targets=_served_model(system=_served_model(uuid=candidate_uuid))
             )
         ],
     )
@@ -6619,7 +6634,7 @@ def _st1_responses() -> dict[str, object]:
         "hmc_get_lpar": {"UUID": _ST1_LPAR_UUID},
         "hmc_capacity_report": [_st1_capacity_row()],
         "hmc_find_placement": [_st1_capacity_row()],
-        "hmc_list_lpar_ownership": SimpleNamespace(
+        "hmc_list_lpar_ownership": _served_model(
             entries=[
                 {
                     "lpar_name": _ST1_LPAR,
@@ -6641,29 +6656,29 @@ def _st1_responses() -> dict[str, object]:
             unreadable_systems=[],
         ),
         "hmc_read_lpar_boot_order": {"lpar_uuid": _ST1_LPAR_UUID},
-        "hmc_inspect_lpar": SimpleNamespace(
+        "hmc_inspect_lpar": _served_model(
             uuid=_ST1_LPAR_UUID,
-            resources=SimpleNamespace(storage_source=SimpleNamespace(status="ok")),
-            rmc=SimpleNamespace(source=SimpleNamespace(status="ok")),
-            refcodes=SimpleNamespace(source=SimpleNamespace(status="ok")),
+            resources=_served_model(storage_source=_served_model(status="ok")),
+            rmc=_served_model(source=_served_model(status="ok")),
+            refcodes=_served_model(source=_served_model(status="ok")),
         ),
-        "hmc_inventory": SimpleNamespace(
+        "hmc_inventory": _served_model(
             systems=[_st1_inventory_system(f"c/{_ST1_SYSTEM_UUID}")],
             partitions=[
-                SimpleNamespace(name=_ST1_LPAR, system_id=f"c/{_ST1_SYSTEM_UUID}")
+                _served_model(name=_ST1_LPAR, system_id=f"c/{_ST1_SYSTEM_UUID}")
             ],
         ),
         "hmc_fleet_health": {"systems": [], "vios": [], "lpars": [], "warnings": []},
         "hmc_get_lpar_proc_compat": {"profile": _ST1_PROFILE},
         "hmc_snapshot_capture": _st1_snapshot(),
-        "hmc_plan_lpar": SimpleNamespace(
+        "hmc_plan_lpar": _served_model(
             plan_digest="digest",
-            selected=SimpleNamespace(system=SimpleNamespace(uuid=_ST1_SYSTEM_UUID)),
+            selected=_served_model(system=_served_model(uuid=_ST1_SYSTEM_UUID)),
             blockers=[],
             candidates=[
-                SimpleNamespace(
-                    targets=SimpleNamespace(
-                        system=SimpleNamespace(uuid=_ST1_SYSTEM_UUID.upper())
+                _served_model(
+                    targets=_served_model(
+                        system=_served_model(uuid=_ST1_SYSTEM_UUID.upper())
                     )
                 )
             ],
@@ -6695,7 +6710,7 @@ async def _run_st1(monkeypatch, overrides: dict[str, tuple[str, object]] | None 
             and kwargs["resource_type"] == "LogicalPartition"
         ):
             return "PASS", [{"UUID": _ST1_LPAR_UUID}]
-        return responses.get(tool, ("PASS", {}))
+        return _normalized_answer(responses.get(tool, ("PASS", {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     state = runner.RunState()
@@ -6768,7 +6783,7 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_list_lpar_ownership",
-            SimpleNamespace(
+            _served_model(
                 entries=[
                     {
                         "lpar_name": _ST1_LPAR,
@@ -6789,13 +6804,13 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_inspect_lpar",
-            SimpleNamespace(
+            _served_model(
                 uuid=_ST1_LPAR_UUID,
-                resources=SimpleNamespace(
-                    storage_source=SimpleNamespace(status="unavailable")
+                resources=_served_model(
+                    storage_source=_served_model(status="unavailable")
                 ),
-                rmc=SimpleNamespace(source=SimpleNamespace(status="ok")),
-                refcodes=SimpleNamespace(source=SimpleNamespace(status="denied")),
+                rmc=_served_model(source=_served_model(status="ok")),
+                refcodes=_served_model(source=_served_model(status="denied")),
             ),
             "lpar.inspect",
             {"resources-read", "refcodes-read"},
@@ -6856,18 +6871,18 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_inventory",
-            SimpleNamespace(
+            _served_model(
                 systems=[_st1_inventory_system("c/s", capacity="denied")],
-                partitions=[SimpleNamespace(name=_ST1_LPAR, system_id="c/s")],
+                partitions=[_served_model(name=_ST1_LPAR, system_id="c/s")],
             ),
             "inventory.logical",
             {"system-sources-read"},
         ),
         (
             "hmc_inventory",
-            SimpleNamespace(
+            _served_model(
                 systems=[_st1_inventory_system("c/s")],
-                partitions=[SimpleNamespace(name="other", system_id="c/elsewhere")],
+                partitions=[_served_model(name="other", system_id="c/elsewhere")],
             ),
             "inventory.logical",
             {"test-partition-listed", "partitions-belong-to-system"},
@@ -6891,10 +6906,10 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_plan_lpar",
-            SimpleNamespace(
+            _served_model(
                 plan_digest="digest",
                 selected=None,
-                blockers=[SimpleNamespace(code="no_candidate")],
+                blockers=[_served_model(code="no_candidate")],
                 candidates=[],
             ),
             "lpar.plan",
@@ -6964,7 +6979,7 @@ async def test_st1_captures_the_partition_default_profile(monkeypatch):
             and kwargs["resource_type"] == "LogicalPartition"
         ):
             return "PASS", [{"UUID": _ST1_LPAR_UUID}]
-        return responses.get(tool, ("PASS", {}))
+        return _normalized_answer(responses.get(tool, ("PASS", {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     await connectivity.inventory_connectivity(None, runner.RunState())
@@ -6997,13 +7012,13 @@ async def test_st1_capture_without_a_profile_name_fails_without_promoting(
 
 @pytest.mark.asyncio
 async def test_st1_blocked_plan_without_a_digest_still_passes(monkeypatch):
-    blocked = SimpleNamespace(
+    blocked = _served_model(
         plan_digest=None,
         selected=None,
-        blockers=[SimpleNamespace(code="no_candidate")],
+        blockers=[_served_model(code="no_candidate")],
         candidates=[
-            SimpleNamespace(
-                targets=SimpleNamespace(system=SimpleNamespace(uuid=_ST1_SYSTEM_UUID))
+            _served_model(
+                targets=_served_model(system=_served_model(uuid=_ST1_SYSTEM_UUID))
             )
         ],
     )
@@ -7048,7 +7063,7 @@ async def test_st1_null_property_500_on_a_system_read_fails_closed(monkeypatch):
             and kwargs["resource_type"] == "LogicalPartition"
         ):
             return "PASS", [{"UUID": _ST1_LPAR_UUID}]
-        return responses.get(tool, ("PASS", {}))
+        return _normalized_answer(responses.get(tool, ("PASS", {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     state = runner.RunState()
@@ -7872,11 +7887,7 @@ async def test_job_scenarios_fail_on_a_non_successful_status(
 
 @pytest.mark.asyncio
 async def test_wait_for_job_outcome_normalizes_from_the_served_shape():
-    """FastMCP serves `hmc_wait_for_job` unwrapped, so `result.data` is not a dict.
-
-    The scripted stubs above hand `_as_outcome` a mapping, so only this arm can
-    catch a normalizer that handles nothing else.
-    """
+    """A real MCP job result is normalized before the consumer validates it."""
     application = FastMCP("job-shape-probe")
 
     @application.tool
@@ -7892,10 +7903,10 @@ async def test_wait_for_job_outcome_normalizes_from_the_served_shape():
         )
 
     async with Client(application) as client:
-        result = await client.call_tool("probe", {})
+        status, data = await runner.RunState().call(client, "probe")
 
-    assert not isinstance(result.data, dict)
-    outcome = metrics._as_outcome(result.data)
+    assert status == "PASS" and isinstance(data, dict)
+    outcome = metrics._as_outcome(data)
     assert outcome is not None
     assert outcome.status == "COMPLETED_OK"
     assert outcome.job_id == "job-uuid"
@@ -7927,10 +7938,10 @@ async def test_sriov_changed_reads_the_served_result_shape(changed: bool):
         )
 
     async with Client(application) as client:
-        result = await client.call_tool("probe", {})
+        status, data = await runner.RunState().call(client, "probe")
 
-    assert not isinstance(result.data, dict)
-    assert sriov._sriov_changed(result.data) is changed
+    assert status == "PASS" and isinstance(data, dict)
+    assert sriov._sriov_changed(data) is changed
 
 
 def _recorded_scenarios() -> dict[str, set[str]]:
@@ -9296,9 +9307,7 @@ async def test_job_get_consumers_grade_normalized_outcomes_strictly(
         if served_model:
             data = result.data
             if invalid == "raw":
-                from types import SimpleNamespace
-
-                data = SimpleNamespace(**values)
+                data = _served_model(**values)
             else:
                 for name, value in values.items():
                     setattr(data, name, value)
@@ -9306,7 +9315,7 @@ async def test_job_get_consumers_grade_normalized_outcomes_strictly(
             data = values
 
     async def scripted_call(_state, _client, _tool, **_kwargs):
-        return "PASS", data
+        return _normalized_answer(("PASS", data))
 
     async def no_cli(*_args):
         pass
@@ -9891,3 +9900,69 @@ def test_paging_optional_defaults_preserve_old_documents():
     del saved["paging_expected_current_vios"]
     del saved["paging_writer_window"]
     assert decode_saved_config(saved).paging_writer_window is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", ["entry", "list", "tuple", "mapping", "nested"])
+async def test_call_normalizes_generated_records_before_scenarios_inspect_them(shape):
+    @dataclasses.dataclass
+    class Entry:
+        UUID: str
+
+    @dataclasses.dataclass
+    class Listing:
+        entries: list[Entry]
+
+    entry = Entry("entry-a")
+    raw, expected = {
+        "entry": (entry, {"UUID": "entry-a"}),
+        "list": ([entry], [{"UUID": "entry-a"}]),
+        "tuple": ((entry,), [{"UUID": "entry-a"}]),
+        "mapping": ({"entries": [entry]}, {"entries": [{"UUID": "entry-a"}]}),
+        "nested": (Listing([entry]), {"entries": [{"UUID": "entry-a"}]}),
+    }[shape]
+    state = runner.RunState()
+    status, data = await state.call(
+        _ScriptedClient(result=_ToolResult(data=raw)), "tool"
+    )
+    assert (status, data) == ("PASS", expected)
+    assert json.loads(json.dumps(data)) == expected
+    state.record(0, "tool", status, data)
+    assert state.results[0]["data"] == expected
+    assert entry.UUID == "entry-a"
+
+
+@pytest.mark.asyncio
+async def test_call_normalizes_a_real_mcp_typed_collection():
+    entry = dataclasses.make_dataclass("Entry", [("UUID", str)])
+    listing = dataclasses.make_dataclass("Listing", [("entries", list[entry])])
+    app = FastMCP("typed result boundary")
+
+    def list_entries():
+        return listing([entry("entry-a")])
+
+    list_entries.__annotations__["return"] = listing
+    app.tool(list_entries)
+    async with Client(app) as client:
+        status, data = await runner.RunState().call(client, "list_entries")
+    assert (status, data) == ("PASS", {"entries": [{"UUID": "entry-a"}]})
+    assert results.entries(data) == [{"UUID": "entry-a"}]
+    assert results.field(data, "entries") == [{"UUID": "entry-a"}]
+
+
+@pytest.mark.asyncio
+async def test_call_preserves_served_property_names_after_client_sanitization():
+    schema = {
+        "type": "object",
+        "properties": {
+            "memory-size": {"type": "integer"},
+            "memory_size": {"type": "integer"},
+        },
+        "required": ["memory-size", "memory_size"],
+    }
+    expected = {"memory-size": 256, "memory_size": 512}
+    generated = TypeAdapter(json_schema_to_type(schema)).validate_python(expected)
+    status, data = await runner.RunState().call(
+        _ScriptedClient(result=_ToolResult(data=generated)), "tool"
+    )
+    assert (status, data) == ("PASS", expected)

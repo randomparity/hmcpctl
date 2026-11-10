@@ -62,22 +62,12 @@ _JOB_SCENARIO = "st12-job-inspection"
 
 
 def _as_outcome(data: Any) -> JobOutcome | None:
-    """Normalize a job tool's result, whatever shape FastMCP served it in.
-
-    Both job tools are annotated ``-> JobOutcome``, so FastMCP serves an
-    unwrapped output schema and ``result.data`` arrives as a generated pydantic
-    model rather than a mapping. Reading it by field name covers both shapes;
-    an ``isinstance(data, dict)`` test would silently reject every real run.
-    """
-    names = [field.name for field in fields(JobOutcome)]
-    if isinstance(data, dict):
-        source: Any = data
-    elif all(hasattr(data, name) for name in names):
-        source = {name: getattr(data, name) for name in names}
-    else:
+    """Validate the named fields of a normalized job tool result."""
+    if not isinstance(data, dict):
         return None
+    names = [field.name for field in fields(JobOutcome)]
     try:
-        return JobOutcome(**{name: source[name] for name in names})
+        return JobOutcome(**{name: data[name] for name in names})
     except (KeyError, TypeError):
         return None
 

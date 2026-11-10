@@ -12,8 +12,7 @@ def entries(data: object) -> list[Mapping[str, object]]:
     elif isinstance(data, Mapping):
         raw_entries = data.get("entries", [])
     else:
-        # A dataclass tool result (ADR 0197's listing) arrives as a generated model.
-        raw_entries = getattr(data, "entries", [])
+        return []
     if not isinstance(raw_entries, list):
         return []
     return [entry for entry in raw_entries if isinstance(entry, Mapping)]
@@ -26,7 +25,5 @@ def resource(entry: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def field(data: object, name: str) -> object:
-    """Read *name* from a mapping result or a generated dataclass model."""
-    if isinstance(data, Mapping):
-        return data.get(name)
-    return getattr(data, name, None)
+    """Read *name* from a normalized mapping result."""
+    return data.get(name) if isinstance(data, Mapping) else None

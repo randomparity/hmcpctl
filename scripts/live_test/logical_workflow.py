@@ -76,7 +76,7 @@ async def _settle(
 
 
 def _operation(st: str, data: object) -> Mapping[str, Any] | None:
-    found = lpar_power._plain(result_field(data, "operation")) if st == "PASS" else None
+    found = result_field(data, "operation") if st == "PASS" else None
     return found if isinstance(found, Mapping) else None
 
 
@@ -236,7 +236,7 @@ async def _inspect(client: Client, state: RunState, run: lpar_power.Run) -> None
         include=["resources", "rmc"],
     )
     state.record(SUBTASK, "hmc_inspect_lpar", st, data)
-    found = lpar_power._plain(data) if st == "PASS" else None
+    found = data if st == "PASS" else None
     inspection = found if isinstance(found, Mapping) else {}
     run.data["lpar.inspect"] = inspection
     resources = inspection.get("resources") or {}
@@ -282,7 +282,7 @@ async def _power(
 
 
 def _operation_record(st: str, data: object) -> Mapping[str, Any] | None:
-    found = lpar_power._plain(data) if st == "PASS" else None
+    found = data if st == "PASS" else None
     return found if isinstance(found, Mapping) else None
 
 

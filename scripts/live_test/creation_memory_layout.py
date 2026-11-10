@@ -38,7 +38,7 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -346,7 +346,6 @@ async def _lpar_fixture(
         ),
         apply_partition_profile=False,
     )
-    data = plain_data(data)
     state.record(SUBTASK, "hmc_create_lpar", status, data)
     journal["outcome"]["lpar"] = "unknown"
     if status != "PASS" or not isinstance(data, dict):
@@ -408,7 +407,6 @@ async def _vios_fixture(client: Client, state: RunState, system_uuid: str) -> bo
             ratios, mode="json", exclude_none=True
         ),
     )
-    data = plain_data(data)
     state.record(SUBTASK, "hmc_create_vios", status, data)
     journal["outcome"]["vios"] = "unknown"
     identity = (

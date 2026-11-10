@@ -26,7 +26,7 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -51,7 +51,6 @@ async def _create(client: Client, state: RunState, run: _Run, value: str | int) 
         affinity_group_id=value,
         apply_partition_profile=False,
     )
-    data = plain_data(data)
     document = data if isinstance(data, dict) else {}
     identity = _uuid_of(document.get("lpar"))
     run.uuid = identity if identity and is_uuid(identity) else None

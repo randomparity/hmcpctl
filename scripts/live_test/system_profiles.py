@@ -15,7 +15,7 @@ from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_descripti
 from hmcpctl.operations.systems import profiles as domain
 from hmcpctl.resource_identity import resolve_system_uuid
 
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -302,7 +302,7 @@ async def exercise_system_profiles(client: Client, state: RunState) -> None:
         tool, status, data = await dispatch_stage(
             client, state, system, stage, names, pairs
         )
-        outcome = plain_data(data)
+        outcome = data
         artifacts.system_profile_jobs.append({"stage": stage, "outcome": outcome})
         artifacts.system_profile_phase = "confirmed:" + stage
         state.checkpoint()
@@ -327,7 +327,6 @@ async def exercise_system_profiles(client: Client, state: RunState) -> None:
             status, listing = await state.call(
                 client, "hmc_list_system_profiles", system_name_or_uuid=system
             )
-            listing = plain_data(listing)
             artifacts.system_profile_baseline["listing"] = listing
             state.checkpoint()
             listed = (

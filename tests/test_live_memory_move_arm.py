@@ -2,6 +2,7 @@ import asyncio
 import sys
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import make_dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import memory_move as arm
 from live_test import runner
 from live_test.config import LiveTestConfig
+from live_test.observation import plain_data
 from lpar.test_memory_move import (
     SOURCE,
     TARGET,
@@ -696,7 +698,8 @@ async def test_explicit_null_generated_result_allows_both_phases(live_boundary):
 
     async def generated(*args, **kwargs):
         status, data = await original(*args, **kwargs)
-        return status, SimpleNamespace(**data)
+        model = make_dataclass("GeneratedResult", [(name, object) for name in data])
+        return status, plain_data(model(**data)) if status == "PASS" else data
 
     state.call = generated
     await arm.exercise_memory_move(None, state)

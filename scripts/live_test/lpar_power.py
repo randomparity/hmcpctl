@@ -19,7 +19,7 @@ import re
 import shlex
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client
@@ -324,7 +324,7 @@ def _repository_without_parent_free(listing: str) -> str:
 
 def _deleted_disks(data: Any) -> frozenset[str]:
     """The disk names a decommission result reports deleted (ADR 0323)."""
-    storage = _plain(result_field(data, "storage"))
+    storage = result_field(data, "storage")
     deleted = storage.get("deleted") if isinstance(storage, Mapping) else None
     return frozenset(
         item["disk_name"]
@@ -442,23 +442,12 @@ async def _gone(client: Client, state: RunState, run: Run, name: str) -> bool:
     return False
 
 
-def _plain(value: object) -> Any:
-    """A served typed result as plain data.
-
-    FastMCP hands a tool whose output schema has properties back as a generated
-    dataclass, nested ones included, never as a dict.
-    """
-    if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
-    return value
-
-
 def _items(data: object, name: str) -> list[Mapping[str, Any]]:
     """The mapping entries of list field *name* of a tool result."""
     value = result_field(data, name)
     if not isinstance(value, list):
         return []
-    return [item for item in map(_plain, value) if isinstance(item, Mapping)]
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def _all_steps(data: object, status: str) -> bool:
@@ -805,7 +794,7 @@ async def _operation(
         wait_seconds=600,
     )
     state.record(SUBTASK, f"hmc_power_lpar ({request_id})", st, data)
-    record = _plain(data) if st == "PASS" else None
+    record = data if st == "PASS" else None
     record = record if isinstance(record, Mapping) else None
     for _ in range(_OPERATION_POLLS):
         if record is None or record.get("state") in {"terminal", "paused"}:
@@ -1051,7 +1040,7 @@ async def _provision(client: Client, state: RunState, run: Run) -> bool:
     record_status, note = judge_create_result(st, data)
     state.record(SUBTASK, "hmc_provision_lpar", record_status, data, note)
     run.data["provision.lpar"] = data
-    operation = _plain(result_field(data, "operation")) if st == "PASS" else None
+    operation = result_field(data, "operation") if st == "PASS" else None
     if isinstance(operation, Mapping):
         # Registered only once recorded: a refused provision has nothing to abandon.
         run.provisions.add(request_id)
@@ -1127,7 +1116,7 @@ async def _saved_profile_active(
     client: Client, state: RunState, run: Run, data: Any
 ) -> bool:
     """P's default and last-activated profile are the one provision saved (ADR 0313)."""
-    operation = _plain(result_field(data, "operation"))
+    operation = result_field(data, "operation")
     if not isinstance(operation, Mapping) or operation.get("outcome") != "configured":
         return False
     saved = f"hmcpctl_{str(operation.get('operation_id', ''))[:12]}"
@@ -1205,7 +1194,7 @@ def _dry_run_mapping_ids(data: object) -> frozenset[tuple[str, str]] | None:
     ]
     if len(mapping_steps) != 1:
         return None
-    result = _plain(result_field(mapping_steps[0], "result"))
+    result = result_field(mapping_steps[0], "result")
     if not isinstance(result, Mapping):
         return None
     mappings = result.get("mappings")
@@ -1225,7 +1214,7 @@ def _dry_run_mapping_ids(data: object) -> frozenset[tuple[str, str]] | None:
 
 
 def _dry_run_inventoried(data: object, run: Run, expected_adapters: object) -> bool:
-    radius = _plain(result_field(data, "blast_radius"))
+    radius = result_field(data, "blast_radius")
     radius = radius if isinstance(radius, Mapping) else {}
     listed = radius.get("adapters")
     if not isinstance(listed, (list, tuple)) or expected_adapters is None:
@@ -1282,7 +1271,7 @@ async def _decommission(
         )
 
     st, data = await call()
-    operation = _plain(result_field(data, "operation")) if st == "PASS" else None
+    operation = result_field(data, "operation") if st == "PASS" else None
     if not isinstance(operation, Mapping):
         return st, data
     # Registered only once recorded: a refused decommission has nothing to abandon.

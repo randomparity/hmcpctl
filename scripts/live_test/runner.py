@@ -126,6 +126,7 @@ from live_test.observation import (
     KnownGap,
     classify_failure,
     grade_assertions,
+    plain_data,
 )
 from live_test.paging_switchover import exercise_paging_switchover
 from live_test.partition_profile_contract import exercise as exercise_profile_contract
@@ -421,7 +422,7 @@ class RunState:
         reuse_gaps: bool = True,
         **kwargs: Any,
     ) -> tuple[str, Any]:
-        """Call a tool and return a PASS or FAIL result without raising."""
+        """Call a tool; normalize successful data and retain structured failures."""
         # FastMCP would reject an invalid dispatch anyway; checking here is what
         # gives the failure a stable reason instead of a pydantic rendering, and
         # keeps a harness defect from ever reaching the real HMC.
@@ -443,7 +444,7 @@ class RunState:
         try:
             result = await client.call_tool(tool, kwargs)
             if hasattr(result, "data") and result.data is not None:
-                return "PASS", result.data
+                return "PASS", plain_data(result.data)
             if hasattr(result, "content"):
                 parts = [
                     str(block.text) if hasattr(block, "text") else str(block)
@@ -484,8 +485,7 @@ class RunState:
             safe_data: Any = redact_failure_text(data.message)
         else:
             if is_dataclass(data) and not isinstance(data, type):
-                # FastMCP serves a dataclass tool result as a generated dataclass.
-                data = asdict(data)
+                data = plain_data(data)
             safe_data = redact_failure_data(data) if status == "FAIL" else data
         entry = {
             "subtask": subtask,

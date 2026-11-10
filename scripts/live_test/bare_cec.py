@@ -49,6 +49,7 @@ from hmcpctl.ssh.transport import HMCCLIError
 from . import cli, dedicated_pcie
 from .metrics import _as_outcome
 from .observation import Assertion, CallFailure, ExpectedOutcome, grade_assertions
+from .results import field as _field
 
 if TYPE_CHECKING:
     from live_test.config import LiveTestConfig
@@ -163,13 +164,6 @@ def _dump_opt_in(config: LiveTestConfig) -> bool | None:
     return {"": False, "false": False, "true": True}.get(
         config.accept_platform_dump.strip().lower()
     )
-
-
-def _field(data: Any, name: str) -> Any:
-    """Read *name* from a tool result served as a mapping or as a generated model."""
-    if isinstance(data, dict):
-        return data.get(name)
-    return getattr(data, name, None)
 
 
 def _power_job(data: Any) -> dict[str, Any] | None:

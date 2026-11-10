@@ -33,7 +33,7 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, judge_create_result, plain_data
+from .observation import Assertion, judge_create_result
 from .results import field as result_field
 
 if TYPE_CHECKING:
@@ -513,7 +513,7 @@ async def _create(
         if j["case"] == "controller-shared-lpar":
             result_status, entry = "FAIL", None
             # This acknowledged partial result permits only independent readback.
-            match plain_data(data):
+            match data:
                 case {
                     "resource_created": True,
                     "workflow_completed": False,
@@ -551,7 +551,7 @@ async def _create(
             resources=RESOURCES,
             creation_memory=_tool_memory(memory),
         )
-        result_status, entry = status, plain_data(data)
+        result_status, entry = status, data
     identity = _canonical(_uuid_of(entry)) if result_status == "PASS" else None
     # Report only bounded classification; raw product errors can contain private remote text.
     state.record(

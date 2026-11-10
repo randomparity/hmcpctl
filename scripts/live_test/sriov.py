@@ -51,9 +51,7 @@ def _sriov_changed(data: object) -> bool:
         return data.get("changed") is True
     if isinstance(data, str):
         return "changed=True" in data
-    # The live client serves the result dataclass as a generated model, not a
-    # mapping (as `metrics._as_outcome` also has to handle), so read the field.
-    return getattr(data, "changed", None) is True
+    return False
 
 
 def _profile_read_clean(profile_ports: str | None) -> bool:

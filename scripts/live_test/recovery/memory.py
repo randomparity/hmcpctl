@@ -11,7 +11,6 @@ from datetime import datetime
 from hmcpctl.config import HMCConfig
 from live_test import config as live_config
 from live_test import creation_memory, creation_memory_layout, lpar_config, runner
-from live_test.observation import plain_data
 
 from .common import Finding, StateUnreadable
 
@@ -263,7 +262,6 @@ async def check_creation_memory(call, inputs: CreationMemoryInputs) -> list[Find
         ("VirtualIOServer", "hmc_list_vios"),
     ):
         status, data = await call(tool, system_name_or_uuid=j["system_uuid"])
-        data = plain_data(data)
         raw = data.get("entries") if isinstance(data, dict) else data
         if (
             status != "PASS"
@@ -371,9 +369,7 @@ async def check_creation_memory_layout(
     status, data = await call(
         "hmc_list_vios", system_name_or_uuid=journal["system_uuid"]
     )
-    raw = data if isinstance(data, list) else getattr(data, "entries", None)
-    if isinstance(data, dict):
-        raw = data.get("entries")
+    raw = data.get("entries") if isinstance(data, dict) else data
     if status != "PASS" or not isinstance(raw, list):
         raise StateUnreadable("ST58 VIOS feed unreadable")
     rows = []

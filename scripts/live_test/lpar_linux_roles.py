@@ -31,7 +31,7 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, grade_assertions, plain_data
+from .observation import Assertion, grade_assertions
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -72,7 +72,6 @@ async def _read(client: Client, state: RunState, run: _Run) -> dict[str, Any]:
         system_name_or_uuid=run.system,
         lpar_name_or_uuid=run.uuid,
     )
-    data = plain_data(data)
     resource = data.get("Resource") if isinstance(data, dict) else None
     if (
         status != "PASS"
@@ -148,7 +147,6 @@ async def _create(
         },
         apply_partition_profile=not controller,
     )
-    data = plain_data(data)
     if status != "PASS" or not isinstance(data, dict):
         raise ValueError("Linux-role creation did not return structured success")
     run.uuid = _uuid_of(data.get("lpar"))
@@ -212,7 +210,6 @@ async def _update(
         lpar_name_or_uuid=run.uuid,
         settings=settings,
     )
-    result = plain_data(result)
     expected = _roles(before) | settings
     if (
         status != "PASS"

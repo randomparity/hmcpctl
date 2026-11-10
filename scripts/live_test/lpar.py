@@ -18,7 +18,6 @@ from .observation import (
     Assertion,
     CallFailure,
     judge_create_result,
-    plain_data,
 )
 from .results import field
 
@@ -89,7 +88,6 @@ async def _create_and_confirm_scratch_lpar(client: Client, state: RunState) -> N
     )
     record_status, reason = judge_create_result(status, data)
     state.record(8, "hmc_create_lpar", record_status, data, reason)
-    data = plain_data(data)
     if status == "PASS" and isinstance(data, dict):
         created = data.get("lpar")
         if isinstance(created, dict):

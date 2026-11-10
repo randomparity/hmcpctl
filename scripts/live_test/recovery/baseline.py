@@ -9,7 +9,6 @@ from hmcpctl.config import HMCConfig
 from live_test import baseline as independent_baseline
 from live_test import config as live_config
 from live_test import runner
-from live_test.observation import plain_data
 from live_test.profiles import ARTIFACT_PREFIX, backup_artifact_names
 from live_test.recovery.common import Finding, StateUnreadable
 
@@ -84,7 +83,6 @@ async def check_round2(call, inputs: Round2Inputs) -> list[Finding]:
             tool, system_name_or_uuid=scope["system"], lpar_name_or_uuid=inputs.lpar
         )
 
-        data = plain_data(data)
         if status != "PASS" or type(data) is not type(expected):
             raise StateUnreadable("round2 property read is incomplete", findings)
         if tool == "hmc_get_lpar_description":

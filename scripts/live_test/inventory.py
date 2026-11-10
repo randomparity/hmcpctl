@@ -10,7 +10,6 @@ from fastmcp import Client
 from hmcpctl.config import HMCConfig
 from hmcpctl.ssh.commands import build_filter
 
-from .observation import plain_data
 from .results import entries
 from .results import resource as get_resource
 
@@ -79,7 +78,7 @@ async def _capture_lpar_properties(client: Client, state: RunState) -> None:
     )
     state.record(0, "hmc_get_lpar_proc_compat (baseline)", st, data)
     if st == "PASS":
-        artifacts.lp3_baseline["proc_compat"] = plain_data(data)
+        artifacts.lp3_baseline["proc_compat"] = data
 
 
 async def _capture_adapter_topology(client: Client, state: RunState) -> None:

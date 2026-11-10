@@ -25,7 +25,7 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -51,7 +51,6 @@ async def _create(client: Client, state: RunState, run: _Run) -> None:
         hardware_mem_expansion=True,
         apply_partition_profile=False,
     )
-    data = plain_data(data)
     if status != "PASS" or not isinstance(data, dict):
         raise ValueError("Hardware memory creation did not return structured success")
     identity = _uuid_of(data.get("lpar"))

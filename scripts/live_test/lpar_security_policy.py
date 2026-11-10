@@ -21,7 +21,7 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -60,7 +60,6 @@ async def _create(client: Client, state: RunState, run: _Run) -> None:
         security_policy={"secure_boot": 0},
         apply_partition_profile=False,
     )
-    data = plain_data(data)
     if status != "PASS" or not isinstance(data, dict):
         raise ValueError("Security policy creation did not return structured success")
     run.uuid = _uuid_of(data.get("lpar"))
@@ -90,7 +89,7 @@ async def _read(client: Client, state: RunState, run: _Run) -> object:
     )
     if status != "PASS":
         raise ValueError("Independent security policy read was unavailable")
-    return plain_data(data)
+    return data
 
 
 async def _update(client: Client, state: RunState, run: _Run, before: dict) -> None:
@@ -103,7 +102,6 @@ async def _update(client: Client, state: RunState, run: _Run, before: dict) -> N
         lpar_name_or_uuid=run.uuid,
         settings={"secure_boot": 1},
     )
-    result = plain_data(result)
     observed = result.get("observed") if isinstance(result, dict) else None
     if (
         status != "PASS"

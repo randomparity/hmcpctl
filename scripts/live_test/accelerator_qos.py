@@ -26,7 +26,7 @@ from hmcpctl.xmlutil import leaf_text
 
 from . import evidence
 from .config import LiveTestConfig
-from .observation import Assertion, CallFailure, plain_data
+from .observation import Assertion, CallFailure
 
 SUBTASK = 64
 GROUP = "lpar-accelerator-qos"
@@ -233,7 +233,6 @@ async def oracle(hmc, system: str, partition_id: int | None) -> list:
 
 
 def succeeded(status, data, observed, number, quantity):
-    data = plain_data(data)
     return (
         status == "PASS"
         and isinstance(data, Mapping)
@@ -388,7 +387,7 @@ async def exercise_accelerator_qos(client, state) -> None:
                         "tool_status": status,
                         "result": data.message
                         if isinstance(data, CallFailure)
-                        else plain_data(data),
+                        else data,
                         "independent": observed,
                         "error": error,
                     },

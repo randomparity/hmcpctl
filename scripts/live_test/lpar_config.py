@@ -41,7 +41,7 @@ from hmcpctl.xmlutil import leaf_text
 
 from . import dedicated_pcie
 from .dedicated_pcie import _ABSENCE_REREAD_DELAY_S, partition_not_found
-from .observation import Assertion, CallFailure, judge_create_result, plain_data
+from .observation import Assertion, CallFailure, judge_create_result
 from .results import field as result_field
 from .results import resource
 
@@ -1468,7 +1468,7 @@ async def _settings_cases(client: Client, state: RunState, run: _Run) -> bool:
         system_name_or_uuid=run.system,
         lpar_name_or_uuid=run.uuid,
     )
-    before = plain_data(data)
+    before = data
     if status != "PASS" or not isinstance(before, dict):
         state.record(SETTINGS_SUBTASK, "settings baseline", "FAIL", data)
         return False
@@ -1501,7 +1501,7 @@ async def _settings_cases(client: Client, state: RunState, run: _Run) -> bool:
             lpar_name_or_uuid=run.uuid,
             settings=patch,
         )
-        result = plain_data(data)
+        result = data
         verified = (
             status == "PASS"
             and isinstance(result, dict)
@@ -1518,7 +1518,7 @@ async def _settings_cases(client: Client, state: RunState, run: _Run) -> bool:
             system_name_or_uuid=run.system,
             lpar_name_or_uuid=run.uuid,
         )
-        after = plain_data(data)
+        after = data
         if status != "PASS" or after != before | patch:
             state.record(SETTINGS_SUBTASK, "settings postcondition", "FAIL", data)
             return False
@@ -1622,7 +1622,7 @@ async def _reporting_cases(client: Client, state: RunState, run: _Run) -> bool:
         system_name_or_uuid=run.system,
         lpar_name_or_uuid=run.uuid,
     )
-    before = plain_data(data)
+    before = data
     if status != "PASS" or not isinstance(before, dict):
         state.record(REPORTING_SUBTASK, "settings baseline", "FAIL", data)
         return False
@@ -1654,7 +1654,7 @@ async def _reporting_cases(client: Client, state: RunState, run: _Run) -> bool:
             lpar_name_or_uuid=run.uuid,
             settings=patch,
         )
-        result = plain_data(data)
+        result = data
         verified = (
             status == "PASS"
             and isinstance(result, dict)
@@ -1674,7 +1674,7 @@ async def _reporting_cases(client: Client, state: RunState, run: _Run) -> bool:
             system_name_or_uuid=run.system,
             lpar_name_or_uuid=run.uuid,
         )
-        after = plain_data(data)
+        after = data
         if status != "PASS" or after != before | patch:
             state.record(REPORTING_SUBTASK, "settings postcondition", "FAIL", data)
             return False

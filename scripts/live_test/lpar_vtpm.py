@@ -19,7 +19,7 @@ from .lpar_config import (
     _teardown,
     scratch_partitions,
 )
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -84,7 +84,6 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
             vtpm_settings={"vtpm_enabled": False},
             apply_partition_profile=False,
         )
-        data = plain_data(data)
         if status != "PASS" or not isinstance(data, dict):
             raise ValueError(
                 f"vTPM creation did not return a structured success ({status}): {data!r}"
@@ -116,7 +115,6 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
             system_name_or_uuid=run.system,
             lpar_name_or_uuid=run.uuid,
         )
-        observed = plain_data(observed)
         actual = observed.get("settings") if isinstance(observed, dict) else None
         if (
             status != "PASS"
@@ -136,7 +134,6 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
             settings=settings,
             acknowledge_data_loss=False,
         )
-        result = plain_data(result)
         expected = result.get("observed") if isinstance(result, dict) else None
         if (
             status != "PASS"
@@ -152,7 +149,6 @@ async def exercise_lpar_vtpm(client: Client, state: RunState) -> None:
             system_name_or_uuid=run.system,
             lpar_name_or_uuid=run.uuid,
         )
-        readback = plain_data(readback)
         if (
             status != "PASS"
             or not isinstance(readback, dict)

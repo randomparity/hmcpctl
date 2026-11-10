@@ -383,14 +383,10 @@ async def _record_inventory_summaries(client: Client, state: RunState) -> None:
     st, data = await state.call(
         client, "hmc_system_summary", system_name_or_uuid=config.system_name
     )
-    # SystemSummary is a dataclass, not a dict; a non-None uuid confirms a real record.
     has_summary = (
         st == "PASS"
-        and data is not None
-        and (
-            (isinstance(data, dict) and (data.get("uuid") or data.get("UUID")))
-            or getattr(data, "uuid", None) is not None
-        )
+        and isinstance(data, dict)
+        and bool(data.get("uuid") or data.get("UUID"))
     )
     state.record_verified(
         1,
@@ -407,14 +403,10 @@ async def _record_inventory_summaries(client: Client, state: RunState) -> None:
     st, data = await state.call(
         client, "hmc_lpar_summary", lpar_name_or_uuid=config.lp3_name
     )
-    # LparSummary is a dataclass, not a dict; a non-None uuid confirms a real record.
     has_lpar_summary = (
         st == "PASS"
-        and data is not None
-        and (
-            (isinstance(data, dict) and (data.get("uuid") or data.get("UUID")))
-            or getattr(data, "uuid", None) is not None
-        )
+        and isinstance(data, dict)
+        and bool(data.get("uuid") or data.get("UUID"))
     )
     state.record_verified(
         1,

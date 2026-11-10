@@ -4,6 +4,8 @@ import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -510,7 +512,12 @@ def test_typed_mapping_retains_exact_fields():
         backing_name: str
 
     row = Row("vhost1/vtscsi1", "client-uuid", "VirtualDisk", "run-disk")
-    assert detach_probe.mapping_rows([row]) == frozenset({tuple(vars(row).values())})
+    client = SimpleNamespace(
+        call_tool=AsyncMock(return_value=SimpleNamespace(data=[row]))
+    )
+    status, data = asyncio.run(runner.RunState().call(client, "tool"))
+    assert status == "PASS"
+    assert detach_probe.mapping_rows(data) == frozenset({tuple(vars(row).values())})
 
 
 def test_surviving_mapping_snapshot_stops_even_if_later_reads_would_converge(

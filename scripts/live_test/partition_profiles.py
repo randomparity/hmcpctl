@@ -18,7 +18,7 @@ from hmcpctl.documents.partition_profile import (
 from hmcpctl.operations.lpar import profiles as domain
 
 from .config import decode_saved_config
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 SUBTASK = 46
 GROUP = "partition-profiles"
@@ -235,7 +235,6 @@ async def _reads(client, state, before):
         status, data = await dispatch(client, state, tool, args)
         if status != "PASS":
             raise ValueError("initial product profile reads failed")
-        data = plain_data(data)
         if not isinstance(data, dict):
             raise TypeError("profile read returned no structured identity")
         if action == "list":
@@ -279,7 +278,7 @@ async def _exercise(client, state):
         journal["phase"] = "pending:" + stage
         state.checkpoint()
         status, data = await dispatch(client, state, tool, args)
-        outcome = plain_data(data)
+        outcome = data
         journal["steps"].append({"stage": stage, "outcome": outcome})
         journal["phase"] = "confirmed:" + stage
         state.checkpoint()

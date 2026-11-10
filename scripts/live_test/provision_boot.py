@@ -182,9 +182,7 @@ def _fixture_media(config: LiveTestConfig, run: lpar_power.Run) -> Media:
 
 def steps_by_name(data: object) -> dict[str, Mapping[str, Any]]:
     """The result's steps by name; the last of a repeated name wins."""
-    # The whole result, so served steps (nested dataclasses) become dicts too.
-    plain = lpar_power._plain(data)
-    steps = plain.get("steps") if isinstance(plain, Mapping) else None
+    steps = data.get("steps") if isinstance(data, Mapping) else None
     items = steps if isinstance(steps, list) else []
     return {str(step.get("step")): step for step in items if isinstance(step, Mapping)}
 
@@ -257,7 +255,7 @@ async def _provision(
     state.artifacts.provision_boot_media = recorded
     st, data = await call()
     for _ in range(_POLLS):
-        operation = lpar_power._plain(result_field(data, "operation"))
+        operation = result_field(data, "operation")
         if st != "PASS" or not isinstance(operation, Mapping):
             break
         run.provisions.add(request_id)
@@ -353,12 +351,11 @@ async def _clock(client: Client, state: RunState) -> dict[str, Any]:
 
 
 def _rows(data: object) -> list[dict[str, Any]] | None:
-    rows = lpar_power._plain(data)
-    if not isinstance(rows, list):
+    if not isinstance(data, list):
         return None
     return [
         {"time_stamp": row.get("time_stamp"), "refcode": row.get("refcode")}
-        for row in rows
+        for row in data
         if isinstance(row, Mapping)
     ]
 
@@ -426,7 +423,7 @@ async def _boot(
     st, data = await _provision(client, state, run, media)
     run.data["answered"] = st == "PASS"
     steps = steps_by_name(data)
-    operation = lpar_power._plain(result_field(data, "operation"))
+    operation = result_field(data, "operation")
     operation = operation if isinstance(operation, Mapping) else {}
     mount = steps.get("mount_media") or {}
     run.data.update(

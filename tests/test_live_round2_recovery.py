@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import live_test_recovery as recovery
 from live_test import baseline, inventory, provisioning, runner
 from live_test import config as live_config
+from live_test.observation import plain_data
 from live_test.recovery import baseline as baseline_recovery
 
 from hmcpctl.config import HMCConfig
@@ -339,7 +340,7 @@ async def test_st0_captures_fresh_round2_witness(state, monkeypatch, served):
         if tool == "hmc_get_lpar_description":
             return "PASS", "original"
         if tool == "hmc_get_lpar_proc_compat":
-            return "PASS", (
+            return "PASS", plain_data(
                 make_dataclass("Compatibility", ["profile", "profile_mode"])(
                     "default", "default"
                 )

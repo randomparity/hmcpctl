@@ -17,7 +17,7 @@ from .lpar_config import (
     _teardown,
     scratch_partitions,
 )
-from .observation import Assertion, plain_data
+from .observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -62,7 +62,6 @@ async def exercise_lpar_physical_io(client: Client, state: RunState) -> None:
             physical_io={"console_slot": "hmc"},
             apply_partition_profile=False,
         )
-        data = plain_data(data)
         if status != "PASS" or not isinstance(data, dict):
             raise ValueError(
                 f"IBM i creation did not return a successful structured result ({status}): {data!r}"

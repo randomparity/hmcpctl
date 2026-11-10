@@ -24,7 +24,7 @@ from live_test import (  # noqa: E402
     lpar_config,
     runner,
 )
-from live_test.observation import CallFailure  # noqa: E402
+from live_test.observation import CallFailure, plain_data  # noqa: E402
 
 SYSTEM = "sys-A"
 OTHER = "lpar-A"
@@ -575,7 +575,8 @@ class DedicatedHMC(FakeHMC):
 
 async def _run_dedicated(monkeypatch, hmc, *, system=SYSTEM, drc="21010020"):
     async def scripted(_state, _client, tool, **kwargs):
-        return hmc.answer(tool, kwargs)
+        status, data = hmc.answer(tool, kwargs)
+        return status, plain_data(data) if status == "PASS" else data
 
     monkeypatch.setattr(runner.RunState, "call", scripted)
     state = runner.RunState(
