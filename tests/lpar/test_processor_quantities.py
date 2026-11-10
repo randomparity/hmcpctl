@@ -1480,8 +1480,8 @@ def test_numeric_representation_precedes_inherited_snapshot(monkeypatch, site):
         ]
         field = "CurrentProcessingUnits"
     container[field] = "0" * 1057 + container[field]
-    inherited = Mock(wraps=processors.memory._snapshot)
-    monkeypatch.setattr(processors.memory, "_snapshot", inherited)
+    inherited = Mock(wraps=processors.observation.partition_snapshot)
+    monkeypatch.setattr(processors.observation, "partition_snapshot", inherited)
     with pytest.raises(ValueError):
         processors._snapshot(entry, LPAR_UUID, processor_row())
     inherited.assert_not_called()

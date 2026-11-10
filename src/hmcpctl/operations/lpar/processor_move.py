@@ -15,7 +15,7 @@ from hmcpctl.documents.lpar_processors import (
 )
 from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar import processors
-from hmcpctl.operations.lpar.memory import current as memory
+from hmcpctl.operations.lpar.observation import contained_partition
 from hmcpctl.resource_identity import (
     is_uuid,
     resolve_system_uuid,
@@ -41,7 +41,7 @@ async def _read_endpoint(
 ) -> _Peer:
     if (await resolve_system_uuid(hmc, system_name)).lower() != system_uuid.lower():
         raise ValueError("Processor move CLI system identity changed")
-    kind, uuid = await memory._contained_partition(hmc, system_uuid, selector)
+    kind, uuid = await contained_partition(hmc, system_uuid, selector)
     read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
     entry = await read(uuid)
     identity = processors._bounded_memory_snapshot(entry, uuid)

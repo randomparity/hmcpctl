@@ -16,7 +16,7 @@ from hmcpctl.documents.lpar_processors import (
     bounded_processor_number,
 )
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.memory import current as memory
+from hmcpctl.operations.lpar.observation import MEMORY_FIELDS
 from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
 from hmcpctl.operations.lpar.processor_move import _read_endpoint
 from hmcpctl.resource_identity import (
@@ -64,7 +64,7 @@ _VECTOR = {
     "CurrentMaximumVirtualProcessors": "current_maximum_processors",
 }
 _SNAPSHOT_FIELDS = {
-    *memory._MEMORY_FIELDS,
+    *MEMORY_FIELDS,
     *_UNIT_FIELDS,
     *_COUNT_FIELDS,
     "uuid",
@@ -151,7 +151,7 @@ def _snapshot(peer: Any) -> dict[str, Any]:
         raise ValueError("ST61 requires the complete processor snapshot")
     for key in _UNIT_FIELDS:
         _unit(peer[key])
-    for key in {*_COUNT_FIELDS, *memory._MEMORY_FIELDS, "partition_id"}:
+    for key in {*_COUNT_FIELDS, *MEMORY_FIELDS, "partition_id"}:
         _integer(peer[key])
     if (
         not isinstance(peer["uuid"], str)

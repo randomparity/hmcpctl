@@ -225,3 +225,28 @@ importlib.import_module("hmcpctl.operations.lpar.{module}")
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize("module", ["processors", "processor_move"])
+def test_partition_read_without_memory_mutation(module):
+    script = f"""
+import importlib
+import importlib.abc
+import sys
+
+class NoMemoryMutation(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "hmcpctl.operations.lpar.memory.current":
+            raise ModuleNotFoundError("memory mutation dependency forbidden")
+
+sys.meta_path.insert(0, NoMemoryMutation())
+importlib.import_module("hmcpctl.operations.lpar.{module}")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

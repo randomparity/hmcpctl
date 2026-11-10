@@ -11,14 +11,16 @@ from hmcpctl.documents.lpar_memory import LparMemoryChange, LparMemoryMove
 from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.memory.current import (
     _admit_state,
-    _contained_partition,
-    _integer,
-    _MemorySnapshot,
     _MemoryTargets,
     _postconditions,
     _require_cpu_vector,
     _result,
-    _snapshot,
+)
+from hmcpctl.operations.lpar.observation import (
+    PartitionSnapshot,
+    contained_partition,
+    integer,
+    partition_snapshot,
 )
 from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
 from hmcpctl.operations.resource_reading import resource_container
@@ -32,10 +34,10 @@ from hmcpctl.ssh.memory import move_lpar_memory_quantity
 
 async def _read_endpoint(
     hmc: HMCClient, system_uuid: str, selector: str
-) -> tuple[str, _MemorySnapshot]:
-    kind, uuid = await _contained_partition(hmc, system_uuid, selector)
+) -> tuple[str, PartitionSnapshot]:
+    kind, uuid = await contained_partition(hmc, system_uuid, selector)
     read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
-    snapshot = _snapshot(await read(uuid), uuid)
+    snapshot = partition_snapshot(await read(uuid), uuid)
     try:
         _require_cpu_vector(snapshot["processors"])
     except ValueError as error:
@@ -57,16 +59,16 @@ async def _system_bounds(hmc: HMCClient, uuid: str, name: str) -> tuple[int, int
     if resource.get("SystemName") != name or resource.get("State") != "operating":
         raise ValueError("Memory move requires the selected operating system")
     memory = resource_container(resource, "AssociatedSystemMemoryConfiguration")
-    region = _integer(memory.get("MemoryRegionSize"), "MemoryRegionSize")
-    total = _integer(memory.get("ConfigurableSystemMemory"), "ConfigurableSystemMemory")
+    region = integer(memory.get("MemoryRegionSize"), "MemoryRegionSize")
+    total = integer(memory.get("ConfigurableSystemMemory"), "ConfigurableSystemMemory")
     if region < 1 or total < region:
         raise ValueError("Memory move system region or capacity is invalid")
     return region, total
 
 
 def _move_targets(
-    source: _MemorySnapshot,
-    destination: _MemorySnapshot,
+    source: PartitionSnapshot,
+    destination: PartitionSnapshot,
     move: LparMemoryMove,
     region: int,
     total: int,
@@ -117,7 +119,7 @@ def _move_targets(
 
 
 def _endpoint_matched(
-    before: _MemorySnapshot, after: _MemorySnapshot, targets: _MemoryTargets
+    before: PartitionSnapshot, after: PartitionSnapshot, targets: _MemoryTargets
 ) -> bool:
     return _postconditions(before, after, targets) and all(
         before.get(key) == after.get(key)
@@ -129,7 +131,7 @@ async def _observe_endpoint(
     hmc: HMCClient,
     system_uuid: str,
     kind: str,
-    before: _MemorySnapshot,
+    before: PartitionSnapshot,
     targets: _MemoryTargets,
     submission_error: str | None,
     native_rejection: bool,

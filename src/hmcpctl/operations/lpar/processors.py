@@ -15,7 +15,7 @@ from hmcpctl.documents.lpar_processors import (
     bounded_processor_number,
 )
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.memory import current as memory
+from hmcpctl.operations.lpar import observation
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.resource_identity import (
@@ -39,7 +39,7 @@ _OS = {
 _MEMORY = ("current_minimum_mib", "current_memory_mib", "current_maximum_mib")
 
 
-class _ProcessorSnapshot(memory._MemorySnapshot):
+class _ProcessorSnapshot(observation.PartitionSnapshot):
     processor_mode: Literal["ded", "shared"]
     dynamic_processor: object
     current_minimum_processors: int
@@ -141,11 +141,11 @@ def _mode(value: object) -> Literal["ded", "shared"]:
 
 def _bounded_memory_snapshot(
     entry: dict[str, Any] | None, uuid: str
-) -> memory._MemorySnapshot:
+) -> observation.PartitionSnapshot:
     resource = resource_container(entry or {}, "Resource")
     _number(resource.get("PartitionID"), "PartitionID", whole=True)
     memory_config = resource_container(resource, "PartitionMemoryConfiguration")
-    for field in memory._MEMORY_FIELDS.values():
+    for field in observation.MEMORY_FIELDS.values():
         _number(memory_config.get(field), field, whole=True)
     for field in ("CurrentEntitledMemory", "RuntimeEntitledMemory"):
         value = leaf_text(memory_config.get(field))
@@ -173,7 +173,7 @@ def _bounded_memory_snapshot(
     )
     for field in fields:
         _number(current.get(field), field, whole="Units" not in field)
-    return memory._snapshot(entry, uuid)
+    return observation.partition_snapshot(entry, uuid)
 
 
 def _snapshot(
@@ -588,7 +588,9 @@ async def change_lpar_processors(
             "system_name_or_uuid is required for native processor quantities"
         )
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    kind, uuid = await memory._contained_partition(hmc, system_uuid, lpar_name_or_uuid)
+    kind, uuid = await observation.contained_partition(
+        hmc, system_uuid, lpar_name_or_uuid
+    )
     read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
     entry = await read(uuid)
     identity = _bounded_memory_snapshot(entry, uuid)
@@ -631,7 +633,7 @@ async def change_lpar_processors(
     ):
         raise ValueError("Processor capacity identity differs from selected system")
     expected = _targets(before, change, system or {})
-    if await memory._contained_partition(hmc, system_uuid, uuid) != (kind, uuid):
+    if await observation.contained_partition(hmc, system_uuid, uuid) != (kind, uuid):
         raise ValueError("Processor containment changed before submission")
     if (await resolve_system_uuid(hmc, system_name)).lower() != system_uuid.lower():
         raise ValueError("Processor system identity changed before submission")
@@ -659,7 +661,10 @@ async def change_lpar_processors(
             and not cause.exit_signal
         )
     try:
-        if await memory._contained_partition(hmc, system_uuid, uuid) != (kind, uuid):
+        if await observation.contained_partition(hmc, system_uuid, uuid) != (
+            kind,
+            uuid,
+        ):
             raise ValueError("Processor readback containment changed")
         after = await evidence(await read(uuid))
         matched = _postconditions(before, after, expected)

@@ -10,7 +10,7 @@ from typing import Any
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.memory.current import _contained_partition
+from hmcpctl.operations.lpar.observation import contained_partition
 from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
 from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.resource_identity import is_uuid, resolve_system_uuid, summary_matching
@@ -110,7 +110,7 @@ def _boolean(value: object, label: str) -> bool:
 
 
 async def _context(hmc: HMCClient, system_uuid: str, selector: str) -> dict[str, Any]:
-    kind, uuid = await _contained_partition(hmc, system_uuid, selector)
+    kind, uuid = await contained_partition(hmc, system_uuid, selector)
     read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
     entry = await read(uuid)
     if entry is None:
