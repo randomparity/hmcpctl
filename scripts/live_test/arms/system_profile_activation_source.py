@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_config_document, load_profile
 from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.jobs import TERMINAL_JOB_STATUSES, build_job_request
 from hmcpctl.operations.lpar.activation import ACTIVATED_STATES, submit_power_off
 from hmcpctl.operations.lpar.ownership import (
@@ -30,11 +31,7 @@ from hmcpctl.operations.lpar.ownership import (
     parse_lpar_ownership_caller_token,
 )
 from hmcpctl.resource_identity import is_uuid
-from hmcpctl.ssh.commands import (
-    build_attribute_record,
-    build_filter,
-    parse_hmc_delimited_rows,
-)
+from hmcpctl.ssh.commands import parse_hmc_delimited_rows
 from hmcpctl.ssh.lpar import create_lpar_via_cli, stamp_lpar_ownership
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import render_mtms

@@ -8,7 +8,8 @@ from typing import Literal
 
 from ..config import HMCConfig
 from ..documents.lpar_io import DRC_INDEX_PATTERN, ProfileIoSlot
-from .commands import build_attribute_record, build_filter, parse_hmc_result_rows
+from ..documents.native_records import build_attribute_record, build_filter
+from .commands import parse_hmc_result_rows
 from .description_validation import validate_lpar_description
 from .transport import HMCCLIError, run_hmc_command
 

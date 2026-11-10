@@ -17,11 +17,8 @@ import asyncssh
 import pytest
 from conftest import make_config
 
-from hmcpctl.ssh.commands import (
-    _parse_lshwres_output,
-    build_attribute_record,
-    parse_hmc_result_rows,
-)
+from hmcpctl.documents.native_records import build_attribute_record
+from hmcpctl.ssh.commands import _parse_lshwres_output, parse_hmc_result_rows
 from hmcpctl.ssh.transport import REDACTED, HMCCLIError, run_hmc_command
 
 # An apostrophe and a backslash: repr() escapes both, and shlex.quote rewrites the first.

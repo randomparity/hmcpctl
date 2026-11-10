@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING, get_args
 
 from fastmcp import Client
 
+from hmcpctl.documents.native_records import build_filter
 from hmcpctl.operations.lpar.configuration import ProcessorCompatibilityMode
-from hmcpctl.ssh.commands import build_filter, parse_hmc_result_rows
+from hmcpctl.ssh.commands import parse_hmc_result_rows
 from hmcpctl.ssh.lpar import validate_lpar_description
 from hmcpctl.ssh.transport import HMCCLIError
 

@@ -6,7 +6,7 @@ shell *word*; the HMC splits the record itself afterwards, so quoting does
 nothing about the record's own delimiters.  A caller value containing ``,`` or
 ``=`` therefore used to add or override attributes the caller was never given.
 
-:func:`hmcpctl.ssh.commands.build_attribute_record` owns the record grammar.
+:func:`hmcpctl.documents.native_records.build_attribute_record` owns the record grammar.
 These tests pin three things: the grammar itself, a per-site refusal for every
 function that builds a record, and the coupling — a new ``-i`` site that skips
 the builder fails here rather than waiting for a reviewer.
@@ -22,12 +22,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hmcpctl.config import HMCConfig
+from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.ssh import io_inventory, sriov, vnic
 from hmcpctl.ssh import profiles as ssh_profiles
-from hmcpctl.ssh.commands import (
-    build_attribute_record,
-    build_filter,
-)
 from hmcpctl.ssh.description_validation import validate_lpar_description
 from hmcpctl.ssh.io_inventory import list_fc_ports
 from hmcpctl.ssh.lpar import create_lpar_via_cli

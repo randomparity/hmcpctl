@@ -20,8 +20,9 @@ one-topic-per-module layout (`affinity`, `console`, `memory`, `sriov`); neither 
 ("physical I/O, Fibre Channel, SEA") nor `lpar` ("creation, ownership, validation, name
 resolution") owns reference codes. No ownership transition and no caller migration: nothing calls
 this code today. No new quoting, parsing or empty-result primitive is written: `build_filter`
-(`ssh/commands.py:144`) emits `lpar_names=<n>` and refuses a value carrying `,`, `=`, `"` or a
-control character; `parse_hmc_delimited_rows` (`:29`) parses `-F --header` output, refusing a
+(`documents/native_records.py`) emits `lpar_names=<n>` and refuses a value carrying `,`,
+`=`, `"` or a control character; `parse_hmc_delimited_rows` (`ssh/commands.py`) parses
+`-F --header` output, refusing a
 mismatched header; and the empty-result guard is the shape `ssh/sriov.py:28-34` already uses.
 
 **The parsed field set** is `-F lpar_name,time_stamp,refcode --header`. Those three names are

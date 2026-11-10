@@ -9,7 +9,8 @@ from io import StringIO
 from typing import Literal
 
 from ..config import HMCConfig
-from .commands import HMC_NO_RESULTS, build_attribute_record, build_filter
+from ..documents.native_records import build_attribute_record, build_filter
+from .commands import HMC_NO_RESULTS
 from .transport import HMCCLIError, run_hmc_command
 
 ViosGroupUpdateAction = Literal["rename", "add-members", "remove-members"]

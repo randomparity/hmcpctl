@@ -4,6 +4,9 @@ import csv
 import hashlib
 import json
 import shlex
+import subprocess
+import sys
+import textwrap
 import traceback
 from dataclasses import FrozenInstanceError, fields
 from decimal import Decimal, localcontext
@@ -378,3 +381,40 @@ async def test_bad_direct_request_and_record_fail_before_submission(monkeypatch)
         )
     assert type(caught.value) is HMCCLIError
     command.assert_not_awaited()
+
+
+def test_creation_memory_validation_does_not_import_ssh():
+    program = textwrap.dedent("""
+        import importlib.abc
+        import sys
+
+        class BlockSSH(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "hmcpctl.ssh" or fullname.startswith("hmcpctl.ssh."):
+                    raise ImportError("document validation must not import SSH")
+                return None
+
+        sys.meta_path.insert(0, BlockSSH())
+        from hmcpctl.documents.lpar_creation_memory import LparCreationMemory
+
+        value = LparCreationMemory(mem_mode="shared", mem_weight=0,
+                                   primary_paging_vios_name="paging")
+        assert value.pairs() == [("mem_mode", "shared"), ("mem_weight", 0),
+                                 ("primary_paging_vios_name", "paging")]
+        try:
+            LparCreationMemory(mem_mode="shared", primary_paging_vios_name="bad,name")
+        except ValueError as error:
+            assert str(error) == "Creation memory fields must use native scalar grammar"
+        else:
+            raise AssertionError("native record delimiter accepted")
+        assert not any(name == "hmcpctl.ssh" or name.startswith("hmcpctl.ssh.")
+                       for name in sys.modules)
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr

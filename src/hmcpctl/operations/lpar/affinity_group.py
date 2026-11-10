@@ -6,6 +6,7 @@ from typing import Any
 
 from ...client.core import HMCClient
 from ...documents.lpar_affinity_group import AffinityGroupID, validate_affinity_group_id
+from ...documents.native_records import build_filter
 from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import (
     is_uuid,
@@ -13,7 +14,7 @@ from ...resource_identity import (
     resolve_system_name,
     resolve_vios_uuid,
 )
-from ...ssh.commands import build_filter, parse_hmc_result_rows
+from ...ssh.commands import parse_hmc_result_rows
 from ...ssh.lpar import DEFAULT_PROFILE_NAME
 from ...ssh.transport import run_hmc_command
 from ...xmlutil import leaf_text

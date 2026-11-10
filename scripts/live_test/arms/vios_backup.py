@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import Client
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.ssh.commands import build_filter
+from hmcpctl.documents.native_records import build_filter
 
 from ..observation import Assertion
 from ..results import entries

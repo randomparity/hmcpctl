@@ -17,9 +17,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from hmcpctl.config import load_profile, validate_agent_id
+from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.documents.partition_profile import one, parse_profile
 from hmcpctl.operations.vios.core import delete_vios
-from hmcpctl.ssh.commands import build_attribute_record, build_filter
 from hmcpctl.ssh.description_validation import validate_lpar_description
 from hmcpctl.ssh.lpar import validate_caller_token
 from hmcpctl.ssh.transport import HMCCLIError, run_hmc_command
@@ -85,6 +85,7 @@ SOURCE_PATHS = (
     "src/hmcpctl/resource_identity.py",
     "src/hmcpctl/ssh/lpar.py",
     "src/hmcpctl/ssh/commands.py",
+    "src/hmcpctl/documents/native_records.py",
     "src/hmcpctl/ssh/description_validation.py",
     "src/hmcpctl/ssh/transport.py",
     "src/hmcpctl/xmlutil.py",

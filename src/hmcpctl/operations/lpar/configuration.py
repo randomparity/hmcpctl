@@ -25,7 +25,7 @@ from hmcpctl.resource_identity import (
 )
 
 from ...documents.lpar import LparReportingSettings, LparSettings
-from ...ssh.commands import build_attribute_record
+from ...documents.native_records import build_attribute_record
 from ...ssh.lpar import (
     get_lpar_reporting_settings,
     get_lpar_settings,

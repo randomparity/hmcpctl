@@ -7,13 +7,8 @@ from collections.abc import Sequence
 from typing import Any, TypedDict
 
 from ..config import HMCConfig
-from .commands import (
-    HMC_NO_RESULTS,
-    _parse_lshwres_output,
-    build_attribute_record,
-    build_filter,
-    parse_hmc_result_rows,
-)
+from ..documents.native_records import build_attribute_record, build_filter
+from .commands import HMC_NO_RESULTS, _parse_lshwres_output, parse_hmc_result_rows
 from .transport import run_hmc_command
 
 

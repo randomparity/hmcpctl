@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client
 
+from hmcpctl.documents.native_records import build_attribute_record
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
 
 # Imported rather than restated so the arm's SKIP envelope cannot drift from the one
@@ -33,7 +34,7 @@ from hmcpctl.operations.virtualization.pcie import (
     _ADMITTED_SYSTEM_MODEL,
     _is_exact_admitted_environment,
 )
-from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_attribute_record
+from hmcpctl.ssh.commands import HMC_NO_RESULTS
 from hmcpctl.ssh.profiles import (
     parse_profile_io_slot_rows,
     parse_profile_io_slots,
@@ -97,7 +98,7 @@ class _DedicatedState:
 
 
 #: Characters this arm refuses in a configured value. Deliberately *stricter*
-#: than `ssh/commands.py:_RECORD_DELIMITERS`, which is the set
+#: than `documents/native_records.py:RECORD_DELIMITERS`, which is the set
 #: `build_attribute_record` and `build_filter` raise on: those two refuse only
 #: ``,``, ``=`` and ``"``, and pass ``[``, ``]`` and ``\`` straight through.
 #: The three they pass through would break parsing of ADR 0064's ``[caller …]``

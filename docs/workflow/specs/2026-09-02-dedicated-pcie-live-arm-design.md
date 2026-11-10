@@ -432,10 +432,11 @@ untrusted actor can reach. Two boundaries are worth stating:
   `profile_name`, and `drc_index` reach `chsyscfg` and `lssyscfg` strings. `system_name` is
   passed through `shlex.quote`. **Both** HMC-side structures are built with the existing
   helpers, and neither is hand-formatted: the `-i` profile record with
-  `hmc_mcp.ssh.commands.build_attribute_record` (the helper
+  `hmcpctl.documents.native_records.build_attribute_record` (the helper
   `ssh/profiles.py:_change_profile_io_slot` uses) and the `--filter` expression with
-  `hmc_mcp.ssh.commands.build_filter` (the helper `ssh/profiles.py:read_lpar_profile_record`
-  uses). `shlex.quote` does not substitute for either: `commands.py` states outright that the
+  `hmcpctl.documents.native_records.build_filter` (the helper
+  `ssh/profiles.py:read_lpar_profile_record` uses). `shlex.quote` does not substitute for either:
+  `native_records.py` states outright that the
   two mechanisms protect different layers — the remote shell versus the HMC's own record
   parser, which runs afterwards on the already-unquoted text — "and neither substitutes for
   the other". `profile_name` reaches the filter straight from `HMC_LIVE_PCIE_PROFILE` with

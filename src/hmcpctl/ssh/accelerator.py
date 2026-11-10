@@ -5,7 +5,8 @@ from typing import Any
 
 from ..config import HMCConfig
 from ..documents.lpar_accelerator import LparAcceleratorQos
-from .commands import _parse_lshwres_output, build_filter
+from ..documents.native_records import build_filter
+from .commands import _parse_lshwres_output
 from .transport import run_hmc_command
 
 

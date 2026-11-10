@@ -32,7 +32,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hmcpctl.ssh.commands import HMC_NO_RESULTS, build_filter
+from hmcpctl.documents.native_records import build_filter
+from hmcpctl.ssh.commands import HMC_NO_RESULTS
 from hmcpctl.xmlutil import leaf_text
 
 from ..observation import Assertion, judge_create_result

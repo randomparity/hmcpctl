@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BeforeValidator, ConfigDict, StrictInt, StrictStr
 
 from ..errors import HMCCLIError
-from ..ssh.commands import build_attribute_record
+from .native_records import build_attribute_record
 
 _INTEGER_LIMIT = 10**4096
 _SHARED_FIELDS = (

@@ -6,8 +6,9 @@ import shlex
 from typing import Any
 
 from ..config import HMCConfig
+from ..documents.native_records import build_filter
 from ..progress_codes import lookup_progress_code
-from .commands import build_filter, parse_hmc_result_rows
+from .commands import parse_hmc_result_rows
 from .install import validate_hmc_name
 from .transport import HMCCLIError, run_hmc_command
 

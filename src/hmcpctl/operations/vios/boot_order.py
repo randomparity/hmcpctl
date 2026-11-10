@@ -9,6 +9,7 @@ from typing_extensions import TypedDict
 
 from ...client.core import HMCClient
 from ...documents.boot import select_boot_string
+from ...documents.native_records import build_filter
 from ...errors import HMCError
 from ...resource_identity import (
     is_uuid,
@@ -16,7 +17,6 @@ from ...resource_identity import (
     resolve_system_uuid,
     resolve_vios_uuid,
 )
-from ...ssh.commands import build_filter
 from ...ssh.transport import run_hmc_command
 from ...xmlutil import leaf_text
 from ..lpar.ownership import authorize_lpar_ownership_description

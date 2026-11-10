@@ -11,7 +11,8 @@ from pydantic import TypeAdapter
 
 from ..config import HMCConfig
 from ..documents.lpar_memory_layout import LparMemoryLayout
-from .commands import build_filter, parse_hmc_result_rows
+from ..documents.native_records import build_filter
+from .commands import parse_hmc_result_rows
 from .transport import run_hmc_command
 
 _RATIO_FIELDS = ("hpt_ratio", "ppt_ratio")

@@ -24,12 +24,12 @@ from unittest.mock import patch
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_profile
+from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
 from hmcpctl.operations.virtualization import adapters
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh import ethernet, profiles
-from hmcpctl.ssh.commands import build_attribute_record, build_filter
 from hmcpctl.xmlutil import console_version
 
 from . import lpar_serial_adapter as files

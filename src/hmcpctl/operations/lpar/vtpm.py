@@ -7,9 +7,9 @@ from typing import Literal
 
 from ...client.core import HMCClient
 from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
+from ...documents.native_records import build_attribute_record
 from ...errors import HMCError
 from ...resource_identity import resolve_system_uuid, resolve_vios_uuid
-from ...ssh.commands import build_attribute_record
 from ...ssh.lpar_vtpm import (
     get_lpar_vtpm_state,
     get_vtpm_advertisement,
