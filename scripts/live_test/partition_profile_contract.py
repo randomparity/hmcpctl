@@ -16,7 +16,7 @@ import re
 import subprocess
 from pathlib import Path
 from time import monotonic
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from xml.etree import ElementTree as ET
 
 from defusedxml.ElementTree import fromstring
@@ -25,6 +25,13 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.systems import profiles as domain
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh.transport import run_hmc_command
+
+if TYPE_CHECKING:
+    from fastmcp import Client
+
+    from hmcpctl.config import HMCConfig
+
+    from .runner import RunState
 
 SUBTASK = 45
 GROUP = "partition-profile-contract"
@@ -618,7 +625,7 @@ class Native(HMCClient):
         return {"xml": response.text, "etag": response.headers["ETag"]}
 
 
-async def exercise(client, state):
+async def exercise(client: Client, state: RunState) -> None:
     """Dispatch only the explicitly selected finite experiment; no maturity assertion."""
     del client
     if state.group != GROUP or state.hmc_config is None:
@@ -660,7 +667,9 @@ async def exercise(client, state):
     )
 
 
-async def recover_document(hmc_config, document):
+async def recover_document(
+    hmc_config: HMCConfig, document: dict[str, Any]
+) -> dict[str, Any]:
     from .config import LiveTestConfig
     from .profile_contract_run import recover
 

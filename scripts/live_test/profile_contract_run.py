@@ -9,6 +9,7 @@ import math
 import time
 from pathlib import Path
 from time import monotonic
+from typing import TYPE_CHECKING, Any, Literal
 
 from hmcpctl.operations.lpar.core import delete_lpar
 from hmcpctl.operations.lpar.ownership import (
@@ -19,6 +20,11 @@ from hmcpctl.ssh.lpar import create_lpar_via_cli, stamp_lpar_ownership
 
 from . import partition_profile_contract as contract
 from . import system_profile_activation_source as fixture_safety
+
+if TYPE_CHECKING:
+    from hmcpctl.config import HMCConfig
+
+    from .config import LiveTestConfig
 
 
 class ContractMismatch(ValueError):
@@ -181,7 +187,13 @@ def same_read(before, after):
     return contract.canonical(roots[0]) == contract.canonical(roots[1])
 
 
-async def observe(api, journal, names, *, owned=True):
+async def observe(
+    api: contract.Native,
+    journal: contract.Journal,
+    names: dict[str, int],
+    *,
+    owned: bool = True,
+) -> dict[str, Any]:
     snapshot = await api.snapshot()
     entry = fixture(
         api, snapshot, names, owned=owned, uuid=journal.data.get("fixture_uuid")
@@ -194,7 +206,9 @@ async def observe(api, journal, names, *, owned=True):
     return entry
 
 
-async def finalize(api, deadline):
+async def finalize(
+    api: contract.Native, deadline: float
+) -> Literal["not-needed", "deadline-expired", "unconfirmed", "completed"]:
     """Never start logout after the phase/window deadline; local close is always safe."""
     try:
         if api._session_token is None:
@@ -211,7 +225,7 @@ async def finalize(api, deadline):
         await api._http.aclose()
 
 
-async def preflight(hmc_config, config):
+async def preflight(hmc_config: HMCConfig, config: LiveTestConfig) -> dict[str, Any]:
     packet = contract.configured(config)
     contract.verify_revision(packet)
     directory = Path(packet["window_dir"])
@@ -452,7 +466,7 @@ async def cleanup(api, journal, names):
     journal.write()
 
 
-async def execute(hmc_config, config):
+async def execute(hmc_config: HMCConfig, config: LiveTestConfig) -> dict[str, Any]:
     packet = contract.configured(config)
     contract.verify_revision(packet)
     directory = Path(packet["window_dir"])
@@ -526,7 +540,7 @@ async def execute(hmc_config, config):
     return journal.data
 
 
-async def recover(hmc_config, config):
+async def recover(hmc_config: HMCConfig, config: LiveTestConfig) -> dict[str, Any]:
     packet = contract.configured(config)
     contract.verify_revision(packet)
     directory = Path(packet["window_dir"])

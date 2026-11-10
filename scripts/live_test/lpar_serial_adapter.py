@@ -19,6 +19,7 @@ import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, TypedDict, cast
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_profile
@@ -35,6 +36,19 @@ from hmcpctl.ssh.commands import build_filter
 from hmcpctl.ssh.lpar import create_lpar_via_cli, stamp_lpar_ownership
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import leaf_text, render_mtms
+
+
+class _SerialCapacity(TypedDict):
+    memory: object
+    processors: object
+
+
+class _SerialSnapshot(TypedDict):
+    system: str
+    partitions: list[dict[str, Any]]
+    profiles: list[dict[str, str]]
+    capacity: _SerialCapacity
+
 
 GROUP = "lpar-serial-adapter"
 SUBTASK = 63
@@ -329,7 +343,7 @@ def saved_profiles(raw, partitions):
     return sorted(records, key=lambda r: (r["lpar_name"], r["name"]))
 
 
-async def snapshot(hmc, packet):
+async def snapshot(hmc: HMCClient, packet: dict[str, Any]) -> _SerialSnapshot:
     system = await hmc.get_managed_system(packet["system_uuid"])
     r = (system or {}).get("Resource", {})
     system_name = render_mtms(r)
@@ -358,7 +372,7 @@ async def snapshot(hmc, packet):
         raise ValueError("ST63 complete saved profiles unavailable")
     memory = r.get("AssociatedSystemMemoryConfiguration", {})
     processor = r.get("AssociatedSystemProcessorConfiguration", {})
-    capacity = {
+    capacity: _SerialCapacity = {
         "memory": leaf_text(memory.get("CurrentAvailableSystemMemory")),
         "processors": leaf_text(processor.get("CurrentAvailableSystemProcessorUnits")),
     }
@@ -527,7 +541,15 @@ class Window:
         binding(self.packet, config)
 
 
-async def execute(hmc, packet, digest, preflight, path, window, packet_path):
+async def execute(
+    hmc: HMCClient,
+    packet: dict[str, Any],
+    digest: str,
+    preflight: dict[str, Any],
+    path: Path,
+    window: Window,
+    packet_path: Path,
+) -> dict[str, Any]:
     window.check(hmc.config, window.invocation)
     if (
         preflight.get("packet_sha256") != digest
@@ -624,7 +646,9 @@ async def execute(hmc, packet, digest, preflight, path, window, packet_path):
     return journal
 
 
-async def recover(hmc, packet, document):
+async def recover(
+    hmc: HMCClient, packet: dict[str, Any], document: dict[str, Any]
+) -> _SerialSnapshot:
     # No authority reconstruction or mutating owner is reachable from recovery.
     current = await snapshot(hmc, packet)
     if (
@@ -709,13 +733,13 @@ def _dispatch(args):
                         fresh=True,
                     )
                 elif args.mode == "recover":
-                    await recover(hmc, packet, document)
+                    await recover(hmc, packet, cast(dict[str, Any], document))
                 else:
                     await execute(
                         hmc,
                         packet,
                         digest,
-                        preflight,
+                        cast(dict[str, Any], preflight),
                         args.results_file,
                         window,
                         packet_path,
