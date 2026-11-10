@@ -42,6 +42,26 @@ def test_ssh_selectors_do_not_import_the_logical_store():
     )
 
 
+@pytest.mark.parametrize(
+    "module", ["hmcpctl.tool_registry", "hmcpctl.server_tools.permissions"]
+)
+def test_registry_metadata_does_not_load_application_guard_dependencies(module):
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                f"import importlib, sys; importlib.import_module({module!r}); "
+                "assert 'hmcpctl.operations.logical.holds' not in sys.modules; "
+                "assert 'hmcpctl.operations.logical.store' not in sys.modules; "
+                "assert 'hmcpctl.client.core' not in sys.modules"
+            ),
+        ],
+        check=True,
+        timeout=20,
+    )
+
+
 class FakeHMC:
     """Answers the partition reads the resolvers make and records them."""
 

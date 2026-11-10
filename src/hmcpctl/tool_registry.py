@@ -34,8 +34,6 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from .call_context import HOLD_EXEMPT_TOOLS, CallContext, calling
-from .operations.logical import holds
-from .resource_identity import guarding_partitions
 
 Effect = Literal["read", "mutate", "destructive", "arbitrary-command"]
 
@@ -405,6 +403,11 @@ def authorized(
     handler takes no ``hold_id`` gets one from the registry; the wrapper removes it before
     authorizing and calling the handler, so the handler never sees it (ADR 0327).
     """
+    # Metadata consumers need no application guard, ledger, or HMC client. Load
+    # enforcement when composing a wrapper, before any invocation can run.
+    from .operations.logical import holds
+    from .resource_identity import guarding_partitions
+
     signature = inspect.signature(handler)
     injected = _injects_hold_id(name, security, handler)
 
