@@ -24,12 +24,12 @@ from hmcpctl.operations.logical.engine import (
     OperationFailed,
     OperationRequest,
 )
-from hmcpctl.operations.lpar import reconfigure
-from hmcpctl.operations.lpar import reconfigure_network as net
 from hmcpctl.operations.lpar.profiles import persist as profile_persist
 from hmcpctl.operations.lpar.profiles.core import PartitionProfileOutcome
-from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
-from hmcpctl.operations.lpar.reconfigure_network import NetworkPatch
+from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
+from hmcpctl.operations.lpar.reconfiguration import network as net
+from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch
+from hmcpctl.operations.lpar.reconfiguration.network import NetworkPatch
 
 MAC_A = "02:00:00:00:00:0a"
 MAC_B = "02:00:00:00:00:0b"

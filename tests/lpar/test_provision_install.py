@@ -18,7 +18,6 @@ from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintErro
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar import reconfigure_media
 from hmcpctl.operations.lpar.core import LparCreationResult
 from hmcpctl.operations.lpar.plan import (
     PlanAdapters,
@@ -56,6 +55,7 @@ from hmcpctl.operations.lpar.provisioning.operation import (
     request_from_arguments,
     result_from_record,
 )
+from hmcpctl.operations.lpar.reconfiguration import media as reconfigure_media
 from hmcpctl.operations.lpar.workflow_contract import (
     DISK_LEDGER,
     MEDIA_LEDGER,

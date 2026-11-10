@@ -16,8 +16,9 @@ from unit.test_lpar_reconfigure import hmc as hmc  # noqa: PLC0414 - fixture imp
 from hmcpctl.errors import HMCError, LparUpdateError
 from hmcpctl.operations.logical import store
 from hmcpctl.operations.logical.engine import EffectNotApplied, OperationFailed
-from hmcpctl.operations.lpar import reconfigure, reconfigure_media
-from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
+from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
+from hmcpctl.operations.lpar.reconfiguration import media as reconfigure_media
+from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch
 
 VIOS = "0000000c-0000-4000-d000-000000000000"
 MEDIA = "hmcpctl_000000000001.iso"

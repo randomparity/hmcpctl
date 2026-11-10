@@ -19,8 +19,8 @@ from hmcpctl.documents.partition_profile import ProfilePatch, apply_profile_patc
 from hmcpctl.errors import HMCError, LparUpdateError
 from hmcpctl.operations.logical import engine, profile_write
 from hmcpctl.operations.logical.engine import OperationFailed, OperationRequest
-from hmcpctl.operations.lpar import reconfigure
-from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch, plan_changes
+from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
+from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch, plan_changes
 from hmcpctl.xmlutil import element_to_dict
 
 SYS = "0000000a-0000-4000-8000-000000000000"

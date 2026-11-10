@@ -152,7 +152,8 @@ importlib.import_module({module!r})
 
 
 @pytest.mark.parametrize(
-    "module", ["provisioning.operation", "decommission.operation", "reconfigure"]
+    "module",
+    ["provisioning.operation", "decommission.operation", "reconfiguration.core"],
 )
 def test_lifecycle_connection_factory_does_not_import_power_workflow(module):
     script = f"""
@@ -190,7 +191,7 @@ class NoProvisioningWorkflow(importlib.abc.MetaPathFinder):
             raise ModuleNotFoundError("provisioning workflow dependency forbidden")
 
 sys.meta_path.insert(0, NoProvisioningWorkflow())
-importlib.import_module("hmcpctl.operations.lpar.reconfigure")
+importlib.import_module("hmcpctl.operations.lpar.reconfiguration.core")
 """
     completed = subprocess.run(
         [sys.executable, "-c", script],

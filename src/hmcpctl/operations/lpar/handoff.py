@@ -26,7 +26,7 @@ from ..logical import holds, store
 from ..logical.holds import Hold
 from .inspect import Admit, Resources, SectionSource, read_resources
 from .ownership import lpar_ownership_entry
-from .reconfigure_network import current_adapters
+from .reconfiguration.network import current_adapters
 
 ADAPTERS_TOOL = "hmc_list_adapters"
 _MAX_DETAIL = 500

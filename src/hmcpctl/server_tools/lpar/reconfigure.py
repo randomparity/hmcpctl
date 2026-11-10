@@ -19,7 +19,7 @@ from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.models import OperationRecord
 from ...operations.logical.store import OperationRefused, connection_label
-from ...operations.lpar.reconfigure import (
+from ...operations.lpar.reconfiguration.core import (
     RECONFIGURE_CLASSIFIERS,
     ReconfigurePatch,
     delegated_tools,

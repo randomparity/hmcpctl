@@ -18,18 +18,18 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_v
 
 from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists, mac_colon_form
 
-from ...client.core import HMCClient
-from ...errors import HMCError
-from ...xmlutil import leaf_text
-from ..logical import engine
-from ..logical.engine import (
+from ....client.core import HMCClient
+from ....errors import HMCError
+from ....xmlutil import leaf_text
+from ...logical import engine
+from ...logical.engine import (
     Classification,
     EffectNotApplied,
     OperationContext,
     OperationFailed,
 )
-from ..logical.models import EffectRecord
-from ..virtualization.adapters import classified_add_refusal
+from ...logical.models import EffectRecord
+from ...virtualization.adapters import classified_add_refusal
 
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 ADD_KIND = "lpar.client_network_adapter"

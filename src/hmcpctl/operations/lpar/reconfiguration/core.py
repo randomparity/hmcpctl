@@ -34,28 +34,28 @@ from hmcpctl.operations.lpar.provisioning.core import (
 )
 from hmcpctl.operations.lpar.workflow_contract import DISK_LEDGER
 
-from ...client.client_factory import open_client
-from ...client.core import HMCClient
-from ...documents.lpar import LparResources, partition_updates
-from ...documents.partition_profile import ProfilePatch
-from ...documents.storage import validate_virtual_disk
-from ...errors import HMCError, HMCTLSFingerprintError, LparUpdateError
-from ...resource_identity import resolve_system_uuid, resolve_vios_uuid
-from ...xmlutil import console_version, escape_xml, leaf_text
-from ..logical import engine, profile_write, store
-from ..logical.engine import (
+from ....client.client_factory import open_client
+from ....client.core import HMCClient
+from ....documents.lpar import LparResources, partition_updates
+from ....documents.partition_profile import ProfilePatch
+from ....documents.storage import validate_virtual_disk
+from ....errors import HMCError, HMCTLSFingerprintError, LparUpdateError
+from ....resource_identity import resolve_system_uuid, resolve_vios_uuid
+from ....xmlutil import console_version, escape_xml, leaf_text
+from ...logical import engine, profile_write, store
+from ...logical.engine import (
     BodyResult,
     Classification,
     EffectNotApplied,
     OperationContext,
     OperationFailed,
 )
-from ..logical.models import EffectRecord
-from ..storage.resources import storage_mapping, volume_group
-from ..systems.fleet import read_system_entry
-from . import reconfigure_network as network
-from .ownership import resolve_and_authorize_lpar_mutation
-from .reconfigure_media import (
+from ...logical.models import EffectRecord
+from ...storage.resources import storage_mapping, volume_group
+from ...systems.fleet import read_system_entry
+from ..ownership import resolve_and_authorize_lpar_mutation
+from . import network
+from .media import (
     BOOT_KEY,
     BOOT_KIND,
     MEDIA_KEY,
