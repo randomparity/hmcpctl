@@ -26,9 +26,29 @@ from hmcpctl.ssh.transport import HMCCLIError, run_hmc_command
 from hmcpctl.xmlutil import leaf_text
 
 from . import vios_ame_source as ame
+from .packets import (
+    HEX32,
+    HEX40,
+    HEX64,
+    MIB,
+    CheckpointError,
+    Held,
+    _attest,
+    _json,
+    _keys,
+    _private,
+    _read_private,
+    _root,
+    _text,
+    _uuid,
+    digest,
+    encode,
+)
+from .packets import (
+    _save as save_packet,
+)
 
 GROUP = "vios-boot-source"
-MIB = ame.MIB
 VALUES = (
     "c09-plain",
     "c09,comma",
@@ -47,6 +67,7 @@ LIMITS = {
     "recover": (70, 1, 4 * MIB, 200),
 }
 SOURCE_PATHS = (
+    "scripts/live_test/packets.py",
     "scripts/live_test/vios_ame_source.py",
     "scripts/live_test_preflight.py",
     "scripts/live_test_recovery.py",
@@ -68,17 +89,6 @@ SOURCE_PATHS = (
     "scripts/live_test/vios_boot_source.py",
     "scripts/live_vios_boot_source.py",
 )
-Held = ame.Held
-CheckpointError = ame.CheckpointError
-encode = ame.encode
-digest = ame.digest
-_json = ame._json
-_keys = ame._keys
-_text = ame._text
-_uuid = ame._uuid
-_private = ame._private
-_attest = ame._attest
-_read_private = ame._read_private
 
 
 def validate_packet(p: dict) -> None:
@@ -119,16 +129,14 @@ def validate_packet(p: dict) -> None:
         raise Held("canonical system UUID required")
     _text(s["name"], 128)
     for key in ("tested_commit", "tested_tree"):
-        if not isinstance(p[key], str) or not ame.HEX40.fullmatch(p[key]):
+        if not isinstance(p[key], str) or not HEX40.fullmatch(p[key]):
             raise Held("exact Git identity required")
     hashes = _keys(p["imported_source_sha256"], set(SOURCE_PATHS))
-    if any(
-        not isinstance(v, str) or not ame.HEX64.fullmatch(v) for v in hashes.values()
-    ):
+    if any(not isinstance(v, str) or not HEX64.fullmatch(v) for v in hashes.values()):
         raise Held("source hash invalid")
     baseline = p["baseline_sha256"]
     if baseline is not None and (
-        not isinstance(baseline, str) or not ame.HEX64.fullmatch(baseline)
+        not isinstance(baseline, str) or not HEX64.fullmatch(baseline)
     ):
         raise Held("baseline digest invalid")
     if encode(p["resources"]) != encode(ame.RESOURCES):
@@ -148,7 +156,7 @@ def validate_packet(p: dict) -> None:
         raise Held("grant identity invalid")
     f = _keys(p["fixture"], {"name", "caller_nonce", "description"})
     nonce = f["caller_nonce"]
-    if not isinstance(nonce, str) or not ame.HEX32.fullmatch(nonce):
+    if not isinstance(nonce, str) or not HEX32.fullmatch(nonce):
         raise Held("128-bit caller nonce required")
     validate_caller_token(nonce)
     marker = (
@@ -253,7 +261,7 @@ def _save(directory: Path, document: dict, name_out: str = "results.json") -> No
     limit = MIB if name_out == "session.json" else 32 * MIB
     if len(encode(document)) > limit:
         raise CheckpointError("private checkpoint bound exceeded")
-    ame._save(directory, document, name_out)
+    save_packet(directory, document, name_out)
 
 
 class BootSourceBudget(ame.Budget):
@@ -950,7 +958,7 @@ def _session_closed(closeout: dict, packet_sha: object, stage: str) -> bool:
         and closeout["source_only"] is True
         and closeout["packet_sha256"] == packet_sha
         and isinstance(packet_sha, str)
-        and ame.HEX64.fullmatch(packet_sha) is not None
+        and HEX64.fullmatch(packet_sha) is not None
         and closeout["stage"] == stage
         and closeout["closed"] is True
         and closeout["logon"] == "acknowledged"
@@ -1392,7 +1400,7 @@ def _main(argv: list[str] | None, started: float) -> int:
     elif args.results is not None:
         raise Held("results input is recovery-only")
     window = Path(p["window"]["directory"])
-    if window == ame._root() or ame._root() in window.parents:
+    if window == _root() or _root() in window.parents:
         raise Held("window must be outside this source checkout")
     if len(window.parts) > 256:
         raise Held("window ancestor depth exceeds bound")

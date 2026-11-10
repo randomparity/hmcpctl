@@ -30,7 +30,7 @@ from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import leaf_text
 
 from . import lpar_serial_adapter as serial
-from .vios_ame_source import _json
+from .packets import _json
 
 GROUP, SUBTASK = "lpar-boot-start", 68
 MIB, REST_CAP, SSH_CAP = 1024**2, 262144, 65536
@@ -1024,7 +1024,7 @@ def complete_feed(path, response, config):
 
     from hmcpctl.documents.partition_profile import ATOM
 
-    from .vios_ame_source import _collection_entry, _collection_link
+    from .packets import _collection_entry, _collection_link
 
     parts = path.split("/")
     if parts[-1] not in (

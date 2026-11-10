@@ -20,6 +20,7 @@ from hmcpctl.documents.partition_profile import UOM
 from hmcpctl.ssh.transport import HMCCLIError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test import packets
 from live_test import vios_ame_source as source
 
 SYS = "00000000-0000-4000-8000-000000000001"
@@ -541,7 +542,7 @@ def test_relative_checkout_window_refused_before_receipt_or_transport(
     }
     monkeypatch.setattr(source.sys, "version_info", (3, 11, 15))
     monkeypatch.setattr(
-        source,
+        packets,
         "_git_read",
         lambda root, args: {
             ("rev-parse", "HEAD"): p["tested_commit"],
@@ -989,7 +990,7 @@ async def test_successful_observation_with_unknown_logout_is_held(rig, monkeypat
 
 @pytest.mark.parametrize("fault", ["success", "overflow", "exit", "timeout"])
 def test_source_attestation_process_is_bounded_and_reaped(tmp_path, monkeypatch, fault):
-    original_popen = source.subprocess.Popen
+    original_popen = packets.subprocess.Popen
     scripts = {
         "success": "print('ok')",
         "overflow": "print('x' * 70000)",
@@ -1005,7 +1006,7 @@ def test_source_attestation_process_is_bounded_and_reaped(tmp_path, monkeypatch,
         children.append(child)
         return child
 
-    monkeypatch.setattr(source.subprocess, "Popen", launch)
+    monkeypatch.setattr(packets.subprocess, "Popen", launch)
     if fault == "timeout":
 
         class NoReadyBytes:
@@ -1021,12 +1022,12 @@ def test_source_attestation_process_is_bounded_and_reaped(tmp_path, monkeypatch,
             def select(self, timeout):
                 return []
 
-        monkeypatch.setattr(source.selectors, "DefaultSelector", NoReadyBytes)
+        monkeypatch.setattr(packets.selectors, "DefaultSelector", NoReadyBytes)
     if fault == "success":
-        assert source._git_read(tmp_path, ("rev-parse", "HEAD")) == "ok"
+        assert packets._git_read(tmp_path, ("rev-parse", "HEAD")) == "ok"
     else:
         with pytest.raises(ValueError):
-            source._git_read(tmp_path, ("rev-parse", "HEAD"))
+            packets._git_read(tmp_path, ("rev-parse", "HEAD"))
     assert len(children) == 1 and children[0].poll() is not None
 
 
@@ -1229,9 +1230,9 @@ def test_source_binding_refuses_changed_execution_inputs(tmp_path, monkeypatch, 
         p["imported_source_sha256"][name] = source.hashlib.sha256(
             target.read_bytes()
         ).hexdigest()
-    monkeypatch.setattr(source, "_root", lambda: checkout)
+    monkeypatch.setattr(packets, "_root", lambda: checkout)
     monkeypatch.setattr(
-        source,
+        packets,
         "hmcpctl",
         SimpleNamespace(__file__=str(checkout / "src/hmcpctl/__init__.py")),
     )
@@ -1253,7 +1254,7 @@ def test_source_binding_refuses_changed_execution_inputs(tmp_path, monkeypatch, 
         }
         return values[args]
 
-    monkeypatch.setattr(source, "_git_read", git)
+    monkeypatch.setattr(packets, "_git_read", git)
     source._attest(p)
     if fault in {"commit", "tree", "dirty"}:
         original = git
@@ -1269,7 +1270,7 @@ def test_source_binding_refuses_changed_execution_inputs(tmp_path, monkeypatch, 
             ),
         ][index]
         monkeypatch.setattr(
-            source,
+            packets,
             "_git_read",
             lambda root, args: (
                 "different" if args == target_args else original(root, args)
@@ -1279,7 +1280,7 @@ def test_source_binding_refuses_changed_execution_inputs(tmp_path, monkeypatch, 
         monkeypatch.setattr(source.sys, "version_info", (3, 11, 14))
     elif fault == "import":
         monkeypatch.setattr(
-            source,
+            packets,
             "hmcpctl",
             SimpleNamespace(__file__=str(tmp_path / "foreign/__init__.py")),
         )
@@ -1393,10 +1394,10 @@ async def test_create_rechecks_reserve_after_local_latency(
         p["imported_source_sha256"][name] = source.hashlib.sha256(
             target.read_bytes()
         ).hexdigest()
-    monkeypatch.setattr(source, "_root", lambda: checkout)
+    monkeypatch.setattr(packets, "_root", lambda: checkout)
     monkeypatch.setattr(source.sys, "version_info", (3, 11, 15))
     monkeypatch.setattr(
-        source,
+        packets,
         "hmcpctl",
         SimpleNamespace(__file__=str(checkout / "src/hmcpctl/__init__.py")),
     )
@@ -1435,7 +1436,7 @@ async def test_create_rechecks_reserve_after_local_latency(
                 delay_hits.append(boundary)
         fsync(fd)
 
-    monkeypatch.setattr(source, "_git_read", git)
+    monkeypatch.setattr(packets, "_git_read", git)
     monkeypatch.setattr(source.os, "fsync", delayed_fsync)
     monkeypatch.setattr(source, "run_hmc_command", wire.ssh)
     monkeypatch.setattr(

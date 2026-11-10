@@ -21,6 +21,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.ssh.transport import HMCCLIError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test import packets
 from live_test import vios_ame_source as ame
 from live_test import vios_boot_source as source
 from test_live_vios_ame_source_arm import SYS, V0, Wire, field
@@ -281,13 +282,13 @@ def test_filesystem_session_bound_and_failed_checkpoint(tmp_path, monkeypatch):
 
 def test_attestation_exact_selected_closure(tmp_path, monkeypatch):
     p = packet(tmp_path)
-    assert len(source.SOURCE_PATHS) == 20
+    assert len(source.SOURCE_PATHS) == 21
     assert set(source.SOURCE_PATHS) == (
         set(ame.SOURCE_PATHS) - {"scripts/live_vios_ame_source.py"}
         | {"scripts/live_test/vios_boot_source.py", "scripts/live_vios_boot_source.py"}
     )
     monkeypatch.setattr(
-        ame,
+        packets,
         "_git_read",
         lambda root, args: "changed" if args == ("rev-parse", "HEAD") else "",
     )
@@ -1254,9 +1255,9 @@ def test_attestation_every_bound_input(tmp_path, monkeypatch, fault):
         p["imported_source_sha256"][name] = hashlib.sha256(
             path.read_bytes()
         ).hexdigest()
-    monkeypatch.setattr(ame, "_root", lambda: root)
-    monkeypatch.setattr(ame.hmcpctl, "__file__", str(package / "__init__.py"))
-    monkeypatch.setattr(ame.sys, "version_info", (3, 11, 15))
+    monkeypatch.setattr(packets, "_root", lambda: root)
+    monkeypatch.setattr(packets.hmcpctl, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(packets.sys, "version_info", (3, 11, 15))
     calls = []
 
     def git(root, args):
@@ -1269,11 +1270,11 @@ def test_attestation_every_bound_input(tmp_path, monkeypatch, fault):
             return "f" * 40 if fault == "tree" else p["tested_tree"]
         return "dirty" if fault == "dirty" else ""
 
-    monkeypatch.setattr(ame, "_git_read", git)
+    monkeypatch.setattr(packets, "_git_read", git)
     if fault == "runtime":
-        monkeypatch.setattr(ame.sys, "version_info", (3, 11, 14))
+        monkeypatch.setattr(packets.sys, "version_info", (3, 11, 14))
     if fault == "import":
-        monkeypatch.setattr(ame.hmcpctl, "__file__", str(tmp_path / "different.py"))
+        monkeypatch.setattr(packets.hmcpctl, "__file__", str(tmp_path / "different.py"))
     if fault == "bytes":
         (root / source.SOURCE_PATHS[-1]).write_text("changed")
     with pytest.raises(ValueError):

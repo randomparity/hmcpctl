@@ -58,8 +58,8 @@ from hmcpctl.ssh.vnic import (
 )
 from hmcpctl.xmlutil import leaf_text
 
+from .packets import _json, _private, _read_private
 from .system_profile_source import _revision, digest, save
-from .vios_ame_source import _json, _private, _read_private
 
 GROUP = "vnic-creation-policy"
 MIB = 1024 * 1024
