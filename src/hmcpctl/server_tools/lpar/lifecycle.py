@@ -38,8 +38,8 @@ from ...operations.lpar.assignments import (
 )
 from ...operations.lpar.core import delete_lpar, rename_lpar
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
-from ...operations.lpar.processor_move import move_lpar_processors
-from ...operations.lpar.processors import change_lpar_processors
+from ...operations.lpar.processors.current import change_lpar_processors
+from ...operations.lpar.processors.move import move_lpar_processors
 from ...tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()

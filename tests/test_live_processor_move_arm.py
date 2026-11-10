@@ -17,7 +17,7 @@ from lpar.test_processor_move import SOURCE, SYSTEM, TARGET, boundary, set_curre
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_processors import LparProcessorMove
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import processor_move as operation
+from hmcpctl.operations.lpar.processors import move as operation
 from hmcpctl.ssh.processors import _FIELDS
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))

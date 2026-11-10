@@ -20,8 +20,8 @@ from hmcpctl.documents.lpar_processors import (
     LparProcessorMove,
 )
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
-from hmcpctl.operations.lpar import processor_move as operation
-from hmcpctl.operations.lpar import processors
+from hmcpctl.operations.lpar.processors import current as processors
+from hmcpctl.operations.lpar.processors import move as operation
 from hmcpctl.ssh import processors as native
 
 CONFIG = HMCConfig.from_mapping({})

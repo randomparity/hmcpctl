@@ -7,8 +7,8 @@ from typing import Literal
 import typer
 
 from ...documents.lpar_processors import LparProcessorChange, LparProcessorMove
-from ...operations.lpar.processor_move import move_lpar_processors
-from ...operations.lpar.processors import change_lpar_processors
+from ...operations.lpar.processors.current import change_lpar_processors
+from ...operations.lpar.processors.move import move_lpar_processors
 from ..output import print_json, terminal_field, usage_error
 from ..runtime import with_client
 

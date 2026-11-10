@@ -77,7 +77,7 @@ _INVENTORY_PATHS = tuple(
         "operations/lpar/creation/core.py",
         "operations/lpar/decommission/core.py",
         "operations/lpar/dlpar.py",
-        "operations/lpar/processors.py",
+        "operations/lpar/processors/current.py",
         "operations/lpar/migration.py",
         "operations/lpar/ownership.py",
         "operations/lpar/provisioning/core.py",
@@ -414,7 +414,7 @@ def test_malformed_symbol_citations_are_rejected() -> None:
 @pytest.mark.parametrize(
     ("operation", "raw_path"),
     [
-        ("change_lpar_processors", "operations/lpar/processors.py"),
+        ("change_lpar_processors", "operations/lpar/processors/current.py"),
         ("set_lpar_accelerator_qos", "operations/lpar/accelerator.py"),
         ("update_network_adapter", "operations/virtualization/adapters.py"),
     ],

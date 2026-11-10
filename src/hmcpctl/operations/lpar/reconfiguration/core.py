@@ -929,7 +929,7 @@ async def _processor_limits(
 ) -> ProcessorLimits:
     """The system's per-partition processor count and units-per-VP floor, when reported.
 
-    The fields ``hmc_dlpar_proc`` checks (``operations/lpar/processors.py``); a sparse
+    The fields ``hmc_dlpar_proc`` checks (``operations/lpar/processors/current.py``); a sparse
     entry from a system that is not operating leaves them unchecked.
     """
     try:

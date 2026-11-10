@@ -29,7 +29,7 @@ from hmcpctl.ssh.processors import (
 )
 from hmcpctl.xmlutil import leaf_text
 
-from .ownership import authorize_lpar_mutation
+from ..ownership import authorize_lpar_mutation
 
 _OS = {
     "AIX/Linux": "AIXOrLinux",

@@ -18,7 +18,7 @@ from hmcpctl.documents.lpar_processors import (
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.observation import MEMORY_FIELDS
 from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
-from hmcpctl.operations.lpar.processor_move import _read_endpoint
+from hmcpctl.operations.lpar.processors.move import _read_endpoint
 from hmcpctl.resource_identity import (
     is_uuid,
     resolve_system_uuid,

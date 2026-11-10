@@ -203,7 +203,7 @@ importlib.import_module("hmcpctl.operations.lpar.reconfiguration.core")
     assert completed.returncode == 0, completed.stderr
 
 
-@pytest.mark.parametrize("module", ["processors", "processor_move"])
+@pytest.mark.parametrize("module", ["processors.current", "processors.move"])
 def test_partition_read_without_collectors(module):
     script = f"""
 import importlib
@@ -228,7 +228,7 @@ importlib.import_module("hmcpctl.operations.lpar.{module}")
     assert completed.returncode == 0, completed.stderr
 
 
-@pytest.mark.parametrize("module", ["processors", "processor_move"])
+@pytest.mark.parametrize("module", ["processors.current", "processors.move"])
 def test_partition_read_without_memory_mutation(module):
     script = f"""
 import importlib
