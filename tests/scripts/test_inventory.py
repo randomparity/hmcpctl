@@ -9,9 +9,12 @@ from typing import Any
 
 import pytest
 
+from hmcpctl.operations.systems.fleet import FleetListing
+
 LIVE_TEST_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(LIVE_TEST_ROOT))
 from live_test import inventory, network, storage  # noqa: E402
+from live_test.observation import plain_data  # noqa: E402
 
 
 class ScenarioState:
@@ -46,7 +49,7 @@ class ScenarioState:
         response = self.responses.get(tool, {})
         if callable(response):
             response = response(kwargs)
-        return "PASS", response
+        return "PASS", plain_data(response)
 
     def record(self, stage: int, tool: str, status: str, data: Any) -> None:
         self.results.append((stage, tool, status, data))
@@ -81,7 +84,7 @@ async def test_baseline_capture_preserves_identity_and_adapter_topology() -> Non
             "hmc_get_lpar_proc_compat": "POWER10",
             "hmc_list_adapters": adapters,
             # A FleetListing result arrives as a generated dataclass (ADR 0197).
-            "hmc_list_vios": SimpleNamespace(
+            "hmc_list_vios": FleetListing(
                 entries=[{"UUID": "vios-uuid", "Resource": {"PartitionID": "2"}}],
                 unreadable_systems=[],
             ),
