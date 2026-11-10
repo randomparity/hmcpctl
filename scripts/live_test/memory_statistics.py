@@ -13,7 +13,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import env_var_value
 from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.memory_statistics import (
+from hmcpctl.operations.lpar.memory.statistics import (
     _admit,
     _context,
     _identity,

@@ -25,7 +25,7 @@ from hmcpctl.ssh.transport import HMCCLIError, _process_error
 
 
 def subject():
-    name = "hmcpctl.operations.lpar.paging"
+    name = "hmcpctl.operations.lpar.memory.paging"
     assert importlib.util.find_spec(name), "one-attempt owner is missing"
     return __import__(name, fromlist=["switch_lpar_paging_vios"])
 

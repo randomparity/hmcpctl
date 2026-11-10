@@ -28,7 +28,7 @@ POOL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
 
 def observation_module():
-    name = "hmcpctl.operations.lpar.paging_observation"
+    name = "hmcpctl.operations.lpar.memory.paging_observation"
     assert importlib.util.find_spec(name), "observation owner is missing"
     return __import__(name, fromlist=["observe_paging"])
 
@@ -631,7 +631,7 @@ async def test_duplicate_pool_provider_is_a_positive_contradiction(paging_bounda
 async def test_known_member_observation_precedes_completeness(
     paging_boundary, changed, missing
 ):
-    from hmcpctl.operations.lpar.paging import compare_paging
+    from hmcpctl.operations.lpar.memory.paging import compare_paging
 
     before = await observe(paging_boundary)
     replacement = paging_boundary.pool_member_response(changed, missing)

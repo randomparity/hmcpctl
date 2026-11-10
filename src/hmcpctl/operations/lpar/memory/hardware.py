@@ -6,13 +6,13 @@ from xml.etree.ElementTree import Element  # nosec B405 — type annotations onl
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
-from ...client.core import HMCClient
-from ...documents.common import UOM_NS
-from ...documents.lpar_hardware_memory import hardware_memory_pairs
-from ...errors import HMCError, HMCTLSFingerprintError
-from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
-from ...xmlutil import ATOM_NS, leaf_text
-from .workflow_contract import WorkflowStep
+from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.common import UOM_NS
+from hmcpctl.documents.lpar_hardware_memory import hardware_memory_pairs
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.resource_identity import is_uuid, resolve_lpar_uuid, resolve_vios_uuid
+from hmcpctl.xmlutil import ATOM_NS, leaf_text
 
 _FIELDS = (
     (

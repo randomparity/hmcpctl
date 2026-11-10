@@ -9,14 +9,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from urllib.parse import urlsplit
 
-from ...client.client_profiles import PartitionKind, read_native_profile
-from ...documents.common import UOM_NS
-from ...documents.partition_profile import one
-from ...errors import HMCError, HMCTLSFingerprintError
-from ...resource_identity import is_uuid
-from ...ssh import memory as native
-from ...xmlutil import leaf_text
-from .creation_memory import (
+from hmcpctl.client.client_profiles import PartitionKind, read_native_profile
+from hmcpctl.documents.common import UOM_NS
+from hmcpctl.documents.partition_profile import one
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar.memory.creation import (
     PagingProvider,
     _detail,
     _identity,
@@ -24,9 +21,12 @@ from .creation_memory import (
     _provider_uuid,
     _read,
 )
+from hmcpctl.resource_identity import is_uuid
+from hmcpctl.ssh import memory as native
+from hmcpctl.xmlutil import leaf_text
 
 if TYPE_CHECKING:
-    from ...client.core import HMCClient
+    from hmcpctl.client.core import HMCClient
 
 _LIMIT = 5 * 1024 * 1024
 T = TypeVar("T")

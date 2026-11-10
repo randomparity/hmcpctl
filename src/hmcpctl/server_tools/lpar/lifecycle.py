@@ -6,6 +6,14 @@ from typing import Any, Literal
 
 from pydantic import StrictBool
 
+from hmcpctl.operations.lpar.memory.current import change_lpar_memory
+from hmcpctl.operations.lpar.memory.move import move_lpar_memory
+from hmcpctl.operations.lpar.memory.paging import (
+    PagingSwitchoverResult,
+    switch_lpar_paging_vios,
+)
+from hmcpctl.operations.lpar.memory.statistics import reset_lpar_memory_statistics
+
 from ..._app import (
     with_client,
 )
@@ -30,10 +38,6 @@ from ...operations.lpar.assignments import (
 )
 from ...operations.lpar.core import delete_lpar, rename_lpar
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
-from ...operations.lpar.memory import change_lpar_memory
-from ...operations.lpar.memory_move import move_lpar_memory
-from ...operations.lpar.memory_statistics import reset_lpar_memory_statistics
-from ...operations.lpar.paging import PagingSwitchoverResult, switch_lpar_paging_vios
 from ...operations.lpar.processor_move import move_lpar_processors
 from ...operations.lpar.processors import change_lpar_processors
 from ...tool_registry import tool_module

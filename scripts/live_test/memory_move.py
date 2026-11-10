@@ -11,7 +11,7 @@ from typing import Any
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.memory_move import _read_endpoint, _system_bounds
+from hmcpctl.operations.lpar.memory.move import _read_endpoint, _system_bounds
 from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
 from hmcpctl.resource_identity import (
     is_uuid,

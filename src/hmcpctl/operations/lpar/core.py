@@ -14,7 +14,18 @@ from hmcpctl.operations.lpar.assignments import (
     prevalidate_lpar_pcie_assignments,
 )
 from hmcpctl.operations.lpar.errors import translate_lpar_write_error
-from hmcpctl.operations.lpar.memory_bound import require_memory_within_system
+from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
+from hmcpctl.operations.lpar.memory.creation import (
+    CreationMemoryAdmission,
+    _raise_creation_memory_failure,
+    admit_creation_memory,
+    confirm_creation_memory_identity,
+    creation_memory_step,
+)
+from hmcpctl.operations.lpar.memory.hardware import (
+    admit_hardware_memory,
+    created_hardware_memory_step,
+)
 from hmcpctl.operations.lpar.ownership import (
     resolve_and_authorize_lpar_mutation,
     stamp_created_lpar_ownership,
@@ -66,14 +77,6 @@ from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml, leaf_text
 from .affinity_group import created_affinity_group_step
 from .configuration import configure_lpar_settings
-from .creation_memory import (
-    CreationMemoryAdmission,
-    _raise_creation_memory_failure,
-    admit_creation_memory,
-    confirm_creation_memory_identity,
-    creation_memory_step,
-)
-from .hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from .linux_roles import (
     admit_role_creation,
     read_creation_authority,

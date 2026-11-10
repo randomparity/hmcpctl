@@ -16,7 +16,7 @@ from hmcpctl.documents.lpar_processors import (
     bounded_processor_number,
 )
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import memory
+from hmcpctl.operations.lpar.memory import current as memory
 from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
 from hmcpctl.operations.lpar.processor_move import _read_endpoint
 from hmcpctl.resource_identity import (

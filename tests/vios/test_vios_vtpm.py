@@ -180,7 +180,7 @@ async def test_vtpm_native_creation_does_not_implicitly_allocate_all_resources(
 async def test_vios_native_capacity_uses_completed_resource_values(
     boundary, monkeypatch
 ):
-    from hmcpctl.operations.lpar.memory_bound import require_memory_within_system
+    from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
 
     b = boundary
     b.hmc.list_system_summaries.return_value[0]["State"] = "operating"

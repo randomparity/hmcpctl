@@ -14,6 +14,8 @@ from hmcpctl.documents.lpar_processors import (
     bounded_processor_number,
 )
 from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar import processors
+from hmcpctl.operations.lpar.memory import current as memory
 from hmcpctl.resource_identity import (
     is_uuid,
     resolve_system_uuid,
@@ -24,7 +26,6 @@ from hmcpctl.ssh.processors import (
     read_lpar_processor_quantities,
 )
 
-from . import memory, processors
 from .ownership import authorize_lpar_mutation
 
 _Peer = tuple[str, processors._ProcessorSnapshot]

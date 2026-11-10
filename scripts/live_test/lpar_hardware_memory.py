@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.hardware_memory import (
+from hmcpctl.operations.lpar.memory.hardware import (
     admit_hardware_memory,
     created_hardware_memory_step,
 )

@@ -20,7 +20,7 @@ from hmcpctl.documents.lpar_hardware_memory import (
     hardware_memory_pairs,
 )
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.hardware_memory import (
+from hmcpctl.operations.lpar.memory.hardware import (
     admit_hardware_memory,
     created_hardware_memory_step,
 )

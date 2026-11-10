@@ -11,7 +11,7 @@ import pytest
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_memory import LparMemoryMove
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
-from hmcpctl.operations.lpar.memory_move import move_lpar_memory
+from hmcpctl.operations.lpar.memory.move import move_lpar_memory
 from hmcpctl.ssh.memory import move_lpar_memory_quantity
 
 SYSTEM = "aaaaaaaa-0000-0000-0000-000000000001"

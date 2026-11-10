@@ -23,11 +23,11 @@ from hmcpctl.documents.lpar_creation_memory import LparCreationMemory as Memory
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import core, linux_roles, serial, workflows
-from hmcpctl.operations.lpar import creation_memory as cm
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
 )
+from hmcpctl.operations.lpar.memory import creation as cm
 from hmcpctl.operations.lpar.profiles.core import PartitionProfileRecord
 from hmcpctl.ssh import lpar as native
 from hmcpctl.ssh.lpar_serial import SerialProfile

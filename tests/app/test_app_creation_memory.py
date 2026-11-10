@@ -19,7 +19,7 @@ from hmcpctl.cli_commands.lpar import create
 from hmcpctl.cli_commands.vios import core as vios_cli
 from hmcpctl.documents.lpar_creation_memory import LparCreationMemory
 from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
-from hmcpctl.operations.lpar.creation_memory import (
+from hmcpctl.operations.lpar.memory.creation import (
     CreationMemoryObservation,
     CreationMemoryVerification,
 )

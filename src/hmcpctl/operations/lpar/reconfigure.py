@@ -21,6 +21,7 @@ from typing import Any, Literal, NotRequired, TypedDict, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
+from hmcpctl.operations.lpar.memory.bounds import require_memory_within_selected_system
 from hmcpctl.operations.lpar.profiles import persist as profile_persist
 from hmcpctl.operations.lpar.profiles.core import (
     PartitionProfileRecord,
@@ -53,7 +54,6 @@ from ..logical.models import EffectRecord
 from ..storage.resources import storage_mapping, volume_group
 from ..systems.fleet import read_system_entry
 from . import reconfigure_network as network
-from .memory_bound import require_memory_within_selected_system
 from .ownership import resolve_and_authorize_lpar_mutation
 from .reconfigure_media import (
     BOOT_KEY,

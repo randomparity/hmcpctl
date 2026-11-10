@@ -12,13 +12,16 @@ from pydantic import TypeAdapter
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
-from hmcpctl.operations.lpar.paging import (
+from hmcpctl.operations.lpar.memory.paging import (
     _require_complete,
     _resolve_target,
     compare_paging,
 )
-from hmcpctl.operations.lpar.paging_observation import PagingObservation, observe_paging
+from hmcpctl.operations.lpar.memory.paging_observation import (
+    PagingObservation,
+    observe_paging,
+)
+from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh.profiles import get_lpar_description
 
@@ -76,12 +79,12 @@ def _candidate(config) -> tuple[str, str]:
     )
     tree = evidence._git(root, "rev-parse", "HEAD^{tree}") if root else None
     # served_client composes the local application; bind its editable source to this checkout.
-    import hmcpctl.operations.lpar.paging as product
+    import hmcpctl.operations.lpar.memory.paging as product
 
     if (
         root is None
         or Path(product.__file__).resolve()
-        != root / "src/hmcpctl/operations/lpar/paging.py"
+        != root / "src/hmcpctl/operations/lpar/memory/paging.py"
         or provenance["tree_clean"] is not True
         or not _HEX.fullmatch(provenance["tested_commit"] or "")
         or tree is None

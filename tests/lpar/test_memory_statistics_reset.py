@@ -68,7 +68,7 @@ def test_request_rejects_unknown_or_untyped(values):
     ],
 )
 def test_statistics_rows(raw, usable):
-    from hmcpctl.operations.lpar.memory_statistics import parse_statistics
+    from hmcpctl.operations.lpar.memory.statistics import parse_statistics
 
     result = parse_statistics(raw)
     assert result["raw"] == raw
@@ -109,7 +109,7 @@ def test_statistics_rows(raw, usable):
     ],
 )
 def test_statistics_invalid_rows_remain_unavailable(raw):
-    from hmcpctl.operations.lpar.memory_statistics import parse_statistics
+    from hmcpctl.operations.lpar.memory.statistics import parse_statistics
 
     result = parse_statistics(raw)
     assert not result["usable"]
@@ -118,7 +118,7 @@ def test_statistics_invalid_rows_remain_unavailable(raw):
 
 
 def test_statistics_preserve_order_values_and_missing():
-    from hmcpctl.operations.lpar.memory_statistics import parse_statistics
+    from hmcpctl.operations.lpar.memory.statistics import parse_statistics
 
     result = parse_statistics(
         "extra=  text  ,min_io_entitled_mem=0,Optimal_io_entitled_mem=22"
@@ -273,7 +273,7 @@ def reset_boundary(monkeypatch):
 
 async def reset_operation(state, *, override=False, **settings):
     from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
-    from hmcpctl.operations.lpar.memory_statistics import reset_lpar_memory_statistics
+    from hmcpctl.operations.lpar.memory.statistics import reset_lpar_memory_statistics
 
     return await reset_lpar_memory_statistics(
         state.hmc,
@@ -512,7 +512,7 @@ async def test_missing_detail_is_actionable_before_effect(reset_boundary, method
 @pytest.mark.asyncio
 async def test_uuid_system_with_duplicate_cli_name_refuses_before_ssh(reset_boundary):
     from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
-    from hmcpctl.operations.lpar.memory_statistics import reset_lpar_memory_statistics
+    from hmcpctl.operations.lpar.memory.statistics import reset_lpar_memory_statistics
 
     state = reset_boundary
     state.hmc.list_system_summaries.return_value = [
@@ -532,7 +532,7 @@ async def test_uuid_system_with_duplicate_cli_name_refuses_before_ssh(reset_boun
 
 @pytest.mark.asyncio
 async def test_context_qualifies_cli_name_from_one_snapshot(reset_boundary):
-    from hmcpctl.operations.lpar.memory_statistics import _context
+    from hmcpctl.operations.lpar.memory.statistics import _context
 
     state = reset_boundary
     context = await _context(state.hmc, SYSTEM.upper(), "guest-R1")
@@ -545,7 +545,7 @@ async def test_context_qualifies_cli_name_from_one_snapshot(reset_boundary):
 @pytest.mark.parametrize("duplicate", [False, True])
 async def test_uuid_shaped_cli_name_is_matched_literally(reset_boundary, duplicate):
     from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
-    from hmcpctl.operations.lpar.memory_statistics import (
+    from hmcpctl.operations.lpar.memory.statistics import (
         _context,
         reset_lpar_memory_statistics,
     )
@@ -576,7 +576,7 @@ async def test_uuid_shaped_cli_name_is_matched_literally(reset_boundary, duplica
 
 @pytest.mark.asyncio
 async def test_null_uuid_after_submission_retains_known_completion(reset_boundary):
-    from hmcpctl.operations.lpar.memory_statistics import parse_statistics
+    from hmcpctl.operations.lpar.memory.statistics import parse_statistics
 
     state = reset_boundary
     valid = {"UUID": SYSTEM, "SystemName": "sys-R1"}

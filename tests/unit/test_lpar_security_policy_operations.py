@@ -692,7 +692,7 @@ async def test_creation_policy_composes_once(creation_target, monkeypatch):
 async def test_lpar_policy_cpu_only_default_capacity(creation_target, monkeypatch):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar import core
-    from hmcpctl.operations.lpar.memory_bound import require_memory_within_system
+    from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
 
     hmc, _, command = creation_target
     hmc.list_system_summaries.return_value[0]["State"] = "operating"

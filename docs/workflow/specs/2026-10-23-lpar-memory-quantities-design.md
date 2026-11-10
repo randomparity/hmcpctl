@@ -30,7 +30,7 @@ Add one typed `LparMemoryChange` in `documents/lpar_memory.py`: operation add/re
 optional quantity_mib (strict nonnegative integer); optional entitled_mib (strict
 positive integer or literal auto); force (strict bool, default false). Reject unknown
 fields, empty requests, booleans/fractions/string numbers and invalid combinations.
-Use one owning `change_lpar_memory` operation in `operations/lpar/memory.py`, one fixed
+Use one owning `change_lpar_memory` operation in `operations/lpar/memory/current.py`, one fixed
 quantity command encoder in `ssh/memory.py`, and no facade or generic command surface.
 
 Extend `hmc_dlpar_mem` with optional change, preserving the old arguments/defaults and

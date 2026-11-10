@@ -16,6 +16,7 @@ from hmcpctl.documents.lpar_processors import (
 )
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.inventory.composite import resource_container
+from hmcpctl.operations.lpar.memory import current as memory
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.resource_identity import (
     is_uuid,
@@ -28,7 +29,6 @@ from hmcpctl.ssh.processors import (
 )
 from hmcpctl.xmlutil import leaf_text
 
-from . import memory
 from .ownership import authorize_lpar_mutation
 
 _OS = {

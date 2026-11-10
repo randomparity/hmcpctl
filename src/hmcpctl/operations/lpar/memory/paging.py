@@ -7,17 +7,26 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from ...errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
-from ...resource_identity import guard_partition, is_uuid, resolve_system_uuid
-from ...ssh import memory as native
-from ...ssh.transport import HMCCLIError
-from ...xmlutil import leaf_text
-from .creation_memory import PagingProvider, _detail, _identity, _inventory
-from .ownership import authorize_lpar_mutation
-from .paging_observation import PagingObservation, PartitionIdentity, observe_paging
+from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar.memory.creation import (
+    PagingProvider,
+    _detail,
+    _identity,
+    _inventory,
+)
+from hmcpctl.operations.lpar.memory.paging_observation import (
+    PagingObservation,
+    PartitionIdentity,
+    observe_paging,
+)
+from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
+from hmcpctl.resource_identity import guard_partition, is_uuid, resolve_system_uuid
+from hmcpctl.ssh import memory as native
+from hmcpctl.ssh.transport import HMCCLIError
+from hmcpctl.xmlutil import leaf_text
 
 if TYPE_CHECKING:
-    from ...client.core import HMCClient
+    from hmcpctl.client.core import HMCClient
 
 
 @dataclass(frozen=True)

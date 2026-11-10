@@ -365,7 +365,8 @@ async def test_overmax_oracle_through_actual_mcp_memory_admission(
     monkeypatch,
     quantity_boundary,  # noqa: F811 -- imported pytest boundary fixture
 ):
-    from hmcpctl.operations.lpar import memory, ownership
+    from hmcpctl.operations.lpar import ownership
+    from hmcpctl.operations.lpar.memory import current as memory
     from hmcpctl.server_tools.lpar import lifecycle
 
     boundary = quantity_boundary

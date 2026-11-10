@@ -7,23 +7,19 @@ import math
 import re
 from typing import Any
 
-from ...client.core import HMCClient
-from ...documents.lpar_memory import LparMemoryStatisticsReset
-from ...errors import HMCError
-from ...resource_identity import (
-    is_uuid,
-    resolve_system_uuid,
-    summary_matching,
-)
-from ...ssh.memory import (
+from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.lpar_memory import LparMemoryStatisticsReset
+from hmcpctl.errors import HMCError
+from hmcpctl.operations.inventory.composite import resource_container
+from hmcpctl.operations.lpar.memory.current import _contained_partition
+from hmcpctl.operations.lpar.ownership import authorize_lpar_mutation
+from hmcpctl.resource_identity import is_uuid, resolve_system_uuid, summary_matching
+from hmcpctl.ssh.memory import (
     read_lpar_memory_statistics,
     reset_lpar_memory_statistics_native,
 )
-from ...ssh.transport import HMCCLIError
-from ...xmlutil import leaf_text
-from ..inventory.composite import resource_container
-from .memory import _contained_partition
-from .ownership import authorize_lpar_mutation
+from hmcpctl.ssh.transport import HMCCLIError
+from hmcpctl.xmlutil import leaf_text
 
 _COUNTERS = (
     "min_io_entitled_mem",

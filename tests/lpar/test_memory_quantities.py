@@ -11,7 +11,7 @@ import pytest
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_memory import LparMemoryChange
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.memory import change_lpar_memory
+from hmcpctl.operations.lpar.memory.current import change_lpar_memory
 from hmcpctl.ssh.memory import change_lpar_memory_quantity
 
 CONFIG = HMCConfig.from_mapping({})
@@ -260,7 +260,8 @@ def quantity_boundary(monkeypatch):
         return_value=[{"UUID": SYSTEM_UUID, "SystemName": "sys-R1"}]
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.authorize_lpar_mutation", boundary.authorize
+        "hmcpctl.operations.lpar.memory.current.authorize_lpar_mutation",
+        boundary.authorize,
     )
     boundary.command = AsyncMock(side_effect=submit)
     monkeypatch.setattr("hmcpctl.ssh.memory.run_hmc_command", boundary.command)

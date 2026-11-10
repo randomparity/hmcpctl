@@ -9,6 +9,17 @@ from dataclasses import replace
 from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
+from hmcpctl.operations.lpar.memory.creation import (
+    _raise_creation_memory_failure,
+    admit_creation_memory,
+    confirm_creation_memory_identity,
+    creation_memory_step,
+)
+from hmcpctl.operations.lpar.memory.hardware import (
+    admit_hardware_memory,
+    created_hardware_memory_step,
+)
 from hmcpctl.operations.partition_state import PARTITION_STATES, PartitionState
 from hmcpctl.operations.systems.fleet import (
     FleetListing,
@@ -54,15 +65,7 @@ from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
 from ..lpar.affinity_group import created_affinity_group_step
-from ..lpar.creation_memory import (
-    _raise_creation_memory_failure,
-    admit_creation_memory,
-    confirm_creation_memory_identity,
-    creation_memory_step,
-)
-from ..lpar.hardware_memory import admit_hardware_memory, created_hardware_memory_step
 from ..lpar.linux_roles import read_creation_authority, read_role_capabilities
-from ..lpar.memory_bound import require_memory_within_system
 from ..lpar.ownership import _resolve_system_name
 from ..lpar.security_policy import (
     admit_security_policy,

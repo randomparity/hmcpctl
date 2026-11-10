@@ -104,8 +104,8 @@ MCP `hmc_create_lpar` and `hmc_create_vios` accept the typed optional family. Th
 CLI commands expose eight flat hyphenated flags, constructing the same model before
 opening clients. No duplicated presentation-only admission replaces domain checks.
 
-`operations/lpar/creation_memory.py` owns creation-specific capability, pool/provider
-admission and saved/current verification; existing `operations/lpar/memory.py` stays
+`operations/lpar/memory/creation.py` owns creation-specific capability, pool/provider
+admission and saved/current verification; existing `operations/lpar/memory/current.py` stays
 the DLPAR quantity owner. `ssh/lpar.py:create_lpar_via_cli` remains the sole writer:
 append fixed typed pairs to the same attribute record as the landed creation families.
 Reuse `read_partition_profile(..., partition_type=LogicalPartition|VirtualIOServer)`

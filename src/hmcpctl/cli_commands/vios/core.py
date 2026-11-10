@@ -15,6 +15,7 @@ from hmcpctl.cli_commands.lpar.assignment_input import (
     load_security_policy,
     load_virtual_serial_adapters,
 )
+from hmcpctl.operations.lpar.memory.creation import CreationMemoryVerification
 from hmcpctl.operations.lpar.security_policy import (
     configure_lpar_security_policy,
     read_lpar_security_policy,
@@ -29,7 +30,6 @@ from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...jobs import validate_wait_timing
-from ...operations.lpar.creation_memory import CreationMemoryVerification
 from ...operations.lpar.vtpm import configure_lpar_vtpm, read_lpar_vtpm
 from ...operations.partition_state import PartitionState
 from ...operations.vios.boot_order import read_vios_boot_order, set_vios_boot_order
