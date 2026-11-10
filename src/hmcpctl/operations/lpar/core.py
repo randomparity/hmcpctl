@@ -172,6 +172,8 @@ async def _create_via_cli(
     system_name_or_uuid: str,
     creation: LparCreation,
     *,
+    defer_apply: bool,
+    native_readback: bool,
     controller_mode: bool = False,
     memory_admission: CreationMemoryAdmission | None = None,
     start_admission: StartAdmission | None = None,
@@ -248,17 +250,7 @@ async def _create_via_cli(
         )
     apply_step = (
         await _apply_created_profile(hmc, system_name, creation)
-        if creation.apply_profile is not None
-        and not creation.physical_io.requested
-        and not creation.security_policy.pairs()
-        and not creation.memory_layout.pairs()
-        and not creation.virtual_serial_adapters
-        and not creation.creation_memory.pairs()
-        and not creation.start_settings.requested()
-        and creation.hardware_mem_encryption is None
-        and creation.hardware_mem_expansion is None
-        and creation.affinity_group_id is None
-        and not roles_requested(creation.settings)
+        if creation.apply_profile is not None and not defer_apply
         else None
     )
     if controller_mode and creation.apply_profile is False:
@@ -276,15 +268,7 @@ async def _create_via_cli(
     except HMCError as exc:
         return system_name, apply_step, None, exc
     except Exception:
-        if (
-            creation.hardware_mem_encryption is None
-            and creation.hardware_mem_expansion is None
-            and not creation.memory_layout.pairs()
-            and not creation.virtual_serial_adapters
-            and not creation.creation_memory.pairs()
-            and not creation.start_settings.requested()
-            and creation.affinity_group_id is None
-        ):
+        if not native_readback:
             raise
         # Native creation succeeded, but the identity lookup is unavailable.
         # Do not retain provider details in the partial result or exception chain.
@@ -523,6 +507,13 @@ async def _submit_lpar_creation(
 ) -> tuple[str | None, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
     """Select native creation or REST with only the established refusal fallback."""
     system_uuid = features.system_uuid
+    native_readback = features.native_features_requested
+    defer_apply = (
+        creation.physical_io.requested
+        or features.policy_requested
+        or native_readback
+        or roles_requested(creation.settings)
+    )
     system_name: str | None = features.system if features.memory_requested else None
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
@@ -530,7 +521,7 @@ async def _submit_lpar_creation(
     if (
         resources is None
         or features.policy_requested
-        or features.native_features_requested
+        or native_readback
         or creation.reporting_settings.pairs()
         or features.vtpm_requested
         or creation.physical_io.requested
@@ -538,7 +529,12 @@ async def _submit_lpar_creation(
     ):
         # Only mksyscfg's all_resources=1 expresses a create with no resource values.
         return await _submit_native_creation(
-            hmc, system_name_or_uuid, creation, features
+            hmc,
+            system_name_or_uuid,
+            creation,
+            features,
+            defer_apply=defer_apply,
+            native_readback=native_readback,
         )
     document = build_lpar_document(
         name=creation.name,
@@ -558,7 +554,14 @@ async def _submit_lpar_creation(
             creation.name,
             exc,
         )
-        return await _create_via_cli(hmc, system_uuid, system_name_or_uuid, creation)
+        return await _create_via_cli(
+            hmc,
+            system_uuid,
+            system_name_or_uuid,
+            creation,
+            defer_apply=defer_apply,
+            native_readback=native_readback,
+        )
     if creation.apply_profile is True:
         apply_step = WorkflowStep("apply_profile", "skipped", _REST_CREATE_CONFIGURED)
     return system_name, apply_step, created_lpar, readback_error
@@ -569,6 +572,9 @@ async def _submit_native_creation(
     system_name_or_uuid: str,
     creation: LparCreation,
     features: _CreationFeatureCoordinator,
+    *,
+    defer_apply: bool,
+    native_readback: bool,
 ) -> tuple[str, WorkflowStep | None, dict[str, Any] | None, HMCError | None]:
     """Preserve feature-specific ambiguous-submission diagnostics and causes."""
     role_requested = roles_requested(creation.settings)
@@ -578,6 +584,8 @@ async def _submit_native_creation(
             features.system_uuid,
             system_name_or_uuid,
             creation,
+            defer_apply=defer_apply,
+            native_readback=native_readback,
             controller_mode=features.controller_mode,
             memory_admission=features.memory_admission,
             start_admission=features.start_admission,
@@ -732,8 +740,20 @@ async def _missing_created_identity(
     apply_warnings = result.warnings
     apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
     if verify_before_apply and creation.stamp_policy == "required":
+        feature_label = "Policy"
+        for requested, label in (
+            (features.memory_requested, "Creation memory"),
+            (features.affinity_requested, "Affinity group"),
+            (features.serial_requested, "Serial"),
+            (features.layout_requested, "Memory layout"),
+            (features.hardware_requested, "Hardware memory"),
+            (roles_requested(creation.settings), "Role"),
+        ):
+            if requested:
+                feature_label = label
+                break
         raise HMCError(
-            f"{'Creation memory' if features.memory_requested else 'Affinity group' if features.affinity_requested else 'Serial' if features.serial_requested else 'Memory layout' if features.layout_requested else 'Hardware memory' if features.hardware_requested else 'Role' if roles_requested(creation.settings) else 'Policy'} creation may have succeeded, but created identity readback is "
+            f"{feature_label} creation may have succeeded, but created identity readback is "
             "unavailable and ownership was not stamped. Inspect the contained "
             "partition before retrying; no rollback performed."
         ) from None

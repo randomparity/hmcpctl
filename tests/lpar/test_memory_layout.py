@@ -617,7 +617,14 @@ async def test_layout_invalid_record_preserves_reason_without_reconciliation(
         layout_creation(LparMemoryLayout(min_num_huge_pages=0)), name=name
     )
     with pytest.raises(HMCCLIError, match="attribute 'name'.*contains") as caught:
-        await _create_via_cli(target.hmc, LAYOUT_SYSTEM, "selector", creation)
+        await _create_via_cli(
+            target.hmc,
+            LAYOUT_SYSTEM,
+            "selector",
+            creation,
+            defer_apply=True,
+            native_readback=True,
+        )
     assert name in str(caught.value)
     assert "Remove" in str(caught.value)
     target.write.assert_not_awaited()
