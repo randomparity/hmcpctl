@@ -559,7 +559,7 @@ class _CreationFeatureCoordinator:
         )
 
     async def _observe_vios(self) -> None:
-        verification_failed = False
+        verification_unavailable = "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
         try:
             await self.confirm_identity()
             if self.memory_admission is not None:
@@ -668,66 +668,69 @@ class _CreationFeatureCoordinator:
                 and not isinstance(error, (HMCError, ValueError, PermissionError))
             ):
                 raise
-            if self.native_features_requested:
-                verification_failed = True
-            elif self.policy_requested:
-                raise HMCError(
-                    "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
-                ) from error
-            else:
+            if not self.native_features_requested:
+                if self.policy_requested:
+                    raise HMCError(verification_unavailable) from error
                 raise HMCError(
                     f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
                 ) from error
-        if verification_failed:
-            raise HMCError(
-                "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
-                if self.layout_requested
-                or self.serial_requested
-                or self.memory_requested
-                or self.start_requested
-                else f"VIOS exists or may exist; {'affinity group' if self.affinity_requested else 'hardware memory access'} readback-unavailable. Inspect before retrying. No second create or rollback performed"
+        else:
+            assert (
+                self.entry is not None
+            )  # Successful identity verification above requires an entry.
+            hardware_step = await self.observe(
+                "hardware_memory_step",
+                created_hardware_memory_step(
+                    self.hmc,
+                    self.system_uuid,
+                    self.entry,
+                    self.name,
+                    "Virtual IO Server",
+                    self.hardware_mem_encryption,
+                    self.hardware_mem_expansion,
+                    vios=True,
+                ),
             )
-        assert (
-            self.entry is not None
-        )  # Successful identity verification above requires an entry.
-        hardware_step = await self.observe(
-            "hardware_memory_step",
-            created_hardware_memory_step(
-                self.hmc,
-                self.system_uuid,
-                self.entry,
-                self.name,
-                "Virtual IO Server",
-                self.hardware_mem_encryption,
-                self.hardware_mem_expansion,
-                vios=True,
-            ),
-        )
-        if hardware_step is not None and hardware_step.status != "ok":
-            raise HMCError(
-                f"VIOS exists or may exist; hardware memory access {hardware_step.result['status']}. "
-                "Inspect before retrying. No second create or rollback performed"
+            if hardware_step is not None and hardware_step.status != "ok":
+                raise HMCError(
+                    f"VIOS exists or may exist; hardware memory access {hardware_step.result['status']}. "
+                    "Inspect before retrying. No second create or rollback performed"
+                )
+            affinity_step = await self.observe(
+                "affinity_group_step",
+                created_affinity_group_step(
+                    self.hmc,
+                    self.system_uuid,
+                    self.entry,
+                    self.name,
+                    "Virtual IO Server",
+                    self.affinity_group_id,
+                    controller_mode=self.controller_mode,
+                    vios=True,
+                ),
             )
-        affinity_step = await self.observe(
-            "affinity_group_step",
-            created_affinity_group_step(
-                self.hmc,
-                self.system_uuid,
-                self.entry,
-                self.name,
-                "Virtual IO Server",
-                self.affinity_group_id,
-                controller_mode=self.controller_mode,
-                vios=True,
-            ),
+            if affinity_step is not None and affinity_step.status != "ok":
+                raise HMCError(
+                    f"VIOS exists or may exist; affinity group {affinity_step.result['status']}. "
+                    f"Observed {affinity_step.result['observed']}; "
+                    f"observation status {affinity_step.result['observation_status']}. "
+                    "Inspect before retrying. No second create or rollback performed"
+                ) from None
+            return
+        if (
+            self.layout_requested
+            or self.serial_requested
+            or self.memory_requested
+            or self.start_requested
+        ):
+            raise HMCError(verification_unavailable)
+        feature = (
+            "affinity group" if self.affinity_requested else "hardware memory access"
         )
-        if affinity_step is not None and affinity_step.status != "ok":
-            raise HMCError(
-                f"VIOS exists or may exist; affinity group {affinity_step.result['status']}. "
-                f"Observed {affinity_step.result['observed']}; "
-                f"observation status {affinity_step.result['observation_status']}. "
-                "Inspect before retrying. No second create or rollback performed"
-            ) from None
+        raise HMCError(
+            f"VIOS exists or may exist; {feature} readback-unavailable. "
+            "Inspect before retrying. No second create or rollback performed"
+        )
 
     async def observe_start(self) -> WorkflowStep | None:
         if self.start_admission is None:
