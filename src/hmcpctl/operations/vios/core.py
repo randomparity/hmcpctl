@@ -278,16 +278,17 @@ async def create_vios(
         assert memory_admission is not None
         await _raise_creation_memory_failure(hmc, memory_admission, error)
     except Exception as error:
-        if (
-            not features.serial_requested
-            and not features.memory_requested
-            and not features.start_requested
-            and not isinstance(error, HMCError)
-        ):
-            raise
-        if not features.native_features_requested and not features.policy_requested:
+        may_need_outcome_report = (
+            features.serial_requested
+            or features.memory_requested
+            or features.start_requested
+            or isinstance(error, HMCError)
+        )
+        if not may_need_outcome_report:
             raise
         if not features.native_features_requested:
+            if not features.policy_requested:
+                raise
             raise HMCError(unknown_outcome) from error
     else:
         await features.observe_before_followup()
