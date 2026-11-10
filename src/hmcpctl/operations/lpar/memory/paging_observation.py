@@ -5,8 +5,8 @@ from __future__ import annotations
 import csv
 import math
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, TypeVar
 from urllib.parse import urlsplit
 
 from hmcpctl.client.client_profiles import PartitionKind, read_native_profile
@@ -363,6 +363,125 @@ def _reconcile(
     return replace(observation, invalid=tuple(invalid))
 
 
+@dataclass
+class _PagingDiagnostics:
+    unavailable: list[str] = field(default_factory=list)
+    invalid: list[str] = field(default_factory=list)
+
+    async def load(self, label: str, call: Awaitable[T]) -> T | None:
+        try:
+            return await call
+        except HMCTLSFingerprintError:
+            raise
+        except (HMCError, ValueError, TypeError):
+            self.unavailable.append(label)
+            return None
+
+    def fact(self, label: str, call: Callable[[], T]) -> T | None:
+        try:
+            return call()
+        except (ValueError, TypeError, KeyError):
+            self.unavailable.append(label)
+            return None
+
+
+class _PoolFacts(NamedTuple):
+    entry: dict[str, Any]
+    id: int | None
+    providers: tuple[PagingProvider, ...]
+    dedicated: tuple[bool | None, ...]
+
+
+async def _observe_pool(
+    hmc: HMCClient,
+    system_uuid: str,
+    known_providers: tuple[PagingProvider, ...],
+    diagnostics: _PagingDiagnostics,
+) -> _PoolFacts:
+    pool = await diagnostics.load("pool", _pool(hmc, system_uuid)) or {}
+    observed_providers = []
+    for key in ("PagingServicePartitionOne", "PagingServicePartitionTwo"):
+        provider = diagnostics.fact(
+            "pool-providers",
+            lambda key=key: _provider(
+                known_providers,
+                _provider_uuid(
+                    hmc, system_uuid, _mapping(pool.get("Resource")).get(key)
+                ),
+            ),
+        )
+        if provider is not None:
+            dedicated = await diagnostics.load(
+                "provider-detail", _provider_dedicated(hmc, provider)
+            )
+            observed_providers.append((provider, dedicated))
+    ordered = sorted(observed_providers, key=lambda item: item[0].uuid)
+    providers = tuple(provider for provider, _ in ordered)
+    dedicated = tuple(value for _, value in ordered)
+    if len(providers) == 2 and providers[0] == providers[1]:
+        diagnostics.invalid.append("pool-providers-not-distinct")
+    if any(value is False for value in dedicated):
+        diagnostics.invalid.append("provider-not-dedicated")
+    pool_id = diagnostics.fact(
+        "pool-id", lambda: _integer(pool["Resource"].get("PoolID"), 0)
+    )
+    return _PoolFacts(pool, pool_id, providers, dedicated)
+
+
+class _NativeFacts(NamedTuple):
+    current: PagingProvider | None
+    assignment: dict[str, str] | None
+    paths: tuple[tuple[str, str], ...] | None
+    redundant: bool | None
+
+
+async def _observe_native(
+    hmc: HMCClient,
+    system_name: str,
+    target: PartitionIdentity,
+    known_providers: tuple[PagingProvider, ...],
+    diagnostics: _PagingDiagnostics,
+) -> _NativeFacts:
+    current_body = await diagnostics.load(
+        "native-current", native.read_lpar_paging_memory(hmc.config, system_name)
+    )
+    device_body = await diagnostics.load(
+        "native-devices", native.read_lpar_paging_devices(hmc.config, system_name)
+    )
+    current_native = (
+        diagnostics.fact(
+            "native-current",
+            lambda: _native_current(_rows(current_body), target, known_providers),
+        )
+        if current_body is not None
+        else None
+    )
+    assignment = (
+        diagnostics.fact(
+            "native-assignment", lambda: _assignment(_rows(device_body), target)
+        )
+        if device_body is not None
+        else None
+    )
+    paths = (
+        diagnostics.fact(
+            "native-paths", lambda: _native_paths(assignment, known_providers)
+        )
+        if assignment is not None
+        else None
+    )
+    native_redundant = (
+        diagnostics.fact(
+            "native-redundancy", lambda: _boolean(assignment.get("is_redundant"))
+        )
+        if assignment is not None
+        else None
+    )
+    if native_redundant is False:
+        diagnostics.invalid.append("native-not-redundant")
+    return _NativeFacts(current_native, assignment, paths, native_redundant)
+
+
 async def observe_paging(
     hmc: HMCClient, system_uuid: str, system_name: str, target: PartitionIdentity
 ) -> PagingObservation:
@@ -370,29 +489,16 @@ async def observe_paging(
     if not math.isfinite(hmc.config.ssh_timeout) or hmc.config.ssh_timeout <= 0:
         raise ValueError("Paging requires a finite positive ssh_timeout")
     system_uuid = system_uuid.lower()
-    unavailable: list[str] = []
-    invalid: list[str] = []
+    diagnostics = _PagingDiagnostics()
 
-    async def load(label: str, call: Awaitable[T]) -> T | None:
-        try:
-            return await call
-        except HMCTLSFingerprintError:
-            raise
-        except (HMCError, ValueError, TypeError):
-            unavailable.append(label)
-            return None
-
-    def fact(label: str, call: Callable[[], T]) -> T | None:
-        try:
-            return call()
-        except (ValueError, TypeError, KeyError):
-            unavailable.append(label)
-            return None
-
-    system = await load("system", _detail(hmc, "ManagedSystem", system_uuid))
+    system = await diagnostics.load(
+        "system", _detail(hmc, "ManagedSystem", system_uuid)
+    )
     if system is not None:
-        name = fact("system-name", lambda: _text(system["Resource"].get("SystemName")))
-        ams = fact(
+        name = diagnostics.fact(
+            "system-name", lambda: _text(system["Resource"].get("SystemName"))
+        )
+        ams = diagnostics.fact(
             "ams",
             lambda: _boolean(
                 _mapping(system["Resource"].get("AssociatedSystemCapabilities")).get(
@@ -401,10 +507,12 @@ async def observe_paging(
             ),
         )
         if name is not None and name != system_name:
-            invalid.append("system-name-changed")
+            diagnostics.invalid.append("system-name-changed")
         if ams is False:
-            invalid.append("ams-disabled")
-    inventory = await load("contained-inventory", _inventory(hmc, system_uuid))
+            diagnostics.invalid.append("ams-disabled")
+    inventory = await diagnostics.load(
+        "contained-inventory", _inventory(hmc, system_uuid)
+    )
     known_providers = tuple(
         _identity(entry, "VirtualIOServer")
         for entry in inventory or ()
@@ -415,30 +523,38 @@ async def observe_paging(
         for entry in inventory
     )
     detail = (
-        await load("consumer-detail", _detail(hmc, target.kind, target.uuid))
+        await diagnostics.load(
+            "consumer-detail", _detail(hmc, target.kind, target.uuid)
+        )
         if contained
         else None
     )
     if not contained:
-        unavailable.append("consumer-detail")
+        diagnostics.unavailable.append("consumer-detail")
     resource = _mapping(detail["Resource"]) if detail else {}
-    identity = fact("consumer-identity", lambda: _identity(detail, target.kind))
+    identity = diagnostics.fact(
+        "consumer-identity", lambda: _identity(detail, target.kind)
+    )
     if identity is not None and identity != PagingProvider(
         target.uuid.lower(), target.name, target.partition_id
     ):
-        invalid.append("consumer-identity-changed")
+        diagnostics.invalid.append("consumer-identity-changed")
     if inventory is not None and not contained:
-        invalid.append("consumer-not-contained")
-    environment = fact("consumer-type", lambda: _text(resource.get("PartitionType")))
+        diagnostics.invalid.append("consumer-not-contained")
+    environment = diagnostics.fact(
+        "consumer-type", lambda: _text(resource.get("PartitionType"))
+    )
     allowed = (
         {"Virtual IO Server"}
         if target.kind == "VirtualIOServer"
         else {"AIX/Linux", "OS400"}
     )
     if environment is not None and environment not in allowed:
-        invalid.append("consumer-kind-type-disagree")
-    state = fact("consumer-state", lambda: _text(resource.get("PartitionState")))
-    shared = fact(
+        diagnostics.invalid.append("consumer-kind-type-disagree")
+    state = diagnostics.fact(
+        "consumer-state", lambda: _text(resource.get("PartitionState"))
+    )
+    shared = diagnostics.fact(
         "consumer-shared",
         lambda: _boolean(
             _mapping(resource.get("PartitionMemoryConfiguration")).get(
@@ -447,55 +563,32 @@ async def observe_paging(
         ),
     )
     if state is not None and state != "running":
-        invalid.append("consumer-not-running")
+        diagnostics.invalid.append("consumer-not-running")
     if shared is False:
-        invalid.append("consumer-not-shared")
+        diagnostics.invalid.append("consumer-not-shared")
     if "IsOperationInProgress" in resource:
-        progress = fact(
+        progress = diagnostics.fact(
             "operation-in-progress", lambda: _boolean(resource["IsOperationInProgress"])
         )
         if progress is True:
-            invalid.append("operation-in-progress")
-    pool = await load("pool", _pool(hmc, system_uuid)) or {}
-    observed_providers = []
-    for key in ("PagingServicePartitionOne", "PagingServicePartitionTwo"):
-        provider = fact(
-            "pool-providers",
-            lambda key=key: _provider(
-                known_providers,
-                _provider_uuid(
-                    hmc, system_uuid, _mapping(pool.get("Resource")).get(key)
-                ),
-            ),
-        )
-        if provider is not None:
-            dedicated = await load(
-                "provider-detail", _provider_dedicated(hmc, provider)
-            )
-            observed_providers.append((provider, dedicated))
-    ordered = sorted(observed_providers, key=lambda item: item[0].uuid)
-    providers = tuple(provider for provider, _ in ordered)
-    dedicated = tuple(value for _, value in ordered)
-    if len(providers) == 2 and providers[0] == providers[1]:
-        invalid.append("pool-providers-not-distinct")
-    if any(value is False for value in dedicated):
-        invalid.append("provider-not-dedicated")
-    pool_id = fact("pool-id", lambda: _integer(pool["Resource"].get("PoolID"), 0))
-    configured = await load(
+            diagnostics.invalid.append("operation-in-progress")
+    pool = await _observe_pool(hmc, system_uuid, known_providers, diagnostics)
+    configured = await diagnostics.load(
         "configured-pair",
         _configured(hmc, system_uuid, target, resource, known_providers),
     )
-    device = fact(
-        "assigned-device", lambda: _device(hmc, system_uuid, pool["Resource"], target)
+    device = diagnostics.fact(
+        "assigned-device",
+        lambda: _device(hmc, system_uuid, pool.entry["Resource"], target),
     )
     uom_redundant = (
-        fact("uom-redundancy", lambda: _boolean(device.get("IsRedundant")))
+        diagnostics.fact("uom-redundancy", lambda: _boolean(device.get("IsRedundant")))
         if device
         else None
     )
     if uom_redundant is False:
-        invalid.append("uom-not-redundant")
-    current_uom = fact(
+        diagnostics.invalid.append("uom-not-redundant")
+    current_uom = diagnostics.fact(
         "uom-current",
         lambda: _provider(
             known_providers,
@@ -508,40 +601,12 @@ async def observe_paging(
             ),
         ),
     )
-    current_body = await load(
-        "native-current", native.read_lpar_paging_memory(hmc.config, system_name)
+    native_facts = await _observe_native(
+        hmc, system_name, target, known_providers, diagnostics
     )
-    device_body = await load(
-        "native-devices", native.read_lpar_paging_devices(hmc.config, system_name)
-    )
-    current_native = (
-        fact(
-            "native-current",
-            lambda: _native_current(_rows(current_body), target, known_providers),
-        )
-        if current_body is not None
-        else None
-    )
-    assignment = (
-        fact("native-assignment", lambda: _assignment(_rows(device_body), target))
-        if device_body is not None
-        else None
-    )
-    paths = (
-        fact("native-paths", lambda: _native_paths(assignment, known_providers))
-        if assignment is not None
-        else None
-    )
-    native_redundant = (
-        fact("native-redundancy", lambda: _boolean(assignment.get("is_redundant")))
-        if assignment is not None
-        else None
-    )
-    if native_redundant is False:
-        invalid.append("native-not-redundant")
     device_names = None
-    if device and paths:
-        device_names = fact(
+    if device and native_facts.paths:
+        device_names = diagnostics.fact(
             "uom-device-names",
             lambda: sorted(
                 (
@@ -551,20 +616,22 @@ async def observe_paging(
             ),
         )
     udid = (
-        fact("unique-device-id", lambda: _text(device["UniqueDeviceID"]))
+        diagnostics.fact("unique-device-id", lambda: _text(device["UniqueDeviceID"]))
         if device and "UniqueDeviceID" in device
         else None
     )
     states = []
     for label, fields, keys in (
         ("uom", device or {}, ("DeviceState", "RedundantDeviceState")),
-        ("native", assignment or {}, ("state", "redundant_state")),
+        ("native", native_facts.assignment or {}, ("state", "redundant_state")),
     ):
         for key in keys:
             states.append(
                 (
                     label + "." + key,
-                    fact("service-state", lambda value=fields[key]: _text(value))
+                    diagnostics.fact(
+                        "service-state", lambda value=fields[key]: _text(value)
+                    )
                     if key in fields
                     else None,
                 )
@@ -577,21 +644,21 @@ async def observe_paging(
         )
         if identity
         else target,
-        pool_uuid=pool.get("UUID"),
-        pool_id=pool_id,
-        providers=providers,
+        pool_uuid=pool.entry.get("UUID"),
+        pool_id=pool.id,
+        providers=pool.providers,
         configured=configured,
-        paths=paths or (),
+        paths=native_facts.paths or (),
         unique_device_id=udid,
         uom_redundant=uom_redundant,
-        native_redundant=native_redundant,
+        native_redundant=native_facts.redundant,
         current_uom=current_uom,
-        current_native=current_native,
+        current_native=native_facts.current,
         state=state,
         shared=shared,
-        provider_dedicated=dedicated,
+        provider_dedicated=pool.dedicated,
         states=tuple(states),
-        unavailable=tuple(dict.fromkeys(unavailable)),
-        invalid=tuple(invalid),
+        unavailable=tuple(dict.fromkeys(diagnostics.unavailable)),
+        invalid=tuple(diagnostics.invalid),
     )
     return _reconcile(observation, device_names)
