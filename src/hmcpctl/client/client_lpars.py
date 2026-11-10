@@ -198,6 +198,11 @@ class LparsMixin:
         returns the created partition entry.
 
         Omits the X-HMC-Schema-Version header; the write headers follow ADR 0178.
+
+        Returns:
+            The first parsed LogicalPartition response entry, or None when the
+            successful response has no body or entries. None leaves creation
+            unconfirmed; inspect the partition identity before retrying.
         """
         _reject_non_uuid_path_argument("system_uuid", system_uuid)
         path = f"/rest/api/uom/ManagedSystem/{system_uuid}/LogicalPartition"

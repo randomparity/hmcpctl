@@ -346,6 +346,11 @@ class SystemsMixin:
         the system's ``VirtualIOServer`` collection: V10R3 answers a VIOS PUT to
         ``LogicalPartition`` with 500 REST0140 (#1214). Omits the
         X-HMC-Schema-Version header; the write headers follow ADR 0178.
+
+        Returns:
+            The first parsed VirtualIOServer response entry, or None when the
+            successful response has no body or entries. None leaves creation
+            unconfirmed; inspect the VIOS identity before retrying.
         """
         _reject_non_uuid_path_argument("system_uuid", system_uuid)
         path = f"/rest/api/uom/ManagedSystem/{system_uuid}/VirtualIOServer"

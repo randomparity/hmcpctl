@@ -639,6 +639,12 @@ class StorageMixin:
         The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
         whole-group write can silently lose a concurrent change. Callers must
         serialize writers to the same VolumeGroup.
+
+        Returns:
+            The first parsed updated VolumeGroup response entry, including its
+            VirtualDisks collection, or None when the successful response has no
+            body or entries. None leaves creation unconfirmed; inspect the volume
+            group's disks before retrying.
         """
 
         for argument, value in (("vios_uuid", vios_uuid), ("vg_uuid", vg_uuid)):
