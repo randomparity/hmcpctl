@@ -292,16 +292,30 @@ def test_add_without_response_identity_finds_the_new_adapter():
     assert _write(fake, plan, "network_add:0")["adapter_uuid"] == "u14"
 
 
-def test_add_refusal_is_not_applied_with_its_guidance():
+@pytest.mark.parametrize("code", ["REST0269", "HSCLB021"])
+@pytest.mark.parametrize("altered_format", [False, True])
+def test_add_refusal_is_not_applied_with_its_guidance(
+    monkeypatch, code, altered_format
+):
+    if altered_format:
+        original_str = HMCError.__str__
+        monkeypatch.setattr(
+            HMCError,
+            "__str__",
+            lambda error: original_str(error).replace(" (HTTP 500)", " [HTTP 500]"),
+        )
     fake = NetHMC()
     fake.add_error = HMCError(
-        "refused", 500, "<Message>REST0269 cookie=secret</Message>"
+        "refused", 500, f"<Message>{code} cookie=secret</Message>"
     )
     plan = _plan(fake, {"add": [{"port_vlan_id": 10}]})
-    with pytest.raises(EffectNotApplied, match="REST0269") as refused:
+    with pytest.raises(EffectNotApplied, match=code) as refused:
         _write(fake, plan, "network_add:0")
     assert "secret" not in str(refused.value)
-    assert "chsyscfg" in str(refused.value)
+    assert "HTTP 500" not in str(refused.value)
+    assert ("chsyscfg" if code == "REST0269" else "RMC state") in str(refused.value)
+    assert refused.value.__cause__ is fake.add_error
+    assert fake.calls == [("add", 10, None)]
 
 
 def test_other_add_error_stays_open():

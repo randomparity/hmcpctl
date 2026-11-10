@@ -115,20 +115,18 @@ _VSI_ROUTE = (
 )
 
 
-def classified_add_refusal(error: HMCError, vsi_selected: bool) -> HMCError | None:
-    """Return the add's known HMC refusal with its next step (ADR 0315), or None."""
+def classified_add_refusal(error: HMCError, vsi_selected: bool) -> str | None:
+    """Return safe guidance for a known add refusal (ADR 0315), or None."""
     if error.status_code != 500:
         return None
     for code, guidance in _ADD_REFUSALS:
         if code in (error.body or ""):
             if code == "HSCLB021" and vsi_selected:
                 guidance += _VSI_ROUTE
-            return HMCError(
+            return (
                 f"Client network adapter add refused: {guidance}. List the partition's "
                 "adapters (hmc_list_adapters, or hmcpctl adapters list) to confirm the "
-                "refused add left none",
-                500,
-                error.body,
+                "refused add left none"
             )
     return None
 
@@ -231,7 +229,7 @@ async def add_network_adapter(
         )
         if refusal is None:
             raise
-        raise refusal from error
+        raise HMCError(refusal, error.status_code, error.body) from error
     try:
         verification = (
             await _verify_network_creation(hmc, lpar_uuid, baseline, resource, selected)

@@ -344,10 +344,7 @@ def _add_write(hmc: HMCClient, lpar_uuid: str, add: NetworkAddPlan) -> Write:
             refusal = classified_add_refusal(exc, False)
             if refusal is None:
                 raise
-            # The guidance only: HMCError appends the HMC's own <Message> after the
-            # status, and this refusal's warning needs none of it (ADR 0325).
-            guidance = str(refusal).partition(f" (HTTP {refusal.status_code})")[0]
-            raise EffectNotApplied(guidance) from exc
+            raise EffectNotApplied(refusal) from exc
         identity = _identity(_adapter(created or {}))
         if identity is None:
             found = _matches(add, await current_adapters(hmc, lpar_uuid))
