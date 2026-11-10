@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import stat
 from dataclasses import asdict
@@ -117,6 +118,7 @@ def private_destination(value: str) -> Path:
         or observations.exists()
         or observations.is_symlink()
         or not path.parent.is_dir()
+        or path.parent.stat().st_uid != os.getuid()
         or stat.S_IMODE(path.parent.stat().st_mode) != 0o700
         or any(
             (parent / ".git").exists() for parent in (path.parent, *path.parent.parents)
