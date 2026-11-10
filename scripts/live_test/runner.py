@@ -910,9 +910,7 @@ def _run_private_group(
     parser.add_argument("--results-file", required=True)
     args = parser.parse_args(argv)
     try:
-        _validate_private_results(
-            _selected_tasks(None, group), group, args.results_file
-        )
+        private_destination(args.results_file)
     except (ValueError, OSError, RuntimeError):
         parser.error(
             "Use new canonical absolute results in a private mode0700 directory outside repositories"
