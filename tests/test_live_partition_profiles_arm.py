@@ -14,7 +14,7 @@ from lpar.test_partition_profile_operations import F, G, NativeService, P, S
 from lpar.test_partition_profiles import field
 
 from hmcpctl.documents.partition_profile import ProfilePatch
-from hmcpctl.operations.lpar import profiles as domain
+from hmcpctl.operations.lpar.profiles import core as domain
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import partition_profiles as arm

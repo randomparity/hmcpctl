@@ -8,7 +8,7 @@ from conftest import make_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.storage import resources
 
 UOM_NS = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"

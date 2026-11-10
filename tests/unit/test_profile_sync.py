@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
-from hmcpctl.operations.lpar.profile_sync import (
+from hmcpctl.operations.lpar.profiles.sync import (
     ChangeLocation,
     adapters_missing_from_profile,
     profile_adapter_warnings,

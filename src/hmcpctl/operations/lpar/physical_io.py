@@ -10,6 +10,7 @@ from hmcpctl.operations.lpar.assignments import (
     LparPcieAssignments,
     prevalidate_lpar_pcie_assignments,
 )
+from hmcpctl.operations.lpar.profiles.core import read_partition_profile
 
 from ...documents.lpar_io import LparPhysicalIO
 from ...errors import HMCError, HMCTLSFingerprintError
@@ -20,7 +21,6 @@ from ...ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
 from ...ssh.sriov import list_sriov_unconfigured_logical_port_rows
 from ...xmlutil import leaf_text
 from ..systems.fleet import read_system_entry
-from .profiles import read_partition_profile
 from .workflow_contract import WorkflowStep
 
 if TYPE_CHECKING:

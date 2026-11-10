@@ -15,7 +15,7 @@ from hmcpctl.documents.partition_profile import (
     compare_profiles,
     parse_profile,
 )
-from hmcpctl.operations.lpar import profiles as domain
+from hmcpctl.operations.lpar.profiles import core as domain
 
 from .config import decode_saved_config
 from .observation import Assertion

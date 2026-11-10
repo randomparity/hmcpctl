@@ -20,18 +20,25 @@ import time
 from collections.abc import Callable, Collection
 from typing import Any
 
-from ...client.core import HMCClient
-from ...errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
-from ...xmlutil import leaf_text
-from ..logical import engine
-from ..logical.engine import Classification, EffectNotApplied, OperationContext
-from ..logical.models import EffectRecord
-from .profile_sync import (
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.logical import engine
+from hmcpctl.operations.logical.engine import (
+    Classification,
+    EffectNotApplied,
+    OperationContext,
+)
+from hmcpctl.operations.logical.models import EffectRecord
+from hmcpctl.operations.lpar.profiles.core import (
+    read_partition_profile,
+    save_current_partition_profile,
+)
+from hmcpctl.operations.lpar.profiles.sync import (
     PROFILE_CHECKED_ADAPTER_TYPES,
     _profile_slots,
     adapters_missing_from_profile,
 )
-from .profiles import read_partition_profile, save_current_partition_profile
+from hmcpctl.xmlutil import leaf_text
 
 # Persisted contract (ADR 0195 Consequences).
 KIND = "lpar.profile_save"

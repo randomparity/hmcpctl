@@ -16,9 +16,9 @@ from hmcpctl.client import client_profiles
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_creation_memory import LparCreationMemory
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import profiles
 from hmcpctl.operations.lpar.linux_roles import read_role_capabilities
 from hmcpctl.operations.lpar.ownership import parse_lpar_ownership_caller_token
+from hmcpctl.operations.lpar.profiles import core as profiles
 from hmcpctl.resource_identity import is_uuid, resolve_system_name, resolve_system_uuid
 from hmcpctl.xmlutil import parse_feed
 

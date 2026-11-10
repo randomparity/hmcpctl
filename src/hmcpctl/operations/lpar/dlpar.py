@@ -7,6 +7,10 @@ from typing import Any
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
+from hmcpctl.operations.lpar.profiles.sync import (
+    change_location_of,
+    resource_with_change_location,
+)
 
 from ...documents.lpar import (
     LparResources,
@@ -26,10 +30,6 @@ from .assignments import (
 )
 from .errors import translate_lpar_write_error
 from .memory_bound import require_memory_within_selected_system
-from .profile_sync import (
-    change_location_of,
-    resource_with_change_location,
-)
 from .sharing import apply_sharing_change, prevalidate_sharing_change
 from .workflow_contract import WorkflowStep
 

@@ -18,8 +18,9 @@ from hmcpctl.errors import HMCError
 from hmcpctl.jobs import job_outcome
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
-from hmcpctl.operations.lpar import profile_persist, reconfigure
-from hmcpctl.operations.lpar.profiles import PartitionProfileOutcome
+from hmcpctl.operations.lpar import reconfigure
+from hmcpctl.operations.lpar.profiles import persist as profile_persist
+from hmcpctl.operations.lpar.profiles.core import PartitionProfileOutcome
 from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
 
 VIOS = "0000000c-0000-4000-8000-000000000000"

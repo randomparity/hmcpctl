@@ -8,19 +8,11 @@ from typing import Annotated
 import typer
 from rich.markup import escape
 
-from ...client.client_profiles import PartitionKind
-from ...documents.boot import select_boot_string
-from ...documents.partition_profile import ProfilePatch
-from ...operations.lpar.boot_order import (
-    clear_lpar_boot_order,
-    read_lpar_boot_order,
-    set_lpar_boot_order,
-)
-from ...operations.lpar.profile_artifacts import (
+from hmcpctl.operations.lpar.profiles.artifacts import (
     delete_backup_profile_artifact,
     list_backup_profile_artifacts,
 )
-from ...operations.lpar.profiles import (
+from hmcpctl.operations.lpar.profiles.core import (
     PartitionProfileOutcome,
     delete_partition_profile,
     list_partition_profiles,
@@ -28,6 +20,15 @@ from ...operations.lpar.profiles import (
     save_current_partition_profile,
     set_default_partition_profile,
     update_partition_profile,
+)
+
+from ...client.client_profiles import PartitionKind
+from ...documents.boot import select_boot_string
+from ...documents.partition_profile import ProfilePatch
+from ...operations.lpar.boot_order import (
+    clear_lpar_boot_order,
+    read_lpar_boot_order,
+    set_lpar_boot_order,
 )
 from ..output import console, print_json, terminal_field
 from ..runtime import with_client

@@ -28,7 +28,7 @@ from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
 )
-from hmcpctl.operations.lpar.profiles import PartitionProfileRecord
+from hmcpctl.operations.lpar.profiles.core import PartitionProfileRecord
 from hmcpctl.ssh import lpar as native
 from hmcpctl.ssh.lpar_serial import SerialProfile
 from hmcpctl.ssh.transport import HMCCLIError

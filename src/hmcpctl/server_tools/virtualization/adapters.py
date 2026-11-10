@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import StrictBool, StrictInt, StrictStr
 
+from hmcpctl.operations.lpar.profiles.sync import resource_with_change_location
+
 from ..._app import run_limited_collection, with_client
 from ...client.client_contracts import AdapterType
 from ...client.core import HMCClient
@@ -14,7 +16,6 @@ from ...documents.adapters import (
     validate_network_adapter_creation_fields,
     validate_network_adapter_update_fields,
 )
-from ...operations.lpar.profile_sync import resource_with_change_location
 from ...operations.virtualization.adapters import (
     _validate_network_update_target,
     add_network_adapter,

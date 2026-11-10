@@ -14,7 +14,7 @@ import pytest
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical.engine import EffectNotApplied
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar import profile_persist
+from hmcpctl.operations.lpar.profiles import persist as profile_persist
 
 SYS = "0000000a-0000-4000-8000-000000000000"
 LPAR = "0000000a-0000-4000-b000-000000000000"

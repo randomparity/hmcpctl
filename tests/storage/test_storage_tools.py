@@ -19,7 +19,7 @@ import pytest
 from conftest import COMPLETED_JOB_ENTRY, JOB_ENTRY, JOB_ID, mock_change_location
 
 from hmcpctl.client.client_contracts import ADAPTER_TYPES
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.storage.resources import StorageMutationResult
 from hmcpctl.server_tools.storage.resources import (
     hmc_create_logical_unit,

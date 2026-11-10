@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 
 from hmcpctl import cli
 from hmcpctl.cli_commands.storage import resources as storage
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.operations.storage.resources import StorageMutationResult
@@ -227,15 +227,7 @@ def test_confirmed_machine_output_keeps_prompt_on_stderr(
 ):
     # CliRunner echoes prompt input to stdout; use actual stdin/stdout for this contract.
     args = [arg for arg in args if arg != "--yes"]
-    source = f"""
-from dataclasses import asdict
-from hmcpctl import cli
-from hmcpctl.cli_commands.storage import resources
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
-from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-from hmcpctl.operations.storage.resources import StorageMutationResult
-data = {data!r}
+    source = f"""'\nfrom dataclasses import asdict\nfrom hmcpctl import cli\nfrom hmcpctl.cli_commands.storage import resources\nfrom hmcpctl.operations.lpar.profiles.sync import ChangeLocation\nfrom hmcpctl.operations.lpar.provisioning.core import AttachDiskResult\nfrom hmcpctl.operations.lpar.workflow_contract import WorkflowStep\nfrom hmcpctl.operations.storage.resources import StorageMutationResult\ndata = '{data!r}
 raw = asdict(data) if isinstance(data, ChangeLocation) else data
 location = data if isinstance(data, ChangeLocation) else (ChangeLocation(**data['change_location']) if isinstance(data, dict) and 'change_location' in data else None)
 resources.with_client = lambda op: data if isinstance(data, AttachDiskResult) else StorageMutationResult.from_raw(raw, change_location=location, lpar_uuid=data.get('lpar_uuid') if isinstance(data, dict) else None)

@@ -18,7 +18,7 @@ from hmcpctl.operations.lpar.ownership import (
     authorize_lpar_mutation,
     resolve_and_authorize_lpar_mutation,
 )
-from hmcpctl.operations.lpar.profile_sync import (
+from hmcpctl.operations.lpar.profiles.sync import (
     ChangeLocation,
     change_location_of,
     read_change_location,

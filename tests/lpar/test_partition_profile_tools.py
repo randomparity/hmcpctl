@@ -102,7 +102,7 @@ async def test_mcp_serializes_profile_records_and_truthful_outcomes(
 
     from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
     from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
-    from hmcpctl.operations.lpar.profiles import (
+    from hmcpctl.operations.lpar.profiles.core import (
         PartitionProfileInventory,
         PartitionProfileOutcome,
         PartitionProfileRecord,

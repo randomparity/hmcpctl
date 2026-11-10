@@ -214,8 +214,9 @@ async def created_start_step(
     controller_mode: bool = False,
 ) -> WorkflowStep:
     """Observe each requested field on exactly its approved required planes."""
+    from hmcpctl.operations.lpar.profiles.core import read_partition_profile
+
     from ...errors import HMCError, HMCTLSFingerprintError
-    from .profiles import read_partition_profile
 
     observed: dict[str, object] = {}
     status = "unavailable"

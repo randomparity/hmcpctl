@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
-from ...client.client_profiles import (
+from hmcpctl.client.client_profiles import (
     NativeProfile,
     PartitionKind,
     delete_native_profile,
@@ -19,8 +19,8 @@ from ...client.client_profiles import (
     require_fresh_profile,
     write_native_profile,
 )
-from ...client.core import HMCClient
-from ...documents.partition_profile import (
+from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.partition_profile import (
     ProfileDifference,
     ProfilePatch,
     apply_profile_patch,
@@ -29,8 +29,8 @@ from ...documents.partition_profile import (
     one,
     profile_name,
 )
-from ...errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
-from ...jobs import (
+from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
+from hmcpctl.jobs import (
     JobOutcome,
     build_job_request,
     canonical_job_path,
@@ -39,15 +39,15 @@ from ...jobs import (
     validate_wait_timing,
     wait_for_submitted_job,
 )
-from ...resource_identity import (
+from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_description
+from hmcpctl.resource_identity import (
     guard_partition,
     is_uuid,
     resolve_system_uuid,
     system_name_from_uuid,
 )
-from ...ssh.transport import run_hmc_command
-from ...xmlutil import console_version, leaf_text
-from .ownership import authorize_lpar_ownership_description
+from hmcpctl.ssh.transport import run_hmc_command
+from hmcpctl.xmlutil import console_version, leaf_text
 
 Execution = Literal["completed", "rejected", "unknown"]
 Requested = Literal["verified", "mismatched", "unverified"]
@@ -393,7 +393,7 @@ async def update_partition_profile(
         after = await read_native_profile(
             hmc, target.kind, target.uuid, before.uuid, target.system
         )
-        from ...documents.partition_profile import requested_profile_values
+        from hmcpctl.documents.partition_profile import requested_profile_values
 
         requested = _same_identity(before, after) and requested_profile_values(
             expected, patch

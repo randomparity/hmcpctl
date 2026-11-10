@@ -2,22 +2,13 @@
 
 from __future__ import annotations
 
-from ..._app import (
-    ssh_with_client,
-    with_client,
-)
-from ...documents.partition_profile import ProfilePatch
-from ...operations.lpar.configuration import (
-    restore_system_lpar_profiles,
-    synchronize_lpar_profile,
-)
-from ...operations.lpar.profile_artifacts import (
+from hmcpctl.operations.lpar.profiles.artifacts import (
     BackupProfileDeletion,
     BackupProfileInventory,
     delete_backup_profile_artifact,
     list_backup_profile_artifacts,
 )
-from ...operations.lpar.profiles import (
+from hmcpctl.operations.lpar.profiles.core import (
     PartitionProfileInventory,
     PartitionProfileOutcome,
     PartitionProfileRecord,
@@ -27,6 +18,16 @@ from ...operations.lpar.profiles import (
     save_current_partition_profile,
     set_default_partition_profile,
     update_partition_profile,
+)
+
+from ..._app import (
+    ssh_with_client,
+    with_client,
+)
+from ...documents.partition_profile import ProfilePatch
+from ...operations.lpar.configuration import (
+    restore_system_lpar_profiles,
+    synchronize_lpar_profile,
 )
 from ...operations.virtualization.pcie import (
     assign_dedicated_pcie_slot,

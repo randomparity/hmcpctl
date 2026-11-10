@@ -17,7 +17,7 @@ from hmcpctl.operations.affinity.rest import (
 from hmcpctl.operations.lpar.ownership import (
     resolve_and_authorize_lpar_mutation,
 )
-from hmcpctl.operations.lpar.profile_sync import profile_adapter_warnings
+from hmcpctl.operations.lpar.profiles.sync import profile_adapter_warnings
 from hmcpctl.operations.partition_state import PartitionState
 
 from ...audit import records as audit

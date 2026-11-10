@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from hmcpctl.authorization.access_policy import compile_access_policy
 from hmcpctl.cli import app
 from hmcpctl.cli_commands.virtualization import adapters as cli_adapters
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.virtualization.adapters import AdapterResult
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.virtualization import adapters as tools

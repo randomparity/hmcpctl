@@ -4,7 +4,7 @@
 
 `save_current_partition_profile(overwrite=True)` first writes a recovery copy of the
 destination profile (ADR 0242). The copy's name is `"hmcprec-" + secrets.token_hex(12)`
-(`src/hmcpctl/operations/lpar/profiles.py`), which is 32 characters long. A live capture on
+(`src/hmcpctl/operations/lpar/profiles/core.py`), which is 32 characters long. A live capture on
 2026-11-03 (V10R3 SP1060, POWER9, one owned scratch partition) recorded the clone PUT
 answered with HTTP 500. The answer was `REST0142` wrapping `HSCL059F The user-defined name
 "hmcprec-…" is too long. The user-defined name cannot be longer than 31 characters.` In the

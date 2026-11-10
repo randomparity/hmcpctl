@@ -25,7 +25,7 @@ from hmcpctl.operations.lpar.migration import (
     recover_lpar_migration,
     remote_restart_lpar,
 )
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionStorage,
     attach_disk_to_lpar,

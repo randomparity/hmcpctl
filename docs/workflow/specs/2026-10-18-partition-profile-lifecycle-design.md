@@ -66,7 +66,7 @@ implementation. No new exclusions, discovery-epic work or sibling allocation are
 
 ## Concrete proposed interface and ownership
 
-Keep policy in a new `operations/lpar/profiles.py`, native transport in an owning client profile
+Keep policy in a new `operations/lpar/profiles/core.py`, native transport in an owning client profile
 module, and presentation adapters in existing LPAR profile modules. Reuse partition/VIOS
 resolution, ownership authorization, bounded HTTP transport, XML parsing and job outcomes.
 No facade exports, generic XML/attribute patch, arbitrary commands, dependencies or local lock.
@@ -123,7 +123,7 @@ absence, present-empty, zero and false are distinct. Do not inject an optional f
 a default or silently discard unfamiliar XML. Unknown namespaces/fields/attributes/cardinality
 remain visible differences or a pre-write source refusal, never whitelist equivalence.
 
-Propose family-owned `PartitionProfileUpdateOutcome` in `operations/lpar/profiles.py`, following
+Propose family-owned `PartitionProfileUpdateOutcome` in `operations/lpar/profiles/core.py`, following
 `SystemProfileOutcome`'s execution/postcondition separation, without a shared result framework:
 
 - `execution`: completed/rejected/unknown; submitted HTTP result and bounded error detail remain facts.

@@ -10,7 +10,7 @@ ADR 0242 (force-save with a verified recovery copy).
 Reconfigure cannot add a virtual disk to an existing partition, so #1848's `delete_owned`
 cannot later delete it as owned. A mapping makes the HMC add a client vSCSI adapter to the
 current configuration only, and a profile activation drops an adapter the profile lacks
-(`operations/lpar/profile_sync.py`). `ProfilePatch` carries no adapter fields (ADR 0313).
+(`operations/lpar/profiles/sync.py`). `ProfilePatch` carries no adapter fields (ADR 0313).
 
 ## Scope
 
@@ -64,7 +64,7 @@ key `added_disk:<i>` with kind `virtual_disk`, the partition, and identity
 `{vios_uuid, vg_uuid, disk_name}`. The insert is idempotent, under this reconfigure
 operation's id (ADR 0313 Decision 6). A detach writes no ledger entry and deletes none.
 
-**Persistence leg** (new `operations/lpar/profile_persist.py`, reusable by #1844 and #1845).
+**Persistence leg** (new `operations/lpar/profiles/persist.py`, reusable by #1844 and #1845).
 `profile_save` runs only when the verification poll ends `completed` and the plan has an
 add. It re-reads the partition and the default profile and re-applies the persistence
 guard. It then calls `save_current_partition_profile(overwrite=True,

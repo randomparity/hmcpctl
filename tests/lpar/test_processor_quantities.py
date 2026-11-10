@@ -1717,7 +1717,7 @@ def test_location_stays_typed_until_result_serialization(dedicated):
 
     from hmcpctl.documents.lpar_processors import LparProcessorChange
     from hmcpctl.operations.lpar.processors import _result, _targets
-    from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+    from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 
     before = snapshot(dedicated)
     location = before["change_location"]

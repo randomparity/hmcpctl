@@ -801,7 +801,7 @@ def test_checkpoint_serializes_internal_profile_location(dedicated):
 
     from lpar.test_processor_quantities import snapshot
 
-    from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+    from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 
     before = snapshot(dedicated)
     assert isinstance(before["change_location"], ChangeLocation)

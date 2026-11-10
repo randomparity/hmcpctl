@@ -13,7 +13,7 @@ from conftest import (
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.storage.resources import (
     get_media_repository,
     list_optical_media,

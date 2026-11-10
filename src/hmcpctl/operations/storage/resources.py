@@ -20,7 +20,7 @@ import httpx
 from hmcpctl.client.client_storage import mapping_lpar_uuid, storage_mapping_id
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation, read_change_location
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation, read_change_location
 
 from ...audit import records as audit
 from ...config import ISO_URL_ALLOWLIST_HELP

@@ -13,7 +13,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.partition_profile import N, ProfilePatch, compare_profiles
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
-from hmcpctl.operations.lpar.profiles import (
+from hmcpctl.operations.lpar.profiles.core import (
     delete_partition_profile,
     list_partition_profiles,
     read_partition_profile,
@@ -228,7 +228,7 @@ class NativeService:
 def service(monkeypatch):
     state = NativeService()
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.run_hmc_command",
+        "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
         AsyncMock(return_value="No results were found.\n"),
     )
     return state
@@ -453,7 +453,7 @@ async def test_refused_recovery_copy_is_classified_and_never_force_saves(
 ):
     # The pre-#1868 32-character name, so the HMC answers with the captured refusal.
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.secrets.token_hex", lambda n: "ab" * 12
+        "hmcpctl.operations.lpar.profiles.core.secrets.token_hex", lambda n: "ab" * 12
     )
     result = await save_current_partition_profile(
         service.hmc,
@@ -492,7 +492,7 @@ async def test_delete_refuses_each_protected_case(service, monkeypatch, protecte
         del service.docs[G]
     if protected == "system-profile":
         monkeypatch.setattr(
-            "hmcpctl.operations.lpar.profiles.run_hmc_command",
+            "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
             AsyncMock(return_value="name\nexisting\n"),
         )
     with pytest.raises((ValueError, PermissionError)):
@@ -744,7 +744,8 @@ async def test_empty_or_malformed_system_profile_read_never_proves_absence(
     service, monkeypatch, raw
 ):
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.run_hmc_command", AsyncMock(return_value=raw)
+        "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
+        AsyncMock(return_value=raw),
     )
     with pytest.raises(ValueError):
         await delete_partition_profile(
@@ -762,7 +763,7 @@ async def test_vios_lifecycle_retains_its_own_containment_and_native_paths(
 ):
     state = NativeService("VirtualIOServer")
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.run_hmc_command",
+        "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
         AsyncMock(return_value="No results were found.\n"),
     )
     kwargs = {"partition_type": "VirtualIOServer"}
@@ -865,7 +866,7 @@ async def test_async_patch_with_visible_changes_does_not_claim_completed_applica
 async def test_save_fingerprint_failure_retains_known_state_without_more_requests(
     service, monkeypatch, stage
 ):
-    from hmcpctl.operations.lpar import profiles
+    from hmcpctl.operations.lpar.profiles import core as profiles
 
     failure = HMCTLSFingerprintError("private-pin")
     inventory = profiles._inventory

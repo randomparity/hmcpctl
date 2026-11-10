@@ -13,6 +13,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryChange
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.inventory.composite import resource_container
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation, change_location_of
 from hmcpctl.resource_identity import (
     guard_partition,
     is_uuid,
@@ -23,7 +24,6 @@ from hmcpctl.ssh.memory import change_lpar_memory_quantity
 from hmcpctl.xmlutil import leaf_text
 
 from .ownership import authorize_lpar_mutation
-from .profile_sync import ChangeLocation, change_location_of
 
 _AIX_TYPES = frozenset({"AIX/Linux", "Virtual IO Server"})
 _MEMORY_FIELDS = {

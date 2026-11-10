@@ -12,8 +12,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
-
-from ...errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 
 ChangeLivesIn = Literal[
     "current-configuration", "current-configuration-and-profile", "unknown"

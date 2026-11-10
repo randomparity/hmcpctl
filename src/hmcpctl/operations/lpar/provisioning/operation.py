@@ -48,7 +48,7 @@ from hmcpctl.operations.lpar.ownership import (
     parse_lpar_ownership_caller_token,
     stamp_created_lpar_ownership,
 )
-from hmcpctl.operations.lpar.profiles import (
+from hmcpctl.operations.lpar.profiles.core import (
     save_current_partition_profile,
     set_default_partition_profile,
 )

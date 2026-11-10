@@ -56,7 +56,7 @@ from hmcpctl.operations.lpar.plan import (
     check_request,
     plan_digest,
 )
-from hmcpctl.operations.lpar.profiles import PartitionProfileOutcome
+from hmcpctl.operations.lpar.profiles.core import PartitionProfileOutcome
 from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionAffinityAssessment,

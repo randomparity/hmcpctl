@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
+from hmcpctl.operations.lpar.profiles import core as profiles
+
 from ...client.client_profiles import PartitionKind
 from ...documents.common import UOM_NS
 from ...documents.lpar import LparResources
@@ -18,7 +20,6 @@ from ...documents.lpar_creation_memory import LparCreationMemory
 from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import is_uuid
 from ...xmlutil import ATOM_NS, leaf_text, parse_feed
-from . import profiles
 from .ownership import authorize_lpar_ownership_description
 from .workflow_contract import WorkflowStep
 

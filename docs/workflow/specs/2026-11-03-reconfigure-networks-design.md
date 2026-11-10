@@ -9,7 +9,7 @@ ADR 0315 (client Ethernet add refusals), ADR 0321 (half-applied detach without R
 
 Reconfigure cannot add a client network adapter to a partition, or remove one. The adapter
 specialists change only the current configuration, so a profile activation undoes them
-(`operations/lpar/profile_sync.py`).
+(`operations/lpar/profiles/sync.py`).
 
 ## Prerequisite
 

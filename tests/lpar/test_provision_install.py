@@ -29,7 +29,7 @@ from hmcpctl.operations.lpar.plan import (
     _intended_changes,
     check_request,
 )
-from hmcpctl.operations.lpar.profiles import PartitionProfileOutcome
+from hmcpctl.operations.lpar.profiles.core import PartitionProfileOutcome
 from hmcpctl.operations.lpar.provisioning import operation as provision_operation
 from hmcpctl.operations.lpar.provisioning.build import BuildFailed
 from hmcpctl.operations.lpar.provisioning.core import (

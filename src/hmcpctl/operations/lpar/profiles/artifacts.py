@@ -6,16 +6,16 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-from ...client.core import HMCClient
-from ...errors import HMCError
-from ...jobs import (
+from hmcpctl.client.core import HMCClient
+from hmcpctl.errors import HMCError
+from hmcpctl.jobs import (
     SUCCESSFUL_JOB_STATUSES,
     JobOutcome,
     build_job_request,
     job_outcome,
     wait_for_submitted_job,
 )
-from ...resource_identity import resolve_system_uuid
+from hmcpctl.resource_identity import resolve_system_uuid
 
 _MAX_RESULT_BYTES = 1_048_576
 _MAX_ARTIFACTS = 1000

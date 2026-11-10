@@ -11,7 +11,7 @@ import typer
 
 from hmcpctl.cli_commands.lpar import profiles as cli
 from hmcpctl.jobs import job_outcome
-from hmcpctl.operations.lpar.profile_artifacts import (
+from hmcpctl.operations.lpar.profiles.artifacts import (
     BackupProfileDeletion,
     BackupProfileInventory,
 )
