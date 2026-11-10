@@ -4288,6 +4288,7 @@ async def test_subset_preserves_destination_pending_scratch_recovery(
 ):
     """A read-only subset cannot erase the only evidence of unconfirmed restoration."""
     import live_test_recovery as recovery
+    from live_test.recovery import storage as recovery_storage
 
     _isolate_runner(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -4322,7 +4323,7 @@ async def test_subset_preserves_destination_pending_scratch_recovery(
         calls.append((tool, kwargs))
         return "PASS", []
 
-    finding = await recovery._run_volume_group_left(no_group, inputs)
+    finding = await recovery_storage._run_volume_group_left(no_group, inputs)
     assert (
         finding is not None and finding.what == "scratch group restoration unconfirmed"
     )
