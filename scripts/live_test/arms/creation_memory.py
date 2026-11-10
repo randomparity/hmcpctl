@@ -22,7 +22,7 @@ from hmcpctl.operations.lpar.profiles import core as profiles
 from hmcpctl.resource_identity import is_uuid, resolve_system_name, resolve_system_uuid
 from hmcpctl.xmlutil import parse_feed
 
-from ..config import _validate_creation_memory
+from ..creation_journals import _validate_creation_memory
 from ..observation import Assertion, judge_create_result
 from ..results import field as result_field
 from .creation_memory_layout import _candidate

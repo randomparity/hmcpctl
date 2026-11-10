@@ -145,12 +145,8 @@ from live_test.arms.vmedia import (
     vmedia_upload_iso,
 )
 from live_test.arms.vmedia_media_change import vmedia_media_change
-from live_test.config import (
-    LiveTestArtifacts,
-    LiveTestConfig,
-    decode_artifacts,
-    decode_saved_config,
-)
+from live_test.artifacts import LiveTestArtifacts, decode_artifacts
+from live_test.config import LiveTestConfig, decode_saved_config
 from live_test.http_fixture import IsoHttpServer
 from live_test.inventory import capture_lpar_baseline
 from live_test.observation import (

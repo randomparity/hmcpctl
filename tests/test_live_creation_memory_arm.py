@@ -18,6 +18,7 @@ from hmcpctl.documents.common import UOM_NS
 from hmcpctl.xmlutil import ATOM_NS
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test import artifacts as live_artifacts
 from live_test import config, runner
 
 
@@ -326,7 +327,7 @@ def native_target(monkeypatch):
     def checkpoint():
         j = state.artifacts.creation_memory
         env.checkpoints.append(deepcopy(j))
-        config.decode_artifacts(asdict(state.artifacts))
+        live_artifacts.decode_artifacts(asdict(state.artifacts))
         if env.fault == "checkpoint" or env.fault == "checkpoint-" + j["phase"]:
             raise OSError("checkpoint fault")
 

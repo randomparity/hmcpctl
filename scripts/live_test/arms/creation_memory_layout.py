@@ -25,7 +25,7 @@ from hmcpctl.resource_identity import (
 from hmcpctl.ssh.commands import parse_hmc_result_rows
 
 from .. import evidence
-from ..config import _validate_creation_memory_layout
+from ..creation_journals import _validate_creation_memory_layout
 from ..observation import Assertion
 from .lpar_config import (
     NAME_PREFIX,

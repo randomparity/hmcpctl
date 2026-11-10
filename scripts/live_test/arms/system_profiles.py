@@ -376,7 +376,8 @@ async def preflight(hmc_config, config):
 
 
 async def recover_document(hmc_config, document):
-    from ..config import decode_artifacts, decode_saved_config
+    from ..artifacts import decode_artifacts
+    from ..config import decode_saved_config
     from ..runner import _hmc_identity
 
     if document.get("hmc") != _hmc_identity(hmc_config):

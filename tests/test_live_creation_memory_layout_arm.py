@@ -23,6 +23,7 @@ from hmcpctl.operations import partition_creation
 from hmcpctl.operations.lpar.creation import core
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test import artifacts as live_artifacts
 from live_test import config as settings
 from live_test import runner
 from live_test.arms import lpar_config
@@ -216,7 +217,7 @@ def target(monkeypatch):
     def checkpoint():
         journal = state.artifacts.creation_memory_layout
         env.checkpoints.append(deepcopy(journal))
-        settings.decode_artifacts(asdict(state.artifacts))
+        live_artifacts.decode_artifacts(asdict(state.artifacts))
         if (
             env.fault == "checkpoint"
             or (

@@ -44,6 +44,7 @@ sys.path.insert(0, str(_RUNNER_PATH.parent))
 import scenario_gap_report  # noqa: E402
 from capability_evidence import registry as capability_registry  # noqa: E402
 from capability_evidence import schema as capability_schema  # noqa: E402
+from live_test import artifacts as live_artifacts  # noqa: E402
 from live_test import config as live_config  # noqa: E402
 from live_test import (  # noqa: E402
     evidence,
@@ -4271,12 +4272,12 @@ def _live_hmc_config() -> HMCConfig:
 def _result_document(
     config: live_config.LiveTestConfig,
     hmc_config: HMCConfig,
-    artifacts: live_config.LiveTestArtifacts | None = None,
+    artifacts: live_artifacts.LiveTestArtifacts | None = None,
 ) -> dict:
     return {
         "config": asdict(config),
         "hmc": runner._hmc_identity(hmc_config),
-        "artifacts": asdict(artifacts or live_config.LiveTestArtifacts()),
+        "artifacts": asdict(artifacts or live_artifacts.LiveTestArtifacts()),
         "results": [{"status": "PASS"}],
     }
 
@@ -4284,7 +4285,7 @@ def _result_document(
 def test_restore_artifacts_round_trips_config_and_preserves_result_rows(tmp_path):
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
-    artifacts = live_config.LiveTestArtifacts(
+    artifacts = live_artifacts.LiveTestArtifacts(
         system_uuid="system-1",
         vios_uuid="vios-1",
         lp3_baseline={"description": "original"},
@@ -4314,7 +4315,7 @@ async def test_subset_preserves_destination_pending_scratch_recovery(
     monkeypatch.chdir(tmp_path)
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
-    artifacts = live_config.LiveTestArtifacts(
+    artifacts = live_artifacts.LiveTestArtifacts(
         vios_uuid="vios-1", storage_volume_group_name="hpvg1234abcd"
     )
     destination = tmp_path / "test-results-storage.json"
@@ -4367,7 +4368,7 @@ def test_subset_rejection_preserves_destination_for_recovery(
     document = _result_document(
         config,
         hmc_config,
-        live_config.LiveTestArtifacts(
+        live_artifacts.LiveTestArtifacts(
             vios_uuid="vios-1", storage_volume_group_name="hpvg1234abcd"
         ),
     )
@@ -4418,7 +4419,7 @@ def test_default_interruption_then_real_subset_preserves_recovery(
     document = _result_document(
         config,
         hmc_config,
-        live_config.LiveTestArtifacts(
+        live_artifacts.LiveTestArtifacts(
             vios_uuid="vios-A",
             vios_partition_id=1,
             storage_volume_group_name="hpvg1234abcd",
@@ -4514,7 +4515,7 @@ def test_default_rejection_preserves_destination_before_client(
     document = _result_document(
         config,
         hmc_config,
-        live_config.LiveTestArtifacts(
+        live_artifacts.LiveTestArtifacts(
             vios_uuid="vios-A", storage_volume_group_name="hpvg1234abcd"
         ),
     )
@@ -4562,7 +4563,7 @@ def test_restore_artifacts_accepts_a_document_carrying_the_run_block(tmp_path):
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
 
 
 def test_restore_drops_the_configured_test_user_from_before_632(tmp_path):
@@ -4601,7 +4602,9 @@ def test_restore_drops_the_network_test_partition_from_before_1377(tmp_path):
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == live_config.LiveTestArtifacts(system_uuid="system-uuid")
+    assert state.artifacts == live_artifacts.LiveTestArtifacts(
+        system_uuid="system-uuid"
+    )
 
 
 @pytest.mark.parametrize(
@@ -4636,7 +4639,7 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vios_backup_arm(
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
-    for name in live_config._VIOS_BACKUP_ARTIFACTS:
+    for name in live_artifacts._VIOS_BACKUP_ARTIFACTS:
         del document["artifacts"][name]
     document["artifacts"]["vios_uuid"] = "vios-1"
     results_path = tmp_path / "previous.json"
@@ -4656,7 +4659,7 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vmedia_artifacts
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
-    for name in live_config._VMEDIA_REPOSITORY_ARTIFACTS:
+    for name in live_artifacts._VMEDIA_REPOSITORY_ARTIFACTS:
         del document["artifacts"][name]
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
@@ -4669,35 +4672,35 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vmedia_artifacts
 
 
 def test_decode_artifacts_refuses_a_non_string_vmedia_field():
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts["vmedia_blank_name"] = 3
 
     with pytest.raises(TypeError, match="vmedia_blank_name"):
-        live_config.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 @pytest.mark.parametrize("value", ["hmcpctl_live_0a1b2c3d", [3]])
 def test_decode_artifacts_refuses_media_change_names_not_a_string_array(value):
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts["vmedia_change_names"] = value
 
     with pytest.raises(TypeError, match="vmedia change names"):
-        live_config.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 def test_decode_artifacts_defaults_media_change_names_for_an_older_document():
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     del artifacts["vmedia_change_names"]
 
-    assert live_config.decode_artifacts(artifacts).vmedia_change_names == []
+    assert live_artifacts.decode_artifacts(artifacts).vmedia_change_names == []
 
 
 def test_decode_artifacts_refuses_a_non_string_vios_backup_field():
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts["vios_backup_mapping"] = 3
 
     with pytest.raises(TypeError, match="vios_backup_mapping"):
-        live_config.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 def test_restore_artifacts_tolerates_a_config_with_the_removed_vios_slot_settings(
@@ -4743,7 +4746,7 @@ def test_restore_artifacts_rejects_wrong_types_without_partial_mutation(
     document["artifacts"]["vios_partition_id"] = True
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = live_config.LiveTestArtifacts(system_uuid="original")
+    original = live_artifacts.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4760,7 +4763,7 @@ def test_restore_artifacts_rejects_config_mismatch_without_mutation(tmp_path, ca
     document["config"]["system_name"] = "other-system"
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = live_config.LiveTestArtifacts(system_uuid="original")
+    original = live_artifacts.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4776,7 +4779,7 @@ def test_restore_artifacts_rejects_unknown_fields_without_mutation(tmp_path, cap
     document["artifacts"]["unknown"] = "value"
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = live_config.LiveTestArtifacts(system_uuid="original")
+    original = live_artifacts.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4802,7 +4805,7 @@ def test_restore_artifacts_rejects_each_hmc_identity_mismatch(tmp_path, capsys, 
     state = runner.RunState(config=config)
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
     assert "does not match this run" in capsys.readouterr().out
 
 
@@ -9121,9 +9124,8 @@ class NoExecutionPackages(importlib.abc.MetaPathFinder):
 
 sys.path.insert(0, sys.argv[1])
 sys.meta_path.insert(0, NoExecutionPackages())
-from live_test.config import (
-    LiveTestConfig, LiveTestArtifacts, decode_saved_config, decode_artifacts,
-)
+from live_test.artifacts import LiveTestArtifacts, decode_artifacts
+from live_test.config import LiveTestConfig, decode_saved_config
 config = LiveTestConfig()
 assert decode_saved_config(json.loads(json.dumps(asdict(config)))) == config
 artifacts = LiveTestArtifacts(lp3_baseline={'state': 'running'}, vmedia_orig_boot_order=['disk'])
@@ -9709,14 +9711,14 @@ def test_pre_st58_saved_config_defaults_only_missing_keys(missing):
 
 
 def test_pre_st58_artifacts_default_missing_journal_empty():
-    saved = asdict(live_config.LiveTestArtifacts())
+    saved = asdict(live_artifacts.LiveTestArtifacts())
     saved.pop("creation_memory_layout", None)
     assert (
-        getattr(live_config.decode_artifacts(saved), "creation_memory_layout", None)
+        getattr(live_artifacts.decode_artifacts(saved), "creation_memory_layout", None)
         == {}
     )
     saved["creation_memory_layout"] = {}
-    assert live_config.decode_artifacts(saved).creation_memory_layout == {}
+    assert live_artifacts.decode_artifacts(saved).creation_memory_layout == {}
 
 
 @pytest.mark.parametrize(
@@ -9790,7 +9792,7 @@ def test_st58_restore_malformed_context_refuses_without_partial_state(
     path.write_text(json.dumps(document))
     state = runner.RunState()
     assert not runner._restore_artifacts_from_results(state, hmc, str(path))
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
 
 
 @pytest.mark.parametrize("arguments", [["67"], ["--group", "lpar-memory-statistics"]])
@@ -9809,6 +9811,7 @@ def test_statistics_direct_runner_requires_private_named_destination(
 def test_creation_memory_optional_defaults_and_registration():
     from dataclasses import asdict
 
+    from live_test import artifacts as live_artifacts
     from live_test import config as settings
     from live_test.arms import creation_memory
 
@@ -9820,9 +9823,9 @@ def test_creation_memory_optional_defaults_and_registration():
         ):
             saved.pop(key)
     assert settings.decode_saved_config(saved).creation_memory_case == ""
-    artifacts = asdict(settings.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts.pop("creation_memory")
-    assert settings.decode_artifacts(artifacts).creation_memory == {}
+    assert live_artifacts.decode_artifacts(artifacts).creation_memory == {}
     assert runner.SUBTASK_GROUPS["creation-memory"] == [65]
     assert runner.SUBTASKS[65] is creation_memory.exercise_creation_memory
 
@@ -9846,7 +9849,7 @@ def test_st65_refuses_saved_or_borrowed_context(
     path.write_text(json.dumps(document))
     state = runner.RunState()
     assert not runner._restore_artifacts_from_results(state, hmc, str(path))
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
     assert 65 not in runner.SUBTASK_GROUPS["all"]
 
 

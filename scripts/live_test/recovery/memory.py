@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 
 from hmcpctl.config import HMCConfig
+from live_test import artifacts as live_artifacts
 from live_test import config as live_config
 from live_test import runner
 from live_test.arms import creation_memory, creation_memory_layout, lpar_config
@@ -27,7 +28,7 @@ def creation_memory_skip_reason(document: dict, subtasks: list[int]) -> str | No
     if subtasks != [creation_memory.SUBTASK]:
         return None
     config = live_config.decode_saved_config(document.get("config"))
-    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    artifacts = live_artifacts.decode_artifacts(document.get("artifacts"))
     run = document["run"]
     if (
         set(document) != {"run", "config", "hmc", "artifacts", "results"}
@@ -48,7 +49,7 @@ def creation_memory_skip_reason(document: dict, subtasks: list[int]) -> str | No
         or type(run.get("tree_clean")) is not bool
         or not isinstance(run.get("schema_version"), str)
         or document["artifacts"].get("creation_memory") != {}
-        or artifacts != live_config.LiveTestArtifacts()
+        or artifacts != live_artifacts.LiveTestArtifacts()
         or document["artifacts"] != asdict(artifacts)
     ):
         return None
@@ -97,7 +98,7 @@ def creation_memory_inputs_from_document(
     if creation_memory.SUBTASK not in subtasks:
         return None
     config = live_config.decode_saved_config(document.get("config"))
-    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    artifacts = live_artifacts.decode_artifacts(document.get("artifacts"))
     journal = artifacts.creation_memory
     if (
         not journal
@@ -127,7 +128,7 @@ def creation_memory_layout_skip_reason(document, subtasks) -> str | None:
     if subtasks != [creation_memory_layout.SUBTASK]:
         return None
     config = live_config.decode_saved_config(document.get("config"))
-    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    artifacts = live_artifacts.decode_artifacts(document.get("artifacts"))
     run = document["run"]
     if (
         set(document) != {"run", "config", "hmc", "artifacts", "results"}
@@ -148,7 +149,7 @@ def creation_memory_layout_skip_reason(document, subtasks) -> str | None:
         or type(run.get("tree_clean")) is not bool
         or not isinstance(run.get("schema_version"), str)
         or document["artifacts"].get("creation_memory_layout") != {}
-        or artifacts != live_config.LiveTestArtifacts()
+        or artifacts != live_artifacts.LiveTestArtifacts()
         or document["artifacts"] != asdict(artifacts)
     ):
         return None
@@ -195,7 +196,7 @@ def creation_memory_layout_inputs_from_document(document, subtasks):
     if creation_memory_layout.SUBTASK not in subtasks:
         return None
     config = live_config.decode_saved_config(document.get("config"))
-    artifacts = live_config.decode_artifacts(document.get("artifacts"))
+    artifacts = live_artifacts.decode_artifacts(document.get("artifacts"))
     journal = artifacts.creation_memory_layout
     if (
         not journal

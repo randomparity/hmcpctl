@@ -51,6 +51,7 @@ _PROFILE_READ = f"lssyscfg -r prof -m {_SYSTEM} -F lpar_name,name,io_slots --hea
 @pytest.fixture
 def unarmed_creation_results(monkeypatch, tmp_path, request):
     """Use the real ST58 arm and runner writer; replace only the MCP boundary."""
+    from live_test import artifacts as live_artifacts
     from live_test import config as settings
     from live_test.arms import creation_memory_layout as arm
 
@@ -91,7 +92,9 @@ def unarmed_creation_results(monkeypatch, tmp_path, request):
     assert not destination.with_name("results-observations.json").exists()
     document = json.loads(destination.read_text())
     assert set(document) == {"run", "config", "hmc", "artifacts", "results"}
-    assert document["artifacts"] == dataclasses.asdict(settings.LiveTestArtifacts())
+    assert document["artifacts"] == dataclasses.asdict(
+        live_artifacts.LiveTestArtifacts()
+    )
     assert len(document["results"]) == 1
     assert document["results"][0]["data"] == "None"
     assert document["results"][0]["result"] == "skipped"
@@ -2801,6 +2804,7 @@ def test_system_profiles_recovery(tmp_path, monkeypatch, capsys):
 
 
 def _creation_memory_document(phase="complete"):
+    from live_test import artifacts as live_artifacts
     from live_test import config as settings
 
     from hmcpctl.config import HMCConfig
@@ -2843,7 +2847,7 @@ def _creation_memory_document(phase="complete"):
         "deletion": {"lpar": "confirmed-absent", "vios": "confirmed-absent"},
     }
     artifacts = dataclasses.asdict(
-        settings.LiveTestArtifacts(creation_memory_layout=journal)
+        live_artifacts.LiveTestArtifacts(creation_memory_layout=journal)
     )
     return {
         "run": {
@@ -2973,7 +2977,7 @@ async def test_creation_memory_recovery_compares_canonical_observed_uuid(
 
 @pytest.mark.parametrize("field", ["system_uuid", "lpar_uuid", "vios_uuid", "baseline"])
 def test_creation_memory_saved_uuid_case_is_still_strict(field):
-    from live_test import config as settings
+    from live_test import artifacts as live_artifacts
 
     artifacts = _creation_memory_document()["artifacts"]
     identity = "AAAAAAAA-0000-0000-0000-000000000001"
@@ -2983,13 +2987,13 @@ def test_creation_memory_saved_uuid_case_is_still_strict(field):
     else:
         journal[field] = identity
     with pytest.raises(ValueError, match="canonical UUID|VIOS baseline"):
-        settings.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 def test_creation_memory_journal_unknown_keys_types_and_saved_grant_refuse():
     from copy import deepcopy
 
-    from live_test import config as settings
+    from live_test import artifacts as live_artifacts
 
     original = _creation_memory_document()["artifacts"]
     for key, value in [
@@ -3005,9 +3009,9 @@ def test_creation_memory_journal_unknown_keys_types_and_saved_grant_refuse():
         artifacts = deepcopy(original)
         artifacts["creation_memory_layout"][key] = value
         with pytest.raises((ValueError, TypeError)):
-            settings.decode_artifacts(artifacts)
+            live_artifacts.decode_artifacts(artifacts)
     assert (
-        settings.decode_artifacts(original).creation_memory_layout[
+        live_artifacts.decode_artifacts(original).creation_memory_layout[
             "fresh_vios_delete_authorized"
         ]
         is True
@@ -3018,6 +3022,7 @@ def test_creation_memory_journal_unknown_keys_types_and_saved_grant_refuse():
 async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
     tmp_path, monkeypatch
 ):
+    from live_test import artifacts as live_artifacts
     from live_test import baseline
     from live_test import config as settings
 
@@ -3051,7 +3056,7 @@ async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
         "scope": {"host": "hmc.test", "system": config.system_name, "vios_ids": [1]},
         "tables": tables,
     }
-    artifacts = settings.LiveTestArtifacts(
+    artifacts = live_artifacts.LiveTestArtifacts(
         vios_partition_id=1,
         lp3_baseline={
             "round2_snapshot": snapshot,
@@ -3104,16 +3109,16 @@ async def test_legacy_non_st58_round2_restore_recovery_keeps_valid_inputs(
 
 @pytest.mark.parametrize("value", [None, [], {"unknown": True}])
 def test_creation_memory_artifact_explicit_malformed_values_never_default(value):
-    from live_test import config as settings
+    from live_test import artifacts as live_artifacts
 
     artifacts = _creation_memory_document()["artifacts"]
     artifacts["creation_memory_layout"] = value
     with pytest.raises((ValueError, TypeError)):
-        settings.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
     artifacts = _creation_memory_document()["artifacts"]
     artifacts["unknown"] = None
     with pytest.raises(ValueError):
-        settings.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 @pytest.mark.parametrize(
@@ -3440,6 +3445,7 @@ def test_vios_boot_source_recovery_requires_each_binding(monkeypatch, missing):
 
 
 def _c07_document(phase="complete"):
+    from live_test import artifacts as live_artifacts
     from live_test import config as settings
 
     from hmcpctl.config import HMCConfig
@@ -3487,7 +3493,7 @@ def _c07_document(phase="complete"):
         "hmc": deepcopy(journal["hmc_identity"]),
         "config": json.loads(json.dumps(dataclasses.asdict(config))),
         "artifacts": dataclasses.asdict(
-            settings.LiveTestArtifacts(creation_memory=journal)
+            live_artifacts.LiveTestArtifacts(creation_memory=journal)
         ),
         "results": [],
     }
@@ -3515,7 +3521,7 @@ def _c07_document(phase="complete"):
     ],
 )
 def test_c07_closed_journal_decoder_refuses_malformed_intent(path, value):
-    from live_test import config as settings
+    from live_test import artifacts as live_artifacts
 
     document = _c07_document()
     node = document["artifacts"]["creation_memory"]
@@ -3523,7 +3529,7 @@ def test_c07_closed_journal_decoder_refuses_malformed_intent(path, value):
         node = node[key]
     node[path[-1]] = value
     with pytest.raises((ValueError, TypeError)):
-        settings.decode_artifacts(document["artifacts"])
+        live_artifacts.decode_artifacts(document["artifacts"])
 
 
 @pytest.mark.parametrize(
@@ -3702,14 +3708,14 @@ def test_c07_real_unarmed_writer_recovery_route_and_forgery(
 
 
 def test_c07_saved_journal_is_bounded_before_semantic_decoding():
-    from live_test import config as settings
+    from live_test import artifacts as live_artifacts
 
     document = _c07_document()
     document["artifacts"]["creation_memory"]["baseline"]["pools"]["partitions"] = [
         "x" * (5 * 1024 * 1024)
     ]
     with pytest.raises(ValueError, match="5 MiB"):
-        settings.decode_artifacts(document["artifacts"])
+        live_artifacts.decode_artifacts(document["artifacts"])
 
 
 @pytest.mark.parametrize("kind", ["directory", "fifo"])
