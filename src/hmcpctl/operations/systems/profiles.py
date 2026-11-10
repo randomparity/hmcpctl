@@ -9,7 +9,7 @@ import shlex
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
-from typing import Literal
+from typing import Literal, NamedTuple
 from urllib.parse import urlsplit
 
 import asyncssh
@@ -128,6 +128,15 @@ class _Phase:
     entries: dict[str, dict]
     namespace: tuple[str, ...]
     records: tuple[SystemProfileRecord, ...] = ()
+
+
+class _StableSnapshot(NamedTuple):
+    system_uuid: str
+    cli_name: str
+    namespace: tuple[str, ...]
+    members: dict[
+        str, tuple[str, dict[str, object], list[tuple[str, dict[str, object]]]]
+    ]
 
 
 class _RestInterrupted(Exception):
@@ -262,7 +271,7 @@ async def _observe(hmc: HMCClient, system: str) -> _Phase:
     return _Phase(system, cli, entries, tuple(sorted(names)))
 
 
-def _stable(phase: _Phase) -> tuple:
+def _stable(phase: _Phase) -> _StableSnapshot:
     members = {}
     for uuid, e in phase.entries.items():
         r = e["entry"]["Resource"]
@@ -293,7 +302,7 @@ def _stable(phase: _Phase) -> tuple:
                 key=lambda p: p[0],
             ),
         )
-    return phase.system_uuid, phase.cli_name, phase.namespace, members
+    return _StableSnapshot(phase.system_uuid, phase.cli_name, phase.namespace, members)
 
 
 def _records(raw: str, phase: _Phase) -> tuple[SystemProfileRecord, ...]:
@@ -862,11 +871,16 @@ async def _metadata(
             expected = {r.name: r for r in initial if r.name != name}
             if action != "delete":
                 expected[desired.name] = desired
-            exact = (
-                {r.name: r for r in records} == expected
-                and _stable(phase)[:2] == _stable(after)[:2]
-                and _stable(phase)[3] == _stable(after)[3]
-            )
+            exact = {r.name: r for r in records} == expected
+            if exact:
+                before_snapshot = _stable(phase)
+                after_snapshot = _stable(after)
+                # Metadata writes may change the namespace, not the system or members.
+                exact = (
+                    before_snapshot.system_uuid == after_snapshot.system_uuid
+                    and before_snapshot.cli_name == after_snapshot.cli_name
+                    and before_snapshot.members == after_snapshot.members
+                )
             if state == "completed":
                 return _metadata_result(
                     system,
