@@ -25,10 +25,10 @@ from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_descripti
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh.profiles import get_lpar_description
 
-from . import evidence
-from .config import decode_saved_config
-from .observation import Assertion
-from .results import field
+from .. import evidence
+from ..config import decode_saved_config
+from ..observation import Assertion
+from ..results import field
 
 SUBTASK = 66
 GROUP = "lpar-paging-switchover"

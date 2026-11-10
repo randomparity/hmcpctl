@@ -21,9 +21,9 @@ from hmcpctl.resource_identity import (
 from hmcpctl.ssh.profiles import get_lpar_description
 from hmcpctl.ssh.transport import run_hmc_command
 
-from . import evidence
-from .observation import Assertion
-from .results import field
+from .. import evidence
+from ..observation import Assertion
+from ..results import field
 
 SUBTASK = 54
 GROUP = "lpar-memory-move"

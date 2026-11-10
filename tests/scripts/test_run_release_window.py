@@ -36,21 +36,12 @@ def window(tmp_path):
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     git(root, "switch", "-c", "fixture-window")
-    for name in (
-        "baseline.py",
-        "cli.py",
-        "config.py",
-        "runner.py",
-        "creation_memory.py",
-        "partition_profiles.py",
-        "partition_profile_contract.py",
-        "profile_contract_run.py",
-        "evidence.py",
-        "scenario_validation.py",
-    ):
-        shutil.copyfile(
-            ROOT / "scripts/live_test" / name, root / "scripts/live_test" / name
-        )
+    shutil.rmtree(root / "scripts/live_test")
+    shutil.copytree(
+        ROOT / "scripts/live_test",
+        root / "scripts/live_test",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     for name in (
         "run_release_window.py",
         "live_test_baseline.py",

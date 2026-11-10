@@ -44,18 +44,15 @@ def candidate(tmp_path):
         "scripts/promote_live_observations.py",
         "scripts/check_capability_inventory.py",
         "scripts/live_test_runner.py",
-        "scripts/live_test/runner.py",
-        "scripts/live_test/creation_memory.py",
-        "scripts/live_test/partition_profiles.py",
-        "scripts/live_test/partition_profile_contract.py",
-        "scripts/live_test/profile_contract_run.py",
-        "scripts/live_test/config.py",
-        "scripts/live_test/evidence.py",
-        "scripts/live_test/scenario_validation.py",
-        "scripts/live_test/observation.py",
     )
     for name in scripts:
         shutil.copyfile(ROOT / name, root / name)
+    shutil.rmtree(root / "scripts/live_test")
+    shutil.copytree(
+        ROOT / "scripts/live_test",
+        root / "scripts/live_test",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     claims = root / "docs/capabilities/releases/v0.0.0.json"
     write_json(
         claims,
@@ -74,6 +71,7 @@ def candidate(tmp_path):
         root,
         "add",
         *scripts,
+        "scripts/live_test",
         str(claims),
     )
     git(root, "commit", "-qm", "Prepare anonymous offline fixture")

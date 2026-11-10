@@ -22,9 +22,8 @@ from hmcpctl.operations.lpar.profiles import core as profiles
 from hmcpctl.resource_identity import is_uuid, resolve_system_name, resolve_system_uuid
 from hmcpctl.xmlutil import parse_feed
 
-from .config import _validate_creation_memory
-from .creation_memory_layout import _candidate
-from .lpar_config import (
+from ..config import _validate_creation_memory
+from ..lpar_config import (
     NAME_PREFIX,
     RESOURCES,
     TOKEN_PREFIX,
@@ -33,16 +32,17 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion, judge_create_result
-from .results import field as result_field
+from ..observation import Assertion, judge_create_result
+from ..results import field as result_field
+from .creation_memory_layout import _candidate
 
 if TYPE_CHECKING:
     from fastmcp import Client
 
     from hmcpctl.client.client_profiles import PartitionKind
 
-    from .config import LiveTestConfig
-    from .runner import RunState
+    from ..config import LiveTestConfig
+    from ..runner import RunState
 
 SUBTASK = 65
 GROUP = "creation-memory"
@@ -194,7 +194,7 @@ async def _baseline(
 def _checkpoint(state: RunState, phase: str) -> None:
     journal = state.artifacts.creation_memory
     kind, memory = configured(state.config)
-    from .runner import _hmc_identity
+    from ..runner import _hmc_identity
 
     if (
         state.checkpoint is None
@@ -462,7 +462,7 @@ async def _prepare(
     fixture = (NAME_PREFIX if kind == "LogicalPartition" else VIOS_PREFIX) + suffix
     if fixture in baseline["pools"]["partitions"]:
         raise ValueError("fresh name collision")
-    from .runner import _hmc_identity
+    from ..runner import _hmc_identity
 
     state.creation_memory_invocation = invocation
     state.artifacts.creation_memory = {

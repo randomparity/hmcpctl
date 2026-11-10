@@ -48,16 +48,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_test import (
     accelerator_qos,
     bare_cec,
-    creation_memory,
-    creation_memory_layout,
     dedicated_pcie,
     logical_workflow,
     lpar_config,
     lpar_power,
     lpar_reconfigure,
-    memory_move,
-    memory_statistics,
-    paging_switchover,
     partition_profile_contract,
     partition_profiles,
     processor_move,
@@ -72,6 +67,13 @@ from live_test import (
     vmedia,
 )
 from live_test import config as live_config
+from live_test.arms import (
+    creation_memory,
+    creation_memory_layout,
+    memory_move,
+    memory_statistics,
+    paging_switchover,
+)
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig, env_var_value

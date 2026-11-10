@@ -52,7 +52,7 @@ _PROFILE_READ = f"lssyscfg -r prof -m {_SYSTEM} -F lpar_name,name,io_slots --hea
 def unarmed_creation_results(monkeypatch, tmp_path, request):
     """Use the real ST58 arm and runner writer; replace only the MCP boundary."""
     from live_test import config as settings
-    from live_test import creation_memory_layout as arm
+    from live_test.arms import creation_memory_layout as arm
 
     from hmcpctl.config import HMCConfig
 
@@ -3345,7 +3345,7 @@ def test_vios_source_recovery_requires_each_binding(monkeypatch, missing):
 def test_statistics_recovery_routes_without_clean_claim(
     tmp_path, monkeypatch, capsys, failure
 ):
-    from live_test import memory_statistics
+    from live_test.arms import memory_statistics
 
     document = {"run": {"group": "lpar-memory-statistics"}}
     path = tmp_path / "results.json"
@@ -3577,7 +3577,7 @@ def test_c07_inputs_refuse_unbound_or_missing_journal(fault):
 async def test_c07_recovery_all_phases_are_read_only_and_never_resume(
     monkeypatch, phase, fault
 ):
-    from live_test import creation_memory
+    from live_test.arms import creation_memory
 
     from hmcpctl.config import HMCConfig
 
@@ -3648,7 +3648,7 @@ def test_c07_real_unarmed_writer_recovery_route_and_forgery(
     tmp_path, monkeypatch, capsys
 ):
     from live_test import config as settings
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     from hmcpctl.config import HMCConfig
 
@@ -3744,7 +3744,7 @@ def test_boot_start_recovery_uses_original_results_without_effect_grant(monkeypa
 def test_paging_recovery_routes_before_generic_partial_gate(
     tmp_path, monkeypatch, capsys, status, code
 ):
-    from live_test import paging_switchover
+    from live_test.arms import paging_switchover
 
     document = {"run": {"group": "lpar-paging-switchover", "partial": True}}
     path = tmp_path / "results.json"
@@ -3759,7 +3759,7 @@ def test_paging_recovery_routes_before_generic_partial_gate(
 
 @pytest.mark.parametrize("raw", ['{"run":{},"run":{}}', "x" * (1024 * 1024 + 1)])
 def test_paging_recovery_bounds_raw_input(tmp_path, monkeypatch, raw):
-    from live_test import paging_switchover
+    from live_test.arms import paging_switchover
 
     path = tmp_path / "results.json"
     path.write_text(raw)

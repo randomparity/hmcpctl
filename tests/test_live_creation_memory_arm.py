@@ -53,7 +53,7 @@ def armed(case="shared-lpar", **kwargs):
     ],
 )
 def test_fixed_cases(case, kind, pairs):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     actual_kind, memory = arm.configured(armed(case))
     assert actual_kind == kind
@@ -76,14 +76,14 @@ def test_fixed_cases(case, kind, pairs):
     ],
 )
 def test_invalid_configuration_refuses(changes):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     with pytest.raises((ValueError, TypeError)):
         arm.configured(replace(armed(), **changes))
 
 
 def test_redundant_is_explicit_and_decimal_json_is_number():
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     _, memory = arm.configured(
         armed("redundant-lpar", creation_memory_secondary_vios_name="paging-b")
@@ -97,7 +97,7 @@ def test_redundant_is_explicit_and_decimal_json_is_number():
 
 @pytest.mark.asyncio
 async def test_unarmed_skip_before_effects():
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     from hmcpctl.config import HMCConfig
 
@@ -135,7 +135,7 @@ def feed(rows):
 
 @pytest.fixture
 def native_target(monkeypatch):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     state = runner.RunState(
         group=arm.GROUP,
@@ -794,7 +794,7 @@ async def test_direct_native_provider_href_is_independently_resolved(native_targ
 @pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
 @pytest.mark.parametrize("fault", [None, "partition", "system", "parent", "origin"])
 async def test_saved_oracle_preserves_verified_uuid_spelling(monkeypatch, kind, fault):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     parent = "abcdefab-abcd-4abc-8abc-abcdefabcdef"
     system = "fedcbafe-fedc-4fed-8fed-fedcbafedcba"

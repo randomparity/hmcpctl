@@ -29,7 +29,7 @@ from hmcpctl.ssh.profiles import get_lpar_description
 from hmcpctl.ssh.transport import run_hmc_command
 
 from . import evidence
-from .memory_move import system_oracle
+from .arms.memory_move import system_oracle
 from .observation import Assertion, plain_data
 
 if TYPE_CHECKING:

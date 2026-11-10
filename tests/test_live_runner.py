@@ -9810,7 +9810,7 @@ def test_creation_memory_optional_defaults_and_registration():
     from dataclasses import asdict
 
     from live_test import config as settings
-    from live_test import creation_memory
+    from live_test.arms import creation_memory
 
     saved = asdict(settings.LiveTestConfig())
     saved["protected_lpar_names"] = list(saved["protected_lpar_names"])

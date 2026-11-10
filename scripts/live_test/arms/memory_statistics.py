@@ -24,9 +24,9 @@ from hmcpctl.operations.lpar.ownership import authorize_lpar_ownership_descripti
 from hmcpctl.resource_identity import is_uuid, resolve_system_uuid
 from hmcpctl.ssh.profiles import get_lpar_description
 
-from . import evidence
-from .config import LiveTestConfig, decode_saved_config
-from .observation import Assertion
+from .. import evidence
+from ..config import LiveTestConfig, decode_saved_config
+from ..observation import Assertion
 
 SUBTASK = 67
 GROUP = "lpar-memory-statistics"

@@ -23,9 +23,9 @@ from hmcpctl.resource_identity import (
 )
 from hmcpctl.ssh.commands import build_filter, parse_hmc_result_rows
 
-from . import evidence
-from .config import _validate_creation_memory_layout
-from .lpar_config import (
+from .. import evidence
+from ..config import _validate_creation_memory_layout
+from ..lpar_config import (
     NAME_PREFIX,
     RESOURCES,
     TOKEN_PREFIX,
@@ -38,13 +38,13 @@ from .lpar_config import (
     _uuid_of,
     scratch_partitions,
 )
-from .observation import Assertion
+from ..observation import Assertion
 
 if TYPE_CHECKING:
     from fastmcp import Client
 
-    from .config import LiveTestConfig
-    from .runner import RunState
+    from ..config import LiveTestConfig
+    from ..runner import RunState
 
 SUBTASK = 58
 GROUP = "creation-memory-layout"
@@ -88,7 +88,7 @@ def _checkpoint(state: RunState, phase: str) -> None:
     journal = state.artifacts.creation_memory_layout
     configured(state.config)
     _validate_creation_memory_layout(journal)
-    from .runner import _hmc_identity
+    from ..runner import _hmc_identity
 
     if (
         state.checkpoint is None
@@ -500,7 +500,7 @@ async def exercise_creation_memory_layout(client: Client, state: RunState) -> No
             or any(row["name"] == vname for row in vios)
         ):
             raise ValueError("fresh-name collision")
-        from .runner import _hmc_identity
+        from ..runner import _hmc_identity
 
         invocation = uuid.uuid4().hex
         state.creation_memory_layout_invocation = invocation

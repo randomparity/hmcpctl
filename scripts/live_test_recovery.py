@@ -68,19 +68,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from live_test import config as live_config
 from live_test import (
-    creation_memory,
-    creation_memory_layout,
     logical_workflow,
     lpar_affinity_group,
     lpar_config,
-    lpar_hardware_memory,
     lpar_linux_roles,
     lpar_physical_io,
     lpar_power,
     lpar_reconfigure,
     lpar_security_policy,
     lpar_vtpm,
-    memory_quantities,
     network,
     processor_quantities,
     processor_sharing_weight,
@@ -89,6 +85,12 @@ from live_test import (
     storage_lifecycle,
     storage_volume_group,
     vios_backup,
+)
+from live_test.arms import (
+    creation_memory,
+    creation_memory_layout,
+    lpar_hardware_memory,
+    memory_quantities,
 )
 from live_test.recovery.backup import (
     check_vios_backup,
@@ -351,7 +353,7 @@ def _report(
 
 
 def _paging_recovery(path: Path) -> int:
-    from live_test import paging_switchover
+    from live_test.arms import paging_switchover
 
     def unique_members(pairs):
         result = {}
@@ -382,7 +384,7 @@ def _paging_recovery(path: Path) -> int:
 
 
 def _statistics_recovery(path: Path) -> int:
-    from live_test import memory_statistics
+    from live_test.arms import memory_statistics
 
     def unique_members(pairs):
         result = {}
@@ -588,7 +590,7 @@ def _recover_document_group(document: dict[str, Any]) -> int | None:
             "CLEAN: system-profile original baseline and finite terminal sequence confirmed",
         ),
         "lpar-memory-move": (
-            "memory_move",
+            "arms.memory_move",
             "memory-move recovery",
             "memory-move recovery",
             "CLEAN: finite memory-move success and both original baselines confirmed; no writes",

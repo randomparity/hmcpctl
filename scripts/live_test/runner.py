@@ -76,6 +76,16 @@ from hmcpctl.server_tools.command import configure_arbitrary_command_tool
 from live_test import config as live_config
 from live_test import evidence, scenario_validation
 from live_test.accelerator_qos import exercise_accelerator_qos
+from live_test.arms.creation_memory import exercise_creation_memory
+from live_test.arms.creation_memory_layout import exercise_creation_memory_layout
+from live_test.arms.lpar_hardware_memory import exercise_lpar_hardware_memory
+from live_test.arms.memory_move import exercise_memory_move
+from live_test.arms.memory_quantities import exercise_memory_quantities
+from live_test.arms.memory_statistics import (
+    exercise_memory_statistics,
+    private_destination,
+)
+from live_test.arms.paging_switchover import exercise_paging_switchover
 from live_test.bare_cec import exercise_bare_cec
 from live_test.config import (
     LiveTestArtifacts,
@@ -84,8 +94,6 @@ from live_test.config import (
     decode_saved_config,
 )
 from live_test.connectivity import inventory_connectivity
-from live_test.creation_memory import exercise_creation_memory
-from live_test.creation_memory_layout import exercise_creation_memory_layout
 from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
 from live_test.detach_probe import exercise_detach_probe
 from live_test.escape_hatch import exercise_cli_escape_hatch
@@ -103,16 +111,12 @@ from live_test.lpar_config import (
     exercise_lpar_reporting,
     exercise_lpar_settings,
 )
-from live_test.lpar_hardware_memory import exercise_lpar_hardware_memory
 from live_test.lpar_linux_roles import exercise_lpar_linux_roles
 from live_test.lpar_physical_io import exercise_lpar_physical_io
 from live_test.lpar_power import exercise_lpar_power
 from live_test.lpar_reconfigure import exercise_lpar_reconfigure
 from live_test.lpar_security_policy import exercise_lpar_security_policy
 from live_test.lpar_vtpm import exercise_lpar_vtpm
-from live_test.memory_move import exercise_memory_move
-from live_test.memory_quantities import exercise_memory_quantities
-from live_test.memory_statistics import exercise_memory_statistics, private_destination
 from live_test.metrics import (
     exercise_pcm_preferences,
     inspect_metrics_jobs,
@@ -129,7 +133,6 @@ from live_test.observation import (
     grade_assertions,
     plain_data,
 )
-from live_test.paging_switchover import exercise_paging_switchover
 from live_test.partition_profile_contract import exercise as exercise_profile_contract
 from live_test.partition_profiles import exercise_partition_profiles
 from live_test.processor_move import exercise_processor_move

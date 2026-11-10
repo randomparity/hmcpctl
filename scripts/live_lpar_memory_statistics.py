@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_test import runner
-from live_test.memory_statistics import private_destination
+from live_test.arms.memory_statistics import private_destination
 
 
 def main(argv=None):

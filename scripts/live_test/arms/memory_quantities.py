@@ -16,12 +16,12 @@ from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
 from hmcpctl.ssh.lpar import apply_lpar_profile_via_cli
 from hmcpctl.xmlutil import leaf_text
 
-from . import lpar_config as fixture
-from .observation import Assertion, CallFailure
-from .results import field, resource
+from .. import lpar_config as fixture
+from ..observation import Assertion, CallFailure
+from ..results import field, resource
 
 if TYPE_CHECKING:
-    from .runner import RunState
+    from ..runner import RunState
 
 SUBTASK = 50
 GROUP = "lpar-memory-quantities"
