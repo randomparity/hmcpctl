@@ -26,8 +26,9 @@ from hmcpctl.config import HMCConfig, load_profile
 from hmcpctl.documents.lpar import LparResources, build_lpar_document
 from hmcpctl.documents.partition_profile import _records
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import core as lpar_core
+from hmcpctl.operations.lpar import core as lifecycle_core
 from hmcpctl.operations.lpar import ownership
+from hmcpctl.operations.lpar.creation import core as lpar_core
 from hmcpctl.operations.lpar.ownership import (
     authorize_lpar_ownership_description,
     parse_lpar_ownership_caller_token,
@@ -2319,7 +2320,7 @@ async def _fixture_run(hmc, packet, stage, output=None, journal=None):
                             document["baseline"] = original["baseline"]
                             budget.captured = original["retained"]["target"]
                             budget.qualified = document["qualified"] = current
-                            removed = await lpar_core.delete_lpar(
+                            removed = await lifecycle_core.delete_lpar(
                                 hmc,
                                 budget.captured["uuid"],
                                 system_name_or_uuid=packet["system_uuid"],

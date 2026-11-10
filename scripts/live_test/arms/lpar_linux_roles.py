@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import LparCreation
+from hmcpctl.operations.lpar.creation.core import LparCreation
 from hmcpctl.operations.lpar.linux_roles import (
     ROLE_FIELDS,
     admit_role_creation,

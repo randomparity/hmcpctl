@@ -11,7 +11,7 @@ untyped `Accept` (`*/*`) and a typed `Content-Type`; with them the vSCSI adapter
 and its DELETE 204. The VIOS mapping and VolumeGroup writes already send that shape by hand
 (ADR 0169, ADR 0171); the shared helpers do not.
 
-LPAR create depends on the 406: `create_and_stamp_lpar` (`src/hmcpctl/operations/lpar/core.py`)
+LPAR create depends on the 406: `create_and_stamp_lpar` (`src/hmcpctl/operations/lpar/creation/core.py`)
 falls back to `mksyscfg` only on a 406. With the header fixed, V10R3 answers 400 `REST0001`: on
 `PartitionMemoryConfiguration` in the 2026-09-23 probe (fixed since by #961), and on
 `PartitionProcessorConfiguration` in a 2026-09-24 check with this design's headers, which created

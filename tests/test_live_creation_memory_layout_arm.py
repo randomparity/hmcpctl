@@ -20,7 +20,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.operations import partition_creation
-from hmcpctl.operations.lpar import core
+from hmcpctl.operations.lpar.creation import core
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import config as settings

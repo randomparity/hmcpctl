@@ -23,7 +23,7 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparReportingSettings, LparResources, LparSettings
 from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import (
+from hmcpctl.operations.lpar.creation.core import (
     LparCreation,
     LparCreationResult,
     create_and_stamp_lpar,

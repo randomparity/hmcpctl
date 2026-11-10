@@ -106,7 +106,7 @@ def test_strict_packet(mutation):
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
     from hmcpctl.config import HMCConfig
-    from hmcpctl.operations.lpar import serial
+    from hmcpctl.operations.lpar.creation import serial
 
     p = packet()
     config = HMCConfig.from_mapping(p["candidate"]["hmc_identity"])

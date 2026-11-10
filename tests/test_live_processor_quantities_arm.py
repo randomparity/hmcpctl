@@ -19,7 +19,7 @@ from lpar.test_processor_quantities import (
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import LparCreationResult
+from hmcpctl.operations.lpar.creation.core import LparCreationResult
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import config, runner

@@ -18,8 +18,9 @@ from hmcpctl.documents.common import UOM_NS
 from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
-from hmcpctl.operations.lpar import core, workflows
 from hmcpctl.operations.lpar.assignments import AssignmentResult, LparPcieAssignments
+from hmcpctl.operations.lpar.creation import core
+from hmcpctl.operations.lpar.creation import workflow as workflows
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import ATOM_NS

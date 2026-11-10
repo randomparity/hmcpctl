@@ -12,7 +12,7 @@ import pytest
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.creation.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.dlpar import set_lpar_memory
 
 SYSTEM_UUID = "cccc0000-0000-0000-0000-000000000001"

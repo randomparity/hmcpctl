@@ -837,7 +837,7 @@ async def test_settings_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
     from dataclasses import asdict
 
     from hmcpctl.documents.lpar import LparSettings
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
 
     hmc = FakeHMC(foreign_token=fault == "foreign")
     settings = asdict(LparSettings(False, 0, False, False, False))
@@ -935,7 +935,7 @@ async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
     from dataclasses import asdict
 
     from hmcpctl.documents.lpar import LparReportingSettings
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
 
     hmc = FakeHMC(foreign_token=fault == "foreign")
     settings = asdict(LparReportingSettings("a", False, "none", False))

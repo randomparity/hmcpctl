@@ -18,7 +18,7 @@ from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintErro
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar.core import LparCreationResult
+from hmcpctl.operations.lpar.creation.core import LparCreationResult
 from hmcpctl.operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,

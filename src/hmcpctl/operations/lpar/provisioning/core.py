@@ -35,9 +35,9 @@ from hmcpctl.operations.lpar.assignments import (
     assignment_step_names,
     prevalidate_lpar_pcie_assignments,
 )
-from hmcpctl.operations.lpar.core import LparCreation
+from hmcpctl.operations.lpar.creation.core import LparCreation
+from hmcpctl.operations.lpar.creation.physical_io import admit_creation_io
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
-from hmcpctl.operations.lpar.physical_io import admit_creation_io
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation, read_change_location
 from hmcpctl.operations.lpar.provisioning.media import (
     Boot,

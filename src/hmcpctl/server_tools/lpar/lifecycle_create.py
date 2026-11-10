@@ -20,8 +20,8 @@ from ...documents.lpar_serial import VirtualSerialAdapter
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
-from ...operations.lpar.core import LparCreation, validate_lpar_creation
-from ...operations.lpar.workflows import create_lpar
+from ...operations.lpar.creation.core import LparCreation, validate_lpar_creation
+from ...operations.lpar.creation.workflow import create_lpar
 from ...tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()

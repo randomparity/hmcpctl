@@ -23,11 +23,12 @@ from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter as Adapter
 from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import core, workflows
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
 )
+from hmcpctl.operations.lpar.creation import core
+from hmcpctl.operations.lpar.creation import workflow as workflows
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh import lpar as native
 from hmcpctl.ssh import profiles

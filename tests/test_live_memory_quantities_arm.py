@@ -16,7 +16,7 @@ from lpar.test_memory_quantities import (
 )
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.operations.lpar.core import LparCreationResult
+from hmcpctl.operations.lpar.creation.core import LparCreationResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))

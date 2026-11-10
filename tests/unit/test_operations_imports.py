@@ -251,3 +251,29 @@ importlib.import_module("hmcpctl.operations.lpar.{module}")
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_lifecycle_mutations_import_without_creation_coordination():
+    script = """
+import importlib
+import importlib.abc
+import sys
+
+class NoCreationCoordination(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "hmcpctl.operations.partition_creation":
+            raise ModuleNotFoundError("creation coordination dependency forbidden")
+
+sys.meta_path.insert(0, NoCreationCoordination())
+core = importlib.import_module("hmcpctl.operations.lpar.core")
+assert callable(core.delete_lpar)
+assert callable(core.rename_lpar)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

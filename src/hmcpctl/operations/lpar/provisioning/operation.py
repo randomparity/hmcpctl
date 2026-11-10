@@ -38,7 +38,7 @@ from hmcpctl.operations.lpar.assignments import (
     assignment_step_names,
 )
 from hmcpctl.operations.lpar.boot_order import read_lpar_boot_order, set_lpar_boot_order
-from hmcpctl.operations.lpar.core import (
+from hmcpctl.operations.lpar.creation.core import (
     LparCreation,
     create_and_stamp_lpar,
     creation_followup,

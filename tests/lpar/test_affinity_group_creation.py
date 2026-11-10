@@ -19,13 +19,14 @@ from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.documents.lpar_io import LparPhysicalIO, SriovLogicalPortAssignment
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import assignments as assignment_ops
-from hmcpctl.operations.lpar import core, workflows
 from hmcpctl.operations.lpar.assignments import (
     AssignmentResult,
     DedicatedPcieAssignment,
     LparPcieAssignments,
     VnicAssignment,
 )
+from hmcpctl.operations.lpar.creation import core
+from hmcpctl.operations.lpar.creation import workflow as workflows
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import ATOM_NS

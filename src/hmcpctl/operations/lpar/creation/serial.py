@@ -5,22 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from ...documents.lpar_serial import (
+from ....documents.lpar_serial import (
     VirtualSerialAdapter,
     serial_integer,
     serial_name,
     validate_serial_input,
 )
-from ...errors import HMCError, HMCTLSFingerprintError
-from ...resource_identity import is_uuid
-from ...ssh.lpar import resolve_system_cli_name
-from ...ssh.lpar_serial import SerialProfile, read_serial_profile
-from ...xmlutil import leaf_text
-from .ownership import authorize_lpar_ownership_description
-from .workflow_contract import WorkflowStep
+from ....errors import HMCError, HMCTLSFingerprintError
+from ....resource_identity import is_uuid
+from ....ssh.lpar import resolve_system_cli_name
+from ....ssh.lpar_serial import SerialProfile, read_serial_profile
+from ....xmlutil import leaf_text
+from ..ownership import authorize_lpar_ownership_description
+from ..workflow_contract import WorkflowStep
 
 if TYPE_CHECKING:
-    from ...client.core import HMCClient
+    from ....client.core import HMCClient
 
 PartitionKind = Literal["LogicalPartition", "VirtualIOServer"]
 

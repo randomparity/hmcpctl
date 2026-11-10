@@ -17,7 +17,7 @@ def test_capability_import_does_not_load_creation(owner):
                 "from importlib.abc import MetaPathFinder\n"
                 "class BlockCreation(MetaPathFinder):\n"
                 " def find_spec(self, fullname, path=None, target=None):\n"
-                "  if fullname == 'hmcpctl.operations.lpar.core':\n"
+                "  if fullname == 'hmcpctl.operations.lpar.creation.core':\n"
                 "   raise ImportError('creation dependency forbidden')\n"
                 "sys.meta_path.insert(0, BlockCreation())\n"
                 f"import hmcpctl.operations.lpar.{owner}\n"

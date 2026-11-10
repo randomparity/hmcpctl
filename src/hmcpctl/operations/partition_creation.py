@@ -19,6 +19,18 @@ from hmcpctl.documents.lpar_start import LparStartSettings
 from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.affinity_group import created_affinity_group_step
+from hmcpctl.operations.lpar.creation.serial import (
+    SerialAdmission,
+    admit_serial_creation,
+    confirm_serial_created,
+    serial_creation_step,
+)
+from hmcpctl.operations.lpar.creation.start import (
+    StartAdmission,
+    admit_start_creation,
+    confirm_start_created,
+    created_start_step,
+)
 from hmcpctl.operations.lpar.linux_roles import (
     read_creation_authority,
     read_role_capabilities,
@@ -39,18 +51,6 @@ from hmcpctl.operations.lpar.security_policy import (
     read_lpar_security_policy,
     read_security_policy_capabilities,
 )
-from hmcpctl.operations.lpar.serial import (
-    SerialAdmission,
-    admit_serial_creation,
-    confirm_serial_created,
-    serial_creation_step,
-)
-from hmcpctl.operations.lpar.start import (
-    StartAdmission,
-    admit_start_creation,
-    confirm_start_created,
-    created_start_step,
-)
 from hmcpctl.operations.lpar.vtpm import admit_vtpm, read_vtpm_capabilities
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.resource_identity import is_uuid
@@ -59,7 +59,7 @@ from hmcpctl.ssh.lpar_memory_layout import admit_memory_layout, get_lpar_memory_
 from hmcpctl.ssh.lpar_vtpm import get_lpar_vtpm_state
 
 if TYPE_CHECKING:
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
 
 @dataclass(frozen=True)

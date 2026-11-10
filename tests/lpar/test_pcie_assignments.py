@@ -20,8 +20,8 @@ from hmcpctl.operations.lpar.assignments import (
     apply_validated_lpar_pcie_assignments,
     prevalidate_lpar_pcie_assignments,
 )
-from hmcpctl.operations.lpar.core import LparCreation
-from hmcpctl.operations.lpar.workflows import create_lpar
+from hmcpctl.operations.lpar.creation.core import LparCreation
+from hmcpctl.operations.lpar.creation.workflow import create_lpar
 from hmcpctl.operations.virtualization.pcie import (
     InventoryResult,
     InventorySelector,
@@ -537,7 +537,9 @@ async def test_create_refuses_off_granularity_capacity_before_creating_the_lpar(
     config = HMCConfig.from_mapping({"host": "h", "user": "u", "password": "p"})
     with (
         _granularity_inventory("1.0"),
-        patch("hmcpctl.operations.lpar.workflows.create_and_stamp_lpar", create),
+        patch(
+            "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar", create
+        ),
         pytest.raises(ValueError, match="not a multiple"),
     ):
         await create_lpar(
@@ -585,7 +587,9 @@ async def test_create_refuses_sriov_items_outside_the_mutation_envelope(
             "hmcpctl.operations.lpar.assignments.require_admitted_environment",
             require_admitted_environment,
         ),
-        patch("hmcpctl.operations.lpar.workflows.create_and_stamp_lpar", create),
+        patch(
+            "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar", create
+        ),
         pytest.raises(SriovLogicalPortCapabilityError, match="8375-42A"),
     ):
         await create_lpar(

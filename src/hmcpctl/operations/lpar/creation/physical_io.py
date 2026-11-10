@@ -12,19 +12,19 @@ from hmcpctl.operations.lpar.assignments import (
 )
 from hmcpctl.operations.lpar.profiles.core import read_partition_profile
 
-from ...documents.lpar_io import LparPhysicalIO
-from ...errors import HMCError, HMCTLSFingerprintError
-from ...ssh.io_inventory import list_io_slots
-from ...ssh.lpar import complete_create_resources, resolve_system_cli_name
-from ...ssh.lpar_io import creation_io_record
-from ...ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
-from ...ssh.sriov import list_sriov_unconfigured_logical_port_rows
-from ...xmlutil import leaf_text
-from ..systems.fleet import read_system_entry
-from .workflow_contract import WorkflowStep
+from ....documents.lpar_io import LparPhysicalIO
+from ....errors import HMCError, HMCTLSFingerprintError
+from ....ssh.io_inventory import list_io_slots
+from ....ssh.lpar import complete_create_resources, resolve_system_cli_name
+from ....ssh.lpar_io import creation_io_record
+from ....ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
+from ....ssh.sriov import list_sriov_unconfigured_logical_port_rows
+from ....xmlutil import leaf_text
+from ...systems.fleet import read_system_entry
+from ..workflow_contract import WorkflowStep
 
 if TYPE_CHECKING:
-    from ...client.core import HMCClient
+    from ....client.core import HMCClient
     from .core import LparCreation
 
 _TAGS = {
@@ -183,7 +183,7 @@ async def _admit_sriov(
             )
         # Existing normalized inventory derives physical identity from the captured
         # logical-port location and rejects ambiguous parents.
-        from ..virtualization.pcie import list_sriov_logical_ports
+        from ...virtualization.pcie import list_sriov_logical_ports
 
         inventory = await list_sriov_logical_ports(
             hmc, system, port.adapter_id, port.physical_port_id
