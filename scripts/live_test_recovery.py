@@ -633,14 +633,14 @@ def _recover_generic_document(document: dict[str, Any], results_path: Path) -> i
             file=sys.stderr,
         )
         return 2
+    unread: list[str] = []
     round2_inputs = None
-    round2_error = None
     try:
         round2_inputs = round2_inputs_from_document(document, subtasks)
     except (ValueError, TypeError, KeyError) as error:
-        round2_error = str(error)
+        if message := str(error):
+            unread.append(message)
     memory_inputs = None
-    memory_error = None
     try:
         skip_reason = creation_memory_skip_reason(document, subtasks)
         if skip_reason:
@@ -651,9 +651,9 @@ def _recover_generic_document(document: dict[str, Any], results_path: Path) -> i
             return 0
         memory_inputs = creation_memory_inputs_from_document(document, subtasks)
     except (ValueError, TypeError, KeyError) as error:
-        memory_error = str(error)
+        if message := str(error):
+            unread.append(message)
     creation_inputs = None
-    creation_error = None
     try:
         skip_reason = creation_memory_layout_skip_reason(document, subtasks)
         if skip_reason:
@@ -666,7 +666,8 @@ def _recover_generic_document(document: dict[str, Any], results_path: Path) -> i
             document, subtasks
         )
     except (ValueError, TypeError, KeyError) as error:
-        creation_error = str(error)
+        if message := str(error):
+            unread.append(message)
     witnessed = _WITNESSED_SUBTASKS | (
         set(runner.SUBTASK_GROUPS["round2"]) if round2_inputs else set()
     )
@@ -710,9 +711,6 @@ def _recover_generic_document(document: dict[str, Any], results_path: Path) -> i
     )
 
     findings: list[Finding] = []
-    unread: list[str] = [
-        error for error in (round2_error, creation_error, memory_error) if error
-    ]
     try:
         users = users_witnessed(document, subtasks)
     except ValueError as error:
