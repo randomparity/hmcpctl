@@ -15,7 +15,7 @@ from lpar.test_creation_memory_workflow import (
 
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar import serial
 from hmcpctl.operations.vios.core import create_vios
 
@@ -143,3 +143,36 @@ async def test_vios_single_provider_omitted_secondary_verifies_saved_empty(
     assert proof.saved.status == "verified" and proof.current is None
     assert proof.saved.observed["secondary_paging_vios_name"] == "none"
     assert "stamp" not in b.events and "apply" not in b.events
+
+
+@pytest.mark.parametrize("stage", ["identity", "memory"])
+async def test_vios_verification_retains_fingerprint_failure_and_stops(
+    memory_target, monkeypatch, stage
+):
+    from hmcpctl.operations.vios import core
+
+    b = memory_target
+    vios(b)
+    failure = HMCTLSFingerprintError("certificate identity differs")
+    read = b.hmc.find_vios_by_name.side_effect
+
+    async def fail(*args, **kwargs):
+        b.events.append("tls-refusal")
+        raise failure
+
+    async def find(*args, **kwargs):
+        if b.created:
+            return await fail()
+        return await read(*args, **kwargs)
+
+    if stage == "identity":
+        b.hmc.find_vios_by_name.side_effect = find
+    else:
+        monkeypatch.setattr(core, "creation_memory_step", fail)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await create_vios(b.hmc, "system", "new", RESOURCES, creation_memory=SHARED)
+    assert caught.value is failure
+    assert b.events[-1] == "tls-refusal"
+    assert b.events.count("create") == 1
+    assert "stamp" not in b.events and "apply" not in b.events
+    assert any("VIOS exists or may exist" in note for note in caught.value.__notes__)

@@ -29,7 +29,7 @@ from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...jobs import (
     DEFAULT_JOB_POLL_INTERVAL,
     DEFAULT_JOB_TIMEOUT_SECONDS,
@@ -360,6 +360,8 @@ async def create_vios(
     try:
         try:
             entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
+        except HMCTLSFingerprintError:
+            raise
         except Exception:
             if not native_features_requested:
                 raise
@@ -427,6 +429,12 @@ async def create_vios(
                 raise ValueError(
                     "Created VIOS policy readback differs from requested fields"
                 )
+    except HMCTLSFingerprintError as error:
+        error.add_note(
+            "VIOS exists or may exist after creation submission. Inspect before "
+            "retrying; no replay or rollback performed."
+        )
+        raise
     except Exception as error:
         if (
             not serial_requested
