@@ -11,6 +11,7 @@ means the save did not land. Messages name partitions by UUID only.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, TypedDict
 
@@ -131,14 +132,13 @@ class NetworkPatch(BaseModel):
         macs = [i.mac for i in (*self.add, *self.remove) if i.mac is not None]
         if len(set(macs)) != len(macs):
             raise ValueError("networks names the same MAC twice")
-        for index, item in enumerate(self.add):
-            others = [o for n, o in enumerate(self.add) if n != index]
-            if item.mac is None and any(
-                o.port_vlan_id == item.port_vlan_id for o in others
-            ):
-                raise ValueError(
-                    "an add without mac must not share its VLAN with another add"
-                )
+        vlan_counts = Counter(item.port_vlan_id for item in self.add)
+        if any(
+            item.mac is None and vlan_counts[item.port_vlan_id] > 1 for item in self.add
+        ):
+            raise ValueError(
+                "an add without mac must not share its VLAN with another add"
+            )
         return self
 
 
