@@ -1204,33 +1204,62 @@ def _print_arms(
 
 
 _PACKET_PREFLIGHTS = {
-    "vnic-creation-policy": (
-        "vnic_creation_policy",
-        "vNIC policy preflight requires packet, digest, private output and read-only hardware checks",
-    ),
-    "vios-ame-source": (
-        "vios_ame_source",
-        "VIOS AME source preflight requires packet, digest, private output and live read-only checks",
-    ),
-    "vios-boot-source": (
-        "vios_boot_source",
-        "VIOS boot source preflight requires packet, digest, private output and live read-only checks",
-    ),
-    "client-ethernet-update": (
-        "ethernet_update",
-        "ST69 requires exact packet, digest and private output",
-    ),
-    "lpar-boot-start": (
-        "lpar_boot_start",
-        "ST68 requires exact packet, digest, private output and read-only admission",
-    ),
-    "lpar-serial-adapter": (
-        "lpar_serial_adapter",
-        "ST63 requires packet, digest, fresh private output and read-only hardware checks",
+    "system-profile-source": (
+        "system_profile_source",
+        "system-profile-source requires packet, digest and live read-only checks",
+        False,
     ),
     "system-profile-activation-source": (
         "system_profile_activation_source",
         "activation source preflight requires packet, digest, private output and live read-only checks",
+        True,
+    ),
+    "lpar-serial-adapter": (
+        "lpar_serial_adapter",
+        "ST63 requires packet, digest, fresh private output and read-only hardware checks",
+        True,
+    ),
+    "lpar-boot-start": (
+        "lpar_boot_start",
+        "ST68 requires exact packet, digest, private output and read-only admission",
+        True,
+    ),
+    "client-ethernet-update": (
+        "ethernet_update",
+        "ST69 requires exact packet, digest and private output",
+        True,
+    ),
+    "vios-ame-source": (
+        "vios_ame_source",
+        "VIOS AME source preflight requires packet, digest, private output and live read-only checks",
+        True,
+    ),
+    "vios-boot-source": (
+        "vios_boot_source",
+        "VIOS boot source preflight requires packet, digest, private output and live read-only checks",
+        True,
+    ),
+    "vnic-creation-policy": (
+        "vnic_creation_policy",
+        "vNIC policy preflight requires packet, digest, private output and read-only hardware checks",
+        True,
+    ),
+}
+
+_NATIVE_PREFLIGHTS = {
+    partition_profile_contract.GROUP: (
+        (Exception,),
+        "profile contract preflight refused: explicit packet/config/credentials required",
+        "configuration only; native profile-contract admission NOT established",
+        "profile contract native preflight refused: ",
+        "profile contract native read-only preflight admitted; no effects",
+    ),
+    "system-profiles": (
+        (HMCError, OSError, ValueError, TypeError, KeyError, TimeoutError),
+        "system-profiles preflight refused: configuration, credentials or explicit scope missing",
+        "system-profiles configuration only: native admission NOT established",
+        "system-profiles native preflight refused: ",
+        "system-profiles read-only admission passed; no effects or live authority granted",
     ),
 }
 
@@ -1242,17 +1271,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--group",
         action="append",
-        choices=(
-            *runner.SUBTASK_GROUPS,
-            "system-profile-source",
-            "system-profile-activation-source",
-            "lpar-serial-adapter",
-            "lpar-boot-start",
-            "client-ethernet-update",
-            "vios-ame-source",
-            "vios-boot-source",
-            "vnic-creation-policy",
-        ),
+        choices=(*runner.SUBTASK_GROUPS, *_PACKET_PREFLIGHTS),
         help="predict one arm instead of every arm",
     )
     parser.add_argument(
@@ -1272,53 +1291,41 @@ def main(argv: list[str] | None = None) -> int:
     if args.group and len(args.group) != 1:
         parser.error("exactly one preflight group may be selected")
     args.group = args.group[0] if args.group else None
+    if args.output:
+        output_groups = [
+            group for group, (_, _, required) in _PACKET_PREFLIGHTS.items() if required
+        ]
+        if args.group not in output_groups:
+            parser.error(
+                "--output requires one of these --group values: "
+                + ", ".join(output_groups)
+            )
     if args.group in _PACKET_PREFLIGHTS:
-        module_name, refusal = _PACKET_PREFLIGHTS[args.group]
+        module_name, refusal, requires_output = _PACKET_PREFLIGHTS[args.group]
         module = import_module(f"live_test.arms.{module_name}")
         if (
             not args.packet
             or not args.packet_sha256
-            or not args.output
+            or (requires_output and not args.output)
             or args.skip_hardware
             or args.detach_probe
         ):
             parser.error(refusal)
-        return module.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-                "--output",
-                str(args.output),
-            ]
-        )
-    if args.output:
-        parser.error("--output requires --group system-profile-activation-source")
-    if args.group == "system-profile-source":
-        from live_test.arms import system_profile_source
-
-        if (
-            not args.packet
-            or not args.packet_sha256
-            or args.skip_hardware
-            or args.detach_probe
-        ):
-            parser.error(
-                "system-profile-source requires packet, digest and live read-only checks"
-            )
-        return system_profile_source.main(
-            [
-                "preflight",
-                "--packet",
-                str(args.packet),
-                "--packet-sha256",
-                args.packet_sha256,
-            ]
-        )
+        command = [
+            "preflight",
+            "--packet",
+            str(args.packet),
+            "--packet-sha256",
+            args.packet_sha256,
+        ]
+        if requires_output:
+            command.extend(("--output", str(args.output)))
+        return module.main(command)
     if args.packet or args.packet_sha256:
-        parser.error("source packet arguments require --group system-profile-source")
+        parser.error(
+            "source packet arguments require one of these --group values: "
+            + ", ".join(_PACKET_PREFLIGHTS)
+        )
     if args.detach_probe and args.group != "lpar-power":
         parser.error("--detach-probe requires --group lpar-power")
 
@@ -1341,53 +1348,28 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
 
-    if args.group == partition_profile_contract.GROUP:
-        if config is None or not credentials_ok or not verdicts[0].runnable:
-            print(
-                "profile contract preflight refused: explicit packet/config/credentials required"
-            )
-            return 1
-        if args.skip_hardware:
-            print(
-                "configuration only; native profile-contract admission NOT established"
-            )
-            return 0
-        from live_test.arms.profile_contract_run import preflight
-
-        try:
-            asyncio.run(preflight(HMCConfig(), config))
-        except Exception as error:  # noqa: BLE001 — private diagnostics never escape this boundary
-            print(f"profile contract native preflight refused: {type(error).__name__}")
-            return 2
-        print("profile contract native read-only preflight admitted; no effects")
-        return 0
-
-    if args.group == "system-profiles":
-        if config is None or not credentials_ok or not verdicts[0].runnable:
-            print(
-                "system-profiles preflight refused: configuration, credentials or explicit scope missing"
-            )
-            return 1
-        if args.skip_hardware:
-            print(
-                "system-profiles configuration only: native admission NOT established"
-            )
-            return 0
-        try:
-            asyncio.run(system_profiles.preflight(HMCConfig(), config))
-        except (
-            HMCError,
-            OSError,
-            ValueError,
-            TypeError,
-            KeyError,
-            TimeoutError,
-        ) as exc:
-            print(f"system-profiles native preflight refused: {type(exc).__name__}")
-            return 2
-        print(
-            "system-profiles read-only admission passed; no effects or live authority granted"
+    if args.group in _NATIVE_PREFLIGHTS:
+        errors, refusal, configuration_only, failure_prefix, success = (
+            _NATIVE_PREFLIGHTS[args.group]
         )
+        if config is None or not credentials_ok or not verdicts[0].runnable:
+            print(refusal)
+            return 1
+        if args.skip_hardware:
+            print(configuration_only)
+            return 0
+        profile_contract = args.group == partition_profile_contract.GROUP
+        if profile_contract:
+            from live_test.arms.profile_contract_run import preflight
+
+        try:
+            if not profile_contract:
+                preflight = system_profiles.preflight
+            asyncio.run(preflight(HMCConfig(), config))
+        except errors as error:
+            print(f"{failure_prefix}{type(error).__name__}")
+            return 2
+        print(success)
         return 0
 
     envelopes: dict[str, str] = {}

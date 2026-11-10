@@ -1551,3 +1551,14 @@ def test_vg_if_match_names_its_pv_and_group_or_refuses(pv, group, runnable):
     if runnable:
         text = " ".join(verdict.mutates)
         assert "hdisk9" in text and "hpvg1234abcd" in text and "If-Match" in text
+
+
+def test_output_refusal_names_eligible_packet_routes(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        preflight.main(["--group", "lpar-settings", "--output", "report.json"])
+
+    assert exit_info.value.code == 2
+    diagnostic = capsys.readouterr().err.split("error: ")[-1]
+    assert "system-profile-activation-source" in diagnostic
+    assert "vios-ame-source" in diagnostic
+    assert "system-profile-source" not in diagnostic
