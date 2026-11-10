@@ -624,11 +624,13 @@ def hmc_read_vios_boot_order(
         vios_name_or_uuid: Name or UUID of the VirtualIOServer on that system.
         profile: Configured HMC profile, or the default when omitted.
     """
-    return with_client(
-        lambda hmc: read_vios_boot_order(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
-        profile=profile,
+    return dict(
+        with_client(
+            lambda hmc: read_vios_boot_order(
+                hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+            ),
+            profile=profile,
+        )
     )
 
 
@@ -657,14 +659,16 @@ def hmc_set_vios_boot_order(
         boot_string: Exact printable raw text with a non-whitespace character, at most 16384 UTF-8 bytes; preserved without normalization, mutually exclusive with devices.
     """
     select_boot_string(devices, boot_string)
-    return with_client(
-        lambda hmc: set_vios_boot_order(
-            hmc,
-            vios_name_or_uuid,
-            devices,
-            system_name_or_uuid=system_name_or_uuid,
-            ownership_override=ownership_override,
-            boot_string=boot_string,
-        ),
-        profile=profile,
+    return dict(
+        with_client(
+            lambda hmc: set_vios_boot_order(
+                hmc,
+                vios_name_or_uuid,
+                devices,
+                system_name_or_uuid=system_name_or_uuid,
+                ownership_override=ownership_override,
+                boot_string=boot_string,
+            ),
+            profile=profile,
+        )
     )
