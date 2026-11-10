@@ -676,6 +676,9 @@ SUBTASKS = {
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
+# New registrations require an explicit decision before joining the default run.
+DEFAULT_SUBTASKS = (*range(26), *range(37, 44), *range(47, 52))
+
 
 # Release-selectable scenarios; numbers are dispatcher subtasks, not result row IDs.
 RELEASE_SCENARIO_SUBTASKS = {
@@ -758,6 +761,84 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
 }
 
 
+_PRIVATE_RESULT_GROUPS = {
+    "lpar-paging-switchover": "Paging switch",
+    "lpar-memory-statistics": "Statistics reset",
+}
+
+
+def _selected_tasks(subtask: int | None, group: str | None) -> list[int]:
+    if subtask is not None:
+        return [subtask]
+    if group is None:
+        return [number for number in DEFAULT_SUBTASKS if number in SUBTASKS]
+    tasks = SUBTASK_GROUPS.get(group, [])
+    if not tasks:
+        raise ValueError(
+            f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}"
+        )
+    return list(tasks)
+
+
+def _validate_private_results(
+    tasks: list[int], group: str | None, results_path: str
+) -> None:
+    for allowed, label in _PRIVATE_RESULT_GROUPS.items():
+        if not set(tasks).intersection(SUBTASK_GROUPS[allowed]):
+            continue
+        try:
+            if group != allowed:
+                raise ValueError("named opt-in group required")
+            private_destination(results_path)
+        except (ValueError, OSError, RuntimeError) as exc:
+            raise ValueError(
+                f"{label} requires new canonical absolute private results outside repositories"
+            ) from exc
+
+
+def _fresh_results_required(
+    tasks: list[int], results_path: str, state: RunState | None
+) -> bool:
+    number = next((number for number in (66, 65, 58) if number in tasks), None)
+    if number is None:
+        return False
+    stale = False
+    if state is not None:
+        if number == 65:
+            stale = bool(
+                state.artifacts.creation_memory
+                or state.creation_memory_invocation is not None
+            )
+        elif number == 58:
+            stale = bool(state.artifacts.creation_memory_layout)
+    paths = [Path(results_path)]
+    if number in {65, 66}:
+        paths.append(evidence.observations_path(results_path))
+    if stale or any(path.exists() for path in paths):
+        raise ValueError(
+            f"Existing ST{number} context refused; use fresh private results"
+        )
+    return True
+
+
+def _prepare_selection(
+    subtask: int | None,
+    group: str | None,
+    results_path: str,
+    *,
+    state: RunState | None = None,
+) -> tuple[list[int], list[str]]:
+    """One selection gate for CLI startup and direct programmatic dispatch."""
+    tasks = _selected_tasks(subtask, group)
+    _validate_private_results(tasks, group, results_path)
+    if _fresh_results_required(tasks, results_path, state):
+        return tasks, []
+    prior_paths = [results_path]
+    if subtask is not None or group is not None:
+        prior_paths.extend(["test-results-vmedia.json", "test-results-round2.json"])
+    return tasks, prior_paths
+
+
 @dataclass(frozen=True)
 class RunnerArguments:
     """Validated live-run selection and result destination."""
@@ -816,26 +897,11 @@ def _parse_arguments(argv: list[str] | None = None) -> RunnerArguments:
 def _run_from_arguments(argv: list[str] | None = None) -> int:
     """Validate arguments, then bootstrap configuration and execute the live run."""
     arguments = _parse_arguments(argv)
-    if arguments.group == "lpar-paging-switchover" or arguments.subtask == 66:
-        try:
-            if arguments.group != "lpar-paging-switchover":
-                raise ValueError("Paging switch requires its named opt-in group")
-            private_destination(arguments.results_path)
-        except (ValueError, OSError, RuntimeError):
-            print(
-                "Paging switch requires new canonical absolute private results outside repositories"
-            )
-            return 1
-    if arguments.group == "lpar-memory-statistics" or arguments.subtask == 67:
-        try:
-            if arguments.group != "lpar-memory-statistics":
-                raise ValueError("Statistics reset requires its named opt-in group")
-            private_destination(arguments.results_path)
-        except (ValueError, OSError, RuntimeError):
-            print(
-                "Statistics reset requires new canonical absolute private results outside repositories"
-            )
-            return 1
+    try:
+        _prepare_selection(arguments.subtask, arguments.group, arguments.results_path)
+    except (ValueError, OSError, RuntimeError) as exc:
+        print(str(exc))
+        return 1
     try:
         config = LiveTestConfig.from_env_file()
         # Validated here, beside the rest of the configuration: `evidence.emit_observations`
@@ -1046,68 +1112,14 @@ async def main(
             "observations will not be written"
         )
 
-    # Determine which sub-tasks to run
-    if subtask_filter is not None:
-        tasks = [subtask_filter]
-    elif group is not None:
-        tasks = SUBTASK_GROUPS.get(group, [])
-        if not tasks:
-            print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
-            return 1
-    else:
-        tasks = sorted(
-            n
-            for n in SUBTASKS
-            if n
-            not in {
-                44,
-                45,
-                46,
-                52,
-                53,
-                54,
-                55,
-                56,
-                57,
-                58,
-                59,
-                61,
-                64,
-                65,
-                66,
-                67,
-                70,
-                71,
-            }
+    try:
+        tasks, prior_paths = _prepare_selection(
+            subtask_filter, group, results_path, state=state
         )
+    except (ValueError, OSError, RuntimeError) as exc:
+        print(str(exc))
+        return 1
 
-    # Every invocation preserves its destination; only subsets borrow another arm's context.
-    prior_paths = [results_path]
-    if 66 in tasks:
-        if (
-            Path(results_path).exists()
-            or evidence.observations_path(results_path).exists()
-        ):
-            print("Existing ST66 context refused; use fresh private results")
-            return 1
-        prior_paths = []
-    elif 65 in tasks:
-        if (
-            state.artifacts.creation_memory
-            or state.creation_memory_invocation is not None
-            or Path(results_path).exists()
-            or evidence.observations_path(results_path).exists()
-        ):
-            print("Existing ST65 context refused; use fresh private results")
-            return 1
-        prior_paths = []
-    elif 58 in tasks:
-        if state.artifacts.creation_memory_layout or Path(results_path).exists():
-            print("Existing ST58 context refused; use fresh private results")
-            return 1
-        prior_paths = []
-    elif subtask_filter is not None or group is not None:
-        prior_paths.extend(["test-results-vmedia.json", "test-results-round2.json"])
     for prior in prior_paths:
         if Path(prior).exists():
             restored = _restore_artifacts_from_results(state, hmc_config, prior)

@@ -9966,3 +9966,61 @@ async def test_call_preserves_served_property_names_after_client_sanitization():
         _ScriptedClient(result=_ToolResult(data=generated)), "tool"
     )
     assert (status, data) == ("PASS", expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "group,expected",
+    [(None, [0]), ("provision-boot", [72]), ("logical-workflow", [73])],
+)
+async def test_default_run_requires_explicit_task_admission(
+    monkeypatch, tmp_path, group, expected
+):
+    _isolate_runner(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def task(number):
+        async def run(_client, state):
+            seen.append(number)
+            state.record(number, "selection-only-probe", "PASS", {})
+
+        return run
+
+    monkeypatch.setattr(
+        runner, "SUBTASKS", {number: task(number) for number in (0, 72, 73, 999)}
+    )
+    assert (
+        await runner.main(
+            group=group,
+            results_path=str(tmp_path / "results.json"),
+            config=live_config.LiveTestConfig(),
+            hmc_config=HMCConfig.from_mapping({}),
+        )
+        == 0
+    )
+    assert seen == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "subtask,label", [(66, "Paging switch"), (67, "Statistics reset")]
+)
+async def test_direct_dispatch_requires_the_private_tasks_named_group(
+    monkeypatch, tmp_path, capsys, subtask, label
+):
+    def forbidden_client(*args, **kwargs):
+        pytest.fail("invalid selection opened a client")
+
+    monkeypatch.setattr(runner, "Client", forbidden_client)
+    assert (
+        await runner.main(
+            subtask_filter=subtask,
+            results_path=str(tmp_path / "results.json"),
+            config=live_config.LiveTestConfig(),
+            hmc_config=HMCConfig.from_mapping({}),
+        )
+        == 1
+    )
+    assert label in capsys.readouterr().out
+    assert not (tmp_path / "results.json").exists()
