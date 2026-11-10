@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
@@ -18,10 +17,6 @@ from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
 from hmcpctl.operations.lpar.memory.creation import (
     CreationMemoryAdmission,
     _raise_creation_memory_failure,
-    creation_memory_step,
-)
-from hmcpctl.operations.lpar.memory.hardware import (
-    created_hardware_memory_step,
 )
 from hmcpctl.operations.lpar.ownership import (
     resolve_and_authorize_lpar_mutation,
@@ -29,8 +24,6 @@ from hmcpctl.operations.lpar.ownership import (
 )
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.operations.partition_creation import (
-    _created_memory_layout_step,
-    _created_vtpm_step,
     _CreationFeatureCoordinator,
 )
 
@@ -76,7 +69,6 @@ from ...ssh.lpar_memory_layout import admit_memory_layout
 from ...ssh.profiles import get_lpar_proc_compat
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import escape_xml, leaf_text
-from .affinity_group import created_affinity_group_step
 from .configuration import configure_lpar_settings
 from .linux_roles import (
     admit_role_creation,
@@ -84,7 +76,6 @@ from .linux_roles import (
     with_role_evidence,
 )
 from .physical_io import admit_creation_io, created_io_step
-from .serial import serial_creation_step
 from .start import (
     StartAdmission,
     recheck_start_controllers,
@@ -145,17 +136,6 @@ class LparCreationResult:
     serial_step: WorkflowStep | None = None
     creation_memory_step: WorkflowStep | None = None
     affinity_group_step: WorkflowStep | None = None
-
-
-@dataclass(frozen=True)
-class MemoryLayoutVerification:
-    """Requested creation values and an honest saved-configuration observation."""
-
-    status: Literal["verified", "mismatch", "unavailable"]
-    requested: LparMemoryLayout
-    observed: dict[str, object]
-    unavailable: tuple[str, ...]
-    warnings: tuple[str, ...]
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -432,51 +412,9 @@ async def create_and_stamp_lpar(
       delete it to release its resources.
     """
     validate_lpar_creation(creation)
-    start_requested = creation.start_settings.requested()
-    memory_requested = bool(creation.creation_memory.pairs())
-    shared_memory = creation.creation_memory.mem_mode == "shared"
-    serial_requested = bool(creation.virtual_serial_adapters)
-    layout_requested = bool(creation.memory_layout.pairs())
-    affinity_requested = creation.affinity_group_id is not None
-    hardware_requested = bool(
-        hardware_memory_pairs(
-            creation.hardware_mem_encryption, creation.hardware_mem_expansion
-        )
-    )
-    policy_requested = bool(creation.security_policy.pairs())
-    role_requested = roles_requested(creation.settings)
-    verify_before_apply = (
-        policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-        or role_requested
-    )
-    if preflight_assignments is not None:
-        if not isinstance(preflight_assignments, LparPcieAssignments):
-            raise TypeError("preflight_assignments must be LparPcieAssignments")
-        if not (
-            (
-                role_requested
-                or affinity_requested
-                or layout_requested
-                or serial_requested
-                or memory_requested
-                or start_requested
-            )
-            and (preflight_assignments.dedicated or preflight_assignments.sriov)
-        ):
-            raise ValueError(
-                "preflight_assignments requires role, memory layout, affinity, serial or creation memory selection "
-                "and dedicated or SR-IOV profile assignments"
-            )
-    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
     features = _CreationFeatureCoordinator(
         hmc,
-        system_uuid,
+        system_name_or_uuid,
         system_name_or_uuid,
         creation.name,
         creation.partition_type,
@@ -493,6 +431,25 @@ async def create_and_stamp_lpar(
         hardware_mem_expansion=creation.hardware_mem_expansion,
         affinity_group_id=creation.affinity_group_id,
     )
+    role_requested = roles_requested(creation.settings)
+    verify_before_apply = (
+        features.policy_requested
+        or features.native_features_requested
+        or role_requested
+    )
+    if preflight_assignments is not None:
+        if not isinstance(preflight_assignments, LparPcieAssignments):
+            raise TypeError("preflight_assignments must be LparPcieAssignments")
+        if not (
+            (role_requested or features.profile_features_requested)
+            and (preflight_assignments.dedicated or preflight_assignments.sriov)
+        ):
+            raise ValueError(
+                "preflight_assignments requires role, memory layout, affinity, serial or creation memory selection "
+                "and dedicated or SR-IOV profile assignments"
+            )
+    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+    features.system_uuid = system_uuid
     # Scoped: the HMC-wide search misses partitions on a system it cannot
     # read (#1309), and the scoped feed refuses a non-operating system.
     existing = await hmc.find_partition_by_name(creation.name, system_uuid=system_uuid)
@@ -517,48 +474,34 @@ async def create_and_stamp_lpar(
         await prevalidate_lpar_pcie_assignments(
             hmc, system_name_or_uuid, preflight_assignments
         )
-    if (
-        affinity_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-    ) and controller_mode:
+    if features.profile_features_requested and controller_mode:
         if creation.apply_profile is True:
             raise ValueError(
                 "Controller affinity creation requires apply_profile=False"
-                if affinity_requested
+                if features.affinity_requested
                 else "Controller creation cannot apply a named profile"
             )
         if creation.physical_io.requested or creation.creation_sriov:
             raise ValueError(
                 "Initial-profile I/O is unavailable in controller mode"
-                if affinity_requested
+                if features.affinity_requested
                 else "Controller creation cannot use initial-profile I/O or SR-IOV"
             )
     await features.admit_host_features()
     await admit_creation_io(hmc, system_uuid, creation)
-    if not shared_memory:
+    if features.creation_memory.mem_mode != "shared":
         await require_memory_within_system(hmc, system_uuid, creation.resources)
     await features.admit_partition_features()
-    serial_admission = features.serial_admission
-    start_admission = features.start_admission
-    memory_admission = features.memory_admission
-    system_name: str | None = features.system if memory_requested else None
+    system_name: str | None = features.system if features.memory_requested else None
     apply_step: WorkflowStep | None = None
     readback_error: HMCError | None = None
     resources = complete_create_resources(creation.resources)
     if (
         resources is None
-        or policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
+        or features.policy_requested
+        or features.native_features_requested
         or creation.reporting_settings.pairs()
-        or creation.vtpm_settings.pairs()
+        or features.vtpm_requested
         or creation.physical_io.requested
         or (creation.settings.pairs() and creation.keylock is None)
     ):
@@ -576,22 +519,22 @@ async def create_and_stamp_lpar(
                 system_name_or_uuid,
                 creation,
                 controller_mode=controller_mode,
-                memory_admission=memory_admission,
-                start_admission=start_admission,
+                memory_admission=features.memory_admission,
+                start_admission=features.start_admission,
             )
         except HMCError as error:
             if (
-                serial_requested
-                or layout_requested
-                or memory_requested
-                or start_requested
+                features.serial_requested
+                or features.layout_requested
+                or features.memory_requested
+                or features.start_requested
             ):
                 raise
-            if hardware_requested or affinity_requested:
+            if features.hardware_requested or features.affinity_requested:
                 native_failed = True
             elif (
                 not creation.physical_io.requested
-                and not policy_requested
+                and not features.policy_requested
                 and not role_requested
             ):
                 raise
@@ -600,14 +543,14 @@ async def create_and_stamp_lpar(
                     "Native role creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
                     if role_requested
                     else "Native policy creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
-                    if policy_requested
+                    if features.policy_requested
                     else "Native I/O creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
                 ) from (None if role_requested else error)
         if native_failed:
             raise HMCError(
-                f"Native {'affinity group' if affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
+                f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity before retrying; no rollback performed."
                 if controller_mode
-                else f"Native {'affinity group' if affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
+                else f"Native {'affinity group' if features.affinity_requested else 'hardware memory'} creation outcome is unknown; the partition may exist. Inspect its scoped identity and profile before retrying; no rollback performed."
             )
     else:
         document = build_lpar_document(
@@ -646,19 +589,7 @@ async def create_and_stamp_lpar(
         _unapplied_profile_warnings(creation.name, apply_step),
         apply_step=apply_step,
     )
-    active_step: str | None = None
     features.entry = created_lpar
-
-    async def observe(
-        field_name: str,
-        observation: Awaitable[WorkflowStep | None] | WorkflowStep | None,
-    ) -> WorkflowStep | None:
-        nonlocal result, active_step
-        active_step = field_name
-        step = await features.observe(field_name, observation)
-        result = replace(result, **{field_name: step})
-        active_step = None
-        return step
 
     try:
         if isinstance(readback_error, HMCTLSFingerprintError):
@@ -666,21 +597,13 @@ async def create_and_stamp_lpar(
         await features.confirm_identity(created_lpar)
         created_lpar = features.entry
         result = replace(result, lpar=created_lpar)
-        serial_step = await observe(
-            "serial_step",
-            serial_creation_step(
-                hmc, serial_admission, created_lpar, controller_mode=controller_mode
-            )
-            if serial_admission is not None and created_lpar is None
-            else None,
-        )
         apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
         apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
 
         if created_lpar is None:
             if verify_before_apply and creation.stamp_policy == "required":
                 raise HMCError(
-                    f"{'Creation memory' if memory_requested else 'Affinity group' if affinity_requested else 'Serial' if serial_requested else 'Memory layout' if layout_requested else 'Hardware memory' if hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
+                    f"{'Creation memory' if features.memory_requested else 'Affinity group' if features.affinity_requested else 'Serial' if features.serial_requested else 'Memory layout' if features.layout_requested else 'Hardware memory' if features.hardware_requested else 'Role' if role_requested else 'Policy'} creation may have succeeded, but created identity readback is "
                     "unavailable and ownership was not stamped. Inspect the contained "
                     "partition before retrying; no rollback performed."
                 ) from None
@@ -706,6 +629,7 @@ async def create_and_stamp_lpar(
                 skipped = "create returned no LPAR body"
             else:
                 skipped = f"read-back after mksyscfg failed: {readback_error}"
+            await features.observe_unavailable_identity(creation, missing=True)
             return LparCreationResult(
                 resource_created=True,
                 lpar=None,
@@ -715,40 +639,6 @@ async def create_and_stamp_lpar(
                     f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
                 ),
                 apply_step=apply_step,
-                serial_step=serial_step,
-                creation_memory_step=await creation_memory_step(
-                    hmc, memory_admission, None, controller_mode=controller_mode
-                )
-                if memory_admission is not None
-                else None,
-                affinity_group_step=await created_affinity_group_step(
-                    hmc,
-                    system_uuid,
-                    None,
-                    creation.name,
-                    creation.partition_type,
-                    creation.affinity_group_id,
-                    controller_mode=controller_mode,
-                ),
-                memory_layout_step=await _created_memory_layout_step(
-                    hmc, None, creation, controller_mode=controller_mode
-                ),
-                hardware_memory_step=await created_hardware_memory_step(
-                    hmc,
-                    system_uuid,
-                    created_lpar,
-                    creation.name,
-                    creation.partition_type,
-                    creation.hardware_mem_encryption,
-                    creation.hardware_mem_expansion,
-                ),
-                security_policy_step=WorkflowStep(
-                    "security_policy",
-                    "error",
-                    "Created partition identity unavailable; policy unverified",
-                )
-                if policy_requested
-                else None,
                 physical_io_step=WorkflowStep(
                     "physical_io",
                     "error",
@@ -762,14 +652,9 @@ async def create_and_stamp_lpar(
                         "error",
                         "Created partition readback unavailable; settings unverified",
                     )
-                    if creation.settings.pairs() or start_requested
+                    if creation.settings.pairs() or features.start_requested
                     else None
                 ),
-                vtpm_step=WorkflowStep(
-                    "vtpm", "error", "Created identity unavailable; vTPM unverified"
-                )
-                if creation.vtpm_settings.pairs()
-                else None,
                 reporting_step=(
                     WorkflowStep(
                         "reporting_settings",
@@ -779,6 +664,7 @@ async def create_and_stamp_lpar(
                     if creation.reporting_settings.pairs()
                     else None
                 ),
+                **features.facts,
             )
         if verify_before_apply and (
             not isinstance(created_lpar, dict)
@@ -793,14 +679,15 @@ async def create_and_stamp_lpar(
                     "identity and ownership are unconfirmed. Inspect the contained "
                     "partition before retrying; no rollback performed."
                 )
+            await features.observe_unavailable_identity(creation, missing=False)
             return LparCreationResult(
                 True,
                 None
                 if role_requested
-                or layout_requested
-                or memory_requested
-                or start_requested
-                or affinity_requested
+                or features.layout_requested
+                or features.memory_requested
+                or features.start_requested
+                or features.affinity_requested
                 else created_lpar,
                 None,
                 (),
@@ -809,41 +696,9 @@ async def create_and_stamp_lpar(
                     "error",
                     "Created partition identity unconfirmed; roles unverified",
                 )
-                if role_requested or start_requested
+                if role_requested or features.start_requested
                 else None,
-                memory_layout_step=await _created_memory_layout_step(
-                    hmc, None, creation, controller_mode=controller_mode
-                ),
-                security_policy_step=WorkflowStep(
-                    "security_policy",
-                    "error",
-                    "Created partition identity unconfirmed; inspect before retrying",
-                )
-                if policy_requested
-                else None,
-                affinity_group_step=await created_affinity_group_step(
-                    hmc,
-                    system_uuid,
-                    None,
-                    creation.name,
-                    creation.partition_type,
-                    creation.affinity_group_id,
-                    controller_mode=controller_mode,
-                ),
-                hardware_memory_step=await created_hardware_memory_step(
-                    hmc,
-                    system_uuid,
-                    created_lpar,
-                    creation.name,
-                    creation.partition_type,
-                    creation.hardware_mem_encryption,
-                    creation.hardware_mem_expansion,
-                ),
-                creation_memory_step=await creation_memory_step(
-                    hmc, memory_admission, None, controller_mode=controller_mode
-                )
-                if memory_admission is not None
-                else None,
+                **features.facts,
             )
         ownership_stamped, warnings = await stamp_created_lpar_ownership(
             hmc,
@@ -872,15 +727,12 @@ async def create_and_stamp_lpar(
                 "release its resources."
             )
         await features.observe_before_followup(creation, system_name)
-        result = replace(result, **features.facts)
-        serial_step = features.facts["serial_step"]
-        memory_step = features.facts["creation_memory_step"]
-        io_step = await observe(
+        io_step = await features.observe(
             "physical_io_step",
             created_io_step(hmc, system_uuid, creation, created_lpar),
         )
         if io_step is not None and ownership_stamped is not True:
-            io_step = await observe(
+            io_step = await features.observe(
                 "physical_io_step",
                 WorkflowStep(
                     "physical_io",
@@ -888,7 +740,7 @@ async def create_and_stamp_lpar(
                     "Partition exists but ownership stamp unconfirmed; I/O workflow stopped before apply",
                 ),
             )
-        settings_step = await observe(
+        await features.observe(
             "settings_step",
             _created_settings_step(
                 hmc,
@@ -902,7 +754,7 @@ async def create_and_stamp_lpar(
             if verify_before_apply
             else None,
         )
-        reporting_step = await observe(
+        await features.observe(
             "reporting_step",
             _created_reporting_step(hmc, system_name, creation)
             if verify_before_apply
@@ -912,16 +764,9 @@ async def create_and_stamp_lpar(
             creation, system_name, verify_before_apply=verify_before_apply
         )
         result = replace(result, **features.facts)
-        vtpm_step = features.facts["vtpm_step"]
-        result = replace(
-            result,
-            lpar=created_lpar,
-            ownership_stamped=ownership_stamped,
-            warnings=(*apply_warnings, *warnings),
-        )
         if verify_before_apply and creation.apply_profile is not None:
             verified = _creation_steps_verified(creation, result)
-            apply_step = await observe(
+            apply_step = await features.observe(
                 "apply_step",
                 _apply_created_profile(
                     hmc, system_name or system_name_or_uuid, creation
@@ -932,7 +777,7 @@ async def create_and_stamp_lpar(
                     "skipped",
                     (
                         _CONTROLLER_AFFINITY_PROFILELESS
-                        if affinity_requested
+                        if features.affinity_requested
                         else _CONTROLLER_CREATE_CONFIGURED
                     )
                     if controller_mode
@@ -940,7 +785,7 @@ async def create_and_stamp_lpar(
                 ),
             )
         elif creation.physical_io.requested and creation.apply_profile is not None:
-            apply_step = await observe(
+            apply_step = await features.observe(
                 "apply_step",
                 _apply_created_profile(
                     hmc, system_name or system_name_or_uuid, creation
@@ -953,21 +798,10 @@ async def create_and_stamp_lpar(
                 ),
             )
         await features.observe_after_apply(apply_step)
-        memory_step = features.facts["creation_memory_step"]
-        if (
-            creation.physical_io.requested
-            or policy_requested
-            or hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-            or role_requested
-        ):
+        if creation.physical_io.requested or verify_before_apply:
             apply_warnings = _unapplied_profile_warnings(creation.name, apply_step)
         if not verify_before_apply:
-            settings_step = await observe(
+            await features.observe(
                 "settings_step",
                 _created_settings_step(
                     hmc,
@@ -979,30 +813,16 @@ async def create_and_stamp_lpar(
                     features=features,
                 ),
             )
-            reporting_step = await observe(
+            await features.observe(
                 "reporting_step", _created_reporting_step(hmc, system_name, creation)
             )
-            vtpm_step = await observe(
-                "vtpm_step", _created_vtpm_step(hmc, system_name, creation)
-            )
+            await features.observe_vtpm(creation, system_name)
         result = replace(
             result,
             warnings=(*apply_warnings, *warnings),
-            apply_step=apply_step,
-            settings_step=settings_step,
-            reporting_step=reporting_step,
-            vtpm_step=vtpm_step,
-            creation_memory_step=memory_step,
+            **features.facts,
         )
-        if (
-            role_requested
-            or hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        ):
+        if role_requested or features.native_features_requested:
             safe_steps = {}
             step_names = (
                 "apply_step",
@@ -1010,14 +830,7 @@ async def create_and_stamp_lpar(
                 "reporting_step",
                 "vtpm_step",
             )
-            if (
-                hardware_requested
-                or layout_requested
-                or serial_requested
-                or memory_requested
-                or start_requested
-                or affinity_requested
-            ):
+            if features.native_features_requested:
                 step_names += (
                     "settings_step",
                     "security_policy_step",
@@ -1040,7 +853,7 @@ async def create_and_stamp_lpar(
         return _tls_aborted_creation(
             creation,
             replace(result, lpar=features.entry, **features.facts),
-            features.active_step or active_step,
+            features.active_step,
         )
 
 

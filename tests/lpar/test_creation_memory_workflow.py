@@ -1501,3 +1501,106 @@ async def test_creation_later_tls_preserves_facts_and_stops(
     assert "apply" not in b.events
     b.hmc.delete_logical_partition.assert_not_called()
     b.hmc.delete_vios.assert_not_called()
+
+
+@pytest.mark.parametrize("identity", ["missing", "unconfirmed"])
+async def test_creation_uncertain_identity_retains_coordinator_facts(
+    memory_target, monkeypatch, identity
+):
+    from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+
+    b = memory_target
+    b.system["Resource"]["AssociatedSystemCapabilities"][
+        "HardwareMemoryCompressionCapable"
+    ] = "true"
+    b.current["MemoryExpansionHardwareAccessEnabled"] = "false"
+    entry = deepcopy(b.local)
+    entry["Resource"]["PartitionName"] = {"text": "new", "@attrs": {"ksv": "V1_5_0"}}
+    b.hmc.find_partition_by_name.side_effect = [
+        None,
+        None if identity == "missing" else entry,
+    ]
+    coordinators = []
+    coordinator_type = partition_creation._CreationFeatureCoordinator
+
+    def coordinator(*args, **kwargs):
+        invocation = coordinator_type(*args, **kwargs)
+        coordinators.append(invocation)
+        return invocation
+
+    monkeypatch.setattr(core, "_CreationFeatureCoordinator", coordinator)
+    result = await core.create_and_stamp_lpar(
+        b.hmc,
+        SYSTEM,
+        core.LparCreation(
+            "new",
+            "AIX/Linux",
+            LparResources(desired_memory=1024),
+            memory_layout=LparMemoryLayout(desired_num_huge_pages=0),
+            hardware_mem_expansion=False,
+            apply_profile=True,
+        ),
+    )
+    assert result.resource_created and result.lpar is None
+    assert result.ownership_stamped is None
+    assert result.memory_layout_step.status == "error"
+    assert result.memory_layout_step.result.status == "unavailable"
+    assert result.hardware_memory_step.status == (
+        "error" if identity == "missing" else "ok"
+    )
+    assert len(coordinators) == 1
+    facts = coordinators[0].facts
+    assert facts["memory_layout_step"] is result.memory_layout_step
+    assert facts["hardware_memory_step"] is result.hardware_memory_step
+    assert coordinators[0].active_step is None
+    assert b.events.count("create") == 1
+    assert "stamp" not in b.events and "apply" not in b.events
+    assert "saved" not in b.events
+    b.hmc.delete_logical_partition.assert_not_called()
+
+
+async def test_creation_unconfirmed_identity_later_tls_preserves_layout_fact(
+    memory_target,
+):
+    from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+    from hmcpctl.errors import HMCTLSFingerprintError
+
+    b = memory_target
+    b.system["Resource"]["AssociatedSystemCapabilities"][
+        "HardwareMemoryCompressionCapable"
+    ] = "true"
+    entry = deepcopy(b.local)
+    entry["Resource"]["PartitionName"] = {"text": "new", "@attrs": {"ksv": "V1_5_0"}}
+    b.hmc.find_partition_by_name.side_effect = [None, entry]
+    original_read = b.hmc._get.side_effect
+    stopped = []
+
+    async def read(path, *args, **kwargs):
+        if path.endswith("LogicalPartition/" + LOCAL):
+            stopped[:] = b.events
+            raise HMCTLSFingerprintError("certificate identity changed")
+        return await original_read(path, *args, **kwargs)
+
+    b.hmc._get.side_effect = read
+    result = await core.create_and_stamp_lpar(
+        b.hmc,
+        SYSTEM,
+        core.LparCreation(
+            "new",
+            "AIX/Linux",
+            LparResources(desired_memory=1024),
+            memory_layout=LparMemoryLayout(desired_num_huge_pages=0),
+            hardware_mem_expansion=False,
+            apply_profile=True,
+        ),
+    )
+    assert result.memory_layout_step.status == "error"
+    assert result.memory_layout_step.result.status == "unavailable"
+    assert result.memory_layout_step.result.unavailable == ("desired_num_huge_pages",)
+    assert result.hardware_memory_step.status == "error"
+    assert "TLS certificate identity" in result.hardware_memory_step.result
+    assert result.apply_step.status == "skipped"
+    assert stopped and b.events == stopped
+    assert b.events.count("create") == 1
+    assert "stamp" not in b.events and "apply" not in b.events
+    b.hmc.delete_logical_partition.assert_not_called()
