@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import re
-import sys
-from contextlib import redirect_stdout
 from dataclasses import asdict
 from decimal import Decimal
 from typing import Any
@@ -22,14 +20,8 @@ from ...operations.virtualization.vnic import (
     remove_vnic,
     update_vnic_policy,
 )
-from ..output import output, print_json, terminal_field
+from ..output import confirm_on_stderr, output, print_json, terminal_field
 from ..runtime import with_client
-
-
-def _confirm_on_stderr(prompt: str) -> bool:
-    """Keep confirmation prompts and terminal input echoes off JSON stdout."""
-    with redirect_stdout(sys.stderr):
-        return typer.confirm(terminal_field(prompt, err=True), err=True)
 
 
 def network_list_fc_ports(
@@ -128,10 +120,13 @@ def network_add_vnic(
             policy[name] = [int(part) for part in parts]
         else:
             policy[name] = parts
-    if not yes and not _confirm_on_stderr(
-        f"Add vNIC (VIOS={vios_name}, adapter={adapter_id}, "
-        f"port={physical_port_id}, capacity={capacity_percent}, vlan={port_vlan_id}) "
-        f"to '{lpar}' on '{system_name}'?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Add vNIC (VIOS={vios_name}, adapter={adapter_id}, "
+            f"port={physical_port_id}, capacity={capacity_percent}, vlan={port_vlan_id}) "
+            f"to '{lpar}' on '{system_name}'?",
+            err=True,
+        )
     ):
         raise typer.Abort()
 
@@ -170,8 +165,10 @@ def network_remove_vnic(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Remove a vNIC from an LPAR (HMC CLI via SSH)."""
-    if not yes and not _confirm_on_stderr(
-        f"Remove vNIC slot {slot_num} from '{lpar}' on '{system_name}'?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Remove vNIC slot {slot_num} from '{lpar}' on '{system_name}'?", err=True
+        )
     ):
         raise typer.Abort()
 
@@ -228,8 +225,11 @@ def network_update_vnic_policy(
         if add_allowed_os_mac_addrs is None
         else add_allowed_os_mac_addrs.split(",")
     )
-    if not yes and not _confirm_on_stderr(
-        f"Update policy of vNIC slot {slot_num} on '{lpar}' on '{system_name}'?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Update policy of vNIC slot {slot_num} on '{lpar}' on '{system_name}'?",
+            err=True,
+        )
     ):
         raise typer.Abort()
 

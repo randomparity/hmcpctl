@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-from contextlib import redirect_stdout
-
 import typer
 
 from ...operations.vios.labels import (
@@ -17,13 +14,8 @@ from ...operations.vios.labels import (
     update_vios_vfc_group_label,
 )
 from ...ssh.vios_labels import ViosGroupUpdateAction
-from ..output import output, print_json, terminal_field
+from ..output import confirm_on_stderr, output, print_json, terminal_field
 from ..runtime import run_cli_coroutine, ssh_config
-
-
-def _confirm_on_stderr(prompt: str) -> bool:
-    with redirect_stdout(sys.stderr):
-        return typer.confirm(terminal_field(prompt, err=True), err=True)
 
 
 def _prompt_value(value: object) -> str:
@@ -67,10 +59,13 @@ def vios_set_fc_port_label(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Set one FC-port label without changing adapter configuration."""
-    if not yes and not _confirm_on_stderr(
-        f"Set FC-port label on system={_prompt_value(system_name_or_uuid)}, "
-        f"port={_prompt_value(port_name)}, {_selected(vios_name, vios_id)}, "
-        f"label={_prompt_value(label)}?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Set FC-port label on system={_prompt_value(system_name_or_uuid)}, "
+            f"port={_prompt_value(port_name)}, {_selected(vios_name, vios_id)}, "
+            f"label={_prompt_value(label)}?",
+            err=True,
+        )
     ):
         raise typer.Abort()
     result = run_cli_coroutine(
@@ -94,9 +89,12 @@ def vios_remove_fc_port_label(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Remove one FC-port label without deleting the FC adapter."""
-    if not yes and not _confirm_on_stderr(
-        f"Remove FC-port label on system={_prompt_value(system_name_or_uuid)}, "
-        f"port={_prompt_value(port_name)}, {_selected(vios_name, vios_id)}?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Remove FC-port label on system={_prompt_value(system_name_or_uuid)}, "
+            f"port={_prompt_value(port_name)}, {_selected(vios_name, vios_id)}?",
+            err=True,
+        )
     ):
         raise typer.Abort()
     result = run_cli_coroutine(
@@ -130,10 +128,13 @@ def vios_create_vfc_group_label(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Create one vFC placement group without changing adapters."""
-    if not yes and not _confirm_on_stderr(
-        f"Create vFC group on system={_prompt_value(system_name_or_uuid)}, "
-        f"label={_prompt_value(label)}, "
-        f"{_members(vios_names, vios_ids)}?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Create vFC group on system={_prompt_value(system_name_or_uuid)}, "
+            f"label={_prompt_value(label)}, "
+            f"{_members(vios_names, vios_ids)}?",
+            err=True,
+        )
     ):
         raise typer.Abort()
     result = run_cli_coroutine(
@@ -165,9 +166,12 @@ def vios_update_vfc_group_label(
         if action == "rename"
         else _members(vios_names, vios_ids)
     )
-    if not yes and not _confirm_on_stderr(
-        f"Update vFC group on system={_prompt_value(system_name_or_uuid)}, "
-        f"label={_prompt_value(label)}, action={_prompt_value(action)}, {detail}?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Update vFC group on system={_prompt_value(system_name_or_uuid)}, "
+            f"label={_prompt_value(label)}, action={_prompt_value(action)}, {detail}?",
+            err=True,
+        )
     ):
         raise typer.Abort()
     result = run_cli_coroutine(
@@ -190,9 +194,12 @@ def vios_remove_vfc_group_label(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Remove one named vFC placement group without deleting adapters."""
-    if not yes and not _confirm_on_stderr(
-        f"Remove vFC group on system={_prompt_value(system_name_or_uuid)}, "
-        f"label={_prompt_value(label)}?"
+    if not yes and not confirm_on_stderr(
+        terminal_field(
+            f"Remove vFC group on system={_prompt_value(system_name_or_uuid)}, "
+            f"label={_prompt_value(label)}?",
+            err=True,
+        )
     ):
         raise typer.Abort()
     result = run_cli_coroutine(
