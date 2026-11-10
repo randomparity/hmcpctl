@@ -54,7 +54,7 @@ persisted, ADR 0195):
 | `unmap:<i>` | `vios.storage_unmap` | `vios:<uuid>` | `{vios_uuid, mapping_id}` | the recorded mapping still backs the disk to this partition → not applied; gone → applied |
 | `disk:<i>` | `vios.virtual_disk` | `vios:<uuid>` | `{vios_uuid, vg_uuid, disk_name, capacity_mib}` | as ADR 0313's `disk`: in the group and not ledgered by another operation → applied; absent → not applied; else attention |
 | `map:<i>` | `vios.storage_map` | `lpar:<uuid>` | `{vios_uuid, storage_name}` | a mapping of that backing to this partition → applied, else not applied |
-| `profile_save` | `lpar.profile_save` | `lpar:<uuid>/profile-name:<default>` | `{profile_name, recovery_profile}` | no current client adapter is missing from the named profile → applied; else not applied |
+| `profile_save` | `lpar.profile_save` | `lpar:<uuid>/profile-name:<default>` | `{profile_name, recovery_profile}` | no current client adapter is missing from the named profile → applied; else needs attention |
 
 `profile_save` is the last effect this issue adds. A leg that a sibling issue adds after it
 (#1844's `boot` and `media_detach`) runs after the save and owns its own persistence; the
@@ -76,8 +76,9 @@ outcome is decided as follows:
 - otherwise a by-name readback decides. No current client adapter missing from the profile
   (`adapters_missing_from_profile`) → applied. That is the only way `execution: unknown`
   (#1867) counts;
-- something missing and no job submitted → `EffectNotApplied`;
-- otherwise uncertain, settled by the classifier, which uses the same readback.
+- a pre-save read refusal that proves no save was invoked → EffectNotApplied;
+- once the save helper has been invoked, a missing job handle does not prove refusal;
+  unconfirmed contents stay uncertain, and resume holds until the same readback matches.
 
 Every exit names the partition's `hmcprec-` profiles, read from the same profile feed:
 
@@ -85,8 +86,9 @@ Every exit names the partition's `hmcprec-` profiles, read from the same profile
 - the `EffectNotApplied` and uncertain messages carry them into the operation's warnings.
 
 When an add applied but `profile_save` did not, the result warns that the added disks live
-in the current configuration only. A `resume` persists them; an `abandon` leaves them out
-of the profile, so a profile activation drops their client adapters.
+in the current configuration only. Resume submits a save only if that effect has not
+been attempted; an existing uncertain or older not_applied save is reconciled read-only
+(ADR 0346). Abandon leaves them out of the profile, so activation drops their adapters.
 
 **Handler.** `needs_window` (`processors`, `memory_mib` or `disks`) requires
 `exclusive_writer_window=true`. Delegated tools are authorized per distinct VIOS, with
@@ -133,8 +135,8 @@ of the profile, so a profile activation drops their client adapters.
      assertion, the profile ETag and the pre-write re-reads are the controls (ADR 0242);
    - a detached disk's client adapter stays in the profile with no backing; activation keeps
      an empty adapter;
-   - an interrupted save whose job lands later can classify `not_applied`, and resume saves
-     again, leaving a second recovery copy.
+   - an unconfirmed name-addressed save remains held until readback matches; an older
+     genuinely unsubmitted save can need inspection and abandonment (ADR 0346).
 4. **Covered elsewhere**
    - deleting owned disks → #1848 (ADR 0192);
    - installer media and boot → #1844;
@@ -174,7 +176,7 @@ of the profile, so a profile activation drops their client adapters.
    - an unpermitted delegated tool. (criteria 2, 3, 4, 5)
 3. A detach removes only the recorded mapping; the disk, its ledger entry and the other
    mappings remain. (criterion 3)
-4. Each new kind classifies applied and not-applied by its live read. Resume after an applied
+4. Each disk/mapping kind classifies applied and not-applied by its live read. Resume after an applied
    `disk:<i>` does not create it again, and still ledgers it. A save the helper reports
    unknown is applied only when the readback shows the adapters. (criteria 4, 6)
 5. Tool docs regenerate. `maturity.json` lists the `added-disks` variant in `missing_scope`

@@ -8,6 +8,7 @@ planned mapping. The fake HMC models one VIOS with one volume group.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -563,3 +564,52 @@ def test_a_mapping_changed_since_planning_is_not_detached(hmc, monkeypatch):
     assert record.outcome == "failed"
     assert "no longer maps the planned disk" in record.warnings[0]
     assert _writes(hmc) == []
+
+
+@pytest.mark.parametrize("has_handle", [False, True])
+@pytest.mark.parametrize("legacy_record", [False, True])
+@pytest.mark.parametrize("matches", [False, True])
+def test_pending_force_save_is_only_reconciled_on_resume(
+    hmc, monkeypatch, has_handle, legacy_record, matches
+):
+    hmc.state = "not activated"
+    original_save = profile_persist.save_current_partition_profile
+
+    async def pending(*args, **kwargs):
+        before = set(hmc.saved_slots)
+        outcome = await original_save(*args, **kwargs)
+        hmc.saved_slots = before
+        return replace(outcome, job=outcome.job if has_handle else None)
+
+    monkeypatch.setattr(profile_persist, "save_current_partition_profile", pending)
+    patch = {"disks": {"add": [ADD]}}
+    first = _run(patch)
+    assert first.outcome == "needs_attention"
+    assert _effects(first)[-1] == ("profile_save", profile_persist.KIND, "uncertain")
+    assert len(hmc.saves) == 1
+    if legacy_record:
+        with store.session() as conn, store.write_transaction(conn):
+            store.record_outcome(
+                conn, first.operation_id, "profile_save", "not_applied", None
+            )
+    if matches:
+        hmc.saved_slots = {
+            slot for _, partition, _, slot in hmc.maps if partition == LPAR
+        }
+    resumed = _run(patch, continuation="resume")
+    assert len(hmc.saves) == 1
+    assert len(hmc.recovery) == 1
+    if matches:
+        assert resumed.outcome == "completed", resumed.warnings
+        assert _effects(resumed)[-1] == (
+            "profile_save",
+            profile_persist.KIND,
+            "applied",
+        )
+    else:
+        assert resumed.outcome == "needs_attention"
+        assert _effects(resumed)[-1] == (
+            "profile_save",
+            profile_persist.KIND,
+            "uncertain",
+        )

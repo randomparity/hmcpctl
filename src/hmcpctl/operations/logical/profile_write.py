@@ -7,8 +7,8 @@ and anything else needs a human. Each tool supplies its own reader of those two
 patches, so provision (#1225) reuses the kind with its own request shape.
 
 A write that creates a profile has no UUID yet, so it targets
-``lpar:<partition uuid>/profile-name:<name>`` instead (ADR 0313 Decision 12): resume
-reads the profile by name, and an absent profile means the write did not land.
+``lpar:<partition uuid>/profile-name:<name>`` instead (ADR 0313 Decision 12, with recovery revised by ADR 0346): resume
+reads the profile by name; absence stays uncertain because a submitted job may land later.
 """
 
 from __future__ import annotations
@@ -113,6 +113,33 @@ def holds(element: ET.Element, patch: ProfilePatch) -> bool:
     }
 
 
+async def classify_named_profile(
+    hmc: HMCClient,
+    lpar_uuid: str,
+    system_uuid: str,
+    name: str,
+    expected: ProfilePatch,
+) -> Classification:
+    """Observe a name-addressed save without treating absence as submission proof."""
+    profile = await profile_by_name(hmc, lpar_uuid, system_uuid, name)
+    if profile is None:
+        return Classification(
+            "needs_attention",
+            reason="the saved profile is not yet visible; reconcile the original save/job",
+        )
+    if holds(profile.element, expected):
+        return Classification(
+            "applied", {"profile_uuid": profile.uuid, "profile_name": name}
+        )
+    return Classification(
+        "needs_attention",
+        reason=(
+            f"profile {profile.uuid} exists without the requested values; read it "
+            "with hmc_list_partition_profiles, then abandon"
+        ),
+    )
+
+
 def profile_write_classifier(
     values: Values,
     open_client: Callable[[str, str], HMCClient],
@@ -125,9 +152,10 @@ def profile_write_classifier(
         lpar_uuid, form, value = _split(effect.target)
         expected, before = values(ctx, effect)
         if form == "profile-name":
-            return await _classify_named(
-                ctx, lpar_uuid, ctx.partition[0], value, expected
-            )
+            async with open_client(ctx.connection, ctx.host) as hmc:
+                return await classify_named_profile(
+                    hmc, lpar_uuid, ctx.partition[0], value, expected
+                )
         profile_uuid = value
         async with open_client(ctx.connection, ctx.host) as hmc:
             profile = await read_native_profile(
@@ -144,30 +172,6 @@ def profile_write_classifier(
             reason=(
                 f"profile {profile_uuid} holds neither the requested nor the earlier "
                 "values; read it with hmc_list_partition_profiles, then abandon"
-            ),
-        )
-
-    async def _classify_named(
-        ctx: OperationContext,
-        lpar_uuid: str,
-        system_uuid: str,
-        name: str,
-        expected: ProfilePatch,
-    ) -> Classification:
-        """A created profile: absent did not land; the requested values did."""
-        async with open_client(ctx.connection, ctx.host) as hmc:
-            profile = await profile_by_name(hmc, lpar_uuid, system_uuid, name)
-        if profile is None:
-            return Classification("not_applied")
-        if holds(profile.element, expected):
-            return Classification(
-                "applied", {"profile_uuid": profile.uuid, "profile_name": name}
-            )
-        return Classification(
-            "needs_attention",
-            reason=(
-                f"profile {profile.uuid} exists without the requested values; read it "
-                "with hmc_list_partition_profiles, then abandon"
             ),
         )
 

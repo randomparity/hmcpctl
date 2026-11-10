@@ -150,9 +150,10 @@ async def save_current_over(
 ) -> dict[str, Any]:
     """Force-save the current configuration over *profile_name*; the effect's write.
 
-    Returns ``{profile_name, recovery_profiles}``. Raises ``EffectNotApplied`` when no
-    save job was submitted, and ``SaveUnconfirmed`` otherwise when the save cannot be
-    confirmed, so the classifier decides it on resume. Either names the step that
+    Returns ``{profile_name, recovery_profiles}``. Raises ``EffectNotApplied`` for a
+    proven pre-submit refusal or explicit rejection, and ``SaveUnconfirmed`` when a
+    possible submission cannot be confirmed. Resume classifies it without resaving.
+    Either names the step that
     failed and what it reported. *removed_slots* and *require_adapter* pass to the
     readback (``persisted``).
     """
@@ -196,8 +197,11 @@ async def save_current_over(
         outcome.execution,
         outcome.requested_change,
     ) == ("completed", "verified")
-    submitted = outcome is None or outcome.job is not None
-    deadline = time.monotonic() + (SETTLE_SECONDS if submitted else 0)
+    rejected = (
+        outcome is not None and outcome.execution == "rejected" and outcome.job is None
+    )
+    # A missing handle alone cannot distinguish refusal from a lost submit response.
+    deadline = time.monotonic() + (0 if rejected else SETTLE_SECONDS)
     reads = 0
     while True:
         reads += 1
@@ -232,9 +236,9 @@ async def save_current_over(
         f"{reads} read(s)"
     )
     copies = f"recovery profiles on the partition: {_copies(recovery)}"
-    if outcome is not None and outcome.job is None:
+    if rejected:
         raise EffectNotApplied(
-            f"the force-save of LPAR {lpar_uuid}'s profile was not submitted "
+            f"the force-save of LPAR {lpar_uuid}'s profile was rejected "
             f"({detail}); {copies}"
         ) from failure
     raise SaveUnconfirmed(
@@ -255,18 +259,24 @@ def _codes(text: str) -> str:
     return ",".join(found) if found else "none"
 
 
+def profile_failure_summary(exc: BaseException) -> str:
+    """Bound opaque profile diagnostics to type, numeric status and message codes."""
+    name = type(exc).__name__[:80]
+    status = getattr(exc, "status_code", None)
+    shown = f", HTTP {status}" if isinstance(status, int) else ""
+    return f"{name}{shown}, codes={_codes(str(exc))}"
+
+
 def _said(exc: BaseException) -> str:
-    """An exception's type, HTTP status and HMC message codes; never its text.
+    """Describe trusted validation errors; summarize other failures without their text.
 
     The save helper's own pre-call refusals (``ValueError``/``TypeError``) are text
-    hmcpctl writes and are shown; every other exception may hold an HMC body.
+    hmcpctl writes and are shown. Opaque readback boundaries use profile_failure_summary.
     """
     name = type(exc).__name__
     if isinstance(exc, (ValueError, TypeError)) and not isinstance(exc, HMCError):
         return f"{name}: {str(exc)[:200]}"
-    status = getattr(exc, "status_code", None)
-    shown = f", HTTP {status}" if status is not None else ""
-    return f"{name}{shown}, codes={_codes(str(exc))}"
+    return profile_failure_summary(exc)
 
 
 def _diagnosis(outcome: Any, failure: Exception | None) -> str:
@@ -288,31 +298,48 @@ def _diagnosis(outcome: Any, failure: Exception | None) -> str:
 ReadbackOptions = Callable[[OperationContext], tuple[Collection[str], bool]]
 
 
+async def classify_saved_profile(
+    hmc: HMCClient,
+    lpar_uuid: str,
+    name: str,
+    *,
+    removed_slots: Collection[str] = (),
+    require_adapter: bool = True,
+) -> Classification:
+    """Observe force-save contents without authorizing a second pending save."""
+    missing, recovery = await persisted(
+        hmc,
+        lpar_uuid,
+        name,
+        removed_slots=removed_slots,
+        require_adapter=require_adapter,
+    )
+    if missing:
+        return Classification(
+            "needs_attention",
+            reason="the saved profile is unconfirmed; reconcile the original save/job",
+        )
+    return Classification(
+        "applied", {"profile_name": name, "recovery_profiles": recovery}
+    )
+
+
 def profile_save_classifier(
     open_client: Callable[[str, str], HMCClient],
     options: ReadbackOptions = lambda _ctx: ((), True),
 ) -> engine.Classifier:
-    """Classify an open save by the readback the write itself uses.
-
-    *options* gives the readback's ``(removed_slots, require_adapter)`` for the
-    operation, as its write passed them.
-    """
+    """Classify using the same readback options as the original save."""
 
     async def classify(ctx: OperationContext, effect: EffectRecord) -> Classification:
         lpar_uuid, name = parse_target(effect.target)
         removed, required = options(ctx)
         async with open_client(ctx.connection, ctx.host) as hmc:
-            missing, recovery = await persisted(
+            return await classify_saved_profile(
                 hmc,
                 lpar_uuid,
                 name,
                 removed_slots=removed,
                 require_adapter=required,
             )
-        if missing:
-            return Classification("not_applied")
-        return Classification(
-            "applied", {"profile_name": name, "recovery_profiles": recovery}
-        )
 
     return classify

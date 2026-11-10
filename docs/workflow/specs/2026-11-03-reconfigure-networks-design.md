@@ -89,6 +89,10 @@ staleness check (`_stale`).
   An add without one looks at the adapters on its VLAN that are absent from the baseline: none →
   `not_applied`, one → `applied`, several → `needs_attention`.
 
+Name-addressed profile-save recovery follows ADR 0346: an unconfirmed save stays
+uncertain, and absent/mismatched readback cannot authorize a second save. Older
+not_applied save rows are reconciled read-only. UUID-addressed CAS remains unchanged.
+
 **Verification.** ADR 0314's poll also requires that every removed UUID is absent and every
 added identity's UUID is listed. The result's `observed.networks` lists the MACs the partition
 reads.

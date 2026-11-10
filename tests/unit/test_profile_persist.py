@@ -131,11 +131,12 @@ async def test_a_verified_completion_decides_without_the_readback(hmc):
 
 
 @pytest.mark.asyncio
-async def test_a_save_never_submitted_is_not_applied_and_names_the_copy(hmc):
+async def test_a_missing_save_handle_is_uncertain_and_names_the_copy(hmc):
     hmc.save_lands = False
     hmc.outcome.job = None
-    with pytest.raises(EffectNotApplied, match="hmcprec-00ff"):
+    with pytest.raises(profile_persist.SaveUnconfirmed, match="hmcprec-00ff"):
         await _save(hmc)
+    assert len(hmc.saves) == 1
 
 
 @pytest.mark.asyncio
@@ -267,7 +268,7 @@ async def test_a_missing_profile_is_an_error(hmc):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("saved", "status"), [(("2", "3"), "applied"), (("2",), "not_applied")]
+    ("saved", "status"), [(("2", "3"), "applied"), (("2",), "needs_attention")]
 )
 async def test_classifier_reads_the_profile_back(saved, status):
     fake = FakeHMC(saved=saved)
@@ -372,7 +373,7 @@ async def test_classifier_applies_the_operations_readback_options():
         lambda _connection, _host: fake, lambda _ctx: (("5",), False)
     )
     assert (await plain(ctx, effect)).status == "applied"
-    assert (await removal(ctx, effect)).status == "not_applied"
+    assert (await removal(ctx, effect)).status == "needs_attention"
 
 
 @pytest.mark.asyncio

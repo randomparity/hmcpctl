@@ -52,6 +52,7 @@ from hmcpctl.operations.lpar.profiles.core import (
     save_current_partition_profile,
     set_default_partition_profile,
 )
+from hmcpctl.operations.lpar.profiles.persist import profile_failure_summary
 from hmcpctl.operations.lpar.provisioning.boot import (
     REFCODE_ROWS,
     row_identity,
@@ -793,10 +794,16 @@ class _Run:
     async def _persist(self, system_uuid: str, lpar_uuid: str) -> str | None:
         """Save, read back and default the profile; its UUID, or None to pause."""
         name = profile_name_for(self.ctx.operation_id)
+        recorded = self.ctx.recorded("profile")
+        write = (
+            self._reconcile_profile
+            if recorded is not None and recorded.status == "not_applied"
+            else self._write_profile
+        )
         identity = await self._leg(
             "profile",
             profile_write.target_by_name(lpar_uuid, name),
-            lambda: self._write_profile(system_uuid, lpar_uuid, name),
+            lambda: write(system_uuid, lpar_uuid, name),
         )
         if identity is None:
             self._skip_rest(
@@ -1227,6 +1234,24 @@ class _Run:
             raise HMCError(f"dedicated slot steps reported errors: {', '.join(failed)}")
         return {"steps": [[s.step, s.status] for s in result.steps]}
 
+    async def _reconcile_profile(
+        self, system_uuid: str, lpar_uuid: str, name: str
+    ) -> dict[str, Any]:
+        """Reclassify an older not_applied row without submitting another save."""
+        try:
+            verdict = await profile_write.classify_named_profile(
+                self.hmc, lpar_uuid, system_uuid, name, expected_profile(self.request)
+            )
+        except HMCTLSFingerprintError:
+            raise
+        except Exception as exc:
+            raise HMCError(
+                "profile reconciliation is unconfirmed: " + profile_failure_summary(exc)
+            ) from exc
+        if verdict.status != "applied":
+            raise HMCError(verdict.reason or "profile save remains unresolved")
+        return dict(verdict.identity or {})
+
     async def _write_profile(
         self, system_uuid: str, lpar_uuid: str, name: str
     ) -> dict[str, Any]:
@@ -1248,15 +1273,29 @@ class _Run:
             failure = exc
         if outcome is not None and TLS_IDENTITY_FAILURE in outcome.diagnostics:
             raise HMCTLSFingerprintError(_TLS_PROVISION_ABORTED)
-        profile = await profile_write.profile_by_name(
-            self.hmc, lpar_uuid, system_uuid, name
-        )
-        if profile is None:
-            reason = (
-                f": {type(failure).__name__}: {failure}" if failure is not None else ""
+        try:
+            profile = await profile_write.profile_by_name(
+                self.hmc, lpar_uuid, system_uuid, name
             )
-            raise EffectNotApplied(
-                f"no saved profile was created for LPAR {lpar_uuid}{reason}"
+        except HMCTLSFingerprintError:
+            raise
+        except Exception as exc:
+            raise HMCError(
+                "profile readback is unconfirmed: " + profile_failure_summary(exc)
+            ) from exc
+        if profile is None:
+            if (
+                outcome is not None
+                and outcome.execution == "rejected"
+                and outcome.job is None
+            ):
+                raise EffectNotApplied("the profile save was definitively rejected")
+            reason = (
+                ": " + profile_failure_summary(failure) if failure is not None else ""
+            )
+            raise HMCError(
+                f"the saved profile of LPAR {lpar_uuid} is unconfirmed{reason}; "
+                "reconcile the original save/job before retrying"
             ) from failure
         return {"profile_uuid": profile.uuid, "profile_name": name}
 

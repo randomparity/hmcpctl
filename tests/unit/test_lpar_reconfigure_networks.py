@@ -719,12 +719,15 @@ def test_an_unconfirmed_save_pauses_warns_and_resumes_without_adding_again(body)
     record = _submit({"networks": {"add": [{"port_vlan_id": 30}]}})
     assert record.outcome == "needs_attention"
     assert any("current configuration only" in w for w in record.result["warnings"])
-    body.save_lands = True
+    body.saved_slots = {
+        str(adapter["Resource"]["VirtualSlotNumber"]) for adapter in body.adapters
+    }
     resumed = _submit(
         {"networks": {"add": [{"port_vlan_id": 30}]}}, continuation="resume"
     )
     assert resumed.outcome == "completed", resumed.warnings
     assert _writes(body).count("add 30") == 1
+    assert len(body.saves) == 1
 
 
 def test_a_live_removal_needs_disruption_and_reports_live(body):

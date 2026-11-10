@@ -2372,7 +2372,9 @@ def test_a_readback_mismatch_pauses_before_the_default_and_power_on(
     )
 
 
-def test_a_save_that_left_no_profile_is_not_applied(monkeypatch, mock_hmc, persistence):
+def test_a_save_that_left_no_profile_stays_uncertain(
+    monkeypatch, mock_hmc, persistence
+):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     _mock_execution_steps(mock_hmc)
@@ -2381,7 +2383,7 @@ def test_a_save_that_left_no_profile_is_not_applied(monkeypatch, mock_hmc, persi
     result = hmc_provision_lpar(**_provision_args())
 
     profile = next(e for e in result.operation.effects if e.key == "profile")
-    assert profile.status == "not_applied"
+    assert profile.status == "uncertain"
     assert result.operation.outcome == "needs_attention"
 
 
@@ -2409,10 +2411,11 @@ def test_a_raised_save_is_decided_by_the_profile_by_name(
         assert profile.status == "applied"
         assert result.operation.outcome == "configured"
     else:
-        assert profile.status == "not_applied"
+        assert profile.status == "uncertain"
         assert result.operation.outcome == "needs_attention"
         step = {s.step: s for s in result.steps}["save_profile"]
-        assert "ValueError: refused" in step.result
+        assert "ValueError" in step.result
+        assert "unconfirmed" in step.result
 
 
 def test_power_on_profile_adapter_warnings_reach_the_result(

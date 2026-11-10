@@ -915,8 +915,10 @@ def _classify_named(monkeypatch, found):
     return _await(classify(ctx, effect))
 
 
-def test_a_named_profile_that_is_absent_was_not_written(monkeypatch):
-    assert _classify_named(monkeypatch, None).status == "not_applied"
+def test_an_absent_named_profile_needs_attention_while_a_save_may_be_pending(
+    monkeypatch,
+):
+    assert _classify_named(monkeypatch, None).status == "needs_attention"
 
 
 @pytest.mark.parametrize(

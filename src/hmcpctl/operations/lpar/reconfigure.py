@@ -39,7 +39,7 @@ from ...client.core import HMCClient
 from ...documents.lpar import LparResources, partition_updates
 from ...documents.partition_profile import ProfilePatch
 from ...documents.storage import validate_virtual_disk
-from ...errors import HMCError, LparUpdateError
+from ...errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from ...resource_identity import resolve_system_uuid, resolve_vios_uuid
 from ...xmlutil import console_version, escape_xml, leaf_text
 from ..logical import engine, profile_write, store
@@ -1386,6 +1386,37 @@ async def _persist(
         return
     lpar_uuid, system_uuid, name = plan["lpar_uuid"], plan["system_uuid"], plan["save"]
     assert name is not None
+    if recorded is not None and recorded.status == "not_applied":
+
+        async def reconcile_only() -> Mapping[str, Any]:
+            try:
+                verdict = await profile_persist.classify_saved_profile(
+                    hmc,
+                    lpar_uuid,
+                    name,
+                    removed_slots=network.removed_slots(plan.get("networks")),
+                    require_adapter=_adds_adapter(plan),
+                )
+            except HMCTLSFingerprintError:
+                raise
+            except Exception as exc:
+                raise profile_persist.SaveUnconfirmed(
+                    "profile reconciliation is unconfirmed: "
+                    + profile_persist.profile_failure_summary(exc)
+                ) from exc
+            if verdict.status != "applied":
+                raise profile_persist.SaveUnconfirmed(
+                    verdict.reason or "profile save remains unresolved"
+                )
+            return verdict.identity or {}
+
+        await ctx.effect(
+            SAVE_KEY,
+            profile_persist.KIND,
+            profile_persist.target(lpar_uuid, name),
+            reconcile_only,
+        )
+        return
     await _resolve(hmc, system_uuid, lpar_uuid)
     view = await _read_view(hmc, lpar_uuid)
     record, profile = await _default_profile(hmc, view, system_uuid, lpar_uuid)
