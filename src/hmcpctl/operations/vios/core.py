@@ -145,12 +145,10 @@ async def create_vios(
         raise TypeError("start_settings must be LparStartSettings")
     if start_settings is not None:
         start_settings.validate_creation("Virtual IO Server")
-    start_requested = start_settings is not None and start_settings.requested()
     if creation_memory is not None and not isinstance(
         creation_memory, LparCreationMemory
     ):
         raise TypeError("creation_memory must be LparCreationMemory")
-    memory_requested = creation_memory is not None and bool(creation_memory.pairs())
     shared_memory = creation_memory is not None and creation_memory.mem_mode == "shared"
     if shared_memory:
         completed = complete_create_resources(resources)
@@ -158,69 +156,23 @@ async def create_vios(
             raise ValueError("Shared memory requires known shared processor resources")
     reject_update_weight_on_create(resources)
     validate_serial_input(virtual_serial_adapters, max_virtual_slots)
-    serial_requested = bool(virtual_serial_adapters)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
         memory_layout.validate_creation("Virtual IO Server")
-    layout_requested = memory_layout is not None and bool(memory_layout.pairs())
-    affinity_requested = validate_affinity_group_id(affinity_group_id) is not None
-    hardware_requested = bool(
-        hardware_memory_pairs(hardware_mem_encryption, hardware_mem_expansion)
-    )
+    validate_affinity_group_id(affinity_group_id)
+    hardware_memory_pairs(hardware_mem_encryption, hardware_mem_expansion)
     if security_policy is not None and not isinstance(
         security_policy, LparSecurityPolicy
     ):
         raise TypeError("security_policy must be LparSecurityPolicy")
-    policy_requested = security_policy is not None and bool(security_policy.pairs())
     if security_policy is not None:
         security_policy.validate_creation("Virtual IO Server")
     if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
-    vtpm_requested = vtpm_settings is not None and bool(vtpm_settings.pairs())
-    native_features_requested = (
-        hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-    )
-    strict_identity_required = policy_requested or native_features_requested
-    if (
-        vtpm_requested
-        or policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-    ):
-        completed = complete_create_resources(resources)
-        if completed is None:
-            raise ValueError(
-                f"VIOS {'native' if policy_requested or hardware_requested or layout_requested or serial_requested or memory_requested or start_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
-            )
-        resources = completed
-    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    if not (vtpm_requested or strict_identity_required):
-        return await hmc.create_vios(
-            system_uuid,
-            build_vios_document(
-                name=name, resources=resources, max_virtual_slots=max_virtual_slots
-            ),
-        )
-    if vtpm_settings is not None:
-        vtpm_settings.validate_creation("Virtual IO Server")
-    if await hmc.find_vios_by_name(name, system_uuid=system_uuid):
-        raise ValueError(
-            "A VIOS with that name already exists on the selected system; nothing was created"
-        )
-    if not shared_memory:
-        await require_memory_within_system(hmc, system_uuid, resources)
     features = _CreationFeatureCoordinator(
         hmc,
-        system_uuid,
+        system_name_or_uuid,
         system_name_or_uuid,
         name,
         "Virtual IO Server",
@@ -236,10 +188,51 @@ async def create_vios(
         hardware_mem_expansion=hardware_mem_expansion,
         affinity_group_id=affinity_group_id,
     )
+    strict_cli_name_required = (
+        features.layout_requested
+        or features.serial_requested
+        or features.memory_requested
+        or features.start_requested
+    )
+    native_resources_required = (
+        features.policy_requested
+        or features.hardware_requested
+        or strict_cli_name_required
+    )
+    strict_identity_required = (
+        features.policy_requested or features.native_features_requested
+    )
+    complete_resources_required = features.vtpm_requested or native_resources_required
+    if complete_resources_required:
+        completed = complete_create_resources(resources)
+        if completed is None:
+            creation_kind = "native" if native_resources_required else "vTPM"
+            raise ValueError(
+                f"VIOS {creation_kind} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
+            )
+        resources = completed
+        features.resources = completed
+    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+    features.system_uuid = system_uuid
+    if not (features.vtpm_requested or strict_identity_required):
+        return await hmc.create_vios(
+            system_uuid,
+            build_vios_document(
+                name=name, resources=resources, max_virtual_slots=max_virtual_slots
+            ),
+        )
+    if vtpm_settings is not None:
+        vtpm_settings.validate_creation("Virtual IO Server")
+    if await hmc.find_vios_by_name(name, system_uuid=system_uuid):
+        raise ValueError(
+            "A VIOS with that name already exists on the selected system; nothing was created"
+        )
+    if not shared_memory:
+        await require_memory_within_system(hmc, system_uuid, resources)
     await features.admit_host_features()
     system = (
         await resolve_system_cli_name(hmc.config, system_uuid)
-        if layout_requested or serial_requested or memory_requested or start_requested
+        if strict_cli_name_required
         else await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
     )
     features.system = system
@@ -250,13 +243,13 @@ async def create_vios(
     memory_admission = features.memory_admission
     start_admission = features.start_admission
     native_options: dict[str, Any] = {}
-    if memory_requested:
+    if features.memory_requested:
         native_options["creation_memory"] = creation_memory
     if max_virtual_slots is not None:
         native_options["max_virtual_slots"] = max_virtual_slots
-    if serial_requested:
+    if features.serial_requested:
         native_options["virtual_serial_adapters"] = virtual_serial_adapters
-    if layout_requested:
+    if features.layout_requested:
         native_options["memory_layout"] = memory_layout
     if controller_mode:
         native_options["profile_name"] = None
@@ -286,15 +279,15 @@ async def create_vios(
         await _raise_creation_memory_failure(hmc, memory_admission, error)
     except Exception as error:
         if (
-            not serial_requested
-            and not memory_requested
-            and not start_requested
+            not features.serial_requested
+            and not features.memory_requested
+            and not features.start_requested
             and not isinstance(error, HMCError)
         ):
             raise
-        if not native_features_requested and not policy_requested:
+        if not features.native_features_requested and not features.policy_requested:
             raise
-        if not native_features_requested:
+        if not features.native_features_requested:
             raise HMCError(unknown_outcome) from error
     else:
         await features.observe_before_followup()
