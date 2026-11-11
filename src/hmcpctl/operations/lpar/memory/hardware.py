@@ -116,11 +116,19 @@ async def admit_hardware_memory(
         DET.ParseError,
         DefusedXmlException,
     ):
-        admitted = False
-    if not admitted:
-        raise ValueError(
-            "Hardware memory creation requires supported selected-system configuration and positive capabilities; inspect connectivity and the configured schema pin before retrying"
+        failure = (
+            "Could not read selected-system hardware memory capabilities; "
+            "inspect connectivity and the configured schema pin before retrying"
         )
+    else:
+        if admitted:
+            return
+        failure = (
+            "Hardware memory creation requires supported selected-system "
+            "configuration and positive capabilities"
+        )
+    # Capability reads may carry private HMC diagnostics in their exception context.
+    raise ValueError(failure)
 
 
 async def created_hardware_memory_step(
