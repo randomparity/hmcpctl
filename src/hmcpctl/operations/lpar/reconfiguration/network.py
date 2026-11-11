@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from typing import Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
@@ -42,7 +43,7 @@ MAX_NETWORKS = 4
 _NOT_ACTIVATED = "not activated"
 _MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
-Opener = Callable[[str, str], Any]
+Opener = Callable[[str, str], AbstractAsyncContextManager[HMCClient]]
 
 
 class NetworkAddPlan(TypedDict):

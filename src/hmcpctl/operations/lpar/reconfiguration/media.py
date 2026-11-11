@@ -9,6 +9,7 @@ so a replay never re-reads the ledger. Messages name partitions by UUID only.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from hmcpctl.operations.lpar.provisioning.media import device_path
@@ -46,7 +47,7 @@ _FIELDS = {
 }
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
 PlanOf = Callable[[OperationContext], "ReconfigurationPlan"]
-Opener = Callable[[str, str], Any]
+Opener = Callable[[str, str], AbstractAsyncContextManager[HMCClient]]
 
 
 class BootPlan(TypedDict):
