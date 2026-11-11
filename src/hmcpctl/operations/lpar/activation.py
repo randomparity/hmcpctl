@@ -170,6 +170,19 @@ async def power_on_lpar(
     changes the profile lacks (memory, processor and adapter changes), unless it
     is the partition's current profile and CurrentProfileSync was On when they
     were made.
+
+    Validation, target lookup, ownership, submission, polling and activation
+    readback exceptions propagate. A returned job retains its reported status.
+    HMC, CLI and validation failures in the optional post-activation affinity
+    measurement become ``failed`` or ``unavailable`` assessments according to
+    its response policy. Inspect ``affinity_assessment.status`` separately from
+    job completion before treating the assessment as successful.
+
+    Raises:
+        ValueError: Timing, activation options, target or assessment inputs are invalid.
+        PermissionError: The enabled ownership guard refuses the mutation.
+        HMCError: A target read, submission, poll or activation readback fails,
+            including a successful job leaving the partition in a failed state.
     """
     system_name_or_uuid = optional_system_selector(system_name_or_uuid)
     if affinity_assessment is not None:
@@ -363,6 +376,14 @@ async def submit_power_on_lpar(
     An active partition returns an already_activated result unless force is set.
     A partition profile must belong to the target; its adapter warnings accompany
     the job. Use power_on_lpar for activation readback and affinity assessment.
+    Returned jobs retain their reported status; this function does not convert
+    remote failures into an affinity outcome.
+
+    Raises:
+        ValueError: Timing, activation options or target/profile selection is invalid.
+        PermissionError: The enabled ownership guard refuses the mutation.
+        HMCError: Target/profile reads, submission or polling fail, or the current
+            partition state does not admit activation without ``force``.
     """
     validate_wait_timing(wait, timeout_seconds, poll_interval)
     validate_power_on_activation(boot_mode, operation_type, keylock)
@@ -439,6 +460,13 @@ async def power_off_lpar(
     Ownership is advisory unless authorize_power_operations is enabled. An
     ownership override bypasses rejection for this call and records an audit.
     Validation precedes ownership reads, audited overrides and job submission.
+    Returned jobs retain their reported status; lookup, authorization and remote
+    failures propagate as exceptions.
+
+    Raises:
+        ValueError: Timing, shutdown options or target selection is invalid.
+        PermissionError: The enabled ownership guard refuses the mutation.
+        HMCError: Target reads, submission or polling fail.
     """
     validate_wait_timing(wait, timeout_seconds, poll_interval)
     validate_power_off_operation(
