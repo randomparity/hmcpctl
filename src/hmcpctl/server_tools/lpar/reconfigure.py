@@ -18,7 +18,7 @@ from ...config import build_config
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.models import OperationRecord
-from ...operations.logical.store import OperationRefused, connection_label
+from ...operations.logical.store import connection_label
 from ...operations.lpar.reconfiguration.core import (
     RECONFIGURE_CLASSIFIERS,
     ReconfigurePatch,
@@ -35,6 +35,7 @@ from ...tool_registry import (
     validate_security,
 )
 from ..delegation import authorize_as
+from .continuation import continuation_arguments
 
 RECONFIGURE_TOOL_NAME = "hmc_reconfigure_lpar"
 UNMOUNT_TOOL_NAME = "hmc_unmount_optical_media"
@@ -72,12 +73,7 @@ def _effective(
             raise ValueError(f"a new operation needs {', '.join(missing)}")
         return {"allow_disruption": False, "exclusive_writer_window": False, **given}
     recorded = engine.recorded_arguments(agent_id, request_id, RECONFIGURE_TOOL_NAME)
-    if recorded is None:
-        raise OperationRefused(
-            "not_found",
-            f"no operation has request_id {request_id}; omit continuation to start one",
-        )
-    return {**recorded, **given}
+    return continuation_arguments(recorded, given, request_id)
 
 
 def reconfigure_handler(

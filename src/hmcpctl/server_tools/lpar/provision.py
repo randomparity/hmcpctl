@@ -56,6 +56,7 @@ from ...tool_registry import (
     validate_security,
 )
 from ..delegation import authorize_as
+from .continuation import continuation_arguments
 from .plan import PLAN_TOOL_NAME, _admitter
 
 PROVISION_TOOL_NAME = "hmc_provision_lpar"
@@ -116,14 +117,7 @@ def _effective(
     """The arguments to run and authorize, and whether a record already exists."""
     recorded = engine.recorded_arguments(agent_id, request_id, PROVISION_TOOL_NAME)
     if continuation != "none":
-        if recorded is None:
-            # Refused here, not by submit: nothing may be admitted without the delegated
-            # check, even if a concurrent call records this request_id meanwhile.
-            raise OperationRefused(
-                "not_found",
-                f"no operation has request_id {request_id}; omit continuation to start one",
-            )
-        return {**recorded, **given}, True
+        return continuation_arguments(recorded, given, request_id), True
     missing = [name for name in _REQUIRED if name not in given]
     if missing:
         raise ValueError(f"a new operation needs {', '.join(missing)}")

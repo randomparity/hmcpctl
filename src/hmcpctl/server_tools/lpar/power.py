@@ -17,7 +17,7 @@ from ...config import build_config
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.models import OperationRecord
-from ...operations.logical.store import OperationRefused, connection_label
+from ...operations.logical.store import connection_label
 from ...operations.lpar.power import (
     DELEGATED,
     POWER_CLASSIFIERS,
@@ -35,6 +35,7 @@ from ...tool_registry import (
     validate_security,
 )
 from ..delegation import authorize_as
+from .continuation import continuation_arguments
 
 POWER_TOOL_NAME = "hmc_power_lpar"
 # "console" and not exhaustive, as hmc_plan_lpar: a continuation names no target, so the
@@ -75,14 +76,7 @@ def _effective(
             raise ValueError(f"a new operation needs {', '.join(missing)}")
         return {"mode": "graceful", **given}
     recorded = engine.recorded_arguments(agent_id, request_id, POWER_TOOL_NAME)
-    if recorded is None:
-        # Refused here, not by submit: nothing may be admitted without the delegated
-        # check, even if a concurrent call records this request_id meanwhile.
-        raise OperationRefused(
-            "not_found",
-            f"no operation has request_id {request_id}; omit continuation to start one",
-        )
-    return {**recorded, **given}
+    return continuation_arguments(recorded, given, request_id)
 
 
 def power_handler(
