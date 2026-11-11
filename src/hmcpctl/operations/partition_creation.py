@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources, LparSettings
@@ -73,6 +73,38 @@ class MemoryLayoutVerification:
     warnings: tuple[str, ...]
 
 
+class _CreationObservations(TypedDict, total=False):
+    """Sparse LPAR result fields; absent observations retain caller-owned evidence."""
+
+    apply_step: WorkflowStep | None
+    settings_step: WorkflowStep | None
+    physical_io_step: WorkflowStep | None
+    reporting_step: WorkflowStep | None
+    vtpm_step: WorkflowStep | None
+    security_policy_step: WorkflowStep | None
+    hardware_memory_step: WorkflowStep | None
+    memory_layout_step: WorkflowStep | None
+    serial_step: WorkflowStep | None
+    creation_memory_step: WorkflowStep | None
+    affinity_group_step: WorkflowStep | None
+
+
+_ObservationName = Literal[
+    "apply_step",
+    "settings_step",
+    "physical_io_step",
+    "reporting_step",
+    "vtpm_step",
+    "security_policy_step",
+    "hardware_memory_step",
+    "memory_layout_step",
+    "serial_step",
+    "creation_memory_step",
+    "affinity_group_step",
+    "start_step",
+]
+
+
 @dataclass
 class _CreationFeatureCoordinator:
     hmc: HMCClient
@@ -96,10 +128,16 @@ class _CreationFeatureCoordinator:
     serial_admission: SerialAdmission | None = field(default=None, init=False)
     memory_admission: CreationMemoryAdmission | None = field(default=None, init=False)
     start_admission: StartAdmission | None = field(default=None, init=False)
-    entry: dict[str, Any] | None = field(default=None, init=False)
-    facts: dict[str, WorkflowStep | None] = field(default_factory=dict, init=False)
-    active_step: str | None = field(default=None, init=False)
+    _entry: dict[str, Any] | None = field(default=None, init=False)
+    facts: _CreationObservations = field(
+        default_factory=_CreationObservations, init=False
+    )
+    active_step: _ObservationName | None = field(default=None, init=False)
     attempted_feature: str | None = field(default=None, init=False)
+
+    @property
+    def entry(self) -> dict[str, Any] | None:
+        return self._entry
 
     @property
     def vios(self) -> bool:
@@ -161,7 +199,7 @@ class _CreationFeatureCoordinator:
 
     async def observe(
         self,
-        field_name: str,
+        field_name: _ObservationName,
         observation: Awaitable[WorkflowStep | None] | WorkflowStep | None,
     ) -> WorkflowStep | None:
         self.active_step = field_name
@@ -171,7 +209,8 @@ class _CreationFeatureCoordinator:
             if observation is None or isinstance(observation, WorkflowStep)
             else await observation
         )
-        self.facts[field_name] = step
+        if field_name != "start_step":
+            self.facts[field_name] = step
         self.active_step = None
         return step
 
@@ -295,12 +334,18 @@ class _CreationFeatureCoordinator:
             )
 
     async def confirm_identity(
-        self, created_lpar: dict[str, Any] | None = None
-    ) -> None:
+        self,
+        created_lpar: dict[str, Any] | None = None,
+        *,
+        readback_error: HMCError | None = None,
+    ) -> dict[str, Any] | None:
+        self._entry = created_lpar
+        if isinstance(readback_error, HMCTLSFingerprintError):
+            raise readback_error
         if self.vios:
             self.attempted_feature = "created_identity"
             try:
-                self.entry = await self.hmc.find_vios_by_name(
+                self._entry = await self.hmc.find_vios_by_name(
                     self.name, system_uuid=self.system_uuid
                 )
             except HMCTLSFingerprintError:
@@ -309,7 +354,7 @@ class _CreationFeatureCoordinator:
                 if not self.native_features_requested:
                     raise
                 # Native creation succeeded; discard unavailable lookup diagnostics.
-                self.entry = None
+                self._entry = None
             if (
                 self.entry is None
                 or (self.layout_requested and not isinstance(self.entry, dict))
@@ -325,7 +370,7 @@ class _CreationFeatureCoordinator:
                 raise ValueError("Created VIOS identity unconfirmed")
             if self.start_admission is not None:
                 self.attempted_feature = "start_identity"
-                self.entry = await confirm_start_created(
+                self._entry = await confirm_start_created(
                     self.hmc,
                     self.start_admission,
                     self.entry,
@@ -333,7 +378,7 @@ class _CreationFeatureCoordinator:
                     "Virtual IO Server",
                 )
         elif created_lpar is not None:
-            self.entry = created_lpar
+            self._entry = created_lpar
             identity_ok = True
             confirmed_lpar = created_lpar
             confirmations: list[
@@ -381,14 +426,14 @@ class _CreationFeatureCoordinator:
                 self.attempted_feature = feature
                 try:
                     confirmed_lpar = await confirm()
-                    self.entry = confirmed_lpar
+                    self._entry = confirmed_lpar
                 except HMCTLSFingerprintError:
                     raise
                 except Exception:  # noqa: BLE001 — uncertain identity forbids stamping.
                     identity_ok = False
-            self.entry = confirmed_lpar if identity_ok else None
+            self._entry = confirmed_lpar if identity_ok else None
         else:
-            self.entry = None
+            self._entry = None
         if not self.vios:
             await self.observe(
                 "serial_step",
@@ -401,6 +446,8 @@ class _CreationFeatureCoordinator:
                 if self.serial_admission is not None and self.entry is None
                 else None,
             )
+
+        return self._entry
 
     async def observe_unavailable_identity(
         self, creation: LparCreation, *, missing: bool
@@ -625,7 +672,7 @@ class _CreationFeatureCoordinator:
             await self.confirm_identity()
             if self.memory_admission is not None:
                 self.attempted_feature = "memory_identity"
-                self.entry = await confirm_creation_memory_identity(
+                self._entry = await confirm_creation_memory_identity(
                     self.hmc, self.memory_admission, self.entry
                 )
                 memory_step = await self.observe(
@@ -642,7 +689,7 @@ class _CreationFeatureCoordinator:
                     raise ValueError("Creation memory observation incomplete")
             if self.serial_admission is not None:
                 self.attempted_feature = "serial_identity"
-                self.entry = await confirm_serial_created(
+                self._entry = await confirm_serial_created(
                     self.hmc, self.serial_admission, self.entry
                 )
                 serial_step = await self.observe(
@@ -736,7 +783,7 @@ class _CreationFeatureCoordinator:
             "Inspect before retrying. No second create or rollback performed"
         )
 
-    async def observe_start(self) -> WorkflowStep | None:
+    async def observe_start(self, entry: dict[str, Any] | None) -> WorkflowStep | None:
         if self.start_admission is None:
             return None
         step = await self.observe(
@@ -744,7 +791,7 @@ class _CreationFeatureCoordinator:
             created_start_step(
                 self.hmc,
                 self.start_admission,
-                self.entry,
+                entry,
                 self.name,
                 self.environment,
                 controller_mode=self.controller_mode,

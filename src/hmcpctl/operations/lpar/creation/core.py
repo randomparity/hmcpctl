@@ -667,13 +667,10 @@ async def _complete_lpar_creation(
         apply_warnings,
         apply_step=apply_step,
     )
-    features.entry = created_lpar
-
     try:
-        if isinstance(readback_error, HMCTLSFingerprintError):
-            raise readback_error
-        await features.confirm_identity(created_lpar)
-        created_lpar = features.entry
+        created_lpar = await features.confirm_identity(
+            created_lpar, readback_error=readback_error
+        )
         result = replace(result, lpar=created_lpar)
         if created_lpar is None:
             return await _missing_created_identity(
@@ -804,7 +801,7 @@ async def _missing_created_identity(
     else:
         skipped = f"read-back after mksyscfg failed: {readback_error}"
     await features.observe_unavailable_identity(creation, missing=True)
-    return LparCreationResult(
+    result = LparCreationResult(
         resource_created=True,
         lpar=None,
         ownership_stamped=None,
@@ -838,8 +835,8 @@ async def _missing_created_identity(
             if creation.reporting_settings.pairs()
             else None
         ),
-        **features.facts,
     )
+    return replace(result, **features.facts)
 
 
 async def _unconfirmed_created_identity(
@@ -856,7 +853,7 @@ async def _unconfirmed_created_identity(
         )
     await features.observe_unavailable_identity(creation, missing=False)
     role_requested = roles_requested(creation.settings)
-    return LparCreationResult(
+    result = LparCreationResult(
         True,
         None
         if role_requested
@@ -874,8 +871,8 @@ async def _unconfirmed_created_identity(
         )
         if role_requested or features.start_requested
         else None,
-        **features.facts,
     )
+    return replace(result, **features.facts)
 
 
 async def _stamp_lpar_creation(
@@ -1398,7 +1395,7 @@ async def _created_settings_step(
     legacy = await _created_legacy_settings_step(
         hmc, system_uuid, cli_system, creation, created, controller_mode=controller_mode
     )
-    start = await features.observe_start()
+    start = await features.observe_start(created)
     if start is None:
         return legacy
     if legacy is None:

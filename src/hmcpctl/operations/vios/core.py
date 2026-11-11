@@ -294,19 +294,25 @@ async def create_vios(
         await features.observe_before_followup()
         entry = features.entry
         assert entry is not None
+        start_step = await features.observe_start(entry)
         affinity_step = features.facts.get("affinity_group_step")
         if affinity_step is not None:
             entry = {**entry, "affinity_verification": affinity_step.result}
-        features.entry = entry
-        await features.observe_start()
         metadata: dict[str, Any] = {}
-        for admission, field, key in (
-            (start_admission, "start_step", "start_verification"),
-            (serial_admission, "serial_step", "serial_verification"),
-            (memory_admission, "creation_memory_step", "creation_memory_verification"),
+        for admission, step, key in (
+            (start_admission, start_step, "start_verification"),
+            (
+                serial_admission,
+                features.facts.get("serial_step"),
+                "serial_verification",
+            ),
+            (
+                memory_admission,
+                features.facts.get("creation_memory_step"),
+                "creation_memory_verification",
+            ),
         ):
             if admission is not None:
-                step = features.facts[field]
                 assert step is not None
                 metadata[key] = step.result
         return {**entry, **metadata} if metadata else entry
