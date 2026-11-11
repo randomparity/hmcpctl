@@ -14,7 +14,7 @@ import re
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
@@ -32,6 +32,9 @@ from ...logical.engine import (
 )
 from ...logical.models import EffectRecord
 from ...virtualization.adapters import classified_add_refusal
+
+if TYPE_CHECKING:
+    from .core import PartitionView
 
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 ADD_KIND = "lpar.client_network_adapter"
@@ -175,7 +178,7 @@ def _on_vlan(adapters: list[dict[str, Any]], vlan: int) -> list[dict[str, Any]]:
 async def plan_networks(
     hmc: HMCClient,
     networks: NetworkPatch,
-    view: Mapping[str, Any],
+    view: PartitionView,
     system_uuid: str,
     lpar_uuid: str,
     *,

@@ -34,7 +34,7 @@ from ...storage.resources import storage_mapping, unmount_optical_media
 from ..boot_order import read_lpar_boot_order, set_lpar_boot_order
 
 if TYPE_CHECKING:
-    from .core import ReconfigurationPlan
+    from .core import PartitionView, ReconfigurationPlan
 
 
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
@@ -60,7 +60,7 @@ class MediaPlan(TypedDict):
     media_name: str
 
 
-def require_detachable(view: Mapping[str, Any], lpar_uuid: str) -> None:
+def require_detachable(view: PartitionView, lpar_uuid: str) -> None:
     """Refuse a detach the HMC would leave half done (ADR 0321 Decision 7).
 
     On a running partition without RMC the mapping removal returns REST0126/HSCL2957
