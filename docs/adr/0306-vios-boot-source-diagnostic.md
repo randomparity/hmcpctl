@@ -5,6 +5,9 @@
 Accepted, 2026-10-27. Independent design review and scope audit approved the contract.
 Design-only authority: call_dfc2b0181f834c4083aafd06c2a39556/0.
 
+Helper ownership is superseded by [ADR 0357](0357-shared-vios-source-infrastructure.md).
+The finite diagnostic policy and remaining decisions below stay accepted.
+
 ## Context
 
 #1770 needs nonempty VIOS pending-boot source evidence. The retained full native header

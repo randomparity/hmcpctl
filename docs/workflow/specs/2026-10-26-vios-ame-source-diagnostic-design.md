@@ -1,5 +1,10 @@
 # Registered VIOS AME source diagnostic — #1768 prerequisite
 
+Shared helper ownership now follows
+[ADR 0357](../../adr/0357-shared-vios-source-infrastructure.md): both source arms use
+`scripts/live_test/vios_source_support.py` for accounting and snapshots. AME retains
+its fixture, two-case authority, mutations, journal and recovery policy.
+
 ## Authority and limits
 
 [Scope](https://github.com/randomparity/hmcpctl/issues/1768#issuecomment-6418382312)

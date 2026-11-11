@@ -21,6 +21,7 @@ from hmcpctl.ssh.transport import HMCCLIError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import packets
+from live_test import vios_source_support as support
 from live_test.arms import vios_ame_source as source
 
 SYS = "00000000-0000-4000-8000-000000000001"
@@ -84,14 +85,14 @@ def packet(tmp_path):
 
 def entry(kind, identity, content):
     return (
-        f'<entry xmlns="{source.ATOM}"><id>urn:uuid:{identity}</id>'
+        f'<entry xmlns="{support.ATOM}"><id>urn:uuid:{identity}</id>'
         f'<content type="application/vnd.ibm.powervm.uom+xml; type={kind}"><{kind} xmlns="{UOM}">{content}</{kind}></content></entry>'
     )
 
 
 def feed(entries, path):
     return (
-        f'<feed xmlns="{source.ATOM}"><link rel="SELF" href="https://hmc.test:443{path}"/>'
+        f'<feed xmlns="{support.ATOM}"><link rel="SELF" href="https://hmc.test:443{path}"/>'
         + "".join(entries)
         + "</feed>"
     )
@@ -324,7 +325,7 @@ class Wire:
         elif fault == "root":
             body = entry(kind, V0, "")
         elif fault == "xml":
-            body = '<feed xmlns="' + source.ATOM + '">'
+            body = '<feed xmlns="' + support.ATOM + '">'
         elif fault == "type":
             headers["Content-Type"] = (
                 "application/vnd.ibm.powervm.uom+xml; type=Unallocated"
@@ -338,7 +339,7 @@ class Wire:
         elif fault == "authority":
             body = body.replace("https://hmc.test:443", "https://other.test:443", 1)
         elif fault == "namespace":
-            body = body.replace(source.ATOM, "urn:unsupported-atom")
+            body = body.replace(support.ATOM, "urn:unsupported-atom")
         elif fault == "member":
             body = feed([entry("Unallocated", V0, "")], path)
         elif fault == "content":
@@ -414,22 +415,22 @@ async def rig(tmp_path, monkeypatch):
             "agent_id": "source-test",
         }
     )
-    monkeypatch.setattr(source, "run_hmc_command", wire.ssh)
+    monkeypatch.setattr(support, "run_hmc_command", wire.ssh)
     monkeypatch.setattr(source, "_attest", lambda p: None)
     monkeypatch.setattr(
-        source.HMCClient,
+        support.HMCClient,
         "_new_http_client",
         lambda self, port: httpx.AsyncClient(
             base_url="https://hmc.test:443", transport=httpx.MockTransport(wire.request)
         ),
     )
     hmc = source.CountedHMC(
-        config, source.Budget("capture", p, source.LIMITS["capture"])
+        config, support.Budget("capture", p, source.LIMITS["capture"])
     )
     hmc.packet_sha = "d" * 64
-    before = await source.snapshot(hmc, p)
+    before = await support.snapshot(hmc, p)
     p["baseline_sha256"] = source.digest(before["stable"])
-    hmc.budget = source.Budget("capture", p, source.LIMITS["capture"])
+    hmc.budget = support.Budget("capture", p, source.LIMITS["capture"])
     wire.http.clear()
     wire.commands.clear()
     wire.collection_hits.clear()
@@ -522,21 +523,21 @@ def test_record_has_one_atomic_marker_and_exact_finite_pairs(tmp_path):
 def test_receipt_is_once_only(tmp_path, stage):
     p = packet(tmp_path.resolve())
     window = Path(p["window"]["directory"])
-    assert window.is_absolute() and source._root() not in window.parents
+    assert window.is_absolute() and support._root() not in window.parents
     output = window / stage
-    source._receipt(p, stage, "d" * 64, output)
+    support._receipt(p, stage, "d" * 64, output)
     assert output.stat().st_mode & 0o077 == 0
     claim = window / (stage + ".claim")
     assert claim.read_text() == "d" * 64 and claim.stat().st_mode & 0o077 == 0
     with pytest.raises((ValueError, OSError)):
-        source._receipt(p, stage, "d" * 64, output)
+        support._receipt(p, stage, "d" * 64, output)
 
 
 def test_relative_checkout_window_refused_before_receipt_or_transport(
     tmp_path, monkeypatch, request
 ):
     p = packet(tmp_path.resolve())
-    root = source._root()
+    root = support._root()
     monkeypatch.chdir(root)
     p["imported_source_sha256"] = {
         name: source.hashlib.sha256((root / name).read_bytes()).hexdigest()
@@ -568,7 +569,7 @@ def test_relative_checkout_window_refused_before_receipt_or_transport(
     transport = Mock(
         side_effect=AssertionError("transport entered before path refusal")
     )
-    monkeypatch.setattr(source.HMCClient, "_new_http_client", transport)
+    monkeypatch.setattr(support.HMCClient, "_new_http_client", transport)
     ignored = root / "docs/workflow/plans"
     if not ignored.exists():
         ignored.mkdir()
@@ -598,7 +599,7 @@ def test_relative_checkout_window_refused_before_receipt_or_transport(
 
 
 def test_budget_refuses_dispatch_and_keeps_failed_payload_charge(tmp_path):
-    b = source.Budget("capture", packet(tmp_path), source.LIMITS["capture"])
+    b = support.Budget("capture", packet(tmp_path), source.LIMITS["capture"])
     with b.section("one", 1, 0, 8, 20):
         b.dispatch(0, "GET")
         b.charge(8)
@@ -711,7 +712,7 @@ async def test_checkpoint_failure_leaves_intent_without_next_effect(
 @pytest.mark.asyncio
 async def test_all_phase_recovery_observes_but_never_cleans_history(rig, phase):
     p, wire, hmc, output, _before = rig
-    hmc.budget = source.Budget("recover", p, source.LIMITS["recover"])
+    hmc.budget = support.Budget("recover", p, source.LIMITS["recover"])
     document = source._new_document(p, hmc.packet_sha, "capture")
     document["phase"] = phase
     result = await source.recover(hmc, p, document, output)
@@ -734,9 +735,9 @@ async def test_foreign_mapping_metadata_and_unknown_profile_fields_are_protected
     extra = raw.replace(
         "</ProfileMemory>", "</ProfileMemory><FutureField>one</FutureField>"
     )
-    assert source._profile_semantic(raw) != source._profile_semantic(extra)
+    assert support._profile_semantic(raw) != support._profile_semantic(extra)
     with pytest.raises(ValueError):
-        source._profile_semantic(
+        support._profile_semantic(
             raw.replace("</ProfileMemory>", "</ProfileMemory><ProfileMemory/>")
         )
 
@@ -784,7 +785,7 @@ async def test_snapshot_maximum_is_exactly_68_reads_and_one_ssh(rig):
         "description": p["cases"][0]["description"],
         "factor": "0",
     }
-    observed = await source.snapshot(hmc, p)
+    observed = await support.snapshot(hmc, p)
     assert len(observed["stable"]["vios"]) == 9
     assert sum(len(v["profiles"]) for v in observed["stable"]["vios"].values()) == 33
     assert len(wire.http) == 68 and len(wire.commands) == 1
@@ -803,7 +804,7 @@ async def test_oversized_inventory_stops_without_creation(rig):
             "factor": "0",
         }
     with pytest.raises(ValueError):
-        await source.snapshot(hmc, p)
+        await support.snapshot(hmc, p)
     assert wire.creates == 0 and wire.deletes == []
 
 
@@ -923,7 +924,7 @@ async def test_predecessor_requires_bound_clean_session(
     wire.http.clear()
     wire.commands.clear()
     receipt = Mock(side_effect=AssertionError("next stage admitted"))
-    monkeypatch.setattr(source, "_receipt", receipt)
+    monkeypatch.setattr(support, "_receipt", receipt)
     if key == "valid":
         source._predecessor(p, stage, current_sha)
     else:
@@ -1069,7 +1070,7 @@ async def test_recovery_requires_supported_history_and_closed_session(
         supported = False
     wire.http.clear()
     wire.commands.clear()
-    hmc.budget = source.Budget("recover", p, source.LIMITS["recover"])
+    hmc.budget = support.Budget("recover", p, source.LIMITS["recover"])
     result = await source.recover(hmc, p, document, output)
     assert result["baseline_agrees_now"] is True
     assert result["history_complete"] is supported
@@ -1363,7 +1364,7 @@ def test_creation_requires_full_remaining_cleanup_and_uncertainty_reserve(
     tmp_path, bound
 ):
     p = packet(tmp_path)
-    budget = source.Budget("capture", p, source.LIMITS["capture"])
+    budget = support.Budget("capture", p, source.LIMITS["capture"])
     source._reserve(budget, 2)
     if bound == "time":
         budget.deadline = time.monotonic() + 989
@@ -1424,25 +1425,25 @@ async def test_create_rechecks_reserve_after_local_latency(
             ): "",
         }[args]
 
-    fsync = source.os.fsync
+    fsync = packets.os.fsync
 
     def delayed_fsync(fd):
         if (
             boundary == "checkpoint"
             and not delay_hits
-            and stat.S_ISREG(source.os.fstat(fd).st_mode)
+            and stat.S_ISREG(packets.os.fstat(fd).st_mode)
         ):
-            document = json.loads(source.os.pread(fd, source.MIB, 0))
+            document = json.loads(packets.os.pread(fd, source.MIB, 0))
             if document["phase"] == "create-pending":
                 elapsed[0] += 6
                 delay_hits.append(boundary)
         fsync(fd)
 
     monkeypatch.setattr(packets, "_git_read", git)
-    monkeypatch.setattr(source.os, "fsync", delayed_fsync)
-    monkeypatch.setattr(source, "run_hmc_command", wire.ssh)
+    monkeypatch.setattr(packets.os, "fsync", delayed_fsync)
+    monkeypatch.setattr(support, "run_hmc_command", wire.ssh)
     monkeypatch.setattr(
-        source.HMCClient,
+        support.HMCClient,
         "_new_http_client",
         lambda self, port: httpx.AsyncClient(
             base_url="https://hmc.test:443", transport=httpx.MockTransport(wire.request)
@@ -1456,7 +1457,7 @@ async def test_create_rechecks_reserve_after_local_latency(
         }
     )
     hmc = source.CountedHMC(
-        config, source.Budget("capture", p, source.LIMITS["capture"])
+        config, support.Budget("capture", p, source.LIMITS["capture"])
     )
     hmc.packet_sha = "d" * 64
     output = tmp_path / "capture"
@@ -1465,9 +1466,9 @@ async def test_create_rechecks_reserve_after_local_latency(
     monkeypatch.setattr(source.time, "monotonic", lambda: monotonic() + elapsed[0])
     monkeypatch.setattr(source.time, "time", lambda: wall() + elapsed[0])
     try:
-        before = await source.snapshot(hmc, p)
+        before = await support.snapshot(hmc, p)
         p["baseline_sha256"] = source.digest(before["stable"])
-        hmc.budget = source.Budget("capture", p, source.LIMITS["capture"])
+        hmc.budget = support.Budget("capture", p, source.LIMITS["capture"])
         hmc.budget.deadline = time.monotonic() + 991
         with pytest.raises(source.Held, match="time reserve unavailable"):
             await source.capture(
@@ -1505,7 +1506,7 @@ async def test_native_timeout_after_submission_leaves_owned_candidate_held(
             raise TimeoutError("synthetic completion uncertainty")
         return result
 
-    monkeypatch.setattr(source, "run_hmc_command", timeout)
+    monkeypatch.setattr(support, "run_hmc_command", timeout)
     with pytest.raises(TimeoutError):
         await run_capture(rig)
     assert wire.creates == 1 and wire.deletes == [] and len(wire.nodes) == 2
@@ -1527,11 +1528,12 @@ async def test_captured_collection_shapes_pass_the_physical_boundary(
     captured = json.loads(
         (Path(__file__).parent / "fixtures/live" / fixture).read_text()
     )
-    root = source.DET.fromstring(captured["body"])
+    root = support.DET.fromstring(captured["body"])
     own = next(
         node.get("href")
         for node in root
-        if node.tag == "{" + source.ATOM + "}link" and node.get("rel").upper() == "SELF"
+        if node.tag == "{" + support.ATOM + "}link"
+        and node.get("rel").upper() == "SELF"
     )
     url = urlsplit(own)
     hmc.config = hmc.config.model_copy(

@@ -15,16 +15,19 @@ import time
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 from hmcpctl.config import load_profile, validate_agent_id
+from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.documents.partition_profile import one, parse_profile
 from hmcpctl.operations.vios.core import delete_vios
 from hmcpctl.ssh.description_validation import validate_lpar_description
-from hmcpctl.ssh.lpar import validate_caller_token
+from hmcpctl.ssh.lpar import _lpar_resource_pairs, validate_caller_token
 from hmcpctl.ssh.transport import HMCCLIError, run_hmc_command
 from hmcpctl.xmlutil import leaf_text
 
+from .. import vios_source_support as support
 from ..packets import (
     HEX32,
     HEX40,
@@ -46,9 +49,22 @@ from ..packets import (
 from ..packets import (
     _save as save_packet,
 )
-from . import vios_ame_source as ame
 
 GROUP = "vios-boot-source"
+RESOURCES: dict[str, Any] = {
+    "min_memory": 1024,
+    "desired_memory": 2048,
+    "max_memory": 4096,
+    "dedicated": False,
+    "min_procs": 0.1,
+    "desired_procs": 0.5,
+    "max_procs": 1.0,
+    "min_vcpus": 1,
+    "desired_vcpus": 1,
+    "max_vcpus": 2,
+    "uncapped": True,
+}
+
 VALUES = (
     "c09-plain",
     "c09,comma",
@@ -69,7 +85,7 @@ LIMITS = {
 SOURCE_PATHS = (
     "scripts/live_test/arms/__init__.py",
     "scripts/live_test/packets.py",
-    "scripts/live_test/arms/vios_ame_source.py",
+    "scripts/live_test/vios_source_support.py",
     "scripts/live_test_preflight.py",
     "scripts/live_test_recovery.py",
     "scripts/live_test_evidence.py",
@@ -142,7 +158,7 @@ def validate_packet(p: dict) -> None:
         not isinstance(baseline, str) or not HEX64.fullmatch(baseline)
     ):
         raise Held("baseline digest invalid")
-    if encode(p["resources"]) != encode(ame.RESOURCES):
+    if encode(p["resources"]) != encode(RESOURCES):
         raise Held("fixed resources required")
     if p["encoding_id"] != ENCODING_ID or p["values"] != list(VALUES):
         raise Held("fixed candidate and ordered literals required")
@@ -190,6 +206,23 @@ def validate_packet(p: dict) -> None:
     }
     if encode(p["budgets"]) != encode(expected):
         raise Held("fixed strict finite budgets required")
+
+
+def _record(fixture: dict) -> str:
+    pairs = [
+        ("name", fixture["name"]),
+        ("lpar_env", "vioserver"),
+        ("profile_name", "default_profile"),
+    ]
+    pairs.extend(_lpar_resource_pairs(LparResources(**RESOURCES), None))
+    pairs.extend(
+        [
+            ("description", fixture["description"]),
+            ("mem_mode", "ded"),
+            ("mem_expansion", "0"),
+        ]
+    )
+    return build_attribute_record(pairs)
 
 
 def encode_boot_record(partition_id: int, case_index: int) -> str:
@@ -267,7 +300,7 @@ def _save(directory: Path, document: dict, name_out: str = "results.json") -> No
     save_packet(directory, document, name_out)
 
 
-def _reserve(budget: ame.Budget, cursor: str, case_index: int = 0) -> None:
+def _reserve(budget: support.Budget, cursor: str, case_index: int = 0) -> None:
     boot = cursor in {"before-boot-observations", "before-boot-write"}
     if (
         budget.stage != "capture"
@@ -308,11 +341,18 @@ def _reserve(budget: ame.Budget, cursor: str, case_index: int = 0) -> None:
         raise Held("remaining suffix/attestation/close time unavailable")
 
 
-class BootSourceHMC(ame.CountedHMC):
-    budget: ame.Budget
+class BootSourceHMC(support.CountedHMC):
+    budget: support.Budget
 
-    def __init__(self, config, budget: ame.Budget):
+    def __init__(self, config, budget: support.Budget):
         super().__init__(config, budget)
+        self.delete_uuid: str | None = None
+        self.delete_sent = False
+        self.delete_count = 0
+        self.packet_sha = ""
+        self.grant_sha = ""
+        self.exclusive = False
+        self.deletion_approved = False
         self.packet: dict | None = None
         self.document: dict | None = None
         self.held = False
@@ -338,12 +378,15 @@ class BootSourceHMC(ame.CountedHMC):
                 raise Held("resource DELETE lacks one exact current intent")
             assert self.packet is not None
             _authority(self, self.packet, "before-delete")
+            self.delete_sent = True
+            self.delete_count += 1
+            return await self._counted_request(method, path, **kwargs)
         return await super()._request(method, path, **kwargs)
 
 
 def _authority(hmc: BootSourceHMC, p: dict, cursor: str, index: int = 0) -> None:
     validate_packet(p)
-    ame._current(p)
+    support._current(p)
     if (
         hmc.held
         or hmc.budget.stage != "capture"
@@ -377,9 +420,7 @@ async def _native(
             raise Held("create token unavailable")
         _authority(hmc, p, "before-create")
         hmc.create_sent = True
-        record = build_attribute_record(
-            ame._record_pairs({**p["fixture"], "mem_expansion": "0"})
-        )
+        record = _record(p["fixture"])
         command = f"mksyscfg -r lpar -m {system} -i {shlex.quote(record)}"
         seconds = 60
     elif kind == "boot" and ident is not None:
@@ -508,7 +549,7 @@ def _admission(s: dict, p: dict, *, require_digest: bool) -> None:
     names = [_text(leaf_text(v["PartitionName"]["value"]), 128) for v in fields]
     if any(n.startswith("c09v-") for n in names):
         raise Held("stranded source fixture requires root disposition")
-    ame._admit_capacity(stable["system"])
+    support._admit_capacity(stable["system"])
     if require_digest and digest(stable) != p["baseline_sha256"]:
         raise Held("approved B0 baseline differs")
 
@@ -559,8 +600,7 @@ def _resource_fields(fields: dict, profile: str) -> None:
 
 
 def _owned(s: dict, p: dict, before: dict) -> dict:
-    case = {**p["fixture"], "mem_expansion": "0"}
-    ident = ame._candidate(s, case, before)
+    ident = support._candidate(s, p["fixture"], before)
     fields = s["stable"]["vios"][ident]["fields"]
     raw = _text(leaf_text(fields["PartitionID"]["value"]), 16)
     if not raw.isdecimal() or str(int(raw)) != raw or int(raw) <= 0:
@@ -572,10 +612,10 @@ def _owned(s: dict, p: dict, before: dict) -> dict:
     if profile["name"] != "default_profile" or not profile["etag"]:
         raise Held("default saved profile identity/ETag unavailable")
     raw_profile = s["profiles"][ident][profile_id]
-    if ame._profile_semantic(raw_profile) != profile["semantic"]:
+    if support._profile_semantic(raw_profile) != profile["semantic"]:
         raise Held("saved profile witness differs from protected snapshot")
     _resource_fields(fields, raw_profile)
-    if ame._foreign(s["stable"], ident) != ame._baseline_foreign(before):
+    if support._foreign(s["stable"], ident) != support._baseline_foreign(before):
         raise Held("foreign protected B0 configuration differs")
     return {
         "system_uuid": p["system"]["uuid"],
@@ -587,7 +627,7 @@ def _owned(s: dict, p: dict, before: dict) -> dict:
 
 
 def _detail_identity(detail: dict, ident: dict, b1: dict) -> None:
-    observed, resource = ame._entry(detail, "VirtualIOServer")
+    observed, resource = support._entry(detail, "VirtualIOServer")
     if observed != ident["vios_uuid"]:
         raise Held("fresh REST UUID differs")
     expected = {
@@ -603,7 +643,7 @@ def _detail_identity(detail: dict, ident: dict, b1: dict) -> None:
         and leaf_text(resource["Description"]) != ident["description"]
     ):
         raise Held("fresh REST marker differs")
-    projection = ame._projection(resource, ame.BASE_FIELDS + ame.IO_FIELDS)
+    projection = support._projection(resource, support.BASE_FIELDS + support.IO_FIELDS)
     saved = b1["vios"][ident["vios_uuid"]]["fields"]
     if any(projection[k] != saved[k] for k in projection):
         raise Held("fresh REST protected detail differs")
@@ -683,7 +723,7 @@ async def _cleanup(
         hmc.delete_uuid = None
     deletion["execution"] = "acknowledged"
     _checkpoint(directory, document, "delete-intent", hmc)
-    restored = await ame.snapshot(hmc, p)
+    restored = await support.snapshot(hmc, p)
     document["snapshots"].append(restored)
     if restored["stable"] != b0 or ident["vios_uuid"] in restored["stable"]["vios"]:
         raise Held("original B0 and absence not restored")
@@ -712,16 +752,14 @@ async def capture(
     hmc.document = document
     ident = None
     try:
-        observed = await ame.snapshot(hmc, p)
+        observed = await support.snapshot(hmc, p)
         _admission(observed, p, require_digest=True)
         document["snapshots"].append(observed)
         b0 = observed["stable"]
         document["observed_baseline_sha256"] = digest(b0)
         creation = document["create"]
         creation["observation"]["baseline_snapshot_index"] = 0
-        record = build_attribute_record(
-            ame._record_pairs({**p["fixture"], "mem_expansion": "0"})
-        )
+        record = _record(p["fixture"])
         creation.update(
             execution="intent",
             record_sha256=hashlib.sha256(record.encode()).hexdigest(),
@@ -735,7 +773,7 @@ async def capture(
                 "rejected" if error.remote_refusal_code else "unknown"
             )
             if error.remote_refusal_code:
-                unchanged = await ame.snapshot(hmc, p)
+                unchanged = await support.snapshot(hmc, p)
                 document["snapshots"].append(unchanged)
                 if unchanged["stable"] != b0:
                     raise Held("refused create changed B0") from error
@@ -749,7 +787,7 @@ async def capture(
         _checkpoint(directory, document, "create-intent", hmc)
         if creation["native_output"]:
             raise Held("nonempty successful create output")
-        created = await ame.snapshot(hmc, p)
+        created = await support.snapshot(hmc, p)
         document["snapshots"].append(created)
         ident = _owned(created, p, b0)
         b1 = created["stable"]
@@ -806,7 +844,7 @@ async def capture(
             after = await _header(hmc, p, ident, f"post-{index}")
             case["native_readback"]["after"] = after
             case["readback_sha256"] = digest(case["native_readback"])
-            observed = await ame.snapshot(hmc, p)
+            observed = await support.snapshot(hmc, p)
             document["snapshots"].append(observed)
             case["snapshot_index"] = len(document["snapshots"]) - 1
             _native_equal(after, n1, pending if refused else literal)
@@ -839,7 +877,7 @@ async def capture(
         _checkpoint(directory, document, "held", hmc)
         # This observation can describe residue but cannot clear the held latch.
         try:
-            uncertain = await ame.snapshot(hmc, p)
+            uncertain = await support.snapshot(hmc, p)
             document["snapshots"].append(uncertain)
             _checkpoint(directory, document, "held", hmc)
             if (
@@ -1097,9 +1135,7 @@ def _history_matches(p: dict, d: dict, packet_sha: str) -> bool:
     ):
         return False
     creation = _keys(d["create"], set(template["create"]))
-    record = build_attribute_record(
-        ame._record_pairs({**p["fixture"], "mem_expansion": "0"})
-    )
+    record = _record(p["fixture"])
     if (
         creation["execution"] != "acknowledged"
         or creation["native_output"] != ""
@@ -1181,7 +1217,7 @@ def _history_matches(p: dict, d: dict, packet_sha: str) -> bool:
 async def preflight(hmc: BootSourceHMC, packet: dict, directory: Path) -> dict:
     p = packet
     d = _new_document(p, hmc.packet_sha)
-    observed = await ame.snapshot(hmc, p)
+    observed = await support.snapshot(hmc, p)
     _admission(observed, p, require_digest=p["baseline_sha256"] is not None)
     d["snapshots"].append(observed)
     d["observed_baseline_sha256"] = digest(observed["stable"])
@@ -1195,7 +1231,7 @@ async def recover(
 ) -> dict:
     p = packet
     d = _new_document(p, hmc.packet_sha)
-    current = await ame.snapshot(hmc, p)
+    current = await support.snapshot(hmc, p)
     d["snapshots"].append(current)
     try:
         close = _read_private(
@@ -1231,7 +1267,7 @@ async def recover(
 
 
 async def _run_stage(p: dict, args, stage: str, started: float) -> int:
-    budget = ame.Budget(stage, p, LIMITS[stage])
+    budget = support.Budget(stage, p, LIMITS[stage])
     budget.started = started
     budget.deadline = started + LIMITS[stage][3]
     config = load_profile(p["configured_profile"])
@@ -1271,7 +1307,7 @@ async def _run_stage(p: dict, args, stage: str, started: float) -> int:
             raise
 
     try:
-        ame._current(p)
+        support._current(p)
         remaining = (
             min(budget.deadline - time.monotonic(), budget.window - time.time()) - 30
         )
@@ -1397,10 +1433,10 @@ def _main(argv: list[str] | None, started: float) -> int:
         raise Held("window ancestor depth exceeds bound")
     if any((ancestor / ".git").exists() for ancestor in (window, *window.parents)):
         raise Held("window must be outside source checkouts")
-    ame._current(p)
+    support._current(p)
     _attest(p)
     _predecessor(p, stage, args.packet_sha256)
-    ame._receipt(p, stage, args.packet_sha256, args.output)
+    support._receipt(p, stage, args.packet_sha256, args.output)
     with (
         open(os.devnull, "w") as sink,
         contextlib.redirect_stdout(sink),
