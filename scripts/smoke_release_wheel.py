@@ -85,7 +85,8 @@ def smoke(artifact_dir: Path) -> None:
         root = Path(temporary)
         library_environment = root / "library"
         library_python = _create_environment(library_environment, wheel, app=False)
-        _run(library_python, "-c", LIBRARY_PROBE, cwd=root)
+        # Isolated mode keeps packaging assertions active under PYTHONOPTIMIZE.
+        _run(library_python, "-I", "-c", LIBRARY_PROBE, cwd=root)
 
         app_environment = root / "app"
         app_python = _create_environment(app_environment, wheel, app=True)
