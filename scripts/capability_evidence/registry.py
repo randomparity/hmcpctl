@@ -54,30 +54,20 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
 
     bound = gateway_handlers(FastMCP(name="capability-inventory"), TOOL_SECURITY)
     handlers = {name: handler for name, (handler, _security) in bound.items()}
-    handlers[INVENTORY_TOOL_NAME] = inventory_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
+    factories = (
+        (INVENTORY_TOOL_NAME, inventory_handler),
+        (PLAN_TOOL_NAME, plan_handler),
+        (POWER_TOOL_NAME, power_handler),
+        (PROVISION_TOOL_NAME, provision_handler),
+        (RECONFIGURE_TOOL_NAME, reconfigure_handler),
+        (DECOMMISSION_TOOL_NAME, decommission_handler),
+        (INSPECT_TOOL_NAME, inspect_handler),
+        (HANDOFF_TOOL_NAME, handoff_handler),
     )
-    handlers[PLAN_TOOL_NAME] = plan_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
-    )
-    handlers[POWER_TOOL_NAME] = power_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
-    )
-    handlers[PROVISION_TOOL_NAME] = provision_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
-    )
-    handlers[RECONFIGURE_TOOL_NAME] = reconfigure_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
-    )
-    handlers[DECOMMISSION_TOOL_NAME] = decommission_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
-    )
-    handlers[INSPECT_TOOL_NAME] = inspect_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
-    )
-    handlers[HANDOFF_TOOL_NAME] = handoff_handler(
-        TOOL_SECURITY, lambda _name: False, lambda *_args: None
-    )
+    for name, factory in factories:
+        handlers[name] = factory(
+            TOOL_SECURITY, lambda _name: False, lambda *_args: None
+        )
     return handlers
 
 
