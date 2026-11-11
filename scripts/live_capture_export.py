@@ -1502,7 +1502,7 @@ def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, A
     """Enum types from the captured `Enumerations.xsd`, bindings from any captured XSD."""
     types: dict[str, list[str]] = {}
     elements: dict[str, str] = {}
-    for record in corpus:
+    for index, record in enumerate(corpus, 1):
         body = record.get("body") or ""
         if (
             record.get("kind") != "rest"
@@ -1513,7 +1513,7 @@ def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, A
         try:
             root = ET.fromstring(body.encode("utf-8"))
         except (ET.ParseError, DefusedXmlException):
-            continue
+            raise ExportError(f"schema record {index} is not safe, valid XML") from None
         for simple in root.iter(f"{_XSD}simpleType"):
             name = simple.get("name") or ""
             if name.endswith(".Enum"):
