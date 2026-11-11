@@ -14,7 +14,7 @@ from ...documents.lpar_security_policy import (
     SecurityPolicyState,
 )
 from ...documents.native_records import build_attribute_record
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import (
     resolve_lpar_uuid,
     resolve_system_uuid,
@@ -483,6 +483,8 @@ async def configure_lpar_security_policy(
         )
     try:
         _, after = await _policy_snapshot(hmc, uuid, vios=vios, expected_name=partition)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError):
         return SecurityPolicyResult(
             "readback-unavailable",

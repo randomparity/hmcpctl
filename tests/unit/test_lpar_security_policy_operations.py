@@ -1106,3 +1106,35 @@ async def test_creation_preserves_standalone_srr_and_keystore(
         assert f"keystore_kbytes={keystore}" in record
     else:
         assert "keystore_kbytes=" not in record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vios", [False, True])
+async def test_policy_readback_preserves_tls_identity(policy_target, vios):
+    from hmcpctl.errors import HMCTLSFingerprintError
+    from hmcpctl.operations.lpar.security_policy import configure_lpar_security_policy
+
+    hmc, entry, command = policy_target
+    if vios:
+        entry["Resource"]["PartitionType"] = "Virtual IO Server"
+    read = hmc.get_uom if vios else hmc.get_logical_partition
+    failure = HMCTLSFingerprintError("Certificate fingerprint differs")
+    reads_at_write = []
+
+    async def submit(*args, **kwargs):
+        reads_at_write.append(read.await_count)
+        read.side_effect = failure
+        return ""
+
+    command.side_effect = submit
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await configure_lpar_security_policy(
+            hmc,
+            PARTITION,
+            LparSecurityPolicy(secure_boot=1),
+            system_name_or_uuid=SYSTEM,
+            vios=vios,
+        )
+    assert caught.value is failure
+    command.assert_awaited_once()
+    assert read.await_count == reads_at_write[0] + 1
