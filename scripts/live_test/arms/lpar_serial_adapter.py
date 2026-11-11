@@ -6,16 +6,11 @@ import argparse
 import asyncio
 import csv
 import hashlib
-import inspect
 import io
 import json
-import os
 import re
 import shlex
-import stat
-import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
-import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +35,8 @@ from hmcpctl.ssh.lpar import create_lpar_via_cli, stamp_lpar_ownership
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import leaf_text, render_mtms
 
+from .. import private_files as files
+
 
 class _SerialCapacity(TypedDict):
     memory: object
@@ -55,8 +52,6 @@ class _SerialSnapshot(TypedDict):
 
 GROUP = "lpar-serial-adapter"
 SUBTASK = 63
-ROOT = Path(__file__).resolve().parents[3]
-LIMIT = 1024 * 1024
 FIELDS = (
     "lpar_name",
     "lpar_id",
@@ -140,127 +135,22 @@ def _expiry(packet):
     return expiry
 
 
-def connection(config):
-    return {
-        "host": config.host,
-        "port": config.port,
-        "user": config.user,
-        "verify_ssl": config.verify_ssl,
-        "agent_id": config.agent_id or "hmcpctl",
-    }
-
-
-def revision(candidate):
-    def git(*args):
-        # Candidate hashes are compared with fixed Git queries, never executed.
-        output = subprocess.check_output(  # nosec B603, B607
-            ["git", "--no-pager", *args],
-            cwd=ROOT,
-            text=True,
-            env={
-                key: value
-                for key, value in os.environ.items()
-                if not key.startswith("GIT_")
-            },
-        )
-        return output.strip()
-
-    if (
-        git("rev-parse", "HEAD") != candidate["commit"]
-        or git("rev-parse", "HEAD^{tree}") != candidate["tree"]
-        or git("status", "--porcelain", "--untracked-files=all")
-        or Path(inspect.getfile(HMCClient)).resolve()
-        != ROOT / "src/hmcpctl/client/core.py"
-    ):
-        raise ValueError("ST63 clean deployed candidate/import differs")
-
-
 def binding(packet, config):
     validate_packet(packet)
-    if connection(config) != packet["candidate"]["hmc_identity"]:
+    if files.connection(config) != packet["candidate"]["hmc_identity"]:
         raise ValueError("ST63 effective HMC identity differs before authentication")
-    revision(packet["candidate"])
+    files.revision(packet["candidate"])
     if datetime.now(UTC) >= _expiry(packet):
         raise ValueError("ST63 current packet has expired")
 
 
-def private_path(path, *, fresh=False, maximum=LIMIT):
-    if type(maximum) is not int or maximum not in (LIMIT, 4 * LIMIT, 8 * LIMIT):
-        raise ValueError("fixed 1/4/8MiB private-file ceiling required")
-    path = Path(path).absolute()
-    resolved = path.resolve()
-    parent = path.parent.lstat()
-    if (
-        path.is_symlink()
-        or path.parent.is_symlink()
-        or resolved == ROOT
-        or ROOT in resolved.parents
-        or not stat.S_ISDIR(parent.st_mode)
-        or parent.st_uid != os.getuid()
-        or parent.st_mode & 0o077
-    ):
-        raise ValueError("ST63 private operator-owned path outside checkout required")
-    if fresh:
-        if path.exists():
-            raise ValueError("ST63 fresh output cannot replace prior intent")
-    else:
-        info = path.lstat()
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_size > maximum
-        ):
-            raise ValueError("ST63 bounded private regular file required")
-    return path
-
-
-def read(path, *, maximum=LIMIT):
-    with private_path(path, maximum=maximum).open("rb") as stream:
-        raw = stream.read(maximum + 1)
-    if len(raw) > maximum:
-        raise ValueError("private input exceeds fixed byte bound")
-    return json.loads(raw)
-
-
 def load_packet(path, digest):
-    raw = private_path(path).read_bytes()
+    raw = files.private_path(path).read_bytes()
     if hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError("ST63 packet digest differs")
     packet = json.loads(raw)
     validate_packet(packet)
     return packet
-
-
-def write(path, document, *, fresh=False, maximum=LIMIT):
-    raw = json.dumps(document, sort_keys=True, indent=2).encode()
-    if type(maximum) is not int or maximum not in (LIMIT, 4 * LIMIT, 8 * LIMIT):
-        raise ValueError("fixed 1/4/8MiB private-file ceiling required")
-    if len(raw) > maximum:
-        raise ValueError("ST63 retained evidence exceeds bound")
-    path = private_path(path, fresh=fresh, maximum=maximum)
-    if fresh:
-        with path.open("xb") as stream:
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-    else:
-        descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=".st63-")
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(name, path)
-        finally:
-            if os.path.exists(name):
-                os.unlink(name)
-    descriptor = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def adapters(packet):
@@ -289,11 +179,11 @@ def kind(packet):
 
 async def _command(hmc, command):
     raw = await run_hmc_command(
-        hmc.config, command, include_stderr=True, max_output_bytes=LIMIT
+        hmc.config, command, include_stderr=True, max_output_bytes=files.LIMIT
     )
     if (
         not isinstance(raw, str)
-        or len(raw.encode()) > LIMIT
+        or len(raw.encode()) > files.LIMIT
         or "[stderr]" in raw.splitlines()
     ):
         raise ValueError("ST63 bounded independent native observation unavailable")
@@ -415,7 +305,7 @@ def admission(snapshot_, packet):
 
 def pair_oracle(raw, name, native):
     """Literal CSV projection, independent of product serial parsers and pair logic."""
-    if not isinstance(raw, str) or len(raw.encode()) > LIMIT:
+    if not isinstance(raw, str) or len(raw.encode()) > files.LIMIT:
         raise ValueError("ST63 pair observation unavailable")
     try:
         rows = list(csv.reader(io.StringIO(raw), strict=True))
@@ -511,7 +401,8 @@ async def verify_fixture(hmc, packet, baseline, identity):
     if not isinstance(description, str):
         raise TypeError("ST63 fixture description unavailable")
     if kind(packet) == "LogicalPartition" and (
-        parse_lpar_ownership_owner(description) != connection(hmc.config)["agent_id"]
+        parse_lpar_ownership_owner(description)
+        != files.connection(hmc.config)["agent_id"]
         or parse_lpar_ownership_caller_token(description) != packet["caller_token"]
     ):
         raise ValueError("ST63 current LPAR owner/caller differs")
@@ -596,7 +487,7 @@ async def execute(
         "delete_attempted": False,
     }
     window.check(hmc.config, journal["invocation"])
-    write(path, journal, fresh=True)
+    files.write(path, journal, fresh=True)
     window.check(hmc.config, journal["invocation"])
     await create_lpar_via_cli(
         hmc.config,
@@ -623,11 +514,11 @@ async def execute(
     identity = entry["UUID"]
     await fixture(hmc, packet, baseline, identity)
     journal.update(created_uuid=identity, phase="created-confirmed")
-    write(path, journal)
+    files.write(path, journal)
     if kind(packet) == "LogicalPartition":
         window.check(hmc.config, journal["invocation"])
         journal["phase"] = "stamp-pending"
-        write(path, journal)
+        files.write(path, journal)
         window.check(hmc.config, journal["invocation"])
         stamped = await stamp_lpar_ownership(
             hmc.config,
@@ -640,12 +531,12 @@ async def execute(
             raise ValueError("ST63 stamp outcome unconfirmed; stop and retain")
     await verify_fixture(hmc, packet, baseline, identity)
     journal["phase"] = "verified"
-    write(path, journal)
+    files.write(path, journal)
     # Verify again before the single UUID deletion. A changed identity or pair stops all effects.
     await verify_fixture(hmc, packet, baseline, identity)
     window.check(hmc.config, journal["invocation"])
     journal.update(phase="delete-pending", delete_attempted=True)
-    write(path, journal)
+    files.write(path, journal)
     window.check(hmc.config, journal["invocation"])
     if kind(packet) == "VirtualIOServer":
         await hmc.delete_vios(identity)
@@ -654,7 +545,7 @@ async def execute(
     if await snapshot(hmc, packet) != baseline:
         raise ValueError("ST63 post-delete baseline differs")
     journal.update(phase="complete", complete=True)
-    write(path, journal)
+    files.write(path, journal)
     return journal
 
 
@@ -706,15 +597,15 @@ def _dispatch(args):
         args.grant_packet_sha256 or args.exclusive_writer_window
     ):
         raise ValueError("ST63 read-only phases accept no effect assertions")
-    document = read(args.results) if args.mode == "recover" else None
+    document = files.read(args.results) if args.mode == "recover" else None
     packet_path = Path(document["packet_path"]) if document is not None else args.packet
     digest = document["packet_sha256"] if document is not None else args.packet_sha256
     packet = load_packet(packet_path, digest)
     config = load_profile()
     if args.mode == "recover":
-        if connection(config) != packet["candidate"]["hmc_identity"]:
+        if files.connection(config) != packet["candidate"]["hmc_identity"]:
             raise ValueError("ST63 recovery HMC identity differs before authentication")
-        revision(packet["candidate"])
+        files.revision(packet["candidate"])
     else:
         binding(packet, config)
     window = Window(
@@ -723,10 +614,10 @@ def _dispatch(args):
     preflight = None
     if args.mode == "run":
         window.check(config, window.invocation)
-        private_path(args.results_file, fresh=True)
-        preflight = read(args.preflight)
+        files.private_path(args.results_file, fresh=True)
+        preflight = files.read(args.preflight)
     if args.mode == "preflight":
-        private_path(args.output, fresh=True)
+        files.private_path(args.output, fresh=True)
 
     async def run():
         async with HMCClient(config) as hmc:
@@ -734,7 +625,7 @@ def _dispatch(args):
                 if args.mode == "preflight":
                     baseline = await snapshot(hmc, packet)
                     admission(baseline, packet)
-                    write(
+                    files.write(
                         args.output,
                         {
                             "packet_sha256": digest,

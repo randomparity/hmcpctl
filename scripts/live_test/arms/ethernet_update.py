@@ -32,7 +32,7 @@ from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh import ethernet, profiles
 from hmcpctl.xmlutil import console_version
 
-from . import lpar_serial_adapter as files
+from .. import private_files as files
 
 GROUP = "client-ethernet-update"
 MIB = 1024 * 1024

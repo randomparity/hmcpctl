@@ -30,6 +30,7 @@ from hmcpctl.ssh import profiles
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import leaf_text
 
+from .. import private_files as files
 from ..packets import _json
 from . import lpar_serial_adapter as serial
 
@@ -156,9 +157,9 @@ def bounded_config(config):
 
 def binding(p, config, *, recovery=False):
     validate_packet(p)
-    if serial.connection(config) != p["candidate"]["hmc_identity"]:
+    if files.connection(config) != p["candidate"]["hmc_identity"]:
         raise ValueError("ST68 effective connection differs before authentication")
-    serial.revision(p["candidate"])
+    files.revision(p["candidate"])
     if (
         not recovery
         and not 0 < (serial._expiry(p) - datetime.now(UTC)).total_seconds() <= 1200
@@ -334,7 +335,7 @@ class CountedHMC(HMCClient):
         return response
 
     async def ssh(self, config, command, **kwargs):
-        if serial.connection(config) != serial.connection(self.config):
+        if files.connection(config) != files.connection(self.config):
             raise ValueError("ST68 SSH connection differs")
         if len(command.encode()) > REQUEST_CAP:
             raise ValueError("ST68 fixed native command byte admission exceeded")
@@ -1207,7 +1208,7 @@ def dispatch(args):
         raise ValueError("ST68 read-only phase cannot accept effect assertions")
     original, original_sha256 = None, None
     if args.mode == "recover":
-        with serial.private_path(args.results, maximum=8 * MIB).open("rb") as stream:
+        with files.private_path(args.results, maximum=8 * MIB).open("rb") as stream:
             original_raw = stream.read(8 * MIB + 1)
         if len(original_raw) > 8 * MIB:
             raise ValueError("ST68 original results exceed8MiB before JSON")
@@ -1215,9 +1216,9 @@ def dispatch(args):
         original_sha256 = hashlib.sha256(original_raw).hexdigest()
     packet_path = Path(original["packet_path"]) if original is not None else args.packet
     digest = original["packet_sha256"] if original is not None else args.packet_sha256
-    with serial.private_path(packet_path).open("rb") as stream:
-        raw = stream.read(serial.LIMIT + 1)
-    if len(raw) > serial.LIMIT:
+    with files.private_path(packet_path).open("rb") as stream:
+        raw = stream.read(files.LIMIT + 1)
+    if len(raw) > files.LIMIT:
         raise ValueError("ST68 packet exceeds1MiB before JSON")
     if hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError("ST68 exact raw packet digest differs")
@@ -1234,7 +1235,7 @@ def dispatch(args):
         if args.mode == "run"
         else args.output
     )
-    serial.private_path(path, fresh=True)
+    files.private_path(path, fresh=True)
     document = {
         "group": GROUP,
         "subtask": SUBTASK,
@@ -1272,7 +1273,7 @@ def dispatch(args):
                 baseline=baseline, captured_utc=datetime.now(UTC).isoformat()
             )
         elif args.mode == "run":
-            preflight = serial.read(args.preflight, maximum=4 * MIB)
+            preflight = files.read(args.preflight, maximum=4 * MIB)
             await execute(
                 hmc, p, digest, preflight, path, window, packet_path, journal=document
             )
@@ -1474,4 +1475,4 @@ def checkpoint(path, document, *, fresh=False):
     mode = document["mode"]
     if mode not in LIMITS:
         raise ValueError("ST68 fixed evidence phase required")
-    serial.write(path, document, fresh=fresh, maximum=LIMITS[mode][2])
+    files.write(path, document, fresh=fresh, maximum=LIMITS[mode][2])

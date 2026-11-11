@@ -10180,11 +10180,13 @@ def test_live_arm_revision_uses_physical_checkout(
         )
         assert system_profile_source._revision() == (head, not dirty)
         return
-    module = lpar_serial_adapter if guard == "serial" else partition_profile_contract
+    module = (
+        lpar_serial_adapter.files if guard == "serial" else partition_profile_contract
+    )
     monkeypatch.setattr(
         module, "__file__", str(owner / "scripts/live_test/arms/guard.py")
     )
-    monkeypatch.setattr(lpar_serial_adapter, "ROOT", owner)
+    monkeypatch.setattr(lpar_serial_adapter.files, "ROOT", owner)
     # The imported-client boundary is covered separately; exercise real Git here.
     monkeypatch.setattr(
         module.inspect, "getfile", lambda _: str(owner / "src/hmcpctl/client/core.py")

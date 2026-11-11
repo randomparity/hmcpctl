@@ -110,7 +110,7 @@ def rig(tmp_path, monkeypatch):
 
     p = packet()
     config = HMCConfig.from_mapping(p["candidate"]["hmc_identity"])
-    monkeypatch.setattr(arm, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "revision", lambda _: None)
     monkeypatch.setattr(
         serial, "resolve_system_cli_name", AsyncMock(return_value="9009-22A*TEST")
     )
@@ -297,7 +297,7 @@ async def test_finite_three_environment_procedure_and_read_only_recovery(
     assert rig.output.read_bytes() == original
     assert result["subtask"] == 63
     assert "verification" not in result and "evidence" not in result
-    assert arm.read(rig.output) == result
+    assert arm.files.read(rig.output) == result
 
 
 @pytest.mark.asyncio
@@ -321,7 +321,7 @@ async def test_uncertainty_stops_no_replay_or_compensation_and_partial_recovery(
     # Absence now cannot upgrade an incomplete intent or authorize cleanup.
     rig.live = False
     with pytest.raises(ValueError, match="incomplete"):
-        await arm.recover(rig.hmc, rig.packet, arm.read(rig.output))
+        await arm.recover(rig.hmc, rig.packet, arm.files.read(rig.output))
     assert rig.effects == expected
     assert rig.output.read_bytes() == before
 
@@ -353,7 +353,7 @@ async def test_admission_refuses_before_intent_and_effects(rig, monkeypatch, fau
         rig.packet["expires_utc"] = "2000-01-01T00:00:00+00:00"
     elif fault == "candidate":
         monkeypatch.setattr(
-            arm, "revision", Mock(side_effect=ValueError("candidate drift"))
+            arm.files, "revision", Mock(side_effect=ValueError("candidate drift"))
         )
     else:
         rig.hmc.config = rig.hmc.config.model_copy(update={"user": "different"})
@@ -369,7 +369,7 @@ async def test_admission_refuses_before_intent_and_effects(rig, monkeypatch, fau
 async def test_drift_before_next_effect_stops_all_subsequent_writes(
     rig, monkeypatch, phase, fault
 ):
-    original = arm.write
+    original = arm.files.write
 
     def write(path, document, **kwargs):
         original(path, document, **kwargs)
@@ -378,7 +378,9 @@ async def test_drift_before_next_effect_stops_all_subsequent_writes(
                 rig.packet["expires_utc"] = "2000-01-01T00:00:00Z"
             elif fault == "candidate":
                 monkeypatch.setattr(
-                    arm, "revision", Mock(side_effect=ValueError("candidate drift"))
+                    arm.files,
+                    "revision",
+                    Mock(side_effect=ValueError("candidate drift")),
                 )
             elif fault == "identity":
                 rig.hmc.config = rig.hmc.config.model_copy(
@@ -387,7 +389,7 @@ async def test_drift_before_next_effect_stops_all_subsequent_writes(
             else:
                 document["invocation"] = "restored"
 
-    monkeypatch.setattr(arm, "write", write)
+    monkeypatch.setattr(arm.files, "write", write)
     with pytest.raises((ValueError, PermissionError)):
         await rig.execute()
     assert rig.effects == (
@@ -414,7 +416,7 @@ def test_private_input_refusal_preserves_bytes(tmp_path, monkeypatch, fault):
     path.write_text("preserve")
     path.chmod(0o600)
     if fault == "owner":
-        monkeypatch.setattr(arm.os, "getuid", lambda: tmp_path.stat().st_uid + 1)
+        monkeypatch.setattr(arm.files.os, "getuid", lambda: tmp_path.stat().st_uid + 1)
     elif fault == "public-file":
         path.chmod(0o644)
     elif fault == "public-parent":
@@ -424,9 +426,9 @@ def test_private_input_refusal_preserves_bytes(tmp_path, monkeypatch, fault):
         alias.symlink_to(path)
         path = alias
     else:
-        monkeypatch.setattr(arm, "ROOT", tmp_path)
+        monkeypatch.setattr(arm.files, "ROOT", tmp_path)
     with pytest.raises(ValueError):
-        arm.private_path(path)
+        arm.files.private_path(path)
     assert path.read_text() == "preserve"
 
 
@@ -450,7 +452,7 @@ def test_cli_pre_authentication_refusal(rig, monkeypatch, fault):
         p["candidate"]["hmc_identity"]["host"] = "wrong.test"
     elif fault == "candidate":
         monkeypatch.setattr(
-            arm, "revision", Mock(side_effect=ValueError("candidate drift"))
+            arm.files, "revision", Mock(side_effect=ValueError("candidate drift"))
         )
     elif fault == "cleanup":
         p["cleanup_authorized"] = False
@@ -521,14 +523,14 @@ def test_cli_false_cleanup_allows_only_preflight(rig, monkeypatch):
         == 0
     )
     assert rig.effects == []
-    assert arm.read(rig.output)["packet_sha256"] == digest
+    assert arm.files.read(rig.output)["packet_sha256"] == digest
 
 
 @pytest.mark.parametrize("fault", ["head", "tree", "dirty", "source"])
 def test_actual_candidate_provenance_guards(monkeypatch, fault, tmp_path):
     p = packet()
     root = tmp_path / "checkout"
-    monkeypatch.setattr(arm, "ROOT", root)
+    monkeypatch.setattr(arm.files, "ROOT", root)
 
     def command(args, **kwargs):
         assert kwargs["cwd"] == root
@@ -538,9 +540,9 @@ def test_actual_candidate_provenance_guards(monkeypatch, fault, tmp_path):
             return ("c" * 40 if fault == "tree" else p["candidate"]["tree"]) + "\n"
         return " M source.py\n" if fault == "dirty" else ""
 
-    monkeypatch.setattr(arm.subprocess, "check_output", command)
+    monkeypatch.setattr(arm.files.subprocess, "check_output", command)
     monkeypatch.setattr(
-        arm.inspect,
+        arm.files.inspect,
         "getfile",
         lambda _: str(
             root
@@ -548,7 +550,7 @@ def test_actual_candidate_provenance_guards(monkeypatch, fault, tmp_path):
         ),
     )
     with pytest.raises(ValueError, match="candidate"):
-        arm.revision(p["candidate"])
+        arm.files.revision(p["candidate"])
 
 
 @pytest.mark.asyncio
@@ -664,13 +666,13 @@ async def test_observed_fixture_drift_never_authorizes_cleanup(rig, fault):
     with pytest.raises(ValueError):
         await rig.execute()
     assert rig.effects == ["create", "stamp"]
-    assert arm.read(rig.output)["complete"] is False
+    assert arm.files.read(rig.output)["complete"] is False
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 async def test_observation_collection_bound_precedes_effects(rig, monkeypatch, stream):
-    conn, process = connection(monkeypatch, **{stream: b"x" * (arm.LIMIT + 8192)})
+    conn, process = connection(monkeypatch, **{stream: b"x" * (arm.files.LIMIT + 8192)})
     rig.hmc.config = rig.hmc.config.model_copy(update={"password": "fixture"})
     monkeypatch.setattr(arm, "run_hmc_command", run_hmc_command)
     with pytest.raises(HMCCLIError, match="exceeded 1048576 output bytes"):
@@ -681,3 +683,7 @@ async def test_observation_collection_bound_precedes_effects(rig, monkeypatch, s
     assert getattr(process, stream).data
     assert rig.effects == []
     assert not rig.output.exists()
+
+
+def test_shared_candidate_root_is_the_physical_checkout():
+    assert arm.files.ROOT == Path(__file__).resolve().parents[1]
