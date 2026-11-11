@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING
 
 from hmcpctl.errors import HMCError
@@ -13,10 +12,8 @@ from .lpar_config import (
     RESOURCES,
     TOKEN_PREFIX,
     _compare,
-    _read_pools,
-    _Run,
+    _prepare_scratch,
     _teardown,
-    scratch_partitions,
 )
 
 if TYPE_CHECKING:
@@ -34,20 +31,19 @@ async def exercise_lpar_physical_io(client: Client, state: RunState) -> None:
     if state.group != GROUP or state.hmc_config is None:
         state.skip(SUBTASK, GROUP, "requires opt-in group and HMC configuration")
         return
-    baseline = await _read_pools(client, state, state.config.system_name)
-    if baseline is None or scratch_partitions(baseline[0].names):
+    prepared = await _prepare_scratch(
+        client,
+        state,
+        name_prefix=NAME_PREFIX,
+        token_prefix=TOKEN_PREFIX,
+        subtask=SUBTASK,
+    )
+    if prepared is None:
         state.skip(
             SUBTASK, GROUP, "baseline unavailable or stranded scratch; run recovery"
         )
         return
-    suffix = uuid.uuid4().hex[:8]
-    run = _Run(
-        state.config.system_name,
-        NAME_PREFIX + suffix,
-        TOKEN_PREFIX + suffix,
-        baseline[1],
-        subtask=SUBTASK,
-    )
+    run, baseline = prepared
     verified = False
     try:
         run.create_attempted = True
@@ -91,7 +87,7 @@ async def exercise_lpar_physical_io(client: Client, state: RunState) -> None:
         state.record(SUBTASK, GROUP, "FAIL", str(error))
     finally:
         await _teardown(client, state, run, inactive_only=True)
-    same = await _compare(client, state, run, baseline[0])
+    same = await _compare(client, state, run, baseline)
     state.record_verified(
         SUBTASK,
         "hmc_create_lpar",

@@ -620,6 +620,28 @@ async def _read_pools(
     return pools, int(region)
 
 
+async def _prepare_scratch(
+    client: Client,
+    state: RunState,
+    *,
+    name_prefix: str,
+    token_prefix: str,
+    subtask: int,
+) -> tuple[_Run, _Pools] | None:
+    """Admit the shared scratch baseline and allocate a matching name and token."""
+    system = state.config.system_name
+    baseline = await _read_pools(client, state, system)
+    if baseline is None:
+        return None
+    pools, region = baseline
+    if scratch_partitions(pools.names):
+        return None
+    suffix = uuid.uuid4().hex[:8]
+    return _Run(
+        system, name_prefix + suffix, token_prefix + suffix, region, subtask=subtask
+    ), pools
+
+
 def _section(data: object, path: tuple[str, ...]) -> Mapping[str, object]:
     node: object = resource(data) if isinstance(data, Mapping) else {}
     for name in path:

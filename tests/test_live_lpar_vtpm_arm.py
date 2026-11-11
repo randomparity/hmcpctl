@@ -10,6 +10,7 @@ import pytest
 from hmcpctl.operations.lpar.vtpm import VtpmCapabilities
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test.arms import lpar_config
 from live_test.arms import lpar_vtpm as arm
 
 
@@ -90,7 +91,9 @@ async def test_creation_barrier_and_bounded_updates_always_cleanup(
         AsyncMock(return_value=VtpmCapabilities(("1.2",), (), False)),
     )
     monkeypatch.setattr(
-        arm, "_read_pools", AsyncMock(return_value=(SimpleNamespace(names=[]), 256))
+        lpar_config,
+        "_read_pools",
+        AsyncMock(return_value=(SimpleNamespace(names=[]), 256)),
     )
 
     async def teardown(client, state, run, **kwargs):
@@ -145,7 +148,7 @@ async def test_unsupported_variant_skips_before_baseline_or_effects(
         AsyncMock(return_value=VtpmCapabilities(versions, encryptions, True)),
     )
     pools = AsyncMock()
-    monkeypatch.setattr(arm, "_read_pools", pools)
+    monkeypatch.setattr(lpar_config, "_read_pools", pools)
     await arm.exercise_lpar_vtpm(object(), state)
     state.skip.assert_called_once()
     pools.assert_not_awaited()
@@ -251,7 +254,9 @@ async def test_real_served_typed_results_and_update_failure_stop(
         AsyncMock(return_value=VtpmCapabilities(("2.0",), ("level",), True)),
     )
     monkeypatch.setattr(
-        arm, "_read_pools", AsyncMock(return_value=(SimpleNamespace(names=[]), 256))
+        lpar_config,
+        "_read_pools",
+        AsyncMock(return_value=(SimpleNamespace(names=[]), 256)),
     )
 
     async def teardown(client, state, run, **kwargs):
@@ -295,7 +300,7 @@ async def test_arm_uses_shared_admission_through_captured_xml(
     monkeypatch.setattr(arm, "HMCClient", HMCClient)
     assert arm.read_vtpm_capabilities is read_vtpm_capabilities
     pools = AsyncMock(return_value=None)
-    monkeypatch.setattr(arm, "_read_pools", pools)
+    monkeypatch.setattr(lpar_config, "_read_pools", pools)
     state = SimpleNamespace(
         group=arm.GROUP,
         hmc_config=make_config(),

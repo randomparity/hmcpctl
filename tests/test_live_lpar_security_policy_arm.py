@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test.arms import lpar_config
 from live_test.arms import lpar_security_policy as arm
 
 
@@ -22,7 +23,7 @@ def setup_arm(monkeypatch):
     capabilities = AsyncMock(return_value=SimpleNamespace(secure_boot=True))
     monkeypatch.setattr(arm, "read_security_policy_capabilities", capabilities)
     pools = AsyncMock(return_value=(SimpleNamespace(names=[]), 256))
-    monkeypatch.setattr(arm, "_read_pools", pools)
+    monkeypatch.setattr(lpar_config, "_read_pools", pools)
     token = AsyncMock(side_effect=lambda client, state, run, target: run.token)
     monkeypatch.setattr(arm, "_token_of", token)
     cleaned = []
