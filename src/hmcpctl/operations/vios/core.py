@@ -410,15 +410,12 @@ async def _resolve_vios_backup_selectors(
     system_name_or_uuid = selector
     system_name = system_name_or_uuid
     vios_uuid = vios_name_or_uuid
-    if is_uuid(system_name_or_uuid) or not is_uuid(vios_name_or_uuid):
-        if is_uuid(system_name_or_uuid):
-            system_name = await _resolve_vios_backup_system_name(
-                hmc, system_name_or_uuid
-            )
-        if not is_uuid(vios_name_or_uuid):
-            vios_uuid = await resolve_vios_uuid(
-                hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-            )
+    if is_uuid(system_name_or_uuid):
+        system_name = await _resolve_vios_backup_system_name(hmc, system_name_or_uuid)
+    if not is_uuid(vios_name_or_uuid):
+        vios_uuid = await resolve_vios_uuid(
+            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        )
     return system_name, vios_uuid
 
 
