@@ -1587,3 +1587,98 @@ async def test_oversized_response_keeps_its_charge_and_closes_own_stream(rig):
         await hmc._request("GET", f"/rest/api/uom/ManagedSystem/{SYS}")
     assert hmc.budget.used == [1, 0, source.MIB]
     assert closed == [True] and hmc.config is original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,before,after,approve_snapshot,message",
+    [
+        ("State", "operating", "not operating", False, "not operating"),
+        ("SystemName", "sys-R1", "other-system", False, "identity differs"),
+        ("IsClassicHMCManagement", "true", "false", False, "classic system authority"),
+        ("VirtualIOServerCapable", "true", "false", False, "capabilities unavailable"),
+        (
+            "ActiveMemoryExpansionCapable",
+            "true",
+            "false",
+            False,
+            "capabilities unavailable",
+        ),
+        ("MemoryRegionSize", "256", "NaN", False, "nonfinite or negative"),
+        ("MemoryRegionSize", "256", "-256", False, "nonfinite or negative"),
+        ("CurrentAvailableSystemMemory", "32768", "unknown", False, "not numeric"),
+        (
+            "CurrentAvailableSystemProcessorUnits",
+            "4",
+            "Infinity",
+            False,
+            "nonfinite or negative",
+        ),
+        (
+            "CurrentAvailableSystemMemory",
+            "32768",
+            "65537",
+            False,
+            "memory capacity contradicts",
+        ),
+        (
+            "CurrentAvailableSystemProcessorUnits",
+            "4",
+            "9",
+            False,
+            "CPU capacity contradicts",
+        ),
+        ("MemoryRegionSize", "256", "0", True, "not a positive integer"),
+        ("MemoryRegionSize", "256", "512.5", True, "not a positive integer"),
+        ("MemoryRegionSize", "256", "768", True, "not region-aligned"),
+        ("CurrentAvailableSystemMemory", "32768", "1024", True, "memory tuple exceeds"),
+        (
+            "CurrentAvailableSystemProcessorUnits",
+            "4",
+            "0.25",
+            True,
+            "processor tuple exceeds",
+        ),
+        (
+            "MinimumProcessorUnitsPerVirtualProcessor",
+            "0.05",
+            "0",
+            True,
+            "advertised minimum",
+        ),
+        (
+            "MinimumProcessorUnitsPerVirtualProcessor",
+            "0.05",
+            "0.2",
+            True,
+            "advertised minimum",
+        ),
+    ],
+)
+async def test_unusable_system_evidence_refuses_creation(
+    rig, monkeypatch, name, before, after, approve_snapshot, message
+):
+    p, wire, hmc, _output, _baseline = rig
+    original = wire.system
+    old = f"<{name}>{before}</{name}>"
+    replacement = f"<{name}>{after}</{name}>"
+
+    def changed_system():
+        body = original()
+        assert body.count(old) == 1
+        return body.replace(old, replacement, 1)
+
+    monkeypatch.setattr(wire, "system", changed_system)
+    if approve_snapshot:
+        observed = await support.snapshot(hmc, p)
+        p["baseline_sha256"] = source.digest(observed["stable"])
+        hmc.budget = support.Budget("capture", p, source.LIMITS["capture"])
+        wire.http.clear()
+        wire.commands.clear()
+
+    with pytest.raises(source.Held, match=message):
+        await run_capture(rig)
+
+    assert wire.creates == 0 and wire.deletes == []
+    assert all(method == "GET" for method, _url in wire.http)
+    assert all(command.startswith("lscomgmt") for command in wire.commands)
