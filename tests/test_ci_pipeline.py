@@ -235,7 +235,16 @@ def just_recipes():
     return json.loads(result.stdout)["recipes"]
 
 
-def _recipe_commands(recipe: str, *arguments: str) -> list[list[str]]:
+def _recipe_commands(recipes, recipe: str, *arguments: str) -> list[list[str]]:
+    # Just's dry run omits the '-' modifier that swallows command failures.
+    literal_body = "\n".join(
+        "".join(part for part in line if isinstance(part, str))
+        for line in recipes[recipe]["body"]
+    ).replace("\\\n", "")
+    for line in literal_body.splitlines():
+        assert not line.lstrip().lstrip("@").startswith("-"), (
+            f"{recipe}: verification commands must propagate failure"
+        )
     result = subprocess.run(
         [
             "just",
@@ -294,28 +303,21 @@ def test_justfile_exposes_one_composed_verification_graph(just_recipes) -> None:
         "test": ["scripts/run_tests.py"],
         "smoke": ["scripts/smoke_mcp.py"],
         "smoke-verbose": ["scripts/smoke_mcp.py", "--verbose"],
-        "verification-report": [
-            "scripts/check_capability_inventory.py",
-            "--verification-report",
-            "__args_probe__",
-        ],
     }
     for recipe, arguments in python_recipes.items():
-        supplied = ("__args_probe__",) if recipe == "verification-report" else ()
-        assert _recipe_commands(recipe, *supplied) == [
+        assert _recipe_commands(just_recipes, recipe) == [
             ["uv", "run", "--no-sync", "python", *arguments]
         ], recipe
-    (pytest_command,) = _recipe_commands("test-verbose")
+    (pytest_command,) = _recipe_commands(just_recipes, "test-verbose")
     assert pytest_command[:4] == ["uv", "run", "--no-sync", "pytest"]
     assert set(pytest_command[4:]) == {"-q", "--cov-report=term-missing"}
-    (build,) = _recipe_commands("build")
+    (build,) = _recipe_commands(just_recipes, "build")
     assert build[:2] == ["uv", "build"]
     assert sorted(build[2:]) == sorted(
         ["--clear", "--wheel", "--sdist", "--out-dir", "dist", "."]
     )
     assert build[build.index("--out-dir") + 1] == "dist"
-    assert build[-1] == "."
-    (secrets,) = _recipe_commands("secrets")
+    (secrets,) = _recipe_commands(just_recipes, "secrets")
     assert secrets[:10] == [
         "git",
         "ls-files",
@@ -328,12 +330,42 @@ def test_justfile_exposes_one_composed_verification_graph(just_recipes) -> None:
         "--no-sync",
         "detect-secrets-hook",
     ]
-    assert secrets[10:] == ["--baseline", ".secrets.baseline", "--no-verify", "--"]
+    assert secrets[-1] == "--"
+    assert sorted(secrets[10:-1]) == sorted(
+        ["--baseline", ".secrets.baseline", "--no-verify"]
+    )
+    assert secrets[secrets.index("--baseline") + 1] == ".secrets.baseline"
     justfile = (ROOT / "justfile").read_text()
     assert re.search(r"hmcpctl [a-z][a-z-]* --help", justfile) is None, (
         "name a group's help here and it is a hand-maintained list again; "
         "scripts/smoke_cli_groups.py derives them from the Typer app"
     )
+
+
+@pytest.mark.parametrize("arguments", [(), ("__first_arg__", "__second_arg__")])
+def test_verification_report_forwards_arguments(just_recipes, arguments) -> None:
+    assert _recipe_commands(just_recipes, "verification-report", *arguments) == [
+        [
+            "uv",
+            "run",
+            "--no-sync",
+            "python",
+            "scripts/check_capability_inventory.py",
+            "--verification-report",
+            *arguments,
+        ]
+    ]
+
+
+def test_collected_verification_forwards_selected_python(just_recipes) -> None:
+    recipe = just_recipes["verify-collected"]
+    (parameter,) = recipe["parameters"]
+    (collection,) = [
+        dependency
+        for dependency in recipe["dependencies"]
+        if dependency["recipe"] == "test-collected"
+    ]
+    assert collection["arguments"] == [["variable", parameter["name"]]]
 
 
 def test_just_recipes_sync_only_in_setup_and_otherwise_run_without_sync(
@@ -346,14 +378,14 @@ def test_just_recipes_sync_only_in_setup_and_otherwise_run_without_sync(
             for line in recipe["body"]
         ).replace("\\\n", "")
         for line in literal_body.splitlines():
-            words = shlex.split(line, comments=True)
-            if words[:2] == ["uv", "sync"]:
-                sync_recipes.append(name)
+            words = shlex.split(line.lstrip().lstrip("@-"), comments=True)
             for index in range(len(words) - 1):
+                if words[index : index + 2] == ["uv", "sync"]:
+                    sync_recipes.append(name)
                 if words[index : index + 2] == ["uv", "run"]:
                     run_arguments.append(words[index + 2 :])
     assert sync_recipes == ["setup"]
-    sync, hooks, *_ = _recipe_commands("setup")
+    sync, hooks, *_ = _recipe_commands(just_recipes, "setup")
     assert sync[:2] == ["uv", "sync"]
     assert sorted(sync[2:]) == sorted(
         ["--locked", "--extra", "app", "--link-mode", "copy"]
@@ -1271,11 +1303,11 @@ def test_coverage_gate_denominator_is_not_shrunk_in_source() -> None:
     )
 
 
-def test_timing_recipes_reuse_the_configured_verification_graph() -> None:
-    assert _recipe_commands("test-timings") == [
+def test_timing_recipes_reuse_the_configured_verification_graph(just_recipes) -> None:
+    assert _recipe_commands(just_recipes, "test-timings") == [
         ["uv", "run", "--no-sync", "python", "scripts/run_tests.py", "--timings"]
     ]
-    assert _recipe_commands("verify-timings") == [
+    assert _recipe_commands(just_recipes, "verify-timings") == [
         ["HMCPCTL_TEST_TIMINGS=1", "just", "--time", "verify"]
     ]
 
@@ -1624,6 +1656,8 @@ def test_verification_routes_execute_gates_once(verification_route, route: str) 
         ]
     )
     assert trace.index("build") < trace.index("verify-artifacts")
+    assert trace.index("test") < trace.index("smoke")
+    assert trace.index("test") < trace.index("build")
 
 
 @pytest.mark.parametrize("route", ["local", "hosted"])
@@ -1639,6 +1673,8 @@ def test_verification_routes_propagate_gate_failure(
         assert not (set(trace) & (RUNTIME_GATES | {"test-group"}))
     else:
         assert trace[-1] == failure
+        if failure == "test":
+            assert not (set(trace) & (RUNTIME_GATES - {"test"}))
 
 
 def test_hosted_verification_ignores_multiline_preparation(verification_route) -> None:
