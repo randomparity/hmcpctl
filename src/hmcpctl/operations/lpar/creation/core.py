@@ -24,6 +24,8 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.operations.partition_creation import (
     _CreationFeatureCoordinator,
     _CreationFeatureInputs,
+    _CreationObservations,
+    _CreationObservationSnapshot,
 )
 
 from ....documents.lpar import (
@@ -127,6 +129,12 @@ class LparCreationResult:
     serial_step: WorkflowStep | None = None
     creation_memory_step: WorkflowStep | None = None
     affinity_group_step: WorkflowStep | None = None
+
+
+def _compose_creation_result(
+    result: LparCreationResult, observations: _CreationObservations
+) -> LparCreationResult:
+    return replace(result, **observations.public_steps())
 
 
 def _rest_create_refused(exc: HMCError) -> bool:
@@ -375,6 +383,29 @@ def validate_lpar_creation(creation: LparCreation) -> None:
     validate_keylock(creation.keylock)
 
 
+def _creation_feature_inputs(creation: LparCreation) -> _CreationFeatureInputs:
+    return _CreationFeatureInputs(
+        creation.name,
+        creation.partition_type,
+        creation.resources,
+        partition_id=creation.partition_id,
+        max_virtual_slots=creation.max_virtual_slots,
+        virtual_serial_adapters=creation.virtual_serial_adapters,
+        creation_memory=creation.creation_memory,
+        start_settings=creation.start_settings,
+        memory_layout=creation.memory_layout,
+        vtpm_settings=creation.vtpm_settings,
+        security_policy=creation.security_policy,
+        hardware_mem_encryption=creation.hardware_mem_encryption,
+        hardware_mem_expansion=creation.hardware_mem_expansion,
+        affinity_group_id=creation.affinity_group_id,
+        settings=creation.settings,
+        reporting_settings=creation.reporting_settings,
+        physical_io=creation.physical_io,
+        apply_profile=creation.apply_profile,
+    )
+
+
 async def create_and_stamp_lpar(
     hmc: HMCClient,
     system_name_or_uuid: str,
@@ -399,22 +430,7 @@ async def create_and_stamp_lpar(
       delete it to release its resources.
     """
     validate_lpar_creation(creation)
-    inputs = _CreationFeatureInputs(
-        creation.name,
-        creation.partition_type,
-        creation.resources,
-        partition_id=creation.partition_id,
-        max_virtual_slots=creation.max_virtual_slots,
-        virtual_serial_adapters=creation.virtual_serial_adapters,
-        creation_memory=creation.creation_memory,
-        start_settings=creation.start_settings,
-        memory_layout=creation.memory_layout,
-        vtpm_settings=creation.vtpm_settings,
-        security_policy=creation.security_policy,
-        hardware_mem_encryption=creation.hardware_mem_encryption,
-        hardware_mem_expansion=creation.hardware_mem_expansion,
-        affinity_group_id=creation.affinity_group_id,
-    )
+    inputs = _creation_feature_inputs(creation)
     features = await _admit_lpar_creation(
         hmc, system_name_or_uuid, creation, inputs, preflight_assignments
     )
@@ -668,8 +684,8 @@ async def _complete_lpar_creation(
         created_lpar,
         None,
         apply_warnings,
-        apply_step=apply_step,
     )
+    features.retain("apply_step", apply_step)
     try:
         created_lpar = await features.confirm_identity(
             created_lpar, readback_error=readback_error
@@ -717,13 +733,12 @@ async def _complete_lpar_creation(
         await features.observe_after_followup(
             system_name, verify_before_apply=verify_before_apply
         )
-        result = replace(result, **features.snapshot().facts)
         apply_step, profile_already_configured = await _apply_verified_creation(
             hmc,
             system_name or system_name_or_uuid,
             creation,
             features,
-            result,
+            ownership_stamped,
             verify_before_apply=verify_before_apply,
             profile_already_configured=profile_already_configured,
         )
@@ -742,15 +757,17 @@ async def _complete_lpar_creation(
         result = replace(
             result,
             warnings=(*apply_warnings, *warnings),
-            **features.snapshot().facts,
         )
-        return _sanitize_creation_steps(creation, features, result)
+        return _sanitize_creation_steps(
+            creation,
+            features,
+            _compose_creation_result(result, features.snapshot().observations),
+        )
     except HMCTLSFingerprintError:
         observations = features.snapshot()
         return _tls_aborted_creation(
-            creation,
-            replace(result, lpar=features.entry, **observations.facts),
-            observations.active_step,
+            replace(result, lpar=features.entry),
+            observations,
         )
 
 
@@ -805,6 +822,36 @@ async def _missing_created_identity(
     else:
         skipped = f"read-back after mksyscfg failed: {readback_error}"
     await features.observe_unavailable_identity(missing=True)
+    features.retain(
+        "physical_io_step",
+        WorkflowStep(
+            "physical_io",
+            "error",
+            "Created partition identity unavailable; I/O unverified",
+        )
+        if creation.physical_io.requested
+        else None,
+    )
+    features.retain(
+        "settings_step",
+        WorkflowStep(
+            "settings",
+            "error",
+            "Created partition readback unavailable; settings unverified",
+        )
+        if creation.settings.pairs() or features.inputs.start_requested
+        else None,
+    )
+    features.retain(
+        "reporting_step",
+        WorkflowStep(
+            "reporting_settings",
+            "error",
+            "Created partition readback unavailable; reporting settings unverified",
+        )
+        if creation.reporting_settings.pairs()
+        else None,
+    )
     result = LparCreationResult(
         resource_created=True,
         lpar=None,
@@ -813,34 +860,8 @@ async def _missing_created_identity(
             *apply_warnings,
             f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
         ),
-        apply_step=result.apply_step,
-        physical_io_step=WorkflowStep(
-            "physical_io",
-            "error",
-            "Created partition identity unavailable; I/O unverified",
-        )
-        if creation.physical_io.requested
-        else None,
-        settings_step=(
-            WorkflowStep(
-                "settings",
-                "error",
-                "Created partition readback unavailable; settings unverified",
-            )
-            if creation.settings.pairs() or features.inputs.start_requested
-            else None
-        ),
-        reporting_step=(
-            WorkflowStep(
-                "reporting_settings",
-                "error",
-                "Created partition readback unavailable; reporting settings unverified",
-            )
-            if creation.reporting_settings.pairs()
-            else None
-        ),
     )
-    return replace(result, **features.snapshot().facts)
+    return _compose_creation_result(result, features.snapshot().observations)
 
 
 async def _unconfirmed_created_identity(
@@ -857,6 +878,17 @@ async def _unconfirmed_created_identity(
         )
     await features.observe_unavailable_identity(missing=False)
     role_requested = roles_requested(creation.settings)
+    features.retain("apply_step", None)
+    features.retain(
+        "settings_step",
+        WorkflowStep(
+            "settings",
+            "error",
+            "Created partition identity unconfirmed; roles unverified",
+        )
+        if role_requested or features.inputs.start_requested
+        else None,
+    )
     result = LparCreationResult(
         True,
         None
@@ -868,15 +900,8 @@ async def _unconfirmed_created_identity(
         else created_lpar,
         None,
         (),
-        settings_step=WorkflowStep(
-            "settings",
-            "error",
-            "Created partition identity unconfirmed; roles unverified",
-        )
-        if role_requested or features.inputs.start_requested
-        else None,
     )
-    return replace(result, **features.snapshot().facts)
+    return _compose_creation_result(result, features.snapshot().observations)
 
 
 async def _stamp_lpar_creation(
@@ -965,13 +990,14 @@ async def _apply_verified_creation(
     system_name: str,
     creation: LparCreation,
     features: _CreationFeatureCoordinator,
-    result: LparCreationResult,
+    ownership_stamped: bool | None,
     *,
     verify_before_apply: bool,
     profile_already_configured: bool,
 ) -> tuple[WorkflowStep | None, bool]:
+    observations = features.snapshot().observations
     if verify_before_apply and creation.apply_profile is not None:
-        verified = _creation_steps_verified(creation, result)
+        verified = ownership_stamped is True and observations.verified
         step = await features.observe(
             "apply_step",
             _apply_created_profile(hmc, system_name, creation)
@@ -990,7 +1016,7 @@ async def _apply_verified_creation(
         )
         return step, features.controller_mode
     if creation.physical_io.requested and creation.apply_profile is not None:
-        io_step = result.physical_io_step
+        io_step = observations.physical_io_step.step
         step = await features.observe(
             "apply_step",
             _apply_created_profile(hmc, system_name, creation)
@@ -1002,7 +1028,7 @@ async def _apply_verified_creation(
             ),
         )
         return step, False
-    return result.apply_step, profile_already_configured
+    return observations.apply_step.step, profile_already_configured
 
 
 def _sanitize_creation_steps(
@@ -1044,106 +1070,25 @@ _TLS_CREATION_ABORTED = (
 )
 
 
-def _creation_step_requests(
-    creation: LparCreation,
-) -> tuple[tuple[str, str, bool], ...]:
-    return (
-        (
-            "settings_step",
-            "settings",
-            bool(creation.settings.pairs()) or creation.start_settings.requested(),
-        ),
-        (
-            "reporting_step",
-            "reporting_settings",
-            bool(creation.reporting_settings.pairs()),
-        ),
-        ("vtpm_step", "vtpm", bool(creation.vtpm_settings.pairs())),
-        ("physical_io_step", "physical_io", creation.physical_io.requested),
-        (
-            "security_policy_step",
-            "security_policy",
-            bool(creation.security_policy.pairs()),
-        ),
-        (
-            "hardware_memory_step",
-            "hardware_memory",
-            bool(
-                hardware_memory_pairs(
-                    creation.hardware_mem_encryption, creation.hardware_mem_expansion
-                )
-            ),
-        ),
-        ("memory_layout_step", "memory_layout", bool(creation.memory_layout.pairs())),
-        (
-            "serial_step",
-            "virtual_serial_adapters",
-            bool(creation.virtual_serial_adapters),
-        ),
-        (
-            "creation_memory_step",
-            "creation_memory",
-            bool(creation.creation_memory.pairs()),
-        ),
-        (
-            "affinity_group_step",
-            "affinity_group",
-            creation.affinity_group_id is not None,
-        ),
-    )
-
-
 def _tls_aborted_creation(
-    creation: LparCreation, result: LparCreationResult, active_step: str | None
+    result: LparCreationResult, snapshot: _CreationObservationSnapshot
 ) -> LparCreationResult:
-    requests = _creation_step_requests(creation)
-    updates: dict[str, Any] = {}
-    if active_step is not None:
-        previous = getattr(result, active_step)
-        label = next(
-            (label for field_name, label, _ in requests if field_name == active_step),
-            "apply_profile",
-        )
-        updates[active_step] = (
-            replace(previous, status="error")
-            if previous is not None
-            else WorkflowStep(label, "error", _TLS_CREATION_ABORTED)
-        )
-    for field_name, label, requested in requests:
-        if (
-            requested
-            and getattr(result, field_name) is None
-            and field_name not in updates
-        ):
-            updates[field_name] = WorkflowStep(label, "error", _TLS_CREATION_ABORTED)
-    if (
-        creation.apply_profile is not None
-        and result.apply_step is None
-        and "apply_step" not in updates
-    ):
-        updates["apply_step"] = WorkflowStep(
-            "apply_profile", "skipped", _TLS_CREATION_ABORTED
-        )
-    if not any(
-        step is not None and step.status == "error" for step in updates.values()
-    ):
-        # A failed ownership/identity read can precede every requested observation.
-        updates["settings_step"] = WorkflowStep(
-            "settings", "error", _TLS_CREATION_ABORTED
-        )
-    return replace(
-        result, warnings=(*result.warnings, _TLS_CREATION_ABORTED), **updates
+    observations = snapshot.observations.interrupted(
+        snapshot.active_step, _TLS_CREATION_ABORTED
+    )
+    return _compose_creation_result(
+        replace(result, warnings=(*result.warnings, _TLS_CREATION_ABORTED)),
+        observations,
     )
 
 
 def _creation_steps_verified(
     creation: LparCreation, result: LparCreationResult
 ) -> bool:
-    return result.ownership_stamped is True and all(
-        not requested or (step is not None and step.status == "ok")
-        for field_name, _, requested in _creation_step_requests(creation)
-        for step in (getattr(result, field_name),)
-    )
+    if result.ownership_stamped is not True:
+        return False
+    observations = _CreationObservations.selected(_creation_feature_inputs(creation))
+    return observations.with_public_steps(vars(result)).verified
 
 
 def creation_followup(

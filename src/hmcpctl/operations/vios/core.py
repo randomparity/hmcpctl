@@ -293,9 +293,10 @@ async def create_vios(
         await features.observe_before_followup()
         entry = features.entry
         assert entry is not None
-        start_step = await features.observe_start(entry)
-        observations = features.snapshot()
-        affinity_step = observations.facts.get("affinity_group_step")
+        await features.observe_start(entry)
+        observations = features.snapshot().observations
+        start_step = observations.start_step.step
+        affinity_step = observations.affinity_group_step.step
         if affinity_step is not None:
             entry = {**entry, "affinity_verification": affinity_step.result}
         metadata: dict[str, Any] = {}
@@ -303,12 +304,12 @@ async def create_vios(
             (start_admission, start_step, "start_verification"),
             (
                 serial_admission,
-                observations.facts.get("serial_step"),
+                observations.serial_step.step,
                 "serial_verification",
             ),
             (
                 memory_admission,
-                observations.facts.get("creation_memory_step"),
+                observations.creation_memory_step.step,
                 "creation_memory_verification",
             ),
         ):

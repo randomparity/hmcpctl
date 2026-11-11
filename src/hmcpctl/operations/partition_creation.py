@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from functools import partial
 from types import MappingProxyType
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, cast
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.documents.lpar import LparResources, LparSettings
+from hmcpctl.documents.lpar import LparReportingSettings, LparResources, LparSettings
 from hmcpctl.documents.lpar_affinity_group import AffinityGroupID
 from hmcpctl.documents.lpar_creation_memory import LparCreationMemory
 from hmcpctl.documents.lpar_hardware_memory import hardware_memory_pairs
+from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
@@ -71,36 +72,12 @@ class MemoryLayoutVerification:
     warnings: tuple[str, ...]
 
 
-class _CreationObservations(TypedDict, total=False):
-    """Sparse LPAR result fields; absent observations retain caller-owned evidence."""
-
-    apply_step: WorkflowStep | None
-    settings_step: WorkflowStep | None
-    physical_io_step: WorkflowStep | None
-    reporting_step: WorkflowStep | None
-    vtpm_step: WorkflowStep | None
-    security_policy_step: WorkflowStep | None
-    hardware_memory_step: WorkflowStep | None
-    memory_layout_step: WorkflowStep | None
-    serial_step: WorkflowStep | None
-    creation_memory_step: WorkflowStep | None
-    affinity_group_step: WorkflowStep | None
-
-
-_ObservationName = Literal[
-    "apply_step",
-    "settings_step",
-    "physical_io_step",
-    "reporting_step",
-    "vtpm_step",
-    "security_policy_step",
-    "hardware_memory_step",
-    "memory_layout_step",
-    "serial_step",
-    "creation_memory_step",
-    "affinity_group_step",
-    "start_step",
-]
+@dataclass(frozen=True)
+class _CreationObservation:
+    label: str
+    requested: bool
+    completed: bool = False
+    step: WorkflowStep | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +98,12 @@ class _CreationFeatureInputs:
     hardware_mem_encryption: bool | None = None
     hardware_mem_expansion: bool | None = None
     affinity_group_id: AffinityGroupID | None = None
+    settings: LparSettings = field(default_factory=LparSettings)
+    reporting_settings: LparReportingSettings = field(
+        default_factory=LparReportingSettings
+    )
+    physical_io: LparPhysicalIO = field(default_factory=LparPhysicalIO)
+    apply_profile: bool | None = None
 
     @property
     def vios(self) -> bool:
@@ -182,12 +165,151 @@ class _CreationFeatureInputs:
 
 
 @dataclass(frozen=True)
-class _CreationObservationSnapshot:
-    """Independent observation membership and phase; payload identity is retained."""
+class _CreationObservations:
+    """One definition of selected and completed creation evidence, including start."""
 
-    facts: Mapping[str, WorkflowStep | None]
-    active_step: _ObservationName | None
+    settings_step: _CreationObservation
+    reporting_step: _CreationObservation
+    vtpm_step: _CreationObservation
+    physical_io_step: _CreationObservation
+    security_policy_step: _CreationObservation
+    hardware_memory_step: _CreationObservation
+    memory_layout_step: _CreationObservation
+    serial_step: _CreationObservation
+    creation_memory_step: _CreationObservation
+    affinity_group_step: _CreationObservation
+    apply_step: _CreationObservation
+    start_step: _CreationObservation
+
+    @classmethod
+    def selected(cls, inputs: _CreationFeatureInputs) -> _CreationObservations:
+        return cls(
+            settings_step=_CreationObservation(
+                "settings", bool(inputs.settings.pairs()) or inputs.start_requested
+            ),
+            reporting_step=_CreationObservation(
+                "reporting_settings", bool(inputs.reporting_settings.pairs())
+            ),
+            vtpm_step=_CreationObservation("vtpm", inputs.vtpm_requested),
+            physical_io_step=_CreationObservation(
+                "physical_io", inputs.physical_io.requested
+            ),
+            security_policy_step=_CreationObservation(
+                "security_policy", inputs.policy_requested
+            ),
+            hardware_memory_step=_CreationObservation(
+                "hardware_memory", inputs.hardware_requested
+            ),
+            memory_layout_step=_CreationObservation(
+                "memory_layout", inputs.layout_requested
+            ),
+            serial_step=_CreationObservation(
+                "virtual_serial_adapters", inputs.serial_requested
+            ),
+            creation_memory_step=_CreationObservation(
+                "creation_memory", inputs.memory_requested
+            ),
+            affinity_group_step=_CreationObservation(
+                "affinity_group", inputs.affinity_requested
+            ),
+            apply_step=_CreationObservation(
+                "apply_profile", inputs.apply_profile is not None
+            ),
+            start_step=_CreationObservation("settings", inputs.start_requested),
+        )
+
+    def _items(self) -> tuple[tuple[str, _CreationObservation], ...]:
+        return tuple(
+            (item.name, cast(_CreationObservation, getattr(self, item.name)))
+            for item in fields(self)
+        )
+
+    def record(self, name: str, step: WorkflowStep | None) -> _CreationObservations:
+        observation = dict(self._items())[name]
+        return replace(self, **{name: replace(observation, completed=True, step=step)})
+
+    def public_items(self) -> tuple[tuple[str, _CreationObservation], ...]:
+        return tuple(
+            (name, value) for name, value in self._items() if name != "start_step"
+        )
+
+    def public_steps(self) -> Mapping[str, WorkflowStep | None]:
+        return MappingProxyType(
+            {
+                name: observation.step
+                for name, observation in self.public_items()
+                if observation.completed
+            }
+        )
+
+    @property
+    def verified(self) -> bool:
+        return all(
+            not observation.requested
+            or (
+                observation.completed
+                and observation.step is not None
+                and observation.step.status == "ok"
+            )
+            for name, observation in self.public_items()
+            if name != "apply_step"
+        )
+
+    def with_public_steps(
+        self, values: Mapping[str, WorkflowStep | None]
+    ) -> _CreationObservations:
+        return replace(
+            self,
+            **{
+                name: replace(observation, completed=True, step=values.get(name))
+                for name, observation in self.public_items()
+            },
+        )
+
+    def interrupted(
+        self, active_step: str | None, message: str
+    ) -> _CreationObservations:
+        updates: dict[str, _CreationObservation] = {}
+        for name, observation in self.public_items():
+            previous = observation.step
+            if name == active_step:
+                step = (
+                    replace(previous, status="error")
+                    if previous is not None
+                    else WorkflowStep(observation.label, "error", message)
+                )
+            elif observation.requested and previous is None:
+                step = WorkflowStep(
+                    observation.label,
+                    "skipped" if name == "apply_step" else "error",
+                    message,
+                )
+            else:
+                continue
+            updates[name] = replace(observation, completed=True, step=step)
+        if not any(
+            value.step is not None and value.step.status == "error"
+            for value in updates.values()
+        ):
+            updates["settings_step"] = replace(
+                self.settings_step,
+                completed=True,
+                step=WorkflowStep("settings", "error", message),
+            )
+        return replace(self, **updates)
+
+
+@dataclass(frozen=True)
+class _CreationObservationSnapshot:
+    """Immutable evidence and phase; payload identity is retained."""
+
+    observations: _CreationObservations
+    active_step: str | None
     attempted_feature: str | None
+
+    @property
+    def facts(self) -> Mapping[str, WorkflowStep | None]:
+        return self.observations.public_steps()
 
 
 @dataclass
@@ -202,11 +324,12 @@ class _CreationFeatureCoordinator:
     memory_admission: CreationMemoryAdmission | None = field(default=None, init=False)
     start_admission: StartAdmission | None = field(default=None, init=False)
     _entry: dict[str, Any] | None = field(default=None, init=False)
-    _facts: _CreationObservations = field(
-        default_factory=_CreationObservations, init=False
-    )
-    _active_step: _ObservationName | None = field(default=None, init=False)
+    _observations: _CreationObservations = field(init=False)
+    _active_step: str | None = field(default=None, init=False)
     _attempted_feature: str | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        self._observations = _CreationObservations.selected(self.inputs)
 
     @property
     def system(self) -> str:
@@ -215,10 +338,8 @@ class _CreationFeatureCoordinator:
         )
 
     def snapshot(self) -> _CreationObservationSnapshot:
-        # TypedDict's open mapping view erases its declared value union.
-        facts = cast(Mapping[str, WorkflowStep | None], self._facts.copy())
         return _CreationObservationSnapshot(
-            MappingProxyType(facts),
+            self._observations,
             self._active_step,
             self._attempted_feature,
         )
@@ -227,20 +348,24 @@ class _CreationFeatureCoordinator:
     def entry(self) -> dict[str, Any] | None:
         return self._entry
 
+    def retain(self, name: str, step: WorkflowStep | None) -> None:
+        self._observations = self._observations.record(name, step)
+
     async def observe(
         self,
-        field_name: _ObservationName,
+        field_name: str,
         observation: Awaitable[WorkflowStep | None] | WorkflowStep | None,
+        *,
+        active_step: str | None = None,
     ) -> WorkflowStep | None:
-        self._active_step = field_name
-        self._attempted_feature = field_name
+        self._active_step = active_step or field_name
+        self._attempted_feature = self._active_step
         step = (
             observation
             if observation is None or isinstance(observation, WorkflowStep)
             else await observation
         )
-        if field_name != "start_step":
-            self._facts[field_name] = step
+        self.retain(field_name, step)
         self._active_step = None
         return step
 
@@ -833,7 +958,7 @@ class _CreationFeatureCoordinator:
         if self.start_admission is None:
             return None
         step = await self.observe(
-            "start_step" if self.inputs.vios else "settings_step",
+            "start_step",
             created_start_step(
                 self.hmc,
                 self.start_admission,
@@ -842,6 +967,7 @@ class _CreationFeatureCoordinator:
                 self.inputs.environment,
                 controller_mode=self.controller_mode,
             ),
+            active_step="start_step" if self.inputs.vios else "settings_step",
         )
         assert step is not None
         if self.inputs.vios and step.status != "ok":
@@ -877,7 +1003,7 @@ class _CreationFeatureCoordinator:
             and apply_step is not None
             and apply_step.status == "ok"
         ):
-            memory_step = self._facts["creation_memory_step"]
+            memory_step = self._observations.creation_memory_step.step
             assert memory_step is not None
             await self.observe(
                 "creation_memory_step",

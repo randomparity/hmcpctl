@@ -137,7 +137,9 @@ def creation(**options):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selected", [False, True])
-async def test_prefollowup_observes_coordinator_feature_selection(selected):
+async def test_prefollowup_observes_coordinator_feature_selection(
+    selected, monkeypatch
+):
     requested = {
         "affinity_group_id": 1,
         "hardware_mem_encryption": False,
@@ -153,16 +155,25 @@ async def test_prefollowup_observes_coordinator_feature_selection(selected):
         ),
     )
 
+    trace = []
+    original = features.observe
+
+    async def observe(field_name, observation, **kwargs):
+        trace.append(field_name)
+        return await original(field_name, observation, **kwargs)
+
+    monkeypatch.setattr(features, "observe", observe)
     await features.observe_before_followup()
     observations = features.snapshot()
 
-    assert list(observations.facts) == [
+    assert trace == [
         "serial_step",
         "creation_memory_step",
         "memory_layout_step",
         "affinity_group_step",
         "hardware_memory_step",
     ]
+    assert set(observations.facts) == set(trace)
     if selected:
         assert observations.facts["affinity_group_step"] is not None
         assert observations.facts["hardware_memory_step"] is not None
