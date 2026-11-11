@@ -19,6 +19,7 @@ from live_test import runner
 from live_test.arms import accelerator_qos as arm
 from live_test.config import LiveTestConfig, decode_saved_config
 from live_test.observation import CallFailure
+from live_test.recovery import procedures
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
@@ -609,7 +610,7 @@ def test_live_uuid_case_phase_and_recovery(
     path.write_text(json.dumps(document(state)))
     before = path.read_bytes()
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 0
     assert "CLEAN:" in capsys.readouterr().out
     assert path.read_bytes() == before and len(state.writes) == 2
@@ -628,7 +629,7 @@ def test_live_uuid_case_recovery_different_identity(
         "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"
     )
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 2
     assert "CLEAN:" not in capsys.readouterr().out
     assert path.read_bytes() == before and len(state.writes) == 2
@@ -724,7 +725,7 @@ def test_recovery_proof(boundary, monkeypatch, tmp_path, capsys, fault):
         assert path.read_bytes() == original
         return
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     before = deepcopy(state.writes)
     code = recovery.main(["--results", str(path)])
     captured = capsys.readouterr()

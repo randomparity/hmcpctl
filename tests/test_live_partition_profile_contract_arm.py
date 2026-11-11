@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test.arms import partition_profile_contract as arm
 from live_test.config import hmc_identity
+from live_test.recovery import procedures
 
 FIXTURE = (
     Path(__file__).parent / "fixtures/partition_profile_contract/normalized-profile.xml"
@@ -789,7 +790,7 @@ def test_interrupted_arm_has_pre_effect_checkpoint_for_independent_cli_recovery(
     assert saved["run"]["partial"] is True
     before = world.snapshots
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: hmc)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: hmc)
     assert recovery.main(["--results", str(results)]) == 2
     assert world.snapshots > before
     assert "CLEAN:" not in capsys.readouterr().out

@@ -14,6 +14,7 @@ from live_test import runner
 from live_test.arms import memory_move as arm
 from live_test.config import LiveTestConfig
 from live_test.observation import plain_data
+from live_test.recovery import procedures
 from lpar.test_memory_move import (
     SOURCE,
     TARGET,
@@ -546,7 +547,7 @@ def test_recovery_route_is_read_only(live_boundary, monkeypatch, tmp_path, capsy
     path = tmp_path / "result.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
 
     def no_generic(*args):
         raise AssertionError("memory move must not enter deletion-oriented recovery")
@@ -653,7 +654,7 @@ def test_system_observation_failure_after_effect_cannot_attest_clean(
     path = tmp_path / "result.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 2
     assert "CLEAN:" not in capsys.readouterr().out
     assert state.effects == 2
@@ -845,7 +846,7 @@ def test_incomplete_proof_never_clears_matching_baselines(
     path = tmp_path / "result.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     command.reset_mock()
     assert recovery.main(["--results", str(path)]) == 2
     captured = capsys.readouterr()

@@ -25,6 +25,7 @@ from live_test import runner
 from live_test.arms import memory_move
 from live_test.arms import processor_move as arm
 from live_test.config import LiveTestConfig
+from live_test.recovery import procedures
 
 CONFIG = HMCConfig.from_mapping({})
 
@@ -562,7 +563,7 @@ def test_incomplete_saved_proof_cannot_clean_matching_live_baselines(
     path = tmp_path / "result.json"
     path.write_text(json.dumps(doc))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 2
     captured = capsys.readouterr()
     assert "CLEAN:" not in captured.out and "unconfirmed" in captured.err

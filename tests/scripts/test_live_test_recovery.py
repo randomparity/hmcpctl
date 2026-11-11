@@ -38,6 +38,7 @@ from live_test.recovery import baseline as baseline_recovery  # noqa: E402
 from live_test.recovery import memory as memory_recovery  # noqa: E402
 from live_test.recovery import partition as partition_recovery  # noqa: E402
 from live_test.recovery import pcie as pcie_recovery  # noqa: E402
+from live_test.recovery import procedures, reporting  # noqa: E402
 from live_test.recovery import storage as storage_recovery  # noqa: E402
 
 _MARKER = "pcie-deadbeef"
@@ -824,7 +825,7 @@ def test_an_unreadable_document_exits_two_not_zero(tmp_path, capsys):
 
 
 def test_a_clean_report_names_the_marker_it_matched_on(capsys):
-    recovery._report(_document(), [], [], [])
+    reporting.report(_document(), [], [], [])
 
     output = capsys.readouterr().out
     assert "CLEAN" in output
@@ -834,7 +835,7 @@ def test_a_clean_report_names_the_marker_it_matched_on(capsys):
 def test_a_stranded_report_prints_the_command_and_disclaims_acting(capsys):
     finding = recovery.Finding("stranded slot", "detail here", "hmc chsyscfg ...")
 
-    recovery._report(_document(), [finding], [], [])
+    reporting.report(_document(), [finding], [], [])
 
     output = capsys.readouterr().out
     assert "STRANDED" in output
@@ -1449,7 +1450,7 @@ def test_the_report_names_the_run_it_witnessed(capsys):
     document = _lpar_document([16])
     document["run"].update(tested_commit="abc1234", finished="2026-10-01T00:00:00")
 
-    recovery._report(document, [], [], [])
+    reporting.report(document, [], [], [])
 
     output = capsys.readouterr().out
     assert "abc1234" in output
@@ -3266,7 +3267,7 @@ def test_processor_move_route_refuses_unarmed_proof(
     path = tmp_path / "result.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: credentials)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: HMCConfig.from_mapping({}))
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: HMCConfig.from_mapping({}))
     assert recovery.main(["--results", str(path)]) == 2
     captured = capsys.readouterr()
     assert "CLEAN:" not in captured.out

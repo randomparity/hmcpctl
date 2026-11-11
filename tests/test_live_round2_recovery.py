@@ -303,7 +303,6 @@ def test_actual_round2_recovery_has_independent_witness(
     monkeypatch.setattr(runner, "_bootstrap_config", lambda: True)
     monkeypatch.setattr(runner, "served_client", served)
     monkeypatch.setattr(runner.RunState, "call", call)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG, raising=False)
     monkeypatch.setattr(baseline_recovery, "HMCConfig", lambda: CONFIG)
     path = tmp_path / "results.json"
     path.write_text(json.dumps(document))
@@ -535,7 +534,6 @@ def test_producer_to_recovery_composes_real_baseline_parsers(
 
     monkeypatch.setattr(runner, "served_client", served)
     monkeypatch.setattr(runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
     monkeypatch.setattr(baseline_recovery, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 0
     assert len(transport_reads) >= 16
