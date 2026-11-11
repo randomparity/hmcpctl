@@ -1157,6 +1157,8 @@ def _partition_write(
             await hmc.update_logical_partition(
                 lpar_uuid, lambda lpar: partition_updates(lpar, **changes), subject
             )
+        except HMCTLSFingerprintError:
+            raise
         except LparUpdateError as exc:
             if exc.submission == "rejected":
                 raise EffectNotApplied(

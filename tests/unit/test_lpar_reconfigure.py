@@ -993,3 +993,61 @@ def test_normalized_resource_triples_preserve_the_persisted_basis(hmc, state):
     assert persisted["memory"] == [512, 768, 1024]
     assert persisted["processors"] == [1, 2, 4]
     assert json.loads(json.dumps(persisted)) == persisted
+
+
+@pytest.mark.parametrize(
+    "subject,changes",
+    [
+        ("the partition name", {"name": "renamed"}),
+        (
+            "the current configuration",
+            {"resources": reconfigure.LparResources(desired_memory=1024)},
+        ),
+    ],
+)
+def test_partition_write_preserves_tls_failure_identity(hmc, subject, changes):
+    from hmcpctl.errors import HMCTLSFingerprintError
+
+    failure = HMCTLSFingerprintError("private-provider-detail")
+    hmc.partition_error = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        _await(reconfigure._partition_write(hmc, LPAR, subject, **changes)())
+    assert caught.value is failure
+    assert hmc.calls == [subject]
+
+
+def test_reconfigure_tls_partition_write_retains_applied_profile_and_stops(
+    hmc, monkeypatch
+):
+    from hmcpctl.errors import HMCTLSFingerprintError
+
+    hmc.partition_error = HMCTLSFingerprintError("private-provider-detail")
+    read = hmc.get_logical_partition
+    update = hmc.update_logical_partition
+    attempted = False
+
+    async def before_failure_only(*args, **kwargs):
+        assert not attempted, "TLS failure was followed by a partition read"
+        return await read(*args, **kwargs)
+
+    async def failed_update(*args, **kwargs):
+        nonlocal attempted
+        assert not attempted, "TLS submission was replayed"
+        attempted = True
+        return await update(*args, **kwargs)
+
+    monkeypatch.setattr(hmc, "get_logical_partition", before_failure_only)
+    monkeypatch.setattr(hmc, "update_logical_partition", failed_update)
+    record = _run({"memory_mib": 1024})
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert ("profile", "lpar.profile_write", "applied") in _effects(record)
+    assert ("current", "lpar.current_config", "uncertain") in _effects(record)
+    assert [call for call in hmc.calls if call != "authorize"] == [
+        "profile",
+        "the current configuration",
+    ]
+    assert record.result["changes"][0]["applied"] == "live"
+    assert "private-provider-detail" not in str(record)
+    assert any(
+        "HMCTLSFingerprintError" in warning for warning in record.result["warnings"]
+    )

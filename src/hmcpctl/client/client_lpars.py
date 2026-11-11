@@ -14,7 +14,7 @@ from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
 from ..documents.lpar import sharing_observation
-from ..errors import HMCError, LparUpdateError
+from ..errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from ..xmlutil import localname
 from .client_contracts import LparsClient, _reject_non_uuid_path_argument
 from .client_parse import _parse_feed
@@ -285,7 +285,8 @@ class LparsMixin:
         """Edit a fresh whole partition and submit once under its original ETag.
 
         Only configured missing uncapped weight may be inserted. Failures before
-        edit validation refuse normally; later failures retain submission certainty.
+        edit validation refuse normally. TLS identity failures propagate unchanged;
+        other later failures retain submission certainty.
         The returned POST entry is not independent proof of configuration completion.
         """
         _reject_non_uuid_path_argument("lpar_uuid", lpar_uuid)
@@ -307,6 +308,8 @@ class LparsMixin:
                     "If-Match": etag,
                 },
             )
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             submission = "unknown"
             message = str(exc)

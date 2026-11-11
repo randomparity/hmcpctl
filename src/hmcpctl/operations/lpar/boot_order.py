@@ -137,6 +137,8 @@ async def set_lpar_boot_order(
             raise ValueError("Raw boot input requires AIX/Linux; OS400 is unsupported")
     try:
         updated = await _write_pending_boot_string(hmc, lpar_uuid, requested)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as error:
         submission = (
             error.submission if isinstance(error, LparUpdateError) else "unknown"

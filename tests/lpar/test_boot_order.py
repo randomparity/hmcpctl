@@ -727,3 +727,55 @@ async def test_boot_read_preserves_pin_mismatch(stage):
     assert caught.value is failure
     if stage == "advanced":
         hmc.read_logical_partition_document.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["raw", "devices"])
+async def test_boot_post_tls_failure_keeps_identity_without_readback(
+    mock_hmc, monkeypatch, operation
+):
+    get, post = _routes(mock_hmc, entry=_raw_entry("baseline"))
+    failure = HMCTLSFingerprintError("certificate identity mismatch")
+    attempts = []
+    stopped_reads = None
+    with (
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_lpar_uuid",
+            new=AsyncMock(return_value=LPAR),
+        ),
+        patch(
+            "hmcpctl.operations.lpar.boot_order.resolve_and_authorize_lpar_mutation",
+            new=AsyncMock(return_value=LPAR),
+        ),
+    ):
+        async with HMCClient(make_config()) as hmc:
+            request = hmc._request_with_uuid_path_arguments
+
+            async def dispatch(method, path, **kwargs):
+                nonlocal stopped_reads
+                if method == "POST":
+                    attempts.append(path)
+                    stopped_reads = get.call_count
+                    raise failure
+                return await request(method, path, **kwargs)
+
+            monkeypatch.setattr(
+                hmc,
+                "_request_with_uuid_path_arguments",
+                AsyncMock(side_effect=dispatch),
+            )
+            with pytest.raises(HMCTLSFingerprintError) as caught:
+                if operation == "devices":
+                    await set_lpar_boot_order(
+                        hmc, LPAR, [DISK], system_name_or_uuid="system-a"
+                    )
+                else:
+                    await set_lpar_boot_order(
+                        hmc,
+                        LPAR,
+                        system_name_or_uuid="system-a",
+                        boot_string="requested",
+                    )
+    assert caught.value is failure
+    assert len(attempts) == 1 and post.call_count == 0
+    assert stopped_reads is not None and get.call_count == stopped_reads
