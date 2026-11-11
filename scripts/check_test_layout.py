@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -24,7 +24,8 @@ _TEST_MODULE_EXCEPTIONS = {
 def _repository_files(repo_root: Path) -> tuple[str, ...]:
     """Return tracked and unignored untracked repository paths."""
     try:
-        result = subprocess.run(
+        # Fixed Git inventory query; inherited repository routing is removed.
+        result = subprocess.run(  # nosec B603, B607
             ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             cwd=repo_root,
             env={

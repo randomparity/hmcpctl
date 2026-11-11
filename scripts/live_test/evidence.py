@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -99,7 +99,8 @@ def read_environment(path: Path | None = None) -> tuple[str, str] | None:
 
 
 def _git(repo_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    # Callers pass fixed read-only Git queries; inherited routing is removed.
+    return subprocess.run(  # nosec B603, B607
         ["git", "-C", str(repo_root), *arguments],
         capture_output=True,
         text=True,

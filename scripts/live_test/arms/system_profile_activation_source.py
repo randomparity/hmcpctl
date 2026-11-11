@@ -12,7 +12,7 @@ import os
 import re
 import shlex
 import stat
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -1409,7 +1409,8 @@ def _main(argv=None):
     binding(packet)
     checkout = Path(__file__).resolve().parents[3]
     revision, clean = source._revision()
-    tree = subprocess.check_output(
+    # Literal HEAD tree query; packet hashes are only comparison data.
+    tree_output = subprocess.check_output(  # nosec B603, B607
         ["git", "rev-parse", "HEAD^{tree}"],
         cwd=checkout,
         text=True,
@@ -1418,8 +1419,8 @@ def _main(argv=None):
             for key, value in os.environ.items()
             if not key.startswith("GIT_")
         },
-    ).strip()
-    if (revision, tree, clean) != (
+    )
+    if (revision, tree_output.strip(), clean) != (
         packet["tested_commit"],
         packet["tested_tree"],
         True,

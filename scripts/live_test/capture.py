@@ -25,7 +25,7 @@ import functools
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import time
 from collections.abc import Callable, Generator
@@ -87,7 +87,8 @@ def destination_is_ignored(path: Path) -> bool:
     if not inside_work_tree(path):
         return True
     target = path.parent.resolve() / path.name
-    proc = subprocess.run(
+    # Fixed Git ignore query; the destination remains a separate path argument.
+    proc = subprocess.run(  # nosec B603, B607
         ["git", "-C", str(target.parent), "check-ignore", "-q", str(target)],
         capture_output=True,
         check=False,
@@ -104,7 +105,8 @@ def destination_is_ignored(path: Path) -> bool:
 
 def inside_work_tree(path: Path) -> bool:
     """Inspect the physical destination without inherited Git routing/configuration."""
-    proc = subprocess.run(
+    # Fixed Git discovery query; inherited routing is removed and errors deny.
+    proc = subprocess.run(  # nosec B603, B607
         ["git", "-C", str(path.parent.resolve()), "rev-parse", "--is-inside-work-tree"],
         capture_output=True,
         text=True,

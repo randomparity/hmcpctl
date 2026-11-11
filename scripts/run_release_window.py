@@ -10,7 +10,7 @@ import os
 import selectors
 import signal
 import stat
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 import time
@@ -63,7 +63,8 @@ class WindowError(ValueError):
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
+    # Fixed repository queries inspect the physical candidate, not inherited routing.
+    result = subprocess.run(  # nosec B603, B607
         ["git", "-C", str(root), *arguments],
         env={
             key: value
@@ -297,7 +298,8 @@ class Execution:
         try:
             with path.open("xb") as log:
                 operation = "spawn child"
-                process = subprocess.Popen(
+                # Fixed phase scripts and ARMS entries run under the current interpreter.
+                process = subprocess.Popen(  # nosec B603
                     [sys.executable, *map(str, arguments)],
                     cwd=self.root,
                     stdout=subprocess.PIPE,

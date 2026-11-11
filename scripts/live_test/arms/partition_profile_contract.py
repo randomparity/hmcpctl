@@ -13,7 +13,7 @@ import json
 import math
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING, Any
@@ -407,7 +407,8 @@ def verify_revision(packet):
     root = Path(__file__).resolve().parents[3]
 
     def git(*args):
-        return subprocess.check_output(
+        # Candidate hashes are compared with fixed Git queries, never executed.
+        output = subprocess.check_output(  # nosec B603, B607
             ["git", "-C", str(root), *args],
             text=True,
             env={
@@ -415,7 +416,8 @@ def verify_revision(packet):
                 for key, value in os.environ.items()
                 if not key.startswith("GIT_")
             },
-        ).strip()
+        )
+        return output.strip()
 
     if (
         git("rev-parse", "HEAD") != packet["tested_commit"]

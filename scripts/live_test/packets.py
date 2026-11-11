@@ -8,7 +8,7 @@ import json
 import os
 import re
 import selectors
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 import time
@@ -110,7 +110,8 @@ def _git_read(root: Path, args: tuple[str, ...]) -> str:
         "core.untrackedCache=false",
         *args,
     ]
-    process = subprocess.Popen(
+    # Fixed attestation queries override Git routing, fsmonitor and untracked cache.
+    process = subprocess.Popen(  # nosec B603
         command,
         cwd=root,
         env=env,

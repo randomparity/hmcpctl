@@ -13,7 +13,7 @@ import os
 import re
 import shlex
 import stat
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 import uuid
@@ -152,7 +152,8 @@ def connection(config):
 
 def revision(candidate):
     def git(*args):
-        return subprocess.check_output(
+        # Candidate hashes are compared with fixed Git queries, never executed.
+        output = subprocess.check_output(  # nosec B603, B607
             ["git", "--no-pager", *args],
             cwd=ROOT,
             text=True,
@@ -161,7 +162,8 @@ def revision(candidate):
                 for key, value in os.environ.items()
                 if not key.startswith("GIT_")
             },
-        ).strip()
+        )
+        return output.strip()
 
     if (
         git("rev-parse", "HEAD") != candidate["commit"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 from pathlib import Path
@@ -61,7 +61,8 @@ def environment_command(
 
 
 def _run(*arguments: str | Path, cwd: Path, quiet: bool = False) -> None:
-    subprocess.run(
+    # The smoke test deliberately installs and executes the selected local wheel.
+    subprocess.run(  # nosec B603
         [str(argument) for argument in arguments],
         cwd=cwd,
         check=True,

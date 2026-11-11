@@ -12,7 +12,7 @@ import json
 import os
 import re
 import shlex
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -339,25 +339,25 @@ async def _job(
 
 
 def _revision() -> tuple[str, bool]:
+    checkout = Path(__file__).resolve().parents[3]
     environment = {
         key: value for key, value in os.environ.items() if not key.startswith("GIT_")
     }
-    return (
-        subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            text=True,
-            cwd=Path(__file__).resolve().parents[3],
-            env=environment,
-        ).strip(),
-        not bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain", "--untracked-files=all"],
-                text=True,
-                cwd=Path(__file__).resolve().parents[3],
-                env=environment,
-            )
-        ),
+    # Literal Git queries inspect the physical deployed commit and dirty state.
+    revision = subprocess.check_output(  # nosec B603, B607
+        ["git", "rev-parse", "HEAD"],
+        text=True,
+        cwd=checkout,
+        env=environment,
     )
+    # Include untracked paths even when Git's display preferences hide them.
+    status = subprocess.check_output(  # nosec B603, B607
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        text=True,
+        cwd=checkout,
+        env=environment,
+    )
+    return revision.strip(), not bool(status)
 
 
 async def capture(

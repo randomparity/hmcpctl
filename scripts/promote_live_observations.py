@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -39,7 +39,8 @@ class PromotionError(ValueError):
 
 def _run(root: Path, *args: str) -> str:
     try:
-        result = subprocess.run(
+        # Promotion uses fixed Git/just/Python commands with branch and file allowlists.
+        result = subprocess.run(  # nosec B603
             args,
             cwd=root,
             check=True,

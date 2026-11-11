@@ -11,7 +11,7 @@ import os
 import re
 import shlex
 import signal
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import time
 from contextlib import ExitStack
@@ -1086,7 +1086,8 @@ def supervise(arguments, seconds):
         for sig in watched:
             signal.signal(sig, stop)
         started = time.monotonic()
-        process = subprocess.Popen(
+        # Literal worker program; CLI options remain argv, never Python source.
+        process = subprocess.Popen(  # nosec B603
             [
                 sys.executable,
                 "-c",
