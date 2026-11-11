@@ -16,7 +16,7 @@ import re
 import subprocess  # nosec B404 # Call sites document execution authority.
 from pathlib import Path
 from time import monotonic
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from xml.etree import ElementTree as ET
 
 from defusedxml.ElementTree import fromstring
@@ -25,13 +25,6 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.systems import profiles as domain
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh.transport import run_hmc_command
-
-if TYPE_CHECKING:
-    from fastmcp import Client
-
-    from hmcpctl.config import HMCConfig
-
-    from ..runner import RunState
 
 SUBTASK = 45
 GROUP = "partition-profile-contract"
@@ -631,72 +624,3 @@ class Native(HMCClient):
             raise ValueError("profile metadata UUID differs")
         scalar(root, "SettingID")
         return {"xml": response.text, "etag": response.headers["ETag"]}
-
-
-async def exercise(client: Client, state: RunState) -> None:
-    """Dispatch only the explicitly selected finite experiment; no maturity assertion."""
-    del client
-    if state.group != GROUP or state.hmc_config is None:
-        state.skip(
-            SUBTASK, "profile contract experiment", "requires its own named group"
-        )
-        return
-    from .profile_contract_run import execute
-
-    try:
-        if state.checkpoint is None:
-            raise ValueError(
-                "durable runner recovery checkpoint required before effects"
-            )
-        state.checkpoint()
-        result = await execute(state.hmc_config, state.config)
-    except Exception as error:  # noqa: BLE001 — journal retains private details; runner reports a safe failure
-        state.record(
-            SUBTASK,
-            "profile contract experiment",
-            "FAIL",
-            {"error_type": type(error).__name__, "recovery_required": True},
-        )
-        return
-    state.record(
-        SUBTASK,
-        "profile contract experiment",
-        "PASS" if result["status"] == "CONTRACT_OBSERVED" else "FAIL",
-        {
-            key: result.get(key)
-            for key in (
-                "status",
-                "deleted",
-                "copies",
-                "patches",
-                "arm_transports_upper_bound",
-            )
-        },
-    )
-
-
-async def recover_document(
-    hmc_config: HMCConfig, document: dict[str, Any]
-) -> dict[str, Any]:
-    from ..config import LiveTestConfig
-    from .profile_contract_run import recover
-
-    run = document.get("run", {})
-    if (
-        run.get("group") != GROUP
-        or run.get("subtasks") != [SUBTASK]
-        or run.get("tree_clean") is not True
-    ):
-        raise ValueError("exact clean experiment dispatch provenance required")
-    config = LiveTestConfig(**document["config"])
-    packet = configured(config)
-    if run.get("tested_commit") != packet["tested_commit"] or document.get(
-        "hmc", {}
-    ) != {
-        "host": hmc_config.host,
-        "port": hmc_config.port,
-        "user": hmc_config.user,
-        "verify_ssl": hmc_config.verify_ssl,
-    }:
-        raise ValueError("recovery document destination/revision differs")
-    return await recover(hmc_config, config)

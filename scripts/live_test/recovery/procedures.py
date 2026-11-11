@@ -208,7 +208,7 @@ def recover_document_group(document: dict[str, Any]) -> int | None:
             "CLEAN: partition-profile original baseline and terminal sequence confirmed",
         ),
         "partition-profile-contract": (
-            "partition_profile_contract",
+            "profile_contract_run",
             "profile contract recovery",
             "profile contract recovery",
             "CLEAN: independent original baseline and fixture absence confirmed",

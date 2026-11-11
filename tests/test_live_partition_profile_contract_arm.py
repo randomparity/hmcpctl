@@ -684,6 +684,7 @@ async def test_error_capture_cannot_retain_echoed_authentication_tokens(
 async def test_independent_recovery_cannot_adopt_incomplete_dispatch(
     tmp_path, monkeypatch
 ):
+    from live_test.arms import profile_contract_run as flow
     from live_test.config import LiveTestConfig
 
     from hmcpctl.config import HMCConfig
@@ -693,7 +694,7 @@ async def test_independent_recovery_cannot_adopt_incomplete_dispatch(
         {"group": arm.GROUP, "subtasks": [arm.SUBTASK, 10], "tree_clean": True},
     ):
         with pytest.raises(ValueError, match="provenance"):
-            await arm.recover_document(
+            await flow.recover_document(
                 HMCConfig.from_mapping({}),
                 {"run": run, "config": LiveTestConfig().__dict__},
             )
@@ -784,7 +785,7 @@ def test_interrupted_arm_has_pre_effect_checkpoint_for_independent_cli_recovery(
     state.checkpoint = checkpoint
     monkeypatch.setattr(flow, "execute", stopped_after_durable_intent)
     with pytest.raises(SimulatedProcessTermination):
-        asyncio.run(arm.exercise(None, state))
+        asyncio.run(flow.exercise(None, state))
     assert results.is_file()
     saved = json.loads(results.read_text())
     assert saved["run"]["partial"] is True
@@ -844,7 +845,7 @@ async def test_failed_recovery_checkpoint_prevents_execute(monkeypatch):
         checkpoint=Mock(side_effect=OSError("private disk unavailable")),
         record=Mock(),
     )
-    await arm.exercise(None, state)
+    await flow.exercise(None, state)
     execute.assert_not_awaited()
     state.record.assert_called_once()
     assert state.record.call_args.args[2] == "FAIL"

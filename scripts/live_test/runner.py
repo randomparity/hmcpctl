@@ -115,13 +115,13 @@ from live_test.arms.metrics import (
 )
 from live_test.arms.network import inventory_network, mutate_virtual_networking
 from live_test.arms.paging_switchover import exercise_paging_switchover
-from live_test.arms.partition_profile_contract import (
-    exercise as exercise_profile_contract,
-)
 from live_test.arms.partition_profiles import exercise_partition_profiles
 from live_test.arms.processor_move import exercise_processor_move
 from live_test.arms.processor_quantities import exercise_processor_quantities
 from live_test.arms.processor_sharing_weight import exercise_processor_sharing_weight
+from live_test.arms.profile_contract_run import (
+    exercise as exercise_profile_contract,
+)
 from live_test.arms.profiles import exercise_backup_artifacts, inventory_lpar_profiles
 from live_test.arms.provision_boot import exercise_provision_boot
 from live_test.arms.provisioning import (

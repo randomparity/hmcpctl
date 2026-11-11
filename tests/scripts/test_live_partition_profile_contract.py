@@ -11,6 +11,7 @@ import live_partition_profile_contract as wrapper
 import live_system_profiles as system_profiles_wrapper
 from live_test import runner
 from live_test.arms import partition_profile_contract as arm
+from live_test.arms import profile_contract_run as flow
 
 
 @pytest.mark.parametrize("selected", [wrapper, system_profiles_wrapper])
@@ -68,6 +69,7 @@ def test_private_profile_wrapper_refuses_unsafe_results(
 
 
 def test_focused_wrapper_and_dispatch(tmp_path, monkeypatch):
+    assert runner.exercise_profile_contract is flow.exercise
     calls = []
     monkeypatch.setattr(
         runner, "_run_from_arguments", lambda args: calls.append(args) or 0
