@@ -14,7 +14,7 @@ Group shared accounting/observations, creation, update-source, retained-fixture,
 and entry points in the existing file. Retain unchanged mode helpers and constants.
 Creation owns _creation_run, source _source_run, fixture its existing _fixture_run.
 Each calls its concrete validator before the existing common client/candidate
-_context. Keep validate_packet's union admission and public preflight/capture/
+_validate_execution_context. Keep validate_packet's union admission and public preflight/capture/
 recover/main/wrapper signatures and behavior. Mode validators enforce exact versions.
 Source retains its existing creation-base field validation and finite-case rules.
 

@@ -104,7 +104,7 @@ def _scalar_text(value):
     return value
 
 
-def _context(hmc: HMCClient, packet: dict, stage: str) -> None:
+def _validate_execution_context(hmc: HMCClient, packet: dict, stage: str) -> None:
     if (hmc.config.host, hmc.config.port) != (
         packet["hmc_identity"]["host"],
         packet["hmc_identity"]["port"],
@@ -603,7 +603,7 @@ def _history_complete(packet, journal, current) -> bool:
 
 async def _creation_run(hmc, packet, stage, output=None, journal=None):
     _validate_creation_packet(packet)
-    _context(hmc, packet, stage)
+    _validate_execution_context(hmc, packet, stage)
     document = {
         "group": GROUP,
         "stage": stage,
@@ -847,7 +847,7 @@ def _source_row(current: dict, slot: str) -> dict:
     return rows[0]
 
 
-def _source_complete(row: dict) -> None:
+def _require_complete_source_policy(row: dict) -> None:
     raw = row.get("port_vlan_id")
     if (
         not isinstance(raw, str)
@@ -1182,7 +1182,7 @@ async def _capture_source(hmc, packet, document, output, budget):
     b1 = await _source_snapshot(hmc, packet)
     slot = _cleanup_candidate(packet, before, b1, created)
     row = _source_row(b1, slot)
-    _source_complete(row)
+    _require_complete_source_policy(row)
     parsed = vnic._parse_vnic_snapshots([row])[0]
     if len(parsed.backing_devices) != 1 or not parsed.backing_devices[0].is_active:
         raise ValueError("source requires one active captured backing")
@@ -1350,7 +1350,7 @@ def _source_history(packet, journal, current) -> bool:
         return False
     if _cleanup_candidate(packet, current, b1, created) != slot:
         return False
-    _source_complete(_source_row(b1, slot))
+    _require_complete_source_policy(_source_row(b1, slot))
     if not (
         source.get("captured_slot") == slot
         and source.get("native_record") == _source_record(packet)
@@ -1371,7 +1371,7 @@ def _source_history(packet, journal, current) -> bool:
 
 async def _source_run(hmc, packet, stage, output=None, journal=None):
     _validate_source_packet(packet)
-    _context(hmc, packet, stage)
+    _validate_execution_context(hmc, packet, stage)
     document = {
         "group": GROUP,
         "stage": stage,
@@ -1885,7 +1885,7 @@ async def _fixture_held(hmc, packet, baseline, *, before_stamp=False):
     }
 
 
-def _fixture_owned(hmc, packet, held):
+def _authorize_fixture_ownership(hmc, packet, held):
     description = held["description"]
     authorize_lpar_ownership_description(
         hmc,
@@ -2030,7 +2030,7 @@ def _fixture_bounded(budget):
                 fresh = await _fixture_held(
                     hmc, budget.packet, budget.document["original"]["baseline"]
                 )
-                _fixture_owned(hmc, budget.packet, fresh)
+                _authorize_fixture_ownership(hmc, budget.packet, fresh)
                 if fresh != budget.qualified:
                     raise ValueError("fixture changed at physical deletion boundary")
                 budget.document["delete_observation"] = fresh
@@ -2180,7 +2180,7 @@ def _fixture_prepared(hmc, packet, original):
         raise ValueError(
             "fixture original retained identity or creation result differs"
         )
-    _fixture_owned(hmc, p, held)
+    _authorize_fixture_ownership(hmc, p, held)
     if held["description"] != _fixture_description(
         target["resource"], held["native_description_raw"]
     ):
@@ -2335,7 +2335,7 @@ async def _fixture_recover(hmc, packet, document, journal):
     if stage == "prepare":
         expected = _fixture_prepared(hmc, packet, journal)
         current = await _fixture_held(hmc, packet, journal["baseline"])
-        _fixture_owned(hmc, packet, current)
+        _authorize_fixture_ownership(hmc, packet, current)
         if current != expected:
             raise ValueError("retained fixture differs during outside recovery")
         document.update(status="RETAINED", observation=current)
@@ -2405,7 +2405,7 @@ async def _fixture_prepare(hmc, packet, document, current):
         "uuid": result.lpar["UUID"].casefold(),
     }
     held = await _fixture_held(hmc, packet, current)
-    _fixture_owned(hmc, packet, held)
+    _authorize_fixture_ownership(hmc, packet, held)
     document["retained"] = held
     document["status"] = "PREPARED"
 
@@ -2431,7 +2431,7 @@ async def _fixture_remove(hmc, packet, document, current, original, budget):
 
 async def _fixture_run(hmc, packet, stage, output=None, journal=None):
     _validate_fixture(packet)
-    _context(hmc, packet, stage)
+    _validate_execution_context(hmc, packet, stage)
     action = packet["action"] if stage == "capture" else stage
     document = {
         "group": GROUP,
@@ -2477,7 +2477,7 @@ async def _fixture_run(hmc, packet, stage, output=None, journal=None):
                             input_bindings=bindings,
                         )
                         current = await _fixture_held(hmc, packet, original["baseline"])
-                        _fixture_owned(hmc, packet, current)
+                        _authorize_fixture_ownership(hmc, packet, current)
                         if current != original["retained"]:
                             raise ValueError(
                                 "fixture differs from its retained empty baseline"

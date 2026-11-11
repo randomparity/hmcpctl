@@ -3249,7 +3249,7 @@ def test_mode_policy_is_owned_at_entry_boundaries():
     import inspect
     import textwrap
 
-    owners = [arm._Budget, arm._bounded, arm.snapshot, arm._context]
+    owners = [arm._Budget, arm._bounded, arm.snapshot, arm._validate_execution_context]
     owners.extend(arm._Budget.__subclasses__())
     owners.extend(
         getattr(arm, name)
