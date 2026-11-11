@@ -24,23 +24,31 @@ def test_adapter_type_validation_accepts_only_the_published_vocabulary():
 @pytest.mark.parametrize(
     "adapter_type", ["ClientNetworkAdapter", "VirtualSCSIClientAdapter"]
 )
-async def test_list_and_delete_adapter_delegate_to_child_resources(adapter_type):
+@pytest.mark.parametrize("allow_empty_network", [False, True])
+async def test_list_and_delete_adapter_delegate_to_child_resources(
+    monkeypatch, adapter_type, allow_empty_network
+):
     client = SimpleNamespace(
         list_child=AsyncMock(return_value=[{"UUID": "adapter-1"}]),
-        _network_adapter_creation_feed=AsyncMock(return_value=[{"UUID": "adapter-1"}]),
         delete_child=AsyncMock(),
     )
-    adapters = await AdaptersMixin.list_adapters(client, "lpar-1", adapter_type)
+    feed = AsyncMock(return_value=[{"UUID": "adapter-1"}])
+    monkeypatch.setattr(
+        "hmcpctl.client.client_adapters._complete_network_adapter_feed", feed
+    )
+    adapters = await AdaptersMixin.list_adapters(
+        client, "lpar-1", adapter_type, allow_empty_network=allow_empty_network
+    )
     await AdaptersMixin.delete_adapter(client, "lpar-1", adapter_type, "adapter-1")
     assert adapters == [{"UUID": "adapter-1"}]
     if adapter_type == "ClientNetworkAdapter":
-        client._network_adapter_creation_feed.assert_awaited_once_with("lpar-1")
+        feed.assert_awaited_once_with(client, "lpar-1", allow_empty=allow_empty_network)
         client.list_child.assert_not_awaited()
     else:
         client.list_child.assert_awaited_once_with(
             "LogicalPartition", "lpar-1", adapter_type
         )
-        client._network_adapter_creation_feed.assert_not_awaited()
+        feed.assert_not_awaited()
     client.delete_child.assert_awaited_once_with(
         "LogicalPartition", "lpar-1", adapter_type, "adapter-1"
     )
@@ -169,8 +177,9 @@ async def test_network_creation_selected_xml_uses_one_real_child_put(mock_hmc):
         ),
     ],
 )
+@pytest.mark.parametrize("allow_empty_network", [False, True])
 async def test_network_creation_feed_refuses_missing_or_incomplete_inventory(
-    mock_hmc, status, body
+    mock_hmc, status, body, allow_empty_network
 ):
     import httpx
     from conftest import make_config
@@ -183,8 +192,20 @@ async def test_network_creation_feed_refuses_missing_or_incomplete_inventory(
         f"/rest/api/uom/LogicalPartition/{partition}/ClientNetworkAdapter"
     ).mock(return_value=httpx.Response(status, text=body))
     async with HMCClient(make_config()) as client:
-        with pytest.raises(HMCError):
-            await client._network_adapter_creation_feed(partition)
+        if status == 204 and allow_empty_network:
+            assert (
+                await client.list_adapters(
+                    partition, "ClientNetworkAdapter", allow_empty_network=True
+                )
+                == []
+            )
+        else:
+            with pytest.raises(HMCError):
+                await client.list_adapters(
+                    partition,
+                    "ClientNetworkAdapter",
+                    allow_empty_network=allow_empty_network,
+                )
     assert route.call_count == 1
 
 
@@ -204,7 +225,7 @@ async def test_network_creation_feed_accepts_positively_empty_atom_feed(mock_hmc
         )
     )
     async with HMCClient(make_config()) as client:
-        assert await client._network_adapter_creation_feed(partition) == []
+        assert await client.list_adapters(partition, "ClientNetworkAdapter") == []
 
 
 @pytest.mark.asyncio
@@ -231,7 +252,10 @@ async def test_network_creation_feed_accepts_positively_empty_atom_feed(mock_hmc
         ),
     ],
 )
-async def test_creation_inventory_refuses_ambiguous_raw_atom_entries(mock_hmc, entry):
+@pytest.mark.parametrize("allow_empty_network", [False, True])
+async def test_creation_inventory_refuses_ambiguous_raw_atom_entries(
+    mock_hmc, entry, allow_empty_network
+):
     import httpx
     from conftest import make_config
 
@@ -249,7 +273,11 @@ async def test_creation_inventory_refuses_ambiguous_raw_atom_entries(mock_hmc, e
     )
     async with HMCClient(make_config()) as client:
         with pytest.raises(HMCError, match="unambiguous"):
-            await client._network_adapter_creation_feed(partition)
+            await client.list_adapters(
+                partition,
+                "ClientNetworkAdapter",
+                allow_empty_network=allow_empty_network,
+            )
     assert route.call_count == 1
 
 
@@ -272,7 +300,7 @@ async def test_creation_inventory_preserves_one_valid_contained_entry(mock_hmc):
         f"/rest/api/uom/LogicalPartition/{identity}/ClientNetworkAdapter"
     ).mock(return_value=httpx.Response(200, text=xml))
     async with HMCClient(make_config()) as client:
-        result = await client._network_adapter_creation_feed(identity)
+        result = await client.list_adapters(identity, "ClientNetworkAdapter")
     assert len(result) == 1
     assert result[0]["UUID"] == identity
     assert result[0]["ResourceType"] == "ClientNetworkAdapter"
@@ -334,7 +362,10 @@ async def test_network_listing_accepts_positive_complete_empty_feed(mock_hmc):
         ),
     ],
 )
-async def test_network_listing_refuses_explicit_continuation(mock_hmc, headers, body):
+@pytest.mark.parametrize("allow_empty_network", [False, True])
+async def test_network_listing_refuses_explicit_continuation(
+    mock_hmc, headers, body, allow_empty_network
+):
     import httpx
     from conftest import make_config
 
@@ -347,7 +378,11 @@ async def test_network_listing_refuses_explicit_continuation(mock_hmc, headers, 
     ).mock(return_value=httpx.Response(200, text=body, headers=headers))
     async with HMCClient(make_config()) as client:
         with pytest.raises(HMCError, match="complete"):
-            await client.list_adapters(identity, "ClientNetworkAdapter")
+            await client.list_adapters(
+                identity,
+                "ClientNetworkAdapter",
+                allow_empty_network=allow_empty_network,
+            )
 
 
 @pytest.mark.asyncio
@@ -363,6 +398,8 @@ async def test_network_listing_reads_an_empty_collection_when_allowed(mock_hmc):
     ).mock(return_value=httpx.Response(204, text=""))
     async with HMCClient(make_config()) as client:
         assert (
-            await client._network_adapter_creation_feed(identity, allow_empty=True)
+            await client.list_adapters(
+                identity, "ClientNetworkAdapter", allow_empty_network=True
+            )
             == []
         )

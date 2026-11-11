@@ -167,7 +167,9 @@ async def current_adapters(hmc: HMCClient, lpar_uuid: str) -> list[dict[str, Any
 
     An empty collection (HTTP 204) is no adapters; a paged feed is refused.
     """
-    feed = await hmc._network_adapter_creation_feed(lpar_uuid, allow_empty=True)
+    feed = await hmc.list_adapters(
+        lpar_uuid, "ClientNetworkAdapter", allow_empty_network=True
+    )
     return [_adapter(entry) for entry in feed if isinstance(entry, dict)]
 
 

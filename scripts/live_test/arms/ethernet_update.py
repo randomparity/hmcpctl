@@ -334,7 +334,9 @@ async def snapshot(hmc, packet, *, admitted=True):
     parent = await adapters._network_update_parent(
         hmc, packet["system_uuid"], packet["lpar_uuid"]
     )
-    entries = deepcopy(await hmc._network_adapter_creation_feed(packet["lpar_uuid"]))
+    entries = deepcopy(
+        await hmc.list_adapters(packet["lpar_uuid"], "ClientNetworkAdapter")
+    )
     inventory = adapters._network_update_inventory(entries)
     if admitted and (len(inventory) > 8 or packet["adapter_uuid"] not in inventory):
         raise ValueError("ST69 bounded contained adapter inventory required")

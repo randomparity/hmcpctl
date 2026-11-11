@@ -61,7 +61,7 @@ def context(monkeypatch):
     before = [adapter(), adapter(FOREIGN, "5")]
     after = deepcopy(before)
     after[0]["Resource"]["QualityOfServicePriority"] = "0"
-    hmc._network_adapter_creation_feed.side_effect = [before, deepcopy(before), after]
+    hmc.list_adapters.side_effect = [before, deepcopy(before), after]
     description = AsyncMock(
         return_value="[hmcpctl owner:test-agent created:2026-10-30]"
     )
@@ -186,7 +186,7 @@ async def test_fresh_configuration_drift_prevents_write(context, change):
         fresh[1]["Resource"]["UnknownPolicy"] = "changed"
     else:
         fresh[0]["Resource"]["QualityOfServicePriority"] = "7"
-    hmc._network_adapter_creation_feed.side_effect = [before, fresh, after]
+    hmc.list_adapters.side_effect = [before, fresh, after]
     with pytest.raises((ValueError, HMCError)):
         await update(context, qos_priority=0)
     writer.assert_not_awaited()
@@ -216,7 +216,7 @@ async def test_vlan_actions_verify_the_resulting_set(
 async def test_already_empty_only_request_is_positively_observed_no_write(context):
     before = deepcopy(context[2])
     before[0]["Resource"]["TaggedVLANIDs"] = ""
-    context[0]._network_adapter_creation_feed.side_effect = [before, deepcopy(before)]
+    context[0].list_adapters.side_effect = [before, deepcopy(before)]
     result = await update(context, addl_vlan_ids=[])
     assert (result.submission, result.mutation_dispatched, result.reason) == (
         "not_dispatched",
@@ -234,7 +234,7 @@ async def test_remove_can_repair_a_complete_baseline_above_twenty(context):
     before[0]["Resource"]["TaggedVLANIDs"] = " ".join(map(str, range(101, 122)))
     after = deepcopy(before)
     after[0]["Resource"]["TaggedVLANIDs"] = " ".join(map(str, range(101, 121)))
-    context[0]._network_adapter_creation_feed.side_effect = [
+    context[0].list_adapters.side_effect = [
         before,
         deepcopy(before),
         after,
@@ -292,7 +292,7 @@ async def test_native_provenance_and_post_observation_remain_separate(
 
 @pytest.mark.asyncio
 async def test_successful_command_output_cannot_verify_missing_readback(context):
-    context[0]._network_adapter_creation_feed.side_effect = [
+    context[0].list_adapters.side_effect = [
         context[2],
         deepcopy(context[2]),
         HMCError("unavailable"),
@@ -389,7 +389,7 @@ async def test_invalid_baseline_binding_refuses_before_write(context, change):
         before[0]["ResourceType"] = "VirtualSCSIClientAdapter"
     else:
         before[0]["Resource"].pop("VirtualSlotNumber")
-    context[0]._network_adapter_creation_feed.side_effect = [before]
+    context[0].list_adapters.side_effect = [before]
     with pytest.raises((ValueError, HMCError)):
         await update(context, qos_priority=0)
     context[4].assert_not_awaited()
@@ -493,11 +493,7 @@ async def test_control_bearing_native_name_refuses_before_ownership_read(context
 async def test_update_observation_propagates_fatal_tls(context, fault):
     hmc, _, before, _, _, _ = context
     failure = HMCTLSFingerprintError("private-pin")
-    method = (
-        "get_logical_partition"
-        if fault == "parent"
-        else "_network_adapter_creation_feed"
-    )
+    method = "get_logical_partition" if fault == "parent" else "list_adapters"
     getattr(hmc, method).side_effect = failure
     with pytest.raises(HMCTLSFingerprintError) as caught:
         await adapters._network_update_after(
@@ -522,12 +518,12 @@ async def test_postwrite_fatal_tls_retains_update_and_stops_reads(context, fault
         hmc.get_logical_partition.side_effect = read
         method = "get_logical_partition"
     else:
-        hmc._network_adapter_creation_feed.side_effect = [
+        hmc.list_adapters.side_effect = [
             before,
             deepcopy(before),
             failure,
         ]
-        method = "_network_adapter_creation_feed"
+        method = "list_adapters"
 
     result = await update(context, qos_priority=0)
     assert hmc.mock_calls[-1][0] == method

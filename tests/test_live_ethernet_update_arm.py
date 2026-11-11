@@ -213,7 +213,7 @@ def live_boundary(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         HMCClient,
-        "_network_adapter_creation_feed",
+        "list_adapters",
         api("ClientNetworkAdapter", lambda: state.rows),
     )
 

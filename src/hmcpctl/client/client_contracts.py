@@ -401,10 +401,6 @@ class AdaptersClient(Protocol):
         **kwargs: Any,
     ) -> httpx.Response: ...
 
-    async def _network_adapter_creation_feed(
-        self, lpar_uuid: str, *, allow_empty: bool = False
-    ) -> list[dict[str, Any]]: ...
-
     async def list_child(
         self, parent_type: str, parent_uuid: str, child_type: str
     ) -> list[dict[str, Any]]: ...

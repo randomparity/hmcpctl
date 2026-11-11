@@ -61,7 +61,7 @@ def hmc(monkeypatch):
     client.list_logical_partitions.return_value = [partition]
     client.get_logical_partition.return_value = partition
     client.add_network_adapter.return_value = entry()
-    client._network_adapter_creation_feed.side_effect = [[], [entry()]]
+    client.list_adapters.side_effect = [[], [entry()]]
     monkeypatch.setattr(
         ownership,
         "get_lpar_description",
@@ -89,7 +89,7 @@ async def test_selected_fields_require_new_contained_identity_and_independent_va
         "mismatched_fields": [],
         "unavailable_fields": [],
     }
-    assert hmc._network_adapter_creation_feed.await_count == 2
+    assert hmc.list_adapters.await_count == 2
     hmc.add_network_adapter.assert_awaited_once()
     assert hmc.add_network_adapter.await_args.kwargs == {
         "slot_number": None,
@@ -104,7 +104,7 @@ async def test_selected_fields_require_new_contained_identity_and_independent_va
 async def test_omitted_new_fields_keep_legacy_reads_and_result(hmc):
     result = await create(hmc)
     assert result.creation_verification is None
-    hmc._network_adapter_creation_feed.assert_not_awaited()
+    hmc.list_adapters.assert_not_awaited()
     assert not set(FIELDS) & hmc.add_network_adapter.await_args.kwargs.keys()
 
 
@@ -128,7 +128,7 @@ async def test_bad_selected_fields_refuse_before_identity_or_description_reads(
     hmc.list_system_summaries.assert_not_awaited()
     hmc.list_logical_partitions.assert_not_awaited()
     ownership.get_lpar_description.assert_not_awaited()
-    hmc._network_adapter_creation_feed.assert_not_awaited()
+    hmc.list_adapters.assert_not_awaited()
     hmc.add_network_adapter.assert_not_awaited()
 
 
@@ -139,7 +139,7 @@ async def test_actual_ownership_guard_blocks_foreign_partition_before_create(hmc
     )
     with pytest.raises(PermissionError):
         await create(hmc, qos_priority=0)
-    hmc._network_adapter_creation_feed.assert_not_awaited()
+    hmc.list_adapters.assert_not_awaited()
     hmc.add_network_adapter.assert_not_awaited()
 
 
@@ -154,7 +154,7 @@ async def test_actual_ownership_guard_blocks_foreign_partition_before_create(hmc
     ],
 )
 async def test_unusable_baseline_blocks_the_only_write(hmc, baseline):
-    hmc._network_adapter_creation_feed.side_effect = [baseline]
+    hmc.list_adapters.side_effect = [baseline]
     with pytest.raises(HMCError):
         await create(hmc, qos_priority=0)
     hmc.add_network_adapter.assert_not_awaited()
@@ -182,7 +182,7 @@ async def test_unusable_create_identity_is_unavailable_not_inferred(hmc, respons
 
 @pytest.mark.asyncio
 async def test_preexisting_case_variant_is_not_verified_as_new(hmc):
-    hmc._network_adapter_creation_feed.side_effect = [
+    hmc.list_adapters.side_effect = [
         [entry(CREATED.upper())],
         [entry()],
     ]
@@ -204,7 +204,7 @@ async def test_preexisting_case_variant_is_not_verified_as_new(hmc):
 async def test_missing_foreign_or_ambiguous_post_identity_remains_unavailable(
     hmc, after
 ):
-    hmc._network_adapter_creation_feed.side_effect = [[], after]
+    hmc.list_adapters.side_effect = [[], after]
     result = await create(hmc, qos_priority=0)
     assert result.creation_verification["status"] == "unavailable"
     hmc.delete_adapter.assert_not_awaited()
@@ -215,7 +215,7 @@ async def test_uuid_case_and_attributed_fields_are_compared_semantically(hmc):
     values = {
         key: {"@attrs": {"ksv": "V1_0"}, "text": value} for key, value in STORED.items()
     }
-    hmc._network_adapter_creation_feed.side_effect = [
+    hmc.list_adapters.side_effect = [
         [],
         [entry(CREATED.upper(), values), entry(OLD)],
     ]
@@ -227,7 +227,7 @@ async def test_uuid_case_and_attributed_fields_are_compared_semantically(hmc):
 async def test_known_mismatch_outranks_missing_field_and_keeps_both_inventories(hmc):
     values = {**STORED, "QualityOfServicePriority": "1"}
     del values["VirtualStationInterfaceTypeID"]
-    hmc._network_adapter_creation_feed.side_effect = [[], [entry(values=values)]]
+    hmc.list_adapters.side_effect = [[], [entry(values=values)]]
     result = await create(hmc, **FIELDS)
     assert result.creation_verification == {
         "status": "mismatched",
@@ -249,7 +249,7 @@ async def test_known_mismatch_outranks_missing_field_and_keeps_both_inventories(
     ],
 )
 async def test_missing_repeated_or_malformed_required_leaf_is_unavailable(hmc, raw):
-    hmc._network_adapter_creation_feed.side_effect = [
+    hmc.list_adapters.side_effect = [
         [],
         [
             entry(
@@ -271,7 +271,7 @@ async def test_missing_repeated_or_malformed_required_leaf_is_unavailable(hmc, r
 )
 async def test_absent_tagged_vlan_ids_means_empty(hmc, requested, status, mismatched):
     values = {key: value for key, value in STORED.items() if key != "TaggedVLANIDs"}
-    hmc._network_adapter_creation_feed.side_effect = [[], [entry(values=values)]]
+    hmc.list_adapters.side_effect = [[], [entry(values=values)]]
     result = await create(hmc, addl_vlan_ids=requested)
     assert result.creation_verification == {
         "status": status,
@@ -284,7 +284,7 @@ async def test_absent_tagged_vlan_ids_means_empty(hmc, requested, status, mismat
 @pytest.mark.asyncio
 @pytest.mark.parametrize("raw", [None, ["2"], {"text": "2"}, "2.0", "0", "4095"])
 async def test_null_or_malformed_tagged_vlan_ids_stays_unavailable(hmc, raw):
-    hmc._network_adapter_creation_feed.side_effect = [
+    hmc.list_adapters.side_effect = [
         [],
         [entry(values={**STORED, "TaggedVLANIDs": raw})],
     ]
@@ -303,7 +303,7 @@ async def test_null_or_malformed_tagged_vlan_ids_stays_unavailable(hmc, raw):
     ],
 )
 async def test_absent_vlans_does_not_verify_missing_or_wrong_resource(hmc, observed):
-    hmc._network_adapter_creation_feed.side_effect = [[], [observed]]
+    hmc.list_adapters.side_effect = [[], [observed]]
     result = await create(hmc, addl_vlan_ids=[])
     assert result.creation_verification["status"] == "unavailable"
     assert result.creation_verification["unavailable_fields"] == ["addl_vlan_ids"]
@@ -318,7 +318,7 @@ async def test_explicit_empty_mac_none_and_disabled_qos_are_not_omission(hmc):
         "QualityOfServicePriorityEnabled": "false",
         "QualityOfServicePriority": "malformed",
     }
-    hmc._network_adapter_creation_feed.side_effect = [[], [entry(values=values)]]
+    hmc.list_adapters.side_effect = [[], [entry(values=values)]]
     result = await create(
         hmc, addl_vlan_ids=[], allowed_os_mac_addrs="none", qos_priority="none"
     )
@@ -342,7 +342,7 @@ async def test_native_submission_error_preserves_exception_and_does_not_retry(
         await create(hmc, qos_priority=0)
     assert error.value is failure
     hmc.add_network_adapter.assert_awaited_once()
-    assert hmc._network_adapter_creation_feed.await_count == 1
+    assert hmc.list_adapters.await_count == 1
     hmc.delete_adapter.assert_not_awaited()
 
 
@@ -421,7 +421,7 @@ async def test_lone_vsi_field_refusal_passes_through(hmc):
 
 @pytest.mark.asyncio
 async def test_post_read_error_is_unavailable_without_automatic_delete(hmc):
-    hmc._network_adapter_creation_feed.side_effect = [[], HMCError("read unavailable")]
+    hmc.list_adapters.side_effect = [[], HMCError("read unavailable")]
     result = await create(hmc, qos_priority=0)
     assert result.resource == entry()
     assert result.creation_verification["status"] == "unavailable"
@@ -434,7 +434,7 @@ async def test_input_lists_are_snapshotted_before_the_first_remote_await(hmc):
     requested = [2, 3]
     calls = 0
 
-    async def inventory(_partition):
+    async def inventory(_partition, _adapter_type):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -442,7 +442,7 @@ async def test_input_lists_are_snapshotted_before_the_first_remote_await(hmc):
             return []
         return [entry()]
 
-    hmc._network_adapter_creation_feed.side_effect = inventory
+    hmc.list_adapters.side_effect = inventory
     result = await create(hmc, addl_vlan_ids=requested)
     assert hmc.add_network_adapter.await_args.kwargs["addl_vlan_ids"] == [2, 3]
     assert result.creation_verification["status"] == "verified"
@@ -451,7 +451,7 @@ async def test_input_lists_are_snapshotted_before_the_first_remote_await(hmc):
 @pytest.mark.asyncio
 async def test_mac_address_lists_compare_hex_case_without_mutating_caller_values(hmc):
     requested = ["0200000000ab"]
-    hmc._network_adapter_creation_feed.side_effect = [
+    hmc.list_adapters.side_effect = [
         [],
         [
             entry(
@@ -492,7 +492,7 @@ async def test_mac_address_lists_compare_hex_case_without_mutating_caller_values
 async def test_observed_policy_values_are_not_guessed_or_coerced(
     hmc, field, stored, expected
 ):
-    hmc._network_adapter_creation_feed.side_effect = [
+    hmc.list_adapters.side_effect = [
         [],
         [entry(values={**STORED, **stored})],
     ]
@@ -504,7 +504,7 @@ async def test_observed_policy_values_are_not_guessed_or_coerced(
 async def test_missing_resource_body_cannot_verify_selected_fields(hmc):
     item = entry()
     item["Resource"] = None
-    hmc._network_adapter_creation_feed.side_effect = [[], [item]]
+    hmc.list_adapters.side_effect = [[], [item]]
     result = await create(hmc, qos_priority=0)
     assert result.creation_verification["status"] == "unavailable"
 
@@ -512,7 +512,7 @@ async def test_missing_resource_body_cannot_verify_selected_fields(hmc):
 @pytest.mark.asyncio
 async def test_baseline_read_failure_propagates_before_submission(hmc):
     failure = HMCError("baseline unavailable")
-    hmc._network_adapter_creation_feed.side_effect = failure
+    hmc.list_adapters.side_effect = failure
     with pytest.raises(HMCError) as error:
         await create(hmc, qos_priority=0)
     assert error.value is failure
@@ -525,14 +525,12 @@ async def test_creation_identity_failure_stops_with_known_submission_state(
     hmc, submitted
 ):
     failure = HMCTLSFingerprintError("certificate identity differs")
-    hmc._network_adapter_creation_feed.side_effect = (
-        [[], failure] if submitted else [failure]
-    )
+    hmc.list_adapters.side_effect = [[], failure] if submitted else [failure]
     with pytest.raises(HMCTLSFingerprintError) as caught:
         await create(hmc, qos_priority=0)
     assert caught.value is failure
     assert hmc.add_network_adapter.await_count == int(submitted)
-    assert hmc._network_adapter_creation_feed.await_count == (2 if submitted else 1)
+    assert hmc.list_adapters.await_count == (2 if submitted else 1)
     hmc.delete_adapter.assert_not_awaited()
     if submitted:
         note = " ".join(caught.value.__notes__)

@@ -392,12 +392,16 @@ def handoff_app(app, monkeypatch):
         return []
 
     async def no_adapters(
-        _self: Any, _lpar_uuid: str, *, allow_empty: bool = False
+        _self: Any,
+        _lpar_uuid: str,
+        _adapter_type: str,
+        *,
+        allow_empty_network: bool = False,
     ) -> list[dict[str, Any]]:
         return []
 
     monkeypatch.setattr(HMCClient, "list_vios", no_vios)
-    monkeypatch.setattr(HMCClient, "_network_adapter_creation_feed", no_adapters)
+    monkeypatch.setattr(HMCClient, "list_adapters", no_adapters)
     return app
 
 

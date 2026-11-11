@@ -61,8 +61,12 @@ class NetHMC:
         self.delete_lands = True
         self.response = True
 
-    async def _network_adapter_creation_feed(self, uuid, *, allow_empty=False):
-        assert uuid == LPAR and allow_empty is True
+    async def list_adapters(self, uuid, adapter_type, *, allow_empty_network=False):
+        assert (
+            uuid == LPAR
+            and adapter_type == "ClientNetworkAdapter"
+            and allow_empty_network is True
+        )
         return list(self.adapters)
 
     async def list_virtual_networks(self, system):
@@ -252,7 +256,7 @@ def test_plan_names_an_unreadable_inventory():
     async def broken(*_, **__):
         raise HMCError("boom", 500, "secret body")
 
-    fake._network_adapter_creation_feed = broken
+    fake.list_adapters = broken
     with pytest.raises(OperationFailed, match="could not be read \\(HMCError\\)"):
         _plan(fake, {"remove": [{"mac": MAC_A}]})
 
@@ -381,7 +385,7 @@ def test_removal_propagates_tls_identity_failure_without_further_reads(failure_a
         mismatch if failure_at == "delete" else HMCError("delete failed", 500)
     )
     fake.delete_lands = False
-    listing = fake._network_adapter_creation_feed
+    listing = fake.list_adapters
     reads = []
 
     async def observed(*args, **kwargs):
@@ -392,7 +396,7 @@ def test_removal_propagates_tls_identity_failure_without_further_reads(failure_a
             raise mismatch
         return []
 
-    fake._network_adapter_creation_feed = observed
+    fake.list_adapters = observed
     with pytest.raises(HMCTLSFingerprintError) as raised:
         _write(fake, plan, "network_remove:0")
     assert raised.value is mismatch
@@ -543,7 +547,7 @@ def test_removal_error_with_unreadable_relist_keeps_the_delete_error():
     fake.delete_error = HMCError("refused", 500, "")
     plan = _plan(fake, {"remove": [{"mac": MAC_B}]})
     reads = []
-    listing = fake._network_adapter_creation_feed
+    listing = fake.list_adapters
 
     async def flaky(*args, **kwargs):
         reads.append(args)
@@ -551,7 +555,7 @@ def test_removal_error_with_unreadable_relist_keeps_the_delete_error():
             raise HMCError("relist", 503, "")
         return await listing(*args, **kwargs)
 
-    fake._network_adapter_creation_feed = flaky
+    fake.list_adapters = flaky
     with pytest.raises(HMCError, match="refused"):
         _write(fake, plan, "network_remove:0")
 
@@ -594,8 +598,11 @@ class BodyMixin(NetHMC):
             _profile_entry(name, ()) for name in self.recovery
         ]
 
-    async def list_adapters(self, uuid, adapter_type):
-        assert adapter_type != "ClientNetworkAdapter"
+    async def list_adapters(self, uuid, adapter_type, *, allow_empty_network=False):
+        if adapter_type == "ClientNetworkAdapter":
+            return await NetHMC.list_adapters(
+                self, uuid, adapter_type, allow_empty_network=allow_empty_network
+            )
         return []
 
     async def get_console_info(self):

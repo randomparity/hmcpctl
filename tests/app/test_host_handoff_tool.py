@@ -54,8 +54,8 @@ class _HMC:
         self.calls.append(f"get_vios_storage_detail {uuid}")
         return {"Resource": {}}
 
-    async def _network_adapter_creation_feed(
-        self, uuid: str, *, allow_empty: bool = False
+    async def list_adapters(
+        self, uuid: str, adapter_type: str, *, allow_empty_network: bool = False
     ) -> list[dict]:
         self.calls.append(f"adapters {uuid}")
         return []

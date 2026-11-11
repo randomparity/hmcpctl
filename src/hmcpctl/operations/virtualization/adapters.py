@@ -208,7 +208,7 @@ async def add_network_adapter(
     location = await read_change_location(hmc, lpar_uuid)
     baseline = (
         _network_inventory_identities(
-            await hmc._network_adapter_creation_feed(lpar_uuid)
+            await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter")
         )
         if selected
         else set()
@@ -322,7 +322,7 @@ async def update_network_adapter(
     await authorize_lpar_mutation(
         hmc, system_name, parent[0], ownership_override=ownership_override
     )
-    before = deepcopy(await hmc._network_adapter_creation_feed(lpar_uuid))
+    before = deepcopy(await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter"))
     inventory = _network_update_inventory(before)
     if adapter_uuid not in inventory:
         raise ValueError(
@@ -332,7 +332,7 @@ async def update_network_adapter(
         inventory[adapter_uuid], selected
     )
     fresh_parent = await _network_update_parent(hmc, system_uuid, lpar_uuid)
-    fresh = deepcopy(await hmc._network_adapter_creation_feed(lpar_uuid))
+    fresh = deepcopy(await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter"))
     if (
         await _network_update_system(hmc, system_uuid) != system_name
         or fresh_parent[:2] != parent[:2]
@@ -713,7 +713,7 @@ async def _network_update_after(
     except (HMCError, ValueError):
         parent_matches = False
     try:
-        after = await hmc._network_adapter_creation_feed(lpar)
+        after = await hmc.list_adapters(lpar, "ClientNetworkAdapter")
     except HMCTLSFingerprintError:
         raise
     except HMCError:
@@ -827,7 +827,7 @@ async def _verify_network_creation(
     if identity is None or identity in baseline:
         return result
     try:
-        after = await hmc._network_adapter_creation_feed(lpar_uuid)
+        after = await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter")
         identities = _network_inventory_identities(after)
     except HMCTLSFingerprintError:
         raise

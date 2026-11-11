@@ -72,8 +72,8 @@ class _HMC:
     async def get_vios_storage_detail(self, _uuid: str) -> dict[str, Any]:
         return {"Resource": {}}
 
-    async def _network_adapter_creation_feed(
-        self, _uuid: str, *, allow_empty: bool = False
+    async def list_adapters(
+        self, _uuid: str, adapter_type: str, *, allow_empty_network: bool = False
     ) -> list[dict[str, Any]]:
         if isinstance(self.adapters, Exception):
             raise self.adapters

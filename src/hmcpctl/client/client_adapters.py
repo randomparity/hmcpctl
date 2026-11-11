@@ -23,12 +23,18 @@ from .client_parse import _parse_feed
 
 class AdaptersMixin:
     async def list_adapters(
-        self: AdaptersClient, lpar_uuid: str, adapter_type: AdapterType
+        self: AdaptersClient,
+        lpar_uuid: str,
+        adapter_type: AdapterType,
+        *,
+        allow_empty_network: bool = False,
     ) -> list[dict[str, Any]]:
         """List one adapter kind, requiring complete network-adapter inventory.
 
-        ClientNetworkAdapter returns [] only for a complete, empty Atom feed.
-        HTTP 204, blank responses, pagination and ambiguous network entries raise
+        ClientNetworkAdapter returns [] for a complete, empty Atom feed.
+        allow_empty_network also accepts HTTP 204 when explicitly proving absence;
+        it does not change other adapter kinds. The default remains strict.
+        Unaccepted HTTP 204, blank responses, pagination and ambiguous entries raise
         HMCError. Other adapter kinds return [] for an empty successful response.
 
         Raises:
@@ -38,7 +44,9 @@ class AdaptersMixin:
         """
         validate_adapter_type(adapter_type)
         if adapter_type == "ClientNetworkAdapter":
-            return await self._network_adapter_creation_feed(lpar_uuid)
+            return await _complete_network_adapter_feed(
+                self, lpar_uuid, allow_empty=allow_empty_network
+            )
         return await self.list_child("LogicalPartition", lpar_uuid, adapter_type)
 
     async def delete_adapter(
@@ -122,59 +130,56 @@ class AdaptersMixin:
             "LogicalPartition", lpar_uuid, "ClientNetworkAdapter", xml
         )
 
-    async def _network_adapter_creation_feed(
-        self: AdaptersClient, lpar_uuid: str, *, allow_empty: bool = False
-    ) -> list[dict[str, Any]]:
-        """Read complete inventory for network listing and creation identity proof.
 
-        An empty collection (HTTP 204) is refused as unavailable unless *allow_empty*:
-        a caller proving an adapter absent reads it as no adapters (ADR 0325).
-        """
-        path = f"/rest/api/uom/LogicalPartition/{lpar_uuid}/ClientNetworkAdapter"
-        response = await self._request_with_uuid_path_arguments(
-            "GET",
-            path,
-            uuid_path_arguments={"lpar_uuid": lpar_uuid},
-            headers=self._uom_headers("ClientNetworkAdapter"),
-        )
-        if response.status_code == 204:
-            if allow_empty:
-                return []
-            raise HMCError("Client network adapter inventory is unavailable")
-        if response.status_code != 200:
-            raise HMCError(f"GET {path} failed", response.status_code, response.text)
-        if "link" in response.headers or "content-range" in response.headers:
-            raise HMCError(
-                "Client network adapter inventory must be a complete Atom feed"
-            )
-        xml = response.text
-        if not xml.strip():
-            raise HMCError("Client network adapter inventory is unavailable")
-        entries = _parse_feed(xml, path)
-        root = DET.fromstring(xml.encode("utf-8"))
-        if root.tag != f"{{{ATOM_NS}}}feed" or any(
-            node.get("rel", "").casefold() == "next"
-            for node in root.findall(f"{{{ATOM_NS}}}link")
+async def _complete_network_adapter_feed(
+    self: AdaptersClient, lpar_uuid: str, *, allow_empty: bool = False
+) -> list[dict[str, Any]]:
+    """Read complete inventory for network listing and creation identity proof.
+
+    An empty collection (HTTP 204) is refused as unavailable unless *allow_empty*:
+    a caller proving an adapter absent reads it as no adapters (ADR 0325).
+    """
+    path = f"/rest/api/uom/LogicalPartition/{lpar_uuid}/ClientNetworkAdapter"
+    response = await self._request_with_uuid_path_arguments(
+        "GET",
+        path,
+        uuid_path_arguments={"lpar_uuid": lpar_uuid},
+        headers=self._uom_headers("ClientNetworkAdapter"),
+    )
+    if response.status_code == 204:
+        if allow_empty:
+            return []
+        raise HMCError("Client network adapter inventory is unavailable")
+    if response.status_code != 200:
+        raise HMCError(f"GET {path} failed", response.status_code, response.text)
+    if "link" in response.headers or "content-range" in response.headers:
+        raise HMCError("Client network adapter inventory must be a complete Atom feed")
+    xml = response.text
+    if not xml.strip():
+        raise HMCError("Client network adapter inventory is unavailable")
+    entries = _parse_feed(xml, path)
+    root = DET.fromstring(xml.encode("utf-8"))
+    if root.tag != f"{{{ATOM_NS}}}feed" or any(
+        node.get("rel", "").casefold() == "next"
+        for node in root.findall(f"{{{ATOM_NS}}}link")
+    ):
+        raise HMCError("Client network adapter inventory must be a complete Atom feed")
+    for entry in root:
+        if localname(entry.tag) != "entry":
+            continue
+        ids = [node for node in entry if localname(node.tag) == "id"]
+        bodies = [node for node in entry if localname(node.tag) == "content"]
+        if (
+            entry.tag != f"{{{ATOM_NS}}}entry"
+            or len(ids) != 1
+            or ids[0].tag != f"{{{ATOM_NS}}}id"
+            or len(ids[0]) != 0
+            or len(bodies) != 1
+            or bodies[0].tag != f"{{{ATOM_NS}}}content"
+            or len(bodies[0]) != 1
+            or localname(bodies[0][0].tag) != "ClientNetworkAdapter"
         ):
             raise HMCError(
-                "Client network adapter inventory must be a complete Atom feed"
+                "Client network adapter inventory requires unambiguous Atom entries"
             )
-        for entry in root:
-            if localname(entry.tag) != "entry":
-                continue
-            ids = [node for node in entry if localname(node.tag) == "id"]
-            bodies = [node for node in entry if localname(node.tag) == "content"]
-            if (
-                entry.tag != f"{{{ATOM_NS}}}entry"
-                or len(ids) != 1
-                or ids[0].tag != f"{{{ATOM_NS}}}id"
-                or len(ids[0]) != 0
-                or len(bodies) != 1
-                or bodies[0].tag != f"{{{ATOM_NS}}}content"
-                or len(bodies[0]) != 1
-                or localname(bodies[0][0].tag) != "ClientNetworkAdapter"
-            ):
-                raise HMCError(
-                    "Client network adapter inventory requires unambiguous Atom entries"
-                )
-        return entries
+    return entries
