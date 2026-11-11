@@ -72,6 +72,8 @@ _INVENTORY_PATHS = tuple(
         "operations/lpar/assignments.py",
         "operations/lpar/boot_order.py",
         "operations/lpar/configuration.py",
+        "operations/lpar/profiles/sync.py",
+        "operations/lpar/profiles/artifacts.py",
         "operations/lpar/vtpm.py",
         "operations/lpar/core.py",
         "operations/lpar/creation/core.py",
@@ -144,6 +146,7 @@ _OPERATIONAL_MUTATORS = frozenset({"submit_power_on_lpar", "power_off_lpar"})
 _CREATION_MUTATORS = frozenset({"create_and_stamp_lpar", "deploy_partition_template"})
 _NON_LPAR_MUTATORS = frozenset(
     {
+        "delete_backup_profile_artifact",
         "create_volume_group",
         "create_virtual_disk",
         "delete_virtual_disk",

@@ -12,7 +12,7 @@ from fastmcp import Client
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
-from hmcpctl.operations.lpar.configuration import synchronize_lpar_profile
+from hmcpctl.operations.lpar.profiles.sync import synchronize_lpar_profile
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar.profiles import (
     hmc_backup_lpar_profiles,
@@ -284,7 +284,7 @@ def test_synchronize_refuses_an_unknown_mode_before_any_hmc_call():
 
     with (
         patch(
-            "hmcpctl.operations.lpar.configuration.resolve_and_authorize_lpar_names",
+            "hmcpctl.operations.lpar.profiles.sync.resolve_and_authorize_lpar_names",
             new=AsyncMock(side_effect=AssertionError("names were resolved")),
         ),
         pytest.raises(ValueError, match="enable, disable or suspend"),

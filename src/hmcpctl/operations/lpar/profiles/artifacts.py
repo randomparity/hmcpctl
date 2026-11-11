@@ -1,4 +1,4 @@
-"""Bounded managed-system backup inventories and explicit artifact deletion."""
+"""Managed-system profile backup inventories, artifact deletion and collective restore."""
 
 from __future__ import annotations
 
@@ -15,7 +15,30 @@ from hmcpctl.jobs import (
     job_outcome,
     wait_for_submitted_job,
 )
+from hmcpctl.operations.lpar.ownership import _authorize_system_lpar_profile_restore
 from hmcpctl.resource_identity import resolve_system_uuid
+from hmcpctl.ssh.profiles import ProfileRestoreType, restore_lpar_profiles
+
+
+async def restore_system_lpar_profiles(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    file_path: str,
+    restore_type: ProfileRestoreType,
+    *,
+    ownership_override: bool = False,
+    force_keystore: bool = False,
+) -> str:
+    """Authorize and restore every LPAR profile on one managed system."""
+    system_name = await _authorize_system_lpar_profile_restore(
+        hmc,
+        system_name_or_uuid,
+        ownership_override=ownership_override,
+    )
+    return await restore_lpar_profiles(
+        hmc.config, system_name, file_path, restore_type, force_keystore=force_keystore
+    )
+
 
 _MAX_RESULT_BYTES = 1_048_576
 _MAX_ARTIFACTS = 1000

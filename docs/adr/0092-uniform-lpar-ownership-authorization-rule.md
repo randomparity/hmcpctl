@@ -145,8 +145,8 @@ against that commit rather than maintained forward.
 | `decommission_lpar` | `operations/lpar/decommission/core.py::decommission_lpar` | guarded (`operations/lpar/decommission/core.py::decommission_lpar`, via `authorize_decommission_lpar_ownership_snapshot`) | — |
 | `rename_lpar` | `operations/lpar/core.py::rename_lpar` | guarded (`operations/lpar/core.py::rename_lpar`) | — |
 | `set_lpar_ownership_description` | `operations/lpar/ownership.py::set_lpar_ownership_description` | guarded (`operations/lpar/ownership.py::set_lpar_ownership_description`) | — |
-| `synchronize_lpar_profile` | `operations/lpar/configuration.py::synchronize_lpar_profile` | guarded (`operations/lpar/configuration.py::synchronize_lpar_profile`) | — |
-| `restore_system_lpar_profiles` | `operations/lpar/configuration.py::restore_system_lpar_profiles` | guarded before SSH by `_authorize_system_lpar_profile_restore` (`operations/lpar/ownership.py::_authorize_system_lpar_profile_restore`) | #449 |
+| `synchronize_lpar_profile` | `operations/lpar/profiles/sync.py::synchronize_lpar_profile` | guarded (`operations/lpar/profiles/sync.py::synchronize_lpar_profile`) | — |
+| `restore_system_lpar_profiles` | `operations/lpar/profiles/artifacts.py::restore_system_lpar_profiles` | guarded before SSH by `_authorize_system_lpar_profile_restore` (`operations/lpar/ownership.py::_authorize_system_lpar_profile_restore`) | #449 |
 
 `rename_lpar` is Destructive rather than Reconfiguring because the partition name
 is the identity every consumer addresses, and the ownership token itself is keyed
@@ -286,6 +286,7 @@ LPAR-mutating exemption.
 | `deploy_partition_template` (`operations/templates/core.py::deploy_partition_template`) | Creates the partition and stamps it per ADR 0014. |
 | `hmc_capture_lpar_console` (`server_tools/console.py::hmc_capture_lpar_console`) | Holds a console session and releases it. Changes no partition existence, configuration or run state. |
 | `hmc_backup_lpar_profiles` (`server_tools/lpar/profiles.py::hmc_backup_lpar_profiles`) | Reads every profile and writes an HMC-side backup file; it does not mutate a partition or profile. |
+| `delete_backup_profile_artifact` (`operations/lpar/profiles/artifacts.py::delete_backup_profile_artifact`) | Deletes one listed ManagedSystem backup artifact; changes no live partition or profile. The MCP destructive authorization and bounded inventory admission remain required. |
 | `hmc_migrate_validate_lpar` (`server_tools/lpar/migration.py::hmc_migrate_validate_lpar`) | Calls `validate_lpar_migration`, which submits an LPM validation job and changes nothing. The mutating migration operation has its own guard. |
 | `install_vios` (`operations/vios/install.py::install_vios`) | Added by #366. `installios` requires its `-p` partition to be a Virtual I/O Server, which ADR 0011 never stamps, so there is no ownership token to authorize against. After resolving through the `VirtualIOServer` feed, both name and UUID selectors are checked through the resolved `VirtualIOServer` resource for Virtual I/O Server type and `not activated` state before submission. |
 

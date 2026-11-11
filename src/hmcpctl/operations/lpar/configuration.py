@@ -15,7 +15,6 @@ from hmcpctl.operations.lpar.linux_roles import (
     with_role_evidence,
 )
 from hmcpctl.operations.lpar.ownership import (
-    _authorize_system_lpar_profile_restore,
     _resolve_and_authorize_vios_names,
     _resolve_contained_lpar_names,
     resolve_and_authorize_lpar_names,
@@ -34,13 +33,8 @@ from ...ssh.lpar import (
     set_lpar_settings,
 )
 from ...ssh.profiles import (
-    ProfileRestoreType,
-    ProfileSyncMode,
-    restore_lpar_profiles,
     set_lpar_msp,
     set_lpar_proc_compat,
-    sync_lpar_profile,
-    validate_profile_sync_mode,
 )
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import leaf_text
@@ -75,45 +69,6 @@ PROCESSOR_COMPATIBILITY_MODES: frozenset[ProcessorCompatibilityMode] = frozenset
         "POWER11",
     }
 )
-
-
-async def restore_system_lpar_profiles(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    file_path: str,
-    restore_type: ProfileRestoreType,
-    *,
-    ownership_override: bool = False,
-    force_keystore: bool = False,
-) -> str:
-    """Authorize and restore every LPAR profile on one managed system."""
-    system_name = await _authorize_system_lpar_profile_restore(
-        hmc,
-        system_name_or_uuid,
-        ownership_override=ownership_override,
-    )
-    return await restore_lpar_profiles(
-        hmc.config, system_name, file_path, restore_type, force_keystore=force_keystore
-    )
-
-
-async def synchronize_lpar_profile(
-    hmc: HMCClient,
-    lpar_name_or_uuid: str,
-    *,
-    system_name_or_uuid: str,
-    ownership_override: bool = False,
-    mode: ProfileSyncMode = "enable",
-) -> str:
-    """Authorize and set an LPAR's ``sync_curr_profile`` setting (ADR 0201)."""
-    validate_profile_sync_mode(mode)
-    system_name, lpar_name = await resolve_and_authorize_lpar_names(
-        hmc,
-        lpar_name_or_uuid,
-        ownership_override=ownership_override,
-        system_name_or_uuid=system_name_or_uuid,
-    )
-    return await sync_lpar_profile(hmc.config, system_name, lpar_name, mode)
 
 
 async def configure_lpar_msp(

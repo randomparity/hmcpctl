@@ -7,6 +7,7 @@ from hmcpctl.operations.lpar.profiles.artifacts import (
     BackupProfileInventory,
     delete_backup_profile_artifact,
     list_backup_profile_artifacts,
+    restore_system_lpar_profiles,
 )
 from hmcpctl.operations.lpar.profiles.core import (
     PartitionProfileInventory,
@@ -25,10 +26,7 @@ from ..._app import (
     with_client,
 )
 from ...documents.partition_profile import ProfilePatch
-from ...operations.lpar.configuration import (
-    restore_system_lpar_profiles,
-    synchronize_lpar_profile,
-)
+from ...operations.lpar.profiles.sync import synchronize_lpar_profile
 from ...operations.virtualization.pcie import (
     assign_dedicated_pcie_slot,
     unassign_dedicated_pcie_slot,

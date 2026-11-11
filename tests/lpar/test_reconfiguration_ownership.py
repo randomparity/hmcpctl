@@ -15,7 +15,6 @@ from hmcpctl.documents.lpar import LparResources
 from hmcpctl.operations.lpar.configuration import (
     configure_lpar_msp,
     configure_lpar_processor_compatibility,
-    synchronize_lpar_profile,
 )
 from hmcpctl.operations.lpar.migration import (
     LpmMigrationRequest,
@@ -25,7 +24,10 @@ from hmcpctl.operations.lpar.migration import (
     recover_lpar_migration,
     remote_restart_lpar,
 )
-from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import (
+    ChangeLocation,
+    synchronize_lpar_profile,
+)
 from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionStorage,
     attach_disk_to_lpar,
@@ -351,7 +353,7 @@ async def test_config_operations_reject_foreign_owner_before_ssh_write(
             "hmcpctl.operations.lpar.ownership.get_lpar_description",
             new=AsyncMock(return_value=FOREIGN_OWNER),
         ),
-        patch(f"hmcpctl.operations.lpar.configuration.{write_name}", new=write),
+        patch(f"{operation.__module__}.{write_name}", new=write),
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
         await operation(hmc, LPAR, *args, system_name_or_uuid=SYSTEM_UUID)
@@ -379,7 +381,7 @@ async def test_config_operations_override_skips_ownership_read(
             "hmcpctl.operations.lpar.ownership.get_lpar_description",
             new=AsyncMock(return_value=FOREIGN_OWNER),
         ) as read,
-        patch(f"hmcpctl.operations.lpar.configuration.{write_name}", new=write),
+        patch(f"{operation.__module__}.{write_name}", new=write),
     ):
         await operation(
             hmc, LPAR, *args, system_name_or_uuid=SYSTEM_UUID, ownership_override=True

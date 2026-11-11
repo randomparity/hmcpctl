@@ -14,6 +14,32 @@ from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_names
+from hmcpctl.ssh.profiles import (
+    ProfileSyncMode,
+    sync_lpar_profile,
+    validate_profile_sync_mode,
+)
+
+
+async def synchronize_lpar_profile(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    *,
+    system_name_or_uuid: str,
+    ownership_override: bool = False,
+    mode: ProfileSyncMode = "enable",
+) -> str:
+    """Authorize and set an LPAR's ``sync_curr_profile`` setting (ADR 0201)."""
+    validate_profile_sync_mode(mode)
+    system_name, lpar_name = await resolve_and_authorize_lpar_names(
+        hmc,
+        lpar_name_or_uuid,
+        ownership_override=ownership_override,
+        system_name_or_uuid=system_name_or_uuid,
+    )
+    return await sync_lpar_profile(hmc.config, system_name, lpar_name, mode)
+
 
 ChangeLivesIn = Literal[
     "current-configuration", "current-configuration-and-profile", "unknown"

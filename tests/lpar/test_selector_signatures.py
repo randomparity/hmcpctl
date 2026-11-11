@@ -79,7 +79,7 @@ SELECTOR_FAMILY = [
     ("hmcpctl.operations.lpar.boot_order", "read_lpar_boot_order", False),
     ("hmcpctl.operations.lpar.boot_order", "set_lpar_boot_order", False),
     ("hmcpctl.operations.lpar.boot_order", "clear_lpar_boot_order", False),
-    ("hmcpctl.operations.lpar.configuration", "synchronize_lpar_profile", False),
+    ("hmcpctl.operations.lpar.profiles.sync", "synchronize_lpar_profile", False),
     ("hmcpctl.operations.lpar.configuration", "configure_lpar_msp", False),
     (
         "hmcpctl.operations.lpar.configuration",
