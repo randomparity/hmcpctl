@@ -868,7 +868,7 @@ def rollup(readings: Iterable[SystemReading]) -> Rollup:
     )
 
 
-def allocated(configurable: Any, free: Any) -> Any:
+def allocated(configurable: float | None, free: float | None) -> int | float | None:
     """Configurable minus free capacity, or ``None`` when either is unknown."""
     return _less(configurable, free)
 
