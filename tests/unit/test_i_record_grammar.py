@@ -700,6 +700,36 @@ def _unguarded_i_values(
 ) -> list[str]:
     # C09's source-qualified two-cell CSV is a distinct fixed dialect, never a
     # generic escape from the shared scalar grammar or a function-name whitelist.
+    if (source_path, func.name) == (
+        _REPO_ROOT / "scripts/live_test/arms/vios_boot_source.py",
+        "_native",
+    ):
+        tree = ast.parse(source_path.read_text())
+        helper = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_record"
+        )
+        returns = [
+            node.value for node in ast.walk(helper) if isinstance(node, ast.Return)
+        ]
+        if not returns or any(not _is_builder_call(value) for value in returns):
+            return ["VIOS creation helper does not return the shared builder record"]
+        problems = []
+        for literal in _selected_literals(func, _is_an_i_record_literal):
+            # Creation uses scalar attributes; ordered boot uses its fixed CSV dialect.
+            builder = (
+                "_record"
+                if isinstance(literal, ast.JoinedStr)
+                and _static_text(literal.values[0]).startswith("mksyscfg ")
+                else "encode_boot_record"
+            )
+            problems.extend(
+                _flag_payload_problems(
+                    literal, _builder_bound_names(func, builder), "-i", builder
+                )
+            )
+        return problems
     builder = BUILDER_NAME
     if (source_path, func.name) in {
         (
@@ -1218,3 +1248,48 @@ def test_fixture_record_sites_independently_require_builder(site):
     assert len(records) == 2
     records[site].value = ast.Constant("name=unguarded")
     assert _unguarded_i_values(function)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "none",
+        "creation-bypass",
+        "boot-bypass",
+        "creation-dialect",
+        "helper-bypass",
+        "wrong-owner",
+    ],
+)
+def test_vios_source_records_trace_each_dialect_and_the_creation_helper(
+    tmp_path, monkeypatch, fault
+):
+    relative = "scripts/live_test/arms/vios_boot_source.py"
+    source = (_REPO_ROOT / relative).read_text()
+    if fault == "creation-bypass":
+        source = source.replace('_record(p["fixture"])', 'p["fixture"]')
+    elif fault == "boot-bypass":
+        source = source.replace(
+            'encode_boot_record(ident["partition_id"], index)', "index"
+        )
+    elif fault == "creation-dialect":
+        source = source.replace('_record(p["fixture"])', "encode_boot_record(1, 0)")
+    elif fault == "helper-bypass":
+        source = source.replace(
+            "return build_attribute_record(pairs)", "return str(pairs)"
+        )
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_text(source)
+    monkeypatch.setattr(f"{__name__}._REPO_ROOT", tmp_path)
+    tree = ast.parse(source)
+    native = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_native"
+    )
+    problems = _unguarded_i_values(
+        native,
+        source_path=path.with_name("other.py") if fault == "wrong-owner" else path,
+    )
+    assert bool(problems) is (fault != "none")
