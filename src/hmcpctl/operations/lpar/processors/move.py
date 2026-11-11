@@ -346,7 +346,28 @@ async def move_lpar_processors(
     system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> dict[str, Any]:
-    """Authorize both endpoints, submit once and retain two independent observations."""
+    """Authorize both endpoints, submit once and retain two independent observations.
+
+    Raises:
+        TypeError: The request is not the required typed move model.
+        ValueError: Input, containment, capacity or fresh admission evidence is invalid.
+        PermissionError: Either endpoint fails ownership authorization.
+        HMCError: An HMC or native read fails before submission, including TLS identity
+            failures. Submission HMCError is captured instead; cancellation propagates.
+
+    Returns:
+        A result with source and destination evidence and submission_error. Each
+        endpoint and the aggregate have outcome applied, noop, partial, rejected or
+        unverified; workflow_completed is true only for applied or noop. Completion
+        requires both endpoints; a normal return alone does not establish it.
+        Post-submission HMCError or ValueError becomes an unverified endpoint.
+        A TLS identity failure stops remaining observations and marks unobserved
+        endpoints unverified while retaining earlier evidence. Matching readback of
+        both endpoints can establish applied despite submission_error. Deferred
+        current-configuration verification does not verify guest restart.
+        Inspect incomplete or uncertain outcomes before retrying; no automatic replay
+        or compensation is performed.
+    """
     if not isinstance(move, LparProcessorMove):
         raise TypeError("move must be a typed LparProcessorMove")
     if any(

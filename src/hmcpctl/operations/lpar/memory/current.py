@@ -317,6 +317,24 @@ async def change_lpar_memory(
 
     The existing absolute resources setter is a separate If-Match contract. This
     native operation never replays an uncertain submission or compensates partial effects.
+
+    Raises:
+        TypeError: The request is not the required typed change model.
+        ValueError: Input, containment, capacity or fresh admission evidence is invalid.
+        PermissionError: Ownership authorization refuses the change.
+        HMCError: An HMC or native read fails before submission, including TLS identity
+            failures. Submission HMCError is captured instead; cancellation propagates.
+
+    Returns:
+        A result with before/after evidence, expected targets, submission_error and
+        warnings. outcome is applied, noop, partial, rejected or unverified;
+        workflow_completed is true only for applied or noop. A normal return alone
+        does not establish completion. Post-submission HMCError or ValueError,
+        including TLS identity failures, yields unverified rather than an exception.
+        Matching independent readback can establish applied despite submission_error.
+        Deferred current-configuration verification does not verify guest restart.
+        Inspect incomplete or uncertain outcomes before retrying; no automatic replay
+        or compensation is performed.
     """
     if not isinstance(change, LparMemoryChange):
         raise TypeError("change must be a typed LparMemoryChange")
