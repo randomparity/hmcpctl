@@ -39,6 +39,8 @@ async def created_affinity_group_step(
     observed: dict[str, int | str | None] = {"native-partition": None}
     if not controller_mode:
         observed["native-profile"] = None
+    readback_failures: list[str] = []
+    stage = "created-identity"
     identity_confirmed = False
     identity_conflict = False
     try:
@@ -54,7 +56,9 @@ async def created_affinity_group_step(
         ):
             raise ValueError("Created affinity identity unavailable")
         resolver = resolve_vios_uuid if vios else resolve_lpar_uuid
+        stage = "scoped-identity"
         await resolver(hmc, uuid, system_name_or_uuid=system_uuid)
+        stage = "fresh-identity"
         fresh = (
             await hmc.get_vios(uuid) if vios else await hmc.get_logical_partition(uuid)
         )
@@ -66,17 +70,20 @@ async def created_affinity_group_step(
             or leaf_text(resource.get("PartitionType")) != environment
         ):
             raise ValueError("Created affinity identity changed")
+        stage = "numeric-identity"
         partition_id = leaf_text(resource.get("PartitionID"))
         if (
             not isinstance(partition_id, str)
             or re.fullmatch(r"[1-9][0-9]*", partition_id) is None
         ):
             raise ValueError("Created affinity numeric identity unavailable")
+        stage = "default-profile-identity"
         if (
             not controller_mode
             and leaf_text(resource.get("DefaultProfileName")) != DEFAULT_PROFILE_NAME
         ):
             raise ValueError("Created affinity default profile identity unavailable")
+        stage = "system-name"
         system = await resolve_system_name(hmc, system_uuid)
         native_env = {
             "AIX/Linux": "aixlinux",
@@ -87,7 +94,7 @@ async def created_affinity_group_step(
     except HMCTLSFingerprintError:
         raise
     except (HMCError, OSError, ValueError, TypeError, PermissionError):
-        pass
+        readback_failures.append(stage)
     if identity_confirmed:
         for label in observed:
             profile = label == "native-profile"
@@ -102,18 +109,22 @@ async def created_affinity_group_step(
                     "lpar_env": native_env,
                 }
             fields = (*expected, "affinity_group_id")
+            stage = f"{label}-read"
             try:
                 raw = await run_hmc_command(
                     hmc.config,
                     f"lssyscfg -r {'prof' if profile else 'lpar'} -m {shlex.quote(system)} "
                     f"--filter {shlex.quote(build_filter(filters))} -F {','.join(fields)} --header",
                 )
+                stage = f"{label}-header"
                 records = raw.splitlines()
                 if not records or records[0] != ",".join(fields):
                     raise ValueError(
                         "Affinity observation requires one exact header and row"
                     )
+                stage = f"{label}-rows"
                 rows = parse_hmc_result_rows(raw, fields, "created affinity group")
+                stage = f"{label}-identity"
                 if len(rows) != 1 or any(
                     rows[0][field] != value for field, value in expected.items()
                 ):
@@ -123,6 +134,7 @@ async def created_affinity_group_step(
                     raise ValueError(
                         "Affinity observation requires one exact header and row"
                     )
+                stage = f"{label}-value"
                 value = rows[0]["affinity_group_id"]
                 if value == "none":
                     observed[label] = value
@@ -131,7 +143,7 @@ async def created_affinity_group_step(
                 else:
                     raise ValueError("Affinity observation domain unavailable")
             except (HMCError, OSError, ValueError, TypeError, PermissionError):
-                continue
+                readback_failures.append(stage)
     observation_status = {
         label: "readback-unavailable"
         if value is None
@@ -157,6 +169,8 @@ async def created_affinity_group_step(
         else "Partition exists or may exist; saved affinity configuration unverified. "
         "Inspect before retrying; no rollback performed."
     )
+    if readback_failures:
+        message += " Readback failure stages " + ", ".join(readback_failures) + "."
     if controller_mode:
         message += " Controller saved-proof source is unavailable."
     result: dict[str, Any] = {

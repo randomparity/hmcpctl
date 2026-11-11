@@ -516,6 +516,7 @@ async def test_created_identity_unavailable_retains_uncertainty(target, kind):
             else next(s for s in result.steps if s.step == "affinity_group")
         )
         assert step.result["status"] == "readback-unavailable"
+        assert "Readback failure stages created-identity." in step.result["message"]
         assert "PRIVATE" not in str(result)
     assert target.events.count("create") == 1
     assert not {"lpar", "prof", "apply", "stamp"} & set(target.events)
@@ -1011,6 +1012,18 @@ async def test_saved_proof_is_independent(target, monkeypatch, fault, saved):
         else "readback-unavailable"
     )
     assert "PRIVATE" not in str(proof)
+    failures = {
+        "lpar-read": "native-partition-read",
+        "lpar-value": "native-partition-value",
+        "lpar-header": "native-partition-header",
+        "prof-read": "native-profile-read",
+        "lpar-identity": "native-partition-identity",
+    }
+    expected = failures.get(fault)
+    if expected is not None:
+        assert f"Readback failure stages {expected}." in proof["message"]
+    else:
+        assert "Readback failure stages" not in proof["message"]
     if saved:
         assert proof["observation_status"]["native-partition"] == "readback-unavailable"
         assert proof["observed"]["native-profile"] == 1
