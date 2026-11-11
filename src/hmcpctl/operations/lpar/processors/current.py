@@ -39,6 +39,59 @@ _OS = {
 _MEMORY = ("current_minimum_mib", "current_memory_mib", "current_maximum_mib")
 
 
+_DEDICATED_CURRENT_FIELDS = (
+    ("curr_min_procs", "CurrentMinimumProcessors", "current_minimum_processors"),
+    ("curr_procs", "CurrentProcessors", "current_processors"),
+    ("curr_max_procs", "CurrentMaximumProcessors", "current_maximum_processors"),
+)
+
+_DEDICATED_PENDING_FIELDS = (
+    ("pend_min_procs", "MinimumProcessors", "pending_minimum_processors"),
+    ("pend_procs", "DesiredProcessors", "pending_processors"),
+    ("pend_max_procs", "MaximumProcessors", "pending_maximum_processors"),
+)
+
+_SHARED_CURRENT_PROCESSORS = (
+    ("curr_min_procs", "CurrentMinimumVirtualProcessors", "current_minimum_processors"),
+    ("curr_procs", "AllocatedVirtualProcessors", "current_processors"),
+    ("curr_max_procs", "CurrentMaximumVirtualProcessors", "current_maximum_processors"),
+)
+
+_SHARED_CURRENT_UNITS = (
+    (
+        "curr_min_proc_units",
+        "CurrentMinimumProcessingUnits",
+        "current_minimum_processing_units",
+    ),
+    ("curr_proc_units", "CurrentProcessingUnits", "current_processing_units"),
+    (
+        "curr_max_proc_units",
+        "CurrentMaximumProcessingUnits",
+        "current_maximum_processing_units",
+    ),
+)
+
+_SHARED_PENDING_PROCESSORS = (
+    ("pend_min_procs", "MinimumVirtualProcessors", "pending_minimum_processors"),
+    ("pend_procs", "DesiredVirtualProcessors", "pending_processors"),
+    ("pend_max_procs", "MaximumVirtualProcessors", "pending_maximum_processors"),
+)
+
+_SHARED_PENDING_UNITS = (
+    (
+        "pend_min_proc_units",
+        "MinimumProcessingUnits",
+        "pending_minimum_processing_units",
+    ),
+    ("pend_proc_units", "DesiredProcessingUnits", "pending_processing_units"),
+    (
+        "pend_max_proc_units",
+        "MaximumProcessingUnits",
+        "pending_maximum_processing_units",
+    ),
+)
+
+
 class _ProcessorSnapshot(observation.PartitionSnapshot):
     processor_mode: Literal["ded", "shared"]
     dynamic_processor: object
@@ -221,62 +274,31 @@ def _snapshot(
         if dedicated
         else "SharedProcessorConfiguration",
     )
-    for prefix, native, container in [
-        ("current", "curr", current),
-        ("pending", "pend", pending),
-    ]:
-        for quantity, suffix, names in [
-            (
-                "processors",
-                "procs",
-                ("MinimumProcessors", "Processors", "MaximumProcessors")
-                if dedicated
-                else (
-                    "MinimumVirtualProcessors",
-                    "VirtualProcessors",
-                    "MaximumVirtualProcessors",
-                ),
-            ),
-            (
-                "processing_units",
-                "proc_units",
-                ("MinimumProcessingUnits", "ProcessingUnits", "MaximumProcessingUnits"),
-            ),
-        ]:
-            if dedicated and quantity == "processing_units":
-                continue
-            values = []
-            for bound, field in zip(("minimum_", "", "maximum_"), names, strict=True):
-                native_field = f"{native}_{'min_' if bound == 'minimum_' else 'max_' if bound else ''}{suffix}"
-                rest_field = (
-                    "Current" + field
-                    if prefix == "current"
-                    else field
-                    if bound
-                    else "Desired" + field
-                )
-                if (
-                    prefix == "current"
-                    and not bound
-                    and quantity == "processors"
-                    and not dedicated
-                ):
-                    rest_field = "AllocatedVirtualProcessors"
-                value = _number(
-                    row.get(native_field), native_field, whole=quantity == "processors"
-                )
-                if value != _number(
-                    container.get(rest_field),
-                    rest_field,
-                    whole=quantity == "processors",
-                ):
-                    raise ValueError("REST and native processor quantities disagree")
-                before[f"{prefix}_{bound}{quantity}"] = value
-                values.append(value)
-            if not values[0] <= values[1] <= values[2]:
-                raise ValueError(
-                    "Processor minimum/current/maximum bounds are contradictory"
-                )
+    groups = (
+        (
+            (current, True, _DEDICATED_CURRENT_FIELDS),
+            (pending, True, _DEDICATED_PENDING_FIELDS),
+        )
+        if dedicated
+        else (
+            (current, True, _SHARED_CURRENT_PROCESSORS),
+            (current, False, _SHARED_CURRENT_UNITS),
+            (pending, True, _SHARED_PENDING_PROCESSORS),
+            (pending, False, _SHARED_PENDING_UNITS),
+        )
+    )
+    for container, whole, fields in groups:
+        values = []
+        for native_field, rest_field, snapshot_field in fields:
+            value = _number(row.get(native_field), native_field, whole=whole)
+            if value != _number(container.get(rest_field), rest_field, whole=whole):
+                raise ValueError("REST and native processor quantities disagree")
+            before[snapshot_field] = value
+            values.append(value)
+        if not values[0] <= values[1] <= values[2]:
+            raise ValueError(
+                "Processor minimum/current/maximum bounds are contradictory"
+            )
     before["runtime_processors"] = _number(
         row.get("run_procs"), "run_procs", whole=True
     )
