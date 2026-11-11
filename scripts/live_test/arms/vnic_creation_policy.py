@@ -2224,6 +2224,53 @@ async def _fixture_recover(hmc, packet, document, journal):
     document.update(status="CLEAN", observation=current)
 
 
+async def _fixture_prepare(hmc, packet, document, current):
+    document["baseline"] = current
+    result = await lpar_core.create_and_stamp_lpar(
+        hmc,
+        packet["system_uuid"],
+        lpar_core.LparCreation(
+            packet["fixture_name"],
+            "AIX/Linux",
+            _fixture_resources(),
+            max_virtual_slots=8,
+            caller_token=packet["caller_token"],
+            stamp_policy="required",
+            apply_profile=False,
+        ),
+    )
+    if result.lpar is None:
+        raise ValueError("fixture creation returned no identity")
+    document["returned"] = {
+        "resource_created": result.resource_created,
+        "ownership_stamped": result.ownership_stamped,
+        "uuid": result.lpar["UUID"].casefold(),
+    }
+    held = await _fixture_held(hmc, packet, current)
+    _fixture_owned(hmc, packet, held)
+    document["retained"] = held
+    document["status"] = "PREPARED"
+
+
+async def _fixture_remove(hmc, packet, document, current, original, budget):
+    document["baseline"] = original["baseline"]
+    budget.captured = original["retained"]["target"]
+    budget.qualified = document["qualified"] = current
+    removed = await lifecycle_core.delete_lpar(
+        hmc,
+        budget.captured["uuid"],
+        system_name_or_uuid=packet["system_uuid"],
+        ownership_override=False,
+    )
+    if removed.casefold() != budget.captured["uuid"]:
+        raise ValueError("fixture delete returned a different UUID")
+    after = document["after"] = await _fixture_snapshot(hmc, packet)
+    _fixture_absent(packet, after)
+    if after != original["baseline"]:
+        raise ValueError("fixture deletion did not restore its original baseline")
+    document["status"] = "CLEAN"
+
+
 async def _fixture_run(hmc, packet, stage, output=None, journal=None):
     _context(hmc, packet, stage)
     action = packet["action"] if stage == "capture" else stage
@@ -2283,62 +2330,16 @@ async def _fixture_run(hmc, packet, stage, output=None, journal=None):
                                 "fixture preflight supplied baseline differs"
                             )
                         document.update(status="READY", baseline_sha256=digest(current))
+                    elif packet["baseline_sha256"] != digest(current):
+                        raise ValueError(
+                            "fixture capture requires its fresh bound baseline"
+                        )
+                    elif action == "prepare":
+                        await _fixture_prepare(hmc, packet, document, current)
                     else:
-                        if packet["baseline_sha256"] != digest(current):
-                            raise ValueError(
-                                "fixture capture requires its fresh bound baseline"
-                            )
-                        if action == "prepare":
-                            document["baseline"] = current
-                            result = await lpar_core.create_and_stamp_lpar(
-                                hmc,
-                                packet["system_uuid"],
-                                lpar_core.LparCreation(
-                                    packet["fixture_name"],
-                                    "AIX/Linux",
-                                    _fixture_resources(),
-                                    max_virtual_slots=8,
-                                    caller_token=packet["caller_token"],
-                                    stamp_policy="required",
-                                    apply_profile=False,
-                                ),
-                            )
-                            if result.lpar is None:
-                                raise ValueError(
-                                    "fixture creation returned no identity"
-                                )
-                            document["returned"] = {
-                                "resource_created": result.resource_created,
-                                "ownership_stamped": result.ownership_stamped,
-                                "uuid": result.lpar["UUID"].casefold(),
-                            }
-                            held = await _fixture_held(hmc, packet, current)
-                            _fixture_owned(hmc, packet, held)
-                            document["retained"] = held
-                            document["status"] = "PREPARED"
-                        else:
-                            document["baseline"] = original["baseline"]
-                            budget.captured = original["retained"]["target"]
-                            budget.qualified = document["qualified"] = current
-                            removed = await lifecycle_core.delete_lpar(
-                                hmc,
-                                budget.captured["uuid"],
-                                system_name_or_uuid=packet["system_uuid"],
-                                ownership_override=False,
-                            )
-                            if removed.casefold() != budget.captured["uuid"]:
-                                raise ValueError(
-                                    "fixture delete returned a different UUID"
-                                )
-                            after = document["after"] = await _fixture_snapshot(
-                                hmc, packet
-                            )
-                            _fixture_absent(packet, after)
-                            if after != original["baseline"]:
-                                raise ValueError(
-                                    "fixture deletion did not restore its original baseline"
-                                )
-                            document["status"] = "CLEAN"
+                        await _fixture_remove(
+                            hmc, packet, document, current, original, budget
+                        )
         if not budget.logged_on or not budget.logged_off:
             raise ValueError("fixture own session closure is unconfirmed")
         document["complete"] = True
