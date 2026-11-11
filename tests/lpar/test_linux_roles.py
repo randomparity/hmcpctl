@@ -1536,3 +1536,23 @@ async def test_shared_creation_authority_has_no_role_prerequisites(
     b.status.assert_awaited_once()
     b.hmc.get_console_info.assert_not_awaited()
     b.modes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["native", "rest"])
+async def test_role_readback_preserves_tls_identity_failure(role_boundary, stage):
+    b = role_boundary
+    failure = HMCTLSFingerprintError("Certificate fingerprint differs")
+    if stage == "native":
+        b.read.side_effect = [BASE, failure]
+    else:
+        entry = {"UUID": PARTITION, "Resource": b.resource}
+        b.hmc.get_logical_partition.side_effect = [entry, failure]
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await operation.configure_lpar_settings(
+            b.hmc, "owned", LparSettings(kvm_capable=True), system_name_or_uuid="system"
+        )
+    assert caught.value is failure
+    b.write.assert_awaited_once()
+    assert b.read.await_count == 2
+    assert b.hmc.get_logical_partition.await_count == (1 if stage == "native" else 2)

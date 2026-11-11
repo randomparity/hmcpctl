@@ -6,7 +6,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Literal
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.linux_roles import (
     admit_role_update,
     read_role_capabilities,
@@ -280,6 +280,8 @@ async def configure_lpar_settings(
             after = with_role_evidence(
                 after, await _role_resource(hmc, uuid, name), expected
             )
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError) as error:
         if not role_selection and not isinstance(error, HMCCLIError):
             raise
