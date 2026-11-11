@@ -1704,7 +1704,12 @@ async def _classify_rename(
     ctx: OperationContext, effect: EffectRecord
 ) -> Classification:
     rename = _plan_of(ctx)["rename"]
-    assert rename is not None
+    if not isinstance(rename, Mapping) or any(
+        not isinstance(rename.get(field), str) for field in ("before", "after")
+    ):
+        raise ValueError(
+            "recorded rename plan is unavailable or malformed; inspect the operation"
+        )
     _, _, lpar_uuid = effect.target.partition(":")
     async with open_client(ctx.connection, ctx.host) as hmc:
         entry = await hmc.get_logical_partition(lpar_uuid)

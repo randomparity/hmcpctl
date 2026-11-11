@@ -876,6 +876,39 @@ def test_profile_write_target_round_trips():
         profile_write.parse_target(f"lpar:{LPAR}")
 
 
+@pytest.mark.parametrize(
+    "rename",
+    [
+        None,
+        {},
+        {"before": "web1"},
+        {"after": "web2"},
+        {"before": None, "after": "web2"},
+        {"before": "web1", "after": 7},
+        "web2",
+    ],
+)
+def test_missing_recorded_rename_refuses_before_client_open(monkeypatch, rename):
+    calls = []
+
+    def unexpected_client(*_args):
+        calls.append("open-client")
+        pytest.fail("missing rename must refuse before opening a client")
+
+    monkeypatch.setattr(reconfigure, "open_client", unexpected_client)
+    ctx = SimpleNamespace(
+        connection="<default>",
+        host="hmc.test",
+        recorded=lambda _key: SimpleNamespace(
+            status="applied", identity={"rename": rename}
+        ),
+    )
+    effect = SimpleNamespace(target=f"lpar:{LPAR}")
+    with pytest.raises(ValueError, match="recorded rename plan is unavailable"):
+        _await(reconfigure._classify_rename(ctx, effect))
+    assert calls == []
+
+
 def test_rename_classifier(hmc):
     hmc.name = "web2"
     ctx = SimpleNamespace(
