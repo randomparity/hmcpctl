@@ -9489,6 +9489,71 @@ def test_provenance_uses_executed_checkout_from_any_cwd(
             )
 
 
+@pytest.mark.parametrize("dirty", [False, True])
+@pytest.mark.parametrize(
+    "redirect", ["missing-dir", "foreign-worktree", "foreign-index"]
+)
+def test_source_provenance_ignores_git_environment(
+    tmp_path, monkeypatch, dirty, redirect
+):
+    owner = tmp_path / "owner"
+    foreign = tmp_path / "foreign"
+    owner.mkdir()
+    foreign.mkdir()
+    _live_repo(owner)
+    _live_repo(foreign)
+    expected = subprocess.check_output(
+        ["git", "-C", str(owner), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "foreign provenance",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "update-index",
+            "--assume-unchanged",
+            "--",
+            "src/hmcpctl/__init__.py",
+        ],
+        check=True,
+    )
+    if dirty:
+        (owner / "src/hmcpctl/__init__.py").write_text("changed = True\n")
+    monkeypatch.setattr(
+        evidence, "__file__", str(owner / "scripts/live_test/evidence.py")
+    )
+    if redirect == "missing-dir":
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing.git"))
+    elif redirect == "foreign-worktree":
+        monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(owner))
+    else:
+        monkeypatch.setenv("GIT_INDEX_FILE", str(foreign / ".git/index"))
+    found = evidence.repository_root()
+    assert found == owner
+    provenance = evidence.run_provenance(
+        [52], "lpar-security-policy", found, "V1_0", False
+    )
+    assert provenance["tested_commit"] == expected
+    assert provenance["tree_clean"] is (not dirty)
+
+
 def test_copied_runner_source_cannot_borrow_callers_git_identity(tmp_path, monkeypatch):
     caller = tmp_path / "caller"
     caller.mkdir()
