@@ -14,7 +14,7 @@ from conftest import live_fixture
 from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects, _run
 from unit.test_lpar_reconfigure import hmc as hmc  # noqa: PLC0414 - fixture import
 
-from hmcpctl.errors import HMCError, LparUpdateError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from hmcpctl.operations.logical import store
 from hmcpctl.operations.logical.engine import EffectNotApplied, OperationFailed
 from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
@@ -542,6 +542,30 @@ def test_media_write_reraises_when_the_listing_also_fails(media):
     }
     with pytest.raises(HMCError, match="timeout"):
         asyncio.run(reconfigure_media.media_write(media.fake, plan)())
+
+
+@pytest.mark.parametrize("failure_at", ["unmount", "readback"])
+def test_media_write_propagates_tls_identity_failure_without_recovery(
+    media, failure_at
+):
+    mismatch = HMCTLSFingerprintError("pinned certificate identity mismatch")
+    media.unmount_error = (
+        mismatch if failure_at == "unmount" else HMCError("unmount failed", 500)
+    )
+    listing = AsyncMock(return_value=[])
+    if failure_at == "readback":
+        listing.side_effect = mismatch
+    media.fake.list_optical_mappings = listing
+    plan = {
+        "lpar_uuid": LPAR,
+        "system_uuid": SYS,
+        "media": {"vios_uuid": VIOS, "media_name": MEDIA},
+    }
+    with pytest.raises(HMCTLSFingerprintError) as raised:
+        asyncio.run(reconfigure_media.media_write(media.fake, plan)())
+    assert raised.value is mismatch
+    assert listing.await_count == (0 if failure_at == "unmount" else 1)
+    assert media.fake.calls == ["unmount"]
 
 
 @pytest.mark.parametrize(

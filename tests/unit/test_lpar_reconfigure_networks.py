@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects
 from unit.test_lpar_reconfigure import hmc as base_hmc  # noqa: F401 - a fixture
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import job_outcome
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import (
@@ -370,6 +370,34 @@ def test_removal_error_with_adapter_listed_stays_open():
     plan = _plan(fake, {"remove": [{"mac": MAC_B}]})
     with pytest.raises(HMCError, match="refused"):
         _write(fake, plan, "network_remove:0")
+
+
+@pytest.mark.parametrize("failure_at", ["delete", "readback"])
+def test_removal_propagates_tls_identity_failure_without_further_reads(failure_at):
+    fake = NetHMC()
+    plan = _plan(fake, {"remove": [{"mac": MAC_B}]})
+    mismatch = HMCTLSFingerprintError("pinned certificate identity mismatch")
+    fake.delete_error = (
+        mismatch if failure_at == "delete" else HMCError("delete failed", 500)
+    )
+    fake.delete_lands = False
+    listing = fake._network_adapter_creation_feed
+    reads = []
+
+    async def observed(*args, **kwargs):
+        reads.append(args)
+        if len(reads) == 1:
+            return await listing(*args, **kwargs)
+        if failure_at == "readback":
+            raise mismatch
+        return []
+
+    fake._network_adapter_creation_feed = observed
+    with pytest.raises(HMCTLSFingerprintError) as raised:
+        _write(fake, plan, "network_remove:0")
+    assert raised.value is mismatch
+    assert len(reads) == (1 if failure_at == "delete" else 2)
+    assert fake.calls == [("delete", "ub")]
 
 
 # --- classifiers -------------------------------------------------------------

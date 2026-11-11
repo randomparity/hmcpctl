@@ -20,7 +20,7 @@ from hmcpctl.operations.lpar.workflow_contract import (
 )
 
 from ....client.core import HMCClient
-from ....errors import HMCError, LparUpdateError
+from ....errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from ....xmlutil import leaf_text
 from ...logical import engine, store
 from ...logical.engine import (
@@ -265,11 +265,15 @@ def media_write(hmc: HMCClient, plan: ReconfigurationPlan) -> Write:
                 f"the installer media detach was refused before writing "
                 f"({type(exc).__name__})"
             ) from exc
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             try:
                 left = await _media_paths(
                     hmc, media["vios_uuid"], lpar_uuid, media["media_name"]
                 )
+            except HMCTLSFingerprintError:
+                raise
             except HMCError:
                 raise exc from None
             if left:

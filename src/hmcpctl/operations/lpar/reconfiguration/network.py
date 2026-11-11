@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_v
 from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists, mac_colon_form
 
 from ....client.core import HMCClient
-from ....errors import HMCError
+from ....errors import HMCError, HMCTLSFingerprintError
 from ....xmlutil import leaf_text
 from ...logical import engine
 from ...logical.engine import (
@@ -378,9 +378,13 @@ def _remove_write(hmc: HMCClient, lpar_uuid: str, item: NetworkRemovePlan) -> Wr
             )
         try:
             await hmc.delete_adapter(lpar_uuid, "ClientNetworkAdapter", uuid)
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             try:
                 left = _listed(await current_adapters(hmc, lpar_uuid), uuid)
+            except HMCTLSFingerprintError:
+                raise
             except HMCError:
                 raise exc from None
             if left is not None:
