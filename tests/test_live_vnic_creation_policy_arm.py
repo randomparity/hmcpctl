@@ -1139,7 +1139,7 @@ async def test_source_intent_latency(
         SimpleNamespace(time=lambda: now["wall"], monotonic=lambda: now["monotonic"]),
     )
     source_packet["expires_at"] = 1300
-    budget = arm._Budget(client, source_packet, "capture", document, output)
+    budget = arm._SourceBudget(client, source_packet, "capture", document, output)
     original = arm.save
     original(output, document)
     preceding = (output / "results.json").read_bytes()
@@ -1175,7 +1175,7 @@ async def test_source_logout_reserve(source_wire, source_packet, monkeypatch):
     client = source_wire.client()
     now = [1000.0]
     monkeypatch.setattr(arm.time, "monotonic", lambda: now[0])
-    budget = arm._Budget(client, source_packet, "capture", {"intents": []}, None)
+    budget = arm._SourceBudget(client, source_packet, "capture", {"intents": []}, None)
     now[0] = 1286.0
     with arm._bounded(budget):
         with pytest.raises(ValueError):
@@ -1188,7 +1188,7 @@ async def test_source_logout_reserve(source_wire, source_packet, monkeypatch):
 @pytest.mark.asyncio
 async def test_source_physical_bounds(source_wire, source_packet):
     client = source_wire.client()
-    budget = arm._Budget(client, source_packet, "capture", {"intents": []}, None)
+    budget = arm._SourceBudget(client, source_packet, "capture", {"intents": []}, None)
     with arm._bounded(budget):
         for _ in range(47):
             await client._request("GET", f"/rest/api/uom/ManagedSystem/{SYS}")
@@ -1327,7 +1327,9 @@ async def test_source_physical_suffix(
     client = source_wire.client()
     output = tmp_path / "journal"
     output.mkdir(mode=0o700)
-    budget = arm._Budget(client, source_packet, "capture", {"intents": []}, output)
+    budget = arm._SourceBudget(
+        client, source_packet, "capture", {"intents": []}, output
+    )
     required = dict(zip(("rest", "ssh"), arm.SOURCE_SUFFIX[kind], strict=True))
     limit = budget.rest_limit if counter == "rest" else budget.ssh_limit
     budget.counts[counter] = limit - required[counter] + (0 if counter == "ssh" else 1)
@@ -3240,3 +3242,155 @@ def test_submission_error_cli_stays_private(
     assert document["source"]["submission_error"]["message"] == "PRIVATE-DIAGNOSTIC-é"
     assert public_evidence.render(document) is None
     assert len(w.writes) == 2
+
+
+def test_mode_policy_is_owned_at_entry_boundaries():
+    import ast
+    import inspect
+    import textwrap
+
+    owners = [arm._Budget, arm._bounded, arm.snapshot, arm._context]
+    owners.extend(arm._Budget.__subclasses__())
+    owners.extend(
+        getattr(arm, name)
+        for name in ("_creation_run", "_source_run", "_fixture_run")
+        if hasattr(arm, name)
+    )
+    violations = []
+    for owner in owners:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(owner)))
+        inferred = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"_source", "_fixture", "validate_packet"}
+        }
+        if inferred:
+            violations.append((owner.__name__, sorted(inferred)))
+    assert not violations, f"mode selection leaked into execution owners: {violations}"
+
+
+@pytest.mark.parametrize(
+    "mode,version",
+    [
+        ("source", None),
+        ("source", True),
+        ("source", 1),
+        ("source", 3),
+        ("fixture", None),
+        ("fixture", True),
+        ("fixture", 1),
+        ("fixture", 2),
+    ],
+)
+def test_concrete_validator_requires_its_packet_version(
+    source_packet, fixture_packet, mode, version
+):
+    packet = deepcopy(source_packet if mode == "source" else fixture_packet)
+    packet["version"] = version
+    validate = (
+        arm._validate_source_packet if mode == "source" else arm._validate_fixture
+    )
+    with pytest.raises(ValueError, match="version"):
+        validate(packet)
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_cli_runs_the_selected_lifecycle_through_recovery(
+    version,
+    wire,
+    source_wire,
+    fixture_wire,
+    packet,
+    source_packet,
+    fixture_packet,
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    w, p, label, captured, recovered = {
+        1: (wire, packet, arm.GROUP, "CLEAN", "CLEAN"),
+        2: (
+            source_wire,
+            source_packet,
+            "vnic-update-source SOURCE ONLY",
+            "CLEAN",
+            "CLEAN",
+        ),
+        3: (
+            fixture_wire,
+            fixture_packet,
+            "vnic-fixture PREREQUISITE ONLY",
+            "PREPARED",
+            "RETAINED",
+        ),
+    }[version]
+    monkeypatch.setattr(transport, "_run_hmc_command", w.ssh)
+    monkeypatch.setattr(
+        HMCClient,
+        "_new_http_client",
+        lambda self, port: httpx.AsyncClient(
+            base_url="https://hmc.test:443", transport=httpx.MockTransport(w.http)
+        ),
+    )
+    monkeypatch.setattr(arm, "load_profile", lambda name: w.config())
+    packet_path = tmp_path / "packet.json"
+
+    def invoke(stage, output, journal=None):
+        raw = json.dumps(p).encode()
+        packet_path.write_bytes(raw)
+        packet_path.chmod(0o600)
+        arguments = [
+            stage,
+            "--packet",
+            str(packet_path),
+            "--packet-sha256",
+            arm.hashlib.sha256(raw).hexdigest(),
+            "--output",
+            str(output),
+        ]
+        if journal is not None:
+            arguments.extend(["--results", str(journal)])
+        assert arm.main(arguments) == 0
+        console = capsys.readouterr()
+        assert console.err == ""
+        record = json.loads((output / "results.json").read_text())
+        assert console.out == f"{label}: {record['status']}\n"
+        assert record["complete"] is True
+        assert output.stat().st_mode & 0o777 == 0o700
+        assert (output / "results.json").stat().st_mode & 0o777 == 0o600
+        return record
+
+    ready = invoke("preflight", tmp_path / "ready")
+    assert ready["status"] == "READY"
+    p["baseline_sha256"] = ready["baseline_sha256"]
+    captured_result = invoke("capture", tmp_path / "capture")
+    assert captured_result["status"] == captured
+    effects = len(w.fixture_writes) if version == 3 else len(w.writes)
+    final = invoke(
+        "recover", tmp_path / "recovery", tmp_path / "capture" / "results.json"
+    )
+    assert final["status"] == recovered
+    assert (len(w.fixture_writes) if version == 3 else len(w.writes)) == effects
+    assert effects == (3 if version == 2 else 2)
+
+
+@pytest.mark.asyncio
+async def test_fixture_preflight_refuses_wrong_version_preparation(
+    fixture_wire, fixture_packet, tmp_path
+):
+    w, p = fixture_wire, fixture_packet
+    prepared = await fixture_prepare(w, p, tmp_path)
+    assert prepared["status"] == "PREPARED"
+    forged = deepcopy(prepared)
+    forged["packet"]["version"] = 2
+    forged["packet_sha256"] = arm.digest(forged["packet"])
+    arm.save(tmp_path / "prepare", forged)
+    effects = len(w.fixture_writes)
+    cleanup = fixture_cleanup_packet(p, tmp_path)
+    held = await arm.preflight(w.client(), cleanup, tmp_path / "held")
+    assert held["status"] == "MANUAL_RECOVERY"
+    assert held["reason"] == "fixture packet requires version 3"
+    assert len(w.fixture_writes) == effects
+    assert LPAR in w.entries
