@@ -48,6 +48,8 @@ class ScriptedSystem:
         if tool == "hmc_run_command":
             command = kwargs["cmd"]
             if command.startswith("lssyscfg"):
+                if self.fault == "unavailable":
+                    return "FAIL", None
                 names = ["existing-R1"]
                 if self.name and not self.deleted:
                     names.append(self.name)
@@ -294,8 +296,9 @@ async def test_arm_is_opt_in_without_calls_outside_its_group(monkeypatch, group)
 
 
 @pytest.mark.asyncio
-async def test_stranded_fixture_prevents_new_creation(monkeypatch):
-    system = ScriptedSystem(fault="stranded")
+@pytest.mark.parametrize("fault", ["stranded", "unavailable"])
+async def test_invalid_baseline_prevents_new_creation(monkeypatch, fault):
+    system = ScriptedSystem(fault=fault)
     state = await run_arm(monkeypatch, system)
     assert not system.creations
     assert not state.observations

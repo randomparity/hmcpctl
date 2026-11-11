@@ -70,6 +70,8 @@ class ScriptedSystem:
         if tool == "hmc_run_command":
             cmd = kwargs["cmd"]
             if cmd.startswith("lssyscfg"):
+                if self.fault == "unavailable":
+                    return "FAIL", None
                 names = ["existing-R1"] + (
                     [self.name] if self.name and not self.deleted else []
                 )
@@ -303,6 +305,7 @@ async def test_processor_setup_is_once_and_requires_all_zero_cpu_and_memory(
     "fault,group",
     [
         ("stranded", "lpar-processor-quantities"),
+        ("unavailable", "lpar-processor-quantities"),
         ("floor", "lpar-processor-quantities"),
         ("none", "all"),
     ],
