@@ -16,7 +16,7 @@ import asyncssh
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from ...client.core import HMCClient
-from ...errors import HMCError
+from ...errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from ...jobs import JobOutcome, validate_wait_timing
 from ...resource_identity import is_uuid, resolve_system_uuid
 from ...ssh.commands import parse_hmc_delimited_rows
@@ -140,8 +140,13 @@ class _StableSnapshot(NamedTuple):
 
 
 class _RestInterrupted(Exception):
-    def __init__(self, job: JobOutcome | None, code: str | None):
-        super().__init__("interrupted; caller reconciliation required")
+    def __init__(
+        self,
+        job: JobOutcome | None,
+        code: str | None,
+        message: str = "interrupted; caller reconciliation required",
+    ):
+        super().__init__(message)
         self.job = job
         self.return_code = code
 
@@ -755,6 +760,8 @@ async def _rest(hmc, system, operation, document, timeout, poll):
             state = "failed" if outcome.status in FAILED_JOB_STATUSES else "uncertain"
             return state, outcome, code, warnings, str(exc)[:2048]
         return "completed", outcome, code, warnings, None
+    except HMCTLSFingerprintError as exc:
+        raise _RestInterrupted(outcome, code, TLS_OBSERVATION_ABORTED) from exc
     except asyncio.CancelledError as exc:
         raise _RestInterrupted(outcome, code) from exc
     except (
