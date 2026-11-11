@@ -1140,8 +1140,11 @@ def build_config(
 ) -> HMCConfig:
     """Build configuration from CLI options, environment, and a TOML profile.
 
-    Environment-only construction is used when nothing selects a profile. Errors
-    reading or validating an authored configuration are propagated unchanged.
+    A nonempty ``host`` override or ``HMC_HOST`` bypasses profile and document
+    loading, even when ``profile`` or ``document`` is supplied. Otherwise load
+    the selected configuration when available, falling back to environment and
+    overrides when no profile is selected. Errors reading or validating authored
+    configuration propagate unchanged when that loading path is used.
     """
     filtered = {key: value for key, value in overrides.items() if value is not None}
 
