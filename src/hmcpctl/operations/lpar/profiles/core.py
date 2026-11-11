@@ -382,6 +382,8 @@ async def update_partition_profile(
         status = await write_native_profile(
             hmc, target.kind, target.uuid, expected, before
         )
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(outcome)
     except HMCError as error:
         return replace(
             outcome,
@@ -421,6 +423,8 @@ async def update_partition_profile(
             and not comparison.equal
             else (),
         )
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(outcome)
     except (HMCError, ValueError, TypeError) as error:
         return replace(outcome, error=str(error)[:2048])
 
@@ -927,6 +931,8 @@ async def delete_partition_profile(
     outcome = _outcome("delete", target, before)
     try:
         status = await delete_native_profile(hmc, target.kind, target.uuid, before.uuid)
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(outcome)
     except HMCError as error:
         return replace(outcome, error=str(error)[:2048])
     outcome = replace(
@@ -954,5 +960,7 @@ async def delete_partition_profile(
             preservation="verified",
             comparison_complete=True,
         )
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(outcome)
     except (HMCError, ValueError, TypeError) as error:
         return replace(outcome, error=str(error)[:2048])

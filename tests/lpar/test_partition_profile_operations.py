@@ -1002,3 +1002,65 @@ def test_profile_operations_use_partition_first_selectors(operation):
     parameters = inspect.signature(operation).parameters
     assert list(parameters)[:2] == ["hmc", "lpar_name_or_uuid"]
     assert parameters["system_name_or_uuid"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("action", ["update", "delete"])
+@pytest.mark.parametrize(
+    "stage,status", [("submission", 200), ("readback", 200), ("readback", 202)]
+)
+async def test_profile_mutation_tls_failure_retains_execution_and_stops(
+    service, kind, action, stage, status
+):
+    state = NativeService(kind)
+    state.post_status = status
+    state.delete_status = status
+    native_request = state.request
+    dispatched = False
+    stopped_calls = None
+    writes = []
+
+    def request(method, path, **kwargs):
+        nonlocal dispatched, stopped_calls
+        if method in {"POST", "DELETE"}:
+            dispatched = True
+            writes.append(method)
+        if dispatched and (
+            stage == "submission"
+            and method in {"POST", "DELETE"}
+            or stage == "readback"
+            and method == "GET"
+        ):
+            stopped_calls = len(state.hmc.mock_calls)
+            raise HMCTLSFingerprintError("private-pin")
+        return native_request(method, path, **kwargs)
+
+    state.hmc._request_with_uuid_path_arguments.side_effect = request
+    arguments = {
+        "hmc": state.hmc,
+        "system_name_or_uuid": S,
+        "lpar_name_or_uuid": P,
+        "profile_selector": "source",
+        "expected_etag": "e1",
+        "partition_type": kind,
+        "exclusive_writer_window": True,
+    }
+    if action == "update":
+        result = await update_partition_profile(
+            **arguments, patch=ProfilePatch(desired_memory=1024)
+        )
+    else:
+        result = await delete_partition_profile(**arguments)
+    assert result.diagnostics == ("tls-identity-verification-failed",)
+    assert "private-pin" not in result.error
+    assert "Reconcile known profile and job state before retrying" in result.error
+    assert result.execution == (
+        "completed" if stage == "readback" and status == 200 else "unknown"
+    )
+    assert result.requested_change == result.preservation == "unverified"
+    assert result.before_etag == "e1" and result.after_etag is None
+    assert result.profile_uuid == F and result.partition_type == kind
+    assert writes == ["POST" if action == "update" else "DELETE"]
+    assert stopped_calls is not None and len(state.hmc.mock_calls) == stopped_calls
+    state.hmc.submit_job.assert_not_awaited()
