@@ -49,7 +49,7 @@ its current observation/start sequence and maps the same facts into its current 
 Callers never access the live accumulator. Admission records retain their existing
 typed interfaces; no parallel admission store or orchestration layer is added.
 
-`observe_unavailable_identity`, `observe_before_followup`, `observe_after_followup`
+`observe_unavailable_identity`, `observe_before_followup`, `observe_security_policy`
 and `observe_vtpm` use the stored inputs instead of receiving LparCreation again.
 The three feature-only observation helpers take `_CreationFeatureInputs`; map its
 environment to the same previous partition-type comparison. Remove the reverse

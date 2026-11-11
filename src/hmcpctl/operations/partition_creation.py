@@ -976,14 +976,7 @@ class _CreationFeatureCoordinator:
             )
         return step
 
-    async def observe_after_followup(
-        self,
-        cli_system: str | None,
-        *,
-        verify_before_apply: bool,
-    ) -> None:
-        if verify_before_apply:
-            await self.observe_vtpm(cli_system)
+    async def observe_security_policy(self) -> None:
         assert self.entry is not None
         await self.observe(
             "security_policy_step",

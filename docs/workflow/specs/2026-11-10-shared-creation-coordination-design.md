@@ -55,7 +55,8 @@ Expose concrete phase methods, not a string-dispatched stage API:
 - `admit_partition_features`: serial/memory/start admission in the explicit kind-specific order.
 - `confirm_identity`: existing confirmation sequence and failure semantics for that kind.
 - `observe_before_followup`: the existing feature observation sequence up to caller-owned work.
-- `observe_after_followup`: the LPAR vTPM/security observations at their existing boundary.
+- `observe_vtpm`: the LPAR vTPM observation; core chooses its existing pre/post-apply position.
+- `observe_security_policy`: the LPAR security observation at its existing boundary.
 - `observe_after_apply`: existing LPAR current-memory verification after a successful apply.
 
 Kind-specific branches remain explicit where the table requires different semantics.

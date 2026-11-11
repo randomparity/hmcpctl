@@ -730,9 +730,9 @@ async def _complete_lpar_creation(
             created_lpar,
             enabled=verify_before_apply,
         )
-        await features.observe_after_followup(
-            system_name, verify_before_apply=verify_before_apply
-        )
+        if verify_before_apply:
+            await features.observe_vtpm(system_name)
+        await features.observe_security_policy()
         apply_step, profile_already_configured = await _apply_verified_creation(
             hmc,
             system_name or system_name_or_uuid,
