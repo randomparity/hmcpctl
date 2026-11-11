@@ -45,6 +45,11 @@ just test
 
 Use `just test-verbose` for native pytest diagnostics and missing-lines coverage.
 
+Verification requires waitable child exit statuses. If a launcher ignores
+`SIGCHLD`, restore its default handling before launching `just` or `uv`.
+Serial execution cannot recover exit statuses discarded by that signal policy;
+the test runner refuses to start verification in this environment.
+
 CI distributes each supported Python version across four groups:
 `domain-and-unit`, `application` (CLI/MCP), `procedure-arms` (offline), and
 `tooling`. Files and test identities stay in place, and shared fixtures still

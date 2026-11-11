@@ -434,6 +434,15 @@ def _run_suite(parallel: bool) -> int:
 def main() -> int:
     """Select a bounded execution mode and restore its process-level ownership."""
     try:
+        child_exit_signal = getattr(signal, "SIGCHLD", None)
+        if (
+            child_exit_signal is not None
+            and signal.getsignal(child_exit_signal) == signal.SIG_IGN
+        ):
+            raise OSError(
+                "SIGCHLD is ignored, so child exit statuses are unavailable; "
+                "restore default SIGCHLD handling in the launcher before verification"
+            )
         if COMBINE is not None:
             if GROUP is not None:
                 raise ValueError(
