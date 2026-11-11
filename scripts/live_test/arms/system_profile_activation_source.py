@@ -1410,7 +1410,14 @@ def _main(argv=None):
     checkout = Path(__file__).resolve().parents[3]
     revision, clean = source._revision()
     tree = subprocess.check_output(
-        ["git", "rev-parse", "HEAD^{tree}"], cwd=checkout, text=True
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=checkout,
+        text=True,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
     ).strip()
     if (revision, tree, clean) != (
         packet["tested_commit"],

@@ -408,7 +408,13 @@ def verify_revision(packet):
 
     def git(*args):
         return subprocess.check_output(
-            ["git", "-C", str(root), *args], text=True
+            ["git", "-C", str(root), *args],
+            text=True,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
         ).strip()
 
     if (

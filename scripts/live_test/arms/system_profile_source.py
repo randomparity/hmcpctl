@@ -339,17 +339,22 @@ async def _job(
 
 
 def _revision() -> tuple[str, bool]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
     return (
         subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
             text=True,
             cwd=Path(__file__).resolve().parents[3],
+            env=environment,
         ).strip(),
         not bool(
             subprocess.check_output(
                 ["git", "status", "--porcelain"],
                 text=True,
                 cwd=Path(__file__).resolve().parents[3],
+                env=environment,
             )
         ),
     )

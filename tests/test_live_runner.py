@@ -10101,3 +10101,97 @@ async def test_direct_dispatch_requires_the_private_tasks_named_group(
     )
     assert label in capsys.readouterr().out
     assert not (tmp_path / "results.json").exists()
+
+
+@pytest.mark.parametrize("guard", ["source", "serial", "profile"])
+@pytest.mark.parametrize(
+    "redirect", ["none", "missing-dir", "foreign-worktree", "foreign-index"]
+)
+@pytest.mark.parametrize("dirty", [False, True])
+def test_live_arm_revision_uses_physical_checkout(
+    tmp_path, monkeypatch, guard, redirect, dirty
+):
+    from live_test.arms import (
+        lpar_serial_adapter,
+        partition_profile_contract,
+        system_profile_source,
+    )
+
+    owner = tmp_path / "owner"
+    foreign = tmp_path / "foreign"
+    owner.mkdir()
+    foreign.mkdir()
+    _live_repo(owner)
+    _live_repo(foreign)
+    head = subprocess.check_output(
+        ["git", "-C", str(owner), "rev-parse", "HEAD"], text=True
+    ).strip()
+    tree = subprocess.check_output(
+        ["git", "-C", str(owner), "rev-parse", "HEAD^{tree}"], text=True
+    ).strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "foreign candidate",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "update-index",
+            "--assume-unchanged",
+            "--",
+            "src/hmcpctl/__init__.py",
+        ],
+        check=True,
+    )
+    if dirty:
+        (owner / "src/hmcpctl/__init__.py").write_text("changed = True\n")
+    if redirect == "missing-dir":
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing.git"))
+    elif redirect == "foreign-worktree":
+        monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(owner))
+    elif redirect == "foreign-index":
+        monkeypatch.setenv("GIT_INDEX_FILE", str(foreign / ".git/index"))
+    if guard == "source":
+        monkeypatch.setattr(
+            system_profile_source,
+            "__file__",
+            str(owner / "scripts/live_test/arms/system_profile_source.py"),
+        )
+        assert system_profile_source._revision() == (head, not dirty)
+        return
+    module = lpar_serial_adapter if guard == "serial" else partition_profile_contract
+    monkeypatch.setattr(
+        module, "__file__", str(owner / "scripts/live_test/arms/guard.py")
+    )
+    monkeypatch.setattr(lpar_serial_adapter, "ROOT", owner)
+    # The imported-client boundary is covered separately; exercise real Git here.
+    monkeypatch.setattr(
+        module.inspect, "getfile", lambda _: str(owner / "src/hmcpctl/client/core.py")
+    )
+    check = (
+        (lambda: module.revision({"commit": head, "tree": tree}))
+        if guard == "serial"
+        else (
+            lambda: module.verify_revision({"tested_commit": head, "tested_tree": tree})
+        )
+    )
+    if dirty:
+        with pytest.raises(ValueError, match="clean"):
+            check()
+    else:
+        check()

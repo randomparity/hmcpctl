@@ -153,7 +153,14 @@ def connection(config):
 def revision(candidate):
     def git(*args):
         return subprocess.check_output(
-            ["git", "--no-pager", *args], cwd=ROOT, text=True
+            ["git", "--no-pager", *args],
+            cwd=ROOT,
+            text=True,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
         ).strip()
 
     if (
