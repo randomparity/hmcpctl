@@ -10195,3 +10195,22 @@ def test_live_arm_revision_uses_physical_checkout(
             check()
     else:
         check()
+
+
+@pytest.mark.parametrize(
+    "value", ["nan", "inf", "-inf", "0", "-1", "0.99", "101", "100.01", "2.001"]
+)
+def test_live_config_rejects_unusable_sriov_capacity(tmp_path, value) -> None:
+    config_path = _example_env_with(tmp_path, "LIVE_TEST_SRIOV_CAPACITY_PERCENT", value)
+
+    with pytest.raises(ValueError, match="sriov_capacity_percent"):
+        live_config.LiveTestConfig.from_env_file(config_path)
+
+
+@pytest.mark.parametrize("value", ["1", "1.25", "2", "100", "1.2500"])
+def test_live_config_accepts_assignable_sriov_capacity(tmp_path, value) -> None:
+    config_path = _example_env_with(tmp_path, "LIVE_TEST_SRIOV_CAPACITY_PERCENT", value)
+
+    config = live_config.LiveTestConfig.from_env_file(config_path)
+
+    assert config.sriov_capacity_percent == float(value)

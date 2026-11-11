@@ -5,8 +5,10 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
+from hmcpctl.documents.lpar_io import validate_capacity_percent
 from hmcpctl.documents.storage import VIRTUAL_DISK_NAME_MAX
 
 _HEX_ID = re.compile(r"[0-9a-f]+")
@@ -106,7 +108,6 @@ def validate_values(parsed: dict[str, Any], required_fields: Mapping[str, str]) 
         "provision_vlan_id",
         "provision_disk_mib",
         "sriov_adapter_id",
-        "sriov_capacity_percent",
         "iso_http_port",
         "vmedia_repository_size_mib",
         "vmedia_short_repository_size_mib",
@@ -115,6 +116,10 @@ def validate_values(parsed: dict[str, Any], required_fields: Mapping[str, str]) 
         "vlan_range_end",
     )
     invalid = [name for name in positive_fields if parsed[name] <= 0]
+    try:
+        validate_capacity_percent(Decimal(str(parsed["sriov_capacity_percent"])))
+    except ValueError:
+        invalid.append("sriov_capacity_percent")
     # Processing units are floats, and `nan` would slip past a `<= 0` test.
     invalid += [
         name
