@@ -61,6 +61,8 @@ from .media import (
     BOOT_KIND,
     MEDIA_KEY,
     MEDIA_KIND,
+    BootPlan,
+    MediaPlan,
     boot_classifier,
     boot_write,
     media_classifier,
@@ -155,8 +157,8 @@ class ReconfigurationPlan(PlannedChanges):
     profile_uuid: str | None
     profile_name: str | None
     profile_etag: str | None
-    boot: NotRequired[dict[str, Any] | None]
-    media: NotRequired[dict[str, Any] | None]
+    boot: NotRequired[BootPlan | None]
+    media: NotRequired[MediaPlan | None]
     disks: NotRequired[DiskPlan | None]
     networks: NotRequired[network.NetworkPlan | None]
     save: NotRequired[str | None]

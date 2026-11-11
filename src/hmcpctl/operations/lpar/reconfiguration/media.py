@@ -9,7 +9,7 @@ so a replay never re-reads the ledger. Messages name partitions by UUID only.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, TypedDict
 
 from hmcpctl.operations.lpar.provisioning.media import device_path
 from hmcpctl.operations.lpar.workflow_contract import (
@@ -43,6 +43,16 @@ _FIELDS = {
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
 PlanOf = Callable[[OperationContext], Mapping[str, Any]]
 Opener = Callable[[str, str], Any]
+
+
+class BootPlan(TypedDict):
+    before: str | None
+    after: str
+
+
+class MediaPlan(TypedDict):
+    vios_uuid: str
+    media_name: str
 
 
 def require_detachable(view: Mapping[str, Any], lpar_uuid: str) -> None:
@@ -144,7 +154,7 @@ async def _pending(hmc: HMCClient, lpar_uuid: str, system_uuid: str) -> str | No
 
 async def plan_media(
     hmc: HMCClient, system_uuid: str, lpar_uuid: str
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[MediaPlan | None, dict[str, Any] | None]:
     """The media to unmap and its change, or ``(None, None)`` when already unmapped."""
     media = provision_owned(system_uuid, lpar_uuid, MEDIA_LEDGER)
     try:
@@ -170,12 +180,14 @@ async def plan_media(
         "applied": "live",
         "reason": None,
     }
-    return media, change
+    return MediaPlan(
+        vios_uuid=media["vios_uuid"], media_name=media["media_name"]
+    ), change
 
 
 async def plan_boot(
     hmc: HMCClient, system_uuid: str, lpar_uuid: str
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[BootPlan | None, dict[str, Any] | None]:
     """The boot-string change to the root disk, or ``(None, None)`` when already set."""
     disk = provision_owned(system_uuid, lpar_uuid, DISK_LEDGER)
     try:
