@@ -159,6 +159,11 @@ def _query(command: list[str], root: Path) -> str:
         result = subprocess.run(
             command,
             cwd=root,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
             capture_output=True,
             text=True,
             errors="replace",

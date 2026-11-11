@@ -653,3 +653,11 @@ def test_unreadable_justfile_fails(tmp_path, capsys) -> None:
 
     assert _run(root) == 1
     assert "`just --summary` failed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_repository_query_uses_physical_checkout(redirected_git_checkout):
+    root = redirected_git_checkout
+    assert check_generated_docs._query(
+        ["git", "ls-files", "src"], root
+    ).splitlines() == ["src/physical.py"]

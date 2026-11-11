@@ -65,6 +65,11 @@ class WindowError(ValueError):
 def git(root: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(root), *arguments],
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
         capture_output=True,
         text=True,
         check=False,
@@ -93,18 +98,13 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
         raise WindowError("run from the candidate checkout root")
     branch = git(root, "symbolic-ref", "--short", "HEAD")
-    default = subprocess.run(
-        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if default.returncode:
+    try:
+        default = git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    except WindowError as error:
         raise WindowError(
             "origin default branch is unknown; configure origin/HEAD first"
-        )
-    protected = {"main", "master", default.stdout.strip().removeprefix("origin/")}
+        ) from error
+    protected = {"main", "master", default.removeprefix("origin/")}
     if branch in protected or git(
         root, "status", "--porcelain", "--untracked-files=all"
     ):

@@ -27,6 +27,11 @@ def _repository_files(repo_root: Path) -> tuple[str, ...]:
         result = subprocess.run(
             ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             cwd=repo_root,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
             check=True,
             capture_output=True,
         )

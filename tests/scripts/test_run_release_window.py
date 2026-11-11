@@ -855,3 +855,38 @@ def test_orchestration_failure_retains_bounded_private_context(
         assert not (tmp_path / "fault.log").exists()
     captured = capsys.readouterr()
     assert "private failure" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_repository_query_uses_physical_checkout(redirected_git_checkout):
+    root = redirected_git_checkout
+    import run_release_window as command
+
+    assert command.git(root, "rev-parse", "--absolute-git-dir") == str(root / ".git")
+
+
+@pytest.mark.parametrize("physical_default", [False, True])
+def test_dry_run_checks_the_physical_default_branch(window, tmp_path, physical_default):
+    root, _, output, environment = window
+    expected = git(root, "rev-parse", "HEAD")
+    if not physical_default:
+        git(root, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    foreign = tmp_path / "foreign checkout"
+    subprocess.run(["git", "init", "--quiet", str(foreign)], check=True)
+    environment.update(GIT_DIR=str(foreign / ".git"), GIT_WORK_TREE=str(root))
+
+    result = invoke(window, "--dry-run")
+
+    if physical_default:
+        assert result.returncode == 0, result.stdout + result.stderr
+        plan = json.loads(result.stdout)
+        assert plan["authorization"]["candidate"] == expected
+        assert plan["authorization"]["authorized"] is False
+    else:
+        assert result.returncode == 2
+        assert (
+            "release-window authorization, configuration or phase check failed"
+            in result.stderr
+        )
+    assert not list(output.iterdir())
+    assert not list(root.glob("test-results-*.json"))

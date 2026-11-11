@@ -6,6 +6,8 @@ import importlib.util
 import subprocess
 from pathlib import Path
 
+import pytest
+
 MODULE_PATH = Path(__file__).parents[2] / "scripts" / "check_test_layout.py"
 MODULE_SPEC = importlib.util.spec_from_file_location("check_test_layout", MODULE_PATH)
 assert MODULE_SPEC is not None
@@ -118,3 +120,9 @@ def test_reports_both_violation_kinds_together(tmp_path: Path, capsys) -> None:
 def test_repository_satisfies_its_own_layout_rule() -> None:
     """The rule this change adds is green on the tree that adds it."""
     assert check_test_layout.scripts_without_test_modules(MODULE_PATH.parents[1]) == ()
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_repository_query_uses_physical_checkout(redirected_git_checkout):
+    root = redirected_git_checkout
+    assert check_test_layout._repository_files(root) == ("src/physical.py",)

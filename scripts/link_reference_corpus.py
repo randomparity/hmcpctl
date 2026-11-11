@@ -55,7 +55,16 @@ def sync_reference_corpus(worktree_root: Path, main_root: Path) -> list[str]:
 
 def _run_git(args: list[str], cwd: Path | None = None) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
     )
     return result.stdout.strip()
 

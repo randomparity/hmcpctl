@@ -974,3 +974,34 @@ def test_reject_ambiguous_source_recording_identity(monkeypatch):
     )
     with pytest.raises(capability_schema.InventoryError, match="ambiguous"):
         capability_registry.discover_observation_sites()
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_repository_query_uses_physical_checkout(redirected_git_checkout):
+    root = redirected_git_checkout
+    assert promotion._run(root, "git", "ls-files", "src").splitlines() == [
+        "src/physical.py"
+    ]
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_promotion_commit_preserves_git_config_selection(
+    hostile_git_config, redirected_git_checkout
+):
+    root = redirected_git_checkout
+
+    promotion._run(
+        root,
+        "git",
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "commit",
+        "-qm",
+        "Record physical fixture",
+    )
+
+    assert promotion._run(
+        root, "git", "ls-tree", "-r", "--name-only", "HEAD"
+    ).splitlines() == ["src/physical.py"]

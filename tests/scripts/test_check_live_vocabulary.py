@@ -555,3 +555,9 @@ def test_job_status_assignments_are_checked_as_status() -> None:
 def test_other_snake_case_parameters_are_not_mapped() -> None:
     """hmcpctl's own parameters take CLI forms (`sharing_mode="keep_idle_procs"`)."""
     assert _values("t.py", 'f(partition_state="Running", status="Degraded")\n') == []
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_repository_query_uses_physical_checkout(redirected_git_checkout):
+    root = redirected_git_checkout
+    assert guard.tracked_files(root) == ["src/physical.py"]

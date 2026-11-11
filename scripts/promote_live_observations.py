@@ -45,8 +45,15 @@ def _run(root: Path, *args: str) -> str:
             check=True,
             capture_output=True,
             text=True,
+            # Preserve the caller's config-file selection for normal commit hooks.
             env={
-                **os.environ,
+                **{
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith("GIT_")
+                    or key
+                    in {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"}
+                },
                 "GIT_EDITOR": "true",
                 "UV_NO_SYNC": "1",
                 "PYTHONPATH": str(root / "src"),
