@@ -19,7 +19,7 @@ from hmcpctl.client.client_templates import TemplatesMixin
 from hmcpctl.client.client_updates import UpdatesMixin
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 
 UUID_A = "12345678-1234-1234-1234-1234567890ab"
 UUID_B = "ABCDEFAB-CDEF-CDEF-CDEF-ABCDEFABCDEF"
@@ -640,3 +640,38 @@ async def test_vios_scoped_ambiguity_requires_parent_name(parent):
 
     with pytest.raises(ValueError, match="cannot identify managed system sys-a"):
         await client.find_vios_by_name("shared", system_uuid="sys-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["dispatch", "readback"])
+async def test_storage_reconciliation_preserves_tls_identity(phase):
+    client = StorageHarness()
+    failure = HMCTLSFingerprintError("Certificate fingerprint differs")
+    dispatch = AsyncMock(
+        side_effect=failure if phase == "dispatch" else HMCError("write failed", 503)
+    )
+    snapshot = AsyncMock(side_effect=failure)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await client._reconcile_storage_mutation(
+            "create_virtual_disk", snapshot, dispatch
+        )
+    assert caught.value is failure
+    dispatch.assert_awaited_once()
+    assert snapshot.await_count == (phase == "readback")
+
+
+@pytest.mark.asyncio
+async def test_storage_reconciliation_keeps_ordinary_readback_failure():
+    client = StorageHarness()
+    write_failure = HMCError("write failed", 503, "unavailable")
+    dispatch = AsyncMock(side_effect=write_failure)
+    snapshot = AsyncMock(side_effect=HMCError("read unavailable", 502))
+    with pytest.raises(HMCError, match="readback failed: read unavailable") as caught:
+        await client._reconcile_storage_mutation(
+            "create_virtual_disk", snapshot, dispatch
+        )
+    assert caught.value.__cause__ is write_failure
+    assert caught.value.status_code == 503
+    assert caught.value.body == "unavailable"
+    dispatch.assert_awaited_once()
+    snapshot.assert_awaited_once()

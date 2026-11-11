@@ -29,7 +29,7 @@ from ..documents.storage import (
     build_vscsi_mapping_document,
     build_web_file_document,
 )
-from ..errors import HMCError, HMCTransportError
+from ..errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ..resource_identity import is_uuid
 from ..xmlutil import WEB_NS, element_to_dict, localname
 from .client_contracts import StorageClient, _reject_non_uuid_path_argument
@@ -555,6 +555,8 @@ class StorageMixin:
                 raise
             try:
                 await snapshot()
+            except HMCTLSFingerprintError:
+                raise
             except HMCError as readback_error:
                 observation = f"readback failed: {readback_error}"
             else:
