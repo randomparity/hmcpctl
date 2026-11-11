@@ -2971,7 +2971,7 @@ def _storage_app() -> typer.Typer:
         (
             ["detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--yes"],
             "detach_storage_mapping",
-            StorageMutationResult.from_raw(asdict(UNSYNCED), change_location=UNSYNCED),
+            StorageMutationResult.from_raw(None, change_location=UNSYNCED),
         ),
         (
             [
@@ -3265,11 +3265,7 @@ def test_storage_delete_media_declined_confirmation_aborts(fake_hmc, monkeypatch
 def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
     mount = AsyncMock(
         return_value=StorageMutationResult.from_raw(
-            {
-                "lpar_uuid": LPAR_UUID,
-                "resource": {"UUID": "mapping-1", "MediaName": "install.iso"},
-                "change_location": asdict(UNSYNCED),
-            },
+            {"UUID": "mapping-1", "MediaName": "install.iso"},
             lpar_uuid=LPAR_UUID,
             change_location=UNSYNCED,
         )
@@ -3316,9 +3312,7 @@ def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
 
 def test_storage_unmount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
     unmount = AsyncMock(
-        return_value=StorageMutationResult.from_raw(
-            asdict(UNSYNCED), change_location=UNSYNCED
-        )
+        return_value=StorageMutationResult.from_raw(None, change_location=UNSYNCED)
     )
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.unmount_optical_media", unmount
@@ -3711,9 +3705,7 @@ def test_storage_detach_mapping_deletes_when_confirmed(fake_hmc, monkeypatch):
             mapping_id=mapping_id,
             ownership_override=ownership_override,
         )
-        return StorageMutationResult.from_raw(
-            asdict(UNSYNCED), change_location=UNSYNCED
-        )
+        return StorageMutationResult.from_raw(None, change_location=UNSYNCED)
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.detach_storage_mapping", fake_detach

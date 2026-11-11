@@ -9,7 +9,7 @@ import os
 import re
 import sys
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class StorageMutationResult:
-    """Original storage projection and its interpreted job, without extra HMC requests."""
+    """Storage facts and diagnostic payload, without extra HMC requests."""
 
     raw: Any
     job: JobOutcome | None = None
@@ -65,7 +65,7 @@ class StorageMutationResult:
         lpar_uuid: str | None = None,
         change_location: ChangeLocation | None = None,
     ) -> StorageMutationResult:
-        source = raw.get("resource", raw) if isinstance(raw, dict) else None
+        source = raw if isinstance(raw, dict) else None
         resource = source.get("Resource", source) if isinstance(source, dict) else None
         entry = (
             source
@@ -507,11 +507,7 @@ async def map_storage(
         vios_uuid, kind, storage_name, lpar_uuid, target
     )
     return StorageMutationResult.from_raw(
-        {
-            "lpar_uuid": lpar_uuid,
-            "resource": resource,
-            "change_location": asdict(location),
-        },
+        resource,
         lpar_uuid=lpar_uuid,
         change_location=location,
     )
@@ -659,7 +655,7 @@ async def detach_storage_mapping(
     )
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
-    return StorageMutationResult.from_raw(asdict(location), change_location=location)
+    return StorageMutationResult(None, change_location=location)
 
 
 async def delete_media_repository(
@@ -1319,11 +1315,7 @@ async def mount_optical_media(
     )
     resource = entry["Resource"] if entry is not None else None
     return StorageMutationResult.from_raw(
-        {
-            "lpar_uuid": lpar_uuid,
-            "resource": resource,
-            "change_location": asdict(location),
-        },
+        resource,
         lpar_uuid=lpar_uuid,
         change_location=location,
     )
@@ -1407,7 +1399,7 @@ async def unmount_optical_media(
         raise HMCError("VirtualSCSIMapping has no adapter/target identity")
     location = await read_change_location(hmc, lpar_uuid)
     await hmc.delete_storage_mapping(vios_uuid, mapping_id, lpar_uuid)
-    return StorageMutationResult.from_raw(asdict(location), change_location=location)
+    return StorageMutationResult(None, change_location=location)
 
 
 #: The only answer ``viosvrcmd`` gave to a successful ``loadopt``/``unloadopt`` in the

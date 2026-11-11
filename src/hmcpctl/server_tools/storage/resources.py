@@ -317,7 +317,12 @@ def hmc_map_storage_to_lpar(
             target=target_device,
             ownership_override=ownership_override,
         )
-        return result.raw
+        assert result.change_location is not None
+        return {
+            "lpar_uuid": result.lpar_uuid,
+            "resource": result.raw,
+            "change_location": asdict(result.change_location),
+        }
 
     return with_client(mapping, profile=profile)
 

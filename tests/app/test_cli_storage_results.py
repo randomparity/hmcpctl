@@ -168,7 +168,9 @@ def operation_result(data):
     location = data if isinstance(data, ChangeLocation) else None
     if isinstance(data, dict) and "change_location" in data:
         location = ChangeLocation(**data["change_location"])
-    raw = asdict(data) if isinstance(data, ChangeLocation) else data
+    raw = None if isinstance(data, ChangeLocation) else data
+    if isinstance(data, dict) and "change_location" in data:
+        raw = data["resource"]
     return StorageMutationResult.from_raw(
         raw,
         change_location=location,
@@ -300,7 +302,7 @@ from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.operations.storage.resources import StorageMutationResult
 data = {data!r}
-raw = asdict(data) if isinstance(data, ChangeLocation) else data
+raw = None if isinstance(data, ChangeLocation) else (data["resource"] if isinstance(data, dict) and "change_location" in data else data)
 location = data if isinstance(data, ChangeLocation) else (ChangeLocation(**data['change_location']) if isinstance(data, dict) and 'change_location' in data else None)
 resources.with_client = lambda op: data if isinstance(data, AttachDiskResult) else StorageMutationResult.from_raw(raw, change_location=location, lpar_uuid=data.get('lpar_uuid') if isinstance(data, dict) else None)
 cli.app(prog_name='hmcpctl')
@@ -501,8 +503,12 @@ def test_mutation_summary_preserves_normalized_job_handle(
         entry["UUID"] = "job-test"
     else:
         entry["link"] = f"{href}/11111111-1111-1111-1111-111111111111"
-    data = {"resource": entry} if enveloped else entry
-    command, args, _, _ = CASES[2]
+    data = (
+        {"resource": entry, "lpar_uuid": "lp-test", "change_location": asdict(LOCATION)}
+        if enveloped
+        else entry
+    )
+    command, args, _, _ = CASES[4 if enveloped else 2]
     result, _ = _invoke(monkeypatch, command, args, data, ("--format", output))
 
     assert result.exit_code == 0, result.output
@@ -544,3 +550,43 @@ def test_attach_summary_uses_typed_job_independent_of_raw_result(monkeypatch):
     assert "RUNNING" in result.stdout
     detailed, _ = _invoke(monkeypatch, command, args, data, ("--json",))
     assert json.loads(detailed.stdout) == json.loads(json.dumps(asdict(data)))
+
+
+@pytest.mark.parametrize("index", [4, 9])
+@pytest.mark.parametrize("details", [False, True])
+def test_mapping_adapter_projects_details_but_uses_typed_job(
+    monkeypatch, index, details
+):
+    from hmcpctl.jobs import job_outcome
+
+    provider = {"diagnostic": "provider-only"}
+    job = job_outcome(
+        "job-test",
+        {"Resource": {"JobID": "job-test", "Status": "COMPLETED_WITH_ERROR"}},
+    )
+    operation = StorageMutationResult(
+        provider,
+        job=job,
+        lpar_uuid="authorized-lpar",
+        change_location=LOCATION,
+        resource={"diagnostic": "different-interpreted-resource"},
+    )
+    monkeypatch.setattr(storage, "with_client", Mock(return_value=operation))
+    command, args, _, _ = CASES[index]
+    result = RUNNER.invoke(
+        cli.app, ["storage", command, *args, "--details" if details else "--json"]
+    )
+    assert result.exit_code == 1, result.output
+    observed = json.loads(result.stdout)
+    if details:
+        assert observed == {
+            "lpar_uuid": "authorized-lpar",
+            "resource": provider,
+            "change_location": asdict(LOCATION),
+        }
+    else:
+        assert observed["lpar_uuid"] == "authorized-lpar"
+        assert observed["outcome"] == "failed"
+        assert observed["job_id"] == "job-test"
+        assert observed["change_location"] == asdict(LOCATION)
+        assert "provider-only" not in result.stdout

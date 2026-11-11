@@ -817,14 +817,7 @@ def test_mount_optical_media_keeps_the_mapping_keys_beside_its_location(
     location = ChangeLocation("Disabled", "current-configuration")
     mount = AsyncMock(
         return_value=StorageMutationResult.from_raw(
-            {
-                "lpar_uuid": LPAR_UUID,
-                "resource": {"UUID": "mapping-1"},
-                "change_location": {
-                    "current_profile_sync": location.current_profile_sync,
-                    "lives_in": location.lives_in,
-                },
-            },
+            {"UUID": "mapping-1"},
             lpar_uuid=LPAR_UUID,
             change_location=location,
         )
@@ -888,14 +881,7 @@ def test_mount_optical_media_without_a_resource_still_reports_its_location(
         "hmcpctl.server_tools.storage.resources.mount_optical_media",
         AsyncMock(
             return_value=StorageMutationResult.from_raw(
-                {
-                    "lpar_uuid": LPAR_UUID,
-                    "resource": None,
-                    "change_location": {
-                        "current_profile_sync": location.current_profile_sync,
-                        "lives_in": location.lives_in,
-                    },
-                },
+                None,
                 lpar_uuid=LPAR_UUID,
                 change_location=location,
             )
@@ -954,3 +940,28 @@ def test_optical_load_tools_forward_every_argument_and_return_the_result(
         ownership_override=True,
         **kwargs,
     )
+
+
+@pytest.mark.parametrize(
+    "provider", [None, {"UUID": "mapping-entry", "Resource": {"DiskName": "disk"}}]
+)
+def test_map_tool_projects_typed_identity_beside_provider_entry(
+    monkeypatch, mock_hmc, provider
+):
+    _hmc_env(monkeypatch)
+    location = ChangeLocation("Disabled", "current-configuration")
+    operation = AsyncMock(
+        return_value=StorageMutationResult.from_raw(
+            provider, lpar_uuid=LPAR_UUID, change_location=location
+        )
+    )
+    monkeypatch.setattr("hmcpctl.server_tools.storage.resources.map_storage", operation)
+    result = hmc_map_storage_to_lpar(
+        vios_name_or_uuid=VIOS_UUID, storage_name="disk", lpar_name_or_uuid=LPAR_UUID
+    )
+    assert result == {
+        "lpar_uuid": LPAR_UUID,
+        "resource": provider,
+        "change_location": asdict(location),
+    }
+    operation.assert_awaited_once()

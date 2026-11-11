@@ -313,6 +313,9 @@ async def test_unmount_optical_media_removes_the_named_mapping_for_that_lpar(moc
         )
 
     assert result.change_location == ChangeLocation("Disabled", "current-configuration")
+    assert result.raw is None
+    assert result.resource is None
+    assert result.job is None
     body = _posted_document(post)
     assert "vtopt0" not in body
     assert "vtscsi0" in body

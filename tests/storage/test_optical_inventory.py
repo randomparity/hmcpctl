@@ -186,7 +186,7 @@ async def test_create_optical_mapping_submits_document(
             )
             assert result.change_location == location
             assert result.lpar_uuid == LPAR_UUID
-            resource = result.raw["resource"]
+            resource = result.raw
             assert resource is None or "Resource" not in resource
 
     assert post_route.called
