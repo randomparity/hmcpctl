@@ -21,6 +21,7 @@ from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.assignments import AssignmentResult, LparPcieAssignments
 from hmcpctl.operations.lpar.creation import core
 from hmcpctl.operations.lpar.creation import workflow as workflows
+from hmcpctl.operations.partition_creation import _CreationFeatureCoordinator
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import ATOM_NS
@@ -129,6 +130,83 @@ def creation(**options):
     return core.LparCreation(
         "part-R1", "AIX/Linux", LparResources(desired_memory=1024), **options
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [False, True])
+async def test_prefollowup_observes_coordinator_feature_selection(selected):
+    requested = {
+        "affinity_group_id": 1,
+        "hardware_mem_encryption": False,
+        "hardware_mem_expansion": True,
+    }
+    hmc = AsyncMock(spec=HMCClient)
+    features = _CreationFeatureCoordinator(
+        hmc,
+        SYSTEM,
+        "sys-R1",
+        "part-R1",
+        "AIX/Linux",
+        LparResources(),
+        **(requested if selected else {}),
+    )
+    context = creation(**({} if selected else requested))
+
+    await features.observe_before_followup(context)
+
+    assert list(features.facts) == [
+        "serial_step",
+        "creation_memory_step",
+        "memory_layout_step",
+        "affinity_group_step",
+        "hardware_memory_step",
+    ]
+    if selected:
+        assert features.facts["affinity_group_step"] is not None
+        assert features.facts["hardware_memory_step"] is not None
+        assert features.facts["affinity_group_step"].result["requested"] == 1
+        assert features.facts["hardware_memory_step"].result["requested"] == {
+            "hardware_mem_encryption": False,
+            "hardware_mem_expansion": True,
+        }
+    else:
+        assert all(step is None for step in features.facts.values())
+    assert features.active_step is None
+    assert hmc.mock_calls == []
+
+
+@pytest.mark.asyncio
+async def test_prefollowup_hardware_observation_uses_coordinator_identity(target):
+    features = _CreationFeatureCoordinator(
+        target.hmc,
+        SYSTEM,
+        "sys-R1",
+        "part-R1",
+        "AIX/Linux",
+        LparResources(),
+        hardware_mem_encryption=True,
+        hardware_mem_expansion=False,
+    )
+    features._entry = target.entry
+    context = core.LparCreation(
+        "different-request",
+        "OS400",
+        LparResources(),
+        hardware_mem_encryption=False,
+        hardware_mem_expansion=True,
+    )
+
+    await features.observe_before_followup(context)
+
+    step = features.facts["hardware_memory_step"]
+    assert step.status == "ok"
+    assert step.result["requested"] == {
+        "hardware_mem_encryption": True,
+        "hardware_mem_expansion": False,
+    }
+    assert target.events == ["LogicalPartition"]
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.command.assert_not_awaited()
 
 
 async def invoke(b, vios=False, *, direct=False, **options):

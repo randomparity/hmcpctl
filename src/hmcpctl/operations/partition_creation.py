@@ -586,9 +586,9 @@ class _CreationFeatureCoordinator:
                 self.hmc,
                 self.system_uuid,
                 self.entry,
-                creation.name,
-                creation.partition_type,
-                creation.affinity_group_id,
+                self.name,
+                self.environment,
+                self.affinity_group_id,
                 controller_mode=self.controller_mode,
             ),
         )
@@ -598,10 +598,10 @@ class _CreationFeatureCoordinator:
                 self.hmc,
                 self.system_uuid,
                 self.entry,
-                creation.name,
-                creation.partition_type,
-                creation.hardware_mem_encryption,
-                creation.hardware_mem_expansion,
+                self.name,
+                self.environment,
+                self.hardware_mem_encryption,
+                self.hardware_mem_expansion,
             ),
         )
 
