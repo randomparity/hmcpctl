@@ -103,7 +103,9 @@ def objects(
     return result
 
 
-def exact_keys(value: object, keys: set[str], label: str, errors: list[str]) -> bool:
+def exact_keys(
+    value: object, keys: set[str], label: str, errors: list[str]
+) -> TypeGuard[dict[str, object]]:
     if not isinstance(value, dict) or set(value) != keys:
         errors.append(f"{label}: expected exactly {sorted(keys)}")
         return False
@@ -137,7 +139,6 @@ def scope_identity(
             )
     if not exact_keys(value, keys, label, errors):
         return None
-    assert isinstance(value, dict)
     variant = value["variant"]
     parameters = value["parameters"]
     if not nonempty(variant) or not isinstance(parameters, list):
@@ -148,7 +149,6 @@ def scope_identity(
         parameter_label = f"{label} parameter {index}"
         if not exact_keys(parameter, {"name", "constraint"}, parameter_label, errors):
             continue
-        assert isinstance(parameter, dict)
         name, constraint = parameter["name"], parameter["constraint"]
         if not nonempty(name) or not nonempty(constraint):
             errors.append(f"{parameter_label}: name and constraint are required")
@@ -167,7 +167,6 @@ def _validate_implementation(
         implementation, {"state", "implemented_scope", "missing_scope"}, label, errors
     ):
         return set()
-    assert isinstance(implementation, dict)
     state = implementation["state"]
     implemented = implementation["implemented_scope"]
     missing = implementation["missing_scope"]
@@ -196,20 +195,22 @@ def _validate_implementation(
     return implemented_ids
 
 
-def _validate_timestamp(value: object, label: str, errors: list[str]) -> None:
+def _validate_timestamp(
+    value: object, label: str, errors: list[str]
+) -> datetime | None:
     if not isinstance(value, str) or not TIMESTAMP.fullmatch(value):
         errors.append(f"{label}: observed_at must be canonical UTC")
-        return
+        return None
     try:
-        datetime.fromisoformat(value)
+        return datetime.fromisoformat(value)
     except ValueError:
         errors.append(f"{label}: observed_at is not a calendar timestamp")
+        return None
 
 
 def validate_confirmation(value: object, label: str, errors: list[str]) -> None:
     if not exact_keys(value, CONFIRMATION_KEYS, label, errors):
         return
-    assert isinstance(value, dict)
     for field, pattern in (
         ("tested_commit", SHA_1),
         ("closure_fingerprint", SHA_256),
@@ -218,12 +219,8 @@ def validate_confirmation(value: object, label: str, errors: list[str]) -> None:
     ):
         if not matches(pattern, value[field]):
             errors.append(f"{label}: invalid confirmation {field}")
-    timestamp_errors: list[str] = []
-    _validate_timestamp(value["observed_at"], label, timestamp_errors)
-    errors.extend(timestamp_errors)
-    if not timestamp_errors and datetime.fromisoformat(
-        value["observed_at"]
-    ) > datetime.now(UTC):
+    observed_at = _validate_timestamp(value["observed_at"], label, errors)
+    if observed_at is not None and observed_at > datetime.now(UTC):
         errors.append(f"{label}: confirmation observed_at must not be in the future")
 
 
@@ -243,7 +240,6 @@ def validate_observation(
         observation, ATTEMPTED_KEYS, f"maturity operation {operation} evidence", errors
     ):
         return
-    assert isinstance(observation, dict)
     identity = observation["id"]
     label = (
         f"maturity evidence {identity}"
