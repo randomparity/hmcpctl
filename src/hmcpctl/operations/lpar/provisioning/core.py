@@ -21,7 +21,7 @@ from hmcpctl.documents.lpar import (
 )
 from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.documents.storage import StorageKind, validate_virtual_disk
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import JobOutcome, job_outcome
 from hmcpctl.operations.affinity.rest import (
     ProvisionAffinityAssessment,
@@ -294,13 +294,14 @@ async def _record_hmc_step(
 async def _read_change_location(
     hmc: HMCClient, lpar_uuid: str
 ) -> tuple[ChangeLocation | None, tuple[str, ...]]:
-    """Where the network and storage changes just made now live.
+    """Read where current changes live before considering any further writes.
 
-    Advisory, like ``profile_adapter_warnings``: a failed read becomes a
-    warning rather than failing provisioning that already succeeded.
+    Unavailable evidence is advisory; TLS identity failure stops subsequent work.
     """
     try:
         return await read_change_location(hmc, lpar_uuid), ()
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         return None, (f"Change location not read: {exc}",)
 

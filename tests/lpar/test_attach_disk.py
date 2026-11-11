@@ -302,3 +302,21 @@ async def test_attach_disk_typed_storage_requires_volume_group_uuid():
         )
     client.list_volume_groups.assert_not_awaited()
     client.create_virtual_disk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_disk_tls_advisory_read_stops_before_any_storage_write():
+    from hmcpctl.errors import HMCTLSFingerprintError
+
+    client = _client()
+    failure = HMCTLSFingerprintError("certificate identity changed")
+    client.get_logical_partition.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await attach_disk_to_lpar(
+            client, LPAR_UUID, _storage(), capacity_mib=1024, system_name_or_uuid=None
+        )
+    assert caught.value is failure
+    client.get_logical_partition.assert_awaited_once_with(LPAR_UUID)
+    client.create_virtual_disk.assert_not_awaited()
+    client.add_vscsi_adapter.assert_not_awaited()
+    client.map_storage_to_lpar.assert_not_awaited()

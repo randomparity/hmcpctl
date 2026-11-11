@@ -1092,3 +1092,29 @@ def test_mount_tls_failure_is_not_classified_as_a_definite_refusal(writes, monke
     assert result.resource_created is True and result.lpar_uuid == LPAR
     assert result.workflow_completed is False
     assert "private-provider-detail" not in str(result)
+
+
+def test_provision_change_location_tls_stops_after_recorded_network(
+    writes, monkeypatch
+):
+    from hmcpctl.operations.lpar.provisioning import core
+
+    read = AsyncMock(side_effect=HMCTLSFingerprintError("private-provider-detail"))
+    monkeypatch.setattr(writes.hmc, "get_logical_partition", read, raising=False)
+    monkeypatch.setattr(
+        provision_operation, "_read_change_location", core._read_change_location
+    )
+    record = _submit(writes)
+    result = result_from_record(record)
+    assert writes.calls == ["create", "network"]
+    read.assert_awaited_once_with(LPAR)
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert [(effect.key, effect.status) for effect in record.effects] == [
+        ("create", "applied"),
+        ("stamp", "applied"),
+        ("network", "applied"),
+    ]
+    assert result.resource_created is True and result.ownership_stamped is True
+    assert result.lpar_uuid == LPAR and result.workflow_completed is False
+    assert "private-provider-detail" not in str(result)
+    assert any("HMCTLSFingerprintError" in warning for warning in result.warnings)
