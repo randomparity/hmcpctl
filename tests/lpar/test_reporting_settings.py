@@ -357,7 +357,7 @@ async def test_creation_separate_readback_step(monkeypatch, readback):
 
 
 @pytest.mark.asyncio
-async def test_reporting_failure_stops_assignments(monkeypatch):
+async def test_reporting_failure_stops_assignments(monkeypatch, creation_mock):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
     from hmcpctl.operations.lpar.creation.core import LparCreation, LparCreationResult
@@ -368,11 +368,9 @@ async def test_reporting_failure_stops_assignments(monkeypatch):
     monkeypatch.setattr(module + "prevalidate_lpar_pcie_assignments", AsyncMock())
     step = WorkflowStep("reporting_settings", "error", "unverified")
     monkeypatch.setattr(
-        module + "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
-                True, {"UUID": "created"}, True, (), reporting_step=step
-            )
+        module + "_create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(True, {"UUID": "created"}, True, (), reporting_step=step)
         ),
     )
     assign = AsyncMock()

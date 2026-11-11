@@ -19,8 +19,8 @@ from ..linux_roles import roles_requested
 from ..workflow_contract import WorkflowStep
 from .core import (
     LparCreation,
-    create_and_stamp_lpar,
-    creation_followup,
+    _create_and_stamp_lpar,
+    _creation_followup,
     validate_lpar_creation,
 )
 
@@ -70,9 +70,11 @@ async def create_lpar(
         assignments = replace(assignments, sriov=())
     try:
         if preflight_assignments is None:
-            created = await create_and_stamp_lpar(hmc, system_name_or_uuid, creation)
+            created, observations = await _create_and_stamp_lpar(
+                hmc, system_name_or_uuid, creation
+            )
         else:
-            created = await create_and_stamp_lpar(
+            created, observations = await _create_and_stamp_lpar(
                 hmc,
                 system_name_or_uuid,
                 creation,
@@ -83,7 +85,7 @@ async def create_lpar(
         if translated is exc:
             raise
         raise translated from exc
-    steps, assignments_allowed = creation_followup(creation, created)
+    steps, assignments_allowed = _creation_followup(creation, created, observations)
     if not assignments_allowed:
         steps.extend(
             WorkflowStep(name, "skipped") for name in assignment_step_names(assignments)

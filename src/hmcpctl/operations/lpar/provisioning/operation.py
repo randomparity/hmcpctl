@@ -40,8 +40,8 @@ from hmcpctl.operations.lpar.assignments import (
 from hmcpctl.operations.lpar.boot_order import read_lpar_boot_order, set_lpar_boot_order
 from hmcpctl.operations.lpar.creation.core import (
     LparCreation,
-    create_and_stamp_lpar,
-    creation_followup,
+    _create_and_stamp_lpar,
+    _creation_followup,
 )
 from hmcpctl.operations.lpar.ownership import (
     lpar_ownership_entry,
@@ -903,7 +903,7 @@ class _Run:
                 if request.physical_io.requested
                 else (),
             )
-            creation = await create_and_stamp_lpar(
+            creation, observations = await _create_and_stamp_lpar(
                 self.hmc,
                 self.system,
                 creation_request,
@@ -923,7 +923,7 @@ class _Run:
             raise HMCError("the create returned no partition UUID")
         self.ownership_stamped = creation.ownership_stamped
         self.warnings.extend(creation.warnings)
-        steps, _ = creation_followup(creation_request, creation)
+        steps, _ = _creation_followup(creation_request, creation, observations)
         follow_ups = [
             # Text only, bounded: an identity is at most 4 KiB (store.MAX_IDENTITY_BYTES).
             [step.step, step.status, str(step.result)[:256] if step.result else None]

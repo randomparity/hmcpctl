@@ -28,6 +28,154 @@ def coordinator():
     )
 
 
+@pytest.fixture
+def rest_creation_client(monkeypatch):
+    from hmcpctl.config import HMCConfig
+
+    system = "11111111-1111-4111-8111-111111111111"
+    entry = {
+        "UUID": "22222222-2222-4222-8222-222222222222",
+        "Resource": {"PartitionName": "partition"},
+    }
+    hmc = AsyncMock(spec=HMCClient)
+    hmc.config = HMCConfig.from_mapping({})
+    hmc.find_partition_by_name.return_value = None
+    hmc.create_logical_partition.return_value = entry
+    hmc.list_logical_partitions.return_value = [entry]
+    hmc.list_system_summaries.return_value = [{"UUID": system, "SystemName": "system"}]
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.ownership.stamp_lpar_ownership",
+        AsyncMock(return_value="ownership stamp"),
+    )
+    return hmc, system, entry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("consumer", ["workflow", "provisioning", "public"])
+async def test_real_creation_keeps_projection_at_the_public_boundary(
+    monkeypatch, rest_creation_client, consumer
+):
+    from unittest.mock import Mock
+
+    from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.creation import core, workflow
+    from hmcpctl.operations.lpar.provisioning import operation
+    from hmcpctl.operations.lpar.provisioning.core import (
+        ProvisionAdapters,
+        ProvisionRequest,
+        ProvisionStorage,
+    )
+
+    hmc, system, entry = rest_creation_client
+    creation = core.LparCreation(
+        "partition", "AIX/Linux", LparResources(min_memory=256), apply_profile=True
+    )
+    projection = Mock(
+        wraps=core._compose_creation_result,
+        side_effect=None
+        if consumer == "public"
+        else AssertionError("internal consumer projected public creation evidence"),
+    )
+    monkeypatch.setattr(core, "_compose_creation_result", projection)
+    if consumer == "workflow":
+        result = await workflow.create_lpar(
+            hmc, system, creation, LparPcieAssignments()
+        )
+        assert result.workflow_completed is True
+        assert result.lpar is entry
+        assert [step.step for step in result.steps] == ["create", "apply_profile"]
+    elif consumer == "provisioning":
+        request = ProvisionRequest(
+            "partition",
+            ProvisionAdapters(1),
+            ProvisionStorage("vios", "disk"),
+            creation.resources,
+        )
+        run = operation._Run(cast(Any, object()), hmc, system, request)
+        identity = await run._write_create(system)
+        assert identity == {
+            "lpar_uuid": entry["UUID"],
+            "name": "partition",
+            "follow_ups": [["apply_profile", "skipped", core._REST_CREATE_CONFIGURED]],
+        }
+        assert run.ownership_stamped is True
+        assert run.warnings == []
+    else:
+        result = await core.create_and_stamp_lpar(hmc, system, creation)
+        assert result.lpar is entry
+        assert result.ownership_stamped is True
+        assert result.apply_step == WorkflowStep(
+            "apply_profile", "skipped", core._REST_CREATE_CONFIGURED
+        )
+        steps, allowed = core.creation_followup(creation, result)
+        assert allowed is True
+        assert steps == [WorkflowStep("create", "ok", entry), result.apply_step]
+    assert projection.call_count == int(consumer == "public")
+    hmc.find_partition_by_name.assert_awaited_once_with("partition", system_uuid=system)
+    hmc.create_logical_partition.assert_awaited_once()
+    hmc.list_logical_partitions.assert_not_awaited()
+
+
+def test_sanitization_retains_canonical_completion_and_unmodified_payloads(coordinator):
+    from hmcpctl.operations.lpar.creation import core
+
+    creation = core.LparCreation(
+        "partition", "AIX/Linux", LparResources(), hardware_mem_encryption=False
+    )
+    features = _CreationFeatureCoordinator(
+        coordinator.hmc,
+        coordinator.system_uuid,
+        coordinator.system_selector,
+        core._creation_feature_inputs(creation),
+    )
+    payload = {"observed": "retained"}
+    successful = WorkflowStep("settings", "ok", payload)
+    serial = WorkflowStep("serial", "error", "existing distinct diagnostic")
+    observations = (
+        features.snapshot()
+        .observations.record("settings_step", successful)
+        .record("serial_step", serial)
+        .record(
+            "hardware_memory_step", WorkflowStep("hardware_memory", "error", "private")
+        )
+    )
+    sanitized = core._sanitize_creation_steps(creation, features, observations)
+    assert sanitized.hardware_memory_step.completed is True
+    assert sanitized.hardware_memory_step.step.status == "error"
+    assert sanitized.hardware_memory_step.step.result == (
+        "Partition exists or may exist; creation step unverified. Inspect before retrying; "
+        "no rollback performed."
+    )
+    assert sanitized.settings_step.step is successful
+    assert sanitized.settings_step.step.result is payload
+    assert sanitized.serial_step.step is serial
+    assert not sanitized.vtpm_step.completed
+    assert observations.hardware_memory_step.step.result == "private"
+
+
+def test_canonical_verification_requires_ownership_and_completed_evidence():
+    from hmcpctl.operations.lpar.creation.core import _creation_steps_verified
+
+    inputs = _CreationFeatureInputs(
+        "partition", "AIX/Linux", LparResources(), hardware_mem_encryption=False
+    )
+    observations = _CreationObservations.selected(inputs).record(
+        "hardware_memory_step", WorkflowStep("hardware_memory", "ok")
+    )
+    assert _creation_steps_verified(True, observations)
+    assert not _creation_steps_verified(False, observations)
+    assert not _creation_steps_verified(None, observations)
+    assert not _creation_steps_verified(
+        True,
+        replace(
+            observations,
+            hardware_memory_step=replace(
+                observations.hardware_memory_step, completed=False
+            ),
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     ("options", "hardware", "profile"),
     [

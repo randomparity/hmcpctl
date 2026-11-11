@@ -184,8 +184,13 @@ class FakeHMC:
 class Writes:
     """The HMC writes a provision body makes, answered as a healthy HMC would."""
 
-    def __init__(self, hmc: FakeHMC, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self, hmc: FakeHMC, monkeypatch: pytest.MonkeyPatch, creation_mock
+    ) -> None:
         self.hmc = hmc
+        self._creation = creation_mock(
+            LparCreationResult(True, {"UUID": LPAR}, True, ())
+        )
         self.calls: list[str] = []
         self.adapter_mac: str | None = MAC
         self.network_mac: list[str | None] = []
@@ -198,7 +203,7 @@ class Writes:
         po = provision_operation
         patch = monkeypatch.setattr
         patch(po, "resolve_system_uuid", AsyncMock(return_value=SYSTEM))
-        patch(po, "create_and_stamp_lpar", self.create)
+        patch(po, "_create_and_stamp_lpar", self.create)
         patch(po, "_stamp_state", AsyncMock(return_value="ours"))
         patch(po, "_add_network", self.network)
         patch(po, "_create_disk", self.record("disk"))
@@ -225,7 +230,7 @@ class Writes:
 
     async def create(self, *_args: Any, **_kwargs: Any) -> Any:
         self.calls.append("create")
-        return LparCreationResult(True, {"UUID": LPAR}, True, ())
+        return await self._creation(*_args, **_kwargs)
 
     async def network(self, _hmc: Any, _lpar: str, _vlan: int, mac: str | None) -> dict:
         self.calls.append("network")
@@ -336,8 +341,8 @@ def _submit(
 
 
 @pytest.fixture
-def writes(monkeypatch: pytest.MonkeyPatch) -> Writes:
-    return Writes(FakeHMC(), monkeypatch)
+def writes(monkeypatch: pytest.MonkeyPatch, creation_mock) -> Writes:
+    return Writes(FakeHMC(), monkeypatch, creation_mock)
 
 
 def _ledger(record) -> list[tuple[str, dict]]:
@@ -955,7 +960,7 @@ def test_fatal_tls_from_create_does_not_reconcile_or_start_another_leg(
     failure = HMCTLSFingerprintError("private-provider-detail")
     create = AsyncMock(side_effect=failure)
     inventory = AsyncMock(return_value=[])
-    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(provision_operation, "_create_and_stamp_lpar", create)
     monkeypatch.setattr(writes.hmc, "list_logical_partitions", inventory, raising=False)
 
     record = _submit(writes)
@@ -971,7 +976,9 @@ def test_fatal_tls_from_create_does_not_reconcile_or_start_another_leg(
     assert "private-provider-detail" not in str(result)
 
 
-def test_tls_aborted_creation_retains_evidence_before_another_leg(writes, monkeypatch):
+def test_tls_aborted_creation_retains_evidence_before_another_leg(
+    writes, monkeypatch, creation_mock
+):
     creation = LparCreationResult(
         True,
         {"UUID": LPAR},
@@ -979,9 +986,9 @@ def test_tls_aborted_creation_retains_evidence_before_another_leg(writes, monkey
         ("TLS certificate identity verification failed after creation",),
         settings_step=WorkflowStep("settings", "error", "TLS aborted"),
     )
-    create = AsyncMock(return_value=creation)
+    create = creation_mock(creation)
     inventory = AsyncMock(return_value=[])
-    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(provision_operation, "_create_and_stamp_lpar", create)
     monkeypatch.setattr(writes.hmc, "list_logical_partitions", inventory, raising=False)
 
     record = _submit(writes)

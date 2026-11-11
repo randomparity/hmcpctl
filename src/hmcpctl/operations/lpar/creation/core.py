@@ -131,6 +131,9 @@ class LparCreationResult:
     affinity_group_step: WorkflowStep | None = None
 
 
+_CreationCompletion = tuple[LparCreationResult, _CreationObservations]
+
+
 def _compose_creation_result(
     result: LparCreationResult, observations: _CreationObservations
 ) -> LparCreationResult:
@@ -429,6 +432,22 @@ async def create_and_stamp_lpar(
       :func:`set_lpar_ownership_description` (issue #376, ADR 0066) or
       delete it to release its resources.
     """
+    result, observations = await _create_and_stamp_lpar(
+        hmc,
+        system_name_or_uuid,
+        creation,
+        preflight_assignments=preflight_assignments,
+    )
+    return _compose_creation_result(result, observations)
+
+
+async def _create_and_stamp_lpar(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    creation: LparCreation,
+    *,
+    preflight_assignments: LparPcieAssignments | None = None,
+) -> _CreationCompletion:
     validate_lpar_creation(creation)
     inputs = _creation_feature_inputs(creation)
     features = await _admit_lpar_creation(
@@ -661,7 +680,7 @@ async def _complete_lpar_creation(
     creation: LparCreation,
     features: _CreationFeatureCoordinator,
     submission: _CreationSubmission,
-) -> LparCreationResult:
+) -> _CreationCompletion:
     """Confirm, stamp, observe and apply, retaining facts at the TLS cutoff."""
     (
         system_name,
@@ -758,10 +777,10 @@ async def _complete_lpar_creation(
             result,
             warnings=(*apply_warnings, *warnings),
         )
-        return _sanitize_creation_steps(
+        return result, _sanitize_creation_steps(
             creation,
             features,
-            _compose_creation_result(result, features.snapshot().observations),
+            features.snapshot().observations,
         )
     except HMCTLSFingerprintError:
         observations = features.snapshot()
@@ -777,7 +796,7 @@ async def _missing_created_identity(
     result: LparCreationResult,
     readback_error: HMCError | None,
     verify_before_apply: bool,
-) -> LparCreationResult:
+) -> _CreationCompletion:
     """Preserve required-stamp failures and best-effort absent-identity evidence."""
     apply_warnings = result.warnings
     apply_note = f" {'; '.join(apply_warnings)}" if apply_warnings else ""
@@ -861,14 +880,14 @@ async def _missing_created_identity(
             f"ownership stamp skipped for LPAR {creation.name!r}: {skipped}",
         ),
     )
-    return _compose_creation_result(result, features.snapshot().observations)
+    return result, features.snapshot().observations
 
 
 async def _unconfirmed_created_identity(
     creation: LparCreation,
     features: _CreationFeatureCoordinator,
     created_lpar: dict[str, Any],
-) -> LparCreationResult:
+) -> _CreationCompletion:
     """Retain the distinct unconfirmed-identity result and observation order."""
     if creation.stamp_policy == "required":
         raise HMCError(
@@ -901,7 +920,7 @@ async def _unconfirmed_created_identity(
         None,
         (),
     )
-    return _compose_creation_result(result, features.snapshot().observations)
+    return result, features.snapshot().observations
 
 
 async def _stamp_lpar_creation(
@@ -1034,13 +1053,13 @@ async def _apply_verified_creation(
 def _sanitize_creation_steps(
     creation: LparCreation,
     features: _CreationFeatureCoordinator,
-    result: LparCreationResult,
-) -> LparCreationResult:
+    observations: _CreationObservations,
+) -> _CreationObservations:
     if not (
         roles_requested(creation.settings) or features.inputs.native_features_requested
     ):
-        return result
-    safe_steps = {}
+        return observations
+    safe_observations = {}
     step_names = (
         "apply_step",
         "physical_io_step",
@@ -1054,13 +1073,17 @@ def _sanitize_creation_steps(
             "hardware_memory_step",
         )
     for name in step_names:
-        step = getattr(result, name)
+        observation = getattr(observations, name)
+        step = observation.step
         if step is not None and step.status == "error" and isinstance(step.result, str):
-            safe_steps[name] = replace(
-                step,
-                result="Partition exists or may exist; creation step unverified. Inspect before retrying; no rollback performed.",
+            safe_observations[name] = replace(
+                observation,
+                step=replace(
+                    step,
+                    result="Partition exists or may exist; creation step unverified. Inspect before retrying; no rollback performed.",
+                ),
             )
-    return replace(result, **safe_steps)
+    return replace(observations, **safe_observations)
 
 
 _TLS_CREATION_ABORTED = (
@@ -1072,29 +1095,37 @@ _TLS_CREATION_ABORTED = (
 
 def _tls_aborted_creation(
     result: LparCreationResult, snapshot: _CreationObservationSnapshot
-) -> LparCreationResult:
+) -> _CreationCompletion:
     observations = snapshot.observations.interrupted(
         snapshot.active_step, _TLS_CREATION_ABORTED
     )
-    return _compose_creation_result(
+    return (
         replace(result, warnings=(*result.warnings, _TLS_CREATION_ABORTED)),
         observations,
     )
 
 
 def _creation_steps_verified(
-    creation: LparCreation, result: LparCreationResult
+    ownership_stamped: bool | None, observations: _CreationObservations
 ) -> bool:
-    if result.ownership_stamped is not True:
-        return False
-    observations = _CreationObservations.selected(_creation_feature_inputs(creation))
-    return observations.with_public_steps(vars(result)).verified
+    return ownership_stamped is True and observations.verified
 
 
 def creation_followup(
     creation: LparCreation, created: LparCreationResult
 ) -> tuple[list[WorkflowStep], bool]:
     """Return ordered creation evidence and whether PCIe assignments may proceed."""
+    observations = _CreationObservations.selected(_creation_feature_inputs(creation))
+    for name, _ in observations.public_items():
+        observations = observations.record(name, getattr(created, name))
+    return _creation_followup(creation, created, observations)
+
+
+def _creation_followup(
+    creation: LparCreation,
+    created: LparCreationResult,
+    observations: _CreationObservations,
+) -> tuple[list[WorkflowStep], bool]:
     memory_requested = bool(creation.creation_memory.pairs())
     start_requested = creation.start_settings.requested()
     affinity_requested = creation.affinity_group_id is not None
@@ -1110,43 +1141,48 @@ def creation_followup(
         or affinity_requested
     )
     # Role-only creation keeps its established apply-first presentation order.
-    ordered = [created.physical_io_step]
+    ordered = [observations.physical_io_step.step]
     if not defer_apply:
-        ordered.append(created.apply_step)
+        ordered.append(observations.apply_step.step)
     ordered.extend(
         (
-            created.settings_step,
-            created.reporting_step,
-            created.vtpm_step,
-            created.security_policy_step,
-            created.affinity_group_step,
-            created.hardware_memory_step,
-            created.memory_layout_step,
-            created.serial_step,
-            created.creation_memory_step,
+            observations.settings_step.step,
+            observations.reporting_step.step,
+            observations.vtpm_step.step,
+            observations.security_policy_step.step,
+            observations.affinity_group_step.step,
+            observations.hardware_memory_step.step,
+            observations.memory_layout_step.step,
+            observations.serial_step.step,
+            observations.creation_memory_step.step,
         )
     )
     if defer_apply:
-        ordered.append(created.apply_step)
+        ordered.append(observations.apply_step.step)
     steps = [WorkflowStep("create", "ok", created.lpar)]
     steps.extend(step for step in ordered if step is not None)
     verification_failed = defer_apply and not _creation_steps_verified(
-        creation, created
+        created.ownership_stamped, observations
     )
     vtpm_failed = bool(creation.vtpm_settings.pairs()) and (
-        created.vtpm_step is None or created.vtpm_step.status != "ok"
+        observations.vtpm_step.step is None
+        or observations.vtpm_step.step.status != "ok"
     )
     reporting_failed = (
-        created.reporting_step is not None and created.reporting_step.status == "error"
+        observations.reporting_step.step is not None
+        and observations.reporting_step.step.status == "error"
     )
     io_failed = (
-        created.physical_io_step is not None and created.physical_io_step.status != "ok"
+        observations.physical_io_step.step is not None
+        and observations.physical_io_step.step.status != "ok"
     )
     settings_failed = (
-        created.settings_step is not None and created.settings_step.status == "error"
+        observations.settings_step.step is not None
+        and observations.settings_step.step.status == "error"
     )
     apply_failed = (
-        created.apply_step is not None and created.apply_step.status == "error"
+        observations.apply_step.step is not None
+        and observations.apply_step.step.status == "error"
     ) or (
         (
             roles_requested(creation.settings)
@@ -1155,7 +1191,10 @@ def creation_followup(
             or affinity_requested
         )
         and creation.apply_profile is True
-        and (created.apply_step is None or created.apply_step.status != "ok")
+        and (
+            observations.apply_step.step is None
+            or observations.apply_step.step.status != "ok"
+        )
     )
     allowed = created.lpar is not None and not (
         apply_failed

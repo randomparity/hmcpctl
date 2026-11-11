@@ -568,6 +568,37 @@ def mock_hmc():
         yield router
 
 
+@pytest.fixture
+def creation_mock():
+    """Build a canonical creation handoff from a consumer test's step scenario."""
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreationResult,
+        _creation_feature_inputs,
+    )
+    from hmcpctl.operations.partition_creation import _CreationObservations
+
+    def make_mock(result):
+        async def create(_hmc, _system, creation, **_kwargs):
+            observations = _CreationObservations.selected(
+                _creation_feature_inputs(creation)
+            )
+            for name, _ in observations.public_items():
+                observations = observations.record(name, getattr(result, name))
+            metadata = LparCreationResult(
+                result.resource_created,
+                result.lpar,
+                result.ownership_stamped,
+                result.warnings,
+            )
+            return metadata, observations
+
+        return AsyncMock(side_effect=create)
+
+    return make_mock
+
+
 def mock_change_location(router, lpar_uuid: str, sync: str = "Disabled"):
     """Register the partition GET adapter and mapping commands read first (#981)."""
     entry = (

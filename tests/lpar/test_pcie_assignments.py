@@ -538,7 +538,7 @@ async def test_create_refuses_off_granularity_capacity_before_creating_the_lpar(
     with (
         _granularity_inventory("1.0"),
         patch(
-            "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar", create
+            "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar", create
         ),
         pytest.raises(ValueError, match="not a multiple"),
     ):
@@ -588,7 +588,7 @@ async def test_create_refuses_sriov_items_outside_the_mutation_envelope(
             require_admitted_environment,
         ),
         patch(
-            "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar", create
+            "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar", create
         ),
         pytest.raises(SriovLogicalPortCapabilityError, match="8375-42A"),
     ):

@@ -27,20 +27,19 @@ def _creation() -> LparCreation:
 @pytest.mark.asyncio
 async def test_create_lpar_returns_create_step_when_creation_has_no_resource(
     monkeypatch,
+    creation_mock,
 ):
     hmc = cast(HMCClient, object())
     assignments = LparPcieAssignments()
     prevalidate = AsyncMock()
-    create = AsyncMock(
-        return_value=LparCreationResult(True, None, False, ("create warning",))
-    )
+    create = creation_mock(LparCreationResult(True, None, False, ("create warning",)))
     apply = AsyncMock()
     monkeypatch.setattr(
         "hmcpctl.operations.lpar.creation.workflow.prevalidate_lpar_pcie_assignments",
         prevalidate,
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar", create
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar", create
     )
     monkeypatch.setattr(
         "hmcpctl.operations.lpar.creation.workflow.apply_validated_lpar_pcie_assignments",
@@ -58,7 +57,7 @@ async def test_create_lpar_returns_create_step_when_creation_has_no_resource(
 
 
 @pytest.mark.asyncio
-async def test_create_lpar_appends_assignment_steps(monkeypatch):
+async def test_create_lpar_appends_assignment_steps(monkeypatch, creation_mock):
     hmc = cast(HMCClient, object())
     assignments = LparPcieAssignments()
     lpar = {"UUID": "lpar-1"}
@@ -67,8 +66,8 @@ async def test_create_lpar_appends_assignment_steps(monkeypatch):
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar",
-        AsyncMock(return_value=LparCreationResult(True, lpar, True, ())),
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar",
+        creation_mock(LparCreationResult(True, lpar, True, ())),
     )
     apply = AsyncMock(
         return_value=AssignmentResult(
@@ -92,7 +91,9 @@ async def test_create_lpar_appends_assignment_steps(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_lpar_skips_assignments_after_apply_error(monkeypatch):
+async def test_create_lpar_skips_assignments_after_apply_error(
+    monkeypatch, creation_mock
+):
     hmc = cast(HMCClient, object())
     assignments = LparPcieAssignments(
         dedicated=(DedicatedPcieAssignment("default_profile", "21010010"),)
@@ -104,10 +105,8 @@ async def test_create_lpar_skips_assignments_after_apply_error(monkeypatch):
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(True, lpar, True, ("w",), apply_step)
-        ),
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar",
+        creation_mock(LparCreationResult(True, lpar, True, ("w",), apply_step)),
     )
     apply = AsyncMock()
     monkeypatch.setattr(
@@ -129,7 +128,9 @@ async def test_create_lpar_skips_assignments_after_apply_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_lpar_skips_assignments_when_no_lpar_body(monkeypatch):
+async def test_create_lpar_skips_assignments_when_no_lpar_body(
+    monkeypatch, creation_mock
+):
     hmc = cast(HMCClient, object())
     assignments = LparPcieAssignments(
         dedicated=(DedicatedPcieAssignment("default_profile", "21010010"),)
@@ -139,8 +140,8 @@ async def test_create_lpar_skips_assignments_when_no_lpar_body(monkeypatch):
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar",
-        AsyncMock(return_value=LparCreationResult(True, None, False, ("no body",))),
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar",
+        creation_mock(LparCreationResult(True, None, False, ("no body",))),
     )
     apply = AsyncMock()
     monkeypatch.setattr(
@@ -165,7 +166,7 @@ async def test_create_lpar_skips_assignments_when_no_lpar_body(monkeypatch):
 @pytest.mark.parametrize("status", [None, "error", "ok"])
 @pytest.mark.parametrize("stamped", [True, False])
 async def test_missing_or_failed_policy_step_stops_followups(
-    monkeypatch, status, stamped
+    monkeypatch, status, stamped, creation_mock
 ):
     from dataclasses import replace
 
@@ -178,9 +179,9 @@ async def test_missing_or_failed_policy_step_stops_followups(
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(
                 True,
                 {"UUID": "created"},
                 stamped,
@@ -202,7 +203,9 @@ async def test_missing_or_failed_policy_step_stops_followups(
 
 
 @pytest.mark.asyncio
-async def test_policy_workflow_reports_verification_before_apply(monkeypatch):
+async def test_policy_workflow_reports_verification_before_apply(
+    monkeypatch, creation_mock
+):
     from dataclasses import replace
 
     from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
@@ -213,9 +216,9 @@ async def test_policy_workflow_reports_verification_before_apply(monkeypatch):
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(
                 True,
                 {"UUID": "created"},
                 True,

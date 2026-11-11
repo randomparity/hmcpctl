@@ -1565,15 +1565,17 @@ def test_provision_rest_create_reports_skipped_apply_step(monkeypatch, mock_hmc)
     assert result.workflow_completed is True
 
 
-def test_provision_pauses_when_create_returns_no_uuid(monkeypatch, mock_hmc):
+def test_provision_pauses_when_create_returns_no_uuid(
+    monkeypatch, mock_hmc, creation_mock
+):
     _hmc_env(monkeypatch)
     _mock_preconditions(mock_hmc)
     apply_step = WorkflowStep("apply_profile", "ok", "default_profile")
     creation = LparCreationResult(True, None, None, (), apply_step)
 
     with patch(
-        "hmcpctl.operations.lpar.provisioning.operation.create_and_stamp_lpar",
-        new=AsyncMock(return_value=creation),
+        "hmcpctl.operations.lpar.provisioning.operation._create_and_stamp_lpar",
+        new=creation_mock(creation),
     ):
         result = hmc_provision_lpar(**_provision_args())
 

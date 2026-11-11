@@ -272,7 +272,7 @@ async def test_console_only_checks_capability_without_allocating_slots(admission
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["error", "ok"])
-async def test_workflow_io_gate_consumes_sriov_once(monkeypatch, status):
+async def test_workflow_io_gate_consumes_sriov_once(monkeypatch, status, creation_mock):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.assignments import (
         AssignmentResult,
@@ -287,8 +287,8 @@ async def test_workflow_io_gate_consumes_sriov_once(monkeypatch, status):
     port = SriovLogicalPortAssignment(
         "default_profile", "1", "0", "27004002", Decimal(2)
     )
-    create = AsyncMock(
-        return_value=LparCreationResult(
+    create = creation_mock(
+        LparCreationResult(
             True,
             {"UUID": "new"},
             True,
@@ -298,7 +298,7 @@ async def test_workflow_io_gate_consumes_sriov_once(monkeypatch, status):
         )
     )
     apply = AsyncMock(return_value=AssignmentResult(True, False, ()))
-    monkeypatch.setattr(module + "create_and_stamp_lpar", create)
+    monkeypatch.setattr(module + "_create_and_stamp_lpar", create)
     monkeypatch.setattr(module + "apply_validated_lpar_pcie_assignments", apply)
     result = await create_lpar(
         object(),
@@ -398,7 +398,9 @@ def _run_provision_body(request, partitions=()):
 
 
 @pytest.mark.asyncio
-async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch):
+async def test_provision_io_mismatch_stops_network_storage_and_power(
+    monkeypatch, creation_mock
+):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.creation.core import LparCreationResult
     from hmcpctl.operations.lpar.provisioning import core as provision
@@ -413,8 +415,8 @@ async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch
         partition_type="OS400",
         physical_io=LparPhysicalIO(console_slot="hmc"),
     )
-    create = AsyncMock(
-        return_value=LparCreationResult(
+    create = creation_mock(
+        LparCreationResult(
             True,
             {"UUID": "new"},
             True,
@@ -423,7 +425,7 @@ async def test_provision_io_mismatch_stops_network_storage_and_power(monkeypatch
         )
     )
     network = AsyncMock()
-    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(provision_operation, "_create_and_stamp_lpar", create)
     monkeypatch.setattr(
         provision_operation, "resolve_system_uuid", AsyncMock(return_value="sys")
     )
@@ -619,7 +621,7 @@ async def test_provision_unknown_create_preserves_uncertainty_and_stops_legs(
     )
     create = AsyncMock(side_effect=HMCError("outcome unknown: inspect before retrying"))
     network = AsyncMock()
-    monkeypatch.setattr(provision_operation, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(provision_operation, "_create_and_stamp_lpar", create)
     monkeypatch.setattr(
         provision_operation, "resolve_system_uuid", AsyncMock(return_value="sys")
     )
@@ -713,7 +715,7 @@ async def test_combined_creation_and_vnic_capacity_rejects_before_create(
     create = AsyncMock(
         side_effect=AssertionError("creation reached before aggregate admission")
     )
-    monkeypatch.setattr(workflows, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(workflows, "_create_and_stamp_lpar", create)
     with pytest.raises(ValueError, match="120% requested"):
         await workflows.create_lpar(
             SimpleNamespace(config=object()), "system", creation, collection

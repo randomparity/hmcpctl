@@ -691,7 +691,7 @@ async def test_creation_vtpm_rejection_precedes_all_effects(monkeypatch, kind):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("step", ["error", "missing"])
 async def test_requested_vtpm_missing_or_failed_step_stops_assignment_consumer(
-    monkeypatch, step
+    monkeypatch, step, creation_mock
 ):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
@@ -714,8 +714,8 @@ async def test_requested_vtpm_missing_or_failed_step_stops_assignment_consumer(
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.creation.workflow.create_and_stamp_lpar",
-        AsyncMock(return_value=result),
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar",
+        creation_mock(result),
     )
     assign = AsyncMock()
     monkeypatch.setattr(

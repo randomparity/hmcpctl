@@ -246,7 +246,7 @@ async def test_settings_creation_preserves_requested_resources_and_options(
 
 
 @pytest.mark.asyncio
-async def test_settings_failure_stops_creation_assignments(monkeypatch):
+async def test_settings_failure_stops_creation_assignments(monkeypatch, creation_mock):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
     from hmcpctl.operations.lpar.creation.core import LparCreation, LparCreationResult
@@ -257,11 +257,9 @@ async def test_settings_failure_stops_creation_assignments(monkeypatch):
     monkeypatch.setattr(module + "prevalidate_lpar_pcie_assignments", AsyncMock())
     step = WorkflowStep("settings", "error", "readback-unavailable")
     monkeypatch.setattr(
-        module + "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
-                True, {"UUID": "created"}, True, (), settings_step=step
-            )
+        module + "_create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(True, {"UUID": "created"}, True, (), settings_step=step)
         ),
     )
     assignments = AsyncMock()

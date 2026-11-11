@@ -40,9 +40,11 @@ Step and nested payload identities remain shared. No mutable backing map remains
 Seed submission apply evidence before post-create identity confirmation, without
 changing phase tracking. LPAR apply eligibility reads coordinator evidence plus the
 existing ownership-stamped fact directly. Remove the intermediate public-result merge.
-Compose the public result from retained evidence at completion, identity-return and
-TLS-return boundaries through one concrete adapter. Keep diagnostic sanitization in
-its current owner and preserve its distinct field subset.
+Carry retained evidence through completion, identity returns, TLS returns and both
+internal follow-up consumers. Compose public results only at the public return
+boundary. Keep diagnostic sanitization in its current owner, operating on canonical
+evidence with its distinct field subset. The completed handoff is specified in
+[canonical creation follow-up](2026-11-11-canonical-creation-followup-design.md).
 
 Missing/unconfirmed identity diagnostics become retained evidence only after their
 existing awaited observations. A normal unconfirmed-identity return still discards
@@ -56,8 +58,9 @@ and raw start are excluded from ordinary requested-step verification; apply reta
 its special skipped-on-interruption behavior. Remaining labels and request predicates
 keep their existing order and meaning.
 
-The same record factory and verification method handle the public `creation_followup`
-projection. Interruption marks the active public step, requested missing steps and
+The same record factory adapts the public `creation_followup` input boundary; internal
+consumers retain canonical observations directly for verification and follow-up.
+Interruption marks the active public step, requested missing steps and
 the existing fallback settings error, preserving previously completed facts and labels.
 No later IO, replay or rollback follows fatal TLS rejection.
 

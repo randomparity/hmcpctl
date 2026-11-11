@@ -255,17 +255,6 @@ class _CreationObservations:
             if name != "apply_step"
         )
 
-    def with_public_steps(
-        self, values: Mapping[str, WorkflowStep | None]
-    ) -> _CreationObservations:
-        return replace(
-            self,
-            **{
-                name: replace(observation, completed=True, step=values.get(name))
-                for name, observation in self.public_items()
-            },
-        )
-
     def interrupted(
         self, active_step: str | None, message: str
     ) -> _CreationObservations:

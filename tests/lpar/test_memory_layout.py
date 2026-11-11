@@ -933,7 +933,7 @@ async def test_layout_role_selection_retains_independent_kvm_admission(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["ok", "error", None])
 async def test_layout_workflow_assignment_barrier(
-    layout_creation_target, monkeypatch, status
+    layout_creation_target, monkeypatch, status, creation_mock
 ):
     from unittest.mock import AsyncMock
 
@@ -951,11 +951,9 @@ async def test_layout_workflow_assignment_barrier(
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
     monkeypatch.setattr(
         workflows,
-        "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
-                True, target.entry, True, (), memory_layout_step=step
-            )
+        "_create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(True, target.entry, True, (), memory_layout_step=step)
         ),
     )
     apply = AsyncMock(return_value=AssignmentResult(True, True, ()))
@@ -977,7 +975,7 @@ async def test_layout_workflow_assignment_barrier(
     ["hardware_memory", "security_policy", "settings", "reporting_settings", "vtpm"],
 )
 async def test_layout_preserves_each_mixed_workflow_barrier(
-    layout_creation_target, monkeypatch, failed
+    layout_creation_target, monkeypatch, failed, creation_mock
 ):
     from unittest.mock import AsyncMock
 
@@ -1012,10 +1010,8 @@ async def test_layout_preserves_each_mixed_workflow_barrier(
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
     monkeypatch.setattr(
         workflows,
-        "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(True, target.entry, True, (), **steps)
-        ),
+        "_create_and_stamp_lpar",
+        creation_mock(LparCreationResult(True, target.entry, True, (), **steps)),
     )
     apply = AsyncMock()
     monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", apply)
@@ -1251,7 +1247,7 @@ async def test_layout_does_not_prevalidate_current_huge_pool(layout_creation_tar
 
 @pytest.mark.asyncio
 async def test_layout_workflow_stamp_failure_blocks_assignments(
-    layout_creation_target, monkeypatch
+    layout_creation_target, monkeypatch, creation_mock
 ):
     from unittest.mock import AsyncMock
 
@@ -1264,9 +1260,9 @@ async def test_layout_workflow_stamp_failure_blocks_assignments(
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
     monkeypatch.setattr(
         workflows,
-        "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
+        "_create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(
                 True,
                 target.entry,
                 False,
