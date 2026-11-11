@@ -2405,8 +2405,9 @@ containment/name/type/inactive checks and baseline exclusion. Name rediscovery
 after an incomplete create is diagnostic only, never adoption or deletion.
 
 After a separate exclusive root allocation and exact candidate/import attestation,
-use these separate invocations; `$PRIVATE` is an existing owner-only directory
-outside the checkout and both result/observation destinations must be fresh:
+use the following invocations. Set `$PRIVATE` to a canonical absolute path to an
+existing mode 0700 directory you own outside any Git checkout. Both the result
+and observation paths must be fresh.
 
 ```sh
 uv run --no-sync python scripts/live_test_preflight.py --group creation-memory-layout
