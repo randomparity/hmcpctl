@@ -133,7 +133,7 @@ def _item(kind: str, identity: Mapping[str, Any]) -> OwnedItem | None:
         name, group = identity.get("media_name"), None
     if not isinstance(vios, str) or not isinstance(name, str) or not name:
         return None
-    if kind == DISK_LEDGER and not isinstance(group, str):
+    if kind == DISK_LEDGER and (not isinstance(group, str) or not group):
         return None
     return OwnedItem(kind, vios.lower(), name, group.lower() if group else None)
 

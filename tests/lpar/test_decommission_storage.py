@@ -169,6 +169,26 @@ def test_without_a_store_nothing_is_owned(hmc):
     assert cleanup.owned_items(SYSTEM, LPAR) == ((), ())
 
 
+@pytest.mark.parametrize("group", [None, "", 0])
+def test_disk_without_group_is_retained_without_hmc_reads(hmc, group):
+    identity = {**DISK, "vg_uuid": group}
+    _seed(("root_disk", "virtual_disk", LPAR, identity))
+
+    record = _run(hmc)
+
+    assert (record.state, record.outcome) == ("terminal", "completed")
+    assert record.result["retained"] == [
+        {
+            "kind": "virtual_disk",
+            "reason": "unreadable_record",
+            "ledger_identity": identity,
+        }
+    ]
+    assert record.effects == ()
+    assert hmc.mock_calls == []
+    assert _rows() == [(LPAR, identity)]
+
+
 def test_a_disk_mapped_to_another_client_is_retained_with_its_entry(hmc):
     _seed(("root_disk", "virtual_disk", LPAR, DISK))
     hmc.get_vios_storage_detail.return_value = _detail(
