@@ -1262,6 +1262,7 @@ async def test_role_preflight_error_preserves_type_and_status(
     assert "no changes were submitted" in str(caught.value)
     assert MARKER in str(original)
     assert original.body is not None
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1381,6 +1382,7 @@ async def test_configuration_role_preflight_error_type(
     )
     assert MARKER in str(failure)
     b.write.assert_not_awaited()
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1403,9 +1405,12 @@ async def test_no_role_preflight_error_is_unchanged(role_boundary, error_type):
 @pytest.mark.parametrize(
     "stage", ["system", "partition", "authorization", "containment", "capabilities"]
 )
-async def test_role_preflight_sibling_read_diagnostics(role_boundary, stage):
+@pytest.mark.parametrize("error_type", [HMCError, HMCTLSFingerprintError])
+async def test_role_preflight_sibling_read_diagnostics(
+    role_boundary, stage, error_type
+):
     b = role_boundary
-    failure = HMCError(MARKER, 503, f"<Message>{MARKER}</Message>")
+    failure = error_type(MARKER, 503, f"<Message>{MARKER}</Message>")
     boundary = {
         "system": b.system,
         "partition": b.partition,
@@ -1426,6 +1431,7 @@ async def test_role_preflight_sibling_read_diagnostics(role_boundary, stage):
         caught.value
     )
     b.write.assert_not_awaited()
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1497,6 +1503,7 @@ async def test_native_controller_error_is_private(source_boundary, error_type):
     assert caught.value.body is None
     assert "no changes were submitted" in str(caught.value)
     assert MARKER not in "".join(traceback.format_exception(caught.value))
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1556,3 +1563,33 @@ async def test_role_readback_preserves_tls_identity_failure(role_boundary, stage
     b.write.assert_awaited_once()
     assert b.read.await_count == 2
     assert b.hmc.get_logical_partition.await_count == (1 if stage == "native" else 2)
+
+
+def _assert_role_error_guidance(error, error_type):
+    message = str(error)
+    assert MARKER not in "".join(traceback.format_exception(error))
+    if error_type is HMCTLSFingerprintError:
+        assert "TLS certificate identity verification failed" in message
+        assert "trusted channel" in message
+        assert "HMC_CERT_FINGERPRINT" in message
+        assert "Check connectivity" not in message
+    else:
+        assert "Check connectivity and read permissions" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("context", ["Affinity group", "Memory layout"])
+async def test_shared_creation_preflight_keeps_private_tls_guidance(
+    source_boundary, context
+):
+    b = source_boundary
+    b.hmc.get_managed_system.side_effect = HMCTLSFingerprintError(MARKER, 503, MARKER)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await roles.read_creation_authority(
+            b.hmc, SYSTEM, need_management=False, context=context
+        )
+    assert f"{context} preflight" in str(caught.value)
+    assert "no changes were submitted" in str(caught.value)
+    assert caught.value.body is None and caught.value.status_code == 503
+    _assert_role_error_guidance(caught.value, HMCTLSFingerprintError)
+    b.status.assert_not_awaited()

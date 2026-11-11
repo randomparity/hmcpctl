@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ...client.core import HMCClient
 from ...documents.lpar import LparSettings
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...ssh.lpar import complete_create_resources
 from ...ssh.profiles import get_proc_compat_modes
 from ...ssh.transport import run_hmc_command
@@ -41,6 +41,26 @@ def roles_requested(settings: LparSettings) -> bool:
     return any(getattr(settings, name) is not None for name in ROLE_FIELDS)
 
 
+def role_preflight_error(
+    error: HMCError,
+    evidence: str,
+    *,
+    context: Literal["Linux role", "Affinity group", "Memory layout"] = "Linux role",
+) -> HMCError:
+    """Preserve preflight failure classification without remote diagnostic details."""
+    guidance = (
+        "TLS certificate identity verification failed. Reconcile HMC_CERT_FINGERPRINT "
+        "over a trusted channel before retrying."
+        if isinstance(error, HMCTLSFingerprintError)
+        else "Check connectivity and read permissions, then retry."
+    )
+    return type(error)(
+        f"{context} preflight could not read {evidence}; "
+        f"no changes were submitted. {guidance}",
+        status_code=error.status_code,
+    )
+
+
 def _role_console_version(resource: object) -> tuple[int, int, int, int] | None:
     if not isinstance(resource, dict):
         return None
@@ -70,10 +90,8 @@ async def read_creation_authority(
     try:
         entry = await hmc.get_managed_system(system_uuid)
     except HMCError as error:
-        raise type(error)(
-            f"{context} preflight could not read selected-system authority; "
-            "no changes were submitted. Check connectivity and read permissions, then retry.",
-            status_code=error.status_code,
+        raise role_preflight_error(
+            error, "selected-system authority", context=context
         ) from None
     resource = (entry or {}).get("Resource")
     if not isinstance(resource, dict):
@@ -92,10 +110,8 @@ async def read_creation_authority(
             hmc.config, f"lscomgmt -m {shlex.quote(system)} -F is_controller"
         )
     except HMCError as error:
-        raise type(error)(
-            f"{context} preflight could not read native controller authority; "
-            "no changes were submitted. Check connectivity and read permissions, then retry.",
-            status_code=error.status_code,
+        raise role_preflight_error(
+            error, "native controller authority", context=context
         ) from None
     # IBM installios/lpar-netboot document exact 1 as co-management/profileless.
     # Native null plus this observed classic tuple classifies legacy grammar only.
@@ -137,11 +153,7 @@ async def read_role_capabilities(
     try:
         console = await hmc.get_console_info()
     except HMCError as error:
-        raise type(error)(
-            "Linux role preflight could not read console release evidence; "
-            "no changes were submitted. Check connectivity and read permissions, then retry.",
-            status_code=error.status_code,
-        ) from None
+        raise role_preflight_error(error, "console release evidence") from None
     version = _role_console_version((console or {}).get("Resource"))
     firmware = leaf_text(resource.get("SystemFirmware"))
     match = (

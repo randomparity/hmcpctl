@@ -10,6 +10,7 @@ from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.linux_roles import (
     admit_role_update,
     read_role_capabilities,
+    role_preflight_error,
     roles_requested,
     with_role_evidence,
 )
@@ -249,11 +250,7 @@ async def configure_lpar_settings(
     except HMCError as error:
         if not role_selection:
             raise
-        raise type(error)(
-            "Linux role preflight could not read required configuration evidence; "
-            "no changes were submitted. Check connectivity and read permissions, then retry.",
-            status_code=error.status_code,
-        ) from None
+        raise role_preflight_error(error, "required configuration evidence") from None
     if resource is not None:
         before = with_role_evidence(before, resource, LparSettings())
     expected = replace(
