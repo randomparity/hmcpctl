@@ -1082,6 +1082,28 @@ async def test_get_managed_system_fallback_matches_quick_all_uuid_in_any_case(
     assert entry["Resource"]["SystemName"] == "sys-R1"
 
 
+@pytest.mark.asyncio
+async def test_get_managed_system_fallback_refuses_a_name_reused_by_another_system(
+    mock_hmc,
+):
+    uuid = "11111111-1111-1111-1111-111111111111"
+    other_uuid = "22222222-2222-2222-2222-222222222222"
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{uuid}").mock(
+        return_value=httpx.Response(500, text="Nested path contains null property")
+    )
+    mock_hmc.get("/rest/api/uom/ManagedSystem/quick/All").mock(
+        return_value=httpx.Response(200, json=[{"UUID": uuid, "SystemName": "sys1"}])
+    )
+    search = mock_hmc.get("/rest/api/uom/ManagedSystem/search/(SystemName==sys1)").mock(
+        return_value=httpx.Response(200, text=_managed_system_feed(other_uuid, "sys1"))
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="could not be resolved") as exc_info:
+            await hmc.get_managed_system(uuid)
+    assert exc_info.value.status_code == 500
+    assert search.call_count == 1
+
+
 @pytest.mark.parametrize(
     ("quick_all_response", "expect_quick_all_cause"),
     [

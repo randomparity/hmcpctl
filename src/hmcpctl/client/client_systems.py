@@ -166,7 +166,11 @@ class SystemsMixin:
                 raise
             except (HMCError, ValueError) as fb_exc:
                 fallback_exc = fb_exc
-            if entry is None:
+            if (
+                entry is None
+                or not isinstance(entry.get("UUID"), str)
+                or entry["UUID"].lower() != uuid.lower()
+            ):
                 raise HMCError(
                     f"Managed system {uuid} is unavailable because the HMC "
                     "could not serialize a null hardware property, and it "
