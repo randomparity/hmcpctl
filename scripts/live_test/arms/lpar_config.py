@@ -627,15 +627,17 @@ async def _prepare_scratch(
     name_prefix: str,
     token_prefix: str,
     subtask: int,
+    group: str,
 ) -> tuple[_Run, _Pools] | None:
     """Admit the shared scratch baseline and allocate a matching name and token."""
     system = state.config.system_name
     baseline = await _read_pools(client, state, system)
-    if baseline is None:
+    if baseline is None or scratch_partitions(baseline[0].names):
+        state.skip(
+            subtask, group, "baseline unavailable or stranded scratch; run recovery"
+        )
         return None
     pools, region = baseline
-    if scratch_partitions(pools.names):
-        return None
     suffix = uuid.uuid4().hex[:8]
     return _Run(
         system, name_prefix + suffix, token_prefix + suffix, region, subtask=subtask

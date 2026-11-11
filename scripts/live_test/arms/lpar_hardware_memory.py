@@ -95,11 +95,9 @@ async def exercise_lpar_hardware_memory(client: Client, state: RunState) -> None
         name_prefix=NAME_PREFIX,
         token_prefix=TOKEN_PREFIX,
         subtask=SUBTASK,
+        group=GROUP,
     )
     if prepared is None:
-        state.skip(
-            SUBTASK, GROUP, "baseline unavailable or stranded scratch; run recovery"
-        )
         return
     run, baseline = prepared
     verified = False
