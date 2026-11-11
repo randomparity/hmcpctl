@@ -351,7 +351,7 @@ def _revision() -> tuple[str, bool]:
         ).strip(),
         not bool(
             subprocess.check_output(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", "--untracked-files=all"],
                 text=True,
                 cwd=Path(__file__).resolve().parents[3],
                 env=environment,

@@ -10107,7 +10107,7 @@ async def test_direct_dispatch_requires_the_private_tasks_named_group(
 @pytest.mark.parametrize(
     "redirect", ["none", "missing-dir", "foreign-worktree", "foreign-index"]
 )
-@pytest.mark.parametrize("dirty", [False, True])
+@pytest.mark.parametrize("dirty", [False, True, "untracked"])
 def test_live_arm_revision_uses_physical_checkout(
     tmp_path, monkeypatch, guard, redirect, dirty
 ):
@@ -10157,7 +10157,13 @@ def test_live_arm_revision_uses_physical_checkout(
         ],
         check=True,
     )
-    if dirty:
+    subprocess.run(
+        ["git", "-C", str(owner), "config", "status.showUntrackedFiles", "no"],
+        check=True,
+    )
+    if dirty == "untracked":
+        (owner / "src/hmcpctl/untracked.py").write_text("untracked = True\n")
+    elif dirty:
         (owner / "src/hmcpctl/__init__.py").write_text("changed = True\n")
     if redirect == "missing-dir":
         monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing.git"))
