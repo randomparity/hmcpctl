@@ -17,8 +17,9 @@ from lpar.test_partition_profiles import profile as profile_document
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.partition_profile import ProfilePatch, apply_profile_patch, one
 from hmcpctl.errors import HMCError, LparUpdateError
-from hmcpctl.operations.logical import engine, profile_write
+from hmcpctl.operations.logical import engine
 from hmcpctl.operations.logical.engine import OperationFailed, OperationRequest
+from hmcpctl.operations.lpar.profiles import write as profile_write
 from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
 from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch, plan_changes
 from hmcpctl.xmlutil import element_to_dict

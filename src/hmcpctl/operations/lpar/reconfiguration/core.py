@@ -42,7 +42,7 @@ from ....documents.storage import validate_virtual_disk
 from ....errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from ....resource_identity import resolve_system_uuid, resolve_vios_uuid
 from ....xmlutil import console_version, escape_xml, leaf_text
-from ...logical import engine, profile_write, store
+from ...logical import engine, store
 from ...logical.engine import (
     BodyResult,
     Classification,
@@ -54,6 +54,7 @@ from ...logical.models import EffectRecord
 from ...storage.resources import storage_mapping, volume_group
 from ...systems.fleet import read_system_entry
 from ..ownership import resolve_and_authorize_lpar_mutation
+from ..profiles import write as profile_write
 from . import network
 from .media import (
     BOOT_KEY,

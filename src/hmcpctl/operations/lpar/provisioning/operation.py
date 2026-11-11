@@ -22,7 +22,7 @@ from hmcpctl.documents.partition_profile import ProfilePatch
 from hmcpctl.errors import TLS_IDENTITY_FAILURE, HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import JobOutcome, job_identifier
 from hmcpctl.operations.affinity.ssh import set_minimum_affinity_policy
-from hmcpctl.operations.logical import engine, profile_write, store
+from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import (
     BodyResult,
     Classification,
@@ -48,6 +48,7 @@ from hmcpctl.operations.lpar.ownership import (
     parse_lpar_ownership_caller_token,
     stamp_created_lpar_ownership,
 )
+from hmcpctl.operations.lpar.profiles import write as profile_write
 from hmcpctl.operations.lpar.profiles.core import (
     save_current_partition_profile,
     set_default_partition_profile,

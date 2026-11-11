@@ -17,16 +17,16 @@ from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
-from ...client.client_profiles import NativeProfile, read_native_profile
-from ...client.core import HMCClient
-from ...documents.partition_profile import (
+from ....client.client_profiles import NativeProfile, read_native_profile
+from ....client.core import HMCClient
+from ....documents.partition_profile import (
     ProfilePatch,
     apply_profile_patch,
     requested_profile_values,
 )
-from ..logical import engine
-from ..logical.engine import Classification, OperationContext
-from ..logical.models import EffectRecord
+from ...logical import engine
+from ...logical.engine import Classification, OperationContext
+from ...logical.models import EffectRecord
 
 if TYPE_CHECKING:
     import xml.etree.ElementTree as ET  # nosec B405 - type name only
