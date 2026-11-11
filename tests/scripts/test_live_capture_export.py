@@ -2368,7 +2368,8 @@ def test_derived_output_is_scanned(tmp_path: Path) -> None:
     assert not out.exists()
 
 
-def test_cli_round_trip(tmp_path: Path) -> None:
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_cli_round_trip(tmp_path: Path, overwrite: bool) -> None:
     raw = tmp_path / "sweep.capture.jsonl"
     raw.write_text(
         "\n".join(
@@ -2377,6 +2378,9 @@ def test_cli_round_trip(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     corpus = tmp_path / "corpus.json"
+    if overwrite:
+        corpus.write_text("stale" * 1_000, encoding="utf-8")
+        corpus.chmod(0o644)
     enums = tmp_path / "enums.json"
     vocab = tmp_path / "vocab.json"
     assert export.main(["tokenize", str(raw), "--out", str(corpus)]) == 0

@@ -1585,10 +1585,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "tokenize":
             corpus = tokenize_records(load_raw(args.raw), args.private)
-            fd = os.open(
-                args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-            )
+            fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                # An existing corpus keeps its mode on open.
+                os.fchmod(fd, 0o600)
+                handle.truncate(0)
                 json.dump(corpus, handle, indent=1)
             print(f"{len(corpus)} records tokenized -> {args.out}")
             return 0
