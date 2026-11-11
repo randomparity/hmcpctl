@@ -10,7 +10,7 @@ import asyncssh
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_memory import LparMemoryChange
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.observation import (
     PartitionSnapshot,
     contained_partition,
@@ -356,6 +356,10 @@ async def change_lpar_memory(
             raise ValueError("Memory readback partition kind or identity changed")
         after = partition_snapshot(await read(uuid), uuid)
         matched = _postconditions(before, after, targets)
+    except HMCTLSFingerprintError:
+        return _result(
+            before, None, targets, "unverified", error, TLS_OBSERVATION_ABORTED
+        )
     except (HMCError, ValueError) as exc:
         return _result(before, None, targets, "unverified", error, str(exc))
     if matched:

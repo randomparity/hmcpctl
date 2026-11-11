@@ -1731,3 +1731,87 @@ def test_location_stays_typed_until_result_serialization(dedicated):
     assert result["after"]["change_location"] == asdict(location)
     assert ("current_processing_units" in before) is not dedicated
     json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("stage", ["lpar_feed", "vios_feed", "detail"])
+@pytest.mark.parametrize("uncertain", [False, True])
+@pytest.mark.parametrize("identity_failure", [False, True])
+async def test_processor_quantity_tls_readback_keeps_uncertainty_and_stops(
+    processor_boundary, kind, stage, uncertain, identity_failure
+):
+    from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
+
+    b = processor_boundary
+    if kind == "VirtualIOServer":
+        for entry in (b.before, b.after):
+            entry["Resource"]["PartitionType"] = "Virtual IO Server"
+        b.hmc.list_logical_partitions.return_value = []
+        b.hmc.list_vios.return_value = [b.before]
+    original_write = b.write.side_effect
+
+    async def submit(*args, **kwargs):
+        await original_write(*args, **kwargs)
+        if uncertain:
+            raise HMCError("submission uncertain")
+
+    b.write.side_effect = submit
+    reader = (
+        b.hmc.get_vios if kind == "VirtualIOServer" else b.hmc.get_logical_partition
+    )
+    methods = [
+        b.write,
+        b.read,
+        b.hmc.get_managed_system,
+        b.hmc.list_logical_partitions,
+        b.hmc.list_vios,
+        b.hmc.get_logical_partition,
+        b.hmc.get_vios,
+    ]
+    stopped = None
+
+    def fail():
+        nonlocal stopped
+        stopped = [method.await_count for method in methods]
+        raise (
+            HMCTLSFingerprintError("private-certificate-detail")
+            if identity_failure
+            else HMCError("ordinary read unavailable")
+        )
+
+    if stage == "detail":
+        original = reader.side_effect
+
+        async def read(*args, **kwargs):
+            if b.changed:
+                fail()
+            return await original(*args, **kwargs)
+
+        reader.side_effect = read
+    else:
+        feed = (
+            b.hmc.list_logical_partitions if stage == "lpar_feed" else b.hmc.list_vios
+        )
+
+        async def inventory(*args, **kwargs):
+            if b.changed:
+                fail()
+            return feed.return_value
+
+        feed.side_effect = inventory
+    result = await cpu_change(b, operation="add", processing_units="0.10")
+    expected_error = (
+        TLS_OBSERVATION_ABORTED if identity_failure else "ordinary read unavailable"
+    )
+    assert expected_error in result["warnings"]
+    assert (TLS_OBSERVATION_ABORTED in result["warnings"]) is identity_failure
+    assert result["outcome"] == "unverified" and result["workflow_completed"] is False
+    assert (
+        result["after"] is None
+        and result["before"]["current_processing_units"] == "0.50"
+    )
+    assert result["submission_error"] == ("submission uncertain" if uncertain else None)
+    assert "private-certificate-detail" not in str(result)
+    b.write.assert_awaited_once()
+    assert stopped is not None and stopped == [method.await_count for method in methods]

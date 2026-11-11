@@ -14,7 +14,7 @@ from hmcpctl.documents.lpar_processors import (
     LparProcessorChange,
     bounded_processor_number,
 )
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar import observation
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.resource_reading import resource_container
@@ -668,6 +668,10 @@ async def change_lpar_processors(
             raise ValueError("Processor readback containment changed")
         after = await evidence(await read(uuid))
         matched = _postconditions(before, after, expected)
+    except HMCTLSFingerprintError:
+        return _result(
+            before, None, expected, "unverified", error, TLS_OBSERVATION_ABORTED
+        )
     except (HMCError, ValueError) as exc:
         return _result(before, None, expected, "unverified", error, str(exc))
     outcome = (
