@@ -433,7 +433,7 @@ async def list_vios_backups(
 ) -> list[dict[str, str]]:
     """Return the validated backup catalog for one VIOS."""
     vios_uuid = vios_name_or_uuid
-    if not is_uuid(vios_name_or_uuid):
+    if not is_uuid(vios_name_or_uuid) or system_name_or_uuid is not None:
         vios_uuid = await resolve_vios_uuid(
             hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         )

@@ -7,8 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from conftest import live_fixture
+from fastmcp import Client
 
+from hmcpctl.authorization.access_policy import compile_access_policy
 from hmcpctl.config import build_config
+from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.vios.core import (
     hmc_backup_vios,
     hmc_list_vios_backups,
@@ -76,6 +79,81 @@ def _fake_vios_client(monkeypatch):
 # ---------------------------------------------------------------------- #
 # hmc_list_vios_backups
 # ---------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["hmc_list_vios_backups", "hmc_power_on_vios"])
+async def test_vios_mcp_scope_selects_duplicate_names(monkeypatch, tool):
+    _hmc_env(monkeypatch)
+    other_system = "33333333-3333-4333-8333-333333333333"
+    other_vios = "44444444-4444-4444-8444-444444444444"
+    identities = {SYSTEM_UUID: VIOS_UUID, other_system: other_vios}
+    hmc = AsyncMock()
+
+    async def find(name, *, system_uuid=None):
+        assert name == "shared-vios"
+        if system_uuid is None:
+            raise ValueError("ambiguous VIOS name")
+        return {"UUID": identities[system_uuid]}
+
+    hmc.find_vios_by_name.side_effect = find
+    hmc.power_on_vios.return_value = None
+    monkeypatch.setattr("hmcpctl._app.client_from_env", _client_factory(hmc))
+    run_cli = AsyncMock(return_value=NO_RESULTS)
+    monkeypatch.setattr("hmcpctl.operations.vios.core.run_hmc_cli", run_cli)
+    policy = compile_access_policy(
+        {
+            "policies": {
+                "test": {
+                    "grants": [
+                        {
+                            "tools": [tool],
+                            "connections": ["<default>"],
+                            "targets": "all-targets",
+                        }
+                    ]
+                }
+            }
+        },
+        "test",
+        TOOL_SECURITY,
+        "test-vios-scope.toml",
+    )
+    async with Client(create_mcp(policy, catalog="registered")) as client:
+        for system, vios in identities.items():
+            result = await client.call_tool(
+                tool,
+                {"vios_name_or_uuid": "shared-vios", "system_name_or_uuid": system},
+            )
+            assert not result.is_error
+            hmc.find_vios_by_name.assert_awaited_with("shared-vios", system_uuid=system)
+            if tool == "hmc_power_on_vios":
+                hmc.power_on_vios.assert_awaited_with(vios)
+            else:
+                assert f"vios_uuids={vios}" in run_cli.await_args.args[0]
+        denied = await client.call_tool(
+            tool, {"vios_name_or_uuid": "shared-vios"}, raise_on_error=False
+        )
+        assert denied.is_error
+        assert "ambiguous VIOS name" in str(denied.content)
+
+
+@pytest.mark.parametrize("belongs", [False, True])
+def test_list_vios_backups_scoped_uuid_checks_system_before_ssh(monkeypatch, belongs):
+    _hmc_env(monkeypatch)
+    hmc = AsyncMock()
+    hmc.list_vios.return_value = [{"UUID": VIOS_UUID}] if belongs else []
+    monkeypatch.setattr("hmcpctl._app.client_from_env", _client_factory(hmc))
+    run_cli = AsyncMock(return_value=NO_RESULTS)
+    monkeypatch.setattr("hmcpctl.operations.vios.core.run_hmc_cli", run_cli)
+    if belongs:
+        assert hmc_list_vios_backups(VIOS_UUID, system_name_or_uuid=SYSTEM_UUID) == []
+        run_cli.assert_awaited_once()
+    else:
+        with pytest.raises(ValueError, match="does not belong"):
+            hmc_list_vios_backups(VIOS_UUID, system_name_or_uuid=SYSTEM_UUID)
+        run_cli.assert_not_awaited()
+    hmc.list_vios.assert_awaited_once_with(SYSTEM_UUID)
 
 
 def test_list_vios_backups_runs_supported_command_and_parses_csv(monkeypatch):

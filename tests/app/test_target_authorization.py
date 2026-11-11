@@ -140,6 +140,26 @@ def test_a_matching_table_permits():
     assert _authorize(LAB_NARROW, "hmc_delete_lpar", _delete()) is None
 
 
+@pytest.mark.parametrize("tool", ["hmc_list_vios_backups", "hmc_power_on_vios"])
+@pytest.mark.parametrize("system", ["sys-2", None])
+def test_vios_optional_system_scope_cannot_escape_grant(monkeypatch, tool, system):
+    opened: list[str] = []
+    _seal_every_outbound_path(monkeypatch, opened)
+    grants = [
+        {
+            "tools": [tool],
+            "connections": ["lab"],
+            "targets": {"managed_system": ["sys-1"], "vios": ["vios-1"]},
+        }
+    ]
+    arguments = {"vios_name_or_uuid": "vios-1", "profile": "lab"}
+    if system is not None:
+        arguments["system_name_or_uuid"] = system
+    with pytest.raises(ToolError):
+        _call(create_mcp(_policy(grants), catalog="registered"), tool, arguments)
+    assert opened == []
+
+
 @pytest.mark.parametrize(
     ("system", "lpar"),
     [("sys-2", "victim"), ("sys-1", "other"), ("sys-2", "other")],
