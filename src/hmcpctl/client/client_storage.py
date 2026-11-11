@@ -13,7 +13,7 @@ import re as _re
 import xml.etree.ElementTree as ET  # nosec B405
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urlparse
 
 import httpx
@@ -34,6 +34,8 @@ from ..resource_identity import is_uuid
 from ..xmlutil import WEB_NS, element_to_dict, localname
 from .client_contracts import StorageClient, _reject_non_uuid_path_argument
 from .client_parse import _parse_feed
+
+_DispatchResult = TypeVar("_DispatchResult")
 
 # HMC UOM namespace — used in read-modify-write VolumeGroup operations.
 _UOM_NS = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
@@ -537,10 +539,10 @@ class StorageMixin:
     async def _reconcile_storage_mutation(
         self: StorageClient,
         operation: str,
-        snapshot: Callable[[], Awaitable[Any]],
-        dispatch: Callable[[], Awaitable[Any]],
+        snapshot: Callable[[], Awaitable[object]],
+        dispatch: Callable[[], Awaitable[_DispatchResult]],
         note: str | Callable[[HMCError], str] = "",
-    ) -> Any:
+    ) -> _DispatchResult:
         """Read state around a failed storage mutation without retrying it.
 
         *note* adds what the caller knows the failed write may have left that the
@@ -909,7 +911,7 @@ class StorageMixin:
             headers["If-Match"] = etag
         body = ET.tostring(vg_elem, encoding="unicode", xml_declaration=False)
 
-        async def dispatch() -> Any:
+        async def dispatch() -> httpx.Response:
             resp = await self._request_with_uuid_path_arguments(
                 "POST",
                 path,

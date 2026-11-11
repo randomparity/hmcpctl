@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal, Protocol, get_args
+from typing import Any, Literal, Protocol, TypeVar, get_args
 
 # Element is a type contract only; client implementations parse inbound XML
 # through defusedxml.
@@ -15,6 +15,8 @@ import httpx
 from ..config import HMCConfig
 from ..errors import HMCError
 from ..resource_identity import is_uuid
+
+_DispatchResult = TypeVar("_DispatchResult")
 
 AuthenticationFilter = Literal["local", "ldap", "kerberos", "all"]
 VALID_AUTHENTICATION_FILTERS = frozenset(get_args(AuthenticationFilter))
@@ -345,10 +347,10 @@ class StorageClient(Protocol):
     async def _reconcile_storage_mutation(
         self,
         operation: str,
-        snapshot: Callable[[], Awaitable[Any]],
-        dispatch: Callable[[], Awaitable[Any]],
+        snapshot: Callable[[], Awaitable[object]],
+        dispatch: Callable[[], Awaitable[_DispatchResult]],
         note: str | Callable[[HMCError], str] = "",
-    ) -> Any: ...
+    ) -> _DispatchResult: ...
 
     async def list_volume_groups(self, vios_uuid: str) -> list[dict[str, Any]]: ...
 
