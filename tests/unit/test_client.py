@@ -1152,6 +1152,58 @@ async def test_quick_all_system_names_maps_uuid_to_name(mock_hmc):
 
 
 @pytest.mark.asyncio
+async def test_quick_all_system_names_skips_unusable_names(mock_hmc):
+    invalid_names = [
+        None,
+        0,
+        7,
+        False,
+        True,
+        {},
+        {"name": "sys1"},
+        [],
+        ["sys1"],
+        "",
+        " \t",
+    ]
+    mock_hmc.get("/rest/api/uom/ManagedSystem/quick/All").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"UUID": f"bad-{index}", "SystemName": name}
+                for index, name in enumerate(invalid_names)
+            ]
+            + [{"UUID": "SYS-R1", "SystemName": " frame & name "}],
+        )
+    )
+    async with HMCClient(make_config()) as hmc:
+        names = await hmc._quick_all_system_names()
+    assert names == {"sys-r1": " frame & name "}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name", [None, 0, 7, False, True, {}, {"name": "sys1"}, [], ["sys1"], "", " \t"]
+)
+async def test_get_managed_system_fallback_does_not_search_unusable_name(
+    mock_hmc, name
+):
+    uuid = "11111111-1111-1111-1111-111111111111"
+    mock_hmc.get(f"/rest/api/uom/ManagedSystem/{uuid}").mock(
+        return_value=httpx.Response(500, text="Nested path contains null property")
+    )
+    mock_hmc.get("/rest/api/uom/ManagedSystem/quick/All").mock(
+        return_value=httpx.Response(200, json=[{"UUID": uuid, "SystemName": name}])
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError, match="could not be resolved") as exc_info:
+            await hmc.get_managed_system(uuid)
+    assert exc_info.value.status_code == 500
+    assert "unset HMC_SCHEMA_VERSION" in str(exc_info.value)
+    assert all("/search/" not in call.request.url.path for call in mock_hmc.calls)
+
+
+@pytest.mark.asyncio
 async def test_quick_all_system_names_raises_on_non_200(mock_hmc):
     mock_hmc.get("/rest/api/uom/ManagedSystem/quick/All").mock(
         return_value=httpx.Response(500, text="boom")

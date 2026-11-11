@@ -121,15 +121,16 @@ class SystemsMixin:
         """UUID -> SystemName map from quick/All, keyed by the lower-cased UUID.
 
         Used only as a fallback when a direct entry read trips the
-        null-property serialization bug, so entries missing UUID or
-        SystemName are skipped rather than raised.
+        null-property serialization bug, so entries missing UUID or a usable,
+        nonblank SystemName string are skipped rather than raised.
         """
         return {
             entry["UUID"].lower(): entry["SystemName"]
             for entry in await self.list_system_summaries()
             if isinstance(entry, dict)
             and isinstance(entry.get("UUID"), str)
-            and "SystemName" in entry
+            and isinstance(entry.get("SystemName"), str)
+            and entry["SystemName"].strip()
         }
 
     async def get_managed_system(
