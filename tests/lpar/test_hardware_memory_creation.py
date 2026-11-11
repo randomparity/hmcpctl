@@ -21,7 +21,10 @@ from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.assignments import AssignmentResult, LparPcieAssignments
 from hmcpctl.operations.lpar.creation import core
 from hmcpctl.operations.lpar.creation import workflow as workflows
-from hmcpctl.operations.partition_creation import _CreationFeatureCoordinator
+from hmcpctl.operations.partition_creation import (
+    _CreationFeatureCoordinator,
+    _CreationFeatureInputs,
+)
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import ATOM_NS
@@ -145,16 +148,15 @@ async def test_prefollowup_observes_coordinator_feature_selection(selected):
         hmc,
         SYSTEM,
         "sys-R1",
-        "part-R1",
-        "AIX/Linux",
-        LparResources(),
-        **(requested if selected else {}),
+        _CreationFeatureInputs(
+            "part-R1", "AIX/Linux", LparResources(), **(requested if selected else {})
+        ),
     )
-    context = creation(**({} if selected else requested))
 
-    await features.observe_before_followup(context)
+    await features.observe_before_followup()
+    observations = features.snapshot()
 
-    assert list(features.facts) == [
+    assert list(observations.facts) == [
         "serial_step",
         "creation_memory_step",
         "memory_layout_step",
@@ -162,16 +164,16 @@ async def test_prefollowup_observes_coordinator_feature_selection(selected):
         "hardware_memory_step",
     ]
     if selected:
-        assert features.facts["affinity_group_step"] is not None
-        assert features.facts["hardware_memory_step"] is not None
-        assert features.facts["affinity_group_step"].result["requested"] == 1
-        assert features.facts["hardware_memory_step"].result["requested"] == {
+        assert observations.facts["affinity_group_step"] is not None
+        assert observations.facts["hardware_memory_step"] is not None
+        assert observations.facts["affinity_group_step"].result["requested"] == 1
+        assert observations.facts["hardware_memory_step"].result["requested"] == {
             "hardware_mem_encryption": False,
             "hardware_mem_expansion": True,
         }
     else:
-        assert all(step is None for step in features.facts.values())
-    assert features.active_step is None
+        assert all(step is None for step in observations.facts.values())
+    assert observations.active_step is None
     assert hmc.mock_calls == []
 
 
@@ -181,24 +183,19 @@ async def test_prefollowup_hardware_observation_uses_coordinator_identity(target
         target.hmc,
         SYSTEM,
         "sys-R1",
-        "part-R1",
-        "AIX/Linux",
-        LparResources(),
-        hardware_mem_encryption=True,
-        hardware_mem_expansion=False,
+        _CreationFeatureInputs(
+            "part-R1",
+            "AIX/Linux",
+            LparResources(),
+            hardware_mem_encryption=True,
+            hardware_mem_expansion=False,
+        ),
     )
     features._entry = target.entry
-    context = core.LparCreation(
-        "different-request",
-        "OS400",
-        LparResources(),
-        hardware_mem_encryption=False,
-        hardware_mem_expansion=True,
-    )
 
-    await features.observe_before_followup(context)
+    await features.observe_before_followup()
 
-    step = features.facts["hardware_memory_step"]
+    step = features.snapshot().facts["hardware_memory_step"]
     assert step.status == "ok"
     assert step.result["requested"] == {
         "hardware_mem_encryption": True,
@@ -207,6 +204,80 @@ async def test_prefollowup_hardware_observation_uses_coordinator_identity(target
     assert target.events == ["LogicalPartition"]
     target.hmc.create_logical_partition.assert_not_awaited()
     target.command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vios", [False, True])
+async def test_creation_constructs_resolved_inputs_before_admission(
+    target, monkeypatch, vios
+):
+    from hmcpctl.operations.vios import core as vios_core
+
+    owner = vios_core if vios else core
+    events = []
+    invocations = []
+    original_admit = _CreationFeatureCoordinator.admit_host_features
+
+    def construct(hmc, system_uuid, selector, inputs):
+        events.append("construct")
+        assert system_uuid == SYSTEM
+        assert selector == "sys-R1"
+        assert inputs.resources.desired_memory == 1024
+        if vios:
+            assert inputs.resources.min_memory is not None
+            assert inputs.resources.max_memory is not None
+            assert inputs.resources.desired_procs is not None
+        instance = _CreationFeatureCoordinator(hmc, system_uuid, selector, inputs)
+        invocations.append(instance)
+        return instance
+
+    async def admit(instance):
+        events.append("host-admit")
+        await original_admit(instance)
+        events.append("host-admitted")
+
+    monkeypatch.setattr(owner, "_CreationFeatureCoordinator", construct)
+    monkeypatch.setattr(_CreationFeatureCoordinator, "admit_host_features", admit)
+    options = {"hardware_mem_encryption": True, "hardware_mem_expansion": False}
+    if vios:
+        original_resolve = vios_core._resolve_system_name
+
+        async def resolve(*args):
+            events.append("cli-context")
+            return await original_resolve(*args)
+
+        monkeypatch.setattr(vios_core, "_resolve_system_name", resolve)
+        target.entry["Resource"]["PartitionType"] = "Virtual IO Server"
+        await vios_core.create_vios(
+            target.hmc,
+            "sys-R1",
+            "part-R1",
+            LparResources(desired_memory=1024),
+            **options,
+        )
+        assert events == ["construct", "host-admit", "host-admitted", "cli-context"]
+    else:
+        await core.create_and_stamp_lpar(target.hmc, "sys-R1", creation(**options))
+        assert events == ["construct", "host-admit", "host-admitted"]
+    assert len(invocations) == 1
+    assert invocations[0].snapshot().active_step is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_local_assignments_precede_identity_and_coordinator(
+    target, monkeypatch
+):
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid local assignments reached coordinator construction")
+
+    monkeypatch.setattr(core, "_CreationFeatureCoordinator", forbidden)
+    with pytest.raises(
+        TypeError, match="preflight_assignments must be LparPcieAssignments"
+    ):
+        await core.create_and_stamp_lpar(
+            target.hmc, "sys-R1", creation(), preflight_assignments=object()
+        )
+    target.hmc.list_system_summaries.assert_not_awaited()
 
 
 async def invoke(b, vios=False, *, direct=False, **options):

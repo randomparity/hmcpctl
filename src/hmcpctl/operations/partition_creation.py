@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from types import MappingProxyType
+from typing import Any, Literal, TypedDict, cast
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar import LparResources, LparSettings
@@ -58,9 +59,6 @@ from hmcpctl.ssh.lpar import complete_create_resources, resolve_system_cli_name
 from hmcpctl.ssh.lpar_memory_layout import admit_memory_layout, get_lpar_memory_layout
 from hmcpctl.ssh.lpar_vtpm import get_lpar_vtpm_state
 
-if TYPE_CHECKING:
-    from hmcpctl.operations.lpar.creation.core import LparCreation
-
 
 @dataclass(frozen=True)
 class MemoryLayoutVerification:
@@ -105,11 +103,10 @@ _ObservationName = Literal[
 ]
 
 
-@dataclass
-class _CreationFeatureCoordinator:
-    hmc: HMCClient
-    system_uuid: str
-    system: str
+@dataclass(frozen=True)
+class _CreationFeatureInputs:
+    """Normalized native feature requests shared by admission and observation."""
+
     name: str
     environment: Literal["AIX/Linux", "OS400", "Virtual IO Server"]
     resources: LparResources
@@ -124,20 +121,6 @@ class _CreationFeatureCoordinator:
     hardware_mem_encryption: bool | None = None
     hardware_mem_expansion: bool | None = None
     affinity_group_id: AffinityGroupID | None = None
-    controller_mode: bool = False
-    serial_admission: SerialAdmission | None = field(default=None, init=False)
-    memory_admission: CreationMemoryAdmission | None = field(default=None, init=False)
-    start_admission: StartAdmission | None = field(default=None, init=False)
-    _entry: dict[str, Any] | None = field(default=None, init=False)
-    facts: _CreationObservations = field(
-        default_factory=_CreationObservations, init=False
-    )
-    active_step: _ObservationName | None = field(default=None, init=False)
-    attempted_feature: str | None = field(default=None, init=False)
-
-    @property
-    def entry(self) -> dict[str, Any] | None:
-        return self._entry
 
     @property
     def vios(self) -> bool:
@@ -197,24 +180,75 @@ class _CreationFeatureCoordinator:
     def native_features_requested(self) -> bool:
         return self.hardware_requested or self.profile_features_requested
 
+
+@dataclass(frozen=True)
+class _CreationObservationSnapshot:
+    """Independent observation membership and phase; payload identity is retained."""
+
+    facts: Mapping[str, WorkflowStep | None]
+    active_step: _ObservationName | None
+    attempted_feature: str | None
+
+
+@dataclass
+class _CreationFeatureCoordinator:
+    hmc: HMCClient
+    system_uuid: str
+    system_selector: str
+    inputs: _CreationFeatureInputs
+    _cli_system: str | None = field(default=None, init=False)
+    controller_mode: bool = False
+    serial_admission: SerialAdmission | None = field(default=None, init=False)
+    memory_admission: CreationMemoryAdmission | None = field(default=None, init=False)
+    start_admission: StartAdmission | None = field(default=None, init=False)
+    _entry: dict[str, Any] | None = field(default=None, init=False)
+    _facts: _CreationObservations = field(
+        default_factory=_CreationObservations, init=False
+    )
+    _active_step: _ObservationName | None = field(default=None, init=False)
+    _attempted_feature: str | None = field(default=None, init=False)
+
+    @property
+    def system(self) -> str:
+        return (
+            self._cli_system if self._cli_system is not None else self.system_selector
+        )
+
+    def snapshot(self) -> _CreationObservationSnapshot:
+        # TypedDict's open mapping view erases its declared value union.
+        facts = cast(Mapping[str, WorkflowStep | None], self._facts.copy())
+        return _CreationObservationSnapshot(
+            MappingProxyType(facts),
+            self._active_step,
+            self._attempted_feature,
+        )
+
+    @property
+    def entry(self) -> dict[str, Any] | None:
+        return self._entry
+
     async def observe(
         self,
         field_name: _ObservationName,
         observation: Awaitable[WorkflowStep | None] | WorkflowStep | None,
     ) -> WorkflowStep | None:
-        self.active_step = field_name
-        self.attempted_feature = field_name
+        self._active_step = field_name
+        self._attempted_feature = field_name
         step = (
             observation
             if observation is None or isinstance(observation, WorkflowStep)
             else await observation
         )
         if field_name != "start_step":
-            self.facts[field_name] = step
-        self.active_step = None
+            self._facts[field_name] = step
+        self._active_step = None
         return step
 
-    async def discover_mode(self, settings: LparSettings | None = None):
+    async def discover_mode(
+        self, settings: LparSettings | None = None, *, cli_system: str | None = None
+    ):
+        if cli_system is not None:
+            self._cli_system = cli_system
         if settings is not None:
             caps = await read_role_capabilities(
                 self.hmc,
@@ -224,16 +258,20 @@ class _CreationFeatureCoordinator:
             )
             self.controller_mode = caps.controller_mode
             return caps
-        if self.affinity_requested or self.layout_requested:
+        if self.inputs.affinity_requested or self.inputs.layout_requested:
             _, self.controller_mode = await read_creation_authority(
                 self.hmc,
                 self.system_uuid,
                 need_management=False,
                 context="Affinity group"
-                if self.affinity_requested
+                if self.inputs.affinity_requested
                 else "Memory layout",
             )
-        elif self.serial_requested or self.memory_requested or self.start_requested:
+        elif (
+            self.inputs.serial_requested
+            or self.inputs.memory_requested
+            or self.inputs.start_requested
+        ):
             self.controller_mode = (
                 await read_role_capabilities(
                     self.hmc, self.system_uuid, need_kvm=False, need_management=False
@@ -242,95 +280,102 @@ class _CreationFeatureCoordinator:
         return None
 
     async def admit_host_features(self) -> None:
-        if self.vtpm_requested:
-            self.attempted_feature = "vtpm_admission"
+        if self.inputs.vtpm_requested:
+            self._attempted_feature = "vtpm_admission"
             admit_vtpm(
-                self.vtpm_settings,
+                self.inputs.vtpm_settings,
                 await read_vtpm_capabilities(self.hmc, self.system_uuid),
             )
-        if self.policy_requested:
-            self.attempted_feature = "security_policy_admission"
+        if self.inputs.policy_requested:
+            self._attempted_feature = "security_policy_admission"
             admit_security_policy(
-                self.security_policy,
+                self.inputs.security_policy,
                 await read_security_policy_capabilities(
                     self.hmc,
                     self.system_uuid,
                     **(
                         {
-                            "need_power11": self.environment == "OS400"
-                            and self.security_policy.secure_boot is not None
+                            "need_power11": self.inputs.environment == "OS400"
+                            and self.inputs.security_policy.secure_boot is not None
                         }
-                        if not self.vios
+                        if not self.inputs.vios
                         else {}
                     ),
                 ),
-                environment=self.environment,
+                environment=self.inputs.environment,
             )
-        self.attempted_feature = "hardware_memory_admission"
+        self._attempted_feature = "hardware_memory_admission"
         await admit_hardware_memory(
             self.hmc,
             self.system_uuid,
-            self.hardware_mem_encryption,
-            self.hardware_mem_expansion,
+            self.inputs.hardware_mem_encryption,
+            self.inputs.hardware_mem_expansion,
         )
 
     async def admit_partition_features(self) -> None:
-        if self.vios and self.layout_requested:
-            await admit_memory_layout(self.hmc.config, self.system, self.memory_layout)
-        if self.serial_requested:
-            self.attempted_feature = "serial_admission"
+        if self.inputs.vios and self.inputs.layout_requested:
+            await admit_memory_layout(
+                self.hmc.config, self.system, self.inputs.memory_layout
+            )
+        if self.inputs.serial_requested:
+            self._attempted_feature = "serial_admission"
             self.serial_admission = await admit_serial_creation(
                 self.hmc,
                 self.system_uuid,
-                name=self.name,
-                partition_id=self.partition_id,
-                maximum=self.max_virtual_slots,
-                adapters=self.virtual_serial_adapters,
-                kind=self.kind,
+                name=self.inputs.name,
+                partition_id=self.inputs.partition_id,
+                maximum=self.inputs.max_virtual_slots,
+                adapters=self.inputs.virtual_serial_adapters,
+                kind=self.inputs.kind,
             )
-        if not self.vios and self.start_requested:
-            self.attempted_feature = "start_admission"
+        if not self.inputs.vios and self.inputs.start_requested:
+            self._attempted_feature = "start_admission"
             self.start_admission = await admit_start_creation(
-                self.hmc, self.system_uuid, self.system, self.start_settings
+                self.hmc, self.system_uuid, self.system, self.inputs.start_settings
             )
-        if not self.vios:
-            resources = complete_create_resources(self.resources)
+        if not self.inputs.vios:
+            resources = complete_create_resources(self.inputs.resources)
             if (
                 (
-                    self.policy_requested
-                    or self.hardware_requested
-                    or self.layout_requested
-                    or self.serial_requested
-                    or self.memory_requested
-                    or self.start_requested
+                    self.inputs.policy_requested
+                    or self.inputs.hardware_requested
+                    or self.inputs.layout_requested
+                    or self.inputs.serial_requested
+                    or self.inputs.memory_requested
+                    or self.inputs.start_requested
                 )
                 and resources is not None
-                and self.creation_memory.mem_mode != "shared"
+                and self.inputs.creation_memory.mem_mode != "shared"
             ):
                 await require_memory_within_system(
                     self.hmc, self.system_uuid, resources
                 )
-            if self.memory_requested:
-                self.system = await resolve_system_cli_name(
+            if self.inputs.memory_requested:
+                self._cli_system = await resolve_system_cli_name(
                     self.hmc.config, self.system_uuid
                 )
-        if self.memory_requested:
-            self.attempted_feature = "creation_memory_admission"
+        if self.inputs.memory_requested:
+            self._attempted_feature = "creation_memory_admission"
             self.memory_admission = await admit_creation_memory(
                 self.hmc,
                 self.system_uuid,
                 self.system,
-                self.creation_memory,
-                complete_create_resources(self.resources) or self.resources,
-                kind=self.kind,
-                environment=self.environment,
-                name=self.name,
-                **({"partition_id": self.partition_id} if not self.vios else {}),
+                self.inputs.creation_memory,
+                complete_create_resources(self.inputs.resources)
+                or self.inputs.resources,
+                kind=self.inputs.kind,
+                environment=self.inputs.environment,
+                name=self.inputs.name,
+                **(
+                    {"partition_id": self.inputs.partition_id}
+                    if not self.inputs.vios
+                    else {}
+                ),
             )
-        if self.vios and self.start_requested:
-            self.attempted_feature = "start_admission"
+        if self.inputs.vios and self.inputs.start_requested:
+            self._attempted_feature = "start_admission"
             self.start_admission = await admit_start_creation(
-                self.hmc, self.system_uuid, self.system, self.start_settings
+                self.hmc, self.system_uuid, self.system, self.inputs.start_settings
             )
 
     async def confirm_identity(
@@ -342,39 +387,41 @@ class _CreationFeatureCoordinator:
         self._entry = created_lpar
         if isinstance(readback_error, HMCTLSFingerprintError):
             raise readback_error
-        if self.vios:
-            self.attempted_feature = "created_identity"
+        if self.inputs.vios:
+            self._attempted_feature = "created_identity"
             try:
                 self._entry = await self.hmc.find_vios_by_name(
-                    self.name, system_uuid=self.system_uuid
+                    self.inputs.name, system_uuid=self.system_uuid
                 )
             except HMCTLSFingerprintError:
                 raise
             except Exception:
-                if not self.native_features_requested:
+                if not self.inputs.native_features_requested:
                     raise
                 # Native creation succeeded; discard unavailable lookup diagnostics.
                 self._entry = None
             if (
                 self.entry is None
-                or (self.layout_requested and not isinstance(self.entry, dict))
+                or (self.inputs.layout_requested and not isinstance(self.entry, dict))
                 or not self.entry.get("UUID")
             ):
                 raise ValueError("Created VIOS identity was not confirmed")
-            if (self.policy_requested or self.native_features_requested) and (
+            if (
+                self.inputs.policy_requested or self.inputs.native_features_requested
+            ) and (
                 not isinstance(self.entry.get("UUID"), str)
                 or not is_uuid(self.entry["UUID"])
                 or not isinstance(self.entry.get("Resource"), dict)
-                or self.entry["Resource"].get("PartitionName") != self.name
+                or self.entry["Resource"].get("PartitionName") != self.inputs.name
             ):
                 raise ValueError("Created VIOS identity unconfirmed")
             if self.start_admission is not None:
-                self.attempted_feature = "start_identity"
+                self._attempted_feature = "start_identity"
                 self._entry = await confirm_start_created(
                     self.hmc,
                     self.start_admission,
                     self.entry,
-                    self.name,
+                    self.inputs.name,
                     "Virtual IO Server",
                 )
         elif created_lpar is not None:
@@ -417,13 +464,13 @@ class _CreationFeatureCoordinator:
                             self.hmc,
                             self.start_admission,
                             created_lpar,
-                            self.name,
-                            self.environment,
+                            self.inputs.name,
+                            self.inputs.environment,
                         ),
                     )
                 )
             for feature, confirm in confirmations:
-                self.attempted_feature = feature
+                self._attempted_feature = feature
                 try:
                     confirmed_lpar = await confirm()
                     self._entry = confirmed_lpar
@@ -434,7 +481,7 @@ class _CreationFeatureCoordinator:
             self._entry = confirmed_lpar if identity_ok else None
         else:
             self._entry = None
-        if not self.vios:
+        if not self.inputs.vios:
             await self.observe(
                 "serial_step",
                 serial_creation_step(
@@ -449,9 +496,7 @@ class _CreationFeatureCoordinator:
 
         return self._entry
 
-    async def observe_unavailable_identity(
-        self, creation: LparCreation, *, missing: bool
-    ) -> None:
+    async def observe_unavailable_identity(self, *, missing: bool) -> None:
         """Retain the existing distinct absent and unconfirmed observation orders."""
         if missing:
             await self.observe(
@@ -469,7 +514,7 @@ class _CreationFeatureCoordinator:
             await self.observe(
                 "memory_layout_step",
                 _created_memory_layout_step(
-                    self.hmc, None, creation, controller_mode=self.controller_mode
+                    self.hmc, None, self.inputs, controller_mode=self.controller_mode
                 ),
             )
             await self.observe(
@@ -479,7 +524,7 @@ class _CreationFeatureCoordinator:
                     "error",
                     "Created partition identity unconfirmed; inspect before retrying",
                 )
-                if self.policy_requested
+                if self.inputs.policy_requested
                 else None,
             )
         await self.observe(
@@ -488,9 +533,9 @@ class _CreationFeatureCoordinator:
                 self.hmc,
                 self.system_uuid,
                 None,
-                self.name,
-                self.environment,
-                self.affinity_group_id,
+                self.inputs.name,
+                self.inputs.environment,
+                self.inputs.affinity_group_id,
                 controller_mode=self.controller_mode,
             ),
         )
@@ -498,7 +543,7 @@ class _CreationFeatureCoordinator:
             await self.observe(
                 "memory_layout_step",
                 _created_memory_layout_step(
-                    self.hmc, None, creation, controller_mode=self.controller_mode
+                    self.hmc, None, self.inputs, controller_mode=self.controller_mode
                 ),
             )
         await self.observe(
@@ -507,10 +552,10 @@ class _CreationFeatureCoordinator:
                 self.hmc,
                 self.system_uuid,
                 self.entry,
-                self.name,
-                self.environment,
-                self.hardware_mem_encryption,
-                self.hardware_mem_expansion,
+                self.inputs.name,
+                self.inputs.environment,
+                self.inputs.hardware_mem_encryption,
+                self.inputs.hardware_mem_expansion,
             ),
         )
         if missing:
@@ -521,7 +566,7 @@ class _CreationFeatureCoordinator:
                     "error",
                     "Created partition identity unavailable; policy unverified",
                 )
-                if self.policy_requested
+                if self.inputs.policy_requested
                 else None,
             )
             await self.observe(
@@ -529,7 +574,7 @@ class _CreationFeatureCoordinator:
                 WorkflowStep(
                     "vtpm", "error", "Created identity unavailable; vTPM unverified"
                 )
-                if self.vtpm_requested
+                if self.inputs.vtpm_requested
                 else None,
             )
         else:
@@ -545,13 +590,10 @@ class _CreationFeatureCoordinator:
                 else None,
             )
 
-    async def observe_before_followup(
-        self, creation: LparCreation | None = None, cli_system: str | None = None
-    ) -> None:
-        if self.vios:
+    async def observe_before_followup(self, cli_system: str | None = None) -> None:
+        if self.inputs.vios:
             await self._observe_vios()
             return
-        assert creation is not None
         await self.observe(
             "serial_step",
             serial_creation_step(
@@ -577,7 +619,7 @@ class _CreationFeatureCoordinator:
         await self.observe(
             "memory_layout_step",
             _created_memory_layout_step(
-                self.hmc, cli_system, creation, controller_mode=self.controller_mode
+                self.hmc, cli_system, self.inputs, controller_mode=self.controller_mode
             ),
         )
         await self.observe(
@@ -586,9 +628,9 @@ class _CreationFeatureCoordinator:
                 self.hmc,
                 self.system_uuid,
                 self.entry,
-                self.name,
-                self.environment,
-                self.affinity_group_id,
+                self.inputs.name,
+                self.inputs.environment,
+                self.inputs.affinity_group_id,
                 controller_mode=self.controller_mode,
             ),
         )
@@ -598,26 +640,26 @@ class _CreationFeatureCoordinator:
                 self.hmc,
                 self.system_uuid,
                 self.entry,
-                self.name,
-                self.environment,
-                self.hardware_mem_encryption,
-                self.hardware_mem_expansion,
+                self.inputs.name,
+                self.inputs.environment,
+                self.inputs.hardware_mem_encryption,
+                self.inputs.hardware_mem_expansion,
             ),
         )
 
     async def _observe_vios_settings(self) -> None:
-        if self.layout_requested:
+        if self.inputs.layout_requested:
             if self.controller_mode:
                 raise ValueError(
                     "Controller current ratio mappings unavailable; no named profile was read"
                 )
-            self.attempted_feature = "memory_layout_step"
+            self._attempted_feature = "memory_layout_step"
             observed_layout = await get_lpar_memory_layout(
-                self.hmc.config, self.system, self.name
+                self.hmc.config, self.system, self.inputs.name
             )
             mismatch = any(
                 getattr(observed_layout, field) != value
-                for field, value in self.memory_layout.pairs()
+                for field, value in self.inputs.memory_layout.pairs()
             )
             await self.observe(
                 "memory_layout_step",
@@ -627,14 +669,15 @@ class _CreationFeatureCoordinator:
             )
             if mismatch:
                 raise ValueError("Created VIOS memory ratios unavailable or mismatched")
-        if self.vtpm_settings is not None and self.vtpm_requested:
-            self.attempted_feature = "vtpm_step"
+        if self.inputs.vtpm_settings is not None and self.inputs.vtpm_requested:
+            self._attempted_feature = "vtpm_step"
             observed = await get_lpar_vtpm_state(
-                self.hmc.config, self.system, self.name, vios=True
+                self.hmc.config, self.system, self.inputs.name, vios=True
             )
             mismatch = any(
-                getattr(observed.settings, field) != getattr(self.vtpm_settings, field)
-                for field, _ in self.vtpm_settings.pairs()
+                getattr(observed.settings, field)
+                != getattr(self.inputs.vtpm_settings, field)
+                for field, _ in self.inputs.vtpm_settings.pairs()
             )
             await self.observe(
                 "vtpm_step",
@@ -644,9 +687,9 @@ class _CreationFeatureCoordinator:
                 raise ValueError(
                     "Created VIOS vTPM readback differs from the requested fields"
                 )
-        if self.security_policy is not None and self.policy_requested:
+        if self.inputs.security_policy is not None and self.inputs.policy_requested:
             assert self.entry is not None
-            self.attempted_feature = "security_policy_step"
+            self._attempted_feature = "security_policy_step"
             policy = await read_lpar_security_policy(
                 self.hmc,
                 self.entry["UUID"],
@@ -654,8 +697,9 @@ class _CreationFeatureCoordinator:
                 vios=True,
             )
             mismatch = any(
-                getattr(policy.settings, field) != getattr(self.security_policy, field)
-                for field, _ in self.security_policy.pairs()
+                getattr(policy.settings, field)
+                != getattr(self.inputs.security_policy, field)
+                for field, _ in self.inputs.security_policy.pairs()
             )
             await self.observe(
                 "security_policy_step",
@@ -671,7 +715,7 @@ class _CreationFeatureCoordinator:
         try:
             await self.confirm_identity()
             if self.memory_admission is not None:
-                self.attempted_feature = "memory_identity"
+                self._attempted_feature = "memory_identity"
                 self._entry = await confirm_creation_memory_identity(
                     self.hmc, self.memory_admission, self.entry
                 )
@@ -688,7 +732,7 @@ class _CreationFeatureCoordinator:
                 if memory_step.status != "ok":
                     raise ValueError("Creation memory observation incomplete")
             if self.serial_admission is not None:
-                self.attempted_feature = "serial_identity"
+                self._attempted_feature = "serial_identity"
                 self._entry = await confirm_serial_created(
                     self.hmc, self.serial_admission, self.entry
                 )
@@ -713,14 +757,14 @@ class _CreationFeatureCoordinator:
             raise
         except Exception as error:
             if (
-                not self.serial_requested
-                and not self.memory_requested
-                and not self.start_requested
+                not self.inputs.serial_requested
+                and not self.inputs.memory_requested
+                and not self.inputs.start_requested
                 and not isinstance(error, (HMCError, ValueError, PermissionError))
             ):
                 raise
-            if not self.native_features_requested:
-                if self.policy_requested:
+            if not self.inputs.native_features_requested:
+                if self.inputs.policy_requested:
                     raise HMCError(verification_unavailable) from error
                 raise HMCError(
                     f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
@@ -735,10 +779,10 @@ class _CreationFeatureCoordinator:
                     self.hmc,
                     self.system_uuid,
                     self.entry,
-                    self.name,
+                    self.inputs.name,
                     "Virtual IO Server",
-                    self.hardware_mem_encryption,
-                    self.hardware_mem_expansion,
+                    self.inputs.hardware_mem_encryption,
+                    self.inputs.hardware_mem_expansion,
                     vios=True,
                 ),
             )
@@ -753,9 +797,9 @@ class _CreationFeatureCoordinator:
                     self.hmc,
                     self.system_uuid,
                     self.entry,
-                    self.name,
+                    self.inputs.name,
                     "Virtual IO Server",
-                    self.affinity_group_id,
+                    self.inputs.affinity_group_id,
                     controller_mode=self.controller_mode,
                     vios=True,
                 ),
@@ -769,14 +813,16 @@ class _CreationFeatureCoordinator:
                 ) from None
             return
         if (
-            self.layout_requested
-            or self.serial_requested
-            or self.memory_requested
-            or self.start_requested
+            self.inputs.layout_requested
+            or self.inputs.serial_requested
+            or self.inputs.memory_requested
+            or self.inputs.start_requested
         ):
             raise HMCError(verification_unavailable)
         feature = (
-            "affinity group" if self.affinity_requested else "hardware memory access"
+            "affinity group"
+            if self.inputs.affinity_requested
+            else "hardware memory access"
         )
         raise HMCError(
             f"VIOS exists or may exist; {feature} readback-unavailable. "
@@ -787,18 +833,18 @@ class _CreationFeatureCoordinator:
         if self.start_admission is None:
             return None
         step = await self.observe(
-            "start_step" if self.vios else "settings_step",
+            "start_step" if self.inputs.vios else "settings_step",
             created_start_step(
                 self.hmc,
                 self.start_admission,
                 entry,
-                self.name,
-                self.environment,
+                self.inputs.name,
+                self.inputs.environment,
                 controller_mode=self.controller_mode,
             ),
         )
         assert step is not None
-        if self.vios and step.status != "ok":
+        if self.inputs.vios and step.status != "ok":
             raise HMCError(
                 "VIOS exists or may exist; start configuration unverified. Inspect before retrying; no rollback performed"
             )
@@ -806,26 +852,23 @@ class _CreationFeatureCoordinator:
 
     async def observe_after_followup(
         self,
-        creation: LparCreation,
         cli_system: str | None,
         *,
         verify_before_apply: bool,
     ) -> None:
         if verify_before_apply:
-            await self.observe_vtpm(creation, cli_system)
+            await self.observe_vtpm(cli_system)
         assert self.entry is not None
         await self.observe(
             "security_policy_step",
             _created_security_policy_step(
-                self.hmc, self.system_uuid, creation, self.entry
+                self.hmc, self.system_uuid, self.inputs, self.entry
             ),
         )
 
-    async def observe_vtpm(
-        self, creation: LparCreation, cli_system: str | None
-    ) -> None:
+    async def observe_vtpm(self, cli_system: str | None) -> None:
         await self.observe(
-            "vtpm_step", _created_vtpm_step(self.hmc, cli_system, creation)
+            "vtpm_step", _created_vtpm_step(self.hmc, cli_system, self.inputs)
         )
 
     async def observe_after_apply(self, apply_step: WorkflowStep | None) -> None:
@@ -834,7 +877,7 @@ class _CreationFeatureCoordinator:
             and apply_step is not None
             and apply_step.status == "ok"
         ):
-            memory_step = self.facts["creation_memory_step"]
+            memory_step = self._facts["creation_memory_step"]
             assert memory_step is not None
             await self.observe(
                 "creation_memory_step",
@@ -852,11 +895,11 @@ class _CreationFeatureCoordinator:
 async def _created_memory_layout_step(
     hmc: HMCClient,
     cli_system: str | None,
-    creation: LparCreation,
+    inputs: _CreationFeatureInputs,
     *,
     controller_mode: bool = False,
 ) -> WorkflowStep | None:
-    requested = creation.memory_layout
+    requested = inputs.memory_layout
     names = tuple(name for name, _ in requested.pairs())
     if not names:
         return None
@@ -872,7 +915,7 @@ async def _created_memory_layout_step(
         )
     else:
         try:
-            layout = await get_lpar_memory_layout(hmc.config, cli_system, creation.name)
+            layout = await get_lpar_memory_layout(hmc.config, cli_system, inputs.name)
             observed = {
                 name: getattr(layout, name)
                 for name in names
@@ -900,26 +943,25 @@ async def _created_memory_layout_step(
 async def _created_security_policy_step(
     hmc: HMCClient,
     system_uuid: str,
-    creation: LparCreation,
+    inputs: _CreationFeatureInputs,
     created_lpar: dict[str, Any],
 ) -> WorkflowStep | None:
-    if not creation.security_policy.pairs():
+    if not inputs.security_policy.pairs():
         return None
     try:
         uuid = created_lpar.get("UUID")
         if (
             not isinstance(uuid, str)
             or not is_uuid(uuid)
-            or (created_lpar.get("Resource") or {}).get("PartitionName")
-            != creation.name
+            or (created_lpar.get("Resource") or {}).get("PartitionName") != inputs.name
         ):
             raise ValueError("Created partition identity unconfirmed")
         observed = await read_lpar_security_policy(
             hmc, uuid, system_name_or_uuid=system_uuid
         )
-        matches = observed.environment == creation.partition_type and all(
-            getattr(observed.settings, name) == getattr(creation.security_policy, name)
-            for name, _ in creation.security_policy.pairs()
+        matches = observed.environment == inputs.environment and all(
+            getattr(observed.settings, name) == getattr(inputs.security_policy, name)
+            for name, _ in inputs.security_policy.pairs()
         )
     except HMCTLSFingerprintError:
         raise
@@ -933,14 +975,14 @@ async def _created_security_policy_step(
 
 
 async def _created_vtpm_step(
-    hmc: HMCClient, cli_system: str | None, creation: LparCreation
+    hmc: HMCClient, cli_system: str | None, inputs: _CreationFeatureInputs
 ) -> WorkflowStep | None:
-    if not creation.vtpm_settings.pairs():
+    if not inputs.vtpm_settings.pairs():
         return None
     try:
         if cli_system is None:
             raise ValueError("Native vTPM creation did not retain its system identity")
-        observed = await get_lpar_vtpm_state(hmc.config, cli_system, creation.name)
+        observed = await get_lpar_vtpm_state(hmc.config, cli_system, inputs.name)
     except HMCTLSFingerprintError:
         raise
     except (HMCError, ValueError, PermissionError) as error:
@@ -948,7 +990,7 @@ async def _created_vtpm_step(
             "vtpm", "error", f"Partition exists; vTPM unverified: {error}"
         )
     matches = all(
-        getattr(observed.settings, name) == getattr(creation.vtpm_settings, name)
-        for name, _ in creation.vtpm_settings.pairs()
+        getattr(observed.settings, name) == getattr(inputs.vtpm_settings, name)
+        for name, _ in inputs.vtpm_settings.pairs()
     )
     return WorkflowStep("vtpm", "ok" if matches else "error", observed)

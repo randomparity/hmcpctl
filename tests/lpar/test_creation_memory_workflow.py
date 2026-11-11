@@ -1551,10 +1551,11 @@ async def test_creation_uncertain_identity_retains_coordinator_facts(
         "error" if identity == "missing" else "ok"
     )
     assert len(coordinators) == 1
-    facts = coordinators[0].facts
+    observations = coordinators[0].snapshot()
+    facts = observations.facts
     assert facts["memory_layout_step"] is result.memory_layout_step
     assert facts["hardware_memory_step"] is result.hardware_memory_step
-    assert coordinators[0].active_step is None
+    assert observations.active_step is None
     assert b.events.count("create") == 1
     assert "stamp" not in b.events and "apply" not in b.events
     assert "saved" not in b.events

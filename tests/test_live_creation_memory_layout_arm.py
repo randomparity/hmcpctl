@@ -20,7 +20,6 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.operations import partition_creation
-from hmcpctl.operations.lpar.creation import core
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import artifacts as live_artifacts
@@ -274,7 +273,7 @@ def target(monkeypatch):
             layout = TypeAdapter(LparMemoryLayout).validate_python(
                 json.loads(json.dumps(args["memory_layout"]))
             )
-            creation = core.LparCreation(
+            creation = partition_creation._CreationFeatureInputs(
                 env.name, "AIX/Linux", LparResources(), memory_layout=layout
             )
             step = await partition_creation._created_memory_layout_step(

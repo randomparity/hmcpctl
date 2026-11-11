@@ -13,7 +13,10 @@ from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
 from hmcpctl.operations.lpar.memory.creation import (
     _raise_creation_memory_failure,
 )
-from hmcpctl.operations.partition_creation import _CreationFeatureCoordinator
+from hmcpctl.operations.partition_creation import (
+    _CreationFeatureCoordinator,
+    _CreationFeatureInputs,
+)
 from hmcpctl.operations.partition_state import PARTITION_STATES, PartitionState
 from hmcpctl.operations.systems.fleet import (
     FleetListing,
@@ -170,10 +173,7 @@ async def create_vios(
         security_policy.validate_creation("Virtual IO Server")
     if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
-    features = _CreationFeatureCoordinator(
-        hmc,
-        system_name_or_uuid,
-        system_name_or_uuid,
+    inputs = _CreationFeatureInputs(
         name,
         "Virtual IO Server",
         resources,
@@ -189,20 +189,18 @@ async def create_vios(
         affinity_group_id=affinity_group_id,
     )
     strict_cli_name_required = (
-        features.layout_requested
-        or features.serial_requested
-        or features.memory_requested
-        or features.start_requested
+        inputs.layout_requested
+        or inputs.serial_requested
+        or inputs.memory_requested
+        or inputs.start_requested
     )
     native_resources_required = (
-        features.policy_requested
-        or features.hardware_requested
-        or strict_cli_name_required
+        inputs.policy_requested or inputs.hardware_requested or strict_cli_name_required
     )
     strict_identity_required = (
-        features.policy_requested or features.native_features_requested
+        inputs.policy_requested or inputs.native_features_requested
     )
-    complete_resources_required = features.vtpm_requested or native_resources_required
+    complete_resources_required = inputs.vtpm_requested or native_resources_required
     if complete_resources_required:
         completed = complete_create_resources(resources)
         if completed is None:
@@ -211,10 +209,12 @@ async def create_vios(
                 f"VIOS {creation_kind} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
             )
         resources = completed
-        features.resources = completed
+        inputs = replace(inputs, resources=completed)
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    features.system_uuid = system_uuid
-    if not (features.vtpm_requested or strict_identity_required):
+    features = _CreationFeatureCoordinator(
+        hmc, system_uuid, system_name_or_uuid, inputs
+    )
+    if not (features.inputs.vtpm_requested or strict_identity_required):
         return await hmc.create_vios(
             system_uuid,
             build_vios_document(
@@ -235,21 +235,20 @@ async def create_vios(
         if strict_cli_name_required
         else await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
     )
-    features.system = system
-    await features.discover_mode()
+    await features.discover_mode(cli_system=system)
     controller_mode = features.controller_mode
     await features.admit_partition_features()
     serial_admission = features.serial_admission
     memory_admission = features.memory_admission
     start_admission = features.start_admission
     native_options: dict[str, Any] = {}
-    if features.memory_requested:
+    if features.inputs.memory_requested:
         native_options["creation_memory"] = creation_memory
     if max_virtual_slots is not None:
         native_options["max_virtual_slots"] = max_virtual_slots
-    if features.serial_requested:
+    if features.inputs.serial_requested:
         native_options["virtual_serial_adapters"] = virtual_serial_adapters
-    if features.layout_requested:
+    if features.inputs.layout_requested:
         native_options["memory_layout"] = memory_layout
     if controller_mode:
         native_options["profile_name"] = None
@@ -279,15 +278,15 @@ async def create_vios(
         await _raise_creation_memory_failure(hmc, memory_admission, error)
     except Exception as error:
         may_need_outcome_report = (
-            features.serial_requested
-            or features.memory_requested
-            or features.start_requested
+            features.inputs.serial_requested
+            or features.inputs.memory_requested
+            or features.inputs.start_requested
             or isinstance(error, HMCError)
         )
         if not may_need_outcome_report:
             raise
-        if not features.native_features_requested:
-            if not features.policy_requested:
+        if not features.inputs.native_features_requested:
+            if not features.inputs.policy_requested:
                 raise
             raise HMCError(unknown_outcome) from error
     else:
@@ -295,7 +294,8 @@ async def create_vios(
         entry = features.entry
         assert entry is not None
         start_step = await features.observe_start(entry)
-        affinity_step = features.facts.get("affinity_group_step")
+        observations = features.snapshot()
+        affinity_step = observations.facts.get("affinity_group_step")
         if affinity_step is not None:
             entry = {**entry, "affinity_verification": affinity_step.result}
         metadata: dict[str, Any] = {}
@@ -303,12 +303,12 @@ async def create_vios(
             (start_admission, start_step, "start_verification"),
             (
                 serial_admission,
-                features.facts.get("serial_step"),
+                observations.facts.get("serial_step"),
                 "serial_verification",
             ),
             (
                 memory_admission,
-                features.facts.get("creation_memory_step"),
+                observations.facts.get("creation_memory_step"),
                 "creation_memory_verification",
             ),
         ):
