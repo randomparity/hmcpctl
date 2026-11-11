@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, NoReturn
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
@@ -204,7 +204,6 @@ async def _create_via_cli(
     if start_admission is not None:
         await recheck_start_controllers(hmc, start_admission)
         native_options["start_settings"] = start_admission.settings
-    serial_submission_failed = False
     try:
         await create_lpar_via_cli(
             hmc.config,
@@ -229,9 +228,7 @@ async def _create_via_cli(
         assert memory_admission is not None
         await _raise_creation_memory_failure(hmc, memory_admission, error)
     except _LayoutCreateSubmissionError as error:
-        if creation.virtual_serial_adapters:
-            serial_submission_failed = True
-        else:
+        if not creation.virtual_serial_adapters:
             await _raise_layout_create_failure(hmc, system_uuid, creation, error)
     except Exception:
         if start_admission is not None:
@@ -240,43 +237,44 @@ async def _create_via_cli(
             ) from None
         if not creation.virtual_serial_adapters:
             raise
-        serial_submission_failed = True
-    if serial_submission_failed:
-        raise HMCError(
-            "Serial creation outcome unknown; partition exists or may exist. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed"
+    else:
+        apply_step = (
+            await _apply_created_profile(hmc, system_name, creation)
+            if creation.apply_profile is not None and not defer_apply
+            else None
         )
-    apply_step = (
-        await _apply_created_profile(hmc, system_name, creation)
-        if creation.apply_profile is not None and not defer_apply
-        else None
-    )
-    profile_already_configured = controller_mode and creation.apply_profile is False
-    if profile_already_configured:
-        apply_step = WorkflowStep(
-            "apply_profile",
-            "skipped",
-            _CONTROLLER_AFFINITY_PROFILELESS
-            if creation.affinity_group_id is not None
-            else _CONTROLLER_CREATE_CONFIGURED,
-        )
-    try:
-        created_lpar = await hmc.find_partition_by_name(
-            creation.name, system_uuid=system_uuid
-        )
-    except HMCError as exc:
+        profile_already_configured = controller_mode and creation.apply_profile is False
+        if profile_already_configured:
+            apply_step = WorkflowStep(
+                "apply_profile",
+                "skipped",
+                _CONTROLLER_AFFINITY_PROFILELESS
+                if creation.affinity_group_id is not None
+                else _CONTROLLER_CREATE_CONFIGURED,
+            )
+        try:
+            created_lpar = await hmc.find_partition_by_name(
+                creation.name, system_uuid=system_uuid
+            )
+        except HMCError as exc:
+            return _CreationSubmission(
+                system_name, apply_step, None, exc, profile_already_configured
+            )
+        except Exception:
+            if not native_readback:
+                raise
+            # Native creation succeeded, but the identity lookup is unavailable.
+            # Do not retain provider details in the partial result or exception chain.
+            return _CreationSubmission(
+                system_name, apply_step, None, None, profile_already_configured
+            )
         return _CreationSubmission(
-            system_name, apply_step, None, exc, profile_already_configured
+            system_name, apply_step, created_lpar, None, profile_already_configured
         )
-    except Exception:
-        if not native_readback:
-            raise
-        # Native creation succeeded, but the identity lookup is unavailable.
-        # Do not retain provider details in the partial result or exception chain.
-        return _CreationSubmission(
-            system_name, apply_step, None, None, profile_already_configured
-        )
-    return _CreationSubmission(
-        system_name, apply_step, created_lpar, None, profile_already_configured
+
+    # Raise outside the handler to avoid retaining private provider context.
+    raise HMCError(
+        "Serial creation outcome unknown; partition exists or may exist. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed"
     )
 
 
@@ -1224,7 +1222,7 @@ def creation_followup(
 
 async def _raise_layout_create_failure(
     hmc: HMCClient, system_uuid: str, creation: LparCreation, error: HMCError
-) -> None:
+) -> NoReturn:
     """Reconcile one failed native request without replay, stamping or deletion."""
     outcome = "unknown"
     identity = ""
