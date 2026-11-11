@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Mapping
 from dataclasses import asdict
 from typing import TYPE_CHECKING
@@ -182,22 +181,17 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
     if state.group != GROUP or state.hmc_config is None:
         state.skip(SUBTASK, GROUP, "requires named opt-in group and HMC configuration")
         return
-    baseline = await fixture._read_pools(client, state, state.config.system_name)
-    if baseline is None or fixture.scratch_partitions(baseline[0].names):
-        state.skip(
-            SUBTASK,
-            GROUP,
-            "baseline unavailable or stranded scratch exists; run recovery",
-        )
-        return
-    suffix = uuid.uuid4().hex[:8]
-    run = fixture._Run(
-        state.config.system_name,
-        fixture.NAME_PREFIX + suffix,
-        fixture.TOKEN_PREFIX + suffix,
-        baseline[1],
+    prepared = await fixture._prepare_scratch(
+        client,
+        state,
+        name_prefix=fixture.NAME_PREFIX,
+        token_prefix=fixture.TOKEN_PREFIX,
         subtask=SUBTASK,
+        group=GROUP,
     )
+    if prepared is None:
+        return
+    run, baseline = prepared
     assertions = [Assertion("inactive-memory-removal-sequence", False)]
     try:
         run.create_attempted = True
@@ -221,7 +215,7 @@ async def exercise_memory_quantities(client: Client, state: RunState) -> None:
         state.record(SUBTASK, "memory quantities arm", "FAIL", str(error))
     finally:
         await fixture._teardown(client, state, run, inactive_only=True)
-    same = await fixture._compare(client, state, run, baseline[0])
+    same = await fixture._compare(client, state, run, baseline)
     if run.created:
         state.record_verified(
             SUBTASK,

@@ -1599,22 +1599,17 @@ async def exercise_lpar_settings(client: Client, state: RunState) -> None:
             "requires opt-in group and HMC configuration",
         )
         return
-    baseline = await _read_pools(client, state, state.config.system_name)
-    if baseline is None or scratch_partitions(baseline[0].names):
-        state.skip(
-            SETTINGS_SUBTASK,
-            SETTINGS_GROUP,
-            "baseline unavailable or stranded scratch exists; run recovery",
-        )
-        return
-    suffix = uuid.uuid4().hex[:8]
-    run = _Run(
-        state.config.system_name,
-        NAME_PREFIX + suffix,
-        TOKEN_PREFIX + suffix,
-        baseline[1],
+    prepared = await _prepare_scratch(
+        client,
+        state,
+        name_prefix=NAME_PREFIX,
+        token_prefix=TOKEN_PREFIX,
         subtask=SETTINGS_SUBTASK,
+        group=SETTINGS_GROUP,
     )
+    if prepared is None:
+        return
+    run, baseline = prepared
     verified = False
     try:
         run.create_attempted = True
@@ -1656,7 +1651,7 @@ async def exercise_lpar_settings(client: Client, state: RunState) -> None:
         state.record(SETTINGS_SUBTASK, "settings arm", "FAIL", str(error))
     finally:
         await _teardown(client, state, run, inactive_only=True)
-    same = await _compare(client, state, run, baseline[0])
+    same = await _compare(client, state, run, baseline)
     cleanup = "passed" if run.deleted and same else "failed"
     if run.created:
         state.record_verified(
@@ -1755,22 +1750,17 @@ async def exercise_lpar_reporting(client: Client, state: RunState) -> None:
             "requires opt-in group and HMC configuration",
         )
         return
-    baseline = await _read_pools(client, state, state.config.system_name)
-    if baseline is None or scratch_partitions(baseline[0].names):
-        state.skip(
-            REPORTING_SUBTASK,
-            REPORTING_GROUP,
-            "baseline unavailable or stranded scratch exists; run recovery",
-        )
-        return
-    suffix = uuid.uuid4().hex[:8]
-    run = _Run(
-        state.config.system_name,
-        NAME_PREFIX + suffix,
-        TOKEN_PREFIX + suffix,
-        baseline[1],
+    prepared = await _prepare_scratch(
+        client,
+        state,
+        name_prefix=NAME_PREFIX,
+        token_prefix=TOKEN_PREFIX,
         subtask=REPORTING_SUBTASK,
+        group=REPORTING_GROUP,
     )
+    if prepared is None:
+        return
+    run, baseline = prepared
     verified = False
     try:
         run.create_attempted = True
@@ -1820,7 +1810,7 @@ async def exercise_lpar_reporting(client: Client, state: RunState) -> None:
         state.record(REPORTING_SUBTASK, "settings arm", "FAIL", str(error))
     finally:
         await _teardown(client, state, run, inactive_only=True)
-    same = await _compare(client, state, run, baseline[0])
+    same = await _compare(client, state, run, baseline)
     cleanup = "passed" if run.deleted and same else "failed"
     if run.created:
         state.record_verified(
