@@ -474,17 +474,16 @@ def command_is_captured(template: str, commands: Sequence[str]) -> bool:
 
 def tracked_files(root: Path) -> list[str]:
     proc = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "src", "tests"],
+        ["git", "-C", str(root), "ls-files", "-z", "src", "tests"],
         env={
             key: value
             for key, value in os.environ.items()
             if not key.startswith("GIT_")
         },
         capture_output=True,
-        text=True,
         check=True,
     )
-    return proc.stdout.split()
+    return [os.fsdecode(path) for path in proc.stdout.split(b"\0") if path]
 
 
 def _file_violations(file: str, text: str, evidence: Evidence) -> list[Violation]:

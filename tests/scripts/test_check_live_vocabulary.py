@@ -561,3 +561,20 @@ def test_other_snake_case_parameters_are_not_mapped() -> None:
 def test_repository_query_uses_physical_checkout(redirected_git_checkout):
     root = redirected_git_checkout
     assert guard.tracked_files(root) == ["src/physical.py"]
+
+
+@pytest.mark.parametrize(
+    "name", ["ordinary.py", "space name.py", 'quote"name.py', "tab\tname.py", "λ.py"]
+)
+def test_tracked_path_spelling_reaches_the_vocabulary_diagnostic(repo, capsys, name):
+    original = repo / "tests" / "t.py"
+    original.rename(repo / "tests" / name)
+    (repo / "src" / "hmcpctl" / "m.py").write_text("answer = 1\n")
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.quotePath", "true"], check=True
+    )
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+
+    assert guard.main(["--root", str(repo)]) == 1
+
+    assert f"tests/{name}:1: PartitionState='Running'" in capsys.readouterr().err
