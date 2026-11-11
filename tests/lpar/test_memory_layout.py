@@ -1417,3 +1417,32 @@ def test_memory_layout_exact_field_scope():
         "memory_layout.hpt_ratio",
         "memory_layout.ppt_ratio",
     }
+
+
+@pytest.mark.asyncio
+async def test_uncertain_layout_creation_preserves_tls_identity_failure(
+    layout_creation_target,
+):
+    from hmcpctl.errors import HMCTLSFingerprintError
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    target = layout_creation_target
+    failure = HMCTLSFingerprintError("Certificate fingerprint differs")
+    target.hmc.find_partition_by_name.side_effect = [None, failure]
+    target.write.side_effect = HMCCLIError("Native submission unconfirmed")
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await create_and_stamp_lpar(
+            target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+        )
+    assert caught.value is failure
+    assert any(
+        "Inspect scoped identity before retrying" in note
+        for note in getattr(failure, "__notes__", ())
+    )
+    assert target.hmc.find_partition_by_name.await_count == 2
+    target.write.assert_awaited_once()
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+    target.apply.assert_not_awaited()
+    target.hmc.delete_logical_partition.assert_not_awaited()

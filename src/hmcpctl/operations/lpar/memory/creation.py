@@ -646,7 +646,14 @@ async def _raise_creation_memory_failure(
                     == "not activated"
                 ):
                     outcome = "partial"
-    except Exception:  # noqa: BLE001 — post-submission evidence failure is always unknown.
+    except HMCTLSFingerprintError as identity_error:
+        identity_error.add_note(
+            "Creation memory submission may have taken effect. "
+            "Inspect scoped identity before retrying; no replay, ownership stamp "
+            "or rollback performed."
+        )
+        raise
+    except Exception:  # noqa: BLE001 — ordinary post-submission evidence failures mean unknown.
         outcome = "unknown"
     code = error.remote_refusal_code
     suffix = (

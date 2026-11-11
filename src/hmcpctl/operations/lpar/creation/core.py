@@ -1240,7 +1240,14 @@ async def _raise_layout_create_failure(
         ):
             outcome = "partial; partition exists"
             identity = f" (UUID {found['UUID']})"
-    except Exception:  # noqa: BLE001 — any failed post-write readback means unknown.
+    except HMCTLSFingerprintError as identity_error:
+        identity_error.add_note(
+            "Memory layout creation submission may have taken effect. "
+            "Inspect scoped identity before retrying; no replay, ownership stamp "
+            "or rollback performed."
+        )
+        raise
+    except Exception:  # noqa: BLE001 — ordinary post-submission evidence failures mean unknown.
         outcome = "unknown; scoped identity readback unavailable"
     raise HMCError(
         f"Memory layout creation outcome {outcome}{identity}. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed."

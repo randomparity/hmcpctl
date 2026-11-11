@@ -1606,3 +1606,51 @@ async def test_creation_unconfirmed_identity_later_tls_preserves_layout_fact(
     assert b.events.count("create") == 1
     assert "stamp" not in b.events and "apply" not in b.events
     b.hmc.delete_logical_partition.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["lpar", "vios"])
+@pytest.mark.parametrize("stage", ["lpar-inventory", "vios-inventory", "detail"])
+async def test_uncertain_memory_creation_preserves_tls_reconciliation_failure(
+    memory_target, kind, stage
+):
+    from hmcpctl.errors import HMCTLSFingerprintError
+    from hmcpctl.operations.vios.core import create_vios
+
+    b = memory_target
+    if kind == "vios":
+        b.local["ResourceType"] = "VirtualIOServer"
+        b.local["Resource"]["PartitionType"] = "Virtual IO Server"
+        b.hmc.get_vios.side_effect = lambda uuid: deepcopy(b.local)
+    b.fault = "timeout"
+    failure = HMCTLSFingerprintError("Certificate fingerprint differs")
+    suffix = {
+        "lpar-inventory": f"ManagedSystem/{SYSTEM}/LogicalPartition",
+        "vios-inventory": f"ManagedSystem/{SYSTEM}/VirtualIOServer",
+        "detail": f"{b.local['ResourceType']}/{LOCAL}",
+    }[stage]
+    original = b.hmc._get.side_effect
+    stopped, failures = [], []
+
+    async def read(path, *args, **kwargs):
+        if b.created and path.endswith(suffix):
+            failures.append(path)
+            stopped[:] = b.events
+            raise failure
+        return await original(path, *args, **kwargs)
+
+    b.hmc._get.side_effect = read
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        if kind == "vios":
+            await create_vios(b.hmc, SYSTEM, "new", RESOURCES, creation_memory=SHARED)
+        else:
+            await create(b, apply_profile=True)
+    assert caught.value is failure
+    assert any(
+        "Inspect scoped identity before retrying" in note
+        for note in getattr(failure, "__notes__", ())
+    )
+    assert len(failures) == 1 and b.events == stopped
+    assert b.events.count("create") == 1
+    assert "stamp" not in b.events and "apply" not in b.events
+    b.hmc.delete_logical_partition.assert_not_called()
+    b.hmc.delete_vios.assert_not_called()
