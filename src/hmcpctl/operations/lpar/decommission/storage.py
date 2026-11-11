@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -37,7 +38,7 @@ from hmcpctl.operations.lpar.workflow_contract import DISK_LEDGER, MEDIA_LEDGER
 from hmcpctl.resource_identity import is_uuid
 from hmcpctl.xmlutil import leaf_text
 
-ClientFactory = Callable[[str, str], Any]
+ClientFactory = Callable[[str, str], AbstractAsyncContextManager[HMCClient]]
 # Persisted contract (ADR 0323 Decision 3): never change while an operation can be open.
 DELETE_KINDS: Mapping[str, str] = {
     DISK_LEDGER: "vios.virtual_disk_delete",
