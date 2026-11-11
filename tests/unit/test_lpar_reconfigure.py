@@ -1084,3 +1084,48 @@ def test_reconfigure_tls_partition_write_retains_applied_profile_and_stops(
     assert any(
         "HMCTLSFingerprintError" in warning for warning in record.result["warnings"]
     )
+
+
+@pytest.mark.parametrize("phase", ["write", "verify", "apply"])
+def test_missing_recorded_profile_identity_refuses_before_profile_reads(
+    monkeypatch, phase
+):
+    hmc = FakeHMC()
+    calls = []
+    original_read = hmc.get_logical_partition
+
+    async def read_partition(uuid):
+        calls.append("partition")
+        return await original_read(uuid)
+
+    async def unexpected_profile_read(*_args, **_kwargs):
+        calls.append("profile")
+        pytest.fail("missing profile identity must refuse before profile queries")
+
+    monkeypatch.setattr(hmc, "get_logical_partition", read_partition)
+    monkeypatch.setattr(
+        hmc, "list_system_summaries", unexpected_profile_read, raising=False
+    )
+    plan = {
+        "system_uuid": SYS,
+        "lpar_uuid": LPAR,
+        "profile_uuid": None,
+        "profile_name": None,
+        "profile_etag": "etag",
+        "profile_patch": {"desired_memory": 1024},
+        "current": None,
+        "rename": None,
+        "disks": None,
+        "networks": None,
+        "boot": None,
+        "media": None,
+    }
+    with pytest.raises(OperationFailed, match="recorded profile .* is unavailable"):
+        if phase == "write":
+            _await(reconfigure._profile_write(hmc, plan)())
+        elif phase == "verify":
+            _await(reconfigure._verify(SimpleNamespace(), hmc, plan))
+        else:
+            ctx = SimpleNamespace(recorded=lambda _key: None)
+            _await(reconfigure._apply(ctx, hmc, plan))
+    assert calls == (["partition"] if phase == "verify" else [])

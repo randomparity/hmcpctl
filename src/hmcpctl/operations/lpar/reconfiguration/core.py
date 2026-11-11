@@ -1113,7 +1113,10 @@ async def _other_names(hmc: HMCClient, system_uuid: str, lpar_uuid: str) -> list
 
 def _profile_write(hmc: HMCClient, plan: ReconfigurationPlan) -> Write:
     profile_uuid = plan["profile_uuid"]
-    assert profile_uuid is not None
+    if profile_uuid is None:
+        raise OperationFailed(
+            "recorded profile UUID is unavailable; inspect the operation"
+        )
 
     async def write() -> Mapping[str, Any]:
         try:
@@ -1275,7 +1278,10 @@ def _steps(plan: ReconfigurationPlan) -> list[tuple[str, str, str]]:
     lpar_uuid = plan["lpar_uuid"]
     steps = []
     if plan["profile_patch"]:
-        assert plan["profile_uuid"] is not None
+        if plan["profile_uuid"] is None:
+            raise OperationFailed(
+                "recorded profile UUID is unavailable; inspect the operation"
+            )
         target = profile_write.target(lpar_uuid, plan["profile_uuid"])
         steps.append((PROFILE_KEY, profile_write.KIND, target))
     if plan["current"]:
@@ -1493,7 +1499,10 @@ async def _verify(
         view = await _read_view(hmc, lpar_uuid)
         seen_profile: dict[str, int] = {}
         if want_profile:
-            assert plan["profile_name"] is not None
+            if plan["profile_name"] is None:
+                raise OperationFailed(
+                    "recorded profile name is unavailable; inspect the operation"
+                )
             _, profile = await _read_profile(
                 hmc, plan["system_uuid"], lpar_uuid, plan["profile_name"]
             )
