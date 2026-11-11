@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import ANY, AsyncMock, patch
 
@@ -846,6 +847,36 @@ def test_mount_optical_media_keeps_the_mapping_keys_beside_its_location(
             "profile_name": None,
         },
     }
+
+
+@pytest.mark.parametrize("action", ["mount", "detach"])
+def test_storage_mcp_uses_typed_facts_with_unrelated_raw(monkeypatch, mock_hmc, action):
+    _hmc_env(monkeypatch)
+    location = ChangeLocation("Disabled", "current-configuration")
+    result = StorageMutationResult(
+        raw={"diagnostic": "unrelated"},
+        change_location=location,
+        resource={"UUID": "mapping-1"},
+    )
+    if action == "mount":
+        monkeypatch.setattr(
+            "hmcpctl.server_tools.storage.resources.mount_optical_media",
+            AsyncMock(return_value=result),
+        )
+        observed = hmc_mount_optical_media(
+            vios_name_or_uuid=VIOS_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            media_name="install.iso",
+        )
+        expected = {"UUID": "mapping-1", "change_location": asdict(location)}
+    else:
+        monkeypatch.setattr(
+            "hmcpctl.server_tools.storage.resources.detach_storage_mapping",
+            AsyncMock(return_value=result),
+        )
+        observed = hmc_detach_storage_mapping(VIOS_UUID, "vhost0/vtscsi0")
+        expected = {"mapping_id": "vhost0/vtscsi0", "change_location": asdict(location)}
+    assert observed == expected
 
 
 def test_mount_optical_media_without_a_resource_still_reports_its_location(

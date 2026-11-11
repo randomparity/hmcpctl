@@ -10,12 +10,32 @@ from hmcpctl.client.client_parse import _parse_feed
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.storage.resources import (
+    StorageMutationResult,
     list_optical_media,
     list_storage_mappings,
     list_volume_groups,
 )
 
 VIOS_UUID = "00000000-0000-0000-0000-000000000001"
+
+
+@pytest.mark.parametrize(
+    "raw,resource",
+    [
+        (None, None),
+        ({"resource": None}, None),
+        ({"name": "disk"}, {"name": "disk"}),
+        ({"Resource": {"name": "disk"}}, {"name": "disk"}),
+        ({"resource": {"Resource": {"name": "disk"}}}, {"name": "disk"}),
+    ],
+)
+def test_storage_mutation_exposes_resource_without_changing_raw(raw, resource):
+    result = StorageMutationResult.from_raw(raw)
+    assert result.raw is raw
+    assert result.resource == resource
+    assert result.job is None
+
+
 _OBSERVED_FEED = (
     '<feed xmlns="http://www.w3.org/2005/Atom"><entry><content>'
     '<VirtualIOServer xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">'

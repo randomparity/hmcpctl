@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from hmcpctl.operations.lpar.profiles.sync import resource_with_change_location
@@ -610,7 +611,11 @@ def hmc_detach_storage_mapping(
             system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         )
-        return {"mapping_id": mapping_id, "change_location": location.raw}
+        assert location.change_location is not None
+        return {
+            "mapping_id": mapping_id,
+            "change_location": asdict(location.change_location),
+        }
 
     return with_client(detach_mapping, profile=profile)
 
@@ -912,9 +917,7 @@ def hmc_mount_optical_media(
             system_name_or_uuid=system_name_or_uuid,
         )
         assert result.change_location is not None
-        return resource_with_change_location(
-            result.raw["resource"], result.change_location
-        )
+        return resource_with_change_location(result.resource, result.change_location)
 
     return with_client(mount, profile=profile)
 

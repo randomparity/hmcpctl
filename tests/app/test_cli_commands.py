@@ -68,6 +68,8 @@ from hmcpctl.operations.storage.resources import (
     OpticalMedia,
     StorageMapping,
     StorageMutationResult,
+    StorageOpticalResult,
+    StorageUploadResult,
     VolumeGroup,
 )
 from hmcpctl.operations.virtualization.adapters import AdapterResult
@@ -2982,8 +2984,9 @@ def _storage_app() -> typer.Typer:
                 "https://images.test/aix.iso",
             ],
             "upload_iso",
-            StorageMutationResult.from_raw(
-                {"status": "uploaded", "media_name": "aix.iso"}
+            StorageUploadResult(
+                raw={"status": "uploaded", "media_name": "aix.iso"},
+                status="uploaded",
             ),
         ),
     ],
@@ -3376,7 +3379,9 @@ def test_storage_optical_load_commands_forward_selectors(
         "release": True,
     }
     call = AsyncMock(
-        return_value=StorageMutationResult.from_raw(raw, lpar_uuid=LPAR_UUID)
+        return_value=StorageOpticalResult(
+            raw=raw, lpar_uuid=LPAR_UUID, target_device="vtopt1"
+        )
     )
     monkeypatch.setattr(f"hmcpctl.cli_commands.storage.resources.{operation}", call)
 
@@ -3801,14 +3806,17 @@ def test_storage_upload_iso_reports_uploaded_media(fake_hmc, monkeypatch):
         assert (vios, vg, media_name) == (VIOS_UUID, VG_UUID, "aix.iso")
         assert iso_source == "https://images.test/aix.iso"
         assert system_name_or_uuid is None
-        return StorageMutationResult.from_raw(
-            {
+        return StorageUploadResult(
+            raw={
                 "status": "uploaded",
                 "media_name": "aix.iso",
                 "media_size_bytes": 1048576,
                 "source_sha256": "abc123",
                 "media": {"MediaName": "aix.iso"},
-            }
+            },
+            status="uploaded",
+            media_size_bytes=1048576,
+            source_sha256="abc123",
         )
 
     monkeypatch.setattr(
@@ -3840,8 +3848,9 @@ def test_storage_upload_iso_json(fake_hmc, monkeypatch):
         _hmc, _vios, _vg, _media_name, _iso_source, *, system_name_or_uuid
     ):
         assert system_name_or_uuid is None
-        return StorageMutationResult.from_raw(
-            {"status": "uploaded", "media_name": "aix.iso"}
+        return StorageUploadResult(
+            raw={"status": "uploaded", "media_name": "aix.iso"},
+            status="uploaded",
         )
 
     monkeypatch.setattr(

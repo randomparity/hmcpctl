@@ -209,6 +209,7 @@ async def test_load_finds_the_lpars_empty_device_and_submits_the_captured_shape(
         "release": False,
     }
     assert result.lpar_uuid == _LPAR[EMPTY]
+    assert result.target_device == "vtopt0"
     assert result.change_location is None
     assert "audit" not in fake.kinds()
 

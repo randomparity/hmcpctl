@@ -24,6 +24,8 @@ from hmcpctl.operations.lpar.provisioning.core import (
 from ...documents.storage import StorageKind, validate_virtual_disk
 from ...operations.storage.resources import (
     StorageMutationResult,
+    StorageOpticalResult,
+    StorageUploadResult,
     create_media_repository,
     create_optical_media,
     create_virtual_disk,
@@ -958,7 +960,7 @@ _RELEASE_HELP = (
 def _change_optical(
     command: str,
     question: str,
-    operation: Callable[[HMCClient], Awaitable[StorageMutationResult]],
+    operation: Callable[[HMCClient], Awaitable[StorageOpticalResult]],
     *,
     yes: bool,
     release: bool,
@@ -975,7 +977,7 @@ def _change_optical(
             "operation": command,
             **summary,
             "lpar_uuid": result.lpar_uuid,
-            "target_device": result.raw["target_device"],
+            "target_device": result.target_device,
             "release": release,
         },
         result,
@@ -1251,7 +1253,7 @@ def storage_upload_iso(
     """
     selected = resolve_inventory_format(as_json or details, format)
 
-    async def _go(hmc: HMCClient) -> StorageMutationResult:
+    async def _go(hmc: HMCClient) -> StorageUploadResult:
         return await upload_iso(
             hmc,
             vios,
@@ -1269,17 +1271,17 @@ def storage_upload_iso(
         "vios": vios,
         "vg": vg,
         "system": system,
-        "outcome": result.raw.get("status", "unknown"),
-        "media_size_bytes": result.raw.get("media_size_bytes"),
-        "source_sha256": result.raw.get("source_sha256"),
+        "outcome": result.status,
+        "media_size_bytes": result.media_size_bytes,
+        "source_sha256": result.source_sha256,
         "verification": "repository entry observed"
-        if result.raw.get("status") == "uploaded"
+        if result.status == "uploaded"
         else "final state not verified",
     }
     _print_mutation(
         summary, result, selected, details or selected == InventoryFormat.json
     )
-    if result.raw.get("status") != "uploaded":
+    if result.status != "uploaded":
         raise typer.Exit(1)
 
 

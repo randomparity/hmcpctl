@@ -55,6 +55,7 @@ class StorageMutationResult:
     job: JobOutcome | None = None
     lpar_uuid: str | None = None
     change_location: ChangeLocation | None = None
+    resource: Mapping[str, Any] | None = None
 
     @classmethod
     def from_raw(
@@ -75,7 +76,29 @@ class StorageMutationResult:
             "JobID" in resource or "Status" in resource
         )
         job = job_outcome("", entry) if is_job and job_identifier(entry) else None
-        return cls(raw, job, lpar_uuid, change_location)
+        return cls(
+            raw,
+            job,
+            lpar_uuid,
+            change_location,
+            resource if isinstance(resource, Mapping) else None,
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class StorageOpticalResult(StorageMutationResult):
+    """An optical command's selected device, separate from its diagnostic payload."""
+
+    target_device: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class StorageUploadResult(StorageMutationResult):
+    """Upload completion and observed metadata, separate from its original payload."""
+
+    status: str
+    media_size_bytes: int | None = None
+    source_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1094,7 +1117,7 @@ async def upload_iso(
     system_name_or_uuid: str | None = None,
     expected_sha256: str | None = None,
     expected_size: int | None = None,
-) -> StorageMutationResult:
+) -> StorageUploadResult:
     """Upload an ISO to a VIOS media repository via the HMC web File API (ADR 0177).
 
     ``vg_uuid`` accepts a volume-group name or UUID on the selected VIOS.
@@ -1205,14 +1228,17 @@ async def upload_iso(
             hmc, vios_uuid, vg_uuid, media_name, iso_path, file_size
         )
 
-        return StorageMutationResult.from_raw(
-            {
+        return StorageUploadResult(
+            raw={
                 "status": "uploaded",
                 "media_name": media_name,
                 "media_size_bytes": file_size,
                 "source_sha256": iso_sha256,
                 "media": uploaded_media_entry,
-            }
+            },
+            status="uploaded",
+            media_size_bytes=file_size,
+            source_sha256=iso_sha256,
         )
     finally:
         primary_error = sys.exception()
@@ -1470,7 +1496,7 @@ async def _change_optical_media(
     target_device: str | None,
     release: bool,
     ownership_override: bool,
-) -> StorageMutationResult:
+) -> StorageOpticalResult:
     if media_name is not None:
         require_media_name(media_name)
     if target_device is not None:
@@ -1522,8 +1548,8 @@ async def _change_optical_media(
             f"{where}: completion unknown, unexpected answer {answer[:512]!r}; "
             f"{read_first}"
         )
-    return StorageMutationResult.from_raw(
-        {
+    return StorageOpticalResult(
+        raw={
             "action": action,
             "vios_uuid": vios_uuid,
             "lpar_uuid": lpar_uuid,
@@ -1532,6 +1558,7 @@ async def _change_optical_media(
             "release": release,
         },
         lpar_uuid=lpar_uuid,
+        target_device=device,
     )
 
 
@@ -1545,7 +1572,7 @@ async def load_optical_media(
     target_device: str | None = None,
     release: bool = False,
     ownership_override: bool = False,
-) -> StorageMutationResult:
+) -> StorageOpticalResult:
     """Load a repository medium into the LPAR's existing virtual optical device.
 
     Runs the VIOS ``loadopt`` through ``viosvrcmd`` (ADR 0317); the mapping stays.
@@ -1587,7 +1614,7 @@ async def unload_optical_media(
     target_device: str | None = None,
     release: bool = False,
     ownership_override: bool = False,
-) -> StorageMutationResult:
+) -> StorageOpticalResult:
     """Unload the medium from the LPAR's virtual optical device, keeping the mapping.
 
     Runs the VIOS ``unloadopt`` through ``viosvrcmd`` (ADR 0317), selecting and

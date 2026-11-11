@@ -147,6 +147,9 @@ async def test_upload_iso_success(mock_hmc, stage_download, selector):
     assert result.raw["media_size_bytes"] == len(TEST_CONTENT)
     assert result.raw["source_sha256"] == TEST_SHA256
     assert result.raw["media"] == VISIBLE
+    assert result.status == "uploaded"
+    assert result.media_size_bytes == len(TEST_CONTENT)
+    assert result.source_sha256 == TEST_SHA256
     web_file_requests = [
         (call.request.method, call.request.url.path)
         for call in mock_hmc.calls

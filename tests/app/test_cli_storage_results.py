@@ -18,7 +18,11 @@ from hmcpctl.cli_commands.storage import resources as storage
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-from hmcpctl.operations.storage.resources import StorageMutationResult
+from hmcpctl.operations.storage.resources import (
+    StorageMutationResult,
+    StorageOpticalResult,
+    StorageUploadResult,
+)
 
 RUNNER = CliRunner()
 RAW = {"Resource": {"MachineSerialNumber": "unrelated-hardware-marker"}}
@@ -154,6 +158,13 @@ CASES = [
 def operation_result(data):
     if isinstance(data, AttachDiskResult):
         return data
+    if data is UPLOAD:
+        return StorageUploadResult(
+            raw=data,
+            status="uploaded",
+            media_size_bytes=12,
+            source_sha256="abc",
+        )
     location = data if isinstance(data, ChangeLocation) else None
     if isinstance(data, dict) and "change_location" in data:
         location = ChangeLocation(**data["change_location"])
@@ -171,6 +182,59 @@ def _invoke(monkeypatch, command, args, data, flags=(), input=None):
     return RUNNER.invoke(
         cli.app, ["storage", command, *args, *flags], input=input
     ), call
+
+
+@pytest.mark.parametrize("command", ["load-optical-media", "unload-optical-media"])
+@pytest.mark.parametrize("details", [False, True])
+def test_optical_device_comes_from_typed_fact(monkeypatch, command, details):
+    raw = {"target_device": "diagnostic-device"}
+    result = StorageOpticalResult(raw=raw, lpar_uuid="lp-test", target_device="vtopt7")
+    monkeypatch.setattr(storage, "with_client", Mock(return_value=result))
+    args = ["storage", command, "vi-test", "--lpar", "lp-test", "--yes"]
+    if command == "load-optical-media":
+        args += ["--name", "media-test"]
+    if details:
+        args += ["--details"]
+    observed = RUNNER.invoke(cli.app, args)
+    assert observed.exit_code == 0, observed.output
+    if details:
+        assert json.loads(observed.stdout) == raw
+    else:
+        assert "target_device\tvtopt7" in observed.stdout
+        assert "diagnostic-device" not in observed.stdout
+
+
+@pytest.mark.parametrize("status,exit_code", [("uploaded", 0), ("unknown", 1)])
+@pytest.mark.parametrize("selected", [None, "--json", "--details"])
+def test_upload_outcome_and_exit_use_typed_facts(
+    monkeypatch, status, exit_code, selected
+):
+    raw = {
+        "status": "unknown" if status == "uploaded" else "uploaded",
+        "media_size_bytes": 999,
+        "source_sha256": "diagnostic-checksum",
+    }
+    result = StorageUploadResult(
+        raw=raw, status=status, media_size_bytes=12, source_sha256="abc"
+    )
+    monkeypatch.setattr(storage, "with_client", Mock(return_value=result))
+    command, args, _, _ = CASES[-1]
+    flags = [selected] if selected else []
+    observed = RUNNER.invoke(cli.app, ["storage", command, *args, *flags])
+    assert observed.exit_code == exit_code, observed.output
+    if selected:
+        assert json.loads(observed.stdout) == raw
+    else:
+        assert f"outcome\t{status}" in observed.stdout
+        assert "media_size_bytes\t12" in observed.stdout
+        assert "source_sha256\tabc" in observed.stdout
+        verification = (
+            "repository entry observed"
+            if status == "uploaded"
+            else "final state not verified"
+        )
+        assert f"verification\t{verification}" in observed.stdout
+        assert "diagnostic-checksum" not in observed.stdout
 
 
 @pytest.mark.parametrize("command,args,data,target", CASES)

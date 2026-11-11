@@ -8,6 +8,7 @@ leave the profile untouched, so activating that profile drops the change (#981).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
@@ -52,7 +53,7 @@ class ChangeLocation:
 
 
 def resource_with_change_location(
-    resource: dict[str, Any] | None, location: ChangeLocation
+    resource: Mapping[str, Any] | None, location: ChangeLocation
 ) -> dict[str, Any]:
     """The HMC resource plus a ``change_location`` key.
 
