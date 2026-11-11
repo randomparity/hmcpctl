@@ -935,7 +935,26 @@ async def create_system_profile(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
 ) -> SystemProfileOutcome:
-    """Create one bound system profile after every new member is authorized."""
+    """Create one bound system profile after every new member is authorized.
+
+    The attempt boundary follows admission and the fresh baseline check, before
+    job construction; crossing it does not prove dispatch.
+
+    Raises:
+        ValueError: Timing, selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with independent state and postcondition fields. A normal
+        return does not prove completion; metadata success requires state=completed
+        and postcondition=verified. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures become error plus failed/uncertain state
+        and unverified postcondition; any known job identity is retained. Cancellation
+        therefore does not always propagate. Inspect state, postcondition, error and
+        job before retrying an uncertain attempt; no automatic replay occurs.
+    """
     return await _metadata(
         hmc,
         system_name_or_uuid,
@@ -961,7 +980,26 @@ async def update_system_profile(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
 ) -> SystemProfileOutcome:
-    """Rename, replace paired members, or both; authorize the old/new union."""
+    """Rename, replace paired members, or both; authorize the old/new union.
+
+    The attempt boundary follows admission and the fresh baseline check, before
+    job construction; crossing it does not prove dispatch.
+
+    Raises:
+        ValueError: Timing, selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with independent state and postcondition fields. A normal
+        return does not prove completion; metadata success requires state=completed
+        and postcondition=verified. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures become error plus failed/uncertain state
+        and unverified postcondition; any known job identity is retained. Cancellation
+        therefore does not always propagate. Inspect state, postcondition, error and
+        job before retrying an uncertain attempt; no automatic replay occurs.
+    """
     return await _metadata(
         hmc,
         system_name_or_uuid,
@@ -984,7 +1022,26 @@ async def delete_system_profile(
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
 ) -> SystemProfileOutcome:
-    """Delete through the fixed CLI route, never as an automatic REST fallback."""
+    """Delete through the fixed CLI route, never as an automatic REST fallback.
+
+    The attempt boundary follows admission and the fresh baseline check, before
+    the native delete call; crossing it does not prove dispatch.
+
+    Raises:
+        ValueError: Selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with independent state and postcondition fields. A normal
+        return does not prove completion; metadata success requires state=completed
+        and postcondition=verified. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures become error plus failed/uncertain state
+        and unverified postcondition; any known job identity is retained. Cancellation
+        therefore does not always propagate. Inspect state, postcondition, error and
+        job before retrying an uncertain attempt; no automatic replay occurs.
+    """
     return await _metadata(
         hmc,
         system_name_or_uuid,
@@ -1147,7 +1204,29 @@ async def activate_system_profile(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
 ) -> SystemProfileOutcome:
-    """Validate or activate once, reporting backend facts separately from bounded witnesses."""
+    """Validate or activate once, reporting backend facts separately from bounded witnesses.
+
+    The attempt boundary follows admission, member observations and the fresh
+    baseline check, before job construction or the native validation call; crossing
+    it does not prove dispatch.
+
+    Raises:
+        ValueError: Action, timing, selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with backend state, postcondition, activation_execution
+        and per-member observations. A normal return does not prove success. Activation
+        requires state=completed, activation_execution=complete and a verified
+        postcondition; validation-only success has postcondition=not-applicable and
+        no activation_execution. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures return error, failed/uncertain state and
+        unverified postcondition, retaining known job facts. Cancellation therefore
+        does not always propagate. Inspect these fields and reconcile known effects
+        before retrying; no automatic replay occurs.
+    """
     from ...jobs import activate_system_profile_job
     from ...ssh.profiles import validate_system_profile_record
 
