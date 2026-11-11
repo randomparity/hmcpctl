@@ -88,8 +88,10 @@ class BootHMC(FakeHMC):
 class Boot(Writes):
     """Writes plus the boot's reads: refcodes, the boot order and the power-on."""
 
-    def __init__(self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch) -> None:
-        super().__init__(hmc, monkeypatch)
+    def __init__(
+        self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch, creation_mock
+    ) -> None:
+        super().__init__(hmc, monkeypatch, creation_mock)
         self.hmc: BootHMC = hmc
         self.refcodes: list[list[dict[str, Any]]] = [[OLD]]
         self.refcode_error: Exception | None = None
@@ -148,8 +150,8 @@ def _submit(boot: Boot, request=IMMEDIATE, continuation="none", rid=None):
 
 
 @pytest.fixture
-def boot(monkeypatch: pytest.MonkeyPatch) -> Boot:
-    return Boot(BootHMC(), monkeypatch)
+def boot(monkeypatch: pytest.MonkeyPatch, creation_mock) -> Boot:
+    return Boot(BootHMC(), monkeypatch, creation_mock)
 
 
 def _step(record, name: str):

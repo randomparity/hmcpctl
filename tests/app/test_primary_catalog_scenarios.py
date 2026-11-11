@@ -155,8 +155,10 @@ class BootHMC(FakeHMC):
 class Boot(Writes):
     """Provision's writes plus the boot: the handoff code is the first read after power-on."""
 
-    def __init__(self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch) -> None:
-        super().__init__(hmc, monkeypatch)
+    def __init__(
+        self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch, creation_mock
+    ) -> None:
+        super().__init__(hmc, monkeypatch, creation_mock)
         self.hmc: BootHMC = hmc
         patch = monkeypatch.setattr
         patch(provision_operation, "list_lpar_refcodes", self.read_refcodes)
@@ -182,12 +184,12 @@ class Boot(Writes):
 
 
 @pytest.fixture
-def boot(monkeypatch: pytest.MonkeyPatch) -> Boot:
+def boot(monkeypatch: pytest.MonkeyPatch, creation_mock) -> Boot:
     """Serve hmc_provision_lpar against a boot fake, bound where the tool builds its body."""
     monkeypatch.setenv("HMC_USER", "u")
     monkeypatch.setenv("HMC_PASSWORD", "p")
     hmc = BootHMC()
-    writes = Boot(hmc, monkeypatch)
+    writes = Boot(hmc, monkeypatch, creation_mock)
     body, classifiers = (
         provision_tool.provision_body,
         provision_tool.provision_classifiers,
