@@ -402,7 +402,7 @@ def _maturity_records(inventory: Path) -> list[dict[str, object]]:
     return [record for record in operations if isinstance(record, dict)]
 
 
-def _process_runtime_projection(
+def _check_or_write_runtime_projection(
     records: Sequence[Mapping[str, object]],
     registry: Collection[RegistryTool],
     output: Path | None,
@@ -747,7 +747,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not errors:
         maturity_records = _maturity_records(args.inventory)
         errors.extend(
-            _process_runtime_projection(
+            _check_or_write_runtime_projection(
                 maturity_records,
                 registry,
                 args.write_runtime_projection,
