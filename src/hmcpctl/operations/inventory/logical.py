@@ -13,7 +13,7 @@ import binascii
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
@@ -28,6 +28,10 @@ from .composite import (
     optional_text,
     processor_figures,
 )
+
+if TYPE_CHECKING:
+    from hmcpctl.client.core import HMCClient
+
 
 SYSTEMS_TOOL = "hmc_list_systems"
 PARTITIONS_TOOL = "hmc_list_lpars"
@@ -191,7 +195,9 @@ def check_inputs(
     return decode_cursor(cursor) if cursor is not None else None
 
 
-async def _enumerate(hmc: Any, admit: Admit) -> tuple[SourceStatus, list[_Candidate]]:
+async def _enumerate(
+    hmc: HMCClient, admit: Admit
+) -> tuple[SourceStatus, list[_Candidate]]:
     denial = admit(SYSTEMS_TOOL, None)
     if denial is not None:
         return _status(SYSTEMS_TOOL, denial + _SELECTOR_HINT), []
@@ -229,7 +235,7 @@ def _unresolved(selector: str, status: SourceStatus) -> InventorySystem:
 
 
 async def _resolve(
-    hmc: Any, admit: Admit, selectors: Sequence[str]
+    hmc: HMCClient, admit: Admit, selectors: Sequence[str]
 ) -> tuple[list[InventorySystem], list[_Candidate], str | None]:
     """Admit, then resolve, each distinct selector against ``quick/All``.
 
@@ -304,7 +310,7 @@ def _partition(
 class _Reader:
     """One page's per-system reads, sharing the lazily asked capacity decision."""
 
-    hmc: Any
+    hmc: HMCClient
     admit: Admit
     connection: str
     enumerated: bool
@@ -421,7 +427,7 @@ class _Reader:
 
 
 async def read_inventory(
-    hmc: Any,
+    hmc: HMCClient,
     *,
     connection: str,
     admit: Admit,

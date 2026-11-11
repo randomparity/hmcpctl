@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists
 from hmcpctl.operations.lpar.provisioning.media import (
@@ -49,6 +49,10 @@ from ..storage.resources import (
 )
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
+
+if TYPE_CHECKING:
+    from hmcpctl.client.core import HMCClient
+
 
 MAX_SELECTORS = 16
 
@@ -528,7 +532,7 @@ _FAILED = object()
 class _Evaluator:
     """Runs the spec's checks on one candidate at a time, sharing the capacity grant."""
 
-    hmc: Any
+    hmc: HMCClient
     admit: PlanAdmit
     request: PlanRequest
     connection: str
@@ -906,7 +910,7 @@ def _unresolved(selector: str, blocker: PlanBlocker) -> PlanCandidate:
 
 
 async def _lookup(
-    hmc: Any, selector: str, stalled: str | None
+    hmc: HMCClient, selector: str, stalled: str | None
 ) -> tuple[dict[str, Any] | None, str, str | None]:
     """Read one selector's system entry; the third value is a transport stall.
 
@@ -929,7 +933,7 @@ async def _lookup(
 
 
 async def _resolve(
-    hmc: Any, admit: PlanAdmit, selectors: Sequence[str]
+    hmc: HMCClient, admit: PlanAdmit, selectors: Sequence[str]
 ) -> tuple[list[_Candidate], list[PlanCandidate], str | None]:
     """Admit each distinct selector as ``hmc_list_lpars``, then resolve it (ADR 0196)."""
     candidates: list[_Candidate] = []
@@ -957,7 +961,7 @@ async def _resolve(
 
 
 async def _enumerate(
-    hmc: Any, admit: PlanAdmit
+    hmc: HMCClient, admit: PlanAdmit
 ) -> tuple[list[_Candidate], PlanBlocker | None, bool]:
     denial = admit(SYSTEMS_TOOL, None, None)
     if denial is not None:
@@ -987,7 +991,7 @@ async def _enumerate(
     return candidates, None, len(summaries) > CANDIDATES_LIMIT
 
 
-def _request_blockers(hmc: Any, request: PlanRequest) -> list[PlanBlocker]:
+def _request_blockers(hmc: HMCClient, request: PlanRequest) -> list[PlanBlocker]:
     blockers: list[PlanBlocker] = []
     install = request.install
     if install is not None and not request.exclusive_writer_window:
@@ -1177,7 +1181,7 @@ def _rank(candidate: PlanCandidate) -> tuple[Any, ...]:
 
 
 async def plan_lpar(
-    hmc: Any, *, connection: str, admit: PlanAdmit, request: PlanRequest
+    hmc: HMCClient, *, connection: str, admit: PlanAdmit, request: PlanRequest
 ) -> LparPlan:
     """Plan *request* on one connection without writing or reserving anything."""
     request = check_request(request)

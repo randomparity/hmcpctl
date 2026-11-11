@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from hmcpctl.operations.lpar.decommission.core import (
     collect_storage_records,
@@ -28,6 +28,10 @@ from ..inventory.composite import (
     processor_figures,
 )
 from ..resource_reading import resource_container
+
+if TYPE_CHECKING:
+    from hmcpctl.client.core import HMCClient
+
 
 Section = Literal["resources", "rmc", "profile_drift", "refcodes"]
 DEFAULT_INCLUDE: tuple[Section, ...] = ("rmc", "refcodes")
@@ -151,7 +155,9 @@ async def _read(tool: str, read: Awaitable[_T]) -> tuple[_T | None, SectionSourc
         return None, SectionSource("unavailable", tool, _error_text(exc))
 
 
-async def _partition(hmc: Any, system: str, lpar: str) -> tuple[str, dict[str, Any]]:
+async def _partition(
+    hmc: HMCClient, system: str, lpar: str
+) -> tuple[str, dict[str, Any]]:
     system_uuid = await resolve_system_uuid(hmc, system)
     return system_uuid.lower(), await resolve_target_lpar(hmc, system_uuid, lpar)
 
@@ -165,7 +171,7 @@ def _rmc(resource: dict[str, Any]) -> Rmc:
 
 
 async def _refcodes(
-    hmc: Any, admit: Admit, system: str, lpar: str, name: str | None
+    hmc: HMCClient, admit: Admit, system: str, lpar: str, name: str | None
 ) -> Refcodes:
     denial = admit(REFCODES_TOOL, {"lpar": lpar, "managed_system": system})
     if denial is not None:
@@ -185,7 +191,7 @@ _STALLED = "the HMC stopped answering"
 
 
 async def _vios_reads(
-    hmc: Any,
+    hmc: HMCClient,
     admit: Admit,
     system: str,
     entries: list[dict[str, Any]],
@@ -249,7 +255,7 @@ def _storage_source(
 
 
 async def read_resources(
-    hmc: Any,
+    hmc: HMCClient,
     admit: Admit,
     system: str,
     system_uuid: str,
@@ -304,7 +310,7 @@ def next_actions(state: str | None, rmc: Rmc | None) -> list[str]:
 
 
 async def inspect_lpar(
-    hmc: Any,
+    hmc: HMCClient,
     *,
     connection: str,
     admit: Admit,
