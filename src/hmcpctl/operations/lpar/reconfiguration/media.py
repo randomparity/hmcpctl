@@ -9,7 +9,7 @@ so a replay never re-reads the ledger. Messages name partitions by UUID only.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from hmcpctl.operations.lpar.provisioning.media import device_path
 from hmcpctl.operations.lpar.workflow_contract import (
@@ -32,6 +32,10 @@ from ...logical.models import EffectRecord
 from ...storage.resources import storage_mapping, unmount_optical_media
 from ..boot_order import read_lpar_boot_order, set_lpar_boot_order
 
+if TYPE_CHECKING:
+    from .core import ReconfigurationPlan
+
+
 # Persisted contract (ADR 0195 Consequences): never change while an operation can be open.
 BOOT_KEY, BOOT_KIND = "boot", "lpar.boot_order"
 MEDIA_KEY, MEDIA_KIND = "media_detach", "vios.optical_unmount"
@@ -41,7 +45,7 @@ _FIELDS = {
     DISK_LEDGER: ("vios_uuid", "disk_name"),
 }
 Write = Callable[[], Awaitable[Mapping[str, Any]]]
-PlanOf = Callable[[OperationContext], Mapping[str, Any]]
+PlanOf = Callable[[OperationContext], "ReconfigurationPlan"]
 Opener = Callable[[str, str], Any]
 
 
@@ -210,11 +214,13 @@ async def plan_boot(
     return {"before": before, "after": path}, change
 
 
-def boot_write(hmc: HMCClient, plan: Mapping[str, Any]) -> Write:
+def boot_write(hmc: HMCClient, plan: ReconfigurationPlan) -> Write:
     """Set the pending boot string; ``set_lpar_boot_order`` verifies its own write."""
 
     async def write() -> Mapping[str, Any]:
-        after = plan["boot"]["after"]
+        boot = plan.get("boot")
+        assert boot is not None  # The engine schedules only planned legs.
+        after = boot["after"]
         try:
             await set_lpar_boot_order(
                 hmc,
@@ -238,9 +244,10 @@ def boot_write(hmc: HMCClient, plan: Mapping[str, Any]) -> Write:
     return write
 
 
-def media_write(hmc: HMCClient, plan: Mapping[str, Any]) -> Write:
+def media_write(hmc: HMCClient, plan: ReconfigurationPlan) -> Write:
     """Remove the installer media's mapping; a refusal is classified by one listing."""
-    media, lpar_uuid = plan["media"], plan["lpar_uuid"]
+    media, lpar_uuid = plan.get("media"), plan["lpar_uuid"]
+    assert media is not None  # The engine schedules only planned legs.
     identity = {"vios_uuid": media["vios_uuid"], "media_name": media["media_name"]}
 
     async def write() -> Mapping[str, Any]:
@@ -284,11 +291,13 @@ def boot_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
 
     async def classify(ctx: OperationContext, _effect: EffectRecord) -> Classification:
         plan = plan_of(ctx)
+        boot = plan.get("boot")
+        assert boot is not None  # Classifiers are registered for planned legs.
         async with opener(ctx.connection, ctx.host) as hmc:
             pending = await _pending(hmc, plan["lpar_uuid"], plan["system_uuid"])
-        if pending == plan["boot"]["after"]:
+        if pending == boot["after"]:
             return Classification("applied", {"pending_boot_string": pending})
-        if pending == plan["boot"]["before"]:
+        if pending == boot["before"]:
             return Classification("not_applied")
         return Classification(
             "needs_attention",
@@ -304,7 +313,8 @@ def media_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
 
     async def classify(ctx: OperationContext, _effect: EffectRecord) -> Classification:
         plan = plan_of(ctx)
-        media = plan["media"]
+        media = plan.get("media")
+        assert media is not None  # Classifiers are registered for planned legs.
         async with opener(ctx.connection, ctx.host) as hmc:
             left = await _media_paths(
                 hmc, media["vios_uuid"], plan["lpar_uuid"], media["media_name"]
@@ -326,16 +336,17 @@ def media_classifier(plan_of: PlanOf, opener: Opener) -> engine.Classifier:
 
 
 async def observed(
-    hmc: HMCClient, plan: Mapping[str, Any]
+    hmc: HMCClient, plan: ReconfigurationPlan
 ) -> tuple[bool, dict[str, Any]]:
     """Whether the boot and media legs read as planned, and what was read."""
     seen: dict[str, Any] = {}
     done = True
-    if plan.get("boot"):
+    boot = plan.get("boot")
+    if boot is not None:
         seen["boot"] = await _pending(hmc, plan["lpar_uuid"], plan["system_uuid"])
-        done = seen["boot"] == plan["boot"]["after"]
-    if plan.get("media"):
-        media = plan["media"]
+        done = seen["boot"] == boot["after"]
+    media = plan.get("media")
+    if media is not None:
         left = await _media_paths(
             hmc, media["vios_uuid"], plan["lpar_uuid"], media["media_name"]
         )

@@ -7,6 +7,7 @@ the optical mappings, the root disk mapping and the pending boot string.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import live_fixture
@@ -443,6 +444,77 @@ def test_an_unknown_boot_write_resumes_by_the_pending_string(media):
 # ---------------------------------------------------------------------------
 # Writes and classifiers in isolation
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "legs,pending,mounted,done,evidence",
+    [
+        ({}, None, [MEDIA], True, {}),
+        ({"boot": None, "media": None}, None, [MEDIA], True, {}),
+        (
+            {"boot": {"before": None, "after": DISK_PATH}},
+            DISK_PATH,
+            [MEDIA],
+            True,
+            {"boot": DISK_PATH},
+        ),
+        (
+            {"boot": {"before": None, "after": DISK_PATH}},
+            None,
+            [MEDIA],
+            False,
+            {"boot": None},
+        ),
+        (
+            {"media": {"vios_uuid": VIOS, "media_name": MEDIA}},
+            None,
+            [],
+            True,
+            {"installer_media": "detached"},
+        ),
+        (
+            {"media": {"vios_uuid": VIOS, "media_name": MEDIA}},
+            None,
+            [MEDIA],
+            False,
+            {"installer_media": "mounted"},
+        ),
+        (
+            {
+                "boot": {"before": None, "after": DISK_PATH},
+                "media": {"vios_uuid": VIOS, "media_name": MEDIA},
+            },
+            DISK_PATH,
+            [],
+            True,
+            {"boot": DISK_PATH, "installer_media": "detached"},
+        ),
+        (
+            {
+                "boot": {"before": None, "after": DISK_PATH},
+                "media": {"vios_uuid": VIOS, "media_name": MEDIA},
+            },
+            OPTICAL_PATH,
+            [],
+            False,
+            {"boot": OPTICAL_PATH, "installer_media": "detached"},
+        ),
+    ],
+)
+def test_observed_reads_only_recorded_media_legs(
+    media, monkeypatch, legs, pending, mounted, done, evidence
+):
+    media.pending, media.mounted = pending, mounted
+    boot_read = AsyncMock(wraps=media.read_boot)
+    media_read = AsyncMock(wraps=media.list_optical_mappings)
+    monkeypatch.setattr(reconfigure_media, "read_lpar_boot_order", boot_read)
+    monkeypatch.setattr(media.fake, "list_optical_mappings", media_read)
+    plan = {"system_uuid": SYS, "lpar_uuid": LPAR, **legs}
+
+    assert asyncio.run(reconfigure_media.observed(media.fake, plan)) == (done, evidence)
+    assert boot_read.await_count == int(legs.get("boot") is not None)
+    assert media_read.await_count == int(legs.get("media") is not None)
+    assert media.fake.calls == []
 
 
 @pytest.mark.parametrize(
