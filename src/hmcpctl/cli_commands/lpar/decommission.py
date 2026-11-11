@@ -299,9 +299,7 @@ def _submit(
         wait_seconds=MAX_WAIT_SECONDS,
     )
     # The worker dies with this process, so wait for it rather than return early.
-    engine.join(record.operation_id, None)
-    with store.session() as conn:
-        return store.read_record(conn, record.operation_id)
+    return engine.wait_for_record(record.operation_id, None)
 
 
 def _detail_rows(value: Any, path: str = ""):

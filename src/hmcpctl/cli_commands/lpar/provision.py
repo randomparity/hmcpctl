@@ -269,9 +269,7 @@ def _run(
             wait_seconds=MAX_WAIT_SECONDS,
         )
         # The worker dies with this process, so wait for it rather than return early.
-        engine.join(record.operation_id, None)
-        with store.session() as conn:
-            record = store.read_record(conn, record.operation_id)
+        record = engine.wait_for_record(record.operation_id, None)
     except ValueError as exc:
         fail(exc)
     result = result_from_record(record)

@@ -17,6 +17,7 @@ import asyncio
 import inspect
 import json
 import textwrap
+import threading
 import xml.etree.ElementTree as ET  # nosec B405 - parses a literal test partition
 from dataclasses import asdict
 from typing import Self
@@ -1612,6 +1613,48 @@ _PROVISIONED = ProvisionResult(
     steps=(),
     warnings=(),
 )
+
+
+@pytest.mark.parametrize("operation", ["provision", "decommission"])
+def test_lpar_cli_renders_completion_after_running_snapshot(
+    operation, monkeypatch, fake_hmc
+):
+    if operation == "provision":
+        _fake_provision(monkeypatch, _PROVISIONED)
+        args = _PROVISION_ARGS
+        message = "provisioned successfully"
+    else:
+        fake_hmc.lpar["Resource"]["PartitionState"] = "not activated"
+        args = ["lpars", "decommission", LPAR_NAME, "--system", SYSTEM_UUID, "--yes"]
+        message = "decommissioned successfully"
+
+    submit = engine.submit
+    snapshots = []
+
+    def submit_running(request, body, **options):
+        release = threading.Event()
+
+        async def held_body(context):
+            if not await asyncio.to_thread(release.wait, 10):
+                raise TimeoutError("test did not release the worker")
+            return await body(context)
+
+        try:
+            record = submit(request, held_body, **(options | {"wait_seconds": 0}))
+            snapshots.append(record)
+            return record
+        finally:
+            release.set()
+
+    monkeypatch.setattr(engine, "submit", submit_running)
+    try:
+        result = RUNNER.invoke(cli.app, [*args, "--request-id", "r1"])
+        assert [record.state for record in snapshots] == ["running"]
+        assert result.exit_code == 0, result.output
+        assert message in result.output
+    finally:
+        for record in snapshots:
+            engine.join(record.operation_id, 10)
 
 
 def test_lpars_provision_requires_a_request_id(fake_hmc):

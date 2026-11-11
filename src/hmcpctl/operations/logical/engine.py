@@ -207,9 +207,7 @@ def submit(
                 )
         if run:
             _start_worker(operation_id, body, continuation, execution_classifiers)
-    join(operation_id, wait_seconds)
-    with store.session() as conn:
-        return store.read_record(conn, operation_id)
+    return wait_for_record(operation_id, wait_seconds)
 
 
 def _admit_new(
@@ -359,6 +357,13 @@ def join(operation_id: str, timeout: float | None) -> None:
         if thread.is_alive():
             return
         joined = thread
+
+
+def wait_for_record(operation_id: str, timeout: float | None) -> OperationRecord:
+    """Wait for this process's worker, then read its latest persisted record."""
+    join(operation_id, timeout)
+    with store.session() as conn:
+        return store.read_record(conn, operation_id)
 
 
 def _work(
