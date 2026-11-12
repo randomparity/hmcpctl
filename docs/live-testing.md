@@ -3406,7 +3406,9 @@ root grant naming the exact commit; a stop below ends the window.
    from step 1, so its preflight refuses anything but that exact baseline. Its
    preflight first waits for the allocation counters to settle (see
    [witness settling](#witness-settling-after-a-fixture-delete)); record how many
-   settling reads it took.
+   settling reads and snapshots it took. The witness packet is read-only
+   evidence: give it the shortest expiry the window allows and never pass it to
+   the capture wrapper, because its bound digest would satisfy a creation.
 
 Stop on any other case result, on any vNIC or partition the fixture does not own
 appearing in a read, and on any preflight drift. On a stop, keep the result, take a
@@ -3515,26 +3517,30 @@ normal evidence route. HMC execution and publication remain root-owned holds.
 
 A managed system can take time to release a deleted partition's allocation. On
 HMC V10R3 M1060 in the #1858 window, the counters still carried a just-deleted
-fixture's 0.05 units and 512+32 MiB through a whole witness preflight and into its
-recovery, and were back at the pre-fixture values minutes later; the #1857 window
+fixture's 0.05 units and 512+32 MiB when the witness preflight read them, were
+still moving when its recovery read them, and were back at the pre-fixture values minutes later; the #1857 window
 saw no lag. This is observed behaviour on one HMC, not documented HMC behaviour,
 and the bound below is a judgment, not a measured release time (ADR 0370).
 
 So every version-3 `prepare` preflight reads only the managed system's memory and
 processor sections, at most 12 times and 10 seconds apart, before its full
-snapshot. Each read is journaled in the preflight result's `settling` record. It
-stops at the first two equal consecutive reads, and the full snapshot must equal
-that settled read. Between reads only the six allocation counters above may
+snapshot. Each read is journaled in the preflight result's `settling` record.
+When two consecutive reads are equal it takes the full snapshot and journals its
+digest. The snapshot is the baseline only if its sections equal that settled read
+and, when the packet binds `baseline_sha256`, its digest matches. Otherwise the
+plateau was a held allocation, not a settled one, and reading continues; a new
+snapshot waits for the counters to move and hold still again. Between reads only the six allocation counters above may
 change, each only in its release direction (available memory and processor units
 up, assigned and hypervisor memory down), and their total movement may not exceed
 one fixture's allocation. Any other change, the wrong direction, or twelve reads
-without a settled pair fails the preflight as MANUAL_RECOVERY. Settling performs
-no write and retries no effect. Its recovery revalidates the `settling` record and
-then compares one fresh read with the settled baseline, exactly once. A result
-with two settling reads means no lag was observed and settling was not exercised.
+without an accepted snapshot fails the preflight as MANUAL_RECOVERY. Settling
+performs no write and retries no effect. Its recovery revalidates the `settling`
+record and then compares one fresh read with the settled baseline, exactly once.
+A READY result with a bound digest, two settling reads and one snapshot means no
+lag was observed and settling was not exercised.
 
 Settling governs only the `prepare` preflight. It does not change the cleanup
 rule: cleanup still requires the restored baseline immediately after its own
 delete, and a later settled witness never turns a failed cleanup CLEAN. A witness
-that settles on a mid-release plateau fails against its bound pre-fixture digest;
-run another read-only witness later, as #1858 did.
+whose counters never reproduce its bound pre-fixture digest within the bound
+fails; run another read-only witness later, as #1858 did.

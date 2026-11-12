@@ -18,12 +18,14 @@ saw no lag. That release is observed behaviour, not documented HMC behaviour.
 
 A fixture preflight whose packet action is `prepare` reads only the managed
 system's memory and processor sections, at most 12 times, 10 seconds apart, before
-its full snapshot. It journals every read. It stops at the first two consecutive
-equal reads. Between reads only the six fixture allocation counters may change,
+its full snapshot. It journals every read. At two consecutive equal reads it takes
+the full snapshot, which becomes the baseline only if its sections equal that read
+and, when the packet binds `baseline_sha256`, its digest matches; otherwise the
+plateau was a held allocation and reading continues until the counters move and
+hold still again. Between reads only the six fixture allocation counters may change,
 each only in its release direction. Their total movement stays within one fixed
-fixture's allocation. Any other change, the wrong direction, or no settled pair by
-the twelfth read fails the preflight as before. The full snapshot's sections must
-equal the settled read. Recovery revalidates the journaled reads with the same
+fixture's allocation. Any other change, the wrong direction, or no accepted
+snapshot by the twelfth read fails the preflight as before. Recovery revalidates the journaled reads with the same
 rules and keeps its single-shot equality against the settled observation. The
 preflight time cap rises from 120 to 240 seconds to hold the wait. This amends
 the preflight cap in the 2026-11-01 retained-fixture design; that design's
@@ -39,10 +41,12 @@ immediate post-delete equality still fails on any counter lag.
 - The 12 x 10 s bound is a judgment, not a measurement. #1858's release outlasted a
   whole preflight and was gone minutes later. A lag longer than about 110 seconds
   still fails, and the operator then runs a later read-only witness, as #1858 did.
-- A plateau of 10 seconds mid-release reads as settled. Against the pre-fixture
-  digest the witness binds, it then fails as "supplied baseline differs", safely.
-- The live record reports how many settling reads ran; two equal reads mean no
-  lag was observed and the settling path was not exercised.
+- A held or mid-release plateau costs one extra full snapshot, which the REST cap
+  bounds. Without a bound digest a held plateau still reads as settled, so the
+  post-delete witness must bind the pre-fixture digest.
+- The live record reports how many settling reads and snapshots ran; a bound
+  READY with two reads and one snapshot means no lag was observed and the
+  settling path was not exercised.
 - A preflight journal written before this change has no settling record. Recovery
   refuses it, so such a preflight is re-run, not recovered.
 
