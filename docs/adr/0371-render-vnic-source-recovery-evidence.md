@@ -37,8 +37,9 @@ writer.
 
 The renderer emits only the case name, the commit, the record's validated 64-hex
 `packet_sha256`, and fixed strings. The digest lets someone who holds the private
-packet tell which run a row came from. It cannot reveal the packet's operands,
-because the packet also carries random UUIDs. `CLEAN` is
+packet tell which run a row came from. It cannot be inverted to the packet's
+low-entropy operands while the packet's other identifiers stay private: the system
+and LPAR UUIDs, the owner token and the HMC host. `CLEAN` is
 written as submission `completed`, readback `verified`, preservation `unchanged`
 and recovery `CLEAN`. Independent recovery reports `CLEAN` only when the capture
 journal held exactly those values (`_source_history`), so the row restates a
