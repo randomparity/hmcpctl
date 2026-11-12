@@ -129,6 +129,13 @@ Post-delete comparison still requires the complete original raw baseline. Transi
 counter lag remains MANUAL_RECOVERY, even if later independent observation restores
 the baseline; failed history is not repaired or promoted to CLEAN.
 
+> **Amended by ADR 0370 (2026-11-12).** The transient-lag rule above governs
+> cleanup only: cleanup's immediate post-delete equality still fails on any counter
+> lag. The post-delete witness preflight may instead wait, within a bounded,
+> read-only, journaled settle, for the allocation counters to settle. See
+> `docs/adr/0370-settle-vnic-witness-allocation-counters.md` and
+> `docs/live-testing.md` ("Witness settling after a fixture delete").
+
 Configured tuple proof comes from the uniquely contained `default_profile`, bound
 to the current default pointer and exact parent/candidate. Check its shared/capped
 mode, all memory/CPU bounds and max slots; reject nonempty configured I/O beyond
@@ -200,6 +207,10 @@ summary reads, both recognized create-fallback branches, native name fallback,
 stamp, fresh deletion checks, original source verification and outside recovery.
 Offline complete physical traces must substantiate the graph and suffix before
 execution; a discrepant graph returns to design rather than silently increasing caps.
+
+> **Amended by ADR 0370 (2026-11-12).** The preflight time cap is 240 s, not the
+> 120 s proposed above, to hold the witness settle wait. See
+> `docs/adr/0370-settle-vnic-witness-allocation-counters.md`.
 
 Reserve one REST slot and the final15s for own logout. Effects require a remaining
 complete observation/closeout suffix, at least15 body seconds, and fresh wall and
