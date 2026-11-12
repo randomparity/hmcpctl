@@ -3546,3 +3546,18 @@ rule: cleanup still requires the restored baseline immediately after its own
 delete, and a later settled witness never turns a failed cleanup CLEAN. A witness
 whose counters never reproduce its bound pre-fixture digest within the bound
 fails; run another read-only witness later, as #1858 did.
+
+#### Recorded witness settling outcome (#1936)
+
+The rule ran once on HMC V10R3 M1060 at commit
+`2886a0069219ae6599d1af166f6f41de8ee7c57b`. A fresh fixture was prepared
+(READY/UNCHANGED, then PREPARED/RETAINED; its preflight settled at read 2) and
+deleted through the ownership-checked `hmcpctl lpars delete`. The bound witness
+preflight started a few seconds later. Its first settling read still carried the
+fixture's allocation. The second, 10 seconds later, had released 544 MiB of current
+and pending available memory, 32 MiB of hypervisor memory and 0.05 current and
+pending processor units; assigned memory did not move. The third read equalled the
+second, and the one snapshot matched the bound pre-fixture digest: READY in 32
+seconds and 12 REST requests, then recovery UNCHANGED. The settling path was
+exercised. The raw results stay private; `scripts/live_test_evidence.py` has no
+route for fixture journals.
