@@ -386,7 +386,36 @@ def test_a_failed_save_pauses_with_the_disk_owned_and_warns(hmc, monkeypatch):
     assert record.outcome == "needs_attention"
     assert _effects(record)[-1] == ("profile_save", "lpar.profile_save", "not_applied")
     assert len(_ledger()) == 1
-    assert any("current configuration only" in w for w in record.result["warnings"])
+    [warning] = [w for w in record.result["warnings"] if "configuration only" in w]
+    assert "resume to save" not in warning
+    assert "hmc_save_current_partition_profile" in warning
+
+
+def test_resume_after_a_refused_save_never_submits_the_save_again(hmc, monkeypatch):
+    hmc.state = "not activated"
+    saves = []
+
+    async def refused(*_args, **_kwargs):
+        saves.append("save")
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
+            execution="rejected",
+            requested_change="unverified",
+            job=None,
+            recovery_verified=False,
+            error="refused",
+        )
+
+    monkeypatch.setattr(profile_persist, "save_current_partition_profile", refused)
+    assert _run({"disks": {"add": [ADD]}}).outcome == "needs_attention"
+    resumed = _run({"disks": {"add": [ADD]}}, continuation="resume")
+    assert resumed.outcome == "needs_attention"
+    assert saves == ["save"]
 
 
 def test_resume_after_an_uncertain_disk_classifies_ledgers_and_saves(hmc):

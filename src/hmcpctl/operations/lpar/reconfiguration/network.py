@@ -490,6 +490,7 @@ def warnings(
     saved: bool,
     *,
     save_profile: str | None,
+    save_attempted: bool,
 ) -> list[str]:
     """Network warnings: a delete error after removal, and changes left unsaved."""
     planned = _planned(networks)
@@ -507,10 +508,33 @@ def warnings(
         (r := ctx.recorded(key)) is not None and r.status != "not_applied"
         for key, _, _ in steps(networks, lpar_uuid)
     )
-    if touched and not saved:
+    consequence = (
+        "a profile activation drops the added adapters and restores the removed ones"
+    )
+    if touched and not saved and save_attempted:
+        notes.append(
+            "the network changes are in the current configuration only: "
+            + unconfirmed_save_guidance(save_profile)
+            + f"; until then {consequence}"
+        )
+    elif touched and not saved:
         notes.append(
             "the network changes are in the current configuration only: resume to save "
             f"them into profile {save_profile}; abandon leaves the profile as it was, "
-            "so a profile activation drops the added adapters and restores the removed ones"
+            f"so {consequence}"
         )
     return notes
+
+
+def unconfirmed_save_guidance(save_profile: str | None) -> str:
+    """What to do once the profile save was attempted but not confirmed (ADR 0346).
+
+    Resume re-checks the saved profile and never submits the save again, so a profile
+    that still lacks the changes needs an explicit save after the operation is abandoned.
+    """
+    return (
+        f"the save into profile {save_profile} was not confirmed, and resume only "
+        "re-checks that profile without saving again (ADR 0346). If it still lacks the "
+        "changes, abandon the operation and save the current configuration with "
+        "hmc_save_current_partition_profile"
+    )

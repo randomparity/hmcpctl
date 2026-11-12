@@ -1569,6 +1569,7 @@ def _result(ctx: OperationContext, plan: ReconfigurationPlan) -> dict[str, Any]:
         plan["lpar_uuid"],
         saved is not None and saved.status == "applied",
         save_profile=plan.get("save"),
+        save_attempted=saved is not None,
     )
     return {
         "system_uuid": plan["system_uuid"],
@@ -1598,11 +1599,19 @@ def _disk_warnings(ctx: OperationContext, plan: ReconfigurationPlan) -> list[str
     adds = len((plan.get("disks") or {"add": []})["add"])
     if not any(_touched(ctx, f"disk:{index}") for index in range(adds)):
         return []
+    consequence = (
+        "a profile activation drops their client adapters while the disks stay owned"
+    )
+    if saved is not None:
+        return [
+            "the added disks are in the current configuration only: "
+            + network.unconfirmed_save_guidance(plan["save"])
+            + f"; until then {consequence}"
+        ]
     return [
         (
             "the added disks are in the current configuration only: resume to save them "
-            f"into profile {plan['save']}; abandon leaves them out of it, so a profile "
-            "activation drops their client adapters while the disks stay owned"
+            f"into profile {plan['save']}; abandon leaves them out of it, so {consequence}"
         )
     ]
 

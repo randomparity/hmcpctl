@@ -500,6 +500,7 @@ def test_warnings_name_unsaved_changes_and_delete_errors():
         plan["lpar_uuid"],
         saved=False,
         save_profile=plan.get("save"),
+        save_attempted=False,
     )
     assert any("HTTP 500" in n for n in notes)
     assert any("current configuration only" in n for n in notes)
@@ -511,6 +512,7 @@ def test_warnings_name_unsaved_changes_and_delete_errors():
             plan["lpar_uuid"],
             True,
             save_profile=plan.get("save"),
+            save_attempted=False,
         )
     )
     assert (
@@ -520,6 +522,7 @@ def test_warnings_name_unsaved_changes_and_delete_errors():
             plan["lpar_uuid"],
             saved=False,
             save_profile=plan.get("save"),
+            save_attempted=False,
         )
         == []
     )
@@ -753,7 +756,9 @@ def test_an_unconfirmed_save_pauses_warns_and_resumes_without_adding_again(body)
     body.save_lands = False
     record = _submit({"networks": {"add": [{"port_vlan_id": 30}]}})
     assert record.outcome == "needs_attention"
-    assert any("current configuration only" in w for w in record.result["warnings"])
+    [warning] = [w for w in record.result["warnings"] if "configuration only" in w]
+    assert "resume to save" not in warning
+    assert "hmc_save_current_partition_profile" in warning
     body.saved_slots = {
         str(adapter["Resource"]["VirtualSlotNumber"]) for adapter in body.adapters
     }
