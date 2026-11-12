@@ -109,9 +109,8 @@ def _credentials(root: Element) -> set[str]:
         for key, value in parent.attrib.items():
             if _LABEL.search(localname(key)):
                 found |= _values(value)
-        values = parent.attrib.values()
         if _LABEL.search(localname(str(parent.tag))) or any(
-            _LABEL.fullmatch(value.strip()) for value in values
+            _LABEL.fullmatch(value.strip()) for value in parent.attrib.values()
         ):
             found |= _values("".join(parent.itertext()))
             for attribute in parent.attrib.values():
@@ -194,9 +193,8 @@ def _sanitized(body: str) -> tuple[str, str]:
                 fields[name] = _scrubbed(text, credentials, limit)[:limit].strip()
     except _Unsanitizable:
         return _withheld(body, "unsanitizable")
-    return _canonical(fields, body), fields.get(
-        "Message"
-    ) or "no Message in the response body"
+    shown = fields.get("Message") or "no Message in the response body"
+    return _canonical(fields, body), shown
 
 
 class HMCError(Exception):
