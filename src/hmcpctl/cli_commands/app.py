@@ -20,7 +20,7 @@ from ..resource_identity import guarding_partitions
 from ..server_tools.catalog import TOOL_SECURITY
 from ..tool_registry import hold_guarded
 from .capabilities import capabilities
-from .output import usage_error
+from .output import print_raw, usage_error
 from .runtime import GlobalOpts
 from .serve import serve
 from .tool_mirrors import CLI_TOOL_MIRRORS
@@ -225,7 +225,7 @@ def _print_version(value: bool) -> None:
     if value:
         import hmcpctl
 
-        typer.echo(hmcpctl.__version__)
+        print_raw(hmcpctl.__version__)
         raise typer.Exit()
 
 
