@@ -18,10 +18,11 @@ provenance than `run.tested_commit`. It is not weaker in practice:
 `_validate_execution_context` refuses to start unless `git rev-parse HEAD` equals
 `expected_commit` and the checkout's `git status --porcelain` is empty. That check
 runs before the document is created, so a runner-written document names the clean
-commit that ran. Since `3bab17c82` the status check also passes
-`--untracked-files=all` and strips `GIT_*` variables. The #1856 and #1857 records
-predate it, and their plain status hides untracked files only when Git's display
-settings do. Even so, it inspects the whole checkout, while `run.tree_clean`
+commit that ran. `b16db06dd` made both checks strip `GIT_*` variables, and
+`3bab17c82` added `--untracked-files=all` to the status check. The #1856 and #1857
+records predate both. For those runs an exported `GIT_DIR` or `GIT_WORK_TREE`
+could have pointed both checks at another repository, and the status check hid
+untracked files when Git's display settings did. Even so, it inspects the whole checkout, while `run.tree_clean`
 inspects only `src/` and `scripts/`. Both fields are unsigned JSON that the runner
 writes, so neither resists hand editing.
 

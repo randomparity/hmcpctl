@@ -1082,7 +1082,10 @@ so nothing marks it stale when the branch moves — which is how PR #869's matri
 survived two weeks and a merge that left the arm unable to import.
 
 If it refuses with "cannot be attributed to a commit", the document has no
-`run.tested_commit`. It cannot support a release claim. After recovery, obtain
+`run.tested_commit`. A `vnic-creation-policy` record refuses the same way when it
+is not a complete recovery record. In that case, render that case's recovery
+record instead (see [the #1856 outcomes](#recorded-source-outcomes-1856)). A
+refused document cannot support a release claim. After recovery, obtain
 authorization for a new attempt using the current runner before trying to replace that evidence.
 
 If the header says **tree was dirty**, `src/` or `scripts/` had uncommitted
