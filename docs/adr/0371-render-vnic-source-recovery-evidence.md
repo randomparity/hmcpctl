@@ -16,10 +16,14 @@ ADR 0312 keeps raw snapshots, submission errors and native text inside an approv
 private evidence boundary. The issue asked whether `expected_commit` is weaker
 provenance than `run.tested_commit`. It is not weaker in practice:
 `_validate_execution_context` refuses to start unless `git rev-parse HEAD` equals
-`expected_commit` and `git status --porcelain --untracked-files=all` is empty. It
-runs before the document is created, so a runner-written document names a clean
-commit that ran. Both fields are unsigned JSON that the runner writes, so neither
-resists hand editing.
+`expected_commit` and the checkout's `git status --porcelain` is empty. That check
+runs before the document is created, so a runner-written document names the clean
+commit that ran. Since `3bab17c82` the status check also passes
+`--untracked-files=all` and strips `GIT_*` variables. The #1856 and #1857 records
+predate it, and their plain status hides untracked files only when Git's display
+settings do. Even so, it inspects the whole checkout, while `run.tree_clean`
+inspects only `src/` and `scripts/`. Both fields are unsigned JSON that the runner
+writes, so neither resists hand editing.
 
 ## Decision
 
@@ -31,7 +35,10 @@ and `status` must be `CLEAN` or `MANUAL_RECOVERY`. The owning module provides
 `validate_source_recovery(document)`, so the record vocabulary stays with its
 writer.
 
-The renderer emits only the case name, the commit, and fixed strings. `CLEAN` is
+The renderer emits only the case name, the commit, the record's validated 64-hex
+`packet_sha256`, and fixed strings. The digest lets someone who holds the private
+packet tell which run a row came from. It cannot reveal the packet's operands,
+because the packet also carries random UUIDs. `CLEAN` is
 written as submission `completed`, readback `verified`, preservation `unchanged`
 and recovery `CLEAN`. Independent recovery reports `CLEAN` only when the capture
 journal held exactly those values (`_source_history`), so the row restates a
@@ -48,7 +55,8 @@ none of them falls through to the generic matrix.
   private capture journal, so the prose outcome tables in `docs/live-testing.md`
   remain the only public account of a refusal.
 - A `finite-update` row does not say which update ran, because its operands carry
-  VLAN IDs and MAC addresses. The row is attributable but not self-describing.
+  VLAN IDs and MAC addresses. Its packet digest can be matched to a private journal,
+  but not to a public W label.
 - Version-1 creation records and #1858 updater journals stay unrouted.
 
 ## Considered & rejected

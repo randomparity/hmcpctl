@@ -33,6 +33,8 @@ In scope (piece A of #1934):
    ```text
    SOURCE ONLY — vNIC update-mode observation on `<commit>`
 
+   Packet: sha256 `<packet_sha256>`
+
    | Case | Submission | Readback | Preservation | Independent recovery |
    | --- | --- | --- | --- | --- |
    | <case> | completed | verified | unchanged | CLEAN |
@@ -43,12 +45,16 @@ In scope (piece A of #1934):
 
    For `MANUAL_RECOVERY`, the row is
    `| <case> | not established | not established | not established | HELD |`.
-   The interpolated values are `case`, which is drawn from the fixed set, and the
-   validated commit. Nothing else from the document is printed.
+   The interpolated values are `case`, which is drawn from the fixed set, the
+   validated commit and the validated packet digest. Nothing else from the document
+   is printed. `main()`'s refusal message is made route-neutral: "cannot be
+   attributed to a commit through any accepted route". It no longer claims a
+   missing `run.tested_commit`, which would be wrong for a refused vNIC record.
 3. `docs/live-testing.md`: the #1856 sentence ("does not apply to them") and the
    #1857 sentence ("has no route for them") are replaced. The new text says that
    recovery records render through the script, and that raw journals, capture
-   records and fixture records stay private.
+   records and fixture records stay private. A rendered `finite-update` row maps to
+   its private journal through the packet digest, never to a public W label.
 
 No ownership transition is needed: the record's vocabulary stays with its writer,
 and the evidence script keeps owning the public allowlist.
@@ -67,7 +73,8 @@ version-1 creation records, for which no criterion asks.
      snapshot or HMC message text reaches the output.
    - No record outside the accepted shape renders; in particular, fixture records
      never render.
-   - A rendered commit is 40 lowercase hex.
+   - A rendered commit is 40 lowercase hex, and a rendered packet digest is 64
+     lowercase hex.
 3. **Accepted failure classes:**
    - A hand-edited record can claim `CLEAN`. This is accepted because every route
      in this script has the same unsigned-JSON trust model (ADR 0371).
@@ -84,8 +91,8 @@ version-1 creation records, for which no criterion asks.
 - **Actor:** the local operator, who is trusted to choose which file to render but
   not to scrub it by hand. HMC-derived strings inside the record are the untrusted
   content.
-- **Control:** a closed allowlist. Only one fixed-set token and one regex-validated
-  commit are interpolated. A validation failure prints nothing and exits 1 through
+- **Control:** a closed allowlist. Only one fixed-set token, one regex-validated
+  commit and one regex-validated digest are interpolated. A validation failure prints nothing and exits 1 through
   the existing `main()` path.
 - **Out of scope:** forged records (see the accepted classes above), and the
   updater journals (piece B).
@@ -98,9 +105,10 @@ version-1 creation records, for which no criterion asks.
    baseline snapshot, `error` and `reason` renders without that sentinel.
 3. Each of these refuses (`render` returns `None`, and `main` exits 1 with no
    stdout), and none falls through to the generic matrix: stage `preflight` or
-   `capture`; `complete` false; an open session; non-empty `intents`; a
-   bad commit; an unknown case; an unknown status; version 1; purpose
-   `vnic-source-fixture`; and a record that adds a `run.tested_commit` block.
+   `capture`; `complete` false; an open session; non-empty `intents`; an
+   `effect_commands` key; a bad commit; a bad packet digest; an unknown case; an
+   unknown status; version 1; and purpose `vnic-source-fixture`. Each refused
+   record also carries a valid `run.tested_commit` block and still refuses.
 4. `docs/live-testing.md` no longer says the script has no route.
 
 ## Validation
