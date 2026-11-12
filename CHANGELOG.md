@@ -344,6 +344,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Changed
 
+- **Breaking:** `hmc_power_on_vios` and `hmc_list_vios_backups` accept an optional keyword-only
+  `system_name_or_uuid` that scopes the VIOS lookup to one managed system, and both now declare
+  it as a `managed_system` target selector, as `hmc_power_off_vios` already did (#1947). An access
+  policy that grants either tool with `targets` constraining only `vios` no longer compiles:
+  add a `managed_system` constraint, or use `targets = "all-targets"`. Under a grant with a
+  `managed_system` constraint, a call that omits `system_name_or_uuid` is denied
+  `target-selector-absent`, so callers must pass it. A policy with the new constraint is refused
+  by earlier releases, so update the policy and the server together.
 - **Breaking:** an MCP server's `tools/list` carries only the eleven primary tools the access
   policy admits (ADR 0330, carrying out ADR 0189 Decision 4). Every other permitted tool is found
   with `hmc_search_tools` and called by name or through `hmc_invoke_tool`, under unchanged
