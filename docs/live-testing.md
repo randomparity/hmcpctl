@@ -3401,7 +3401,12 @@ root grant naming the exact commit; a stop below ends the window.
    removed with `hmcpctl network remove-vnic --yes`.
 4. Remove vNIC 2 the same way, delete the fixture with the ownership-checked
    inactive-only `hmcpctl lpars delete`, and run a witness fixture preflight and
-   recovery, which must return READY and UNCHANGED.
+   recovery, which must return READY and UNCHANGED. The witness is a fresh
+   `prepare` packet whose `baseline_sha256` binds the pre-fixture baseline digest
+   from step 1, so its preflight refuses anything but that exact baseline. Its
+   preflight first waits for the allocation counters to settle (see
+   [witness settling](#witness-settling-after-a-fixture-delete)); record how many
+   settling reads it took.
 
 Stop on any other case result, on any vNIC or partition the fixture does not own
 appearing in a read, and on any preflight drift. On a stop, keep the result, take a
@@ -3496,7 +3501,8 @@ still hold at the physical DELETE boundary. No override or power operation exist
 in this purpose. Any MANUAL_RECOVERY result stops the enclosing workflow; retain
 private artifacts and let root determine a separately authorized recovery.
 
-Fixture caps are preflight64REST/40SSH/120s, prepare96/24/300,
+Fixture caps are per stage: preflight64REST/40SSH/240s (both actions; ADR 0370
+amends the 120s in the fixture design to hold the settling wait), prepare96/24/300,
 cleanup128/64/300 and recovery32/24/120. These include physical fallback paths
 and own sessions; source-v2 retains its separate caps. Body effects require fresh
 post-intent suffix/time reserves; one REST slot and15s are reserved for logout.
@@ -3504,3 +3510,31 @@ REST/native output is1MiB, own journal5MiB, source evidence at most66MiB across
 six separately bounded records. No cap is an operational admission. Keep raw
 packets/results and terminal captures private; publish only redacted evidence through the
 normal evidence route. HMC execution and publication remain root-owned holds.
+
+#### Witness settling after a fixture delete
+
+A managed system can take time to release a deleted partition's allocation. On
+HMC V10R3 M1060 in the #1858 window, the counters still carried a just-deleted
+fixture's 0.05 units and 512+32 MiB through a whole witness preflight and into its
+recovery, and were back at the pre-fixture values minutes later; the #1857 window
+saw no lag. This is observed behaviour on one HMC, not documented HMC behaviour,
+and the bound below is a judgment, not a measured release time (ADR 0370).
+
+So every version-3 `prepare` preflight reads only the managed system's memory and
+processor sections, at most 12 times and 10 seconds apart, before its full
+snapshot. Each read is journaled in the preflight result's `settling` record. It
+stops at the first two equal consecutive reads, and the full snapshot must equal
+that settled read. Between reads only the six allocation counters above may
+change, each only in its release direction (available memory and processor units
+up, assigned and hypervisor memory down), and their total movement may not exceed
+one fixture's allocation. Any other change, the wrong direction, or twelve reads
+without a settled pair fails the preflight as MANUAL_RECOVERY. Settling performs
+no write and retries no effect. Its recovery revalidates the `settling` record and
+then compares one fresh read with the settled baseline, exactly once. A result
+with two settling reads means no lag was observed and settling was not exercised.
+
+Settling governs only the `prepare` preflight. It does not change the cleanup
+rule: cleanup still requires the restored baseline immediately after its own
+delete, and a later settled witness never turns a failed cleanup CLEAN. A witness
+that settles on a mid-release plateau fails against its bound pre-fixture digest;
+run another read-only witness later, as #1858 did.
