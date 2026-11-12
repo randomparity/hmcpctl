@@ -58,7 +58,7 @@ and `""` are kept unchanged and render nothing, as today.
    `no Message in the response body`.
 5. **Withhold** a body over 65536 characters (`oversized`), an unparseable body,
    or one whose collection exceeds 64 assignments, a 4096-character value, 1024
-   values, or 256 occurrences of one value in a field (`unsanitizable`): retain
+   values, or 256 redacted occurrences of one value in a field (`unsanitizable`): retain
    `<HttpErrorResponse>` whose Message is
    `<oversized|unparseable|unsanitizable> <N>-character response body withheld`, plus
    `; recognized: <marker>` and `<Recognized>` when one matched. The rendered

@@ -274,3 +274,14 @@ def test_an_echo_split_by_markup_inside_message_is_redacted_whole() -> None:
     error = HMCError("op", 400, body)
 
     assert str(error) == "op (HTTP 400): bad <redacted> REST0001"
+
+
+def test_benign_digits_beside_a_short_sibling_cookie_do_not_withhold() -> None:
+    raw = live_fixture("rest-client-network-add-vsi-rmc-refused")["body"]
+    body = raw.replace("&lt;REDACTED-COOKIE&gt;", f"JSESSIONID={COOKIE}; lb=0")
+    end = body.index("</Message>")
+    body = body[:end] + " 00000000-0000-0000-0000-000000000000" * 20 + body[end:]
+
+    error = HMCError("x", 500, body)
+
+    assert "HSCLB021" in error.body

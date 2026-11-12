@@ -118,7 +118,13 @@ def _credentials(root: Element) -> set[str]:
 
 
 def _spans(text: str, value: str) -> list[tuple[int, int]]:
-    spans, start, matches = [], text.find(value), 0
+    """Redactable occurrences of one value; glued short-value finds are skipped.
+
+    Only redactable occurrences count against the budget, so benign digits next
+    to a short sibling cookie cannot withhold a body. Skipped finds are bounded
+    anyway: at most one per short-value length per window position.
+    """
+    spans, start = [], text.find(value)
     while start >= 0:
         end = start + len(value)
         glued = len(value) < _ANYWHERE_CHARS and (
@@ -127,9 +133,8 @@ def _spans(text: str, value: str) -> list[tuple[int, int]]:
         )
         if not glued:
             spans.append((start, end))
-        matches += 1
-        if matches > _MAX_MATCHES:
-            raise _Unsanitizable
+            if len(spans) > _MAX_MATCHES:
+                raise _Unsanitizable
         start = text.find(value, start + 1)
     return spans
 
