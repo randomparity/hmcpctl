@@ -3533,7 +3533,9 @@ snapshot waits for the counters to move and hold still again. Between reads only
 change, each only in its release direction (available memory and processor units
 up, assigned and hypervisor memory down), and their total movement may not exceed
 one fixture's allocation. Any other change, the wrong direction, or twelve reads
-without an accepted snapshot fails the preflight as MANUAL_RECOVERY. Settling
+without an accepted snapshot fails the preflight as MANUAL_RECOVERY. Each refused
+plateau costs a full snapshot, so the stage's REST or time cap can also end
+settling earlier, as MANUAL_RECOVERY naming the exhausted cap. Settling
 performs no write and retries no effect. Its recovery revalidates the `settling`
 record and then compares one fresh read with the settled baseline, exactly once.
 A READY result with a bound digest, two settling reads and one snapshot means no

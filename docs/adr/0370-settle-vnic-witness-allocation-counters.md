@@ -41,9 +41,14 @@ immediate post-delete equality still fails on any counter lag.
 - The 12 x 10 s bound is a judgment, not a measurement. #1858's release outlasted a
   whole preflight and was gone minutes later. A lag longer than about 110 seconds
   still fails, and the operator then runs a later read-only witness, as #1858 did.
-- A held or mid-release plateau costs one extra full snapshot, which the REST cap
-  bounds. Without a bound digest a held plateau still reads as settled, so the
-  post-delete witness must bind the pre-fixture digest.
+- Each refused plateau costs one full snapshot. A staircase release can exhaust the
+  stage's REST or time cap before the twelfth read; that ends as a normal
+  MANUAL_RECOVERY whose reason is the exhausted cap. Without a bound digest a held
+  plateau still reads as settled, so the post-delete witness must bind the
+  pre-fixture digest.
+- A witness packet bound to the pre-fixture digest is creation-capable until it
+  expires. Its controls are procedural: the shortest expiry the window allows and
+  never passing it to the capture wrapper.
 - The live record reports how many settling reads and snapshots ran; a bound
   READY with two reads and one snapshot means no lag was observed and the
   settling path was not exercised.

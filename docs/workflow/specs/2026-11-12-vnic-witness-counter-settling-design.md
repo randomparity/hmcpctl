@@ -27,7 +27,7 @@ v3 is unchanged.
      at `_FIXTURE_HYPERVISOR_MAX`.
 
    It returns whether the last two reads are equal.
-3. `_fixture_settle(hmc, packet, document, output)` reads, journals in
+3. `_fixture_settled_snapshot(hmc, packet, document, output)` reads, journals in
    `document["settling"]` (`max_reads` 12, `interval_seconds` 10, `reads`,
    `snapshots`), and saves after each read. It sleeps `_SETTLE_INTERVAL` between
    reads. At each new settled pair it takes a full snapshot and journals
@@ -45,6 +45,7 @@ v3 is unchanged.
    single-shot equality applies.
 6. `FIXTURE_LIMITS["preflight"]` time becomes 240 seconds; the REST cap rises
    only if a twelve-read preflight under the null-property fallback exceeds 64.
+   Each refused plateau adds a full snapshot; the caps may end settling first.
 7. `docs/live-testing.md`: the rule, labelled observed and not documented HMC
    behaviour. It is reconciled with the cleanup counter-lag rule. #1858 step 4
    tells the witness packet to bind the pre-fixture baseline digest. The caps
