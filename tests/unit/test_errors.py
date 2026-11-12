@@ -319,3 +319,17 @@ def test_a_bracketed_value_keeps_the_text_after_its_first_bracket(source: str) -
 
     assert str(error) == "op (HTTP 500): see <redacted> here"
     assert token not in error.body
+
+
+@pytest.mark.parametrize(
+    "carrier",
+    [
+        "<R sessionCookieName='REST0001'/>",
+        "<CookieSupported>REST0001</CookieSupported>",
+    ],
+)
+def test_a_name_merely_containing_a_label_does_not_redact_a_code(carrier: str) -> None:
+    error = HMCError("op", 400, f"<E><Message>REST0001 x</Message>{carrier}</E>")
+
+    assert str(error) == "op (HTTP 400): REST0001 x"
+    assert "REST0001" in error.body

@@ -41,6 +41,9 @@ _TOKEN_RUN: Final = re.compile(r"[A-Za-z0-9._~+/-]{8,}")
 # not glued to a letter or digit, so it cannot cut a code like REST0269.
 _ANYWHERE_CHARS: Final = 8
 _LABEL: Final = re.compile(r"cookie|x-?api-?session", re.IGNORECASE)
+# A tag, attribute name or Name/Value text that *is* a header name; matched
+# whole, so a name merely containing a label (sessionCookieName) is no source.
+_HEADER_NAME: Final = re.compile(r"(?:set-?)?cookie\d*|x-?api-?session", re.IGNORECASE)
 _ASSIGNMENT: Final = re.compile(
     r"(?:cookie|x-?api-?session)[\"']?\s*[=:]\s*", re.IGNORECASE
 )
@@ -106,16 +109,18 @@ def _credentials(root: Element) -> set[str]:
         for text in (parent.text or "", parent.tail or "", *parent.attrib.values()):
             found |= _assigned_values(text)
         for key, value in parent.attrib.items():
-            if _LABEL.search(localname(key)):
+            if _HEADER_NAME.fullmatch(localname(key)):
                 found |= _values(value)
-        if _LABEL.search(localname(str(parent.tag))) or any(
-            _LABEL.fullmatch(value.strip()) for value in parent.attrib.values()
+        if _HEADER_NAME.fullmatch(localname(str(parent.tag))) or any(
+            _HEADER_NAME.fullmatch(value.strip()) for value in parent.attrib.values()
         ):
             found |= _values("".join(parent.itertext()))
             for attribute in parent.attrib.values():
                 found |= _values(attribute)
         children = list(parent)
-        if any(_LABEL.fullmatch((child.text or "").strip()) for child in children):
+        if any(
+            _HEADER_NAME.fullmatch((child.text or "").strip()) for child in children
+        ):
             for child in children:
                 found |= _values("".join(child.itertext()))
         if len(found) > _MAX_VALUES:
