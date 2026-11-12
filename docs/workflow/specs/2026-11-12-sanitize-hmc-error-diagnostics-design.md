@@ -29,8 +29,8 @@ and `""` are kept unchanged and render nothing, as today.
      character data (labels split across nodes), and in each attribute value; the
      value ends at the first CR, LF, `}`, `, <name>=` (the next `RequestHeaders`
      map entry), or the end of the string searched;
-   - an element whose local name is `Cookie` or `X-API-Session`: its text and
-     attribute values;
+   - an element whose local name, or one of whose attribute values, is `Cookie`
+     or `X-API-Session`: its text and attribute values;
    - a parent with a child whose whole stripped text is such a label: every
      child's text (a `Name`/`Value` header pair).
    Each value contributes its stripped whole, each `;`/`,`-separated part, each

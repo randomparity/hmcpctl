@@ -82,6 +82,8 @@ def test_refusal_classifier_reads_the_sanitized_body() -> None:
     [
         f"<Cookie>{SESSION}</Cookie>",
         f'<Cookie value="{SESSION}"/>',
+        f'<Header name="X-API-Session">{SESSION}</Header>',
+        f'<H name="cookie" value="{SESSION}"/>',
         f"<Header><Name>X-API-Session</Name><Value>{SESSION}</Value></Header>",
         f'<RequestHeaders a="x-api-session={SESSION}"/>',
         f"<RequestHeaders>x-api-session={SESSION}</RequestHeaders><RequestBody>abc</RequestBody>",

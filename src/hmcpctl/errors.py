@@ -95,7 +95,8 @@ def _credentials(root: Element) -> set[str]:
     for parent in root.iter():
         for text in (parent.text or "", parent.tail or "", *parent.attrib.values()):
             found |= _assigned_values(text)
-        if _LABEL.fullmatch(localname(str(parent.tag)).strip()):
+        names = (localname(str(parent.tag)), *parent.attrib.values())
+        if any(_LABEL.fullmatch(name.strip()) for name in names):
             found |= _values("".join(parent.itertext()))
             for attribute in parent.attrib.values():
                 found |= _values(attribute)
