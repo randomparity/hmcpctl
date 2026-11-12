@@ -159,7 +159,7 @@ def binding(p, config, *, recovery=False):
     validate_packet(p)
     if files.connection(config) != p["candidate"]["hmc_identity"]:
         raise ValueError("ST68 effective connection differs before authentication")
-    files.revision(p["candidate"])
+    files.validate_deployed_candidate(p["candidate"])
     if (
         not recovery
         and not 0 < (serial._expiry(p) - datetime.now(UTC)).total_seconds() <= 1200

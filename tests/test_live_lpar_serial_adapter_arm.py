@@ -110,7 +110,7 @@ def rig(tmp_path, monkeypatch):
 
     p = packet()
     config = HMCConfig.from_mapping(p["candidate"]["hmc_identity"])
-    monkeypatch.setattr(arm.files, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     monkeypatch.setattr(
         serial, "resolve_system_cli_name", AsyncMock(return_value="9009-22A*TEST")
     )
@@ -353,7 +353,9 @@ async def test_admission_refuses_before_intent_and_effects(rig, monkeypatch, fau
         rig.packet["expires_utc"] = "2000-01-01T00:00:00+00:00"
     elif fault == "candidate":
         monkeypatch.setattr(
-            arm.files, "revision", Mock(side_effect=ValueError("candidate drift"))
+            arm.files,
+            "validate_deployed_candidate",
+            Mock(side_effect=ValueError("candidate drift")),
         )
     else:
         rig.hmc.config = rig.hmc.config.model_copy(update={"user": "different"})
@@ -379,7 +381,7 @@ async def test_drift_before_next_effect_stops_all_subsequent_writes(
             elif fault == "candidate":
                 monkeypatch.setattr(
                     arm.files,
-                    "revision",
+                    "validate_deployed_candidate",
                     Mock(side_effect=ValueError("candidate drift")),
                 )
             elif fault == "identity":
@@ -452,7 +454,9 @@ def test_cli_pre_authentication_refusal(rig, monkeypatch, fault):
         p["candidate"]["hmc_identity"]["host"] = "wrong.test"
     elif fault == "candidate":
         monkeypatch.setattr(
-            arm.files, "revision", Mock(side_effect=ValueError("candidate drift"))
+            arm.files,
+            "validate_deployed_candidate",
+            Mock(side_effect=ValueError("candidate drift")),
         )
     elif fault == "cleanup":
         p["cleanup_authorized"] = False
@@ -550,7 +554,7 @@ def test_actual_candidate_provenance_guards(monkeypatch, fault, tmp_path):
         ),
     )
     with pytest.raises(ValueError, match="candidate"):
-        arm.files.revision(p["candidate"])
+        arm.files.validate_deployed_candidate(p["candidate"])
 
 
 @pytest.mark.asyncio

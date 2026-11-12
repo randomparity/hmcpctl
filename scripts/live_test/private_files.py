@@ -26,7 +26,7 @@ def connection(config):
     }
 
 
-def revision(candidate):
+def validate_deployed_candidate(candidate):
     def git(*args):
         # Candidate hashes are compared with fixed Git queries, never executed.
         output = subprocess.check_output(  # nosec B603, B607

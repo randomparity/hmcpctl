@@ -158,7 +158,7 @@ def live_boundary(tmp_path, monkeypatch):
     state = SimpleNamespace(
         writes=[], reads=[], rows=rows, packet=value_packet, root=tmp_path
     )
-    monkeypatch.setattr(arm.files, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     monkeypatch.setattr(arm, "load_profile", lambda _: config)
 
     async def transport(self, method, path, **kwargs):

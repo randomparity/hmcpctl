@@ -856,7 +856,7 @@ def outcome(document, packet, current):
 async def phase(packet, digest, mode, output_path, action):
     # All local admission and fresh output checks precede credentials/session construction.
     checked_path(output_path, fresh=True)
-    files.revision(packet["candidate"])
+    files.validate_deployed_candidate(packet["candidate"])
     config = load_profile(PROFILE).model_copy(update={"max_response_bytes": REST_CAP})
     budget = Budget(mode, packet["expires_utc"])
     document = new_document(packet, digest, mode, budget)

@@ -139,7 +139,7 @@ def binding(packet, config):
     validate_packet(packet)
     if files.connection(config) != packet["candidate"]["hmc_identity"]:
         raise ValueError("ST63 effective HMC identity differs before authentication")
-    files.revision(packet["candidate"])
+    files.validate_deployed_candidate(packet["candidate"])
     if datetime.now(UTC) >= _expiry(packet):
         raise ValueError("ST63 current packet has expired")
 
@@ -605,7 +605,7 @@ def _dispatch(args):
     if args.mode == "recover":
         if files.connection(config) != packet["candidate"]["hmc_identity"]:
             raise ValueError("ST63 recovery HMC identity differs before authentication")
-        files.revision(packet["candidate"])
+        files.validate_deployed_candidate(packet["candidate"])
     else:
         binding(packet, config)
     window = Window(

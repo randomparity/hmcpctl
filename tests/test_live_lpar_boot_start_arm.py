@@ -95,7 +95,7 @@ def test_pre_session_config_preserves_identity_and_stricter_limit():
 
 def test_current_grant_and_invocation_cannot_be_restored(monkeypatch):
     p = packet()
-    monkeypatch.setattr(arm.files, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     c = HMCConfig.from_mapping(p["candidate"]["hmc_identity"])
     w = arm.Window(p, "digest", "digest", True)
     w.check(c, w.invocation)
@@ -318,7 +318,7 @@ async def test_actual_stamp_journal_separates_acknowledgment_and_marker(
         }
     )
     h = arm.CountedHMC(arm.bounded_config(c), arm.Budget("run", p))
-    monkeypatch.setattr(arm.files, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     h.window = arm.Window(p, "digest", "digest", True)
     e = fixture_entry()
     expected = f"[hmcpctl owner:test created:{arm.date.today().isoformat()}] [caller {p['caller_token']}]"
@@ -396,7 +396,7 @@ def physical_world(monkeypatch, tmp_path):
     from hmcpctl.xmlutil import parse_feed
 
     tmp_path.chmod(0o700)
-    monkeypatch.setattr(arm.files, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     p = packet()
     c = HMCConfig.from_mapping(
         p["candidate"]["hmc_identity"]
@@ -1204,7 +1204,7 @@ async def test_pending_post_accepts_no_unregistered_path_or_query(monkeypatch, q
             )
         ),
     )
-    monkeypatch.setattr(arm.files, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     h.window = arm.Window(p, "digest", "digest", True)
     h.effect = "test"
     h.target = {"kind": "LogicalPartition", "uuid": TARGET}
