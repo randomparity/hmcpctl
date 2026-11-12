@@ -278,7 +278,34 @@ async def update_network_adapter(
     remove_vsi_profile: bool = False,
     ownership_override: bool = False,
 ) -> NetworkUpdateResult:
-    """Attempt one coordinated native update, independently observing its stored result."""
+    """Attempt one coordinated native update, independently observing its stored result.
+
+    Raises:
+        ValueError: Invalid fields, selectors or writer acknowledgement; unavailable
+            or contradictory preflight facts; a changed baseline; or invalid native
+            command inputs, before that command is dispatched.
+        PermissionError: The selected partition is not authorized for mutation.
+        HMCError: Resolution or preflight inventory fails before native submission.
+            A fingerprint mismatch during this phase also propagates.
+        asyncio.CancelledError: Cancellation propagates, including during submission
+            or readback. A dispatched command may still have taken effect; reconcile
+            the independent state before considering a retry.
+
+    Returns:
+        Independent submission, selected-field verification and unrelated-adapter
+        preservation facts. Already-satisfied requests return not_dispatched.
+        Native HMCCLIError/HMCError failures are captured as rejected or unknown
+        submission with bounded diagnostics; selected readback failures become
+        unavailable observations and errors. A post-submission fingerprint mismatch
+        stops further readback and returns the safe TLS-abort diagnostic.
+
+        A normal return, or submission=completed, does not establish verified change
+        or preservation. Inspect mutation_dispatched, submission, verification.status,
+        preservation.status and errors together. mutation_dispatched records the
+        native attempt, not confirmed remote execution; preservation is bounded by
+        preservation.scope. No automatic retry or rollback is performed; reconcile
+        uncertain or drifted state before another attempt.
+    """
     fields: dict[str, Any] = {
         "tagged": tagged,
         "addl_vlan_ids": addl_vlan_ids,
