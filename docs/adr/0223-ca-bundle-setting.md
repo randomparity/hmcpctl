@@ -35,16 +35,23 @@ Add `ca_bundle: str | None = None` (env var `HMC_CA_BUNDLE`, TOML key
 to check it first:
 
 ```
-HMC_CA_BUNDLE set → pass verify=ca_bundle (path string; httpx accepts it)
+HMC_CA_BUNDLE set → verify=ssl.create_default_context(cafile=ca_bundle)
 SSL_CERT_FILE/SSL_CERT_DIR set → trust_system_store is bypassed (existing)
 trust_system_store=True and no env bundle → truststore.SSLContext (ADR 0222)
 else → True (certifi roots)
 ```
 
 **`ca_bundle` wins over all other trust sources when `verify_ssl=True`.** The
-path is passed as the string `verify=` argument to `httpx.AsyncClient`. httpx
-0.28.x accepts a PEM file path for `verify=`, so no new library dependency is
-needed.
+PEM file is loaded with `ssl.create_default_context(cafile=ca_bundle)` and the
+resulting `ssl.SSLContext` is passed as `verify=` to `httpx.AsyncClient`, so
+`CERT_REQUIRED` and hostname checking stay on and no new library dependency is
+needed. An unreadable or invalid file raises `HMCError` naming the setting, the
+path and the fix when the client is constructed.
+
+*Amended (#1935):* the original text passed the path string as `verify=`. httpx
+0.28 deprecates `verify=<str>` and warns on every client construction, and a
+later release may remove it, so the context is built here instead. Directory
+bundles (`capath=`) remain unsupported.
 
 **`ca_bundle` does not change the `verify_ssl` audit record.** The
 `tls-verification-disabled` record names where `verify_ssl` came from
@@ -70,7 +77,7 @@ by CA. Deferred to #1613.
 ## Interaction with HMC_TRUST_SYSTEM_STORE
 
 When `ca_bundle` is set, the system-store path is skipped entirely: the client
-passes the bundle path and does not create a `truststore.SSLContext`. This is
+builds a context from the bundle alone and does not create a `truststore.SSLContext`. This is
 intentional — an operator who sets `HMC_CA_BUNDLE` has made an explicit trust
 decision that should not be supplemented by the OS store.
 
@@ -90,6 +97,6 @@ by an ambient environment variable.
   CLI flag without altering process-wide environment variables.
 - The four-way precedence (`ca_bundle` → `SSL_CERT_FILE` → system store →
   certifi) is now complete and documented in `docs/configuration.md`.
-- No new library dependency: httpx already accepts a path string for `verify=`.
+- No new library dependency: the standard library builds the context.
 - `just env-vars` requires `HMC_CA_BUNDLE` to appear in
   `docs/environment-variables.md`; the new row satisfies that gate.

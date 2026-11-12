@@ -382,6 +382,21 @@ class _FingerprintMismatch(ssl.SSLCertVerificationError):
         self.presented = presented
 
 
+def _ca_bundle_ssl_context(ca_bundle: str) -> ssl.SSLContext:
+    """A verifying context that trusts only the PEM file at *ca_bundle* (ADR 0223)."""
+    try:
+        return ssl.create_default_context(cafile=ca_bundle)
+    except (
+        OSError,
+        ValueError,
+    ) as exc:  # missing/unreadable/directory/bad PEM; NUL in path
+        raise HMCError(
+            f"HMC_CA_BUNDLE could not be loaded from {ca_bundle!r} "
+            f"({type(exc).__name__}: {exc}). Set HMC_CA_BUNDLE (or --ca-bundle) to "
+            "a readable PEM file holding the CA certificate(s) for the HMC."
+        ) from exc
+
+
 def _fingerprint_ssl_context(expected: str, host: str) -> ssl.SSLContext:
     """A context that trusts exactly the leaf certificate whose SHA-256 is *expected*.
 
@@ -535,10 +550,10 @@ class HMCClient(
         base_url = httpx.URL(self.config.base_url).copy_with(port=port)
         verify: bool | ssl.SSLContext | str = self.config.verify_ssl
         if self.config.verify_ssl and self.config.ca_bundle:
-            # ADR 0223: HMC_CA_BUNDLE takes the highest precedence. Pass the
-            # path string directly; httpx accepts a PEM path for verify=.
+            # ADR 0223: HMC_CA_BUNDLE takes the highest precedence. httpx 0.28
+            # deprecates verify=<str>, so load the PEM into a context here.
             # SSL_CERT_FILE/SSL_CERT_DIR and trust_system_store are ignored.
-            verify = self.config.ca_bundle
+            verify = _ca_bundle_ssl_context(self.config.ca_bundle)
         elif self.config.verify_ssl and self.config.cert_fingerprint:
             # ADR 0224: pin the leaf certificate by SHA-256; yields only to ca_bundle.
             verify = _fingerprint_ssl_context(
