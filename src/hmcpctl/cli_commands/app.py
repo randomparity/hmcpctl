@@ -14,13 +14,15 @@ from typer import _click
 from typer._click.core import ParameterSource
 from typer.core import TyperCommand, TyperGroup, TyperOption
 
+import hmcpctl
+
 from ..call_context import CallContext, calling
 from ..operations.logical.holds import HOLD_GUARD
 from ..resource_identity import guarding_partitions
 from ..server_tools.catalog import TOOL_SECURITY
 from ..tool_registry import hold_guarded
 from .capabilities import capabilities
-from .output import usage_error
+from .output import print_raw, usage_error
 from .runtime import GlobalOpts
 from .serve import serve
 from .tool_mirrors import CLI_TOOL_MIRRORS
@@ -221,6 +223,12 @@ config_app = typer.Typer(
 app.add_typer(config_app, name="config")
 
 
+def _print_version(value: bool) -> None:
+    if value:
+        print_raw(hmcpctl.__version__)
+        raise typer.Exit()
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -278,6 +286,13 @@ def main(
         "--profile",
         envvar="HMC_PROFILE",
         help="Named profile from ~/.config/hmcpctl/config.toml (or platform equivalent)",
+    ),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_print_version,
+        is_eager=True,
+        help="Show the installed hmcpctl version and exit.",
     ),
 ) -> None:
     option_names = (
