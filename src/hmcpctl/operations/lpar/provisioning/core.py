@@ -49,9 +49,9 @@ from hmcpctl.operations.lpar.provisioning.media import (
     repository_group,
 )
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.operations.storage.iso_upload import require_allowlisted_iso_url
 from hmcpctl.operations.storage.resources import (
     create_virtual_disk,
-    require_allowlisted_iso_url,
     resolve_volume_group_uuid,
 )
 from hmcpctl.operations.virtualization.pcie import list_dedicated_slots

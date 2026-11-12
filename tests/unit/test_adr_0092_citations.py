@@ -89,6 +89,8 @@ _INVENTORY_PATHS = tuple(
         "operations/virtualization/pcie.py",
         "operations/virtualization/vnic.py",
         "operations/storage/resources.py",
+        "operations/storage/optical.py",
+        "operations/storage/iso_upload.py",
         "operations/templates/core.py",
         "operations/vios/install.py",
     )

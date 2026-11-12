@@ -64,12 +64,11 @@ from hmcpctl.operations.lpar.migration import LpmResult
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult, ProvisionResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.operations.storage.iso_upload import StorageUploadResult
+from hmcpctl.operations.storage.optical import OpticalMedia, StorageOpticalResult
 from hmcpctl.operations.storage.resources import (
-    OpticalMedia,
     StorageMapping,
     StorageMutationResult,
-    StorageOpticalResult,
-    StorageUploadResult,
     VolumeGroup,
 )
 from hmcpctl.operations.virtualization.adapters import AdapterResult

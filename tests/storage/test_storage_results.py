@@ -9,9 +9,9 @@ import pytest
 from hmcpctl.client.client_parse import _parse_feed
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
+from hmcpctl.operations.storage.optical import list_optical_media
 from hmcpctl.operations.storage.resources import (
     StorageMutationResult,
-    list_optical_media,
     list_storage_mappings,
     list_volume_groups,
 )
@@ -462,7 +462,10 @@ async def test_mapping_operation_retains_provider_and_typed_facts(
     from unittest.mock import AsyncMock, Mock, call
 
     from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
-    from hmcpctl.operations.storage import resources
+    from hmcpctl.operations.storage import optical
+    from hmcpctl.operations.storage import resources as storage
+
+    resources = optical if operation == "mount" else storage
 
     lpar_uuid = "00000000-0000-0000-0000-000000000002"
     location = ChangeLocation("Disabled", "current-configuration")
@@ -514,7 +517,7 @@ async def test_mapping_operation_retains_provider_and_typed_facts(
 async def test_mount_preserves_malformed_provider_entry_error(monkeypatch):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.storage import resources
+    from hmcpctl.operations.storage import optical as resources
 
     client = AsyncMock(spec=HMCClient)
     client.create_optical_mapping.return_value = {}
@@ -540,7 +543,10 @@ async def test_mapping_removal_has_only_typed_location(monkeypatch, operation):
     from unittest.mock import AsyncMock
 
     from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
-    from hmcpctl.operations.storage import resources
+    from hmcpctl.operations.storage import optical
+    from hmcpctl.operations.storage import resources as storage
+
+    resources = optical if operation == "unmount" else storage
 
     lpar_uuid = "00000000-0000-0000-0000-000000000002"
     location = ChangeLocation("Disabled", "current-configuration")

@@ -12,7 +12,7 @@ from conftest import live_fixture, make_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.storage.resources import (
+from hmcpctl.operations.storage.optical import (
     load_optical_media,
     unload_optical_media,
 )
@@ -159,7 +159,7 @@ class _Fake:
         def released(**fields):
             self.calls.append(("audit", fields))
 
-        target = "hmcpctl.operations.storage.resources"
+        target = "hmcpctl.operations.storage.optical"
         monkeypatch.setattr(f"{target}.resolve_and_authorize_lpar_mutation", authorize)
         monkeypatch.setattr(f"{target}.resolve_system_name", system_name)
         if not transport:

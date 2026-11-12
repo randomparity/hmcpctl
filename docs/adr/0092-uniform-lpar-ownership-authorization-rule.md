@@ -206,10 +206,10 @@ wildcard records the operation's actual scope.
 | `delete_adapter` | `operations/virtualization/adapters.py::delete_adapter` | guarded (`operations/virtualization/adapters.py::delete_adapter`) | #372 |
 | `map_storage` | `operations/storage/resources.py::map_storage` | guarded (`operations/storage/resources.py::map_storage`) | #372 |
 | `attach_disk_to_lpar` | `operations/lpar/provisioning/core.py::attach_disk_to_lpar` | guarded (`operations/lpar/provisioning/core.py::attach_disk_to_lpar`) | #372 |
-| `mount_optical_media` | `operations/storage/resources.py::mount_optical_media` | guarded (`operations/storage/resources.py::mount_optical_media`) | — |
-| `unmount_optical_media` | `operations/storage/resources.py::unmount_optical_media` | guarded (`operations/storage/resources.py::unmount_optical_media`) | — |
-| `load_optical_media` | `operations/storage/resources.py::load_optical_media` | guarded via `operations/storage/resources.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
-| `unload_optical_media` | `operations/storage/resources.py::unload_optical_media` | guarded via `operations/storage/resources.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
+| `mount_optical_media` | `operations/storage/optical.py::mount_optical_media` | guarded (`operations/storage/optical.py::mount_optical_media`) | — |
+| `unmount_optical_media` | `operations/storage/optical.py::unmount_optical_media` | guarded (`operations/storage/optical.py::unmount_optical_media`) | — |
+| `load_optical_media` | `operations/storage/optical.py::load_optical_media` | guarded via `operations/storage/optical.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
+| `unload_optical_media` | `operations/storage/optical.py::unload_optical_media` | guarded via `operations/storage/optical.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
 | `migrate_lpar` | `operations/lpar/migration.py::migrate_lpar` | guarded after optional validation and before migration submission (`operations/lpar/migration.py::migrate_lpar`) | #373 |
 | `migrate_lpar_with_affinity_preflight` | `operations/lpar/migration.py::migrate_lpar_with_affinity_preflight` | guarded (`operations/lpar/migration.py::migrate_lpar_with_affinity_preflight`) | #373 |
 | `abort_lpar_migration` | `operations/lpar/migration.py::abort_lpar_migration` | guarded (`operations/lpar/migration.py::abort_lpar_migration`) | #373 |

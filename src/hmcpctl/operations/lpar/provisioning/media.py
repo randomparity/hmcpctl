@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.storage.resources import require_allowlisted_iso_url
+from hmcpctl.operations.storage.iso_upload import require_allowlisted_iso_url
 from hmcpctl.xmlutil import leaf_text
 
 InstallProfile = Literal["ubuntu-26.04.1", "rocky-9.8"]

@@ -232,6 +232,7 @@ UNSYNCED = ChangeLocation("Disabled", "current-configuration")
 
 
 def _operations():
+    from hmcpctl.operations.storage import optical
     from hmcpctl.operations.storage import resources as storage
     from hmcpctl.operations.virtualization import adapters
 
@@ -268,7 +269,7 @@ def _operations():
         ),
         (
             "create_optical_mapping",
-            lambda h: storage.mount_optical_media(
+            lambda h: optical.mount_optical_media(
                 h, VIOS_UUID, LPAR_UUID, media_name="m"
             ),
         ),
@@ -278,7 +279,7 @@ def _operations():
         ),
         (
             "delete_storage_mapping",
-            lambda h: storage.unmount_optical_media(
+            lambda h: optical.unmount_optical_media(
                 h, VIOS_UUID, LPAR_UUID, media_name="m"
             ),
         ),
@@ -304,7 +305,7 @@ async def test_each_operation_reads_the_location_before_its_write(
     monkeypatch, write, operation
 ):
     authorize = AsyncMock(return_value=LPAR_UUID)
-    for module in ("virtualization.adapters", "storage.resources"):
+    for module in ("virtualization.adapters", "storage.resources", "storage.optical"):
         monkeypatch.setattr(
             f"hmcpctl.operations.{module}.resolve_and_authorize_lpar_mutation",
             authorize,
@@ -314,7 +315,15 @@ async def test_each_operation_reads_the_location_before_its_write(
         AsyncMock(return_value=VIOS_UUID),
     )
     monkeypatch.setattr(
+        "hmcpctl.operations.storage.optical.resolve_vios_uuid",
+        AsyncMock(return_value=VIOS_UUID),
+    )
+    monkeypatch.setattr(
         "hmcpctl.operations.storage.resources.storage_mapping_id",
+        lambda _mapping: "vhost0/vtscsi0",
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.storage.optical.storage_mapping_id",
         lambda _mapping: "vhost0/vtscsi0",
     )
     monkeypatch.setattr(

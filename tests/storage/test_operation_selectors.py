@@ -166,7 +166,7 @@ async def test_volume_group_operation_resolves_name_before_client_call(
 ):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.storage import resources
+    from hmcpctl.operations.storage import optical, resources
 
     client = AsyncMock()
     client.list_volume_groups.return_value = [
@@ -175,7 +175,8 @@ async def test_volume_group_operation_resolves_name_before_client_call(
     client.list_optical_media.return_value = []
     client.list_optical_mappings.return_value = []
     client.list_storage_mappings.return_value = []
-    await getattr(resources, operation)(client, VIOS_UUID, "rootvg", *arguments)
+    owner = resources if operation == "delete_virtual_disk" else optical
+    await getattr(owner, operation)(client, VIOS_UUID, "rootvg", *arguments)
     getattr(client, client_method).assert_awaited_with(VIOS_UUID, VG_UUID, *tail)
 
 

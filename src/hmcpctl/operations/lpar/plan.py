@@ -25,6 +25,12 @@ from hmcpctl.operations.lpar.provisioning.media import (
     check_install,
     check_mac,
 )
+from hmcpctl.operations.storage.iso_upload import require_allowlisted_iso_url
+from hmcpctl.operations.storage.resources import (
+    VolumeGroup,
+    storage_mapping,
+    volume_group,
+)
 
 from ...documents.lpar import (
     LparResources,
@@ -41,12 +47,6 @@ from ...ssh.lpar import validate_caller_token
 from ...xmlutil import leaf_text
 from ..affinity.rest import ProvisionAffinityAssessment, validate_affinity_request
 from ..inventory.capacity import system_capacity
-from ..storage.resources import (
-    VolumeGroup,
-    require_allowlisted_iso_url,
-    storage_mapping,
-    volume_group,
-)
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
 

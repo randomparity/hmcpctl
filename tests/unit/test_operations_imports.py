@@ -307,3 +307,44 @@ assert not hasattr(client_lpars, "_exact_partition_path")
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_storage_owners_have_one_way_dependencies():
+    script = """
+import importlib.abc
+import sys
+
+blocked = {
+    "hmcpctl.operations.storage.optical",
+    "hmcpctl.operations.storage.iso_upload",
+}
+class NoReverseStorageDependency(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise ModuleNotFoundError(fullname)
+
+finder = NoReverseStorageDependency()
+sys.meta_path.insert(0, finder)
+from hmcpctl.operations.storage import resources
+assert not hasattr(resources, "upload_iso")
+assert not hasattr(resources, "mount_optical_media")
+blocked.remove("hmcpctl.operations.storage.optical")
+from hmcpctl.operations.storage import optical
+blocked.clear()
+from hmcpctl.operations.storage import iso_upload
+sys.meta_path.remove(finder)
+assert optical.StorageOpticalResult.__bases__ == (resources.StorageMutationResult,)
+assert iso_upload.StorageUploadResult.__bases__ == (resources.StorageMutationResult,)
+assert optical._optional_number is resources._optional_number
+assert iso_upload.logger.name == "hmcpctl.operations.storage.resources"
+assert optical.mount_optical_media.__module__ == optical.__name__
+assert iso_upload.upload_iso.__module__ == iso_upload.__name__
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

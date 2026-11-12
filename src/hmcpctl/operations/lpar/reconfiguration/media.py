@@ -18,6 +18,8 @@ from hmcpctl.operations.lpar.workflow_contract import (
     MEDIA_LEDGER,
     PARTITION_LEDGER,
 )
+from hmcpctl.operations.storage.optical import unmount_optical_media
+from hmcpctl.operations.storage.resources import storage_mapping
 
 from ....client.core import HMCClient
 from ....errors import HMCError, HMCTLSFingerprintError, LparUpdateError
@@ -30,7 +32,6 @@ from ...logical.engine import (
     OperationFailed,
 )
 from ...logical.models import EffectRecord
-from ...storage.resources import storage_mapping, unmount_optical_media
 from ..boot_order import read_lpar_boot_order, set_lpar_boot_order
 
 if TYPE_CHECKING:

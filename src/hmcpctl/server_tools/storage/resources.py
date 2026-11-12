@@ -11,6 +11,29 @@ from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionStorage,
     attach_disk_to_lpar,
 )
+from hmcpctl.operations.storage.iso_upload import upload_iso
+from hmcpctl.operations.storage.optical import (
+    create_media_repository,
+    create_optical_media,
+    delete_media_repository,
+    delete_optical_media,
+    get_media_repository,
+    list_optical_mappings,
+    list_optical_media,
+    load_optical_media,
+    mount_optical_media,
+    unload_optical_media,
+    unmount_optical_media,
+)
+from hmcpctl.operations.storage.resources import (
+    create_virtual_disk,
+    create_volume_group,
+    delete_virtual_disk,
+    detach_storage_mapping,
+    list_storage_mappings,
+    list_volume_groups,
+    map_storage,
+)
 
 from ..._app import (
     run_limited_collection,
@@ -26,27 +49,6 @@ from ...jobs import (
 from ...operations.storage.cluster import (
     create_logical_unit,
     delete_logical_unit,
-)
-from ...operations.storage.resources import (
-    create_media_repository,
-    create_optical_media,
-    create_virtual_disk,
-    create_volume_group,
-    delete_media_repository,
-    delete_optical_media,
-    delete_virtual_disk,
-    detach_storage_mapping,
-    get_media_repository,
-    list_optical_mappings,
-    list_optical_media,
-    list_storage_mappings,
-    list_volume_groups,
-    load_optical_media,
-    map_storage,
-    mount_optical_media,
-    unload_optical_media,
-    unmount_optical_media,
-    upload_iso,
 )
 from ...tool_registry import tool_module
 

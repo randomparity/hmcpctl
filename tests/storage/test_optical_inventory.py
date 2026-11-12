@@ -9,7 +9,7 @@ from conftest import make_config
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
-from hmcpctl.operations.storage import resources
+from hmcpctl.operations.storage import optical
 
 UOM_NS = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
 VIOS_UUID = "00000000-0000-0000-0000-000000000003"
@@ -174,14 +174,14 @@ async def test_create_optical_mapping_submits_document(
         else:
             location = ChangeLocation("Disabled", "current-configuration")
             monkeypatch.setattr(
-                resources,
+                optical,
                 "resolve_and_authorize_lpar_mutation",
                 AsyncMock(return_value=LPAR_UUID),
             )
             monkeypatch.setattr(
-                resources, "read_change_location", AsyncMock(return_value=location)
+                optical, "read_change_location", AsyncMock(return_value=location)
             )
-            result = await resources.mount_optical_media(
+            result = await optical.mount_optical_media(
                 hmc, VIOS_UUID, LPAR_UUID, media_name="test.iso", target_device="cd1"
             )
             assert result.change_location == location

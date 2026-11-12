@@ -62,6 +62,10 @@ def _authorize_lpar_mutations(monkeypatch):
         "hmcpctl.operations.storage.resources.resolve_and_authorize_lpar_mutation",
         authorize,
     )
+    monkeypatch.setattr(
+        "hmcpctl.operations.storage.optical.resolve_and_authorize_lpar_mutation",
+        authorize,
+    )
 
 
 LPAR_UUID = "00000000-0000-0000-0000-000000000002"

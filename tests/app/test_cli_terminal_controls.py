@@ -220,7 +220,7 @@ def test_upload_failure_renders_ordered_notes_at_stderr_boundary(
 ):
     from rendered_output import collapse_whitespace
 
-    from hmcpctl.operations.storage.resources import _ACCEPTED_NOTE
+    from hmcpctl.operations.storage.iso_upload import _ACCEPTED_NOTE
 
     notes = (
         (_ACCEPTED_NOTE, PAYLOAD, "Cleanup failed [bold]:smile:") if with_notes else ()

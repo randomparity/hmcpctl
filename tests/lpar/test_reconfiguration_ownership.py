@@ -32,11 +32,11 @@ from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionStorage,
     attach_disk_to_lpar,
 )
-from hmcpctl.operations.storage.resources import (
-    map_storage,
+from hmcpctl.operations.storage.optical import (
     mount_optical_media,
     unmount_optical_media,
 )
+from hmcpctl.operations.storage.resources import map_storage
 from hmcpctl.operations.virtualization.adapters import (
     add_network_adapter,
     add_vfc_adapter,
@@ -91,11 +91,11 @@ CASES: tuple[tuple[str, Operation], ...] = (
         ),
     ),
     (
-        "hmcpctl.operations.storage.resources.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.storage.optical.resolve_and_authorize_lpar_mutation",
         lambda hmc: mount_optical_media(hmc, VIOS, LPAR, media_name="aix.iso"),
     ),
     (
-        "hmcpctl.operations.storage.resources.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.storage.optical.resolve_and_authorize_lpar_mutation",
         lambda hmc: unmount_optical_media(hmc, VIOS, LPAR, media_name="aix.iso"),
     ),
     (

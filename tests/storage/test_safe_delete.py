@@ -9,11 +9,11 @@ from conftest import make_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.storage.resources import (
+from hmcpctl.operations.storage.optical import (
     delete_media_repository,
     delete_optical_media,
-    delete_virtual_disk,
 )
+from hmcpctl.operations.storage.resources import delete_virtual_disk
 
 VIOS_UUID = "00000000-0000-0000-0000-000000000003"
 VG_UUID = "22222222-2222-2222-2222-222222220002"

@@ -18,11 +18,9 @@ from hmcpctl.cli_commands.storage import resources as storage
 from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-from hmcpctl.operations.storage.resources import (
-    StorageMutationResult,
-    StorageOpticalResult,
-    StorageUploadResult,
-)
+from hmcpctl.operations.storage.iso_upload import StorageUploadResult
+from hmcpctl.operations.storage.optical import StorageOpticalResult
+from hmcpctl.operations.storage.resources import StorageMutationResult
 
 RUNNER = CliRunner()
 RAW = {"Resource": {"MachineSerialNumber": "unrelated-hardware-marker"}}

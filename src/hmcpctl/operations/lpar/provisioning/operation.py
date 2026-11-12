@@ -97,11 +97,9 @@ from hmcpctl.operations.lpar.workflow_contract import (
     PARTITION_LEDGER,
     WorkflowStep,
 )
-from hmcpctl.operations.storage.resources import (
-    mount_optical_media,
-    storage_mapping,
-    upload_iso,
-)
+from hmcpctl.operations.storage.iso_upload import upload_iso
+from hmcpctl.operations.storage.optical import mount_optical_media
+from hmcpctl.operations.storage.resources import storage_mapping
 from hmcpctl.resource_identity import resolve_system_uuid
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy
 from hmcpctl.ssh.lpar import apply_lpar_profile_via_cli
