@@ -94,8 +94,9 @@ new `HMCError` (`rg -n 'exc\.body|error\.body' src`) need no private bypass.
    - An echo of a value shorter than 8 characters glued between letters or
      digits survives: session credentials are long; short values are sibling
      cookies, and matching them inside words would corrupt the codes in S2.
-   - Bodies passed as excerpts of successful responses (`resp.text[:500]`) are
-     withheld as unparseable and lose that excerpt: fail closed.
+   - Bodies a caller cuts before raising (`resp.text[:500]`: success-response
+     excerpts, and `client_pcm.py`'s failed metrics fetch) are withheld as
+     unparseable and lose their Message: fail closed, label and status kept.
    - A second sanitation of a retained body may redact more than the first
      (labels formed across adjacent kept fields): never less.
 4. Covered elsewhere: warning policy #1885; result-document redaction #1896;
