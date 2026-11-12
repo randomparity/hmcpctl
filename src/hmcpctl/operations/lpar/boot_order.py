@@ -8,9 +8,9 @@ from typing import Any, NoReturn
 from hmcpctl.client.core import HMCClient
 from hmcpctl.operations.lpar.ownership import resolve_and_authorize_lpar_mutation
 
-from ...client.client_lpars import _exact_partition_path
 from ...documents.boot import select_boot_string
-from ...documents.partition_profile import N
+from ...documents.common import UOM_NS
+from ...documents.lpar import exact_partition_path
 from ...errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from ...resource_identity import optional_system_selector, resolve_lpar_uuid
 from .errors import translate_lpar_write_error
@@ -78,11 +78,11 @@ async def read_lpar_boot_order(
             "Pending boot observation unavailable; inspect before retrying",
             error.status_code,
         ) from None
-    identity = _exact_partition_path(document, "Metadata/Atom/AtomID")
-    name = _exact_partition_path(document, "PartitionName")
-    pending = _exact_partition_path(document, "BootListInformation/PendingBootString")
+    identity = exact_partition_path(document, "Metadata/Atom/AtomID")
+    name = exact_partition_path(document, "PartitionName")
+    pending = exact_partition_path(document, "BootListInformation/PendingBootString")
     if (
-        document.tag != N + "LogicalPartition"
+        document.tag != f"{{{UOM_NS}}}LogicalPartition"
         or identity is None
         or (identity.text or "").casefold() != lpar_uuid.casefold()
         or name is None
@@ -127,8 +127,8 @@ async def set_lpar_boot_order(
     )
     if boot_string is not None:
         document, _ = await hmc.read_logical_partition_document(lpar_uuid)
-        environment = _exact_partition_path(document, "PartitionType")
-        identity = _exact_partition_path(document, "Metadata/Atom/AtomID")
+        environment = exact_partition_path(document, "PartitionType")
+        identity = exact_partition_path(document, "Metadata/Atom/AtomID")
         if identity is None or (identity.text or "").casefold() != lpar_uuid.casefold():
             raise HMCError(
                 "Raw boot admission identity unavailable; nothing was submitted"

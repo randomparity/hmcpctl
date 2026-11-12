@@ -277,3 +277,33 @@ assert callable(core.rename_lpar)
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_partition_path_document_owner_is_independent_and_shared():
+    script = """
+import importlib.abc
+import sys
+
+class NoClientLayer(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "hmcpctl.client" or fullname.startswith("hmcpctl.client."):
+            raise ModuleNotFoundError(fullname)
+
+finder = NoClientLayer()
+sys.meta_path.insert(0, finder)
+from hmcpctl.documents.lpar import exact_partition_path
+sys.meta_path.remove(finder)
+from hmcpctl.client import client_lpars
+from hmcpctl.operations.lpar import boot_order
+assert client_lpars.exact_partition_path is exact_partition_path
+assert boot_order.exact_partition_path is exact_partition_path
+assert not hasattr(client_lpars, "_exact_partition_path")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
