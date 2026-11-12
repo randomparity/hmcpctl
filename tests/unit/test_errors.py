@@ -346,3 +346,92 @@ def test_a_name_containing_a_label_is_a_credential_carrier(carrier: str) -> None
 
     assert str(error) == "op (HTTP 400): REST0001 <redacted>"
     assert SESSION not in error.body
+
+
+AFFIXED_HEADER_NAMES = [
+    "<H><Name>Set_Cookie</Name><Value>{token}</Value></H>",
+    '<Header name="Set_Cookie">{token}</Header>',
+    '<Header name="Session-Cookie">{token}</Header>',
+    "<H><Name>X-API-Session-Token</Name><Value>{token}</Value></H>",
+    "<H><Name> x api session_id </Name><Value>{token}</Value></H>",
+    "<H key='Request.Cookie'>{token}</H>",
+]
+
+
+@pytest.mark.parametrize("carrier", AFFIXED_HEADER_NAMES)
+def test_an_affixed_header_name_in_a_value_or_name_text_is_a_source(
+    carrier: str,
+) -> None:
+    body = (
+        f"<E><Message>see {SESSION} here</Message>{carrier.format(token=SESSION)}</E>"
+    )
+
+    error = HMCError("op", 500, body)
+
+    assert str(error) == "op (HTTP 500): see <redacted> here"
+    assert SESSION not in error.body
+
+
+@pytest.mark.parametrize("carrier", AFFIXED_HEADER_NAMES)
+@pytest.mark.parametrize(
+    "name",
+    [
+        "rest-client-network-add-state-refused",
+        "rest-client-network-add-vsi-rmc-refused",
+        "rest-lpar-create-refused",
+        "rest-vios-optical-mapping-vtd-in-use",
+    ],
+)
+def test_captured_codes_survive_beside_an_affixed_header_name(
+    name: str, carrier: str
+) -> None:
+    raw = live_fixture(name)["body"]
+    message_end = raw.index("</Message>")
+    root_end = raw.rindex("</")
+    body = (
+        raw[:message_end]
+        + f" {SESSION}"
+        + raw[message_end:root_end]
+        + carrier.format(token=SESSION)
+        + raw[root_end:]
+    )
+
+    error = HMCError("x", live_fixture(name)["status"], body)
+
+    for code in ("REST0269", "HSCLB021", "REST0001", "name is already used"):
+        assert (code in raw) == (code in error.body)
+    assert SESSION not in f"{error}\n{error.body}"
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "<Message>the session cookie expired</Message>",
+        "<D><Name>see the cookie docs</Name><Value>REST0269</Value></D>",
+        '<D note="cookie was rejected">REST0269</D>',
+    ],
+)
+def test_prose_mentioning_a_label_is_not_a_header_name(prose: str) -> None:
+    body = f"<E><ReasonCode>REST0269</ReasonCode>{prose}</E>"
+
+    error = HMCError("op", 400, body)
+
+    assert "<ReasonCode>REST0269</ReasonCode>" in error.body
+
+
+@pytest.mark.parametrize("name", ["ſet-cookie", "cookieſ", "cookie٣", "SET-COOKIES2"])
+@pytest.mark.parametrize(
+    "carrier",
+    [
+        '<Header name="{name}">{token}</Header>',
+        "<H><Name>{name}</Name><Value>{token}</Value></H>",
+    ],
+)
+def test_names_the_closed_spelling_matched_stay_sources(
+    name: str, carrier: str
+) -> None:
+    body = f"<E><Message>see {SESSION} here</Message>{carrier.format(name=name, token=SESSION)}</E>"
+
+    error = HMCError("op", 500, body)
+
+    assert str(error) == "op (HTTP 500): see <redacted> here"

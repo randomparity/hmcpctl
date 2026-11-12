@@ -34,10 +34,13 @@ and `""` are kept unchanged and render nothing, as today.
      list);
    - an element whose local name contains a label, or one of whose attribute
      values is a header name: its text and attribute values; an attribute whose
-     name contains a label: its value (a header name matches the whole of
-     `(?:set-?)?cookies?\d*` or `x[-_ ]?api[-_ ]?session`, case-insensitive). A
-     label-bearing tag or attribute name such as `sessionCookieName` may
-     over-redact a code-like value; that fails closed by design;
+     name contains a label: its value (a header name is stripped text that
+     contains a label and, with every label removed, is one run of word
+     characters, `.` and `-`, so `Set_Cookie`, `Session-Cookie` and
+     `X-API-Session-Token` are names and prose that mentions a cookie is not;
+     #1957). A label-bearing tag or attribute name, or header name, such as
+     `sessionCookieName` may over-redact a code-like value; that fails closed by
+     design;
    - a parent with a child whose whole stripped text is a header name: every
      child's text (a `Name`/`Value` header pair).
    Each value contributes its stripped whole, each `;`/`,`-separated part, each

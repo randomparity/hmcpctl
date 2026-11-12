@@ -41,12 +41,9 @@ _TOKEN_RUN: Final = re.compile(r"[A-Za-z0-9._~+/-]{8,}")
 # not glued to a letter or digit, so it cannot cut a code like REST0269.
 _ANYWHERE_CHARS: Final = 8
 _LABEL: Final = re.compile(r"cookie|x[-_ ]?api[-_ ]?session", re.IGNORECASE)
-# An attribute value or Name/Value text naming the header; matched whole. Tag and
-# attribute names match any label they contain instead: a name such as
-# sessionCookieName may over-redact a code-like value, which fails closed.
-_HEADER_NAME: Final = re.compile(
-    r"(?:set-?)?cookies?\d*|x[-_ ]?api[-_ ]?session", re.IGNORECASE
-)
+# What remains of a header name once its labels are removed: one whitespace-free
+# token, so prose that mentions a cookie is not a name.
+_NAME_REST: Final = re.compile(r"[\w.-]*")
 _ASSIGNMENT: Final = re.compile(
     r"(?:cookie|x[-_ ]?api[-_ ]?session)[\"']?\s*[=:]\s*", re.IGNORECASE
 )
@@ -105,6 +102,19 @@ def _assigned_values(text: str) -> set[str]:
     return found
 
 
+def _names_header(text: str) -> bool:
+    """An attribute value or Name/Value text naming a Cookie / X-API-Session header.
+
+    A label anywhere in the token counts, as it does in a tag or attribute name:
+    a name such as sessionCookieName may over-redact a code-like value, which
+    fails closed.
+    """
+    text = text.strip()
+    return bool(_LABEL.search(text)) and bool(
+        _NAME_REST.fullmatch(_LABEL.sub("", text))
+    )
+
+
 def _credentials(root: Element) -> set[str]:
     """Values from every identifiable Cookie / X-API-Session source in the body."""
     found = _assigned_values("".join(root.itertext()))
@@ -115,15 +125,13 @@ def _credentials(root: Element) -> set[str]:
             if _LABEL.search(localname(key)):
                 found |= _values(value)
         if _LABEL.search(localname(str(parent.tag))) or any(
-            _HEADER_NAME.fullmatch(value.strip()) for value in parent.attrib.values()
+            _names_header(value) for value in parent.attrib.values()
         ):
             found |= _values("".join(parent.itertext()))
             for attribute in parent.attrib.values():
                 found |= _values(attribute)
         children = list(parent)
-        if any(
-            _HEADER_NAME.fullmatch((child.text or "").strip()) for child in children
-        ):
+        if any(_names_header(child.text or "") for child in children):
             for child in children:
                 found |= _values("".join(child.itertext()))
         if len(found) > _MAX_VALUES:
