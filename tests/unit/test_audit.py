@@ -1766,3 +1766,46 @@ def test_shutdown_returns_even_when_the_destination_never_drains(full_stderr_pip
         sink.close()
         elapsed = time.monotonic() - start
     assert elapsed < 5.0, f"close() on a wedged destination took {elapsed}s"
+
+
+@pytest.mark.parametrize("entrypoint", ["submit", "diagnostic"])
+@pytest.mark.parametrize("failure", ["construct", "start"])
+@pytest.mark.parametrize("after_failure", ["retry", "close"])
+def test_writer_startup_failure_is_a_counted_drop(
+    sink, monkeypatch, entrypoint, failure, after_failure
+):
+    landed = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", landed)
+    monkeypatch.setattr(audit_sink, "_SINK", sink)
+
+    def refuse(*_args, **_kwargs):
+        if failure == "construct":
+            raise MemoryError("writer allocation failed")
+        raise RuntimeError("can't start new thread")
+
+    with monkeypatch.context() as startup:
+        if failure == "construct":
+            startup.setattr(audit_sink.threading, "Thread", refuse)
+        else:
+            startup.setattr(audit_sink.threading.Thread, "start", refuse)
+        if entrypoint == "submit":
+            sink.submit("lost\n")
+        else:
+            audit_sink.write_diagnostic("lost")
+    assert sink._writer is None
+    assert sink._dropped == 1
+    assert sink._pending == 0
+    assert sink._queue.empty()
+    assert sink.drain(0.0)
+    if after_failure == "close":
+        sink.close()
+        sink.close()
+        assert landed.getvalue() == ""
+        return
+    sink.submit("kept\n")
+    assert sink.drain(2.0)
+    marker, kept = landed.getvalue().splitlines()
+    record = json.loads(marker)
+    assert record["event"] == "records-dropped"
+    assert record["count"] == 1
+    assert kept == "kept"
