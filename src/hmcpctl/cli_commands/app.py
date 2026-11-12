@@ -14,6 +14,8 @@ from typer import _click
 from typer._click.core import ParameterSource
 from typer.core import TyperCommand, TyperGroup, TyperOption
 
+import hmcpctl
+
 from ..call_context import CallContext, calling
 from ..operations.logical.holds import HOLD_GUARD
 from ..resource_identity import guarding_partitions
@@ -223,8 +225,6 @@ app.add_typer(config_app, name="config")
 
 def _print_version(value: bool) -> None:
     if value:
-        import hmcpctl
-
         print_raw(hmcpctl.__version__)
         raise typer.Exit()
 
