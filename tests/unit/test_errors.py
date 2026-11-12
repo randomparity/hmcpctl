@@ -92,6 +92,10 @@ def test_refusal_classifier_reads_the_sanitized_body() -> None:
         f"<RequestHeaders>{{x-api-session=[{SESSION}], accept=[x]}}</RequestHeaders>",
         f"<RequestHeaders>X-API-Session: {SESSION} Accept: */*</RequestHeaders>",
         f"<RequestHeaders>X-API-Session={SESSION}\tAccept=x</RequestHeaders>",
+        f'<RequestHeaders Cookie="a={SESSION}" X-API-Session="x"/>',
+        f"<RequestHeaders><Set-Cookie>{SESSION}</Set-Cookie></RequestHeaders>",
+        f"<RequestHeaders><XAPISession>{SESSION}</XAPISession></RequestHeaders>",
+        f"<RequestHeaders>{{cookie=[a=1, JSESSIONID={SESSION}], x=[y]}}</RequestHeaders>",
     ],
 )
 def test_each_identifiable_source_is_redacted_from_its_echo(source: str) -> None:
@@ -285,3 +289,14 @@ def test_benign_digits_beside_a_short_sibling_cookie_do_not_withhold() -> None:
     error = HMCError("x", 500, body)
 
     assert "HSCLB021" in error.body
+
+
+def test_echoes_shrunk_by_redaction_cannot_pull_a_cut_echo_into_the_field() -> None:
+    token = "T" + "k" * 199
+    message = (token * 41)[:8192] + token
+    body = f"<E><Message>{message}</Message><R>{{x-api-session={token}}}</R></E>"
+
+    error = HMCError("op", 500, body)
+
+    assert "kkkkk" not in str(error)
+    assert "kkkkk" not in error.body

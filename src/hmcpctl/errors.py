@@ -24,8 +24,8 @@ REDACTED: Final = "<redacted>"
 # every .body code lookup reads; the caps keep the escaped canonical document
 # under MAX_ERROR_BODY_BYTES (ADR 0369).
 _FIELD_CHARS: Final = (("ReasonCode", 100), ("Message", 500))
-# Scrubbing this prefix of a field covers every echo that can start inside its
-# cap, because a longer credential value withholds the body.
+# Scrubbing this prefix of a field finds every echo that starts inside its cap,
+# because a longer credential value withholds the body.
 _SCRUB_WINDOW: Final = 8192
 _MAX_VALUE_CHARS: Final = 4096
 _MAX_ASSIGNMENTS: Final = 64
@@ -40,9 +40,9 @@ _TOKEN_RUN: Final = re.compile(r"[A-Za-z0-9._~+/-]{8,}")
 # A shorter value (a sibling cookie such as lb=0) is redacted only where it is
 # not glued to a letter or digit, so it cannot cut a code like REST0269.
 _ANYWHERE_CHARS: Final = 8
-_LABEL: Final = re.compile(r"cookie|x-api-session", re.IGNORECASE)
+_LABEL: Final = re.compile(r"cookie|x-?api-?session", re.IGNORECASE)
 _ASSIGNMENT: Final = re.compile(
-    r"(?:cookie|x-api-session)[\"']?\s*[=:]\s*", re.IGNORECASE
+    r"(?:cookie|x-?api-?session)[\"']?\s*[=:]\s*", re.IGNORECASE
 )
 _VALUE_END: Final = re.compile(r"[\r\n}]|,\s*[\w-]+\s*=")
 # Reported by fixed literal, never by received text: client_systems.py's
@@ -92,6 +92,9 @@ def _assigned_values(text: str) -> set[str]:
         if count >= _MAX_ASSIGNMENTS:
             raise _Unsanitizable
         rest = text[match.end() : match.end() + _MAX_VALUE_CHARS + 1]
+        if rest.startswith("[") and "]" in rest:  # a [a=1, b=2] header list
+            found |= _values(rest[1 : rest.index("]")])
+            continue
         end = _VALUE_END.search(rest)
         found |= _values(rest[: end.start()] if end else rest)
     return found
@@ -103,8 +106,13 @@ def _credentials(root: Element) -> set[str]:
     for parent in root.iter():
         for text in (parent.text or "", parent.tail or "", *parent.attrib.values()):
             found |= _assigned_values(text)
-        names = (localname(str(parent.tag)), *parent.attrib.values())
-        if any(_LABEL.fullmatch(name.strip()) for name in names):
+        for key, value in parent.attrib.items():
+            if _LABEL.search(localname(key)):
+                found |= _values(value)
+        values = parent.attrib.values()
+        if _LABEL.search(localname(str(parent.tag))) or any(
+            _LABEL.fullmatch(value.strip()) for value in values
+        ):
             found |= _values("".join(parent.itertext()))
             for attribute in parent.attrib.values():
                 found |= _values(attribute)
@@ -139,13 +147,20 @@ def _spans(text: str, value: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _scrubbed(text: str, credentials: set[str]) -> str:
+def _scrubbed(text: str, credentials: set[str], limit: int) -> str:
     """Redact every located echo in one pass, then cut at a credential label.
 
-    Echoes go first: a label inside a credential value must not cut the value
-    and leave its prefix behind.
+    The field is cut at ``limit`` received characters, extended to the end of
+    any echo straddling that point, so redaction shrinking earlier echoes can
+    never pull later received text into the kept field. Echoes go first: a label
+    inside a credential value must not cut the value and leave its prefix behind.
     """
     spans = sorted(span for value in credentials for span in _spans(text, value))
+    cut = limit
+    for start, end in spans:
+        if start < cut < end:
+            cut = end
+    text, spans = text[:cut], [span for span in spans if span[0] < cut]
     out, cursor = [], 0
     for start, end in spans:
         if start < cursor:  # overlaps the redaction just emitted
@@ -176,7 +191,7 @@ def _sanitized(body: str) -> tuple[str, str]:
             )
             if element is not None:
                 text = "".join(element.itertext()).strip()[:_SCRUB_WINDOW]
-                fields[name] = _scrubbed(text, credentials)[:limit].strip()
+                fields[name] = _scrubbed(text, credentials, limit)[:limit].strip()
     except _Unsanitizable:
         return _withheld(body, "unsanitizable")
     return _canonical(fields, body), fields.get(

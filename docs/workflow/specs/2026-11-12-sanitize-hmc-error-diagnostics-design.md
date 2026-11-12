@@ -28,9 +28,12 @@ and `""` are kept unchanged and render nothing, as today.
      in each text node (`.text`, `.tail`), in the document's concatenated
      character data (labels split across nodes), and in each attribute value; the
      value ends at the first CR, LF, `}`, `, <name>=` (the next `RequestHeaders`
-     map entry), or the end of the string searched;
-   - an element whose local name, or one of whose attribute values, is `Cookie`
-     or `X-API-Session`: its text and attribute values;
+     map entry), or the end of the string searched; a value opening with `[`
+     ends at its `]` (a `[a=1, b=2]` header list);
+   - an element whose local name contains a label, or one of whose attribute
+     values is a label: its text and attribute values; an attribute whose name
+     contains a label: its value (labels match `cookie` or `x-api-session`, the
+     hyphens optional);
    - a parent with a child whose whole stripped text is such a label: every
      child's text (a `Name`/`Value` header pair).
    Each value contributes its stripped whole, each `;`/`,`-separated part, each
@@ -47,7 +50,9 @@ and `""` are kept unchanged and render nothing, as today.
    replaced by one `<redacted>` each, in a single pass. A value of 8 or more
    characters matches anywhere; a shorter value matches only where neither
    neighbour is a letter or digit, so a sibling cookie such as `lb=0` cannot cut
-   `REST0269`. Then a label cuts the text there and appends `<redacted>` (after
+   `REST0269`. The field keeps received text up to its cap, extended to the end
+   of any echo straddling the cap, so shrinking earlier echoes never pulls a
+   window-cut echo into the field. Then a label cuts the text there and appends `<redacted>` (after
    the values, so a label inside a value cannot strand the value's prefix).
    Then the field is truncated to its cap and stripped.
 4. **Retain** `<HttpErrorResponse>` holding the kept fields, plus
