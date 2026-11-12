@@ -62,7 +62,10 @@ def environment(monkeypatch, mock_hmc):  # noqa: F811
     ssh = Mock(side_effect=AssertionError("SSH reached"))
     monkeypatch.setattr(transport.asyncssh, "connect", ssh)
     mock_hmc.route(method__in=["POST", "PUT", "DELETE"]).mock(
-        return_value=httpx.Response(500, text="write reached")
+        return_value=httpx.Response(
+            500,
+            text="<HttpErrorResponse><Message>write reached</Message></HttpErrorResponse>",
+        )
     )
     app = create_mcp(
         compile_legacy_policy(

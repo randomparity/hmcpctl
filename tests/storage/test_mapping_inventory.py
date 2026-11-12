@@ -528,7 +528,10 @@ async def test_delete_storage_mapping_rejects_xml_entities(mock_hmc):
 async def test_delete_storage_mapping_propagates_parent_post_failure(mock_hmc):
     mock_hmc.get(VIOS_PATH).mock(return_value=_vios_parent_response())
     mock_hmc.post(VIOS_PATH).mock(
-        return_value=httpx.Response(409, text="parent changed")
+        return_value=httpx.Response(
+            409,
+            text="<HttpErrorResponse><Message>parent changed</Message></HttpErrorResponse>",
+        )
     )
     async with HMCClient(make_config()) as hmc:
         with pytest.raises(HMCError) as raised:

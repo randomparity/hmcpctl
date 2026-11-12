@@ -663,7 +663,8 @@ async def test_captured_entry_uuid_refusal_is_an_error_not_a_missing_job(
     # The HMC's own words reach the caller; it says the URL is invalid, and
     # nothing about licences or PTF levels (#1202).
     assert "REST000E Unrecognized root REST type of jobs." in str(excinfo.value)
-    assert excinfo.value.body == response.text
+    assert excinfo.value.body == HMCError("sanitized", 400, response.text).body
+    assert "REST000E" in excinfo.value.body
     assert "PTF" not in str(excinfo.value)
 
 

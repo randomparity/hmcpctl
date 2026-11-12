@@ -190,8 +190,9 @@ def test_console_info_translates_known_null_property_500(monkeypatch, mock_hmc, 
     assert "unset HMC_SCHEMA_VERSION" in message
     assert "firmware" not in message
     assert exc_info.value.status_code == 500
-    assert exc_info.value.body == body
     assert isinstance(exc_info.value.__cause__, HMCError)
+    assert exc_info.value.body == exc_info.value.__cause__.body
+    assert "Nested path contains null property" in exc_info.value.body
 
 
 @pytest.mark.parametrize("body", ["forbidden", NULL_PROPERTY_500_BODY])
@@ -215,7 +216,10 @@ def test_console_info_propagates_unrelated_hmc_error(monkeypatch, mock_hmc, body
 def test_console_info_propagates_unrelated_http_500(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     mock_hmc.get("/rest/api/uom/ManagementConsole").mock(
-        return_value=httpx.Response(500, text="database unavailable")
+        return_value=httpx.Response(
+            500,
+            text="<HttpErrorResponse><Message>database unavailable</Message></HttpErrorResponse>",
+        )
     )
     with pytest.raises(HMCError, match="database unavailable") as exc_info:
         hmc_get_console_info()

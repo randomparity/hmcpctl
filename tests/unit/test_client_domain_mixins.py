@@ -672,6 +672,6 @@ async def test_storage_reconciliation_keeps_ordinary_readback_failure():
         )
     assert caught.value.__cause__ is write_failure
     assert caught.value.status_code == 503
-    assert caught.value.body == "unavailable"
+    assert caught.value.body == write_failure.body
     dispatch.assert_awaited_once()
     snapshot.assert_awaited_once()

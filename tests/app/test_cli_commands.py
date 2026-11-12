@@ -648,7 +648,11 @@ class FakeHMC:
     async def get_partition_template(self, template_uuid):
         self._record("get_partition_template", template_uuid)
         if template_uuid != TEMPLATE_UUID:
-            raise HMCError("GET partition template failed", 404, "not found")
+            raise HMCError(
+                "GET partition template failed",
+                404,
+                "<HttpErrorResponse><Message>not found</Message></HttpErrorResponse>",
+            )
         return self.template
 
     async def deploy_partition_template(self, draft_template_uuid, target_system_uuid):

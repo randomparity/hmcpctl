@@ -973,7 +973,9 @@ def test_check_pcm_error_preserves_hmc_body(monkeypatch, mock_hmc):
     with pytest.raises(HMCError) as exc_info:
         hmc_get_pcm_preferences("ManagedSystem", "00000000-0000-0000-0000-000000000001")
 
-    assert exc_info.value.body == live_fixture("rest-pcm-metrics-403")["body"]
+    raw = live_fixture("rest-pcm-metrics-403")["body"]
+    assert exc_info.value.body == HMCError("sanitized", 403, raw).body
+    assert "requested authority" in exc_info.value.body
     assert "requested authority" in str(exc_info.value)
 
 
@@ -1054,4 +1056,4 @@ def test_processed_metric_links_404_names_collection_preferences(monkeypatch, mo
     message = str(exc_info.value)
     assert "no ProcessedMetrics feed" in message
     assert "hmc_get_pcm_preferences" in message
-    assert exc_info.value.body == capture["body"]
+    assert exc_info.value.body == HMCError("sanitized", 404, capture["body"]).body

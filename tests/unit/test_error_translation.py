@@ -23,12 +23,14 @@ from hmcpctl.operations.metrics import pcm
     ],
 )
 def test_error_translators_return_translated_errors(translator, status, message):
-    original = HMCError("raw failure", status, "sensitive response body")
+    body = "<HttpErrorResponse><Message>sensitive response body</Message></HttpErrorResponse>"
+    original = HMCError("raw failure", status, body)
 
     translated = translator(original)
 
     assert translated.status_code == status
-    assert translated.body == "sensitive response body"
+    assert translated.body == original.body
+    assert "sensitive response body" in translated.body
     assert message in str(translated)
 
 

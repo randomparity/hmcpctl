@@ -39,13 +39,14 @@ and `""` are kept unchanged and render nothing, as today.
    values withholds the body. No cookie-name allowlist.
 3. **Keep only the code-bearing fields**: the text of the first `ReasonCode`
    (100 characters) and first `Message` (500 characters) element by local name.
-   In each, within its first 8192 characters: a label cuts the text there and
-   appends `<redacted>`; then every occurrence of a collected value, overlapping
-   occurrences included, is located in that text and the merged spans are
+   In each, within its first 8192 characters: every occurrence of a collected
+   value, overlapping occurrences included, is located and the merged spans are
    replaced by one `<redacted>` each, in a single pass. A value of 8 or more
    characters matches anywhere; a shorter value matches only where neither
    neighbour is a letter or digit, so a sibling cookie such as `lb=0` cannot cut
-   `REST0269`. Then the field is truncated to its cap and stripped.
+   `REST0269`. Then a label cuts the text there and appends `<redacted>` (after
+   the values, so a label inside a value cannot strand the value's prefix).
+   Then the field is truncated to its cap and stripped.
 4. **Retain** `<HttpErrorResponse>` holding the kept fields, plus
    `<Recognized>` when the received body contains a recognized plaintext marker
    (only `Nested path contains null property`, ADR 0138), built with
