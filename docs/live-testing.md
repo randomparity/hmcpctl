@@ -3296,9 +3296,16 @@ fresh preflight reproduced the original fixture baseline each time. The failed
 source histories disarm the fixture's own cleanup by design. The fixture was
 therefore deleted through the ownership-checked inactive-only
 `hmcpctl lpars delete`. A later fixture preflight and recovery reproduced the
-pre-fixture baseline. This version-2 procedure's results carry no
-`run.tested_commit` block, so `scripts/live_test_evidence.py` does not apply to
-them. The raw journals stay private. None of this is product update support.
+pre-fixture baseline. None of this is product update support.
+
+A version-2 source case's own recovery record is the only part of it that can be
+published (ADR 0371). Render it with
+`uv run --no-sync python scripts/live_test_evidence.py <recovery.json>`, which
+prints the case, the commit, the packet digest and fixed status words. The
+renderer refuses capture, preflight and fixture records, incomplete records, and
+records whose session did not close. A refused case's recovery is never CLEAN, so
+its row reads HELD, and its refusal code and HMC text stay in the private capture
+journal. Raw journals and snapshots stay private.
 
 
 #### Recorded finite update outcomes (#1857)
@@ -3364,8 +3371,12 @@ fixture was then deleted through the ownership-checked inactive-only
 UNCHANGED, which reproduces the pre-fixture baseline.
 
 One REST session may have persisted until the HMC's own timeout: W1b's first
-recovery logoff. The raw journals stay private, and `scripts/live_test_evidence.py`
-has no route for them. None of this is product update support; that remains #1858.
+recovery logoff. Each case's recovery record renders through
+`scripts/live_test_evidence.py` under the rule in
+[the #1856 outcomes](#recorded-source-outcomes-1856). A `finite-update` row does
+not name its operands. Only the packet digest ties it to a W label, and only for
+someone who holds the private packet. Raw journals stay private. None of this is
+product update support; that remains #1858.
 
 ### Public vNIC policy updater qualification (#1858)
 
