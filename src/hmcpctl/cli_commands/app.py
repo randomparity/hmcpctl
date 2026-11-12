@@ -221,6 +221,14 @@ config_app = typer.Typer(
 app.add_typer(config_app, name="config")
 
 
+def _print_version(value: bool) -> None:
+    if value:
+        import hmcpctl
+
+        typer.echo(hmcpctl.__version__)
+        raise typer.Exit()
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -278,6 +286,13 @@ def main(
         "--profile",
         envvar="HMC_PROFILE",
         help="Named profile from ~/.config/hmcpctl/config.toml (or platform equivalent)",
+    ),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_print_version,
+        is_eager=True,
+        help="Show the installed hmcpctl version and exit.",
     ),
 ) -> None:
     option_names = (
