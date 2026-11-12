@@ -25,6 +25,10 @@ hmcpctl --profile sample vios list
 hmcpctl --profile sample storage list-vgs vios1 --system system1
 ```
 
+`hmcpctl --version` prints the installed package version (the value of
+`hmcpctl.__version__`, which identifies the commit on a development build) and exits 0.
+It needs no subcommand, configuration, credentials or network.
+
 Move `hmcpctl lpars list --profile sample` to
 `hmcpctl --profile sample lpars list`. Usage errors now print concise stderr
 text, usage and a `--help` hint, retaining exit 2. Missing required inputs are

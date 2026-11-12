@@ -1082,7 +1082,10 @@ so nothing marks it stale when the branch moves — which is how PR #869's matri
 survived two weeks and a merge that left the arm unable to import.
 
 If it refuses with "cannot be attributed to a commit", the document has no
-`run.tested_commit`. It cannot support a release claim. After recovery, obtain
+`run.tested_commit`. A `vnic-creation-policy` record refuses the same way when it
+is not a complete recovery record. In that case, render that case's recovery
+record instead (see [the #1856 outcomes](#recorded-source-outcomes-1856)). A
+refused document cannot support a release claim. After recovery, obtain
 authorization for a new attempt using the current runner before trying to replace that evidence.
 
 If the header says **tree was dirty**, `src/` or `scripts/` had uncommitted
@@ -3296,9 +3299,16 @@ fresh preflight reproduced the original fixture baseline each time. The failed
 source histories disarm the fixture's own cleanup by design. The fixture was
 therefore deleted through the ownership-checked inactive-only
 `hmcpctl lpars delete`. A later fixture preflight and recovery reproduced the
-pre-fixture baseline. This version-2 procedure's results carry no
-`run.tested_commit` block, so `scripts/live_test_evidence.py` does not apply to
-them. The raw journals stay private. None of this is product update support.
+pre-fixture baseline. None of this is product update support.
+
+A version-2 source case's own recovery record is the only part of it that can be
+published (ADR 0371). Render it with
+`uv run --no-sync python scripts/live_test_evidence.py <recovery.json>`, which
+prints the case, the commit, the packet digest and fixed status words. The
+renderer refuses capture, preflight and fixture records, incomplete records, and
+records whose session did not close. A refused case's recovery is never CLEAN, so
+its row reads HELD, and its refusal code and HMC text stay in the private capture
+journal. Raw journals and snapshots stay private.
 
 
 #### Recorded finite update outcomes (#1857)
@@ -3364,8 +3374,12 @@ fixture was then deleted through the ownership-checked inactive-only
 UNCHANGED, which reproduces the pre-fixture baseline.
 
 One REST session may have persisted until the HMC's own timeout: W1b's first
-recovery logoff. The raw journals stay private, and `scripts/live_test_evidence.py`
-has no route for them. None of this is product update support; that remains #1858.
+recovery logoff. Each case's recovery record renders through
+`scripts/live_test_evidence.py` under the rule in
+[the #1856 outcomes](#recorded-source-outcomes-1856). A `finite-update` row does
+not name its operands. Only the packet digest ties it to a W label, and only for
+someone who holds the private packet. Raw journals stay private. None of this is
+product update support; that remains #1858.
 
 ### Public vNIC policy updater qualification (#1858)
 
@@ -3401,7 +3415,14 @@ root grant naming the exact commit; a stop below ends the window.
    removed with `hmcpctl network remove-vnic --yes`.
 4. Remove vNIC 2 the same way, delete the fixture with the ownership-checked
    inactive-only `hmcpctl lpars delete`, and run a witness fixture preflight and
-   recovery, which must return READY and UNCHANGED.
+   recovery, which must return READY and UNCHANGED. The witness is a fresh
+   `prepare` packet whose `baseline_sha256` binds the pre-fixture baseline digest
+   from step 1, so its preflight refuses anything but that exact baseline. Its
+   preflight first waits for the allocation counters to settle (see
+   [witness settling](#witness-settling-after-a-fixture-delete)); record how many
+   settling reads and snapshots it took. The witness packet is read-only
+   evidence: give it the shortest expiry the window allows and never pass it to
+   the capture wrapper, because its bound digest would satisfy a creation.
 
 Stop on any other case result, on any vNIC or partition the fixture does not own
 appearing in a read, and on any preflight drift. On a stop, keep the result, take a
@@ -3496,7 +3517,8 @@ still hold at the physical DELETE boundary. No override or power operation exist
 in this purpose. Any MANUAL_RECOVERY result stops the enclosing workflow; retain
 private artifacts and let root determine a separately authorized recovery.
 
-Fixture caps are preflight64REST/40SSH/120s, prepare96/24/300,
+Fixture caps are per stage: preflight64REST/40SSH/240s (both actions; ADR 0370
+amends the 120s in the fixture design to hold the settling wait), prepare96/24/300,
 cleanup128/64/300 and recovery32/24/120. These include physical fallback paths
 and own sessions; source-v2 retains its separate caps. Body effects require fresh
 post-intent suffix/time reserves; one REST slot and15s are reserved for logout.
@@ -3504,3 +3526,52 @@ REST/native output is1MiB, own journal5MiB, source evidence at most66MiB across
 six separately bounded records. No cap is an operational admission. Keep raw
 packets/results and terminal captures private; publish only redacted evidence through the
 normal evidence route. HMC execution and publication remain root-owned holds.
+
+#### Witness settling after a fixture delete
+
+A managed system can take time to release a deleted partition's allocation. On
+HMC V10R3 M1060 in the #1858 window, the counters still carried a just-deleted
+fixture's 0.05 units and 512+32 MiB when the witness preflight read them, were
+still moving when its recovery read them, and were back at the pre-fixture values minutes later; the #1857 window
+saw no lag. This is observed behaviour on one HMC, not documented HMC behaviour,
+and the bound below is a judgment, not a measured release time (ADR 0370).
+
+So every version-3 `prepare` preflight reads only the managed system's memory and
+processor sections, at most 12 times and 10 seconds apart, before its full
+snapshot. Each read is journaled in the preflight result's `settling` record.
+When two consecutive reads are equal it takes the full snapshot and journals its
+digest. The snapshot is the baseline only if its sections equal that settled read
+and, when the packet binds `baseline_sha256`, its digest matches. Otherwise the
+plateau was a held allocation, not a settled one, and reading continues; a new
+snapshot waits for the counters to move and hold still again. Between reads only the six allocation counters above may
+change, each only in its release direction (available memory and processor units
+up, assigned and hypervisor memory down), and their total movement may not exceed
+one fixture's allocation. Any other change, the wrong direction, or twelve reads
+without an accepted snapshot fails the preflight as MANUAL_RECOVERY. Each refused
+plateau costs a full snapshot, so the stage's REST or time cap can also end
+settling earlier, as MANUAL_RECOVERY naming the exhausted cap. Settling
+performs no write and retries no effect. Its recovery revalidates the `settling`
+record and then compares one fresh read with the settled baseline, exactly once.
+A READY result with a bound digest, two settling reads and one snapshot means no
+lag was observed and settling was not exercised.
+
+Settling governs only the `prepare` preflight. It does not change the cleanup
+rule: cleanup still requires the restored baseline immediately after its own
+delete, and a later settled witness never turns a failed cleanup CLEAN. A witness
+whose counters never reproduce its bound pre-fixture digest within the bound
+fails; run another read-only witness later, as #1858 did.
+
+#### Recorded witness settling outcome (#1936)
+
+The rule ran once on HMC V10R3 M1060 at commit
+`2886a0069219ae6599d1af166f6f41de8ee7c57b`. A fresh fixture was prepared
+(READY/UNCHANGED, then PREPARED/RETAINED; its preflight settled at read 2) and
+deleted through the ownership-checked `hmcpctl lpars delete`. The bound witness
+preflight started a few seconds later. Its first settling read still carried the
+fixture's allocation. The second, 10 seconds later, had released 544 MiB of current
+and pending available memory, 32 MiB of hypervisor memory and 0.05 current and
+pending processor units; assigned memory did not move. The third read equalled the
+second, and the one snapshot matched the bound pre-fixture digest: READY in 32
+seconds and 12 REST requests, then recovery UNCHANGED. The settling path was
+exercised. The raw results stay private; `scripts/live_test_evidence.py` has no
+route for fixture journals.

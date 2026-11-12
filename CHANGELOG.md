@@ -18,6 +18,8 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Added
 
+- `hmcpctl --version` (#1950) prints the installed package version and exits 0. It is eager:
+  it needs no subcommand, HMC configuration, credentials or network.
 - `hmc_update_vnic_policy` and `hmcpctl network update-vnic-policy` (#1858, ADR 0332) change
   one policy field of an existing vNIC: `pvid_priority`, `auto_priority_failover`, `port_vlan_id`
   from 0 while allowed VLAN IDs are `none`, or additions to a finite allowed VLAN or OS MAC list.

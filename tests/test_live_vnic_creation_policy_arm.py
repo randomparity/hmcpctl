@@ -1744,6 +1744,7 @@ class FixtureWire(SourceWire):
         self.name_failure_pending = False
         self.name_failures = 0
         self.deltas = {}
+        self.sequence = []
         self.trace = []
         self.system = {
             "SystemName": "system-a",
@@ -1894,6 +1895,8 @@ class FixtureWire(SourceWire):
             return httpx.Response(
                 500 if self.name_fallback else 200, json={"SystemName": "system-a"}
             )
+        if path.endswith(f"/ManagedSystem/{SYS}") and self.sequence:
+            self.system = self.sequence.pop(0)
         if path.endswith(f"/ManagedSystem/{SYS}"):
             if self.null_property:
                 self.null_pending = True
@@ -1998,6 +2001,7 @@ def fixture_wire(monkeypatch, fixture_packet, tmp_path):
         ),
     )
     monkeypatch.setattr(arm, "_revision", lambda: ("a" * 40, True))
+    monkeypatch.setattr(arm, "_SETTLE_INTERVAL", 0)
     return w
 
 
@@ -3397,3 +3401,169 @@ async def test_fixture_preflight_refuses_wrong_version_preparation(
     assert held["reason"] == "fixture packet requires version 3"
     assert len(w.fixture_writes) == effects
     assert LPAR in w.entries
+
+
+def released(w, memory, cpu, hypervisor):
+    """The wire's system still holding part of a deleted fixture's allocation."""
+    state = deepcopy(w.system)
+    mem = state["AssociatedSystemMemoryConfiguration"]
+    proc = state["AssociatedSystemProcessorConfiguration"]
+    for key, delta in (
+        ("CurrentAvailableSystemMemory", -memory),
+        ("PendingAvailableSystemMemory", -memory),
+        ("CurrentAssignedMemoryToPartitions", memory - hypervisor),
+        ("MemoryUsedByHypervisor", hypervisor),
+    ):
+        mem[key] = str(Decimal(mem[key]) + delta)
+    for key in (
+        "CurrentAvailableSystemProcessorUnits",
+        "PendingAvailableSystemProcessorUnits",
+    ):
+        proc[key] = str(Decimal(proc[key]) - Decimal(cpu))
+    return state
+
+
+def test_fixture_settling_bound_is_fixed():
+    assert (arm._SETTLE_READS, arm.FIXTURE_LIMITS["preflight"]) == (12, (64, 40, 240))
+
+
+@pytest.mark.parametrize("bound", [False, True])
+@pytest.mark.asyncio
+async def test_fixture_witness_settles(fixture_wire, fixture_packet, tmp_path, bound):
+    w, p = fixture_wire, fixture_packet
+    if bound:
+        before = await arm.preflight(w.client(), p, tmp_path / "pre-fixture")
+        p["baseline_sha256"] = before["baseline_sha256"]
+    w.sequence = [released(w, 544, "0.05", 32), released(w, 256, "0", 16), w.system]
+    ready = await arm.preflight(w.client(), p, tmp_path / "witness")
+    assert ready["status"] == "READY", ready
+    assert len(ready["settling"]["reads"]) == 4
+    assert ready["settling"]["interval_seconds"] == arm._SETTLE_INTERVAL
+    assert ready["counts"]["rest"] <= arm.FIXTURE_LIMITS["preflight"][0]
+    assert (await arm.recover(w.client(), p, ready))["status"] == "UNCHANGED"
+    assert not w.fixture_writes
+
+
+@pytest.mark.asyncio
+async def test_fixture_witness_plateau_refuses_bound_baseline(
+    fixture_wire, fixture_packet, tmp_path
+):
+    w, p = fixture_wire, fixture_packet
+    before = await arm.preflight(w.client(), p, tmp_path / "pre-fixture")
+    p["baseline_sha256"] = before["baseline_sha256"]
+    w.system = released(w, 256, "0", 16)
+    ready = await arm.preflight(w.client(), p, tmp_path / "witness")
+    assert ready["status"] == "MANUAL_RECOVERY"
+    assert ready["reason"] == "fixture settled counters never reproduced the baseline"
+    assert len(ready["settling"]["reads"]) == arm._SETTLE_READS
+    assert len(ready["settling"]["snapshots"]) == 1
+    assert not w.fixture_writes
+
+
+@pytest.mark.asyncio
+async def test_fixture_witness_held_then_released(
+    fixture_wire, fixture_packet, tmp_path
+):
+    w, p = fixture_wire, fixture_packet
+    before = await arm.preflight(w.client(), p, tmp_path / "pre-fixture")
+    p["baseline_sha256"] = before["baseline_sha256"]
+    held = released(w, 544, "0.05", 32)
+    w.sequence = [held, held, held, released(w, 256, "0", 16), w.system]
+    ready = await arm.preflight(w.client(), p, tmp_path / "witness")
+    assert ready["status"] == "READY", ready
+    assert len(ready["settling"]["reads"]) == 5
+    assert [s["after_read"] for s in ready["settling"]["snapshots"]] == [2, 5]
+    assert ready["counts"]["rest"] <= arm.FIXTURE_LIMITS["preflight"][0]
+    assert (await arm.recover(w.client(), p, ready))["status"] == "UNCHANGED"
+    assert not w.fixture_writes
+
+
+@pytest.mark.parametrize("null_property", [False, True])
+@pytest.mark.asyncio
+async def test_fixture_witness_never_settles(
+    fixture_wire, fixture_packet, tmp_path, null_property
+):
+    w, p = fixture_wire, fixture_packet
+    w.null_property = null_property
+    w.sequence = [released(w, 552 - 16 * n, "0", 0) for n in range(arm._SETTLE_READS)]
+    ready = await arm.preflight(w.client(), p, tmp_path / "witness")
+    assert ready["status"] == "MANUAL_RECOVERY"
+    assert (
+        ready["reason"] == "fixture allocation counters did not settle within the bound"
+    )
+    assert len(ready["settling"]["reads"]) == arm._SETTLE_READS
+    assert ready["counts"]["rest"] <= arm.FIXTURE_LIMITS["preflight"][0]
+    assert ready["session"] == {"logged_on": True, "logged_off": True}
+    assert not w.fixture_writes
+
+
+def _away(w, key, value):
+    state = released(w, 256, "0", 16)
+    group = (
+        "AssociatedSystemProcessorConfiguration"
+        if "Processor" in key
+        else "AssociatedSystemMemoryConfiguration"
+    )
+    state[group][key] = value
+    return state
+
+
+@pytest.mark.parametrize(
+    "key,value,reason",
+    [
+        (
+            "CurrentAvailableSystemMemory",
+            "7000",
+            "fixture allocation counter moved away from release",
+        ),
+        (
+            "MemoryUsedByHypervisor",
+            "1100",
+            "fixture allocation counter moved away from release",
+        ),
+        (
+            "CurrentLogicalMemoryBlockSize",
+            "32",
+            "fixture settling changed more than allocation counters",
+        ),
+        (
+            "PendingAvailableSystemProcessorUnits",
+            "1.5",
+            "fixture allocation release exceeds one fixture",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_fixture_witness_moves_away(
+    fixture_wire, fixture_packet, tmp_path, key, value, reason
+):
+    w, p = fixture_wire, fixture_packet
+    w.sequence = [released(w, 256, "0", 16), _away(w, key, value), w.system]
+    ready = await arm.preflight(w.client(), p, tmp_path / "witness")
+    assert ready["status"] == "MANUAL_RECOVERY"
+    assert ready["reason"] == reason
+    assert not w.fixture_writes
+
+
+@pytest.mark.parametrize("forgery", ["removed", "read", "limits", "continued"])
+@pytest.mark.asyncio
+async def test_fixture_witness_recovery_refuses_settling(
+    fixture_wire, fixture_packet, tmp_path, forgery
+):
+    w, p = fixture_wire, fixture_packet
+    ready = await arm.preflight(w.client(), p, tmp_path / "witness")
+    assert ready["status"] == "READY"
+    forged = deepcopy(ready)
+    settling = forged["settling"]
+    if forgery == "removed":
+        del forged["settling"]
+    elif forgery == "read":
+        settling["reads"][-1]["memory"]["MemoryUsedByHypervisor"] = "999"
+    elif forgery == "limits":
+        settling["max_reads"] = 99
+    else:
+        settling["reads"].insert(0, settling["reads"][0])
+    recovered = await arm.recover(w.client(), p, forged)
+    assert recovered["status"] == "MANUAL_RECOVERY"
+    assert recovered["reason"] == "fixture preflight settling history is unconfirmed"
+    assert not w.fixture_writes

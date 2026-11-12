@@ -15,6 +15,7 @@ from copy import deepcopy
 from dataclasses import asdict, fields
 from datetime import date
 from decimal import Decimal
+from itertools import pairwise
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1369,6 +1370,35 @@ def _source_history(packet, journal, current) -> bool:
     return _source_cleanup(packet, current, b1, b2, created) == slot
 
 
+def validate_source_recovery(document: dict) -> None:
+    """Raise unless `document` is a complete, read-only source recovery record.
+
+    `scripts/live_test_evidence.py` publishes only records this accepts (ADR 0371).
+    """
+    case = document.get("case") if isinstance(document, dict) else None
+    if not (
+        isinstance(document, dict)
+        and document.get("group") == GROUP
+        and document.get("stage") == "recover"
+        and type(document.get("version")) is int
+        and document["version"] == 2
+        and document.get("purpose") == "update-mode-source"
+        and document.get("evidence_class") == "source-only"
+        and isinstance(case, str)
+        and (case in _SOURCE_CASES or case == _FINITE)
+        and isinstance(document.get("expected_commit"), str)
+        and re.fullmatch(r"[0-9a-f]{40}", document["expected_commit"])
+        and isinstance(document.get("packet_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", document["packet_sha256"])
+        and document.get("complete") is True
+        and document.get("status") in ("CLEAN", "MANUAL_RECOVERY")
+        and document.get("session") == {"logged_on": True, "logged_off": True}
+        and document.get("intents") == []
+        and "effect_commands" not in document
+    ):
+        raise ValueError("not a complete read-only vNIC source recovery record")
+
+
 async def _source_run(hmc, packet, stage, output=None, journal=None):
     _validate_source_packet(packet)
     _validate_execution_context(hmc, packet, stage)
@@ -1452,7 +1482,7 @@ _FIXTURE_FIELDS = {
     "source_evidence",
 }
 FIXTURE_LIMITS = {
-    "preflight": (64, 40, 120),
+    "preflight": (64, 40, 240),
     "prepare": (96, 24, 300),
     "cleanup": (128, 64, 300),
     "recover": (32, 24, 120),
@@ -1576,6 +1606,10 @@ def _fixture_number(value):
 # 2026-11-04 (ADR 0312). It is bounded to 0..64 MiB in whole logical memory blocks;
 # available memory must fall by exactly the fixture's 512 MiB plus that change.
 _FIXTURE_HYPERVISOR_MAX = Decimal(64)
+# Witness settling (ADR 0370): observed, not documented, HMC release of a deleted
+# fixture's allocation. Read-only, journaled, and bounded to 12 reads 10 s apart.
+_SETTLE_READS = 12
+_SETTLE_INTERVAL = 10
 _FIXTURE_AVAILABLE_MEMORY = (
     ("memory", "CurrentAvailableSystemMemory"),
     ("memory", "PendingAvailableSystemMemory"),
@@ -1638,7 +1672,7 @@ def _fixture_capacity(system):
         raise ValueError("fixed fixture resources are not freshly eligible")
 
 
-async def _fixture_snapshot(hmc, packet):
+async def _fixture_system(hmc, packet):
     system = await hmc.get_managed_system(packet["system_uuid"])
     r = system["Resource"]
     if (
@@ -1646,6 +1680,84 @@ async def _fixture_snapshot(hmc, packet):
         or _scalar_text(r.get("State")) != "operating"
     ):
         raise ValueError("fixture operating system identity unavailable")
+    return r
+
+
+def _fixture_sections(snapshot):
+    return {"memory": snapshot["system"]["memory"], "cpu": snapshot["system"]["cpu"]}
+
+
+def _fixture_settling(reads):
+    """Validate journaled counter reads; return whether the last two are equal."""
+    deltas = _fixture_bounded_deltas(_FIXTURE_HYPERVISOR_MAX)
+
+    def masked(read):
+        value = deepcopy(read)
+        for section, key in deltas:
+            item = value[section][key]
+            value[section][key] = item["@attrs"] if isinstance(item, dict) else None
+        return value
+
+    def moved(before, after, section, key):
+        return _fixture_number(after[section][key]) - _fixture_number(
+            before[section][key]
+        )
+
+    if not 1 <= len(reads) <= _SETTLE_READS:
+        raise ValueError("fixture settling read count is outside its bound")
+    for before, after in pairwise(reads):
+        if masked(before) != masked(after):
+            raise ValueError("fixture settling changed more than allocation counters")
+        if any(moved(before, after, *k) * d > 0 for k, d in deltas.items()):
+            raise ValueError("fixture allocation counter moved away from release")
+    if any(abs(moved(reads[0], reads[-1], *k)) > abs(d) for k, d in deltas.items()):
+        raise ValueError("fixture allocation release exceeds one fixture")
+    return len(reads) > 1 and reads[-1] == reads[-2]
+
+
+async def _fixture_settled_snapshot(hmc, packet, document, output):
+    """Snapshot once counters hold still; a refused plateau keeps polling (ADR 0370)."""
+    reads, snapshots = [], []
+    document["settling"] = {
+        "max_reads": _SETTLE_READS,
+        "interval_seconds": _SETTLE_INTERVAL,
+        "reads": reads,
+        "snapshots": snapshots,
+    }
+    for index in range(_SETTLE_READS):
+        if index:
+            await asyncio.sleep(_SETTLE_INTERVAL)
+        r = await _fixture_system(hmc, packet)
+        reads.append(
+            _plain(
+                {
+                    "memory": r["AssociatedSystemMemoryConfiguration"],
+                    "cpu": r["AssociatedSystemProcessorConfiguration"],
+                }
+            )
+        )
+        if output is not None:
+            save(output, document)
+        if not _fixture_settling(reads) or (
+            snapshots and reads[snapshots[-1]["after_read"] - 1] == reads[-1]
+        ):
+            continue
+        current = await _fixture_snapshot(hmc, packet)
+        snapshots.append({"after_read": len(reads), "sha256": digest(current)})
+        if output is not None:
+            save(output, document)
+        if _fixture_sections(current) == reads[-1] and packet["baseline_sha256"] in (
+            None,
+            snapshots[-1]["sha256"],
+        ):
+            return current
+    if snapshots:
+        raise ValueError("fixture settled counters never reproduced the baseline")
+    raise ValueError("fixture allocation counters did not settle within the bound")
+
+
+async def _fixture_snapshot(hmc, packet):
+    r = await _fixture_system(hmc, packet)
     system_name = _scalar_text(r.get("SystemName"))
     if not isinstance(system_name, str) or not system_name:
         raise ValueError("fixture system command name unavailable")
@@ -2310,6 +2422,30 @@ def _fixture_absent(packet, current):
         )
 
 
+def _fixture_settled_history(journal):
+    settling = journal.get("settling")
+    try:
+        if (
+            not isinstance(settling, dict)
+            or set(settling) != {"max_reads", "interval_seconds", "reads", "snapshots"}
+            or settling["max_reads"] != _SETTLE_READS
+            or settling["interval_seconds"] != _SETTLE_INTERVAL
+            or not isinstance(settling["reads"], list)
+            or not _fixture_settling(settling["reads"])
+            or settling["reads"][-1] != _fixture_sections(journal["observation"])
+            or not isinstance(settling["snapshots"], list)
+            or not settling["snapshots"]
+            or settling["snapshots"][-1]
+            != {
+                "after_read": len(settling["reads"]),
+                "sha256": digest(journal["observation"]),
+            }
+        ):
+            raise ValueError
+    except (ValueError, TypeError, KeyError) as error:
+        raise ValueError("fixture preflight settling history is unconfirmed") from error
+
+
 async def _fixture_recover(hmc, packet, document, journal):
     stage = journal["stage"]
     status = {"preflight": "READY", "prepare": "PREPARED", "cleanup": "CLEAN"}.get(
@@ -2349,6 +2485,8 @@ async def _fixture_recover(hmc, packet, document, journal):
     if stage == "preflight":
         if journal["effects"]:
             raise ValueError("fixture preflight history contains effects")
+        if packet["action"] == "prepare":
+            _fixture_settled_history(journal)
         current = (
             await _fixture_snapshot(hmc, packet)
             if packet["action"] == "prepare"
@@ -2457,7 +2595,11 @@ async def _fixture_run(hmc, packet, stage, output=None, journal=None):
                     await _fixture_recover(hmc, packet, document, journal)
                 else:
                     if packet["action"] == "prepare":
-                        current = await _fixture_snapshot(hmc, packet)
+                        current = await (
+                            _fixture_settled_snapshot(hmc, packet, document, output)
+                            if stage == "preflight"
+                            else _fixture_snapshot(hmc, packet)
+                        )
                         _fixture_absent(packet, current)
                         _fixture_capacity(
                             {
