@@ -417,3 +417,21 @@ def test_prose_mentioning_a_label_is_not_a_header_name(prose: str) -> None:
     error = HMCError("op", 400, body)
 
     assert "<ReasonCode>REST0269</ReasonCode>" in error.body
+
+
+@pytest.mark.parametrize("name", ["ſet-cookie", "cookieſ", "cookie٣", "SET-COOKIES2"])
+@pytest.mark.parametrize(
+    "carrier",
+    [
+        '<Header name="{name}">{token}</Header>',
+        "<H><Name>{name}</Name><Value>{token}</Value></H>",
+    ],
+)
+def test_names_the_closed_spelling_matched_stay_sources(
+    name: str, carrier: str
+) -> None:
+    body = f"<E><Message>see {SESSION} here</Message>{carrier.format(name=name, token=SESSION)}</E>"
+
+    error = HMCError("op", 500, body)
+
+    assert str(error) == "op (HTTP 500): see <redacted> here"

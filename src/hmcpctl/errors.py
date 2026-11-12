@@ -43,7 +43,7 @@ _ANYWHERE_CHARS: Final = 8
 _LABEL: Final = re.compile(r"cookie|x[-_ ]?api[-_ ]?session", re.IGNORECASE)
 # What remains of a header name once its labels are removed: one whitespace-free
 # token, so prose that mentions a cookie is not a name.
-_NAME_REST: Final = re.compile(r"[A-Za-z0-9._-]*")
+_NAME_REST: Final = re.compile(r"[\w.-]*")
 _ASSIGNMENT: Final = re.compile(
     r"(?:cookie|x[-_ ]?api[-_ ]?session)[\"']?\s*[=:]\s*", re.IGNORECASE
 )
