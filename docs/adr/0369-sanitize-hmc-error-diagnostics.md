@@ -31,8 +31,10 @@ canonical one. Diagnostics in other elements, Message text past 500 characters o
 after a cookie/session label, plaintext bodies, and the success-response
 excerpts some sites pass as a body are lost. The null-property
 classifier survives through the fixed `<Recognized>` marker. Any tag or
-attribute name containing a cookie or session label is a credential carrier, so
-a label-bearing name may over-redact a code-like value; that fails closed by
+attribute name containing a cookie or session label is a credential carrier, and
+so is an attribute value or `Name`/`Value` text that contains one and is
+otherwise a single whitespace-free token, such as `Set_Cookie` (#1957); a
+label-bearing name may over-redact a code-like value; that fails closed by
 design. Secrets with no identifiable source remain the operator's accepted
 exclusion.
 

@@ -536,6 +536,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   error's `ReasonCode` and `Message`, with those credentials and their echoes replaced by
   `<redacted>`; `.body` is that sanitized document, not the received text. A body that is not
   XML, or was cut before raising, is reported only by its length.
+- `HMCError` also redacts a credential whose header name is given as an attribute value or as
+  `Name`/`Value` text with an affix, such as `Set_Cookie`, `Session-Cookie` or
+  `X-API-Session-Token` (#1957).
 
 ## [0.1.0] - 2026-10-12
 
