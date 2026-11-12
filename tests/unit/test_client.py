@@ -4791,7 +4791,7 @@ def test_ca_bundle_client_construction_emits_no_deprecation_warning(
         HMCClient(make_config(verify_ssl=True, ca_bundle=ca_pem))
 
 
-@pytest.mark.parametrize("content", [None, b"", b"not a certificate\n"])
+@pytest.mark.parametrize("content", [None, b"", b"not a certificate\n", "directory"])
 def test_ca_bundle_unloadable_file_fails_with_actionable_error(
     monkeypatch, tmp_path, content
 ):
@@ -4799,7 +4799,9 @@ def test_ca_bundle_unloadable_file_fails_with_actionable_error(
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
     monkeypatch.delenv("SSL_CERT_DIR", raising=False)
     path = tmp_path / "bad-ca.pem"
-    if content is not None:
+    if content == "directory":
+        path.mkdir()
+    elif content is not None:
         path.write_bytes(content)
     with pytest.raises(HMCError) as excinfo:
         HMCClient(make_config(verify_ssl=True, ca_bundle=str(path)))

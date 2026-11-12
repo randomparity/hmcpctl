@@ -386,7 +386,10 @@ def _ca_bundle_ssl_context(ca_bundle: str) -> ssl.SSLContext:
     """A verifying context that trusts only the PEM file at *ca_bundle* (ADR 0223)."""
     try:
         return ssl.create_default_context(cafile=ca_bundle)
-    except OSError as exc:  # FileNotFoundError, PermissionError and ssl.SSLError
+    except (
+        OSError,
+        ValueError,
+    ) as exc:  # missing/unreadable/directory/bad PEM; NUL in path
         raise HMCError(
             f"HMC_CA_BUNDLE could not be loaded from {ca_bundle!r} "
             f"({type(exc).__name__}: {exc}). Set HMC_CA_BUNDLE (or --ca-bundle) to "
