@@ -204,14 +204,20 @@ async def test_native_post_carries_opaque_if_match_and_preserves_document():
 
 @pytest.mark.asyncio
 async def test_native_write_failure_carries_hmc_message():
-    capture = live_fixture("rest-profile-create-name-too-long")
-    hmc = client(response(), httpx.Response(500, text=capture["body"]))
+    token = "tok-session-E5f6G7h8"
+    body = live_fixture("rest-profile-create-name-too-long")["body"]
+    body = body.replace("&lt;REDACTED-SESSION&gt;", token).replace(
+        "HSCL059F", f"HSCL059F {token}"
+    )
+    hmc = client(response(), httpx.Response(500, text=body))
     r = await read_native_profile(hmc, "LogicalPartition", P, F, S)
     with pytest.raises(HMCError) as raised:
         await write_native_profile(hmc, "LogicalPartition", P, r.element)
-    assert "HSCL059F" in str(raised.value) and "31 characters" in str(raised.value)
-    assert "REDACTED-SESSION" not in str(raised.value)
-    assert "REDACTED-SESSION" not in (raised.value.body or "")
+    assert "HSCL059F <redacted>" in str(raised.value) and "31 characters" in str(
+        raised.value
+    )
+    assert "HSCL059F" in raised.value.body
+    assert token not in f"{raised.value} {raised.value.body}"
 
 
 @pytest.mark.parametrize("cut", ["message-less", "not-xml"])

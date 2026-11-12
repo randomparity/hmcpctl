@@ -529,6 +529,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   empty list: the HMC refuses it with `HSCL8012` and the tool raises, as the live probe showed
   (#1475).
 
+### Security
+
+- HMC error diagnostics no longer carry the session cookie or `X-API-Session` token the HMC echoes
+  in its error bodies (#1884, ADR 0369). `HMCError` text and `HMCError.body` keep only the
+  error's `ReasonCode` and `Message`, with those credentials and their echoes replaced by
+  `<redacted>`; `.body` is that sanitized document, not the received text. A body that is not
+  XML, or was cut before raising, is reported only by its length.
+
 ## [0.1.0] - 2026-10-12
 
 First tagged release of `hmcpctl`: a CLI, an MCP server and a Python library for the IBM HMC.

@@ -3252,7 +3252,9 @@ async def test_list_quick_properties_200_without_the_container_raises(mock_hmc):
             await hmc.list_quick_properties("ManagedSystem")
 
     assert raised.value.status_code == 200
-    assert raised.value.body == body
+    assert raised.value.body == (
+        "<HttpErrorResponse><ReasonCode>INVALID_URL</ReasonCode></HttpErrorResponse>"
+    )
 
 
 @pytest.mark.asyncio
@@ -4941,7 +4943,7 @@ async def test_discovery_classifies_with_one_parse(
                 f"GET {path} returned no {container} element;"
             )
             assert error.value.status_code == 200
-            assert error.value.body == body
+            assert error.value.body == "<HttpErrorResponse></HttpErrorResponse>"
         else:
             assert await getattr(hmc, method)("ManagedSystem") == (
                 expected,
@@ -4971,7 +4973,10 @@ async def test_discovery_http_gates_do_not_parse(
             with pytest.raises(HMCError) as error:
                 await getattr(hmc, method)("ManagedSystem")
             assert error.value.status_code == status
-            assert error.value.body == "not xml"
+            assert error.value.body == (
+                "<HttpErrorResponse><Message>unparseable 7-character response body "
+                "withheld</Message></HttpErrorResponse>"
+            )
         # A refusal retains HMCError's error-detail parse, without discovery parsing.
         assert parse.call_count == (1 if status == 400 else 0)
 

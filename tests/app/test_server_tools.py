@@ -1073,7 +1073,12 @@ def test_submit_available_hmc_ptfs_query_surfaces_job_error(monkeypatch, mock_hm
     _hmc_env(monkeypatch)
     mock_hmc.put(
         f"/rest/api/uom/ManagementConsole/{MC_UUID}/do/ListManagementConsoleUpdates"
-    ).mock(return_value=httpx.Response(500, text="repository unavailable"))
+    ).mock(
+        return_value=httpx.Response(
+            500,
+            text="<HttpErrorResponse><Message>repository unavailable</Message></HttpErrorResponse>",
+        )
+    )
     with pytest.raises(HMCError, match="repository unavailable"):
         hmc_submit_available_hmc_ptfs_query(MC_UUID)
 

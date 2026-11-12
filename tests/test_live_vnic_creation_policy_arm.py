@@ -1854,7 +1854,10 @@ class FixtureWire(SourceWire):
             return httpx.Response(200, content=b"x" * (arm.MIB + 1))
         if method == "PUT":
             if self.fallback:
-                return httpx.Response(self.fallback, text="REST0001")
+                return httpx.Response(
+                    self.fallback,
+                    text="<HttpErrorResponse><Message>REST0001</Message></HttpErrorResponse>",
+                )
             self.create()
             if self.fixture_fault == "create":
                 raise httpx.ReadTimeout("synthetic ambiguous creation")

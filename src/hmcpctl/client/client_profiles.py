@@ -20,7 +20,6 @@ from ..documents.partition_profile import (
 )
 from ..errors import HMCError
 from ..resource_identity import is_uuid
-from ..xmlutil import find_text
 from .client_contracts import _reject_non_uuid_path_argument
 from .client_parse import _parse_feed
 from .core import HMCClient
@@ -188,16 +187,10 @@ async def write_native_profile(
         headers=headers,
     )
     if response.status_code not in {200, 201, 202, 204}:
-        # Only the <Message>: the HMC's error body echoes the request's session
-        # cookie and X-API-Session in <RequestHeaders> (#1868).
-        try:
-            message = find_text(response.text, "Message")
-        except (DET.ParseError, DefusedXmlException):
-            message = None
         raise HMCError(
             "native profile write failed; reconcile before retrying",
             response.status_code,
-            message,
+            response.text,
         )
 
     return response.status_code

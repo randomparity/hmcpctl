@@ -198,12 +198,15 @@ async def test_error_diagnostics_are_independently_bounded(body):
 
 
 async def test_http_error_body_has_separate_cap(make_client):
-    stream = ObservedStream([b"x" * 9000])
+    stream = ObservedStream([b"<E><Message>" + b"m" * 9000 + b"</Message></E>"])
     client = await make_client(stream, status=500, max_response_bytes=20000)
     with pytest.raises(HMCError) as error:
         await client._get(PATH)
     assert error.value.status_code == 500
-    assert len(error.value.body.encode()) == 4096
+    assert (
+        error.value.body
+        == f"<HttpErrorResponse><Message>{'m' * 500}</Message></HttpErrorResponse>"
+    )
     assert stream.closed
 
 
