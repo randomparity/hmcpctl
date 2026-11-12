@@ -30,8 +30,11 @@ received text: a library consumer reading the HMC's own document gets the
 canonical one. Diagnostics in other elements, Message text past 500 characters or
 after a cookie/session label, plaintext bodies, and the success-response
 excerpts some sites pass as a body are lost. The null-property
-classifier survives through the fixed `<Recognized>` marker. Secrets with no
-identifiable source remain the operator's accepted exclusion.
+classifier survives through the fixed `<Recognized>` marker. Any tag or
+attribute name containing a cookie or session label is a credential carrier, so
+a label-bearing name may over-redact a code-like value; that fails closed by
+design. Secrets with no identifiable source remain the operator's accepted
+exclusion.
 
 ## Considered & rejected
 

@@ -327,12 +327,22 @@ def test_a_bracketed_value_keeps_the_text_after_its_first_bracket(source: str) -
 @pytest.mark.parametrize(
     "carrier",
     [
-        "<R sessionCookieName='REST0001'/>",
-        "<CookieSupported>REST0001</CookieSupported>",
+        "<Cookies>{token}</Cookies>",
+        "<CookieHeader>{token}</CookieHeader>",
+        "<RequestCookie>{token}</RequestCookie>",
+        "<Set_Cookie>{token}</Set_Cookie>",
+        "<X-API-Session-Token>{token}</X-API-Session-Token>",
+        "<R cookies='{token}'/>",
+        "<Header name='Cookies'>{token}</Header>",
     ],
 )
-def test_a_name_merely_containing_a_label_does_not_redact_a_code(carrier: str) -> None:
-    error = HMCError("op", 400, f"<E><Message>REST0001 x</Message>{carrier}</E>")
+def test_a_name_containing_a_label_is_a_credential_carrier(carrier: str) -> None:
+    """Fail closed: a label-bearing name may over-redact a code-like value."""
+    body = (
+        f"<E><Message>REST0001 {SESSION}</Message>{carrier.format(token=SESSION)}</E>"
+    )
 
-    assert str(error) == "op (HTTP 400): REST0001 x"
-    assert "REST0001" in error.body
+    error = HMCError("op", 400, body)
+
+    assert str(error) == "op (HTTP 400): REST0001 <redacted>"
+    assert SESSION not in error.body

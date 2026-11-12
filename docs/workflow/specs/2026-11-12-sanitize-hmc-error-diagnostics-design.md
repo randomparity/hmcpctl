@@ -32,11 +32,12 @@ and `""` are kept unchanged and render nothing, as today.
      map entry), or the end of the string searched; a value opening with `[`
      also contributes the text up to its first `]` (a `[a=1, b=2]` header
      list);
-   - an element whose local name is a header name, or one of whose attribute
-     values is one: its text and attribute values; an attribute whose name is a
-     header name: its value (a header name matches the whole of
-     `(?:set-?)?cookie\d*` or `x[-_ ]?api[-_ ]?session`, case-insensitive, so a name
-     merely containing a label, such as `sessionCookieName`, is no source);
+   - an element whose local name contains a label, or one of whose attribute
+     values is a header name: its text and attribute values; an attribute whose
+     name contains a label: its value (a header name matches the whole of
+     `(?:set-?)?cookies?\d*` or `x[-_ ]?api[-_ ]?session`, case-insensitive). A
+     label-bearing tag or attribute name such as `sessionCookieName` may
+     over-redact a code-like value; that fails closed by design;
    - a parent with a child whose whole stripped text is a header name: every
      child's text (a `Name`/`Value` header pair).
    Each value contributes its stripped whole, each `;`/`,`-separated part, each
