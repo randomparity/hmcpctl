@@ -1676,10 +1676,7 @@ def _fixture_settling(reads):
 
     if not 1 <= len(reads) <= _SETTLE_READS:
         raise ValueError("fixture settling read count is outside its bound")
-    pairs = list(pairwise(reads))
-    for index, (before, after) in enumerate(pairs):
-        if before == after and index < len(pairs) - 1:
-            raise ValueError("fixture settling continued after a settled pair")
+    for before, after in pairwise(reads):
         if masked(before) != masked(after):
             raise ValueError("fixture settling changed more than allocation counters")
         if any(moved(before, after, *k) * d > 0 for k, d in deltas.items()):
@@ -1690,11 +1687,13 @@ def _fixture_settling(reads):
 
 
 async def _fixture_settled_snapshot(hmc, packet, document, output):
-    reads = []
+    """Snapshot once counters hold still; a refused plateau keeps polling (ADR 0370)."""
+    reads, snapshots = [], []
     document["settling"] = {
         "max_reads": _SETTLE_READS,
         "interval_seconds": _SETTLE_INTERVAL,
         "reads": reads,
+        "snapshots": snapshots,
     }
     for index in range(_SETTLE_READS):
         if index:
@@ -1710,14 +1709,22 @@ async def _fixture_settled_snapshot(hmc, packet, document, output):
         )
         if output is not None:
             save(output, document)
-        if _fixture_settling(reads):
-            break
-    else:
-        raise ValueError("fixture allocation counters did not settle within the bound")
-    current = await _fixture_snapshot(hmc, packet)
-    if _fixture_sections(current) != reads[-1]:
-        raise ValueError("fixture allocation counters moved after settling")
-    return current
+        if not _fixture_settling(reads) or (
+            snapshots and reads[snapshots[-1]["after_read"] - 1] == reads[-1]
+        ):
+            continue
+        current = await _fixture_snapshot(hmc, packet)
+        snapshots.append({"after_read": len(reads), "sha256": digest(current)})
+        if output is not None:
+            save(output, document)
+        if _fixture_sections(current) == reads[-1] and packet["baseline_sha256"] in (
+            None,
+            snapshots[-1]["sha256"],
+        ):
+            return current
+    if snapshots:
+        raise ValueError("fixture settled counters never reproduced the baseline")
+    raise ValueError("fixture allocation counters did not settle within the bound")
 
 
 async def _fixture_snapshot(hmc, packet):
@@ -2391,12 +2398,19 @@ def _fixture_settled_history(journal):
     try:
         if (
             not isinstance(settling, dict)
-            or set(settling) != {"max_reads", "interval_seconds", "reads"}
+            or set(settling) != {"max_reads", "interval_seconds", "reads", "snapshots"}
             or settling["max_reads"] != _SETTLE_READS
             or settling["interval_seconds"] != _SETTLE_INTERVAL
             or not isinstance(settling["reads"], list)
             or not _fixture_settling(settling["reads"])
             or settling["reads"][-1] != _fixture_sections(journal["observation"])
+            or not isinstance(settling["snapshots"], list)
+            or not settling["snapshots"]
+            or settling["snapshots"][-1]
+            != {
+                "after_read": len(settling["reads"]),
+                "sha256": digest(journal["observation"]),
+            }
         ):
             raise ValueError
     except (ValueError, TypeError, KeyError) as error:

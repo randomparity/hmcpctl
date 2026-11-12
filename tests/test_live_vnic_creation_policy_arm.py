@@ -3451,7 +3451,27 @@ async def test_fixture_witness_plateau_refuses_bound_baseline(
     w.system = released(w, 256, "0", 16)
     ready = await arm.preflight(w.client(), p, tmp_path / "witness")
     assert ready["status"] == "MANUAL_RECOVERY"
-    assert ready["reason"] == "fixture preflight supplied baseline differs"
+    assert ready["reason"] == "fixture settled counters never reproduced the baseline"
+    assert len(ready["settling"]["reads"]) == arm._SETTLE_READS
+    assert len(ready["settling"]["snapshots"]) == 1
+    assert not w.fixture_writes
+
+
+@pytest.mark.asyncio
+async def test_fixture_witness_held_then_released(
+    fixture_wire, fixture_packet, tmp_path
+):
+    w, p = fixture_wire, fixture_packet
+    before = await arm.preflight(w.client(), p, tmp_path / "pre-fixture")
+    p["baseline_sha256"] = before["baseline_sha256"]
+    held = released(w, 544, "0.05", 32)
+    w.sequence = [held, held, held, released(w, 256, "0", 16), w.system]
+    ready = await arm.preflight(w.client(), p, tmp_path / "witness")
+    assert ready["status"] == "READY", ready
+    assert len(ready["settling"]["reads"]) == 5
+    assert [s["after_read"] for s in ready["settling"]["snapshots"]] == [2, 5]
+    assert ready["counts"]["rest"] <= arm.FIXTURE_LIMITS["preflight"][0]
+    assert (await arm.recover(w.client(), p, ready))["status"] == "UNCHANGED"
     assert not w.fixture_writes
 
 
