@@ -23,7 +23,8 @@ and `""` are kept unchanged and render nothing, as today.
    propagates, as today.
 2. **Collect credential values** from the identifiable sources, the set this spec
    means by "identifiable":
-   - a `cookie` or `x-api-session` label (case-insensitive, also inside a longer
+   - a `cookie` or `x-api-session` label (case-insensitive, the X-API-Session
+     separators `-`, `_`, space or none, also inside a longer
      name such as `set-cookie`, optionally quoted) followed by `=` or `:`, found
      in each text node (`.text`, `.tail`), in the document's concatenated
      character data (labels split across nodes), and in each attribute value; the
@@ -34,7 +35,7 @@ and `""` are kept unchanged and render nothing, as today.
    - an element whose local name is a header name, or one of whose attribute
      values is one: its text and attribute values; an attribute whose name is a
      header name: its value (a header name matches the whole of
-     `(?:set-?)?cookie\d*` or `x-?api-?session`, case-insensitive, so a name
+     `(?:set-?)?cookie\d*` or `x[-_ ]?api[-_ ]?session`, case-insensitive, so a name
      merely containing a label, such as `sessionCookieName`, is no source);
    - a parent with a child whose whole stripped text is a header name: every
      child's text (a `Name`/`Value` header pair).

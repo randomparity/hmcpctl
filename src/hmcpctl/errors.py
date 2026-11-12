@@ -40,12 +40,14 @@ _TOKEN_RUN: Final = re.compile(r"[A-Za-z0-9._~+/-]{8,}")
 # A shorter value (a sibling cookie such as lb=0) is redacted only where it is
 # not glued to a letter or digit, so it cannot cut a code like REST0269.
 _ANYWHERE_CHARS: Final = 8
-_LABEL: Final = re.compile(r"cookie|x-?api-?session", re.IGNORECASE)
+_LABEL: Final = re.compile(r"cookie|x[-_ ]?api[-_ ]?session", re.IGNORECASE)
 # A tag, attribute name or Name/Value text that *is* a header name; matched
 # whole, so a name merely containing a label (sessionCookieName) is no source.
-_HEADER_NAME: Final = re.compile(r"(?:set-?)?cookie\d*|x-?api-?session", re.IGNORECASE)
+_HEADER_NAME: Final = re.compile(
+    r"(?:set-?)?cookie\d*|x[-_ ]?api[-_ ]?session", re.IGNORECASE
+)
 _ASSIGNMENT: Final = re.compile(
-    r"(?:cookie|x-?api-?session)[\"']?\s*[=:]\s*", re.IGNORECASE
+    r"(?:cookie|x[-_ ]?api[-_ ]?session)[\"']?\s*[=:]\s*", re.IGNORECASE
 )
 _VALUE_END: Final = re.compile(r"[\r\n}]|,\s*[\w-]+\s*=")
 # Reported by fixed literal, never by received text: client_systems.py's

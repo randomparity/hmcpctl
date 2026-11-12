@@ -95,6 +95,9 @@ def test_refusal_classifier_reads_the_sanitized_body() -> None:
         f'<RequestHeaders Cookie="a={SESSION}" X-API-Session="x"/>',
         f"<RequestHeaders><Set-Cookie>{SESSION}</Set-Cookie></RequestHeaders>",
         f"<RequestHeaders><XAPISession>{SESSION}</XAPISession></RequestHeaders>",
+        f"<RequestHeaders>X_API_SESSION={SESSION}</RequestHeaders>",
+        f"<RequestHeaders><X_API_Session>{SESSION}</X_API_Session></RequestHeaders>",
+        f"<RequestHeaders>X API Session: {SESSION}</RequestHeaders>",
         f"<RequestHeaders>{{cookie=[a=1, JSESSIONID={SESSION}], x=[y]}}</RequestHeaders>",
     ],
 )
