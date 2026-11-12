@@ -18,7 +18,7 @@ and several sites re-wrap `exc.body` into a new `HMCError`.
 canonical `<HttpErrorResponse>` holding only the first `ReasonCode` and
 `Message` text, capped, with every identifiable Cookie / X-API-Session value and
 its exact echoes replaced by `<redacted>`, and a label cutting the field.
-Unparseable or out-of-bounds bodies are withheld: only their length and a fixed
+Oversized, unparseable or out-of-bounds bodies are withheld: only their length and a fixed
 recognized-marker literal survive. Sanitizing the canonical form again can only
 redact more, so re-wrapping is safe without a bypass. The design is
 [the #1884 specification](../workflow/specs/2026-11-12-sanitize-hmc-error-diagnostics-design.md).

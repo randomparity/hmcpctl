@@ -35,9 +35,12 @@ and `""` are kept unchanged and render nothing, as today.
      child's text (a `Name`/`Value` header pair).
    Each value contributes its stripped whole, each `;`/`,`-separated part, each
    part's right-hand side after its first `=`, and each of those with surrounding
-   quotes stripped. Values with no letter or digit are dropped; more than 1024
+   quotes stripped, plus every maximal run of 8 or more token characters
+   (`[A-Za-z0-9._~+/-]`), so a bracketed or space-separated value still yields
+   the bare credential. Values with no letter or digit are dropped; more than 1024
    values withholds the body. No cookie-name allowlist.
-3. **Keep only the code-bearing fields**: the text of the first `ReasonCode`
+3. **Keep only the code-bearing fields**: the joined text (`itertext`, so an echo
+   split by child markup is matched whole) of the first `ReasonCode`
    (100 characters) and first `Message` (500 characters) element by local name.
    In each, within its first 8192 characters: every occurrence of a collected
    value, overlapping occurrences included, is located and the merged spans are
@@ -53,9 +56,11 @@ and `""` are kept unchanged and render nothing, as today.
    `saxutils.escape`. Maximum size about 3.2 KB, so `MAX_ERROR_BODY_BYTES`
    never truncates it. Render the kept Message, or
    `no Message in the response body`.
-5. **Withhold** an unparseable body, or one whose collection exceeds 64
-   assignments, a 4096-character value, or 1024 values: retain `<HttpErrorResponse>` whose Message is
-   `<unparseable|unsanitizable> <N>-character response body withheld`, plus
+5. **Withhold** a body over 65536 characters (`oversized`), an unparseable body,
+   or one whose collection exceeds 64 assignments, a 4096-character value, 1024
+   values, or 256 occurrences of one value in a field (`unsanitizable`): retain
+   `<HttpErrorResponse>` whose Message is
+   `<oversized|unparseable|unsanitizable> <N>-character response body withheld`, plus
    `; recognized: <marker>` and `<Recognized>` when one matched. The rendered
    detail is that Message. The operation label and HTTP status always remain.
 
@@ -108,8 +113,9 @@ new `HMCError` (`rg -n 'exc\.body|error\.body' src`) need no private bypass.
 - Boundary (existing, narrowed): HMC response body into `HMCError` text/`.body`,
   then to logs, CLI output, MCP tool results and stored warnings.
 - Actor: the HMC echoing request headers; anyone later reading those sinks.
-  Trust stays with the TLS-authenticated HMC for parsing (defusedxml, bounded by
-  the existing response-size cap).
+  Parsing uses defusedxml; the sanitizer's work, done synchronously in the
+  event loop, is bounded by the 65536-character input bound and the step 5 limits,
+  not by the 32 MiB response-size cap.
 - Control: allow-listed fields only, value replacement, fail-closed withholding;
   leaks on failure only the body length and a fixed marker.
 - Out of scope: the exclusions above; a caller assigning raw text to `.body`.

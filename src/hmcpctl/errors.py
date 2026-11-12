@@ -30,6 +30,13 @@ _SCRUB_WINDOW: Final = 8192
 _MAX_VALUE_CHARS: Final = 4096
 _MAX_ASSIGNMENTS: Final = 64
 _MAX_VALUES: Final = 1024
+_MAX_MATCHES: Final = 256
+# Captured HMC error bodies are about 2 KB; bounding the input bounds the
+# sanitizer's work, which HMCError does synchronously.
+_MAX_SANITIZED_CHARS: Final = 65536
+# Maximal runs of token characters, so a bracketed or space-separated header
+# value still yields the bare credential.
+_TOKEN_RUN: Final = re.compile(r"[A-Za-z0-9._~+/-]{8,}")
 # A shorter value (a sibling cookie such as lb=0) is redacted only where it is
 # not glued to a letter or digit, so it cannot cut a code like REST0269.
 _ANYWHERE_CHARS: Final = 8
@@ -75,6 +82,7 @@ def _values(raw: str) -> set[str]:
         found.add(part.strip())
         found.add(part.partition("=")[2].strip())
     found |= {value.strip("\"'") for value in found}
+    found.update(_TOKEN_RUN.findall(raw))
     return {value for value in found if any(char.isalnum() for char in value)}
 
 
@@ -110,7 +118,7 @@ def _credentials(root: Element) -> set[str]:
 
 
 def _spans(text: str, value: str) -> list[tuple[int, int]]:
-    spans, start = [], text.find(value)
+    spans, start, matches = [], text.find(value), 0
     while start >= 0:
         end = start + len(value)
         glued = len(value) < _ANYWHERE_CHARS and (
@@ -119,6 +127,9 @@ def _spans(text: str, value: str) -> list[tuple[int, int]]:
         )
         if not glued:
             spans.append((start, end))
+        matches += 1
+        if matches > _MAX_MATCHES:
+            raise _Unsanitizable
         start = text.find(value, start + 1)
     return spans
 
@@ -145,6 +156,8 @@ def _scrubbed(text: str, credentials: set[str]) -> str:
 
 def _sanitized(body: str) -> tuple[str, str]:
     """Return the canonical body an HMCError retains and the detail it renders."""
+    if len(body) > _MAX_SANITIZED_CHARS:
+        return _withheld(body, "oversized")
     try:
         root = DET.fromstring(body)
     except (DET.ParseError, DefusedXmlException):
@@ -157,7 +170,7 @@ def _sanitized(body: str) -> tuple[str, str]:
                 (el for el in root.iter() if localname(str(el.tag)) == name), None
             )
             if element is not None:
-                text = (element.text or "").strip()[:_SCRUB_WINDOW]
+                text = "".join(element.itertext()).strip()[:_SCRUB_WINDOW]
                 fields[name] = _scrubbed(text, credentials)[:limit].strip()
     except _Unsanitizable:
         return _withheld(body, "unsanitizable")

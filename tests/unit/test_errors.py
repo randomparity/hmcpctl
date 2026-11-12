@@ -89,6 +89,9 @@ def test_refusal_classifier_reads_the_sanitized_body() -> None:
         f"<RequestHeaders>x-api-session={SESSION}</RequestHeaders><RequestBody>abc</RequestBody>",
         f'<Detail>{{"X-API-Session": "{SESSION}"}}</Detail>',
         f"<RequestHeaders>{{content-length=1, Cookie=a={SESSION}; b=c, host=h}}</RequestHeaders>",
+        f"<RequestHeaders>{{x-api-session=[{SESSION}], accept=[x]}}</RequestHeaders>",
+        f"<RequestHeaders>X-API-Session: {SESSION} Accept: */*</RequestHeaders>",
+        f"<RequestHeaders>X-API-Session={SESSION}\tAccept=x</RequestHeaders>",
     ],
 )
 def test_each_identifiable_source_is_redacted_from_its_echo(source: str) -> None:
@@ -157,6 +160,11 @@ def test_recognized_plaintext_marker_is_reported_by_literal() -> None:
         ("<E>" + "cookie=a; " * 65 + "</E>", "unsanitizable"),
         ("<E><Cookie>" + "a" * 4097 + "</Cookie></E>", "unsanitizable"),
         (
+            f"<E><Cookie>{SESSION}</Cookie><Message>{f'{SESSION} ' * 257}</Message></E>",
+            "unsanitizable",
+        ),
+        ("<E><Message>REST0269</Message></E>" + " " * 65537, "oversized"),
+        (
             "<E>"
             + "".join(
                 f"<Cookie>{'; '.join(f'{tag}{i}' for i in range(600))}</Cookie>"
@@ -166,7 +174,7 @@ def test_recognized_plaintext_marker_is_reported_by_literal() -> None:
             "unsanitizable",
         ),
     ],
-    ids=["assignments", "value-length", "value-count"],
+    ids=["assignments", "value-length", "echo-count", "body-length", "value-count"],
 )
 def test_out_of_bounds_credentials_withhold(body: str, reason: str) -> None:
     error = HMCError("x", 500, body)
@@ -254,3 +262,15 @@ def test_hmc_error_renders_the_captured_http_error_response_message() -> None:
         "Console REST Web Services is not valid. The supplied URI does not identify "
         "a known resource."
     )
+
+
+def test_an_echo_split_by_markup_inside_message_is_redacted_whole() -> None:
+    half = len(SESSION) // 2
+    body = (
+        f"<E><Message>bad {SESSION[:half]}<i/>{SESSION[half:]} REST0001</Message>"
+        f"<RequestHeaders>{{x-api-session={SESSION}}}</RequestHeaders></E>"
+    )
+
+    error = HMCError("op", 400, body)
+
+    assert str(error) == "op (HTTP 400): bad <redacted> REST0001"
