@@ -29,7 +29,8 @@ and `""` are kept unchanged and render nothing, as today.
      character data (labels split across nodes), and in each attribute value; the
      value ends at the first CR, LF, `}`, `, <name>=` (the next `RequestHeaders`
      map entry), or the end of the string searched; a value opening with `[`
-     ends at its `]` (a `[a=1, b=2]` header list);
+     also contributes the text up to its first `]` (a `[a=1, b=2]` header
+     list);
    - an element whose local name contains a label, or one of whose attribute
      values is a label: its text and attribute values; an attribute whose name
      contains a label: its value (labels match `cookie` or `x-api-session`, the

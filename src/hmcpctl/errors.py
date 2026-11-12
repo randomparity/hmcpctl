@@ -94,7 +94,6 @@ def _assigned_values(text: str) -> set[str]:
         rest = text[match.end() : match.end() + _MAX_VALUE_CHARS + 1]
         if rest.startswith("[") and "]" in rest:  # a [a=1, b=2] header list
             found |= _values(rest[1 : rest.index("]")])
-            continue
         end = _VALUE_END.search(rest)
         found |= _values(rest[: end.start()] if end else rest)
     return found

@@ -300,3 +300,22 @@ def test_echoes_shrunk_by_redaction_cannot_pull_a_cut_echo_into_the_field() -> N
 
     assert "kkkkk" not in str(error)
     assert "kkkkk" not in error.body
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Cookie: [JSESSIONID=ab]{token}X7, lb=0]",
+        "{{cookie=[JSESSIONID=ab]{token}X7], x=[y]}}",
+        "Cookie: [] JSESSIONID={token}X7",
+    ],
+    ids=["bracket-in-value", "bracket-in-map-list", "empty-leading-list"],
+)
+def test_a_bracketed_value_keeps_the_text_after_its_first_bracket(source: str) -> None:
+    token = "Zq9SynthTok"
+    body = f"<E><Message>see {token}X7 here</Message><R>{source.format(token=token)}</R></E>"
+
+    error = HMCError("op", 500, body)
+
+    assert str(error) == "op (HTTP 500): see <redacted> here"
+    assert token not in error.body
