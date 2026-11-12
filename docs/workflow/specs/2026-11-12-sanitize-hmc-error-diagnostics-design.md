@@ -24,37 +24,43 @@ and `""` are kept unchanged and render nothing, as today.
 2. **Collect credential values** from the identifiable sources, the set this spec
    means by "identifiable":
    - a `cookie` or `x-api-session` label (case-insensitive, also inside a longer
-     name such as `set-cookie`) followed by `=` or `:` in the document's
-     concatenated character data or in any attribute value; the value ends at
-     the first CR, LF, `}`, or `, <name>=` (the next `RequestHeaders` map entry);
+     name such as `set-cookie`, optionally quoted) followed by `=` or `:`, found
+     in each text node (`.text`, `.tail`), in the document's concatenated
+     character data (labels split across nodes), and in each attribute value; the
+     value ends at the first CR, LF, `}`, `, <name>=` (the next `RequestHeaders`
+     map entry), or the end of the string searched;
    - an element whose local name is `Cookie` or `X-API-Session`: its text and
      attribute values;
    - a parent with a child whose whole stripped text is such a label: every
      child's text (a `Name`/`Value` header pair).
    Each value contributes its stripped whole, each `;`/`,`-separated part, each
    part's right-hand side after its first `=`, and each of those with surrounding
-   quotes stripped. Empty strings are dropped. No cookie-name allowlist.
+   quotes stripped. Values with no letter or digit are dropped; more than 1024
+   values withholds the body. No cookie-name allowlist.
 3. **Keep only the code-bearing fields**: the text of the first `ReasonCode`
    (100 characters) and first `Message` (500 characters) element by local name.
    In each, within its first 8192 characters: a label cuts the text there and
-   appends `<redacted>`; then every collected value is replaced with
-   `<redacted>`, longest first; then the field is truncated to its cap.
+   appends `<redacted>`; then every occurrence of a collected value, overlapping
+   occurrences included, is located in that text and the merged spans are
+   replaced by one `<redacted>` each, in a single pass. A value of 8 or more
+   characters matches anywhere; a shorter value matches only where neither
+   neighbour is a letter or digit, so a sibling cookie such as `lb=0` cannot cut
+   `REST0269`. Then the field is truncated to its cap and stripped.
 4. **Retain** `<HttpErrorResponse>` holding the kept fields, plus
    `<Recognized>` when the received body contains a recognized plaintext marker
    (only `Nested path contains null property`, ADR 0138), built with
    `saxutils.escape`. Maximum size about 3.2 KB, so `MAX_ERROR_BODY_BYTES`
    never truncates it. Render the kept Message, or
-   `no Message in the <N>-character response body`.
+   `no Message in the response body`.
 5. **Withhold** an unparseable body, or one whose collection exceeds 64
-   assignments or a 4096-character value, or where a collected value still
-   occurs after replacement: retain `<HttpErrorResponse>` whose Message is
+   assignments, a 4096-character value, or 1024 values: retain `<HttpErrorResponse>` whose Message is
    `<unparseable|unsanitizable> <N>-character response body withheld`, plus
    `; recognized: <marker>` and `<Recognized>` when one matched. The rendered
    detail is that Message. The operation label and HTTP status always remain.
 
-Re-sanitizing a retained body returns it unchanged, so the sites that re-wrap
-`exc.body` in a new `HMCError` (`rg -n 'exc\.body|error\.body' src`) keep working
-without a private bypass.
+Re-sanitizing a retained body can only redact more, never re-expose, and keeps
+its kept text for every body in S1–S3, so the sites that re-wrap `exc.body` in a
+new `HMCError` (`rg -n 'exc\.body|error\.body' src`) need no private bypass.
 `client_profiles.py` passes `response.text` and drops its own extraction.
 
 ## Success
@@ -65,8 +71,11 @@ without a private bypass.
 - S2: REST0269, HSCLB021, REST0001, VTD name-in-use and null-property
   classifiers return their current results for the captured/fixture bodies.
 - S3: every non-XML or truncated body renders `<label> (HTTP <status>): unparseable
-  <N>-character response body withheld` and retains no received character.
-- S4: `HMCError(m, s, e.body).body == e.body` for every retained body above.
+  <N>-character response body withheld`, plus `; recognized: <marker>` when a
+  recognized marker matched, and retains no received character other than that
+  fixed marker literal.
+- S4: `HMCError(m, s, e.body).body == e.body` for every retained body in S1–S3
+  and for a Message cut at its cap next to whitespace.
 - S5: a native profile write failure renders the HMC Message without the echo.
 
 ## Failure model
@@ -82,8 +91,13 @@ without a private bypass.
    - Message text after a label, Message beyond 500 characters, and every other
      field are dropped: bounded diagnostic loss; no classifier reads them.
    - Withheld bodies lose body-derived codes: fail closed, label and status kept.
-   - Short collected values (for example `/`) over-redact Message text: bounded,
-     the text is diagnostic only.
+   - An echo of a value shorter than 8 characters glued between letters or
+     digits survives: session credentials are long; short values are sibling
+     cookies, and matching them inside words would corrupt the codes in S2.
+   - Bodies passed as excerpts of successful responses (`resp.text[:500]`) are
+     withheld as unparseable and lose that excerpt: fail closed.
+   - A second sanitation of a retained body may redact more than the first
+     (labels formed across adjacent kept fields): never less.
 4. Covered elsewhere: warning policy #1885; result-document redaction #1896;
    secrets in application-supplied labels and historical documents: operator.
 
@@ -102,8 +116,11 @@ without a private bypass.
 
 Focused: `uv run --no-sync pytest tests/unit/test_errors.py -q --no-cov`.
 Tokenized echoed-header fixture tests (S1, S4), withheld/truncated tests (S3),
-classifier tests (S2), profile test (S5). Controlled faults: restore the
+classifier tests (S2) including a short sibling cookie beside REST0269, a
+value ending its text node before `<RequestBody>`, and a quoted
+`"X-API-Session": "tok"` key, profile test (S5). Controlled faults: restore the
 `body[:500]` fallback and raw retention; each must turn S1/S3 red. Closure: the
 caller tests asserting raw `.body` equality or raw plaintext rendering are
-updated to the retained form; `tests/app/test_system_hold_coverage.py` returns an
+updated to the retained form; the `client_systems.py` comment describing
+`.body` as received text and the `[Unreleased]` CHANGELOG entry are updated; `tests/app/test_system_hold_coverage.py` returns an
 `HttpErrorResponse` sentinel. `just verify` and all-files prek before push.

@@ -9,8 +9,8 @@ Accepted (2026-11-12), under the operator-approved #1884 charter.
 HMC error bodies echo the request's session cookie and X-API-Session token in
 `<RequestHeaders>`. `HMCError` rendered `body[:500]` for non-XML bodies and kept
 up to 4096 bytes of the received body as `.body`, so credentials reached
-exception text and every sink downstream of it. Code lookups read `.body` for
-HMC codes and markers (five lookups), and several sites re-wrap `exc.body` into a new `HMCError`.
+exception text and every sink downstream of it. Five code lookups read `.body`,
+and several sites re-wrap `exc.body` into a new `HMCError`.
 
 ## Decision
 
@@ -19,15 +19,17 @@ canonical `<HttpErrorResponse>` holding only the first `ReasonCode` and
 `Message` text, capped, with every identifiable Cookie / X-API-Session value and
 its exact echoes replaced by `<redacted>`, and a label cutting the field.
 Unparseable or out-of-bounds bodies are withheld: only their length and a fixed
-recognized-marker literal survive. The canonical form is a fixed point, so
-re-wrapping is safe without a bypass. The design is
+recognized-marker literal survive. Sanitizing the canonical form again can only
+redact more, so re-wrapping is safe without a bypass. The design is
 [the #1884 specification](../workflow/specs/2026-11-12-sanitize-hmc-error-diagnostics-design.md).
 
 ## Consequences
 
-`.body` is no longer the received text; tests asserting equality with it change.
-Diagnostics in other elements, Message text past 500 characters or after a
-cookie/session label, and every plaintext body are lost. The null-property
+`HMCError` is a stable facade name (ADR 0118), and its `.body` is no longer the
+received text: a library consumer reading the HMC's own document gets the
+canonical one. Diagnostics in other elements, Message text past 500 characters or
+after a cookie/session label, plaintext bodies, and the success-response
+excerpts some sites pass as a body are lost. The null-property
 classifier survives through the fixed `<Recognized>` marker. Secrets with no
 identifiable source remain the operator's accepted exclusion.
 
@@ -37,12 +39,13 @@ identifiable source remain the operator's accepted exclusion.
   keeping the rest.** verified: the #1884 attempt of 2026-11-04/05 took this
   route and ran sixteen review rounds, each finding a new carrier (attributes,
   namespaces, comments, split text/tail, tails) before parking on a blocking
-  finding (issue #1884 trajectory comments).
+  finding: issue #1884 comment 2026-11-05T13:20:22Z (`gh issue view 1884
+  --comments`).
 - **Keep only the `<Message>` text, as the profile write did.** judgment: the
   re-wrap sites would then re-parse plain text and hit the unparseable path,
   losing every code on the second wrap.
 - **A private raw-bypass constructor for re-wrapping.** judgment: a second entry
   point that skips sanitation is the surface this decision removes.
 - **Pass the client's own session token to `HMCError` and redact it.** judgment:
-  every one of the ~25 client raise sites would change signature, and the echoed
-  cookie is not the token.
+  every client raise site would change, and the echoed cookie is not the token.
+- **Do nothing.** judgment: the charter requires removing the echoed credentials.
