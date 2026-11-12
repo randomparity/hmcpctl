@@ -10,6 +10,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -387,6 +388,17 @@ def _run_native(schemas, world: World, config, group="native-rocky-boot-started"
 
 @pytest.fixture
 def _short_window(monkeypatch):
+    elapsed = 0.0
+
+    async def sleep(delay):
+        nonlocal elapsed
+        elapsed += delay
+
+    # Advance the observation window only through its requested polling delays.
+    monkeypatch.setattr(
+        provision_boot, "time", SimpleNamespace(monotonic=lambda: elapsed)
+    )
+    monkeypatch.setattr(provision_boot, "asyncio", SimpleNamespace(sleep=sleep))
     monkeypatch.setattr(provision_boot, "_RECORD_DELAY_S", 0.01)
     monkeypatch.setattr(provision_boot, "NATIVE_WINDOW_S", 0.05)
 
