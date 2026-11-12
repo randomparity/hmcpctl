@@ -1370,6 +1370,35 @@ def _source_history(packet, journal, current) -> bool:
     return _source_cleanup(packet, current, b1, b2, created) == slot
 
 
+def validate_source_recovery(document: dict) -> None:
+    """Raise unless `document` is a complete, read-only source recovery record.
+
+    `scripts/live_test_evidence.py` publishes only records this accepts (ADR 0371).
+    """
+    case = document.get("case") if isinstance(document, dict) else None
+    if not (
+        isinstance(document, dict)
+        and document.get("group") == GROUP
+        and document.get("stage") == "recover"
+        and type(document.get("version")) is int
+        and document["version"] == 2
+        and document.get("purpose") == "update-mode-source"
+        and document.get("evidence_class") == "source-only"
+        and isinstance(case, str)
+        and (case in _SOURCE_CASES or case == _FINITE)
+        and isinstance(document.get("expected_commit"), str)
+        and re.fullmatch(r"[0-9a-f]{40}", document["expected_commit"])
+        and isinstance(document.get("packet_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", document["packet_sha256"])
+        and document.get("complete") is True
+        and document.get("status") in ("CLEAN", "MANUAL_RECOVERY")
+        and document.get("session") == {"logged_on": True, "logged_off": True}
+        and document.get("intents") == []
+        and "effect_commands" not in document
+    ):
+        raise ValueError("not a complete read-only vNIC source recovery record")
+
+
 async def _source_run(hmc, packet, stage, output=None, journal=None):
     _validate_source_packet(packet)
     _validate_execution_context(hmc, packet, stage)

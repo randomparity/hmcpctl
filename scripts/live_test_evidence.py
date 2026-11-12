@@ -9,10 +9,12 @@ Usage:
 
 Output is Markdown, meant to be pasted into a pull request, issue or ADR.
 
-**Refuses a document it cannot attribute.** No `run.tested_commit` means no
-matrix and a non-zero exit, because an unattributed matrix is the failure this
-script exists to prevent. A run whose tree was dirty is rendered with that
-stated: the sha names a tree nobody exercised.
+**Refuses a document it cannot attribute.** A generic results document needs
+`run.tested_commit`; a source-only record needs its group's own route, which
+accepts only a validated commit. Anything else gets no matrix and a non-zero
+exit, because an unattributed matrix is the failure this script exists to
+prevent. A run whose tree was dirty is rendered with that stated: the sha names
+a tree nobody exercised.
 
 **Marks an interrupted run PARTIAL.** A document whose `run.partial` is present
 and not `false` came from a run an exception or interrupt stopped: its rows end
@@ -304,9 +306,38 @@ def _render_ethernet_update(document: dict[str, Any]) -> str | None:
         return None
 
 
+def _render_vnic_source(document: dict[str, Any]) -> str | None:
+    from live_test.arms import vnic_creation_policy
+
+    try:
+        vnic_creation_policy.validate_source_recovery(document)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+    # Only the fixed case token, validated commit and packet digest are public.
+    # CLEAN restates the owner's recovery predicate (ADR 0371); nothing is read
+    # from a capture journal.
+    cells = (
+        ("completed", "verified", "unchanged", "CLEAN")
+        if document["status"] == "CLEAN"
+        else ("not established",) * 3 + ("HELD",)
+    )
+    return (
+        "SOURCE ONLY — vNIC update-mode observation on "
+        f"`{document['expected_commit']}`\n\n"
+        f"Packet: sha256 `{document['packet_sha256']}`\n\n"
+        "| Case | Submission | Readback | Preservation | Independent recovery |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        f"| {document['case']} | {' | '.join(cells)} |\n\n"
+        "One owned-fixture case. Finite-update operands, snapshots and HMC text "
+        "stay private.\nNo public updater, traffic or failover claim."
+    )
+
+
 def render(document: dict[str, Any]) -> str | None:
     """The Markdown matrix, or `None` when the document cannot be attributed."""
     run = document.get("run")
+    if document.get("group") == "vnic-creation-policy":
+        return _render_vnic_source(document)
     if document.get("group") == "client-ethernet-update":
         return _render_ethernet_update(document)
     if document.get("group") == "lpar-boot-start" or (
@@ -398,9 +429,10 @@ def main(argv: list[str] | None = None) -> int:
     matrix = render(document)
     if matrix is None:
         print(
-            f"ERROR: {args.results} carries no run.tested_commit — it cannot be "
-            "attributed to a commit, and an unattributed matrix is not evidence.\n"
-            "       Re-run with a runner that stamps run provenance.",
+            f"ERROR: {args.results} cannot be attributed to a commit through any "
+            "accepted route, and an unattributed matrix is not evidence.\n"
+            "       Generic results need the live runner's run.tested_commit; "
+            "source records need their own complete recovery record.",
             file=sys.stderr,
         )
         return 1

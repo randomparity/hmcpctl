@@ -586,3 +586,128 @@ def test_boot_start_incomplete_or_source_evidence_cannot_qualify(field, value):
 )
 def test_st69_unattributed_or_fabricated_result_has_no_matrix(document):
     assert evidence.render(document) is None
+
+
+# ---------------------------------------------------------------------------
+# vNIC update-mode source recovery records (ADR 0371)
+# ---------------------------------------------------------------------------
+
+# Synthetic private values: a VLAN ID and a MAC in the HMC's 12-hex form.
+_VNIC_VLAN, _VNIC_MAC = "3917", "0a1b2c3d4e5f"  # pragma: allowlist secret
+
+
+def _vnic_recovery(**overrides) -> dict:
+    document = {
+        "group": "vnic-creation-policy",
+        "stage": "recover",
+        "packet_sha256": "b" * 64,
+        "expected_commit": "c" * 40,
+        "complete": True,
+        "status": "CLEAN",
+        "intents": [],
+        "version": 2,
+        "purpose": "update-mode-source",
+        "evidence_class": "source-only",
+        "case": "finite-update",
+        "baseline": {
+            "identity": {
+                "system": f"{_SENTINEL}-sys",
+                "lpar": f"{_SENTINEL}-lpar",
+                "description": f"{_SENTINEL}-owner",
+            },
+            "vnics": [
+                {
+                    "slot_num": f"{_SENTINEL}-slot",
+                    "allowed_vlan_ids": _VNIC_VLAN,
+                    "allowed_os_mac_addrs": _VNIC_MAC,
+                }
+            ],
+        },
+        "session": {"logged_on": True, "logged_off": True},
+        "counts": {"rest": 3, "ssh": 4},
+    }
+    document.update(overrides)
+    return document
+
+
+@pytest.mark.parametrize(
+    "case,status,row",
+    [
+        (
+            "finite-update",
+            "CLEAN",
+            "| finite-update | completed | verified | unchanged | CLEAN |",
+        ),
+        (
+            "vlan-remove-last",
+            "MANUAL_RECOVERY",
+            (
+                "| vlan-remove-last | not established | not established | "
+                "not established | HELD |"
+            ),
+        ),
+    ],
+)
+def test_vnic_source_recovery_renders_fixed_row(case, status, row):
+    result = evidence.render(_vnic_recovery(case=case, status=status))
+    assert result is not None
+    assert row in result.splitlines()
+    assert f"`{'c' * 40}`" in result
+    assert f"Packet: sha256 `{'b' * 64}`" in result
+
+
+def test_vnic_source_recovery_withholds_private_values(tmp_path, capsys):
+    document = _vnic_recovery(
+        error=f"{_SENTINEL}-error", reason=f"HSCLAB1F {_SENTINEL} {_VNIC_VLAN}"
+    )
+
+    assert evidence.main([str(_write(tmp_path, document))]) == 0
+
+    out = capsys.readouterr().out
+    assert "| finite-update | completed |" in out
+    for private in (_SENTINEL, _VNIC_VLAN, _VNIC_MAC, "HSCLAB1F"):
+        assert private not in out
+
+
+_VNIC_FIXTURE = {"version": 3, "purpose": "vnic-source-fixture", "case": None}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"stage": "preflight"},
+        {"stage": "capture"},
+        {"complete": False},
+        {"session": {"logged_on": True, "logged_off": False}},
+        {"intents": ["create"]},
+        {"effect_commands": []},
+        {"expected_commit": "C" * 40},
+        {"expected_commit": "c" * 39},
+        {"packet_sha256": "x"},
+        {"case": f"{_SENTINEL}-case"},
+        {"status": "READY"},
+        {"version": 1},
+        {"version": True},
+        {"purpose": "vnic-source-fixture"},
+        _VNIC_FIXTURE,
+        {"evidence_class": "product"},
+    ],
+    ids=lambda overrides: ",".join(overrides),
+)
+def test_vnic_source_non_recovery_records_refuse(overrides):
+    document = _vnic_recovery(**overrides)
+    # A valid generic run block proves a refusal cannot fall through to the matrix.
+    document["run"] = {"tested_commit": "a" * 40, "tree_clean": True}
+
+    assert evidence.render(document) is None
+
+
+def test_vnic_source_refusal_exits_without_output(tmp_path, capsys):
+    path = _write(tmp_path, _vnic_recovery(**_VNIC_FIXTURE))
+
+    assert evidence.main([str(path)]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot be attributed" in captured.err
+    assert "run.tested_commit" not in captured.err.splitlines()[0]
