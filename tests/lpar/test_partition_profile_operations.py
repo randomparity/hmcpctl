@@ -382,6 +382,37 @@ async def test_default_job_and_readback_use_selected_profile_name(service):
 
 
 @pytest.mark.asyncio
+async def test_default_readback_fingerprint_failure_is_marked_and_stops(
+    service, monkeypatch
+):
+    from hmcpctl.operations.lpar.profiles import core as profiles
+
+    target = profiles._target
+    stopped_calls = None
+
+    async def read_target(*args, **kwargs):
+        nonlocal stopped_calls
+        if service.hmc.submit_job.called:
+            stopped_calls = len(service.calls)
+            raise HMCTLSFingerprintError("private-pin")
+        return await target(*args, **kwargs)
+
+    monkeypatch.setattr(profiles, "_target", read_target)
+    result = await set_default_partition_profile(
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        exclusive_writer_window=True,
+    )
+    assert result.diagnostics == ("tls-identity-verification-failed",)
+    assert "private-pin" not in result.error
+    assert result.execution == "completed"
+    assert result.requested_change == "unverified"
+    assert stopped_calls is not None and len(service.calls) == stopped_calls
+
+
+@pytest.mark.asyncio
 async def test_new_profile_save_does_not_require_overwrite_or_recovery(service):
     result = await save_current_partition_profile(
         hmc=service.hmc,

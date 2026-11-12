@@ -624,6 +624,8 @@ async def set_default_partition_profile(
             differences=comparison.differences,
             after_etag=record.etag,
         )
+    except HMCTLSFingerprintError:
+        return _tls_aborted_outcome(outcome)
     except (HMCError, ValueError, TypeError) as error:
         return replace(outcome, error=str(error)[:2048])
 
