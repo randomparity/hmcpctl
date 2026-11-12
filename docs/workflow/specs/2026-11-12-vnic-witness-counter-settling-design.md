@@ -19,7 +19,7 @@ v3 is unchanged.
    resource. `_fixture_snapshot` uses it instead of its inline check.
 2. `_fixture_settling(reads) -> bool` is pure. Each read is
    `{"memory": ..., "cpu": ...}`, the plain sections. It raises `ValueError` when:
-   - there are more than `_SETTLE_READS` (6) reads;
+   - there are more than `_SETTLE_READS` (12) reads;
    - an equal consecutive pair appears before the last pair;
    - a field other than the six counters in `_fixture_bounded_deltas` changes,
      including their scalar attributes;
@@ -29,22 +29,24 @@ v3 is unchanged.
 
    It returns whether the last two reads are equal.
 3. `_fixture_settle(hmc, packet, document, output)` reads, journals in
-   `document["settling"] = {"max_reads": 6, "interval_seconds": 10, "reads": []}`,
+   `document["settling"] = {"max_reads": 12, "interval_seconds": 10, "reads": []}`,
    and saves after each read. It sleeps `_SETTLE_INTERVAL` between reads and
-   stops at the first settled pair. Six reads without one raise
+   stops at the first settled pair. Twelve reads without one raise
    "fixture allocation counters did not settle within the bound".
 4. `_fixture_run`: for stage `preflight` with action `prepare`, settle first.
    Then require the snapshot's `system.memory`/`system.cpu` to equal the last read.
-5. `_fixture_recover`, preflight stage with action `prepare`: require the
-   journal's settling limits to equal the constants, `_fixture_settling(reads)`
+5. `_fixture_recover`, preflight stage with action `prepare`: require a
+   `settling` dict in the journal (absent or malformed refuses with "fixture
+   preflight settling history is unconfirmed"), its settling limits to equal the constants, `_fixture_settling(reads)`
    true, and the last read to equal the observation's sections. Then the existing
    single-shot equality applies.
-6. `FIXTURE_LIMITS["preflight"]` time becomes 180 seconds; the REST cap rises
-   only if the measured worst-case preflight exceeds 64.
+6. `FIXTURE_LIMITS["preflight"]` time becomes 240 seconds; the REST cap rises
+   only if a twelve-read preflight under the null-property fallback exceeds 64.
 7. `docs/live-testing.md`: the rule, labelled observed and not documented HMC
    behaviour. It is reconciled with the cleanup counter-lag rule. #1858 step 4
    tells the witness packet to bind the pre-fixture baseline digest. The caps
-   line is updated.
+   line is updated, and the 2026-11-01 retained-fixture design's preflight cap
+   is noted as amended by ADR 0370 (that file is outside this change).
 
 ## Failure model
 
@@ -55,8 +57,8 @@ v3 is unchanged.
    read journaled and counted against the stage caps; a READY baseline is never
    taken from moving counters; cleanup's post-delete equality is unchanged.
 3. Accepted failure classes:
-   - a release slower than about 50 seconds fails normally (bounded, stated in
-     ADR 0370);
+   - a release slower than about 110 seconds, or one that plateaus for 10
+     seconds, fails normally (bounded judgment, stated in ADR 0370);
    - a foreign actor releasing a smaller allocation within the bound during the
      wait reads as settling. It is held by the exclusive-writer acknowledgement
      and by the bound pre-fixture digest the witness supplies.
@@ -66,11 +68,14 @@ v3 is unchanged.
 ## Success
 
 - In the mocked counter sequences, a settle within the bound gives READY then
-  UNCHANGED; still moving at the sixth read gives MANUAL_RECOVERY; a move in an
+  UNCHANGED, including with the pre-fixture digest bound; still moving at the
+  twelfth read gives MANUAL_RECOVERY within the stage caps; a move in an
   allocation direction gives MANUAL_RECOVERY. None of the three writes.
 - Recovery refuses a journal whose settling record is missing or violates
   item 2.
-- The live witness after a real fixture delete returns READY and UNCHANGED.
+- The live witness after a real fixture delete returns READY and UNCHANGED, and
+  the record states the settling read count. Two equal reads are recorded as "no
+  lag observed, settling not exercised", not as proof of the settling path.
 
 ## Validation
 

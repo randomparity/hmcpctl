@@ -17,15 +17,17 @@ saw no lag. That release is observed behaviour, not documented HMC behaviour.
 ## Decision
 
 A fixture preflight whose packet action is `prepare` reads only the managed
-system's memory and processor sections, at most 6 times, 10 seconds apart, before
+system's memory and processor sections, at most 12 times, 10 seconds apart, before
 its full snapshot. It journals every read. It stops at the first two consecutive
 equal reads. Between reads only the six fixture allocation counters may change,
 each only in its release direction. Their total movement stays within one fixed
 fixture's allocation. Any other change, the wrong direction, or no settled pair by
-the sixth read fails the preflight as before. The full snapshot's sections must
+the twelfth read fails the preflight as before. The full snapshot's sections must
 equal the settled read. Recovery revalidates the journaled reads with the same
 rules and keeps its single-shot equality against the settled observation. The
-preflight time cap rises from 120 to 180 seconds to hold the wait.
+preflight time cap rises from 120 to 240 seconds to hold the wait. This amends
+the preflight cap in the 2026-11-01 retained-fixture design; that design's
+transient-lag refusal keeps governing the cleanup comparison.
 
 Settling performs no write and no effect retry. Cleanup is unchanged: its
 immediate post-delete equality still fails on any counter lag.
@@ -34,8 +36,13 @@ immediate post-delete equality still fails on any counter lag.
 
 - Every prepare preflight costs at least one extra REST read and a 10-second wait,
   including one taken before a first preparation.
-- A lag longer than about 50 seconds still fails. The operator then runs a later
-  read-only witness, as #1858 did.
+- The 12 x 10 s bound is a judgment, not a measurement. #1858's release outlasted a
+  whole preflight and was gone minutes later. A lag longer than about 110 seconds
+  still fails, and the operator then runs a later read-only witness, as #1858 did.
+- A plateau of 10 seconds mid-release reads as settled. Against the pre-fixture
+  digest the witness binds, it then fails as "supplied baseline differs", safely.
+- The live record reports how many settling reads ran; two equal reads mean no
+  lag was observed and the settling path was not exercised.
 - A preflight journal written before this change has no settling record. Recovery
   refuses it, so such a preflight is re-run, not recovered.
 
@@ -48,7 +55,11 @@ immediate post-delete equality still fails on any counter lag.
 - **Settle inside recovery instead of preflight.** judgment: the READY baseline
   would already carry the moving values, so a settled recovery could only report
   a difference, never UNCHANGED.
+- **Stop only when the read reproduces the bound pre-fixture baseline.** judgment:
+  the counters alone cannot be compared with a whole-snapshot digest without a
+  full snapshot per read, which the REST cap cannot hold.
 - **Do nothing; keep re-running the witness by hand.** judgment: the witness
   keeps demanding manual attention for a state that clears itself.
-- **Relax the cleanup counter-lag rule.** judgment: excluded by the operator for
-  #1936; cleanup's own equality is the delete's proof.
+- **Relax the cleanup counter-lag rule.** verified: the operator excluded it for
+  #1936 (the issue's frozen `WORK:SCOPE` exclusions, 2026-11-12); cleanup's own
+  equality is the delete's proof.
