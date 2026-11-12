@@ -10192,7 +10192,7 @@ def test_live_arm_revision_uses_physical_checkout(
         module.inspect, "getfile", lambda _: str(owner / "src/hmcpctl/client/core.py")
     )
     check = (
-        (lambda: module.revision({"commit": head, "tree": tree}))
+        (lambda: module.validate_deployed_candidate({"commit": head, "tree": tree}))
         if guard == "serial"
         else (
             lambda: module.verify_revision({"tested_commit": head, "tested_tree": tree})
