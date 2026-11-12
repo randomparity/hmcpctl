@@ -446,6 +446,7 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- `HMC_CA_BUNDLE` (#1935, ADR 0223) is loaded into a TLS context instead of being handed to httpx as a path, so constructing a client no longer emits httpx's `verify=<str>` `DeprecationWarning`. An unreadable or invalid bundle now fails with a message naming the setting, the path and the fix, and a directory path, which httpx used to treat as a hashed-certificate directory, is now refused: `HMC_CA_BUNDLE` takes a PEM file (use `SSL_CERT_DIR` for a directory).
 - A REST request sent after nearly 5 seconds without one, such as the first after a run of SSH
   commands, no longer intermittently fails with `Server disconnected without sending a response`
   (#1926). HMCs close an idle connection about 5 seconds after their last response, and the client

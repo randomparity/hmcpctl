@@ -4722,30 +4722,97 @@ def test_tls_audit_record_still_names_verify_ssl_source_not_trust_system_store(
 # We reuse _patch_async_client / _CapturingAsyncClient from ADR 0222's section.
 
 
-def test_ca_bundle_set_passes_path_as_verify(monkeypatch):
-    """ca_bundle set and verify_ssl=True passes the path string to AsyncClient."""
+@pytest.fixture
+def ca_pem(tmp_path) -> str:
+    """A throwaway self-signed CA certificate, written as a PEM file."""
+    from datetime import UTC, datetime, timedelta
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "hmc-test-ca")])
+    now = datetime.now(UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    path = tmp_path / "hmc-ca.pem"
+    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    return str(path)
+
+
+def _assert_bundle_context(verify, ca_pem: str) -> None:
+    """*verify* is a verifying context that loaded exactly the *ca_pem* certificate."""
+    import ssl
+
+    assert isinstance(verify, ssl.SSLContext)
+    assert verify.verify_mode == ssl.CERT_REQUIRED
+    assert verify.check_hostname is True
+    subjects = [c["subject"] for c in verify.get_ca_certs()]
+    assert subjects == [((("commonName", "hmc-test-ca"),),)]
+
+
+def test_ca_bundle_set_passes_ssl_context_as_verify(monkeypatch, ca_pem):
+    """ca_bundle set and verify_ssl=True passes a verifying SSLContext to AsyncClient."""
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
     monkeypatch.delenv("SSL_CERT_DIR", raising=False)
     captured = _patch_async_client(monkeypatch)
-    HMCClient(make_config(verify_ssl=True, ca_bundle="/path/to/hmc-ca.pem"))
-    assert len(captured) >= 1
-    assert captured[0] == "/path/to/hmc-ca.pem"
+    HMCClient(make_config(verify_ssl=True, ca_bundle=ca_pem))
+    assert len(captured) == 1
+    _assert_bundle_context(captured[0], ca_pem)
 
 
-def test_ca_bundle_wins_over_ssl_cert_file(monkeypatch):
+def test_ca_bundle_wins_over_ssl_cert_file(monkeypatch, ca_pem):
     """When ca_bundle is set, SSL_CERT_FILE is ignored for verify=."""
     monkeypatch.setenv("SSL_CERT_FILE", "/some/other/bundle.pem")
     captured = _patch_async_client(monkeypatch)
-    HMCClient(make_config(verify_ssl=True, ca_bundle="/hmc-specific.pem"))
-    assert len(captured) >= 1
-    # Must be the ca_bundle path, not a bool or SSLContext
-    assert captured[0] == "/hmc-specific.pem"
+    HMCClient(make_config(verify_ssl=True, ca_bundle=ca_pem))
+    _assert_bundle_context(captured[0], ca_pem)
 
 
-def test_ca_bundle_wins_over_trust_system_store(monkeypatch):
-    """When ca_bundle is set, trust_system_store is bypassed (no SSLContext)."""
-    import ssl
+def test_ca_bundle_client_construction_emits_no_deprecation_warning(
+    monkeypatch, ca_pem
+):
+    """A real httpx client built from ca_bundle raises no httpx verify=<str> warning."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        HMCClient(make_config(verify_ssl=True, ca_bundle=ca_pem))
 
+
+@pytest.mark.parametrize("content", [None, b"", b"not a certificate\n", "directory"])
+def test_ca_bundle_unloadable_file_fails_with_actionable_error(
+    monkeypatch, tmp_path, content
+):
+    """A missing, empty or non-PEM bundle names the setting, the path and the fix."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    path = tmp_path / "bad-ca.pem"
+    if content == "directory":
+        path.mkdir()
+    elif content is not None:
+        path.write_bytes(content)
+    with pytest.raises(HMCError) as excinfo:
+        HMCClient(make_config(verify_ssl=True, ca_bundle=str(path)))
+    message = str(excinfo.value)
+    assert "HMC_CA_BUNDLE" in message
+    assert str(path) in message
+    assert "readable PEM file" in message
+
+
+def test_ca_bundle_wins_over_trust_system_store(monkeypatch, ca_pem):
+    """When ca_bundle is set, trust_system_store is bypassed (no truststore context)."""
     import truststore
 
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
@@ -4755,14 +4822,12 @@ def test_ca_bundle_wins_over_trust_system_store(monkeypatch):
         make_config(
             verify_ssl=True,
             trust_system_store=True,
-            ca_bundle="/hmc-specific.pem",
+            ca_bundle=ca_pem,
         )
     )
     assert len(captured) >= 1
-    # Must be the path string, not a truststore.SSLContext
-    assert not isinstance(captured[0], ssl.SSLContext)
     assert not isinstance(captured[0], truststore.SSLContext)
-    assert captured[0] == "/hmc-specific.pem"
+    _assert_bundle_context(captured[0], ca_pem)
 
 
 def test_ca_bundle_ignored_when_verify_ssl_false(monkeypatch):
@@ -4990,14 +5055,10 @@ def test_cert_fingerprint_context_wins_over_env_bundle_and_system_store(monkeypa
     assert context.check_hostname is False
 
 
-def test_ca_bundle_wins_over_cert_fingerprint(monkeypatch):
+def test_ca_bundle_wins_over_cert_fingerprint(monkeypatch, ca_pem):
     captured = _patch_async_client(monkeypatch)
-    HMCClient(
-        make_config(
-            verify_ssl=True, ca_bundle="/hmc-specific.pem", cert_fingerprint=_PIN
-        )
-    )
-    assert captured[0] == "/hmc-specific.pem"
+    HMCClient(make_config(verify_ssl=True, ca_bundle=ca_pem, cert_fingerprint=_PIN))
+    _assert_bundle_context(captured[0], ca_pem)
 
 
 def test_cert_fingerprint_ignored_when_verify_ssl_false(monkeypatch):
